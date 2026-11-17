@@ -31,10 +31,11 @@
  * disagree, chiefly two masters of one surface reconciling after a partition
  * heals. Holdings are observed from traffic, so two nodes can briefly hold
  * different counts; a reconciliation decided on a disputed number could have
- * both sides believing they lost, or both believing they won. Version and a
- * advertised ranking behavior are computed from the datagram itself. Current
- * nodes switch monotonically to v1 compatibility after accepting an existing
- * v1 peer, so a mixed group does not form cyclic pairwise preferences.
+ * both sides believing they lost, or both believing they won. Version and
+ * advertised ranking behavior are computed from the datagram itself. A current
+ * node advertises v1 compatibility while it tracks a peer whose build declares
+ * no ranking feature, and either side of a pair advertising it selects the v1
+ * ordering, so both nodes of a pair always rank it the same way.
  */
 import { stableSurfaceHash } from './surface-id.js';
 import { existingV1PeerSurfaceRank } from './ranking-v1-peer.js';

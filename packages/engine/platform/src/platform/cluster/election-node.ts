@@ -21,7 +21,7 @@
  * otherwise ignored, so the group's other traffic passes through without
  * being mistaken for an election message.
  */
-import { clusterProductVersion, clusterRankingWireVersion, hasCurrentClusterRanking } from './ranking-feature.js';
+import { clusterProductVersion, clusterRankingWireVersion, declaresNoClusterRanking } from './ranking-feature.js';
 import { SurfaceElection, type SurfaceElectionHost } from './election.js';
 import { ClusterHoldingsLedger } from './holdings.js';
 import { decodeMessage, decodeMessageFields, encodeMessage } from './protocol.js';
@@ -68,6 +68,8 @@ interface TrackedPeer {
   readonly lastSeq: number;
   /** Sender's wall clock on that datagram; distinguishes restart from replay. */
   readonly lastTs: number;
+  /** The peer's build predates ranking negotiation (its version carries neither ranking tag). */
+  readonly declaresNoRanking: boolean;
 }
 
 export class ClusterElection {
@@ -80,8 +82,9 @@ export class ClusterElection {
   private readonly host: SurfaceElectionHost;
   private readonly wireVersion: string;
   private readonly v1PeerWireVersion: string;
-  /** Monotonic during this instance. Switching back merely because a peer is
-   * temporarily unheard would give a partition mixed pairwise orderings. */
+  /** On while a tracked peer declares no ranking feature; a current node relaying
+   * compatibility does not count, so the mode ends once the last old build is
+   * upgraded (its next datagram replaces its record) or leaves the peer table. */
   private v1PeerRanking = false;
 
   private running = false;
@@ -375,7 +378,7 @@ export class ClusterElection {
     // through the identical mechanism, which means we also hear ourselves.
     if (message.nodeId === this.options.nodeId) return;
     if (!this.recordPeer(message)) return;
-    if (!hasCurrentClusterRanking(message.nodeVersion)) this.v1PeerRanking = true;
+    this.v1PeerRanking = [...this.peers.values()].some((peer) => peer.declaresNoRanking);
     this.recordHoldings(message);
     if (message.surfaceId === null) return;
     // Recorded above either way: a surface this node cannot serve still tells
@@ -411,6 +414,7 @@ export class ClusterElection {
       lastMessageType: message.type,
       lastSeq: message.seq,
       lastTs: message.ts,
+      declaresNoRanking: declaresNoClusterRanking(message.nodeVersion),
     });
     return true;
   }

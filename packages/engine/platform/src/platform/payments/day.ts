@@ -20,11 +20,14 @@
  *
  * ── Why totals are recomputed rather than counted ─────────────────────────
  *
- * Every spend record keeps its UTC instant. Today's totals are derived by
- * filtering those instants through the CURRENT timezone, never by incrementing a
- * stored counter. Otherwise changing `daemon.timezone` would roll the day over
- * and hand back a fresh budget, a trivial way around the limit, reachable by
- * anything that can write daemon config.
+ * Every spend record keeps its UTC instant, the zone in force when it was made
+ * and the calendar day it was made on there. Today's totals are derived from
+ * those records, never by incrementing a stored counter, and a spend counts
+ * until its own day is over where it was made, as well as on the day it falls
+ * on in the current zone. A timezone change can therefore keep a spend counted
+ * longer but can never hand back a spent budget before its day ends. An agent
+ * cannot change `daemon.timezone` at all while it would move today's budget
+ * window: that write goes to the owner (config-key-facts.ts).
  */
 
 import { isValidTimezone } from '../utils/timezone.js';
@@ -87,4 +90,59 @@ export function dayKey(atMs: number, timezone: string): DayKey {
 /** True when two instants fall on the same calendar day in `timezone`. */
 export function sameDay(leftMs: number, rightMs: number, timezone: string): boolean {
   return dayKey(leftMs, timezone) === dayKey(rightMs, timezone);
+}
+
+const HOUR_MS = 60 * 60 * 1000;
+/** Wider than any day in any zone, offsets and daylight-saving shifts included. */
+const DAY_SEARCH_MS = 27 * HOUR_MS;
+
+/** The first instant at or after `fromMs` that is not on `day` in `zone`, to the millisecond. */
+function dayEndsAt(fromMs: number, toMs: number, day: DayKey, zone: string): number {
+  let inside = fromMs;
+  let outside = toMs;
+  while (outside - inside > 1) {
+    const middle = Math.floor((inside + outside) / 2);
+    if (dayKey(middle, zone) === day) inside = middle; else outside = middle;
+  }
+  return outside;
+}
+
+/** The first instant at or before `fromMs` that is on `day` in `zone`, to the millisecond. */
+function dayStartsAt(fromMs: number, toMs: number, day: DayKey, zone: string): number {
+  let inside = fromMs;
+  let outside = toMs;
+  while (inside - outside > 1) {
+    const middle = Math.ceil((inside + outside) / 2);
+    if (dayKey(middle, zone) === day) inside = middle; else outside = middle;
+  }
+  return inside;
+}
+
+/**
+ * Today's daily-budget window in `timezone`: the calendar date and the UTC
+ * instants it starts and ends at. About sixty date readings, each a cached
+ * formatter call; read only when a timezone change is weighed.
+ */
+export function todayWindow(nowMs: number, timezone: string | undefined): { readonly day: DayKey; readonly startMs: number; readonly endMs: number } {
+  const zone = resolveTimezone(timezone);
+  const day = dayKey(nowMs, zone);
+  return {
+    day,
+    startMs: dayStartsAt(nowMs, nowMs - DAY_SEARCH_MS, day, zone),
+    endMs: dayEndsAt(nowMs, nowMs + DAY_SEARCH_MS, day, zone),
+  };
+}
+
+/**
+ * Whether moving the daemon from `previous` to `next` would change today's
+ * daily-budget window: a different date, or a different midnight at either end.
+ * Two names for the same clock (or an unchanged zone) change nothing.
+ */
+export function timezoneChangeMovesToday(previous: unknown, next: unknown, nowMs: number): boolean {
+  const before = resolveTimezone(typeof previous === 'string' ? previous : undefined);
+  const after = resolveTimezone(typeof next === 'string' ? next : undefined);
+  if (before === after) return false;
+  const a = todayWindow(nowMs, before);
+  const b = todayWindow(nowMs, after);
+  return a.day !== b.day || a.startMs !== b.startMs || a.endMs !== b.endMs;
 }

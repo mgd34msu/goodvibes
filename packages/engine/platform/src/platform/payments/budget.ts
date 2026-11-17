@@ -26,7 +26,7 @@
  * Checkout reservations remain held until commit or a known-safe release,
  * including across restarts. Elapsed time cannot prove that a charge failed.
  */
-import { dayKey, type DayKey } from './day.js';
+import { dayKey, resolveTimezone, type DayKey } from './day.js';
 import { samePaymentEvidence } from './evidence-equality.js';
 import type { BudgetPool, MinorUnits } from './types.js';
 import type { PaymentStoreStop } from './payment-host-health.js';
@@ -51,6 +51,11 @@ export interface SpendRecord {
   readonly itemMinorUnits: MinorUnits;
   readonly overageMinorUnits: MinorUnits;
   readonly toleranceMinorUnits: MinorUnits;
+  /** The zone in force when the purchase was decided, and the calendar day the
+   * spend was made on in it. Fixed at the spend, so a later timezone change
+   * cannot move it out of that day. Absent on records from before they were kept. */
+  readonly timezone?: string;
+  readonly dayKey?: DayKey;
 }
 
 export interface BudgetReservation {
@@ -61,6 +66,8 @@ export interface BudgetReservation {
   readonly toleranceMinorUnits: MinorUnits;
   readonly createdAtMs: number;
   readonly expiresAtMs: number;
+  /** The zone `dayKey` was reckoned in. Absent on holds from before it was kept. */
+  readonly timezone?: string;
   /** A live/uncertain checkout owns this hold until explicit settlement.
    * TTL and day rollover cannot make an unresolved charge spendable again. */
   readonly retainUntilSettled?: true;
@@ -107,11 +114,34 @@ export interface CheckoutBudgetSettlementOwner {
 const RECONCILIATION_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 
 /**
+ * Whether a draw made at `atMs`, on `recordedDay` in `recordedZone`, still
+ * counts against today. It does while its own day has not ended in the zone it
+ * was made in, while today's date in the current zone is the date it was made
+ * on, and while it falls inside today in the current zone. A timezone change
+ * can therefore only keep a draw counted longer, never let it go before its
+ * own day is over.
+ */
+function countsToday(
+  atMs: number,
+  recordedZone: string | undefined,
+  recordedDay: DayKey | undefined,
+  today: DayKey,
+  timezone: string,
+  todayIn: (zone: string) => DayKey,
+): boolean {
+  if (dayKey(atMs, timezone) === today) return true;
+  if (recordedDay === undefined) return false;
+  if (recordedDay === today) return true;
+  return recordedZone !== undefined && todayIn(recordedZone) === recordedDay;
+}
+
+/**
  * The pools, over a set of spend records and live reservations.
  *
- * Deliberately not a running counter: `snapshot()` filters spend records by the
- * CURRENT timezone every time it is asked. That is what makes changing
- * `daemon.timezone` unable to refill a spent pool, see day.ts.
+ * Deliberately not a running counter: `snapshot()` reads each spend record's
+ * own day every time it is asked. A spend keeps the day it was made on in the
+ * zone then in force, so changing `daemon.timezone` cannot refill a spent pool
+ * before that day is over, see `countsToday` and day.ts.
  */
 export class BudgetLedger {
   /** Why durable accounting stopped itself; an in-memory ledger never does. */
@@ -133,11 +163,17 @@ export class BudgetLedger {
 
   snapshot(limits: BudgetLimits, nowMs: number, timezone: string): PoolSnapshot {
     const today = dayKey(nowMs, timezone);
+    const days = new Map<string, DayKey>([[timezone, today]]);
+    const todayIn = (zone: string): DayKey => {
+      let day = days.get(zone);
+      if (day === undefined) { day = dayKey(nowMs, zone); days.set(zone, day); }
+      return day;
+    };
     let itemSpent = 0;
     let overageSpent = 0;
     let toleranceSpent = 0;
     for (const record of this.spend) {
-      if (dayKey(record.atMs, timezone) !== today) continue;
+      if (!countsToday(record.atMs, record.timezone, record.dayKey, today, timezone, todayIn)) continue;
       itemSpent += record.itemMinorUnits;
       overageSpent += record.overageMinorUnits;
       toleranceSpent += record.toleranceMinorUnits;
@@ -148,7 +184,8 @@ export class BudgetLedger {
     let toleranceReserved = 0;
     for (const reservation of this.reservations) {
       if (reservation.retainUntilSettled !== true
-        && (reservation.expiresAtMs <= nowMs || reservation.dayKey !== today)) continue;
+        && (reservation.expiresAtMs <= nowMs
+          || (reservation.dayKey !== today && (reservation.timezone === undefined || todayIn(reservation.timezone) !== reservation.dayKey)))) continue;
       itemReserved += reservation.itemMinorUnits;
       overageReserved += reservation.overageMinorUnits;
       toleranceReserved += reservation.toleranceMinorUnits;
@@ -202,6 +239,7 @@ export class BudgetLedger {
       toleranceMinorUnits: input.toleranceMinorUnits,
       createdAtMs: input.nowMs,
       expiresAtMs: input.nowMs + (input.ttlMs ?? RESERVATION_TTL_MS),
+      timezone: resolveTimezone(input.timezone),
       ...(input.retainUntilSettled === true ? { retainUntilSettled: true as const } : {}),
     });
     this.reservations.push(reservation);
@@ -214,13 +252,7 @@ export class BudgetLedger {
     if (index === -1) return null;
     const [reservation] = this.reservations.splice(index, 1);
     if (reservation === undefined) return null;
-    const record: SpendRecord = Object.freeze({
-      purchaseId: reservation.id,
-      atMs,
-      itemMinorUnits: reservation.itemMinorUnits,
-      overageMinorUnits: reservation.overageMinorUnits,
-      toleranceMinorUnits: reservation.toleranceMinorUnits,
-    });
+    const record: SpendRecord = spendFromHold(reservation, atMs);
     this.spend.push(record);
     return record;
   }
@@ -273,8 +305,7 @@ export class BudgetLedger {
       if (spent || held.retainUntilSettled !== true || held.id !== receipt.purchaseId) throw new Error('The original payment hold is unavailable.');
       this.reservations = this.reservations.filter(row => row !== held);
       if (receipt.outcome === 'purchased') {
-        finalSpend = Object.freeze({ purchaseId: held.id, atMs: receipt.atMs,
-          itemMinorUnits: held.itemMinorUnits, overageMinorUnits: held.overageMinorUnits, toleranceMinorUnits: held.toleranceMinorUnits });
+        finalSpend = spendFromHold(held, receipt.atMs);
         this.spend.push(finalSpend);
       }
     }
@@ -306,6 +337,22 @@ export class BudgetLedger {
     this.spend = this.spend.filter(record => record.atMs >= cutoff
       || (!settled.has(record.purchaseId) && retainPendingSpend?.(record.purchaseId) === true));
   }
+}
+
+/**
+ * The spend a hold becomes. It keeps the day it was made on: the day of `atMs`
+ * in the zone the hold was decided in.
+ */
+export function spendFromHold(hold: BudgetReservation, atMs: number): SpendRecord {
+  const zone = hold.timezone;
+  return Object.freeze({
+    purchaseId: hold.id,
+    atMs,
+    itemMinorUnits: hold.itemMinorUnits,
+    overageMinorUnits: hold.overageMinorUnits,
+    toleranceMinorUnits: hold.toleranceMinorUnits,
+    ...(zone === undefined ? {} : { timezone: zone, dayKey: dayKey(atMs, zone) }),
+  });
 }
 
 function pool(

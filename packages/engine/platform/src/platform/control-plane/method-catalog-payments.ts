@@ -93,7 +93,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
     id: 'payments.budget.status',
     title: 'Payment Budget Status',
     description:
-      "Today's spending pools: the daily item budget, the separate overage budget that covers only unavoidable charges (tax, mandatory fees, and the delivery option actually used), and the tolerance allowance. Each reports its limit, what today has spent, what purchases in flight are holding, and what is left. Includes the calendar day and the timezone it was computed in, the day resets at midnight in daemon.timezone, UTC when unset, and whether this node is the one currently allowed to spend. Totals are recomputed from each spend record's UTC instant rather than counted, so changing the timezone cannot hand back a spent budget.",
+      "Today's spending pools: the daily item budget, the separate overage budget that covers only unavoidable charges (tax, mandatory fees, and the delivery option actually used), and the tolerance allowance. Each reports its limit, what today has spent, what purchases in flight are holding, and what is left. Includes the calendar day and the timezone it was computed in, the day resets at midnight in daemon.timezone, UTC when unset, and whether this node is the one currently allowed to spend. Each spend keeps the day it was made on, in the zone then in force, and counts until that day is over, so changing the timezone cannot hand back a spent budget.",
     category: 'payments',
     scopes: ['read:payments'],
     http: { method: 'GET', path: '/api/payments/budget' },

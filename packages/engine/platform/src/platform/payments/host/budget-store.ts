@@ -79,11 +79,18 @@ function isValidTimestampMs(value: unknown): value is number {
     && value <= 8_640_000_000_000_000;
 }
 
+/** An optional zone or day kept on a record: absent, or a non-empty string. */
+function isOptionalName(value: unknown): boolean {
+  return value === undefined || (typeof value === 'string' && value.length > 0);
+}
+
 function isSpendRecord(value: unknown): value is SpendRecord {
   if (typeof value !== 'object' || value === null) return false;
   const record = value as Record<string, unknown>;
   return typeof record['purchaseId'] === 'string' && record['purchaseId'].length > 0
     && isValidTimestampMs(record['atMs'])
+    && isOptionalName(record['timezone']) && isOptionalName(record['dayKey'])
+    && (record['timezone'] === undefined) === (record['dayKey'] === undefined)
     && isFiniteNonNegativeAmount(record['itemMinorUnits'])
     && isFiniteNonNegativeAmount(record['overageMinorUnits'])
     && isFiniteNonNegativeAmount(record['toleranceMinorUnits']);
@@ -94,6 +101,7 @@ function isReservation(value: unknown): value is BudgetReservation {
   const record = value as Record<string, unknown>;
   return typeof record['id'] === 'string' && record['id'].length > 0
     && typeof record['dayKey'] === 'string' && record['dayKey'].length > 0
+    && isOptionalName(record['timezone'])
     && isFiniteNonNegativeAmount(record['itemMinorUnits'])
     && isFiniteNonNegativeAmount(record['overageMinorUnits'])
     && isFiniteNonNegativeAmount(record['toleranceMinorUnits'])

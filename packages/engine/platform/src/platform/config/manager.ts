@@ -1599,7 +1599,9 @@ export class ConfigManager {
       }
       try { this.#resolvePath(key); }
       catch { return invalid(key, 'no such setting; check the spelling against the settings list'); }
-      if (by.kind === 'agent' && facts.loosens?.(readDotPath(this.#config, key).value, value) && !ownerSettled(by.decision)) {
+      // Weighed against the value features act on: an unset setting the owner
+      // profile fills (the zone, the currency) is loosened from that value.
+      if (by.kind === 'agent' && facts.loosens?.(resolveWithProfileFallback(key, readDotPath(this.#config, key).value, this.profileFallback), value) && !ownerSettled(by.decision)) {
         return refuse({ code: 'OWNER_ONLY', reason: `Changing ${key} would ${facts.loosening ?? 'loosen security'}, which only the owner decides.`,
           next: ['Ask the owner to make this change, or to approve it when asked.'], status: 403 });
       }

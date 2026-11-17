@@ -20,6 +20,7 @@ import { isPaymentsSyntheticConfigKey } from './payment-config-keys.js';
 import { CREDENTIAL_DESTINATION_KEYS } from './credential-destination-keys.js';
 import { SAFETY_GATE_CONFIG_PREFIXES } from './settings-ingestion.js';
 import { parsePermissionMode } from '../gate/presets.js';
+import { timezoneChangeMovesToday } from '../payments/day.js';
 
 export type { ConfigKeyFacts } from './schema-shared.js';
 
@@ -251,6 +252,13 @@ declareLoosening('payments.notifyChannels', addsToList('let another channel answ
 declareLoosening('payments.currency', { loosening: 'change the currency your spending limits are counted in', loosens: changes });
 // A purchase inside the limits goes without asking, so whoever sets the address receives it.
 declareLoosening('payments.shippingAddress.', { loosening: 'change where purchases are delivered', loosens: changes });
+// The daily spending limits reset at midnight in this zone; a zone whose day
+// started more recently reads today's spend as yesterday's. Read at the moment
+// of the write: a change that leaves today's window where it is moves nothing.
+declareLoosening('daemon.timezone', {
+  loosening: 'move the day your daily spending limits are counted in',
+  loosens: (prev, next) => timezoneChangeMovesToday(prev, next, Date.now()),
+});
 
 function looseningFor(key: string): Loosening | undefined {
   const exact = EXACT_LOOSENING.get(key);

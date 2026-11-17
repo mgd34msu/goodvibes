@@ -17,6 +17,7 @@ import { describeProfileWrite } from './disclosure.js';
 import { PROFILE_SECTIONS, profileFieldById, profileSectionTier } from './fields.js';
 import { resolveOwnerProfilePath } from './paths.js';
 import { evaluateProfileRemoval, evaluateProfileWrite } from './trust.js';
+import { timezoneChangeMovesToday } from '../payments/day.js';
 import {
   appendProse,
   forget as forgetLines,
@@ -526,6 +527,10 @@ export class OwnerProfileStore {
     if (input.authority === 'autonomous' && !admitted) return refusal('Autonomous profile mutations require exact selected-owner admission; source provenance alone cannot authorize a write.');
     const projection = this.writableProjection();
     if ('reason' in projection) return refusal(projection.reason);
+    if (input.authority === 'autonomous' && input.fieldId === BUDGET_ZONE_FIELD
+      && timezoneChangeMovesToday(projection.value.fields.get(BUDGET_ZONE_FIELD)?.value, input.value, Date.now())) {
+      return refusal(BUDGET_ZONE_REFUSAL);
+    }
 
     const decision = await evaluateProfileWrite({
       authority: input.authority,
@@ -585,6 +590,7 @@ export class OwnerProfileStore {
     const projection = this.writableProjection();
     if ('reason' in projection) return refusal(projection.reason);
 
+    if (input.authority === 'autonomous' && input.fieldId === BUDGET_ZONE_FIELD) return refusal(BUDGET_ZONE_REFUSAL);
     const decision = evaluateProfileRemoval({
       authority: input.authority,
       fieldId: input.fieldId ?? null,
@@ -621,6 +627,7 @@ export class OwnerProfileStore {
     const projection = this.writableProjection();
     if ('reason' in projection) return refusal(projection.reason);
 
+    if (input.authority === 'autonomous' && input.fieldId === BUDGET_ZONE_FIELD) return refusal(BUDGET_ZONE_REFUSAL);
     const decision = evaluateProfileRemoval({ authority: input.authority, fieldId: input.fieldId }, options);
     if (!decision.allowed) return refusal(decision.reason ?? 'Refused.');
 
@@ -864,6 +871,14 @@ export class OwnerProfileStore {
 function refusal(reason: string): ProfileWriteResult {
   return { ok: false, reason, changes: [], disclosure: '' };
 }
+
+/**
+ * The field `daemon.timezone` falls back to when it is unset (consumers.ts).
+ * The daily spending limits reset at midnight in that zone, so an agent acting
+ * on its own may not move today's window through it; the owner says it.
+ */
+const BUDGET_ZONE_FIELD = 'location.timezone';
+const BUDGET_ZONE_REFUSAL = 'Only you can change your timezone: while daemon.timezone is unset your daily spending limits reset at midnight in it, and this change would move today to a different day. Tell the runtime yourself and it will record it.';
 
 /** Re-exported so a caller holding a field id can name it without a second import. */
 export { profileFieldById };

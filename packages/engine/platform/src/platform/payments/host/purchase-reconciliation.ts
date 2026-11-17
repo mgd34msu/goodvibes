@@ -2,7 +2,7 @@ import { samePaymentEvidence } from '../evidence-equality.js';
 import { OwnedWork } from '../../utils/owned-work.js';
 import { CheckoutOwnershipError } from '../checkout-ownership.js';
 import { canReconcilePaymentOperation, purchaseOutcomeText, readPurchaseOutcome, type PaymentOperationView } from '../operation-view.js';
-import type { BudgetLedger, CheckoutBudgetSettlement, CheckoutBudgetSettlementOwner } from '../budget.js';
+import { spendFromHold, type BudgetLedger, type CheckoutBudgetSettlement, type CheckoutBudgetSettlementOwner } from '../budget.js';
 import { captureOwnedJson } from '../../gate/judgment-input.js';
 import type { CheckoutJournal } from '../checkout-registry.js';
 import { PaymentOperationStoreError, type DurablePaymentOperations, type PaymentOperationWriter } from './operation-store.js';
@@ -44,8 +44,7 @@ function retainEvidence(deps: ReconciliationDeps, purchaseId: string, operationI
   }
   if (checkpoint && pinned.receipt) {
     const held = checkpoint.reservation;
-    const expectedSpend = held ? (checkpoint.outcome === 'purchased' ? { purchaseId, atMs: settlementReceipt(checkpoint).atMs,
-      itemMinorUnits: held.itemMinorUnits, overageMinorUnits: held.overageMinorUnits, toleranceMinorUnits: held.toleranceMinorUnits } : null) : checkpoint.spend;
+    const expectedSpend = held ? (checkpoint.outcome === 'purchased' ? spendFromHold(held, settlementReceipt(checkpoint).atMs) : null) : checkpoint.spend;
     // A receipt proves the original once-only transition even after spend
     // pruning. It cannot adopt a new hold or a different current spend.
     if (pinned.reservation || (pinned.spend && !samePaymentEvidence(pinned.spend, expectedSpend))) throw new PurchaseReconciliationError();

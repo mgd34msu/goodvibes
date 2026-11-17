@@ -1,7 +1,6 @@
 /** Detached checkout ownership. Durable admission is an acknowledgement of one
  * operation, never a successful purchase. Actual work and its execution lease
  * outlive the request and remain drained by the registration owner. */
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { DecisionModelsDisabledError, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { isDeepStrictEqual } from 'node:util';
@@ -433,7 +432,7 @@ export class CheckoutOperations {
     if (admitted) captured = captureOwnedJson(admitted) as unknown as BeginCheckoutInput;
     current();
     const now = this.now();
-    const operation: PaymentOperationView = Object.freeze({ purchaseId: id, operationId: `payment-operation:${opaqueUuid()}`,
+    const operation: PaymentOperationView = Object.freeze({ purchaseId: id, operationId: `payment-operation:${crypto.randomUUID()}`,
       state: 'accepted', phase: null, createdAtMs: now, updatedAtMs: now, outcome: null, totalMinorUnits: null, currency: null });
     const writer = this.store.create(operation, source.principalId, current);
     const active: ActiveOperation = { writer, source, abort, protectedRequest: false, continuation: undefined,

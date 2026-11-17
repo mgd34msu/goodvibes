@@ -3,7 +3,6 @@
  * The explicit fixture owner-text cast retains exact original bytes; real
  * consumers must independently establish their normal owner/provenance guards.
  */
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { readPaymentsServiceConfig, parseCurrencyCode, type ProtectedPaymentRequest,
   type CheckoutWindowCheckpoint, type OwnerSuppliedText } from '@goodvibes-jev/engine/platform/platform/payments';
 import { retainTaintEvidence, UntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
@@ -12,7 +11,7 @@ export function protectedPaymentRequest(purchaseId = 'original-owner-request'): 
   const ledger = new UntrustedContentLedger();
   ledger.record({ surface: 'web-page', origin: 'https://fixture.invalid/item', at: '2026-11-08T00:00:00Z', content: 'Original private page evidence.' });
   return {
-    version: 1, purchaseId, operationId: `payment-operation:${opaqueUuid()}`, principalId: 'pairing:fixture-owner',
+    version: 1, purchaseId, operationId: `payment-operation:${crypto.randomUUID()}`, principalId: 'pairing:fixture-owner',
     input: { sessionId: 'original-session', pageId: 'original-page', merchantDomain: 'fixture.invalid',
       checkoutUrl: 'https://fixture.invalid/checkout', item: 'Original private owner instruction', cardId: 'card-reference-only',
       requestedLines: [{ label: 'owner item', quantity: 1 }], requestedMax: '0.00', preferredTier: undefined,

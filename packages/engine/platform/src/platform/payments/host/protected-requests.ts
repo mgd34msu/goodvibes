@@ -109,7 +109,7 @@ function refuse<T>(validate: () => T): T {
 function own(value: unknown): ProtectedPaymentRequest {
   const row = captureOwnedJson(value);
   if (!object(row) || Object.keys(row).length !== 7 + (Object.hasOwn(row, 'window') ? 1 : 0) + (Object.hasOwn(row, 'replyHistory') ? 1 : 0) || row['version'] !== 1
-    || !text(row['principalId']) || !text(row['operationId']) || !/^payment-operation:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}$/.test(row['operationId'])) throw new ProtectedPaymentRequestError();
+    || !text(row['principalId']) || !text(row['operationId']) || !/^payment-operation:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}$/.test(row['operationId'])) throw new ProtectedPaymentRequestError();
   checkoutRequestId(row['purchaseId']);
   const input = row['input'], host = row['host'];
   if (!object(input) || !['sessionId', 'pageId', 'merchantDomain', 'checkoutUrl', 'item', 'cardId'].every(key => text(input[key]))

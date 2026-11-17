@@ -19,12 +19,14 @@ export interface ParsedSlashCommand {
   readonly args: readonly string[];
 }
 
+/** A rawRest rule computed from the words read so far and the next word as typed, when there is one. */
+export type SlashCommandRawRestRule = (args: readonly string[], upcoming?: string) => number | undefined;
 /**
  * The word from which a command takes the rest of the line as typed; given the
  * words read so far and, while there is one, the next word as typed (not yet
  * read), so a rule can read leading flags as words and stop before the text.
  */
-export type SlashCommandRawRest = number | ((args: readonly string[], upcoming?: string) => number | undefined);
+export type SlashCommandRawRest = number | SlashCommandRawRestRule;
 
 /** What a command declares about how its line is split. */
 export interface SlashCommandGrammar {
@@ -117,7 +119,7 @@ function rawRestIndex(rule: SlashCommandRawRest | undefined, args: readonly stri
  * rest of the line, from the first word that is not one of `flags`, is kept
  * as typed (spacing, line breaks and quotes included).
  */
-export function rawRestAfterLeadingFlags(subcommands: readonly string[], flags: ReadonlySet<string>): SlashCommandRawRest {
+export function rawRestAfterLeadingFlags(subcommands: readonly string[], flags: ReadonlySet<string>): SlashCommandRawRestRule {
   return (args, upcoming) => {
     if (!subcommands.includes((args[0] ?? '').toLowerCase())) return undefined;
     if (!args.slice(1).every((word) => flags.has(word))) return undefined;

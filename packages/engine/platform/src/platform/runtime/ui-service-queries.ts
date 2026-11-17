@@ -36,7 +36,8 @@ export interface SubscriptionAccessQuery {
   get(provider: string): ProviderSubscription | null;
   getPending(provider: string): PendingSubscriptionLogin | null;
   getAccessToken(provider: string): string | null;
-  logout(provider: string): void;
+  /** Resolves true when there was a sign-in or pending login to remove; rejects when its tokens could not leave the secret store. */
+  logout(provider: string): Promise<boolean>;
 }
 
 export interface LocalAuthInspectionQuery {

@@ -8,7 +8,7 @@ import { requireShellPaths } from '../input/commands/runtime-services.ts';
 import { isOnboardingComplete } from '../runtime/onboarding/completion.ts';
 import { clearSetupWizardCheckpoint, readSetupWizardCheckpoint, saveSetupWizardCheckpoint } from '../agent/setup-wizard-checkpoint.ts';
 import { listSetupSmokeEvidence, recordSetupSmokeEvidence, type SetupSmokeEvidenceList } from '../agent/setup-smoke-evidence.ts';
-import { DEFAULT_AGENT_SETUP_WIZARD_CLEAR_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_INSPECT_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_MARK_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_REVIEW_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_RERUN_SMOKE_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_SAVE_SMOKE_ROUTE, buildAgentSetupWizard, emptyAgentSetupSmokeHistory, emptyAgentSetupWizardCheckpoint, type AgentSetupWizard, type AgentSetupWizardCheckpoint, type AgentSetupWizardDurableReceipt, type AgentSetupWizardSmokeHistory, type AgentSetupWizardSourceItem } from '../agent/setup-wizard.ts';
+import { DEFAULT_AGENT_SETUP_WIZARD_CLEAR_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_INSPECT_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_MARK_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_REVIEW_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_RERUN_SMOKE_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_SAVE_SMOKE_ROUTE, buildAgentSetupWizard, emptyAgentSetupSmokeHistory, emptyAgentSetupWizardCheckpoint, type AgentSetupWizard, type AgentSetupWizardCheckpoint, type AgentSetupWizardSmokeHistory, type AgentSetupWizardSourceItem } from '../agent/setup-wizard.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { homeRelativePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/home-path';
 import { readFieldMap, readString, safeIso, setupSmokeArtifactStore } from './agent-harness-setup-posture-utils.ts';
@@ -658,8 +658,6 @@ export function setupPlanItemToWizardSource(item: SetupPlanItem): AgentSetupWiza
   };
 }
 
-/** No producer publishes setup receipts as artifacts; the Agent's own checks and the smoke evidence are what setup reads. */
-const NO_DURABLE_SETUP_RECEIPTS: readonly AgentSetupWizardDurableReceipt[] = [];
 
 export function buildSetupWizard(plan: readonly SetupPlanItem[], context: CommandContext, smoke: SetupSmokeEvidenceList): AgentSetupWizard {
   const markerItem = plan.find((item) => item.id === 'finish-onboarding');
@@ -668,8 +666,8 @@ export function buildSetupWizard(plan: readonly SetupPlanItem[], context: Comman
     smokeHistory: setupWizardSmokeHistory(smoke),
     checkpoint: setupWizardCheckpoint(context),
     closeoutCriticalStepIds: plan.filter((item) => item.blocksAutonomy).map((item) => item.id),
-    receiptRequiredStepIds: ['connected-host-readiness', 'connected-host-auth', 'install-smoke'],
-    durableReceipts: NO_DURABLE_SETUP_RECEIPTS,
+    // Only the setup smoke saves evidence; the host readiness and auth steps are decided by their live checks.
+    receiptRequiredStepIds: ['install-smoke'],
     setupMarkerExists: markerItem?.status === 'ready' || setupCompletionMarkerExists(context),
     repeatedBlockerAliases: SETUP_WIZARD_PLAN_BLOCKER_ALIASES,
   });

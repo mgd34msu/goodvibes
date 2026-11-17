@@ -3,7 +3,6 @@ export type AgentSetupWizardStatus = 'complete' | 'active' | 'blocked';
 export type AgentSetupWizardStepStatus = 'done' | 'current' | 'pending' | 'blocked';
 export type AgentSetupWizardCheckpointStatus = 'available' | 'none' | 'stale' | 'unavailable';
 export type AgentSetupWizardCloseoutStatus = 'complete' | 'ready-to-finish' | 'needs-smoke-evidence' | 'blocked';
-export type AgentSetupWizardReceiptSchemaStatus = 'certified' | 'legacy';
 
 export interface AgentSetupWizardSourceItem {
   readonly id: string;
@@ -36,26 +35,6 @@ export interface AgentSetupWizardSmokeHistory {
   readonly reason?: string;
 }
 
-export type AgentSetupWizardDurableReceiptStatus = 'ready' | 'blocked' | 'failed' | 'unknown';
-
-export interface AgentSetupWizardDurableReceipt {
-  readonly stepId: string;
-  readonly stepLabel?: string;
-  readonly status: AgentSetupWizardDurableReceiptStatus;
-  readonly receiptId: string;
-  readonly recordedAt: string;
-  readonly summary: string;
-  readonly inspectRoute: string | null;
-  readonly source?: string;
-  readonly schemaStatus?: AgentSetupWizardReceiptSchemaStatus;
-  readonly schemaVersion?: string;
-  readonly provenance?: readonly string[];
-  readonly publicationGuarantee?: string;
-  readonly eventCursor?: string;
-  readonly eventSequence?: number;
-  readonly publisher?: string;
-}
-
 export interface AgentSetupWizardRepeatedBlocker {
   readonly setupItemId: string;
   readonly checkId: string;
@@ -75,7 +54,7 @@ export interface AgentSetupWizardStep {
   readonly backtrackRoute: string | null;
 }
 
-export type AgentSetupWizardStepHistoryKind = 'checkpoint' | 'setup-smoke' | 'durable-receipt';
+export type AgentSetupWizardStepHistoryKind = 'checkpoint' | 'setup-smoke';
 
 export interface AgentSetupWizardStepHistoryEntry {
   readonly id: string;
@@ -89,13 +68,6 @@ export interface AgentSetupWizardStepHistoryEntry {
   readonly source?: string;
   readonly receiptStatus?: string;
   readonly satisfiesReceipt?: boolean;
-  readonly schemaStatus?: AgentSetupWizardReceiptSchemaStatus;
-  readonly schemaVersion?: string;
-  readonly provenance?: readonly string[];
-  readonly publicationGuarantee?: string;
-  readonly eventCursor?: string;
-  readonly eventSequence?: number;
-  readonly publisher?: string;
 }
 
 export interface AgentSetupWizardReceiptGap {
@@ -180,7 +152,6 @@ export interface BuildAgentSetupWizardInput {
   readonly finishRoute?: string;
   readonly finishUserRoute?: string;
   readonly receiptRequiredStepIds?: readonly string[];
-  readonly durableReceipts?: readonly AgentSetupWizardDurableReceipt[];
   readonly repeatedBlockerAliases?: Readonly<Record<string, readonly string[]>>;
   readonly reviewRoute?: string;
 }
@@ -372,11 +343,8 @@ function validIso(value: string | null | undefined): string | null {
 }
 
 function setupReceiptKind(stepId: string): string {
-  if (stepId === 'runtime' || stepId === 'connected-host-readiness') return 'connected-host service status receipt';
-  if (stepId === 'connected-host-auth') return 'connected-host auth receipt';
   if (stepId === 'install-smoke') return 'setup smoke evidence receipt';
-  if (stepId === 'browser-pwa') return 'connected-host browser/PWA first-run receipt';
-  return 'durable setup receipt';
+  return 'setup evidence receipt';
 }
 
 function setupStepAliases(stepId: string): readonly string[] {
@@ -389,35 +357,10 @@ function setupStepMatches(left: string, right: string): boolean {
   return setupStepAliases(right).some((alias) => leftAliases.has(alias));
 }
 
-function validDurableReceipt(receipt: AgentSetupWizardDurableReceipt): boolean {
-  return Boolean(validIso(receipt.recordedAt)) && receipt.receiptId.trim().length > 0;
-}
-
-/** Whether this receipt is a verdict on its step: ready, or a blocked/failed outcome. An `unknown` status says nothing either way. */
-function isVerdictReceipt(receipt: AgentSetupWizardDurableReceipt): boolean {
-  return validDurableReceipt(receipt) && receipt.status !== 'unknown';
-}
-
-/** Whether a ready receipt still counts: no blocked or failed receipt for the same step is as new or newer. */
-function durableReceiptSatisfies(
-  receipt: AgentSetupWizardDurableReceipt,
-  receipts: readonly AgentSetupWizardDurableReceipt[],
-): boolean {
-  if (receipt.status !== 'ready' || !validDurableReceipt(receipt)) return false;
-  const readyAt = Date.parse(receipt.recordedAt);
-  return !receipts.some((other) => (
-    isVerdictReceipt(other)
-    && other.status !== 'ready'
-    && setupStepMatches(receipt.stepId, other.stepId)
-    && Date.parse(other.recordedAt) >= readyAt
-  ));
-}
-
 function buildStepHistory(input: {
   readonly items: readonly AgentSetupWizardSourceItem[];
   readonly smokeHistory: AgentSetupWizardSmokeHistory;
   readonly checkpoint: AgentSetupWizardCheckpoint;
-  readonly durableReceipts: readonly AgentSetupWizardDurableReceipt[];
 }): readonly AgentSetupWizardStepHistoryEntry[] {
   const byId = new Map(input.items.map((item) => [item.id, item]));
   const history: AgentSetupWizardStepHistoryEntry[] = [];
@@ -461,33 +404,6 @@ function buildStepHistory(input: {
     });
   }
 
-  for (const receipt of input.durableReceipts) {
-    const recordedAt = validIso(receipt.recordedAt);
-    if (!recordedAt || receipt.receiptId.trim().length === 0) continue;
-    const item = input.items.find((candidate) => setupStepMatches(candidate.id, receipt.stepId));
-    const stepLabel = receipt.stepLabel ?? item?.label ?? receipt.stepId;
-    history.push({
-      id: `setup-step-history:${receipt.stepId}:durable-receipt:${receipt.receiptId}`,
-      stepId: receipt.stepId,
-      stepLabel,
-      kind: 'durable-receipt',
-      receiptId: receipt.receiptId,
-      recordedAt,
-      summary: receipt.summary,
-      inspectRoute: receipt.inspectRoute,
-      source: receipt.source,
-      receiptStatus: receipt.status,
-      satisfiesReceipt: durableReceiptSatisfies(receipt, input.durableReceipts),
-      schemaStatus: receipt.schemaStatus,
-      schemaVersion: receipt.schemaVersion,
-      provenance: receipt.provenance,
-      publicationGuarantee: receipt.publicationGuarantee,
-      eventCursor: receipt.eventCursor,
-      eventSequence: receipt.eventSequence,
-      publisher: receipt.publisher,
-    });
-  }
-
   return history.sort((left, right) => Date.parse(right.recordedAt) - Date.parse(left.recordedAt) || left.id.localeCompare(right.id));
 }
 
@@ -506,7 +422,7 @@ function buildReceiptGaps(input: {
         stepId,
         stepLabel,
         requiredReceipt,
-        summary: `${stepLabel} still needs a stable ${requiredReceipt} id and timestamp before release closeout can count it as durable setup evidence.`,
+        summary: `${stepLabel} has no ready ${requiredReceipt} yet; closeout counts only saved evidence with an id and timestamp.`,
       };
     });
 }
@@ -544,16 +460,11 @@ function buildCloseout(input: {
   const latestSmoke = input.smokeHistory.status === 'available'
     ? input.smokeHistory.latestResult ?? 'unknown'
     : input.smokeHistory.status;
-  const satisfyingSetupReceipts = input.stepHistory.filter((entry) => entry.kind === 'durable-receipt' && entry.satisfiesReceipt === true);
-  const certifiedSetupReceipts = satisfyingSetupReceipts.filter((entry) => entry.schemaStatus === 'certified');
-  const eventStreamSetupReceipts = satisfyingSetupReceipts.filter((entry) => entry.eventCursor);
   const evidence = [
     `critical setup blockers: ${primaryBlocker ? `${primaryBlocker.label} (${primaryBlocker.status})` : 'none'}`,
     `setup marker: ${input.setupMarkerExists ? 'present' : 'missing'}`,
     `latest setup smoke: ${latestSmoke}`,
     `setup smoke receipt: ${input.setupSmokeReceiptReady ? 'ready' : 'missing'}`,
-    `certified setup receipts: ${certifiedSetupReceipts.length}/${satisfyingSetupReceipts.length}`,
-    `setup receipt event streams: ${eventStreamSetupReceipts.length}`,
     `setup smoke history: ${input.smokeHistory.status}; total ${input.smokeHistory.total}; trend ${input.smokeHistory.trend}`,
   ];
   const policy = 'Setup closeout is advisory until a confirmed finish route writes the local onboarding marker. Optional setup recommendations do not block closeout, but unresolved critical blockers or missing ready setup smoke evidence do.';
@@ -629,8 +540,7 @@ function buildCloseout(input: {
 export function buildAgentSetupWizard(input: BuildAgentSetupWizardInput): AgentSetupWizard {
   const smokeHistory = input.smokeHistory ?? emptyAgentSetupSmokeHistory();
   const inputCheckpoint = input.checkpoint ?? emptyAgentSetupWizardCheckpoint();
-  const durableReceipts = input.durableReceipts ?? [];
-  // A step's status is its live check; durable receipts are history beside it.
+  // A step's status is its live check; the checkpoint and the setup smoke evidence are history beside it.
   const items = input.items;
   const repeated = itemFromRepeatedBlockers(items, smokeHistory, input.repeatedBlockerAliases ?? {});
   const blocking = firstBlockingItem(items);
@@ -640,7 +550,7 @@ export function buildAgentSetupWizard(input: BuildAgentSetupWizardInput): AgentS
   const current = repeated?.item ?? blocking ?? checkpointItem ?? firstAttentionItem(items);
   const currentId = current?.id ?? null;
   const steps = items.map((item) => buildStep(item, currentId));
-  const stepHistory = buildStepHistory({ items, smokeHistory, checkpoint, durableReceipts });
+  const stepHistory = buildStepHistory({ items, smokeHistory, checkpoint });
   const smokeVerdict = newestSmokeVerdict(stepHistory);
   const setupSmokeReceiptReady = smokeVerdict === true;
   const receiptGaps = buildReceiptGaps({

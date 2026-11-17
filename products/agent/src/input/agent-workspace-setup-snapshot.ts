@@ -3,7 +3,7 @@ import type { CommandContext } from './command-registry.ts';
 import { readSetupWizardCheckpoint } from '../agent/setup-wizard-checkpoint.ts';
 import { listSetupSmokeEvidence } from '../agent/setup-smoke-evidence.ts';
 import { isOnboardingComplete } from '../runtime/onboarding/completion.ts';
-import { DEFAULT_AGENT_SETUP_WIZARD_CLEAR_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_INSPECT_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_MARK_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_RERUN_SMOKE_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_SAVE_SMOKE_ROUTE, buildAgentSetupWizard, emptyAgentSetupSmokeHistory, emptyAgentSetupWizardCheckpoint, type AgentSetupWizard, type AgentSetupWizardBlockedCheckFrequency, type AgentSetupWizardCheckpoint, type AgentSetupWizardDurableReceipt, type AgentSetupWizardSmokeHistory, type AgentSetupWizardSourceItem } from '../agent/setup-wizard.ts';
+import { DEFAULT_AGENT_SETUP_WIZARD_CLEAR_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_INSPECT_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_MARK_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_RERUN_SMOKE_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_SAVE_SMOKE_ROUTE, buildAgentSetupWizard, emptyAgentSetupSmokeHistory, emptyAgentSetupWizardCheckpoint, type AgentSetupWizard, type AgentSetupWizardBlockedCheckFrequency, type AgentSetupWizardCheckpoint, type AgentSetupWizardSmokeHistory, type AgentSetupWizardSourceItem } from '../agent/setup-wizard.ts';
 import type { AgentWorkspaceSetupChecklistItem } from './agent-workspace-setup.ts';
 import { readArtifactMetadataString, readArtifactMetadataStringList } from './agent-workspace-artifact-metadata.ts';
 
@@ -171,7 +171,6 @@ export function buildWorkspaceSetupWizard(
   smokeHistory: AgentSetupWizardSmokeHistory,
   checkpoint: AgentSetupWizardCheckpoint,
   setupMarkerExists: boolean,
-  durableReceipts: readonly AgentSetupWizardDurableReceipt[] = [],
 ): AgentSetupWizard {
   const items: AgentSetupWizardSourceItem[] = checklist.map((item) => ({
     id: item.id,
@@ -187,11 +186,8 @@ export function buildWorkspaceSetupWizard(
     smokeHistory,
     checkpoint,
     closeoutCriticalStepIds: ['runtime', 'connected-host-auth', 'provider-model'],
-    receiptRequiredStepIds: [
-      'runtime',
-      'connected-host-auth',
-    ],
-    durableReceipts,
+    // Only the setup smoke saves evidence; the runtime and auth steps are decided by their live checks.
+    receiptRequiredStepIds: ['install-smoke'],
     setupMarkerExists,
     repeatedBlockerAliases: SETUP_WIZARD_SNAPSHOT_BLOCKER_ALIASES,
   });

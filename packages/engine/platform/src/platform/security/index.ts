@@ -1,4 +1,4 @@
-export { SecurityReadSourceRetiredError } from './read-source.js';
+export { SecurityReadSourceRetiredError, captureFileIdentities } from './read-source.js';
 export { UserAuthManager } from './user-auth.js';
 export type { AuthUser, AuthSession, LocalAuthSnapshot } from './user-auth.js';
 export {

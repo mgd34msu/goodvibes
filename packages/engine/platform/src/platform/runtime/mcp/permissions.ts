@@ -1,4 +1,4 @@
-import { assertSecurityReadSource, captureSecurityReadBindings, retainSecurityReadData } from '../../security/read-source.js';
+import { captureRevisionReadSource } from '../../security/read-source.js';
 import type { ExternalRequestEvidence } from '../../permissions/external-request-evidence.js';
 /**
  * MCP per-server permissions: each registered server's trust mode, role,
@@ -149,14 +149,9 @@ function sortFindings(a: McpAttackPathFinding, b: McpAttackPathFinding): number 
  *   4. `evaluateToolCall(name, tool, args)`, checked before every tool invocation.
  *   5. `removeServer(name)`, called on permanent disconnection.
  */
-const mcpDecisionReadSources = new WeakMap<McpPermissionManager, () => () => void>();
-const getMcpDecisionReadSources = mcpDecisionReadSources.get.bind(mcpDecisionReadSources);
-const setMcpDecisionReadSources = mcpDecisionReadSources.set.bind(mcpDecisionReadSources);
-
+/** A check that the decision history did not change while it was read. */
 export function captureMcpDecisionHistoryReadSource(manager: McpPermissionManager): () => void {
-  const capture = getMcpDecisionReadSources(manager);
-  assertSecurityReadSource(capture !== undefined);
-  return capture();
+  return manager.captureSecurityDecisionReadSource();
 }
 
 export class McpPermissionManager {
@@ -165,15 +160,9 @@ export class McpPermissionManager {
   private decisionRevision = 0;
   private readonly decisionListeners = new Set<() => void>();
 
-  constructor() {
-    setMcpDecisionReadSources(this, () => {
-      const binding = captureSecurityReadBindings(this, ['decisionRevision', 'recentDecisions', 'listRecentDecisions', '_recordDecision', 'captureSecurityDecisionReadSource']);
-      const revision = this.decisionRevision, rawCurrent = retainSecurityReadData(this.recentDecisions);
-      return () => { binding(); rawCurrent(); assertSecurityReadSource(this.decisionRevision === revision); };
-    });
-  }
 
-  captureSecurityDecisionReadSource(): () => void { return captureMcpDecisionHistoryReadSource(this); }
+  /** One integer compare per check: the revision moves on every recorded decision. */
+  captureSecurityDecisionReadSource(): () => void { return captureRevisionReadSource('MCP decision history', () => this.decisionRevision); }
 
   /** Be told whenever a decision is recorded. The listener carries no payload: read the recent decisions again. */
   subscribeDecisions(listener: () => void): () => void {

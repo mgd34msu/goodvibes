@@ -1,4 +1,4 @@
-import { assertSecurityReadSource, captureSecurityReadBindings, captureSecurityReadData, retainSecurityReadData } from '../security/read-source.js';
+import { captureRevisionReadSource } from '../security/read-source.js';
 import type {
   VoiceProvider,
   VoiceProviderCapability,
@@ -11,14 +11,9 @@ export interface VoiceProviderDescriptor {
   readonly capabilities: readonly VoiceProviderCapability[];
 }
 
-const providerReadSources = new WeakMap<VoiceProviderRegistry, () => () => void>();
-const getProviderReadSources = providerReadSources.get.bind(providerReadSources);
-const setProviderReadSources = providerReadSources.set.bind(providerReadSources);
-
+/** A check that the voice provider list did not change while a status read ran. */
 export function captureVoiceProviderReadSource(registry: VoiceProviderRegistry): () => void {
-  const capture = getProviderReadSources(registry);
-  assertSecurityReadSource(capture !== undefined);
-  return capture();
+  return registry.captureReadSource();
 }
 
 export class VoiceProviderRegistry {
@@ -27,27 +22,9 @@ export class VoiceProviderRegistry {
 
   getIncarnation(): number { return this.incarnation; }
 
-  captureReadSource(): () => void { return captureVoiceProviderReadSource(this); }
+  /** One integer compare per check: the incarnation moves on every register and unregister. */
+  captureReadSource(): () => void { return captureRevisionReadSource('voice provider list', () => this.incarnation); }
 
-  constructor() {
-    setProviderReadSources(this, () => {
-      const bindings = captureSecurityReadBindings(this, ['incarnation', 'providers', 'get', 'list', 'status', 'getIncarnation', 'captureReadSource']);
-      const revision = this.incarnation;
-      const mapBindings = captureSecurityReadBindings(this.providers, ['get', 'values', 'entries']);
-      const entries = [...this.providers.entries()];
-      const providersCurrent = entries.map(([, provider]) => captureSecurityReadBindings(provider,
-        Reflect.ownKeys(provider).filter((key): key is string => typeof key === 'string')));
-      const capabilitiesCurrent = retainSecurityReadData(entries.map(([, provider]) => provider.capabilities));
-      const catalogCurrent = captureSecurityReadData(() => this.list());
-      return () => {
-        bindings(); mapBindings(); capabilitiesCurrent(); for (const guard of providersCurrent) guard(); catalogCurrent();
-        const current = [...this.providers.entries()];
-        assertSecurityReadSource(this.incarnation === revision && current.length === entries.length
-          && current.every(([id, provider], index) => id === entries[index]?.[0] && provider === entries[index]?.[1]));
-        bindings(); for (const guard of providersCurrent) guard();
-      };
-    });
-  }
 
   register(provider: VoiceProvider, options: { readonly replace?: boolean } = {}): () => void {
     const id = provider.id.trim();

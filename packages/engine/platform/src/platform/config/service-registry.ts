@@ -1,4 +1,4 @@
-import { assertSecurityReadSource, captureSecurityReadBindings, captureSecurityReadFiles } from '../security/read-source.js';
+import { captureFileIdentities } from '../security/read-source.js';
 /**
  * ServiceRegistry, named service credential resolution.
  *
@@ -224,20 +224,21 @@ function parseServicesFile(filePath: string): ServicesFileRead {
 // ServiceRegistry
 // ---------------------------------------------------------------------------
 
-const serviceReadSources = new WeakMap<ServiceRegistry, () => () => void>();
-const getServiceReadSources = serviceReadSources.get.bind(serviceReadSources);
-const setServiceReadSources = serviceReadSources.set.bind(serviceReadSources);
-
-/** Restriction from the original native owner; a replaced instance method cannot issue it. */
+/** A check that the service list and the credentials behind it did not change while a status read ran. */
 export function captureServiceReadSource(owner: ServiceRegistry): () => void {
-  const capture = getServiceReadSources(owner);
-  assertSecurityReadSource(capture !== undefined);
-  return capture();
+  return owner.captureReadSource();
 }
 
 export class ServiceRegistry {
+  /**
+   * A check that the services files (one `stat` each) and the secret and
+   * subscription stores (their own revisions) did not change while a status
+   * read ran.
+   */
   captureReadSource(): () => void {
-    return captureServiceReadSource(this);
+    const files = captureFileIdentities('service list', [this.servicesFilePath, this.projectServicesFilePath].filter((path): path is string => Boolean(path)));
+    const secretsCurrent = captureSecretsReadSource(this.secretsManager), subscriptionsCurrent = captureSubscriptionReadSource(this.subscriptionManager);
+    return () => { files(); secretsCurrent(); subscriptionsCurrent(); };
   }
   private readonly servicesFilePath: string;
   private readonly projectServicesFilePath: string | undefined;
@@ -257,12 +258,6 @@ export class ServiceRegistry {
     this.secretsManager = options.secretsManager;
     this.subscriptionManager = options.subscriptionManager;
     this.diagnosticMode = options.diagnosticMode ?? 'default';
-    setServiceReadSources(this, () => {
-      const binding = captureSecurityReadBindings(this, ['servicesFilePath', 'secretsManager', 'subscriptionManager', 'diagnosticMode', 'getAll', 'get', 'inspect', 'resolveSecret', 'resolveConfiguredSecret', 'captureReadSource']);
-      const filesCurrent = captureSecurityReadFiles([this.servicesFilePath, this.projectServicesFilePath].filter((path): path is string => Boolean(path)));
-      const secretsCurrent = captureSecretsReadSource(this.secretsManager), subscriptionsCurrent = captureSubscriptionReadSource(this.subscriptionManager);
-      return () => { binding(); filesCurrent(); secretsCurrent(); subscriptionsCurrent(); binding(); };
-    });
   }
 
   /**
@@ -321,22 +316,16 @@ export class ServiceRegistry {
     keyOrRef?: string,
     ref?: SecretRefInput,
   ): Promise<string | null> {
-    const current = captureSecurityReadBindings(this, ['secretsManager', 'diagnosticMode']);
     const secrets = this.secretsManager;
-    const secretsCurrent = captureSecurityReadBindings(secrets, ['get', 'getGlobalHome']);
-    const read = secrets.get, home = secrets.getGlobalHome;
-    const assertCurrent = () => { current(); secretsCurrent(); };
-    assertCurrent();
     const candidate = ref ?? (keyOrRef && isSecretRefInput(keyOrRef) ? keyOrRef : undefined);
     if (candidate) {
       try {
         const resolved = await resolveSecretRef(candidate, {
-          resolveLocalSecret: async (key) => { assertCurrent(); const value = await read.call(secrets, key); assertCurrent(); return value; },
-          homeDirectory: home.call(secrets),
+          resolveLocalSecret: (key) => secrets.get(key),
+          homeDirectory: secrets.getGlobalHome(),
         });
-        assertCurrent(); return resolved.value;
+        return resolved.value;
       } catch (error) {
-        assertCurrent();
         logger.warn('ServiceRegistry: failed to resolve secret reference', {
           serviceName,
           field,
@@ -347,9 +336,7 @@ export class ServiceRegistry {
       }
     }
 
-    assertCurrent();
-    const value = keyOrRef ? await read.call(secrets, keyOrRef) : null;
-    assertCurrent(); return value;
+    return keyOrRef ? secrets.get(keyOrRef) : null;
   }
 
   /**
@@ -474,10 +461,9 @@ export class ServiceRegistry {
   }
 
   async inspect(serviceName: string): Promise<ServiceInspection | null> {
-    const current = captureSecurityReadBindings(this, ['get', 'resolveSecret', 'resolveConfiguredSecret']);
-    const get = this.get, resolve = this.resolveSecret;
-    current(); const config = get.call(this, serviceName); current();
+    const config = this.get(serviceName);
     if (!config) return null;
+    const resolve = this.resolveSecret;
 
     const pending = [
       resolve.call(this, serviceName, 'primary'),
@@ -500,7 +486,6 @@ export class ServiceRegistry {
       await Promise.allSettled(pending);
       throw error;
     });
-    current();
 
     return {
       config,

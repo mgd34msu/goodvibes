@@ -1,4 +1,4 @@
-import { assertSecurityReadSource, captureSecurityReadBindings, retainSecurityReadData } from '../../security/read-source.js';
+import { captureRevisionReadSource } from '../../security/read-source.js';
 import { captureDivergenceReadSource } from './divergence-dashboard.js';
 import { PolicyRegistry } from './policy-registry.js';
 import { DivergencePanel } from '../diagnostics/panels/divergence.js';
@@ -31,14 +31,15 @@ export interface PermissionAuditEntry {
   readonly persisted?: boolean | undefined;
 }
 
-const policyReadSources = new WeakMap<PolicyRuntimeState, () => () => void>();
-const getPolicyReadSources = policyReadSources.get.bind(policyReadSources);
-const setPolicyReadSources = policyReadSources.set.bind(policyReadSources);
+/**
+ * The policy panel snapshot and a check that nothing it shows changed while it
+ * was read: the runtime's revision, the registry's publication revision and
+ * the dashboard's, compared as integers.
+ */
 export function capturePolicyRuntimeReadSource(state: PolicyRuntimeState): { readonly snapshot: PolicyPanelSnapshot; readonly assertCurrent: () => void } {
-  const capture = getPolicyReadSources(state); assertSecurityReadSource(capture !== undefined);
-  const assertCurrent = capture(); assertCurrent(); const snapshot = state.getSnapshot();
-  const snapshotCurrent = retainSecurityReadData(snapshot); assertCurrent();
-  return Object.freeze({ snapshot, assertCurrent() { assertCurrent(); snapshotCurrent(); assertCurrent(); } });
+  const assertCurrent = state.captureReadSource();
+  const snapshot = state.getSnapshot();
+  return Object.freeze({ snapshot, assertCurrent });
 }
 
 export class PolicyRuntimeState {
@@ -57,18 +58,13 @@ export class PolicyRuntimeState {
 
   public constructor(registry: PolicyRegistry = new PolicyRegistry()) {
     this._registry = registry;
-    setPolicyReadSources(this, () => {
-      const binding = captureSecurityReadBindings(this, ['_readRevision', '_registry', '_dashboard', '_divergencePanel', '_recentPermissionAudit', '_lintFindings', '_lastSimulationSummary', '_lastPreflightReview', 'getSnapshot']);
-      const registryBinding = captureSecurityReadBindings(registry, ['_publicationRevision', '_current', '_candidate', '_history', 'getCurrent', 'getCandidate', 'getHistory', 'getPublicationRevision', 'diff']);
-      const revision = this._readRevision, registryRevision = registry.getPublicationRevision();
-      const rawCurrent = retainSecurityReadData([registry.getCurrent(), registry.getCandidate(), registry.getHistory(),
-        this._recentPermissionAudit, this._lintFindings, this._lastSimulationSummary, this._lastPreflightReview]);
-      const dashboardCurrent = this._dashboard ? captureDivergenceReadSource(this._dashboard) : undefined;
-      return () => {
-        binding(); registryBinding(); rawCurrent(); dashboardCurrent?.();
-        assertSecurityReadSource(this._readRevision === revision && registry.getPublicationRevision() === registryRevision);
-      };
-    });
+  }
+
+  public captureReadSource(): () => void {
+    const own = captureRevisionReadSource('permission policy', () => this._readRevision);
+    const registry = captureRevisionReadSource('permission policy', () => this._registry.getPublicationRevision());
+    const dashboard = this._dashboard ? captureDivergenceReadSource(this._dashboard) : undefined;
+    return () => { own(); registry(); dashboard?.(); };
   }
 
   public getRegistry(): PolicyRegistry {

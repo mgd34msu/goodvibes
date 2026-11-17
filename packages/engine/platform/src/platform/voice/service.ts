@@ -1,5 +1,4 @@
 import { VoiceProviderRegistry, captureVoiceProviderReadSource } from './provider-registry.js';
-import { assertSecurityReadSource, captureSecurityReadBindings } from '../security/read-source.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { DaemonErrorCategory, GoodVibesError } from '@goodvibes-jev/engine/errors';
@@ -31,14 +30,9 @@ export interface VoiceBillableUsage {
   readonly unit: 'characters' | 'seconds';
 }
 
-const voiceListReadSources = new WeakMap<VoiceService, () => () => void>();
-const getVoiceListReadSources = voiceListReadSources.get.bind(voiceListReadSources);
-const setVoiceListReadSources = voiceListReadSources.set.bind(voiceListReadSources);
-
+/** A check that the voice providers did not change while a voice list was read. */
 export function captureVoiceListReadSource(service: VoiceService): () => void {
-  const capture = getVoiceListReadSources(service);
-  assertSecurityReadSource(capture !== undefined);
-  return capture();
+  return service.captureListReadSource();
 }
 
 export class VoiceService {
@@ -47,11 +41,10 @@ export class VoiceService {
     /** Cost-attribution sink for METERED providers (wired by the runtime root). */
     private readonly onBillableUsage?: ((usage: VoiceBillableUsage) => void) | undefined,
   ) {
-    setVoiceListReadSources(this, () => {
-      const bindings = captureSecurityReadBindings(this, ['registry', 'listVoices']);
-      const providerCurrent = captureVoiceProviderReadSource(registry);
-      return () => { bindings(); providerCurrent(); bindings(); };
-    });
+  }
+
+  captureListReadSource(): () => void {
+    return captureVoiceProviderReadSource(this.registry);
   }
 
   /** Record a metered call; a provider with billing 'none' emits nothing (honest no-dimension). */

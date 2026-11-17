@@ -1,5 +1,4 @@
-import { types as nodeTypes } from 'node:util';
-import { assertSecurityReadSource, captureSecurityReadBindings, captureSecurityReadData, retainSecurityReadData } from '../security/read-source.js';
+import { captureRevisionReadSource } from '../security/read-source.js';
 import type { DeliveryLifetime } from '../utils/delivery-lifetime.js';
 import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 
@@ -150,15 +149,9 @@ function makesOutput(provider: MediaGenerationProvider, filter: MediaProviderFil
   return !filter.output || !provider.outputs || provider.outputs.includes(filter.output);
 }
 
-const mediaReadSources = new WeakMap<MediaProviderRegistry, () => () => void>();
-const getMediaReadSource = mediaReadSources.get.bind(mediaReadSources);
-const setMediaReadSource = mediaReadSources.set.bind(mediaReadSources);
-
-/** An original native collection restriction; it grants no effect authority. */
+/** A check that the media provider list did not change while a status read ran. */
 export function captureMediaProviderReadSource(registry: MediaProviderRegistry): () => void {
-  const capture = getMediaReadSource(registry);
-  assertSecurityReadSource(capture !== undefined);
-  return capture();
+  return registry.captureReadSource();
 }
 
 export class MediaProviderRegistry {
@@ -167,35 +160,9 @@ export class MediaProviderRegistry {
 
   getIncarnation(): number { return this.incarnation; }
 
-  captureReadSource(): () => void { return captureMediaProviderReadSource(this); }
+  /** One integer compare per check: the incarnation moves on every register and unregister. */
+  captureReadSource(): () => void { return captureRevisionReadSource('media provider list', () => this.incarnation); }
 
-  constructor() {
-    setMediaReadSource(this, () => {
-      const bindings = captureSecurityReadBindings(this, ['providers', 'incarnation', 'get', 'list', 'status', 'getIncarnation', 'captureReadSource']);
-      bindings();
-      const revision = this.incarnation, providers = this.providers;
-      const mapBindings = captureSecurityReadBindings(providers, ['entries', 'get', 'values']);
-      mapBindings();
-      const entries = [...providers.entries()];
-      const providerBindings = entries.map(([, provider]) => {
-        assertSecurityReadSource(!nodeTypes.isProxy(provider));
-        return captureSecurityReadBindings(provider, [
-          'id', 'label', 'capabilities', 'status', 'analyze', 'transform', 'generate',
-          ...Reflect.ownKeys(provider).filter((key): key is string => typeof key === 'string'),
-        ]);
-      });
-      for (const guard of providerBindings) guard();
-      const capabilities = retainSecurityReadData(entries.map(([, provider]) => provider.capabilities));
-      const catalog = captureSecurityReadData(() => { bindings(); mapBindings(); for (const guard of providerBindings) guard(); return this.list(); });
-      return () => {
-        bindings(); mapBindings(); capabilities(); for (const guard of providerBindings) guard();
-        const current = [...providers.entries()];
-        assertSecurityReadSource(this.incarnation === revision && this.providers === providers && current.length === entries.length
-          && entries.every(([id, provider], index) => current[index]?.[0] === id && current[index]?.[1] === provider));
-        catalog(); bindings(); mapBindings(); for (const guard of providerBindings) guard();
-      };
-    });
-  }
 
   register(provider: MediaGenerationProvider, options: { readonly replace?: boolean } = {}): () => void {
     const id = provider.id.trim();

@@ -1,4 +1,3 @@
-import { assertSecurityReadSource, captureSecurityReadBindings } from '../security/read-source.js';
 import { getCorrelationContext } from '../runtime/correlation.js';
 import { prepareExternalExecution, prepareExternalWorkspaceRevision } from '../permissions/external-execution.js';
 import { captureExternalRequestEvidence } from '../permissions/external-request-evidence.js';
@@ -78,7 +77,7 @@ import { getSandboxConfigSnapshot } from '../runtime/sandbox/manager.js';
 import {
   type SandboxSessionRegistry,
 } from '../runtime/sandbox/session-registry.js';
-import { resolveSandboxCommandPlan } from '../runtime/sandbox/backend.js';
+import { sandboxCommandWrapper } from '../runtime/sandbox/backend.js';
 import { summarizeError } from '../utils/error-display.js';
 
 function compactEnv(env: NodeJS.ProcessEnv | Record<string, string>): Record<string, string> {
@@ -121,14 +120,9 @@ function sameServerConfig(a: McpServerConfig | undefined, b: McpServerConfig | u
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
 
-const mcpSecurityReadSources = new WeakMap<McpRegistry, () => () => void>();
-const getMcpSecurityReadSources = mcpSecurityReadSources.get.bind(mcpSecurityReadSources);
-const setMcpSecurityReadSources = mcpSecurityReadSources.set.bind(mcpSecurityReadSources);
-
+/** A check that the MCP security decisions did not change while they were read. */
 export function captureMcpSecurityDecisionReadSource(registry: McpRegistry): () => void {
-  const capture = getMcpSecurityReadSources(registry);
-  assertSecurityReadSource(capture !== undefined);
-  return capture();
+  return registry.captureSecurityDecisionReadSource();
 }
 
 /** Servers connected at once while applying a configuration. */
@@ -228,11 +222,6 @@ export class McpRegistry {
   }) {
     this.hookDispatcher = options.hookDispatcher;
     this.sandboxSessions = options.sandboxSessions;
-    setMcpSecurityReadSources(this, () => {
-      const binding = captureSecurityReadBindings(this, ['permissions', 'listRecentSecurityDecisions', 'captureSecurityDecisionReadSource']);
-      const decisionCurrent = captureMcpDecisionHistoryReadSource(this.permissions);
-      return () => { binding(); decisionCurrent(); binding(); };
-    });
   }
 
   setRuntimeBus(runtimeBus: RuntimeEventBus | null): void {
@@ -864,7 +853,7 @@ export class McpRegistry {
   listServerSandboxBindings(): Array<{
     name: string;
     sessionId?: string | undefined;
-    profileId?: 'mcp-shared' | 'mcp-per-server' | undefined;
+    profileId?: 'mcp-server' | undefined;
     state?: import('../runtime/sandbox/types.js').SandboxSessionState | undefined;
     backend?: import('../runtime/sandbox/types.js').SandboxResolvedBackend | undefined;
     startupStatus?: 'verified' | 'planned' | 'failed' | undefined;
@@ -875,11 +864,9 @@ export class McpRegistry {
       return {
         name,
         sessionId: sessionId ?? undefined,
-        profileId: session?.profileId === 'mcp-shared' || session?.profileId === 'mcp-per-server'
-          ? session.profileId
-          : undefined,
+        profileId: session?.profileId === 'mcp-server' ? session.profileId : undefined,
         state: session?.state,
-        backend: session?.resolvedBackend ?? session?.backend,
+        backend: session?.backend,
         startupStatus: session?.startupStatus,
       };
     });
@@ -938,7 +925,7 @@ export class McpRegistry {
     return true;
   }
 
-  captureSecurityDecisionReadSource(): () => void { return captureMcpSecurityDecisionReadSource(this); }
+  captureSecurityDecisionReadSource(): () => void { return captureMcpDecisionHistoryReadSource(this.permissions); }
 
   listRecentSecurityDecisions(limit = 8): McpDecisionRecord[] {
     return this.permissions.listRecentDecisions(limit);
@@ -1045,7 +1032,17 @@ export class McpRegistry {
       assertHostCurrent(); assertExecutionCurrent();
     }
     if (this.sandboxConfigManager) {
-      const resolved = await this._resolveSandboxProcessSpec(serverConfig, assertExecutionCurrent);
+      let resolved: Awaited<ReturnType<McpRegistry['_resolveSandboxProcessSpec']>>;
+      try { resolved = await this._resolveSandboxProcessSpec(serverConfig, assertExecutionCurrent); }
+      catch (error) {
+        // A server that asked for a boundary this host cannot give is not started; say so where its status is read.
+        if (this.serverConfigs.get(name) === serverConfig) {
+          this.freshness.markFailed(name, summarizeError(error));
+          this.connectFailures.set(name, summarizeError(error));
+          if (stillWanted()) this.#lifecycle.failed(name, summarizeError(error));
+        }
+        throw error;
+      }
       sandboxSessionId = resolved?.sessionId ?? null;
       processSpec = resolved?.processSpec;
       try { assertHostCurrent(); }
@@ -1211,6 +1208,13 @@ export class McpRegistry {
     }
   }
 
+  /**
+   * With `sandbox.mcpIsolation: contained`, a stdio server starts inside its
+   * own bubblewrap boundary (sandbox session profile `mcp-server`): workspace
+   * writable, system files and the server's own install read-only, $HOME and
+   * /tmp private, host network shared. A host that cannot give the boundary
+   * refuses the start rather than run the server unconfined.
+   */
   private async _resolveSandboxProcessSpec(
     serverConfig: McpServerConfig,
     assertCurrent?: () => void,
@@ -1219,56 +1223,31 @@ export class McpRegistry {
     if (!configManager) return null;
     // HTTP servers are remote endpoints, there is no local process to sandbox.
     if (!serverConfig.command) return null;
-    const sandbox = getSandboxConfigSnapshot(configManager);
-    if (sandbox.mcpIsolation === 'disabled') return null;
+    if (getSandboxConfigSnapshot(configManager).mcpIsolation === 'disabled') return null;
 
-    const profileId = this._selectSandboxProfile(serverConfig);
-    const label = `${serverConfig.name} MCP`;
     assertCurrent?.();
-    const session = await this.sandboxSessions.start(profileId, label, configManager);
-    if (!session.launchPlan) {
-      throw new Error(`Sandbox session ${session.id} for MCP server '${serverConfig.name}' is missing a launch plan.`);
+    const session = await this.sandboxSessions.start('mcp-server', `${serverConfig.name} MCP`, configManager);
+    const plan = session.launchPlan;
+    if (!plan || plan.backend !== 'bubblewrap') {
+      this.sandboxSessions.stop(session.id);
+      throw new Error(
+        `MCP server '${serverConfig.name}' was not started: sandbox.mcpIsolation is 'contained' but this host has no boundary `
+        + `(${plan?.summary ?? 'no launch plan'}). Install bubblewrap, or set sandbox.mcpIsolation to disabled to run MCP servers as host processes.`,
+      );
     }
-    const resolvedPlan = resolveSandboxCommandPlan(serverConfig.command, serverConfig.args ?? []);
+    const args = [...(serverConfig.args ?? [])];
     return {
       sessionId: session.id,
       processSpec: {
-        command: resolvedPlan.command,
-        args: [...resolvedPlan.args],
+        command: serverConfig.command,
+        args,
         env: compactEnv(serverConfig.env ?? {}),
-        cwd: session.launchPlan.workspaceRoot,
-        summary: resolvedPlan.summary,
+        cwd: plan.workspaceRoot,
+        summary: plan.summary,
         sandboxSessionId: session.id,
+        wrapper: sandboxCommandWrapper(plan, serverConfig.command, args),
       },
     };
-  }
-
-  private _selectSandboxProfile(serverConfig: McpServerConfig): 'mcp-shared' | 'mcp-per-server' {
-    const configManager = this.sandboxConfigManager;
-    if (!configManager) return 'mcp-shared';
-    const sandbox = getSandboxConfigSnapshot(configManager);
-    switch (sandbox.mcpIsolation) {
-      case 'per-server-vm':
-        return 'mcp-per-server';
-      case 'shared-vm':
-        return 'mcp-shared';
-      case 'hybrid':
-        return this._requiresDedicatedMcpSandbox(serverConfig) ? 'mcp-per-server' : 'mcp-shared';
-      case 'disabled':
-      default:
-        return 'mcp-shared';
-    }
-  }
-
-  private _requiresDedicatedMcpSandbox(serverConfig: McpServerConfig): boolean {
-    return Boolean(
-      (serverConfig.allowedHosts?.length ?? 0) > 0
-      || (serverConfig.allowedPaths?.length ?? 0) > 0
-      || serverConfig.role === 'automation'
-      || serverConfig.role === 'browser'
-      || serverConfig.role === 'ops'
-      || serverConfig.role === 'remote',
-    );
   }
 
   private _handleClientNotification(notification: McpClientNotification): void {

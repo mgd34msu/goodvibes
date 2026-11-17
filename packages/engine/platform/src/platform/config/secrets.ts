@@ -1,5 +1,5 @@
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
-import { assertSecurityReadSource, captureSecurityReadBindings, captureSecurityReadFiles, captureSecurityReadData } from '../security/read-source.js';
+import { assertSecurityReadSource } from '../security/read-source.js';
 /**
  * SecretsManager, hierarchy-aware secret resolution and persistence.
  *
@@ -179,6 +179,8 @@ export interface SecretStorageReview {
     readonly exists: boolean;
     readonly readable: boolean;
   }[];
+  /** Every record the review read (the same list `listDetailed` answers), so a caller needs no second read. */
+  readonly records?: readonly SecretRecord[] | undefined;
 }
 
 type SecureStoreReadResult =
@@ -325,15 +327,9 @@ function deletionFileObservation(path: string): { stamp: string; raw: string | n
   } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { stamp: 'absent', raw: null }; throw error; }
 }
 
-const secretsReadSources = new WeakMap<SecretsManager, () => () => void>();
-const getSecretsReadSources = secretsReadSources.get.bind(secretsReadSources);
-const setSecretsReadSources = secretsReadSources.set.bind(secretsReadSources);
-
-/** Restriction from the original native owner; a replaced instance method cannot issue it. */
+/** A check that the stored credentials did not change while a status read ran. */
 export function captureSecretsReadSource(owner: SecretsManager): () => void {
-  const capture = getSecretsReadSources(owner);
-  assertSecurityReadSource(capture !== undefined);
-  return capture();
+  return owner.captureReadSource();
 }
 
 /** Reference sources that run a password-manager or other command to resolve. */
@@ -346,8 +342,17 @@ function ownEnvValue(key: string): string | undefined {
 
 export class SecretsManager {
   /** Restriction only, captured from this manager's actual native stores. */
+  /**
+   * A check that the stored credentials did not change while a status read ran:
+   * integer compares of this owner's revision (its own writes, and another
+   * process's writes seen by the store watch) and the storage policy.
+   */
   captureReadSource(): () => void {
-    return captureSecretsReadSource(this);
+    assertSecurityReadSource(!this.pendingLocalMutations.size, 'secret store');
+    this.#startWatching();
+    const revision = this.#revisionSource.revision(), policy = this.getPolicy();
+    return () => assertSecurityReadSource(!this.pendingLocalMutations.size && this.#revisionSource.revision() === revision
+      && this.getPolicy() === policy, 'secret store');
   }
   /** Change listeners, fired after a successful set() or delete() so credential consumers (e.g. the provider registry) re-resolve LIVE, no restart. */
   private readonly changeListeners = new Set<(key: string) => void>();
@@ -871,20 +876,6 @@ export class SecretsManager {
     // References resolved anywhere in this process run the password managers this owner's settings name.
     if (configManager) useSecretProviderHostConfig(() => readSecretProviderHostConfig(configManager));
     this.#approvals = new ProjectSecretApprovals(join(dirname(secretWriteTarget(this.layout, 'user', 'secure').path), 'project-secret-approvals.json'));
-    setSecretsReadSources(this, () => {
-      const binding = captureSecurityReadBindings(this, ['credentialMutationGeneration', 'pendingLocalMutations', 'options', 'layout', 'keyFilePath', 'getPolicy', 'getCredentialMutationState', 'getAllCandidateStores', 'getReadOrder', 'get', 'getGlobalHome', 'getInternal', 'resolveMaybeReferencedValue', 'readEncryptedStore', 'readPlaintextStore', 'readEncryptedFile', 'readPlaintextFile', 'inspect', 'listDetailed', 'captureReadSource']);
-      const state = this.getCredentialMutationState(); assertSecurityReadSource(!state.pending);
-      const optionsBinding = captureSecurityReadBindings(this.options, Reflect.ownKeys(this.options).filter((key): key is string => typeof key === 'string'));
-      const paths = [...new Set([...this.getAllCandidateStores().map(store => store.path), this.keyFilePath])];
-      const filesCurrent = captureSecurityReadFiles(paths), environmentCurrent = captureSecurityReadData(() => Object.keys(process.env).sort());
-      const policy = this.getPolicy();
-      return () => {
-        binding(); optionsBinding(); filesCurrent(); environmentCurrent();
-        const current = this.getCredentialMutationState();
-        assertSecurityReadSource(!current.pending && current.generation === state.generation && this.getPolicy() === policy);
-        binding(); optionsBinding();
-      };
-    });
   }
 
   /** Load the encryption key, generating a fresh one exclusively on first need, see secrets-keyfile.ts. */
@@ -949,11 +940,7 @@ export class SecretsManager {
   }
 
   async get(key: string): Promise<string | null> {
-    const current = captureSecurityReadBindings(this, ['getInternal']);
-    const read = this.getInternal;
-    current();
-    const value = await read.call(this, key, new Set([key]));
-    current(); return value;
+    return this.getInternal(key, new Set([key]));
   }
 
   /** Atomic first creation for daemon-owned material, shared across process creators.
@@ -1065,10 +1052,7 @@ export class SecretsManager {
    * would copy the pointed-at value over the pointer.
    */
   async getFromScope(key: string, scope: SecretScope, storePath?: string): Promise<string | null> {
-    const current = captureSecurityReadBindings(this, ['getMigratableStores', 'readEncryptedFile', 'readPlaintextFile']);
-    const stores = this.getMigratableStores;
-    current();
-    for (const path of stores.call(this)) {
+    for (const path of this.getMigratableStores()) {
       if (storePath !== undefined ? path.path !== storePath : path.scope !== scope) continue;
       const secrets = path.secure ? this.readEncryptedFile(path.path) : this.readPlaintextFile(path.path);
       if (secrets !== null && Object.hasOwn(secrets, key)) return secrets[key] ?? null;
@@ -1134,11 +1118,6 @@ export class SecretsManager {
   }
 
   private async resolveMaybeReferencedValue(key: string, value: string, seen: Set<string>, fromProjectStore = false): Promise<string | null> {
-    const current = captureSecurityReadBindings(this, ['options', 'getInternal']);
-    const optionsCurrent = captureSecurityReadBindings(this.options, ['globalHome', 'diagnosticMode']);
-    const read = this.getInternal;
-    const assertCurrent = () => { current(); optionsCurrent(); };
-    assertCurrent();
     if (!isSecretRefInput(value)) return value;
 
     // A project store lives inside a directory that may have been cloned from
@@ -1162,18 +1141,15 @@ export class SecretsManager {
     try {
       const resolved = await resolveSecretRef(value, {
         resolveLocalSecret: async (nextKey) => {
-          assertCurrent();
           if (seen.has(nextKey)) {
             throw new Error(`Recursive GoodVibes secret reference for ${nextKey}`);
           }
           const nextSeen = new Set(seen);
           nextSeen.add(nextKey);
-          const resolved = await read.call(this, nextKey, nextSeen);
-          assertCurrent(); return resolved;
+          return this.getInternal(nextKey, nextSeen);
         },
         homeDirectory: this.options.globalHome,
       });
-      assertCurrent();
       logger.debug('SecretsManager: resolved secret reference', { key, refSource: resolved.source });
       if (commandBacked && resolved.value !== null && this.#revisionSource.revision() === revision) {
         if (this.#resolvedReferences.size >= 256) this.#resolvedReferences.clear();
@@ -1181,7 +1157,6 @@ export class SecretsManager {
       }
       return resolved.value;
     } catch (error) {
-      assertCurrent();
       logger.warn('SecretsManager: failed to resolve secret reference', {
         key,
         refSource: getSecretRefSource(value) ?? 'unknown',
@@ -1393,8 +1368,6 @@ export class SecretsManager {
   }
 
   async list(): Promise<string[]> {
-    const current = captureSecurityReadBindings(this, ['getReadOrder', 'readEncryptedFile', 'readPlaintextFile']);
-    current();
     const keys = new Set<string>();
     for (const path of this.getReadOrder()) {
       const values = path.secure
@@ -1407,20 +1380,11 @@ export class SecretsManager {
   }
 
   async listDetailed(): Promise<SecretRecord[]> {
-    const current = captureSecurityReadBindings(this, ['getReadOrder', 'readEncryptedFile', 'readPlaintextFile']);
-    current();
-    const readOrder = this.getReadOrder, readEncrypted = this.readEncryptedFile, readPlaintext = this.readPlaintextFile;
-    current();
     const envKeys = new Set(Object.keys(process.env));
     const records: SecretRecord[] = [];
 
-    const order = readOrder.call(this); current();
-    for (const path of order) {
-      current();
-      const values = path.secure
-        ? readEncrypted.call(this, path.path)
-        : readPlaintext.call(this, path.path);
-      current();
+    for (const path of this.getReadOrder()) {
+      const values = path.secure ? this.readEncryptedFile(path.path) : this.readPlaintextFile(path.path);
       if (!values) continue;
       for (const key of Object.keys(values)) {
         const refSource = getSecretRefSource(values[key]!);
@@ -1452,16 +1416,12 @@ export class SecretsManager {
       });
     }
 
-    current();
     return records.sort((a, b) => a.key.localeCompare(b.key) || a.source.localeCompare(b.source));
   }
 
   async inspect(): Promise<SecretStorageReview> {
-    const current = captureSecurityReadBindings(this, ['getAllCandidateStores', 'getPolicy', 'listDetailed', 'readEncryptedStore', 'readPlaintextStore']);
-    const list = this.listDetailed;
-    current();
     const policy = this.getPolicy();
-    current(); const records = await list.call(this); current();
+    const records = await this.listDetailed();
     const storedRecords = records.filter((record) => record.source !== 'env');
     const storeStates = this.getAllCandidateStores().map((store) => ({
       store,
@@ -1499,6 +1459,7 @@ export class SecretsManager {
       plaintextKeys: new Set(storedRecords.filter((record) => !record.secure).map((record) => record.key)).size,
       warnings,
       locations,
+      records,
     };
   }
 
@@ -1624,8 +1585,6 @@ export class SecretsManager {
 
   /** Every credential a migration could move, across every surface's silo. */
   async listDetailedForMigration(): Promise<SecretRecord[]> {
-    const current = captureSecurityReadBindings(this, ['getMigratableStores', 'readEncryptedFile', 'readPlaintextFile']);
-    current();
     return listMigratableSecrets(
       this.getMigratableStores(),
       (path, secure) => (secure ? this.readEncryptedFile(path) : this.readPlaintextFile(path)),

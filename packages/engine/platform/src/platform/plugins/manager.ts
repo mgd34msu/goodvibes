@@ -1,4 +1,4 @@
-import { assertSecurityReadSource, captureSecurityReadBindings, captureSecurityReadData, captureSecurityPluginFiles, retainSecurityReadData } from '../security/read-source.js';
+import { captureFileIdentities, captureRevisionReadSource } from '../security/read-source.js';
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
 import { resolve, sep } from 'node:path';
@@ -146,14 +146,23 @@ export interface PluginShutdownStatus {
 /**
  * PluginManager, orchestrates plugin discovery, loading, and persistence.
  */
-const pluginReadSources = new WeakMap<PluginManager, () => () => void>();
-const getPluginReadSources = pluginReadSources.get.bind(pluginReadSources);
-const setPluginReadSources = pluginReadSources.set.bind(pluginReadSources);
+/**
+ * A check that the plugin list did not change while a status read ran: this
+ * manager's revision (every load, enable, trust and quarantine change moves
+ * it) and one `stat` of each plugin directory and the state file, which
+ * another process can change.
+ */
 export function capturePluginSecurityReadSource(manager: PluginManager): () => void {
-  const capture = getPluginReadSources(manager); assertSecurityReadSource(capture !== undefined); return capture();
+  return manager.captureReadSource();
 }
 export class PluginManager {
   private readRevision = 0;
+
+  captureReadSource(): () => void {
+    const revision = captureRevisionReadSource('plugin list', () => this.readRevision, () => !this.closed && this.operations.size === 0);
+    const files = captureFileIdentities('plugin list', [...getPluginDirectories(this.pathOptions), this.stateFilePath]);
+    return () => { revision(); files(); };
+  }
   private plugins = new Map<string, LoadedPlugin>();
   private state: PluginState = { ...DEFAULT_STATE, enabled: {}, enabledDirs: {}, config: {}, trust: {}, quarantine: {} };
   /** Lifecycle operations run one at a time, in the order they were asked for. */
@@ -189,18 +198,6 @@ export class PluginManager {
       throw new Error('PluginManager requires an explicit stateFilePath.');
     }
     this.stateFilePath = options.stateFilePath;
-    setPluginReadSources(this, () => {
-      const binding = captureSecurityReadBindings(this, ['closed', 'operations', 'readRevision', 'state', 'plugins', 'pathOptions', 'stateFilePath', 'trustStore', 'quarantineEngine', 'list', 'discoverPlugins']);
-      assertSecurityReadSource(!this.closed && this.operations.size === 0);
-      const revision = this.readRevision;
-      const rawCurrent = retainSecurityReadData([this.state, this.pathOptions]);
-      const filesCurrent = captureSecurityPluginFiles(getPluginDirectories(this.pathOptions));
-      const statusCurrent = captureSecurityReadData(() => this.list());
-      return () => {
-        binding(); rawCurrent(); filesCurrent(); statusCurrent();
-        assertSecurityReadSource(!this.closed && this.operations.size === 0 && this.readRevision === revision);
-      };
-    });
   }
 
   /**

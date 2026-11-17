@@ -1,4 +1,4 @@
-import { assertSecurityReadSource, captureSecurityReadBindings, retainSecurityReadData } from '../../security/read-source.js';
+import { captureRevisionReadSource } from '../../security/read-source.js';
 /**
  * Runtime permissions simulation pipeline.
  *
@@ -105,11 +105,9 @@ function statsFromCounts(counts: DivergenceCounts | undefined, totalEvaluations:
  * }
  * ```
  */
-const simulationReadSources = new WeakMap<PermissionSimulator, () => () => void>();
-const getSimulationReadSources = simulationReadSources.get.bind(simulationReadSources);
-const setSimulationReadSources = simulationReadSources.set.bind(simulationReadSources);
+/** A check that no evaluation was recorded while the simulation report was read: one integer compare. */
 export function captureSimulationReadSource(simulator: PermissionSimulator): () => void {
-  const capture = getSimulationReadSources(simulator); assertSecurityReadSource(capture !== undefined); return capture();
+  return simulator.captureReadSource();
 }
 export class PermissionSimulator {
   private readonly actual: LayeredPolicyEvaluator;
@@ -135,6 +133,10 @@ export class PermissionSimulator {
   /** Total evaluations across all calls. */
   private totalEvals = 0;
 
+  captureReadSource(): () => void {
+    return captureRevisionReadSource('permission simulation', () => this.totalEvals);
+  }
+
   /**
    * Divergence counts per bucket. Counted as each divergence happens, never recomputed from `records`,
    * which drops its oldest entries at the cap: the rate the enforcement gate and the promotion gate
@@ -156,12 +158,6 @@ export class PermissionSimulator {
     simulationMode: SimulationMode,
     config: PermissionSimulatorConfig = {},
   ) {
-    setSimulationReadSources(this, () => {
-      const binding = captureSecurityReadBindings(this, ['totalEvals', 'records', 'divergenceTally', 'evalsByClass', 'evalsByPrefix', 'evalsByMode', 'getDivergenceReport']);
-      const evaluations = this.totalEvals;
-      const rawCurrent = retainSecurityReadData([this.records, this.divergenceTally, this.evalsByClass, this.evalsByPrefix, this.evalsByMode]);
-      return () => { binding(); rawCurrent(); assertSecurityReadSource(this.totalEvals === evaluations); };
-    });
     this.policySources = {
       projectRoot: simulatedConfig.projectRoot ?? actualConfig.projectRoot,
       rules: [...(actualConfig.rules ?? []), ...(simulatedConfig.rules ?? [])],

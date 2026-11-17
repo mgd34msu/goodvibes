@@ -110,6 +110,8 @@ export async function collectTerminalOnboardingSnapshot<Config extends CommonCon
   };
   const read = <Value>(operation: () => Value | Promise<Value>): Promise<Value> =>
     assertCurrent ? observe(operation) : Promise.resolve(operation());
+  // The review lists every record while reading the stores; the records come from it, so the stores are read once.
+  const secretReviewRead = readers.loadOptionalSnapshot('secrets-review', () => read(() => sources.secrets.inspect()), buildFallbackSecretReview(captured.config));
   const pending = [
     readers.loadOptionalSnapshot(
       'subscriptions-active',
@@ -123,8 +125,11 @@ export async function collectTerminalOnboardingSnapshot<Config extends CommonCon
     ),
     readers.loadOptionalSnapshot('auth', () => read(() => sources.auth.inspect()), buildFallbackAuthSnapshot()),
     readers.buildServicesSnapshot(sources.services, assertCurrent),
-    readers.loadOptionalSnapshot('secrets-review', () => read(() => sources.secrets.inspect()), buildFallbackSecretReview(captured.config)),
-    readers.loadOptionalSnapshot('secrets-records', () => read(() => sources.secrets.listDetailed()), [] as const),
+    secretReviewRead,
+    readers.loadOptionalSnapshot('secrets-records', async () => {
+      const review = await secretReviewRead;
+      return review.issue === null && review.value.records ? review.value.records : read(() => sources.secrets.listDetailed());
+    }, [] as const),
     readers.loadOptionalSnapshot(
       'surfaces',
       sources.surfaces ? () => read(() => sources.surfaces!.list()) : undefined,

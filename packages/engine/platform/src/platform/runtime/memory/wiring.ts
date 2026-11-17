@@ -133,6 +133,8 @@ export interface DaemonMemoryGovernanceOptions {
   readonly knowledgeStores: ReadonlyArray<{ retainedEntryCount(): number; pruneJobRuns(keep: number): number }>;
   /** The shared session broker: real retained-record count + a real GC/truncate trim. */
   readonly sessionBroker: { retainedRecordCount(): number; trimRetained(level: 'floor' | 'flush'): void };
+  /** What the governor does instead of exiting at the tripwire; a terminal keeps running and warns. */
+  readonly exit?: MemoryGovernorDeps['exit'] | undefined;
 }
 
 /**
@@ -177,5 +179,6 @@ export function wireDaemonMemoryGovernance(options: DaemonMemoryGovernanceOption
     caches,
     receiptPath: options.receiptPath,
     onTripwireShutdown: options.onTripwireShutdown,
+    ...(options.exit === undefined ? {} : { deps: { exit: options.exit } }),
   });
 }

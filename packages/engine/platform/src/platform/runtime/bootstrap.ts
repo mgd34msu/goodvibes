@@ -90,7 +90,11 @@ export type {
   WorkspaceTrustChoice,
   PermissionHostSeam,
   HostSeams,
+  ComposedRuntimeServices,
+  WorkspaceCheckpointing,
 } from './services.js';
+export { createRuntimeAcquisitionScope } from './acquisition-scope.js';
+export type { RuntimeAcquisitionScope } from './acquisition-scope.js';
 // The OTHER composition shape: what a surface product's interactive loop needs
 // in-process, without the daemon-grade furniture `RuntimeServices` requires.
 // Purely additive, `RuntimeServices` is unchanged and still satisfies the

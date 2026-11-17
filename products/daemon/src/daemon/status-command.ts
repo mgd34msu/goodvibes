@@ -60,7 +60,8 @@ export interface RemoteCommandDeps {
   readonly daemonHomeDir: string;
   /** Where the daemon writes its own lifecycle/receipt files, for the local-only lines. */
   readonly controlPlaneConfigDir: string;
-  readonly fetchImpl?: DaemonFetch | undefined;
+  /** Asks the daemon, here or remote, with the configured outbound TLS trust (`createDaemonCommandRemote`); never the bare global fetch. */
+  readonly fetchImpl: DaemonFetch;
   readonly readToken?: ((daemonHomeDir: string) => string | undefined) | undefined;
   readonly now?: (() => number) | undefined;
   readonly localStateIo?: LocalStateIo | undefined;
@@ -361,7 +362,7 @@ export async function runStatusCommand(input: RunStatusCommandInput): Promise<Da
   const resolved = resolveTargetOrFailure(flags, input);
   if (!resolved.ok) return resolved.result;
   const target = resolved.target;
-  const fetchImpl = input.fetchImpl ?? fetch;
+  const fetchImpl = input.fetchImpl;
   // One small local file read; it is how a daemon that died says why.
   const crashLog = target.isLocal && input.crashLogPath ? summarizeCrashLog(input.crashLogPath) : null;
 
@@ -472,7 +473,7 @@ export async function runUpdateCommand(input: RunUpdateCommandInput): Promise<Da
   const resolved = resolveTargetOrFailure(flags, input);
   if (!resolved.ok) return resolved.result;
   const target = resolved.target;
-  const fetchImpl = input.fetchImpl ?? fetch;
+  const fetchImpl = input.fetchImpl;
   const method = flags.check ? 'update.check' : 'update.status';
 
   const [identity, update] = await Promise.all([

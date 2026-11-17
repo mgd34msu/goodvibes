@@ -190,8 +190,8 @@ export interface RunClusterCommandInput {
   readonly daemonHomeDir: string;
   readonly now?: (() => number) | undefined;
   readonly isTerminal?: boolean | undefined;
-  /** Injected in tests so nothing opens a socket or reads a real token. */
-  readonly fetchImpl?: DaemonFetch | undefined;
+  /** Asks the daemon with the configured outbound TLS trust (`createNetworkFetch`); never the bare global fetch. */
+  readonly fetchImpl: DaemonFetch;
   readonly readToken?: ((daemonHomeDir: string) => string | undefined) | undefined;
   /** Injected in tests; the real one reads stdin. */
   readonly prompt?: ((question: string) => Promise<string>) | undefined;
@@ -310,7 +310,7 @@ export async function runClusterCommand(input: RunClusterCommandInput): Promise<
   const now = input.now?.() ?? Date.now();
   const isTerminal = input.isTerminal ?? Boolean(process.stdout.isTTY);
   const call = async <T>(path: string, method: 'GET' | 'POST' = 'GET', body?: unknown): Promise<DaemonVerbOutcome<T>> =>
-    printableAnswer(await callDaemonVerb<T>(resolved.target, path, { method, ...(body === undefined ? {} : { body }) }, input.fetchImpl ?? fetch));
+    printableAnswer(await callDaemonVerb<T>(resolved.target, path, { method, ...(body === undefined ? {} : { body }) }, input.fetchImpl));
 
   const irreversible = describeIrreversibleClusterCommand(parsed);
   if (irreversible !== null && !parsed.yes) {

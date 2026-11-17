@@ -69,7 +69,7 @@ export interface PairCommandDeps {
   /** Process-local override, never adopted into the stored companion identity. */
   readonly operatorToken?: string | undefined;
   /** Asks the daemon, here or remote, with the configured outbound TLS trust (`createDaemonCommandRemote`). */
-  readonly fetchImpl?: DaemonFetch | undefined;
+  readonly fetchImpl: DaemonFetch;
   /** Whether this daemon's pairing store records the shared operator token as revoked. Absent: never. */
   readonly sharedTokenRevoked?: (() => boolean) | undefined;
 }
@@ -97,7 +97,7 @@ async function askLocalDaemon(input: RunPairCommandInput, token: string): Promis
   });
   if (!resolved.ok) return { kind: 'absent', baseUrl: 'this machine' };
   const target = resolved.target;
-  const fetchImpl = input.fetchImpl ?? fetch;
+  const fetchImpl = input.fetchImpl;
   let status: number;
   try {
     status = (await fetchImpl(`${target.baseUrl}/status`, { headers: { Authorization: `Bearer ${token}` } })).status;
@@ -320,7 +320,7 @@ async function runRemoteMint(input: RunPairCommandInput, target: RemoteDaemonTar
   const { flags } = input;
 
   const outcome = await callDaemonMethod<PairingHandoffCreateResult>(
-    target, 'pairing.handoff.create', { input: { name: defaultPairingTokenName() } }, input.fetchImpl ?? fetch,
+    target, 'pairing.handoff.create', { input: { name: defaultPairingTokenName() } }, input.fetchImpl,
   );
   if (!outcome.ok) return failure(outcome.error, outcome.fix, flags.json, outcome.code);
 

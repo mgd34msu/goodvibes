@@ -64,7 +64,8 @@ export interface RunMcpCommandInput {
   /** Where frames go out. Nothing but frames is ever written here. */
   readonly output: ChunkSink;
   readonly stderr: (line: string) => void;
-  readonly fetchImpl?: McpFetch | undefined;
+  /** Asks the daemon with the configured outbound TLS trust (`createDaemonCommandRemote`); never the bare global fetch. */
+  readonly fetchImpl: McpFetch;
   readonly readToken?: ((daemonHomeDir: string) => string | undefined) | undefined;
 }
 
@@ -95,7 +96,7 @@ export async function runMcpCommand(input: RunMcpCommandInput): Promise<number> 
   if (!resolved.ok) return refuse(resolved.error, resolved.fix);
   const target = resolved.target;
 
-  const fetchImpl: McpFetch = input.fetchImpl ?? ((url, init) => fetch(url, init));
+  const fetchImpl: McpFetch = input.fetchImpl;
   // Prove the daemon answers and accepts the token before the first frame, so a
   // client sees a failed launch rather than a server whose every tool errors.
   const reachable = await callDaemonRoute<unknown>(

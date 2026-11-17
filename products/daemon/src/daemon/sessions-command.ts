@@ -143,7 +143,7 @@ export async function runSessionsCommand(input: RunSessionsCommandInput): Promis
   const resolved = resolveTargetOrFailure(flags, input);
   if (!resolved.ok) return resolved.result;
   const target = resolved.target;
-  const fetchImpl = input.fetchImpl ?? fetch;
+  const fetchImpl = input.fetchImpl;
   const now = input.now?.() ?? Date.now();
 
   if (subcommand === 'kill') {

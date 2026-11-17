@@ -14,6 +14,7 @@
 import { resolveDaemonHomeDir } from '@goodvibes-jev/engine/platform/platform/workspace/daemon-home';
 import { CLUSTER_SUBCOMMANDS, describeIrreversibleClusterCommand, parseClusterCommand, runClusterCommand } from '@goodvibes-jev/engine/terminal-shell/cluster-commands';
 import type { CommandRegistry } from '../command-registry.ts';
+import { createNetworkFetch } from '@goodvibes-jev/engine/platform/platform/runtime/transport';
 
 /** Subcommand → argument hint, surfaced as the operator types. */
 export const CLUSTER_SUBCOMMAND_ARG_HINTS: Record<string, string> = {
@@ -60,6 +61,8 @@ export function registerClusterRuntimeCommands(registry: CommandRegistry): void 
         argv,
         configManager: ctx.platform.configManager,
         daemonHomeDir: resolveDaemonHomeDir(),
+        // The configured outbound TLS trust, as the daemon's own cluster command uses.
+        fetchImpl: createNetworkFetch(globalThis.fetch, ctx.platform.configManager),
         // A transcript is not a terminal for clipboard purposes: writing an
         // OSC 52 escape into the rendered conversation would put a control
         // sequence in the scrollback rather than on anyone's clipboard.

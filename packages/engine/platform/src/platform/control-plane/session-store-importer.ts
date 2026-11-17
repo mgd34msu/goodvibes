@@ -21,8 +21,7 @@
  *
  * The sources are not retired here: the project stores are still the local
  * session stores of the terminal apps, and the companion directory is the
- * companion chat's own persistence. The pre-split home store is retired by the
- * sweep that folds it (pre-split-control-plane-sweep.ts).
+ * companion chat's own persistence.
  */
 
 import { existsSync, readdirSync } from 'node:fs';

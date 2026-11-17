@@ -92,7 +92,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'local_auth.users.create',
     title: 'Create Local Auth User',
-    description: 'Create a local auth user. roles: omitted creates an admin. scopes: the operator scopes the user holds (for example read:sessions and write:sessions for someone who only chats); omitted, the user holds its role\'s default set. A narrowed user is not an admin, whatever its roles.',
+    description: 'Create a local auth user. roles: omitted creates an admin. scopes: the operator scopes the user holds (for example read:sessions, read:transcripts and write:sessions for someone who only chats); omitted, the user holds its role\'s default set. A narrowed user is not an admin, whatever its roles.',
     category: 'auth',
     scopes: ['write:auth'],
     access: 'admin',
@@ -234,7 +234,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'config.set',
     title: 'Set Config Value',
-    description: 'Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is saved for the next start of the daemon. The same route also serves the settings clients\' lanes, which answer with that lane\'s own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer), and `{ settingsImportPrecondition }` takes the same two actions plus `apply`, which spends a captured `reference`.',
+    description: 'Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is saved and the daemon moves there in the same process once no session is mid-turn (every service starts again on the new directory and attached apps reconnect; `moving`, `waitingForSessions` and `note` say what happens, and a second change while it moves is 409 WORKSPACE_BUSY), or, on a host that cannot move, at its next start (`restartRequired`). The same route also serves the settings clients\' lanes, which answer with that lane\'s own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer), and `{ settingsImportPrecondition }` takes the same two actions plus `apply`, which spends a captured `reference`.',
     category: 'config',
     scopes: ['write:config'],
     access: 'admin',

@@ -304,7 +304,7 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
         daemonHomeDir: options.runtime.daemonHomeDirectory,
         configManager: runtime.configManager, userAuth: runtime.localUserAuthManager,
         runtimeBus: runtime.runtimeBus, runtimeServices: runtime,
-        // A working-directory change (POST /config runtime.workingDir) is saved for the next start; this process stays on its root.
+        // A working-directory change (POST /config runtime.workingDir) moves the whole host when its owner gave one (moveWorkspace).
         ...(runtime.workspaceSwap ? { swapManager: runtime.workspaceSwap } : {}),
         drainForNativeHandover,
         deferNativeActivationUntilHostReady: true,

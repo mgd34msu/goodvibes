@@ -304,10 +304,13 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     });
     disposalScope.registry.add('browser checkout seam holder', () => browserCheckoutSeam.clear()); // newer than 'browser sessions' above, so runs first
     disposalScope.registry.add('native automation updates', registerNativeAutomationGatewayMethods(gatewayMethods, { manager: automationManager, host: autonomousHost }));
-    // One owner of the saved working directory: POST /config runtime.workingDir and `state set runtime.workingDir` both save through it.
+    // One owner of the working directory: POST /config runtime.workingDir and `state set runtime.workingDir` both
+    // go through it. With a host owner that can move (moveWorkspace) the daemon moves once no session is mid-turn.
     const workspaceSwap = options.daemonHomeDirectory === undefined ? null : new WorkspaceSwapManager(workingDirectory, {
       runtimeBus: options.runtimeBus, daemonHomeDir: options.daemonHomeDirectory, startOverride: options.workingDirectoryOverride,
+      ...(options.moveWorkspace ? { moveHost: options.moveWorkspace, getBusySessionCount: () => sessionBroker.countBusySessions() } : {}),
     });
+    if (workspaceSwap) disposalScope.registry.add('working directory move wait', () => workspaceSwap.dispose());
     const agentToolDependencies = {
       ...graph.agentToolDependencies,
       ...(workspaceSwap ? { workspaceSwap } : {}),

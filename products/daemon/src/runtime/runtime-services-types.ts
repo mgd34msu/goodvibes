@@ -107,6 +107,13 @@ export interface RuntimeServicesOptions {
    * saved working-directory change then says that option must change first.
    */
   readonly workingDirectoryOverride?: string | undefined;
+  /**
+   * Moves this daemon to another working directory: the process owner stops
+   * this host and builds every service again there (cli/serve.ts). Called by
+   * the working-directory owner once the change is saved and no session is
+   * busy. Absent: a working-directory change applies at the next start.
+   */
+  readonly moveWorkspace?: ((workingDirectory: string) => void) | undefined;
   /** Opt-in (daemon-side only): fold host-observed external coding-agent sessions
    * into the fleet as 'observed-external' rows. Interactive leaves it off and reads
    * the daemon snapshot. Mirrors the platform's own createRuntimeServices option. */
@@ -263,6 +270,8 @@ export interface RuntimeServices {
   readonly contextAccountingHolder: ContextAccountingHolder; // never bound to a session: workers answer through their own scoped source, and each hosted session binds its own holder (hosted-sessions/session-runtime.ts)
   readonly contractRunner: ContractRunner;
   readonly contractOperator: ContractOperatorService;
+  /** Joins the hosted-session floors' workers into this runtime's fleet (the composed graph's own). */
+  readonly attachHostedFleetAgents: import('@goodvibes-jev/engine/platform/platform/runtime/bootstrap').RuntimeServices['attachHostedFleetAgents'];
   readonly judgment: JudgmentServices;
   readonly browserJudgment?: BrowserJudgmentService | undefined;
   /** The daemon's `browser.*` service; absent when the composition had no home directory for a browser. */

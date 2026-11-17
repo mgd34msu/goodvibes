@@ -232,6 +232,8 @@ export function composeHostedSessionsForFacade(
   // signals a hosted turn never emits, and closes it 'idle-reaped' while its
   // turn is still running.
   runtimeServices.sessionBroker.setExternalLivenessProbe(createHostedSessionLivenessProbe(manager));
+  // A hosted turn in flight makes the daemon busy, as a local one does (a working-directory move waits for it).
+  runtimeServices.sessionBroker.setExternalTurnCounter(() => manager.list().filter((record) => record.status === 'running').length);
   // Closing the broker record of a hosted session ends the hosted session too; otherwise its
   // next registration re-opens the record the operator just closed.
   attachHostedSessionCloseSync(manager, runtimeServices.sessionBroker);

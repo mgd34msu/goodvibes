@@ -364,7 +364,7 @@ export function registerAllTools(
      * instead of reading or writing a local store the host does not serve.
      */
     memoryRoutedOverWire?: (() => boolean) | undefined;
-    /** Saves a new working directory for the next start (the daemon's workspace swap manager); `state set runtime.workingDir` uses it. */
+    /** Changes the working directory (the daemon's workspace swap manager): the daemon moves there, or keeps it for its next start; `state set runtime.workingDir` uses it. */
     workspaceSwap?: import('./state/index.js').StateSwapManager | undefined;
     /**
      * Where the owner profile store and occasions service arrive once the

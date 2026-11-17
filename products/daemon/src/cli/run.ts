@@ -239,6 +239,15 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
             const currentErrors = prepareDaemonCliServe(active.config, cli.flags);
             if (currentErrors.length) throw new Error('Daemon serving configuration changed before activation');
             signal.throwIfAborted(); return active;
+          }, undefined, undefined,
+          // A working-directory change moves the daemon in this process: the same homes and
+          // command-line settings over the new root. The start option that chose the first root
+          // is still named, since a later start uses it again.
+          (workingDirectory) => {
+            const moved = createDaemonCliConfiguration({ ...cli.flags, workingDir: workingDirectory }, env, options.cwd, { diagnosticMode: 'structural' });
+            const movedErrors = prepareDaemonCliServe(moved.config, cli.flags);
+            if (movedErrors.length) throw new Error(movedErrors.join('; '));
+            return { ...moved, workingDirectoryOverride: configuration.workingDirectoryOverride };
           });
         try { return await processHandle.finished; }
         finally { releaseCrashCapture?.(); }

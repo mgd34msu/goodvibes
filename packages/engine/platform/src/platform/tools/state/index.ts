@@ -49,6 +49,7 @@ function sanitizeMemoryKey(key: string): string | null {
 export interface StateSwapManager {
   requestSwap(newDir: string): Promise<{
     ok: boolean; reason?: string; code?: string; current?: string; previous?: string;
+    moving?: boolean; waitingForSessions?: number;
     restartRequired?: boolean; requiresRestart?: readonly string[] | undefined; note?: string;
   }>;
 }
@@ -92,7 +93,8 @@ export interface StateToolOptions {
   readonly daemonHomeDir?: string | (() => string | undefined) | undefined;
   /**
    * Workspace swap manager. When provided, `set({values: {'runtime.workingDir': '/new/path'}})`
-   * saves the new working directory for the next start via `requestSwap()` instead of
+   * saves the new working directory via `requestSwap()`, and a daemon that can move moves
+   * there once no session is mid-turn (otherwise at its next start), instead of
    * returning an error. Failures are surfaced as `success: false` with the error reason.
    */
   readonly swapManager?: StateSwapManager;
@@ -615,10 +617,13 @@ async function runSet(
     if (!result.ok) {
       return { success: false, error: `Working directory not changed (${result.code ?? 'UNKNOWN'}): ${result.reason ?? 'unknown error'}` };
     }
-    // Saved for the next start; this host keeps working in its current directory until then.
+    // Saved. A host that can move does so once no session is mid-turn (this one's
+    // included); any other keeps its directory until its next start.
     return { success: true, output: JSON.stringify({
       mode: 'set', saved: true,
       workingDir: result.previous, savedWorkingDir: result.current ?? newDir,
+      moving: result.moving ?? false,
+      ...(result.waitingForSessions ? { waitingForSessions: result.waitingForSessions } : {}),
       restartRequired: result.restartRequired ?? false,
       ...(result.requiresRestart?.length ? { movesOnRestart: result.requiresRestart } : {}),
       ...(result.note ? { note: result.note } : {}),

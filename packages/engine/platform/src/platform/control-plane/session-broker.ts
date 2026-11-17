@@ -254,21 +254,32 @@ export class SharedSessionBroker {
     this.externalLivenessProbe = probe;
   }
 
+  /** Turns running outside this broker's records (hosted sessions), counted by their owner. */
+  private externalTurnCounter: (() => number) | null = null;
+
+  /** Set by the subsystem that runs turns this broker cannot see, so countBusySessions includes them. */
+  setExternalTurnCounter(counter: (() => number) | null): void {
+    this.externalTurnCounter = counter;
+  }
+
   setEventPublisher(publisher: SharedSessionEventPublisher | null): void {
     this.eventPublisher = publisher;
   }
 
   /**
    * Returns the number of sessions that currently have a pending input
-   * (i.e. pendingInputCount > 0). Used by WorkspaceSwapManager to determine
-   * whether the daemon is busy before allowing a workspace swap.
+   * (i.e. pendingInputCount > 0), plus turns running outside these records
+   * (setExternalTurnCounter). A working-directory move waits until it is 0,
+   * and memory consolidation runs only then.
    */
   countBusySessions(): number {
     let count = 0;
     for (const session of this.sessions.values()) {
       if (session.pendingInputCount > 0) count++;
     }
-    return count;
+    let external = 0;
+    try { external = this.externalTurnCounter?.() ?? 0; } catch { /* an owner that cannot count adds nothing */ }
+    return count + external;
   }
 
   /**

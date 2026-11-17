@@ -6,13 +6,16 @@
  */
 
 export type WorkspaceEvent =
-  /** Emitted immediately before the swap procedure begins. */
+  /** Emitted when the daemon begins to move to another working directory (every service stops and starts again there). */
   | {
       type: 'WORKSPACE_SWAP_STARTED';
       from: string;
       to: string;
     }
-  /** Emitted after all stores have been re-rooted at the new working directory. */
+  /**
+   * Emitted by the daemon once it serves on the new working directory after a
+   * move, or, on a host that cannot move, once the change is saved for its next start.
+   */
   | {
       type: 'WORKSPACE_SWAP_COMPLETED';
       from: string;
@@ -20,7 +23,7 @@ export type WorkspaceEvent =
       /** True if the new path was persisted to daemon-settings.json. */
       persistedInDaemonSettings: boolean;
     }
-  /** Emitted when a swap is rejected because at least one session has pending input. */
+  /** Emitted when a change is refused because the daemon is already moving. */
   | {
       type: 'WORKSPACE_SWAP_REFUSED';
       from: string;
@@ -31,7 +34,9 @@ export type WorkspaceEvent =
       retryAfter: number;
     }
   /**
-   * Emitted when a workspace swap fails (mkdir or rerootStores threw).
+   * Emitted when a working-directory change fails: the path could not be
+   * created or saved, or a move failed and the daemon started again on its
+   * previous root.
    * Any subscriber that saw WORKSPACE_SWAP_STARTED without a subsequent
    * WORKSPACE_SWAP_COMPLETED should watch for this event.
    */

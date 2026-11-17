@@ -659,13 +659,23 @@ async function handleWorkingDirectoryConfig(
   if (result.ok) {
     return Response.json({
       success: true, key, value: result.current, previous: result.previous,
-      // The change is saved for the next start; the running daemon keeps `previous` until it restarts.
+      // The directory serving this answer; a move (`moving`) starts every service again on `value` right after.
       workingDir: result.previous,
-      ...('restartRequired' in result && typeof result.restartRequired === 'boolean' ? { restartRequired: result.restartRequired } : {}),
-      ...('note' in result && typeof result.note === 'string' ? { note: result.note } : {}),
+      ...(result.moving !== undefined ? { moving: result.moving } : {}),
+      ...(result.waitingForSessions ? { waitingForSessions: result.waitingForSessions } : {}),
+      ...(result.restartRequired !== undefined ? { restartRequired: result.restartRequired } : {}),
+      ...(result.note !== undefined ? { note: result.note } : {}),
       ...(result.persisted !== undefined ? { persisted: result.persisted } : {}),
       ...(result.requiresRestart?.length ? { requiresRestart: result.requiresRestart } : {}),
     });
+  }
+  if (result.code === 'WORKSPACE_BUSY') {
+    const busy = jsonErrorResponse({
+      error: result.reason, code: result.code, state: 'the daemon is moving to another working directory',
+      next: [`Retry in ${result.retryAfter} seconds, once the daemon serves again`],
+    }, { status: 409 });
+    busy.headers.set('Retry-After', String(result.retryAfter));
+    return busy;
   }
   return jsonErrorResponse(
     {

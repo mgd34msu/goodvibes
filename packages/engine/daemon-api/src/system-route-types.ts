@@ -252,11 +252,19 @@ export interface WorkspaceSwapManagerLike {
       current: string;
       /** False when the new path could not be saved, so it will not survive a restart. */
       persisted?: boolean | undefined;
+      /** True when the daemon moves to `current` in this process (now, or once busy sessions finish). */
+      moving?: boolean | undefined;
+      /** Busy sessions the move waits for. */
+      waitingForSessions?: number | undefined;
+      /** True when nothing moves until the daemon restarts. */
+      restartRequired?: boolean | undefined;
       /** Subsystems that keep using the previous working directory until restart. */
       requiresRestart?: readonly string[] | undefined;
+      note?: string | undefined;
     }
     | { ok: false; code: 'INVALID_PATH'; reason: string }
     | { ok: false; code: 'REROOT_FAILED'; reason: string }
+    | { ok: false; code: 'WORKSPACE_BUSY'; reason: string; retryAfter: number }
   >;
 }
 

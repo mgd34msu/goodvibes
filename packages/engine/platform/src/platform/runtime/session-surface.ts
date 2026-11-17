@@ -2,9 +2,6 @@ import { join } from 'node:path';
 import { requireSurfaceRoot, resolveSurfaceDirectory } from './surface-root.js';
 import type { NativeDataWriteOwner } from './native-reader-compatibility.js';
 import { createRecoveryPathResolver } from './recovery-path.js';
-import { runSessionSurfaceMigration } from './session-migration.js';
-import { logger } from '../utils/logger.js';
-import { summarizeError } from '../utils/error-display.js';
 
 /**
  * The raw identity a product declares once at startup: which surface it is
@@ -47,9 +44,7 @@ export interface SessionSurface {
    * `<workingDirectory>/.goodvibes/<surfaceRoot>/recovery`, anchored to
    * `workingDirectory`, NOT `homeDirectory`. A crash-recovery snapshot lives
    * with the project it happened in, so a crash in one project never nags
-   * the boot of an unrelated project, the defect the legacy, home-anchored
-   * `getRecoveryDir` (session-persistence-scope.ts) has, and keeps having for
-   * callers that stay on the legacy option form.
+   * the boot of an unrelated project.
    */
   readonly recoveryDir: string;
   /** `<workingDirectory>/.goodvibes/<surfaceRoot>/state` */
@@ -88,7 +83,7 @@ export function createSessionSurface(identity: SurfaceIdentity): SessionSurface 
   const recoveryDir = resolveSurfaceDirectory(workingDirectory, surfaceRoot, 'recovery');
 
   const recoveryFile = createRecoveryPathResolver(recoveryDir, identity.nativeDataWriter);
-  const surface: SessionSurface = {
+  return {
     surfaceRoot,
     workingDirectory,
     homeDirectory,
@@ -100,15 +95,4 @@ export function createSessionSurface(identity: SurfaceIdentity): SessionSurface 
     checkpointsDir: resolveSurfaceDirectory(workingDirectory, surfaceRoot, 'checkpoints'),
     recoveryFile,
   };
-
-  // One-time, idempotent, marker-guarded migration from the pre-surface
-  // on-disk layout (see session-migration.ts). Never throws: a migration
-  // problem must never break surface construction or startup.
-  try {
-    runSessionSurfaceMigration(surface);
-  } catch (error) {
-    logger.warn('createSessionSurface: migration pass failed', { error: summarizeError(error) });
-  }
-
-  return surface;
 }

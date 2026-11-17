@@ -24,9 +24,8 @@ import {
   type AtRestPolicy,
   type RetentionOutcome,
 } from '../at-rest-persistence.js';
-import { resolveScopedDirectory, resolveSharedDirectory } from '../surface-root.js';
+import { resolveScopedDirectory } from '../surface-root.js';
 import { CRASH_LOG_FILENAME, CRASH_LOG_PREVIOUS_FILENAME } from '../crash-capture.js';
-import { isLegacyAgentJournalFile } from './legacy-agent-journal-patterns.js';
 import { logger } from '../../utils/logger.js';
 import { join } from 'node:path';
 import { closeSync, openSync, readSync, readdirSync, statSync, unlinkSync } from 'node:fs';
@@ -38,8 +37,7 @@ export type AppendOnlyStoreId =
   | 'telemetry-local-ledger'
   | 'session-recovery-snapshots'
   | 'session-conversations'
-  | 'surface-crash-log'
-  | 'legacy-event-store';
+  | 'surface-crash-log';
 
 /**
  * The roots a sweep resolves store paths from. A store whose required root is
@@ -85,38 +83,6 @@ export interface AppendOnlyStoreDescriptor {
 }
 
 const EMPTY_TARGETS: AppendOnlyStoreTargets = { journalDirs: [], files: [] };
-
-/**
- * The legacy agent/workmap journal files sitting directly in `sessionsDir`
- * (not its `agents/` subdirectory) from before the repoint to sessions/agents/.
- * Classification (isLegacyAgentJournalFile) is shared with
- * session-migration.ts's move, so the sweep and the move can never
- * disagree about which files are legacy agent journals. Returns an empty
- * list when the directory is absent or unreadable, this is a best-effort
- * supplementary sweep, never a hard requirement.
- *
- * The classification is name AND first-line content: a user conversation the
- * user saved under a name that happens to collide with a journal filename
- * shape ("release_workmap", "agent-deadbeef", both legal outputs of
- * SessionManager.sanitizeName) is a real conversation, not a journal, and is
- * left completely alone. So is anything unreadable or ambiguous.
- */
-function listLegacyAgentJournalFiles(sessionsDir: string): string[] {
-  let names: string[];
-  try {
-    names = readdirSync(sessionsDir, { withFileTypes: true })
-      .filter((entry) => entry.isFile())
-      .map((entry) => entry.name);
-  } catch {
-    return [];
-  }
-  const files: string[] = [];
-  for (const name of names) {
-    const path = join(sessionsDir, name);
-    if (isLegacyAgentJournalFile(path, name)) files.push(path);
-  }
-  return files;
-}
 
 /**
  * Read a saved session's `saveSource` off its meta line (line 0) without
@@ -179,18 +145,12 @@ export const APPEND_ONLY_STORES: readonly AppendOnlyStoreDescriptor[] = [
   {
     id: 'session-journals',
     owner: 'session/agent journal (agents/session.ts)',
-    description: 'per-agent transcript journals, and the workmap journals the retired review loop left, under the scoped sessions/agents/ directory, plus (this release only) any pre-repoint journal left flat in sessions/ from before agent journals moved out of the user-conversation directory',
+    description: 'per-agent transcript journals under the scoped sessions/agents/ directory',
     policy: DEFAULT_AT_REST_POLICY,
     resolve(roots) {
       if (!roots.workingDirectory) return EMPTY_TARGETS;
       const sessionsDir = resolveScopedDirectory(roots.workingDirectory, roots.surfaceRoot, 'sessions');
-      return {
-        journalDirs: [join(sessionsDir, 'agents')],
-        // Legacy sweep is filename-filtered, never the whole sessionsDir,
-        // that directory also holds user conversation *.jsonl files and must
-        // never be swept wholesale.
-        files: listLegacyAgentJournalFiles(sessionsDir),
-      };
+      return { journalDirs: [join(sessionsDir, 'agents')], files: [] };
     },
   },
   {
@@ -222,9 +182,7 @@ export const APPEND_ONLY_STORES: readonly AppendOnlyStoreDescriptor[] = [
       // Anchored to workingDirectory, matching SessionSurface.recoveryDir,
       // NOT homeDirectory. A crash snapshot lives with the project it
       // happened in (see session-surface.ts's SessionSurface.recoveryDir doc
-      // comment); the legacy home-anchored resolution stays reachable only
-      // through session-recovery.ts's legacy call form, which this sweep
-      // does not follow.
+      // comment).
       if (!roots.workingDirectory) return EMPTY_TARGETS;
       return {
         journalDirs: [resolveScopedDirectory(roots.workingDirectory, roots.surfaceRoot, 'recovery')],
@@ -256,20 +214,6 @@ export const APPEND_ONLY_STORES: readonly AppendOnlyStoreDescriptor[] = [
       if (!roots.homeDirectory) return EMPTY_TARGETS;
       const surfaceDir = resolveScopedDirectory(roots.homeDirectory, roots.surfaceRoot);
       return { journalDirs: [], files: [join(surfaceDir, CRASH_LOG_FILENAME), join(surfaceDir, CRASH_LOG_PREVIOUS_FILENAME)] };
-    },
-  },
-  {
-    id: 'legacy-event-store',
-    owner: 'legacy event store (dead: no live writer anywhere in the platform; last write observed 2026-07-02)',
-    description: 'the unscoped .goodvibes/state/events.jsonl file and its event-archives/ directory, dead data with no live writer, NOT the whole state dir (which holds live retries.json, agent-tracking.json, workflows/, and session_*.json KVState files)',
-    policy: DEFAULT_AT_REST_POLICY,
-    resolve(roots) {
-      if (!roots.workingDirectory) return EMPTY_TARGETS;
-      const stateDir = resolveSharedDirectory(roots.workingDirectory, 'state');
-      return {
-        journalDirs: [join(stateDir, 'event-archives')],
-        files: [join(stateDir, 'events.jsonl')],
-      };
     },
   },
 ];

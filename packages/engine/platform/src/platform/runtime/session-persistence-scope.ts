@@ -21,7 +21,7 @@ import { SessionManager, sanitizeSessionName } from '../sessions/manager.js';
 import { logger } from '../utils/logger.js';
 import type { SessionReturnContextSummary } from './session-return-context.js';
 import type { ConversationTitleSource } from '../core/conversation.js';
-import { resolveScopedDirectory, resolveSharedDirectory } from './surface-root.js';
+import { resolveScopedDirectory } from './surface-root.js';
 import { recoveryFilePath } from './recovery-path.js';
 import type { SessionSurface } from './session-surface.js';
 
@@ -240,25 +240,6 @@ export const RECOVERY_FILE_SUFFIX = '.jsonl';
  */
 export function getRecoveryDir(homeDirectory: string, surfaceRoot?: string): string {
   return resolveScopedDirectory(homeDirectory, surfaceRoot, 'recovery');
-}
-
-/**
- * The legacy, home-anchored, fully UNSCOPED shared recovery directory
- * (`~/.goodvibes/recovery/`, no surfaceRoot segment at all), the oldest
- * layout, predating even the surfaceRoot-scoped `getRecoveryDir` above. It
- * cannot be mapped to a project deterministically (any project that ever ran
- * with this surfaceRoot before per-project scoping could have written here),
- * so it is never migrated (see session-migration.ts's header), only
- * dual-read, one time, by the surface form of checkRecoveryFile /
- * loadRecoveryConversation / deleteRecoveryFile in session-recovery.ts.
- */
-export function legacySharedRecoveryDir(surface: SessionSurface): string {
-  return resolveSharedDirectory(surface.homeDirectory, 'recovery');
-}
-
-/** The legacy shared per-session recovery file path for `sessionId` (see legacySharedRecoveryDir). */
-export function legacySharedRecoveryFile(surface: SessionSurface, sessionId: string): string {
-  return recoveryFilePath(legacySharedRecoveryDir(surface), sessionId);
 }
 
 /**

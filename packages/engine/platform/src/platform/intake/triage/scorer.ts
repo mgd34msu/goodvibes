@@ -48,7 +48,9 @@ async function scoreReadable(items: readonly CapturedTriageInput[], port: Judgme
     parts[`item${i}`] = { ...inboxTriage, items: { spam: addressed('spam'), urgency: addressed('urgency') } };
   }
   try {
-    const state = { items: items.map(item => Object.freeze({...item})) };
+    // Only what the model reads: the withheld marker stays on this side.
+    const state = { items: items.map(({ id, surface, subject, snippet, conversationKind, unread }) =>
+      Object.freeze({ id, surface, subject, snippet, conversationKind, unread })) };
     Object.freeze(state.items); Object.freeze(state);
     // The shared fan-out owns request composition. This boundary decorator
     // validates an injected port's raw result before fan-out reads its fields.

@@ -70,8 +70,9 @@ export function isHarnessCatalogQuery(input: Record<string, unknown>): boolean {
   if (typeof routing.mode === 'string' && (PERSONAL_OPS_MODES.has(routing.mode) || PROTECTED_COMMS_EFFECT_MODES.has(routing.mode) || MEMORY_CATALOG_MODES.has(routing.mode))) { captureCatalogData(input); return true; }
   if (routing.mode === 'model_routing' || routing.mode === 'model_route') { captureCatalogData(input); return true; }
   if (typeof routing.mode === 'string' && PRESERVED_CATALOG_MODES.has(routing.mode)) captureCatalogData(input);
+  // `target` names an exact id: the lookup is code (rankHarnessCatalog), so it is not screened as a phrase.
   return typeof routing.mode === 'string' && CATALOG_MODES.has(routing.mode)
-    && [routing.query, routing.target].some((value) => typeof value === 'string' && value.trim().length > 0);
+    && typeof routing.query === 'string' && routing.query.trim().length > 0;
 }
 
 /** Avoid invoking any registration's replaced definition/name accessor. */

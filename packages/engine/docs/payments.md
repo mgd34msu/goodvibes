@@ -1714,11 +1714,15 @@ not from buying.
 ebay.com is necessary and not sufficient. Two conditions, both required, in
 `payments/marketplace-listing.ts`:
 
-*Not wired yet.* No purchase carries the listing figures today: the checkout
-begin input has no storefront, sale-type or listing fields, so the two
-conditions below are not applied to a live purchase and every eBay purchase
-asks for the owner's yes. The module and its tests describe what applying them
-will do.
+The listing is read by code from the page the purchase runs on, and only on a
+per-seller marketplace (or a domain the owner added): the browser engine's
+`readMarketplaceListing` reads which purchase controls eBay drew (a bid control
+is an auction, Buy It Now is a fixed price, an offer control alone is Best
+Offer) and the seller figures inside eBay's seller card and seller-feedback
+section. The listing description is drawn in its own frame and is never read. A
+page that shows no purchase control (the checkout page itself) states no format,
+and the purchase asks; a count that is not labelled as feedback received selling
+is not taken, and the purchase asks.
 
 **1. Fixed price only. Auctions are refused structurally, not by policy toggle.**
 The flow is: know the final total → notify the owner → run the window → pay. An

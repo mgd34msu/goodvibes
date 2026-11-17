@@ -27,6 +27,7 @@ import type { CardFieldKind } from './card-redaction.js';
 import type { CartLine } from './cart.js';
 import type { CurrencyCode, MinorUnits } from './types.js';
 import type { RawCheckoutReading } from './checkout-extraction.js';
+import type { MarketplaceListing } from './marketplace-listing.js';
 
 /** The exact parsed purchase shown to the owner, never an expandable allowance. */
 export interface CheckoutTerms {
@@ -67,6 +68,13 @@ export interface CheckoutPageDriver {
    * Returning it grants no approval: the flow must decide and notify again. */
   readCurrentQuote?(original: { readonly terms: CheckoutTerms; readonly reading: RawCheckoutReading },
     ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<RawCheckoutReading | null>;
+
+  /**
+   * What a per-seller marketplace page says about the listing, read by code
+   * from the marketplace's own controls and seller widget; undefined when the
+   * page says nothing readable. Asked for only on such a marketplace.
+   */
+  readListing?(ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<MarketplaceListing | undefined>;
 
   /** The page's current url, for the merchant-origin check. */
   url(ownership?: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<string>;

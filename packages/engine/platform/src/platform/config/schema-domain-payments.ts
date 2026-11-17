@@ -302,7 +302,7 @@ export const paymentsConfigSettings: ConfigSetting[] = [
     type: 'number',
     default: 100,
     description:
-      "Minimum feedback ratings earned AS A SELLER before an eBay Buy It Now listing proceeds on silence. eBay's headline score combines buying and selling, so an account with a large number can have earned all of it buying, only the seller-side figure counts. Below this, the purchase asks for your yes. Not applied yet: no purchase carries the listing figures, so every eBay purchase asks for your yes. Auctions and Best Offer listings are refused outright regardless, because there is no final price to show you before paying.",
+      "Minimum feedback ratings earned AS A SELLER before an eBay Buy It Now listing proceeds on silence. eBay's headline score combines buying and selling, so an account with a large number can have earned all of it buying, only the seller-side figure counts. Below this, or when the figure cannot be read from eBay's own seller widget, the purchase asks for your yes. The listing is read by code from the page the purchase runs on: its purchase controls and eBay's seller card, never the seller's text. Auctions and Best Offer listings are refused outright regardless, because there is no final price to show you before paying.",
     ...intRange(0, 1_000_000),
   },
   {
@@ -310,7 +310,7 @@ export const paymentsConfigSettings: ConfigSetting[] = [
     type: 'number',
     default: 98,
     description:
-      'Minimum positive feedback percentage AS A SELLER before an eBay Buy It Now listing proceeds on silence. Read from eBay\'s own feedback widget, never from the seller\'s listing text, if the figures cannot be attributed to eBay with confidence, the purchase asks for your yes rather than assuming. Not applied yet: no purchase carries the listing figures, so every eBay purchase asks for your yes.',
+      'Minimum positive feedback percentage AS A SELLER before an eBay Buy It Now listing proceeds on silence. Read from eBay\'s own feedback widget, never from the seller\'s listing text, if the figures cannot be attributed to eBay with confidence, the purchase asks for your yes rather than assuming.',
     ...intRange(0, 100),
   },
   {

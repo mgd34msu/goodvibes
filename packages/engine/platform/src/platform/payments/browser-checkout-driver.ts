@@ -105,6 +105,7 @@ import { checkAnswers, toJson, type EntryType, type JudgmentPort } from '@goodvi
 import { checkoutTerms, checkoutTermsView } from './batteries/checkout-terms.js';
 import { registrableDomain } from '../security/public-suffix.js';
 import type { RawCheckoutReading } from './checkout-extraction.js';
+import type { MarketplaceListing } from './marketplace-listing.js';
 import { readRepricedCheckout } from './checkout-repricing.js';
 import { markPaymentCheckoutAction } from '../security/order-submission.js';
 
@@ -169,6 +170,11 @@ export interface CheckoutBrowserEngine {
   }) => Promise<Record<string, unknown>>;
   observeCheckoutTerms?: (target: CheckoutEngineTarget, ownership: CheckoutControlOwnership, submitTarget?: string) => Promise<{
     readonly state: object; readonly assertCurrent: () => Promise<void>; readonly signal?: AbortSignal | undefined;
+  }>;
+  readMarketplaceListing?: (target: CheckoutEngineTarget, ownership?: CheckoutControlOwnership) => Promise<{
+    readonly url: string; readonly format: MarketplaceListing['format'];
+    readonly sellerFeedbackCount: number | null; readonly sellerPositivePercent: number | null;
+    readonly fromPlatformWidget: boolean; readonly sellerName: string | null;
   }>;
 }
 
@@ -279,6 +285,32 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
 
   identity(): PageIdentity {
     return { sessionId: this.sessionId, pageId: this.pageId };
+  }
+
+  /**
+   * The listing as the marketplace page states it: format from its purchase
+   * controls, seller figures from its seller widget (never the seller's own
+   * text). Undefined when this browser cannot read it or the page is not on
+   * https.
+   */
+  async readListing(ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<MarketplaceListing | undefined> {
+    const owner = this.ownership(ownership);
+    const engine = await this.engine(); owner.assertCurrent();
+    const read = engine.readMarketplaceListing;
+    if (typeof read !== 'function') return undefined;
+    const facts = await read.call(engine, this.target, owner); owner.assertCurrent();
+    let secure = false;
+    try { secure = new URL(facts.url).protocol === 'https:'; } catch { secure = false; }
+    if (!secure) return undefined;
+    return {
+      format: facts.format,
+      reputation: {
+        sellerFeedbackCount: facts.sellerFeedbackCount,
+        sellerPositivePercent: facts.sellerPositivePercent,
+        region: facts.fromPlatformWidget ? 'platform-widget' : 'unknown',
+      },
+      ...(facts.sellerName ? { sellerIdentity: facts.sellerName } : {}),
+    };
   }
 
   private invalidateTerms(): void { this.#termsOwner = null; this.#quote = null; }

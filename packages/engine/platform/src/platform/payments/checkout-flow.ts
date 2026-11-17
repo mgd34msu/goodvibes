@@ -494,6 +494,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
       ...(request.storefrontHost === undefined ? {} : { storefrontHost: request.storefrontHost }),
       ...(request.saleType === undefined ? {} : { saleType: request.saleType }),
       ...(request.listing === undefined ? {} : { listing: request.listing }),
+      ...(driver.readListing ? { readListing: () => driver.readListing!(ownership) } : {}),
     },
     deps.merchantJudge,
     deps.merchantPolicy ?? {},

@@ -3,6 +3,7 @@ import { captureOwnedJson } from '../gate/judgment-input.js';
 import { isYoloExecution } from '../gate/execution-context.js';
 import type { ToolExecuteOptions } from '../types/tools.js';
 import { BrowserControlIdentityWork } from './browser-control-identity.js';
+import { readMarketplaceListingFacts, type MarketplaceListingFacts } from './marketplace-listing-reader.js';
 import type { BrowserProvisionLifetime } from './browser-failure-reading.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -552,6 +553,22 @@ export class BrowserEngine {
   }
 
   /** Complete checkout evidence without replacing snapshot refs or exporting field secrets. */
+  /**
+   * What a per-seller marketplace page states about the listing it shows: the
+   * sale format from the marketplace's own purchase controls and the seller's
+   * figures from its seller widget, read by code (see
+   * marketplace-listing-reader.ts). Read by the payments flow itself, so it is
+   * not recorded as content the conversation read.
+   */
+  async readMarketplaceListing(target: BrowserTarget, ownership?: BrowserActionLifetime): Promise<MarketplaceListingFacts> {
+    target = { ...target }; ownership = ownership && { ...ownership };
+    const work = new BrowserControlIdentityWork(ownership);
+    return this.withTarget(target, async ({ page }) => {
+      const facts = await work.wait(() => page.evaluate(readMarketplaceListingFacts));
+      return { url: page.url(), ...facts };
+    }, work);
+  }
+
   async observeCheckoutTerms(target: BrowserTarget, ownership: BrowserActionLifetime, submitTarget?: string): Promise<{
     readonly state: object; readonly assertCurrent: () => Promise<void>; readonly signal: AbortSignal;
   }> {

@@ -149,6 +149,12 @@ export interface MerchantIdentity {
   readonly storefrontHost?: string | undefined;
   readonly saleType?: SaleType | undefined;
   readonly listing?: MarketplaceListing | undefined;
+  /**
+   * Reads the listing from the page when none was given: asked only on a
+   * per-seller marketplace or an owner-added domain, so an ordinary purchase
+   * reads nothing extra.
+   */
+  readonly readListing?: (() => Promise<MarketplaceListing | undefined>) | undefined;
 }
 
 export interface MerchantVerdict {
@@ -159,6 +165,16 @@ export interface MerchantVerdict {
   /** Where the verdict came from, for the audit record. */
   readonly basis: 'owner-override' | 'judgement' | 'unconfident' | 'structural';
   readonly reason: string;
+}
+
+/**
+ * The listing as the page states it. A page that shows no purchase control
+ * (a checkout page, say) states no format, which is not a reason to refuse:
+ * it is treated as no listing read, and the purchase asks.
+ */
+async function readPageListing(merchant: MerchantIdentity): Promise<MarketplaceListing | undefined> {
+  const listing = await merchant.readListing?.();
+  return listing === undefined || listing.format === 'unknown' ? undefined : listing;
 }
 
 /** Parse a comma-separated config value into normalized registrable domains. */
@@ -277,8 +293,10 @@ export async function classifyMerchant(
     // there: a listing whose price is not fixed has no total to show before
     // paying, whoever the seller is. Only the sale format is applied here; the
     // reputation thresholds stay the owner's to waive.
-    if (merchant.listing !== undefined) {
-      const format = evaluateMarketplaceListing(merchant.listing, policy.listingThresholds ?? DEFAULT_MARKETPLACE_LISTING_THRESHOLDS);
+    const ownerListing = merchant.listing ?? await readPageListing(merchant);
+    owner.assertCurrent();
+    if (ownerListing !== undefined) {
+      const format = evaluateMarketplaceListing(ownerListing, policy.listingThresholds ?? DEFAULT_MARKETPLACE_LISTING_THRESHOLDS);
       if (format.outcome === 'refuse') {
         return { isMajor: false, refused: true, registrable, basis: 'owner-override', reason: format.reason };
       }
@@ -295,7 +313,8 @@ export async function classifyMerchant(
 
   // 5a. eBay-class marketplaces: the domain is necessary, not sufficient.
   if (marketplaceKind === 'per-seller' && verdict.qualifies && verdict.confident) {
-    const listing = merchant.listing;
+    const listing = merchant.listing ?? await readPageListing(merchant);
+    owner.assertCurrent();
     if (listing === undefined) {
       return {
         isMajor: false,

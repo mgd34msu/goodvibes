@@ -1,4 +1,4 @@
-import { InboundMessageDedup, inboundDedupKey } from '../inbound-dedup.js';
+import { inboundDedupKey, surfaceInboundDedup } from '../inbound-dedup.js';
 import { logger } from '../../utils/logger.js';
 import { DiscordIntegration, DiscordInteractionResponseType, DiscordInteractionType } from '../../integrations/index.js';
 import type { SurfaceAdapterContext } from '../types.js';
@@ -9,9 +9,6 @@ import { answerSurfaceControl, gateAnswerText, runSurfaceMessage, submitSurfaceM
 
 /** Discord message flag: only the user who ran the command sees the reply. */
 const EPHEMERAL_MESSAGE_FLAG = 64;
-
-const completedInteractions = new InboundMessageDedup();
-const pendingInteractions = new Set<string>();
 
 export async function handleDiscordSurfaceWebhook(req: Request, context: SurfaceAdapterContext): Promise<Response> {
   const publicKey =
@@ -60,18 +57,19 @@ export async function handleDiscordInteractionPayload(
   const id = typeof bodyRecord.id === 'string' ? bodyRecord.id : '';
   const key = inboundDedupKey('discord', String(bodyRecord.application_id ?? ''), id);
   if (bodyRecord.type !== DiscordInteractionType.Ping && !key) return new Response('Missing interaction id', { status: 400 });
-  if (key && (pendingInteractions.has(key) || completedInteractions.has(key))) {
+  // The one claim every surface takes on a provider message (surface-message.ts): held while
+  // the interaction is handled, kept once it took effect, given back when it did nothing.
+  if (!surfaceInboundDedup.claim(key)) {
     return Response.json({ type: DiscordInteractionResponseType.DeferredChannelMessageWithSource });
   }
-  if (key) pendingInteractions.add(key);
-  let delivered = false;
-  const committed = () => { delivered = true; completedInteractions.claim(key); };
-  const failed = () => { if (!delivered) completedInteractions.release(key); pendingInteractions.delete(key); };
+  let kept = false;
+  const committed = () => { kept = true; };
+  const failed = () => { if (!kept) surfaceInboundDedup.release(key); };
   try {
     const response = await dispatchDiscordInteraction(bodyRecord, context, discord, req, committed, failed);
-    // Deferred command processing owns the pending claim until it settles.
+    // Deferred command processing owns the claim until it settles.
     if (response.status >= 400) failed();
-    else if (bodyRecord.type !== DiscordInteractionType.ApplicationCommand) { committed(); pendingInteractions.delete(key); }
+    else if (bodyRecord.type !== DiscordInteractionType.ApplicationCommand) committed();
     return response;
   } catch (error) { failed(); throw error; }
 }

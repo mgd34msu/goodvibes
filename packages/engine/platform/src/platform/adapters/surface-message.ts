@@ -15,6 +15,8 @@ import type { SharedSessionSubmission } from '../control-plane/session-types.js'
 import type { SurfaceAdapterContext, SurfaceIngressDecision, TrySpawnAgentResult } from './types.js';
 import { ingressAnswerResponse, type IngressAudience } from './helpers.js';
 import { duplicateDeliveryResponse, surfaceInboundDedup } from './inbound-dedup.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 
 type IngressInput = Parameters<SurfaceAdapterContext['authorizeSurfaceIngress']>[0];
 
@@ -81,7 +83,8 @@ export async function answerSurfaceControl(
 }
 
 export interface SurfaceMessageDeps extends SurfaceControlDeps {
-  readonly sessionBroker: Pick<SurfaceAdapterContext['sessionBroker'], 'submitMessage' | 'bindAgent'>;
+  readonly sessionBroker: Pick<SurfaceAdapterContext['sessionBroker'], 'submitMessage' | 'bindAgent'>
+    & Partial<Pick<SurfaceAdapterContext['sessionBroker'], 'failInput'>>;
   readonly trySpawnAgent: (...args: Parameters<SurfaceAdapterContext['trySpawnAgent']>) => TrySpawnAgentResult | Promise<TrySpawnAgentResult>;
   readonly queueSurfaceReplyFromBinding?: SurfaceAdapterContext['queueSurfaceReplyFromBinding'] | undefined;
 }
@@ -168,7 +171,16 @@ export async function submitSurfaceMessage(
   }
 
   const spawned = await context.trySpawnAgent({ mode: 'spawn', task: submission.task ?? input.text }, input.logLabel, submission.session.id);
-  if (spawned instanceof Response) return readSpawnAnswer(spawned);
+  if (spawned instanceof Response) {
+    const answer = await readSpawnAnswer(spawned);
+    // The row says failed now, with the reason, instead of waiting out the start window.
+    if (answer.kind === 'not-started') {
+      await context.sessionBroker.failInput?.(submission.session.id, submission.input.id, answer.error)?.catch((error: unknown) => {
+        logger.warn('The message whose agent could not start was not marked failed', { sessionId: submission.session.id, error: summarizeError(error) });
+      });
+    }
+    return answer;
+  }
   input.committed?.();
   await context.sessionBroker.bindAgent(submission.session.id, spawned.id, submission.input.id);
   if (input.queueReply) {

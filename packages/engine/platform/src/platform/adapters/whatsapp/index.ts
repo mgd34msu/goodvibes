@@ -12,24 +12,6 @@ function readString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
 }
 
-/**
- * Messages already handled, by phone number and message id. Meta redelivers a whole payload
- * when any message in it was answered with a failure, so a message that was handled must
- * not be handled again. Bounded: it only has to cover Meta's redelivery window.
- */
-const HANDLED_MESSAGE_LIMIT = 4_096;
-/** Per daemon (its route binding manager), so one running daemon's history is not another's. */
-const handledMessagesByOwner = new WeakMap<object, Set<string>>();
-function handledMessagesOf(context: SurfaceAdapterContext): Set<string> {
-  let handled = handledMessagesByOwner.get(context.routeBindings);
-  if (!handled) { handled = new Set(); handledMessagesByOwner.set(context.routeBindings, handled); }
-  return handled;
-}
-function rememberHandled(handled: Set<string>, key: string): void {
-  handled.add(key);
-  if (handled.size > HANDLED_MESSAGE_LIMIT) handled.delete(handled.values().next().value!);
-}
-
 const MEDIA_FIELDS = ['image', 'document', 'video', 'audio', 'voice', 'sticker'] as const;
 
 /** The text of a message: its body, or the caption Meta nests under the media object. */
@@ -123,8 +105,9 @@ export async function handleWhatsAppSurfaceWebhook(req: Request, context: Surfac
   const responses: Response[] = [];
   for (const { value, message } of messages) {
     // One message failing must not stop the others, and must not be reported as if the payload failed
-    // outright: the ones already handled are remembered, so Meta's redelivery only repeats the failed one.
-    responses.push(await handleWhatsAppMessage(value, message, context).catch((error: unknown) => {
+    // outright. Meta redelivers the whole payload then; the shared per-message claim (runSurfaceMessage)
+    // answers the ones already handled as duplicates, so only the failed one runs again.
+    responses.push(await processWhatsAppMessage(value, message, context).catch((error: unknown) => {
       logger.warn('handleWhatsAppSurfaceWebhook: message handling failed', { messageId: readString(message.id), error: error instanceof Error ? error.message : String(error) });
       return Response.json({ error: 'Message handling failed' }, { status: 500 });
     }));
@@ -133,20 +116,6 @@ export async function handleWhatsAppSurfaceWebhook(req: Request, context: Surfac
   const failed = responses.find(response => !response.ok);
   const results = await Promise.all(responses.map(response => response.json()));
   return Response.json({ acknowledged: !failed, results }, { status: failed?.status ?? 200 });
-}
-
-async function handleWhatsAppMessage(value: Record<string, unknown>, message: Record<string, unknown>, context: SurfaceAdapterContext): Promise<Response> {
-  const messageId = readString(message.id);
-  const phoneNumberId = readString(value?.metadata && readRecord(value.metadata)?.phone_number_id);
-  const handledKey = messageId ? `${phoneNumberId ?? ''}:${messageId}` : undefined;
-  const handled = handledMessagesOf(context);
-  if (handledKey && handled.has(handledKey)) {
-    return Response.json({ acknowledged: true, queued: false, outcome: 'ignored', reason: 'duplicate-delivery', messageId });
-  }
-  const response = await processWhatsAppMessage(value, message, context);
-  // Only a message that was answered successfully is remembered; a refused or failed one is tried again on redelivery.
-  if (handledKey && response.ok) rememberHandled(handled, handledKey);
-  return response;
 }
 
 async function processWhatsAppMessage(value: Record<string, unknown>, message: Record<string, unknown>, context: SurfaceAdapterContext): Promise<Response> {

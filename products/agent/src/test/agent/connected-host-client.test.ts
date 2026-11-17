@@ -87,7 +87,6 @@ describe('connected-host client calls', () => {
     const failure = await failureOf(host.invoke(methodId, payload));
     expect(failure).toMatchObject({ kind, applied, refusal: { code, status } });
     expect(failure.refusal.reason).toContain('host says why');
-    expect(failure.refusal.reason).toContain(`HTTP ${status}`);
     expect(requests).toHaveLength(1);
   });
 

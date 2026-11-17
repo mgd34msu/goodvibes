@@ -49,8 +49,6 @@ export function closeModelPickerRoute(state: {
 }
 export function createModelPickerTokenHandler<Context extends ModelPickerCommandContext, Picker extends ModelPickerModal>(policy: {
   readonly chromeLines: number;
-  /** Unused: a cap outside 1-10,000,000 is always refused with an error in both apps. */
-  readonly validateContextCap?: boolean | undefined;
   readonly extraControls: boolean;
   readonly commitBeforeClose: boolean;
   readonly commit: (state: ModelPickerTokenState<Context, Picker>, selection: PickerSelection<Picker>) => void;

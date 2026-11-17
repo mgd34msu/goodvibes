@@ -12,7 +12,6 @@ import type { ProcessEntry } from '../renderer/process-modal.ts';
 import { isLocalFitRecommendation, isProviderSignInRow } from './model-picker-local-fit.ts';
 export const handleModelPickerToken = createModelPickerTokenHandler<CommandContext, ModelPickerModal>({
   chromeLines: MODEL_PICKER_CHROME_LINES,
-  validateContextCap: false,
   extraControls: false,
   commitBeforeClose: true,
   commit(state, selection) {

@@ -9,6 +9,23 @@ export const NATIVE_WORK_LEDGER_HISTORY_TAIL = 20;
 /** Shown while the host does not answer a read; transport errors can carry addresses or credentials. */
 const READ_UNANSWERED = 'The host did not answer the work ledger read. These rows are the last ones read; it is retried automatically.';
 const RETRY_AFTER_FAILED_READ_MS = 5_000;
+/** A refused read is retried at the reader's own refusal back-off; the reader's resume re-reads sooner. */
+const RETRY_AFTER_REFUSED_READ_MS = 60_000;
+
+/** The HTTP status a failed operator read carries, when it carries one. */
+function statusOf(value: unknown): number | undefined {
+  try {
+    const status: unknown = value !== null && typeof value === 'object' && 'status' in value ? value.status : undefined;
+    return typeof status === 'number' ? status : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A fixed sentence for a refusal (the error text can carry the host address or a credential). */
+function refusedRead(status: number): string {
+  return `The host refused the work ledger read (HTTP ${status}). These rows are the last ones read; it is retried every minute. Restore this device's access to the host to resume.`;
+}
 
 /** A fact this view established about the ledger itself (a gap, a stale snapshot): reopening is the fix. */
 class LedgerViewError extends Error {}
@@ -198,13 +215,18 @@ export class BoundWorkLedgerModel {
       this.unavailable(error.message);
       return;
     }
-    this.publish(this.state.status === 'ready' ? { ...this.state, reason: READ_UNANSWERED } : { status: 'unavailable', reason: READ_UNANSWERED });
+    // A refusal (revoked device, missing read scope, gone) is not an unanswered host: it says so
+    // with the fix and is not retried at the fast pace. The reader's resume re-reads when access returns.
+    const status = statusOf(error);
+    const refused = status === 401 || status === 403 || status === 404 || status === 410;
+    const reason = refused ? refusedRead(status) : READ_UNANSWERED;
+    this.publish(this.state.status === 'ready' ? { ...this.state, reason } : { status: 'unavailable', reason });
     if (!retry || this.retryTimer !== undefined) return;
     if (!this.pending || this.pending.cursor < retry.cursor) this.pending = retry;
     this.retryTimer = setTimeout(() => {
       this.retryTimer = undefined;
       if (epoch === this.epoch && this.pending && !this.draining) void this.drain(epoch);
-    }, RETRY_AFTER_FAILED_READ_MS);
+    }, refused ? RETRY_AFTER_REFUSED_READ_MS : RETRY_AFTER_FAILED_READ_MS);
     this.retryTimer.unref?.();
   }
   /** `fromReader`: the reader's own ordered notification, not the answer to a read this view made. */

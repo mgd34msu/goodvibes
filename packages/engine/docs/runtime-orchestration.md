@@ -42,7 +42,19 @@ autonomous decision contract.
 Important pieces:
 
 - `ConversationManager` stores the conversation messages for a session.
-- `executeOrchestratorTurnLoop()` drives provider streaming and tool execution.
+- `runTurn()` (`core/turn-loop.ts`) is the one turn loop. The main session
+  (`executeOrchestratorTurnLoop()`), every worker agent and contract unit, and
+  the companion chat run their turns through it, each with a policy: who the
+  answer is for, where its text goes (a worker's drafts stay private), the turn
+  budget (`agents.maxTurns` for a worker) and whether delegated work is
+  awaited. Its rules hold for every caller. A request whose failure is
+  retryable by its own status, code or Retry-After is retried after 5, 10, 20,
+  40 and 60 seconds; a server asking for more than five minutes, or a spent
+  account, is reported instead. Interim text is read beside its tool calls,
+  never ahead of them. Five consecutive rounds in which every call failed
+  warn the model; ten end the turn after one closing reply without tools, and
+  so do eight runs of the same call with the same arguments and result. A
+  spent turn budget ends the turn the same way.
 - `executeToolCalls()` routes tool calls through the registered tool runtime.
 - A worker agent runs the consecutive tool calls of one assistant turn whose
   definitions declare `concurrency: 'parallel'` together, at most four at a
@@ -93,12 +105,15 @@ applicability reading retains the checks. This routing neither completes nor
 cancels earlier pending work.
 
 When verification applies, the guard checks the requested outcome against
-native observations, delegated work and the exact proposed answer. Rejected
-final drafts stay private. The model receives numbered findings with repair and
-closure conditions, so it can fix the remaining work while preserving valid
-results. Equivalent drafts over unchanged evidence reuse held findings for up
-to three cycles before a fresh full check; new execution evidence triggers a
-fresh check. Rewording cannot satisfy a finding that requires more work.
+native observations, delegated work and the exact proposed answer. The check
+runs after the draft is shown and has 30 seconds; a draft it sends back is
+withdrawn. The model receives numbered findings with repair and closure
+conditions, so it can fix the remaining work while preserving valid results.
+An equivalent draft over unchanged evidence gets the held findings again
+without another full check; new execution evidence triggers a fresh check.
+Rewording cannot satisfy a finding that requires more work. A turn sends back
+at most two drafts: the next one stands with a "Not verified" note that says
+why, as does a draft whose check did not finish in time or could not run.
 
 Original instructions and execution observations are audited separately.
 Read receipts preserve returned ranges, hashes and truncation; reading a file
@@ -109,8 +124,8 @@ to approval or established counterevidence. Work-quality, integration and final
 publication checks still apply, and a changed evidence binding starts fresh
 attempts. Contract reviews also expose [file inventory and version-bound assessments](./contract-criteria.md#project-review-inventory).
 
-Jev authentication, access or billing failures hold completion and report the
-operational problem. Completed work is retained and the draft is not published.
+Jev authentication, access or billing failures are named in the "Not verified"
+note on the answer, so the person sees what to fix. Completed work is retained.
 These mechanisms describe implemented behavior; they do not establish
 live-provider accuracy or end-to-end acceptance for an untested candidate.
 

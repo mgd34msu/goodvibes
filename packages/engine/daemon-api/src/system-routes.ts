@@ -367,13 +367,13 @@ export function createDaemonSystemRouteHandlers(
       const currentAdmin = context.requireAdmin(req);
       if (currentAdmin) return currentAdmin;
       const unchanged = 'nothing was saved';
-      const entries = payload.entries;
-      if (!Array.isArray(entries) || entries.length === 0) {
+      const requested = payload.entries;
+      if (!Array.isArray(requested) || requested.length === 0) {
         return jsonErrorResponse({ error: 'The request names no settings to write.', code: 'INVALID_ARGUMENT', state: unchanged,
           next: ['Send { "entries": [{ "key": "<config key>", "value": <value> }] }; config.get lists the keys.'] }, { status: 400 });
       }
       const changes: { readonly key: string; readonly value: unknown }[] = [];
-      for (const entry of entries) {
+      for (const entry of requested) {
         const key = isJsonRecord(entry) && typeof entry.key === 'string' ? entry.key : '';
         if (!key || !isJsonRecord(entry) || !Object.hasOwn(entry, 'value')) {
           return jsonErrorResponse({ error: 'Every entry needs a key and a value.', code: 'INVALID_ARGUMENT', state: unchanged,

@@ -33,7 +33,7 @@ export const atRestConfigSettings: ConfigSetting[] = [
     type: 'number',
     default: 30,
     description:
-      'Age cap (days) for the on-disk transcript journal and execution-ledger files. Files older than this are pruned at the retention enforcement point (the journal prunes on each new agent session; the ledger prunes on each export). Generous by default; bounded so the files cannot grow without limit.',
+      'Age cap (days) for the append-only files: per-agent transcript journals, the execution ledger, the activity log, crash logs and crash-recovery snapshots. Files older than this are pruned at start and every six hours (the journal also prunes on each new agent session; the ledger on each export). Saved conversations are never pruned by it. Generous by default; bounded so the files cannot grow without limit.',
     ...intRange(1, 365),
   },
   {
@@ -41,7 +41,7 @@ export const atRestConfigSettings: ConfigSetting[] = [
     type: 'number',
     default: 512,
     description:
-      'Total-size cap (MB) across the on-disk transcript journal / execution-ledger file set. When exceeded, the retention enforcement point deletes oldest-first (rotated backups before freshly-written active files) until under budget.',
+      'Total-size cap (MB) for each of the append-only file sets named under atRest.retentionMaxAgeDays (transcript journals, execution ledger, activity log, crash logs, crash-recovery snapshots). When exceeded, the oldest are deleted first (rotated backups before freshly-written active files) until under budget. Saved conversations are never deleted by it.',
     ...intRange(1, 1_048_576),
   },
 ];

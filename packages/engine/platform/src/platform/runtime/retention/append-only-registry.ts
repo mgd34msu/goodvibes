@@ -27,7 +27,7 @@ import { resolveScopedDirectory } from '../surface-root.js';
 import { CRASH_LOG_FILENAME, CRASH_LOG_PREVIOUS_FILENAME } from '../crash-capture.js';
 import { logger } from '../../utils/logger.js';
 import { join } from 'node:path';
-import { closeSync, openSync, readSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import { readdirSync, statSync, unlinkSync } from 'node:fs';
 
 /** Every append-only store the platform writes. Extend this when adding one. */
 export type AppendOnlyStoreId =
@@ -35,7 +35,6 @@ export type AppendOnlyStoreId =
   | 'activity-log'
   | 'telemetry-local-ledger'
   | 'session-recovery-snapshots'
-  | 'session-conversations'
   | 'surface-crash-log';
 
 /**
@@ -84,62 +83,10 @@ export interface AppendOnlyStoreDescriptor {
 const EMPTY_TARGETS: AppendOnlyStoreTargets = { journalDirs: [], files: [] };
 
 /**
- * Read a saved session's `saveSource` off its meta line (line 0) without
- * reading the whole file. Protective default: `'user'` (exempt from
- * reclaim) for anything that is not unambiguously `saveSource: 'auto'`,
- * an unreadable file, a malformed meta line, or (most importantly) a
- * pre-upgrade file that predates this field entirely. Losing a user's saved
- * session to an over-eager sweep is the failure mode this errs away from;
- * only a file that explicitly says `'auto'` is ever a reclaim candidate.
+ * The canonical registry. Adding an append-only writer means adding an entry here.
+ * Saved conversations (sessions/*.jsonl) are not here: they are the user's data,
+ * read by --continue, /resume and the session list, and no sweep removes them.
  */
-function peekSessionSaveSource(filePath: string): 'user' | 'auto' {
-  let fd: number;
-  try {
-    fd = openSync(filePath, 'r');
-  } catch {
-    return 'user';
-  }
-  try {
-    const buf = Buffer.alloc(4096);
-    const bytesRead = readSync(fd, buf, 0, 4096, 0);
-    const firstLine = buf.toString('utf-8', 0, bytesRead).split('\n')[0];
-    if (!firstLine) return 'user';
-    const meta = JSON.parse(firstLine) as { type?: unknown; saveSource?: unknown };
-    if (meta.type !== 'meta') return 'user';
-    return meta.saveSource === 'auto' ? 'auto' : 'user';
-  } catch {
-    return 'user';
-  } finally {
-    closeSync(fd);
-  }
-}
-
-/**
- * The saved user-conversation files in `sessionsDir` (top-level `*.jsonl`
- * only, never the sessions/agents/ subdirectory, which the session-journals
- * store owns) that are eligible for retention: `saveSource: 'auto'` files
- * only. A file the user explicitly saved (`saveSource: 'user'`), or any file
- * with no readable saveSource at all, is never included here, see
- * peekSessionSaveSource.
- */
-function listReclaimableAutoSessionFiles(sessionsDir: string): string[] {
-  let names: string[];
-  try {
-    names = readdirSync(sessionsDir, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && entry.name.endsWith('.jsonl'))
-      .map((entry) => entry.name);
-  } catch {
-    return [];
-  }
-  const files: string[] = [];
-  for (const name of names) {
-    const path = join(sessionsDir, name);
-    if (peekSessionSaveSource(path) === 'auto') files.push(path);
-  }
-  return files;
-}
-
-/** The canonical registry. Adding an append-only writer means adding an entry here. */
 export const APPEND_ONLY_STORES: readonly AppendOnlyStoreDescriptor[] = [
   {
     id: 'session-journals',
@@ -187,17 +134,6 @@ export const APPEND_ONLY_STORES: readonly AppendOnlyStoreDescriptor[] = [
         journalDirs: [resolveScopedDirectory(roots.workingDirectory, roots.surfaceRoot, 'recovery')],
         files: [],
       };
-    },
-  },
-  {
-    id: 'session-conversations',
-    owner: 'saved user conversation sessions (sessions/manager.ts SessionManager.save)',
-    description: 'saved conversation *.jsonl files under the scoped sessions/ directory; a file the user explicitly saved (saveSource "user"), or any pre-upgrade file with no saveSource at all, is exempt and never reclaimed, only saveSource "auto" files are subject to the bounded default retention policy',
-    policy: DEFAULT_AT_REST_POLICY,
-    resolve(roots) {
-      if (!roots.workingDirectory) return EMPTY_TARGETS;
-      const sessionsDir = resolveScopedDirectory(roots.workingDirectory, roots.surfaceRoot, 'sessions');
-      return { journalDirs: [], files: listReclaimableAutoSessionFiles(sessionsDir) };
     },
   },
   {

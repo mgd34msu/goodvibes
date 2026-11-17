@@ -98,13 +98,9 @@ export function saveSession(
   title = '',
   options?: SessionPersistenceOptions,
   /**
-   * Who caused this save. Defaults to `'auto'`, the honest default for every
-   * existing caller (shutdownRuntime's save-on-exit, and any other call site
-   * that has not been updated to state it was an explicit user action). Pass
-   * `'user'` only from a call site the user directly triggered (e.g. a
-   * `/save` command in a consuming surface), so the session-conversations
-   * retention store (runtime/retention/append-only-registry.ts) never expires
-   * a session the user explicitly asked to keep.
+   * Who caused this save, recorded on the session's meta line. Defaults to
+   * `'auto'` (save-on-exit and turn-end saves); `'user'` is a save the user
+   * asked for. Neither is ever removed by a retention sweep.
    */
   saveSource: 'user' | 'auto' = 'auto',
 ): void {

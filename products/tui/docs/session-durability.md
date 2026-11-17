@@ -10,6 +10,10 @@ conversation through `SessionManager` (one temp file, one rename). This is the c
 resume`, `--continue`, `--resume` and the session browser read. The first line of the file carries
 the session's title, model and message count, so listing sessions reads one line per file.
 
+Saved sessions are kept until you delete them. The start-up retention sweep that bounds journals,
+logs and crash snapshots (`atRest.retentionMaxAgeDays`, `atRest.retentionMaxTotalMb`) never removes
+a saved conversation, whether it was saved at turn end or with `/session save`.
+
 ## Crash snapshot
 
 The crash snapshot (`writeRecoveryFile`) is written, each time only when the conversation changed

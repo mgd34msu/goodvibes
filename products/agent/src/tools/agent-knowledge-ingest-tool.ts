@@ -111,7 +111,8 @@ function isAbsent(value: unknown): boolean {
 /** An argument rule this tool refuses; the text is fixed, never built from the caller's values, so it can be shown to the model. */
 class IngestArgumentError extends Error {}
 
-function readSinceMs(value: unknown): number | undefined {
+/** The import window's length in milliseconds; the daemon takes its start as a timestamp. */
+function readSinceWindowMs(value: unknown): number | undefined {
   if (isAbsent(value)) return undefined;
   const days = readPositiveInt(value, 0);
   if (days <= 0) throw new IngestArgumentError('sinceDays must be a positive whole number of days; omit it to import without a time window.');
@@ -271,7 +272,7 @@ function requestForArgs(args: AgentKnowledgeIngestToolArgs): AgentKnowledgeInges
   if (sourceKind === 'browser_history') {
     const requestedLimit = readImportLimit(args.limit);
     const limit = Math.min(requestedLimit, BROWSER_HISTORY_LIMIT_MAX);
-    const sinceMs = readSinceMs(args.sinceDays);
+    const sinceWindowMs = readSinceWindowMs(args.sinceDays);
     const browsers = readStringList(args.browsers), kinds = readStringList(args.sourceKinds);
     const homeOverride = readOptionalString(args.homeOverride);
     return {
@@ -284,7 +285,7 @@ function requestForArgs(args: AgentKnowledgeIngestToolArgs): AgentKnowledgeInges
         `browsers ${browsers.length > 0 ? browsers.join(', ') : 'all'}`,
         `source kinds ${kinds.length > 0 ? kinds.join(', ') : 'all'}`,
         `limit ${limit}`,
-        `window ${sinceMs === undefined ? 'none (all history up to the limit)' : `last ${Math.round(sinceMs / 86_400_000)} day(s)`}`,
+        `window ${sinceWindowMs === undefined ? 'none (all history up to the limit)' : `last ${Math.round(sinceWindowMs / 86_400_000)} day(s)`}`,
         ...(homeOverride ? [`profile home ${homeOverride}`] : []),
       ],
       ...(requestedLimit > limit ? { notes: [`The limit was capped at ${limit} (requested ${requestedLimit}).`] } : {}),
@@ -293,7 +294,7 @@ function requestForArgs(args: AgentKnowledgeIngestToolArgs): AgentKnowledgeInges
         sourceKinds: [...kinds],
         homeOverride,
         limit,
-        sinceMs,
+        sinceMs: sinceWindowMs === undefined ? undefined : Date.now() - sinceWindowMs,
         connectorId: 'goodvibes-agent-main-conversation-browser-history',
         metadata: originMetadata,
       },

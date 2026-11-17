@@ -7,13 +7,12 @@ import {
   hasAnyFlag,
   hasFlag,
   parseConnectorInput,
-  readFirstStringList,
   readOptionValue,
   readPositiveInt,
-  readSinceMs,
   readStringList,
   stripCommandFlag,
 } from './agent-knowledge-args.ts';
+import { parseBrowserImportScope } from '../input/commands/knowledge-browser-flags.ts';
 import {
   formatAsk,
   formatAgentKnowledgeFailureKind,
@@ -430,16 +429,24 @@ export async function handleAgentKnowledgeCommand(runtime: CliCommandRuntime): P
         exitCode: 2,
       };
     }
-    const browsers = readFirstStringList(rest, ['--browsers', '--browser']);
-    const sourceKinds = readFirstStringList(rest, ['--sources', '--source-kinds', '--source-kind']);
+    // The same reading as /knowledge import-browser-history: a typo in a flag that
+    // narrows the import is refused, never widened to every browser or all time.
+    const scope = parseBrowserImportScope(rest, Date.now());
+    if (!scope.ok) {
+      const failure = { ok: false, kind: 'invalid_import_scope', error: scope.message, route: AGENT_KNOWLEDGE_METHODS.ingestBrowserHistory.route };
+      return {
+        output: json ? JSON.stringify(failure, null, 2) : `${failure.error}\nUsage: goodvibes-agent knowledge import-browser-history [--browsers chrome,firefox] [--sources history,bookmark] [--limit <n>] [--since-days <n>] --yes`,
+        exitCode: 2,
+      };
+    }
     const homeOverride = readOptionValue(rest, '--home');
     const result = await runKnowledgeCall(runtime, AGENT_KNOWLEDGE_METHODS.ingestBrowserHistory, async (connection) => (
       await postAgentKnowledgeJson(connection, AGENT_KNOWLEDGE_METHODS.ingestBrowserHistory.route, {
-        browsers,
-        sourceKinds,
+        browsers: scope.scope.browsers,
+        sourceKinds: scope.scope.sourceKinds,
         homeOverride,
-        limit: readPositiveInt(rest, '--limit', 250),
-        sinceMs: readSinceMs(rest),
+        limit: scope.scope.limit,
+        sinceMs: scope.scope.sinceMs,
         connectorId: 'goodvibes-agent-browser-history',
       })
     ));

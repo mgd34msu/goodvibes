@@ -14,7 +14,7 @@ export function sameDelegatedOwner(current: NativePairedSnapshot | null, expecte
   if (current === null) return false;
   try { return isDeepStrictEqual(captureDelegatedOwner(current), expected); } catch { return false; }
 }
-/** A row saved before rows named their owner belongs to no one; it grants nothing and waits out its expiry. */
-export function delegatedReviewOwnership(current: DelegatedReviewOwner): (record: { readonly owner?: DelegatedReviewOwner }) => boolean {
-  return record => record.owner !== undefined && isDeepStrictEqual(record.owner, current);
+/** Whether a review row belongs to this owner. Every row names its owner; one saved without it is dropped when the queue loads. */
+export function delegatedReviewOwnership(current: DelegatedReviewOwner): (record: { readonly owner: DelegatedReviewOwner }) => boolean {
+  return record => isDeepStrictEqual(record.owner, current);
 }

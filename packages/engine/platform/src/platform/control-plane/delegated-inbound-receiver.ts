@@ -9,7 +9,7 @@ import { NativeInboundReceiverRefusal, type NativeInboundAcceptance, type Native
 import { delegatedReviewRecordSchema, type DelegatedInboundChoices, type DelegatedReviewOwner } from './delegated-inbound-wire.js';
 export interface DelegatedReviewRecord {
   readonly id: string; readonly ref: NativeInboundSourceRef; readonly origin: NativeInboundResolvedSource['origin'];
-  readonly configurationId: string; readonly ownerRevision: string; readonly owner?: DelegatedReviewOwner; readonly workspaceRevision: string;
+  readonly configurationId: string; readonly ownerRevision: string; readonly owner: DelegatedReviewOwner; readonly workspaceRevision: string;
   readonly approvalId: string; readonly choices: DelegatedInboundChoices;
   readonly acceptedAt: number; readonly sourceExpiresAt: number; readonly recordExpiresAt: number;
   /** `reviewed` once the owner has read the original; a review leaves the queue when cancelled or expired. */
@@ -61,17 +61,22 @@ export class DelegatedInboundReviewReceiver {
     // dropped on its own: its neighbours are unaffected, and nothing is guessed.
     const loaded: DelegatedReviewRecord[] = [];
     let droppedRows = 0;
+    let ownerlessRows = 0;
     if (saved) for (const value of saved.records) {
       const parsed = delegatedReviewRecordSchema.safeParse(value);
       if (!parsed.success) { droppedRows += 1; continue; }
       const { owner, ...fields } = parsed.data;
-      const record: DelegatedReviewRecord = { ...fields, ...(owner === undefined ? {} : { owner }) };
+      // A row an earlier build saved without its owner can be answered by no
+      // one, so it goes the way an expired row does.
+      if (owner === undefined) { ownerlessRows += 1; continue; }
+      const record: DelegatedReviewRecord = { ...fields, owner };
       Object.freeze(record.ref); Object.freeze(record.origin); Object.freeze(record.choices);
-      if (record.owner) { Object.freeze(record.owner.scopes); Object.freeze(record.owner); }
+      Object.freeze(record.owner.scopes); Object.freeze(record.owner);
       Object.freeze(record);
       loaded.push(record);
     }
     if (droppedRows > 0) logger.warn('Delegated review queue rows failed validation and were dropped', { droppedRows, kept: loaded.length });
+    if (ownerlessRows > 0) logger.info('Delegated review queue rows with no owner were dropped; their requests must be sent again', { ownerlessRows, kept: loaded.length });
     // Old original proof is never reconstructed; persisted rows are metadata
     // only. A cancelled row grants nothing, so one left by an earlier build is dropped.
     for (const record of loaded) if (record.recordExpiresAt > Date.now() && isOpenReview(record)) { this.records.set(record.ref.requestId, record); this.durable.add(record.ref.requestId); }
@@ -87,8 +92,8 @@ export class DelegatedInboundReviewReceiver {
   private persist(): Promise<void> {
     const snapshot = { records: [...this.records.values()] };
     return this.writes.run(() => {
-      // Publish the reader floor before any new-format write, including pruning/cancel.
-      if (snapshot.records.some(record => record.owner !== undefined)) this.beforeOwnerWrite?.();
+      // Publish the reader floor before any new-format write (every row carries its owner), including pruning/cancel.
+      if (snapshot.records.length > 0) this.beforeOwnerWrite?.();
       return this.store.persist(snapshot, { durable: true });
     });
   }

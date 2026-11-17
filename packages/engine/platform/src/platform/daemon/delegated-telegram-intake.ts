@@ -65,7 +65,7 @@ function movePending(pending: { state: PendingState }, to: PendingState): boolea
 /** A stored review row as a command result carries it. */
 function reviewRecordView(record: DelegatedReviewRecord): DelegatedTelegramResult<'list'>['records'][number] {
   const { owner, ...fields } = record;
-  return { ...fields, execution: 'not-started', ...(owner ? { owner: { ...owner, scopes: [...owner.scopes] } } : {}) };
+  return { ...fields, execution: 'not-started', owner: { ...owner, scopes: [...owner.scopes] } };
 }
 /** Most live provider messages one intake tracks; entries leave when their source deadline passes. */
 const MAX_TRACKED_INGRESSES = 500;

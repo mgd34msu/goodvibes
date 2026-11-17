@@ -1,4 +1,4 @@
-export { DaemonServer } from './server.js';
+export { DaemonServer } from './facade.js';
 export { bootDaemon } from './boot.js';
 export type { BootDaemonOptions, BootedDaemon } from './boot.js';
 // Fatal-boot disclosure: a direct, unbuffered descriptor write immune to a

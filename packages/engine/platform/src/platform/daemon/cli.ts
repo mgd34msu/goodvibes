@@ -8,7 +8,7 @@ import { RuntimeEventBus, configureRuntimeEventBusDefaults, runtimeEventBusOptio
 import { createRuntimeStore } from '../runtime/store/index.js';
 import { composeRuntimeServices } from '../runtime/services.js';
 import { createHostPowerSeam } from '../power/runtime-wiring.js';
-import { DaemonServer } from './server.js';
+import { DaemonServer } from './facade.js';
 import { createHostShutdown, settleDaemonStart } from './cli-shutdown.js';
 import { HttpListener } from './http-listener.js';
 import { resolveDaemonServiceDefault, resolveServiceUnitHome } from './daemon-service-default.js';

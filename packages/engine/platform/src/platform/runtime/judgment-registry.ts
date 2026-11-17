@@ -11,13 +11,14 @@ export const registry = new BatteryRegistry();
 import { knowledgeRelevance } from '../state/batteries/knowledge-relevance.js';
 import { memoryAgreement, memoryAlignment } from '../state/batteries/memory-alignment.js';
 import { memoryReviewPriority } from '../state/batteries/memory-review-priority.js';
-import { memorySearchRerank } from '../state/batteries/memory-search-rerank.js';
+import { knowledgeInjectionRerank, memorySearchRerank } from '../state/batteries/memory-search-rerank.js';
 import { memoryUsage } from '../state/batteries/memory-usage.js';
 registry.register(knowledgeRelevance);
 registry.register(memoryAlignment);
 registry.register(memoryAgreement);
 registry.register(memoryReviewPriority);
 registry.register(memorySearchRerank);
+registry.register(knowledgeInjectionRerank);
 registry.register(memoryUsage);
 
 // Runtime: compaction, forensics, ops, tool contracts.

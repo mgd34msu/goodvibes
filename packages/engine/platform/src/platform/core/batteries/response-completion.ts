@@ -7,6 +7,26 @@ const UNSUPPORTED_PASSAGE_OPTIONS = Object.freeze(Object.fromEntries([
   ...Array.from({ length: MAX_ANSWER_PASSAGES }, (_, index) => [`p${index + 1}`, `passages[${index}] makes an unsupported execution claim.`]),
 ])) as Readonly<Record<'none' | `p${number}`, string>>;
 
+/**
+ * A fixture whose answer reads source modules (each read observed) and then,
+ * at sentence `position`, claims a test run nothing observed: the located
+ * passage is that sentence. One per numbered position, so every answer of the
+ * unsupported-passage question has an example.
+ */
+function locatedPassageFixture(position: number) {
+  const reads = Array.from({ length: position - 1 }, (_, index) => `src/module-${index + 1}.ts`);
+  const transcript = reads.flatMap((path, index) => [
+    { role: 'assistant', content: '', toolCalls: [{ id: `r${index + 1}`, name: 'read', arguments: { path } }] },
+    { role: 'tool', callId: `r${index + 1}`, content: `export const module${index + 1} = ${index + 1};`, outcome: 'ok' },
+  ]);
+  const passages = [...reads.map(path => `I read ${path}.`), 'All parser tests pass.'].map((passage, index) => index === 0 ? passage : ` ${passage}`);
+  return {
+    name: `an unsupported test claim at sentence ${position} is located`,
+    state: { request: 'Read the source modules and run the parser tests.', transcript, delegated: [], tools: ['read', 'exec'], response: passages.join(''), passages },
+    expect: { unsupported_passage: `p${position}` } as const,
+  };
+}
+
 export const HOST_COMPLETION_REVIEW_CONTEXT = 'Host contentReview and goalCoverage entries are exact saved native Jev receipts, with bindings computed by the runtime. A matching passed contentReview establishes that Jev reviewed the saved answer; a matching passed goalCoverage establishes its recorded original-scope implication check. Their recorded probability/outcome metadata does not revoke the native result under its recorded policy. These are prior-stage facts, never permission to publish the current response. Compare the current claims and original requirements with the checked result; do not demand the entire earlier source inspection again merely because its full contents are absent from this packet. A stale/rejected receipt, uncovered original obligation or actual later invalidating observation still requires repair or retrieval. ';
 
 export const RESPONSE_REVIEW_CONTEXT = HOST_COMPLETION_REVIEW_CONTEXT + 'Judge the CURRENT proposed answer against the original user request and primary observations. Host-completed-contract observations are real runtime records of an identified original scope, its saved acceptance checks, accepted answer and publication outcome. Use those checks for that recorded work; do not reconstruct an already checked contract from older partial progress or require its completed agents to still be running. They do not approve this final response, prove unrelated work, erase a failed publication or override later invalidating observations. Compare scope and current claims, and retrieve any specifically missing fact. When native verification records are supplied, transcript contains nativeSourceVerification receipts: their Jev-qualified reductions were checked against complete identified original source pages; exact-original records contain the unchanged source. Use those records and their preserved source roles as evidence. An observed linked write receipt can establish artifact creation; an assistant claim remains a claim. Native requirement readings are fresh Jev checks, not assistant self-certification; they never grant final publication by themselves. previousReview is a repair checklist, not an additional user requirement or proof of failure. Close findings when current evidence or a legitimate wording correction resolves them. Do not carry resolved, disproven or irrelevant concerns forward, require stylistic polishing, or invent extra work. A requested artifact may contain the detailed results: when its contents and delivery are observed, the final answer may link it and summarize without repeating every finding. For a review-only request, finding defects, failing checks, release risks and recommended future fixes is a legitimate review result. Those findings do not make the review unfinished or authorize implementing fixes. Passing every test, fixing the reviewed application and certifying release readiness are not implied requirements. A full codebase review does not imply executing every branch, proving the absence of every defect or meeting a coverage target. It does require actual inspection of the requested source scope; an actually unreviewed requested area or missing deliverable still is unfinished work. Missing observation contents cannot establish hidden execution or claims; name the precise missing evidence rather than demand a repeat review or another unchanged artifact. ';
@@ -40,6 +60,8 @@ export const responseCompletion = defineBattery({
     { name: 'demonstrated access refusal needs an owner decision', state: { request: 'Deploy the prepared build with the configured hosting credential.', transcript: [{ role: 'tool', content: 'Deployment rejected: configured credential revoked. No other credential or authorized deployment path is available.', outcome: 'error' }], delegated: [], tools: ['exec'], response: 'Deployment is blocked: the hosting service rejected the revoked credential. Please reauthorize the hosting account so deployment can proceed.' }, expect: { false_blocker: 'no', unfinished: 'no', unsupported: 'no', unanswered: 'no', unnecessary_permission: 'no' } },
     { name: 'the unsupported passage of a mixed answer is located', state: { request: 'Write the review report to review.md and run the parser tests.', transcript: [{ role: 'assistant', content: '', toolCalls: [{ id: 'w', name: 'write', arguments: { path: 'review.md', content: 'findings' } }] }, { role: 'tool', callId: 'w', content: 'Successfully wrote review.md.', outcome: 'ok' }], delegated: [], tools: ['write', 'exec'], response: 'I wrote review.md. All parser tests pass.', passages: ['I wrote review.md.', ' All parser tests pass.'] }, expect: { unsupported_passage: 'p2' } },
     { name: 'every passage of a supported answer is backed', state: { request: 'Write hello to hello.txt.', transcript: [{ role: 'assistant', content: '', toolCalls: [{ id: 'w', name: 'write', arguments: { path: 'hello.txt', content: 'hello' } }] }, { role: 'tool', callId: 'w', content: 'Successfully wrote hello.txt.', outcome: 'ok' }], delegated: [], tools: ['write'], response: 'Wrote hello.txt. It contains hello.', passages: ['Wrote hello.txt.', ' It contains hello.'] }, expect: { unsupported_passage: 'none' } },
+    // p2 is the mixed-answer fixture above.
+    ...Array.from({ length: MAX_ANSWER_PASSAGES }, (_, index) => index + 1).filter(position => position !== 2).map(locatedPassageFixture),
   ],
 });
 

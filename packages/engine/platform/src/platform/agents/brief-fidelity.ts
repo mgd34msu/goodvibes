@@ -91,6 +91,22 @@ export function requirementClauses(request: string): string[] {
   return [...clauses.slice(0, MAX_QUOTED_REQUIREMENTS - 1), clauses.slice(MAX_QUOTED_REQUIREMENTS - 1).join(' ')];
 }
 
+const READ_CLAUSES = ['parser', 'lexer', 'ast', 'printer', 'errors', 'tokens', 'scope', 'resolver', 'checker', 'emit', 'cli'].map(name => `Read src/${name}.ts.`);
+/**
+ * A fixture whose request lists read-only clauses and, at clause `position`,
+ * forbids changing files, while the assignment edits them: the located
+ * requirement is that clause. One per numbered position, so every answer of
+ * the conflicting-requirement question has an example.
+ */
+function locatedRequirementFixture(position: number) {
+  const requirements = [...READ_CLAUSES.slice(0, position - 1), 'Do not change any files.', ...(position < MAX_QUOTED_REQUIREMENTS ? ['Report the findings to me.'] : [])];
+  return {
+    name: `the file restriction at clause ${position} is quoted`,
+    state: { request: requirements.join(' '), requirements, assignments: [{ task: 'Read the source files under src/ and edit them to fix every issue found.' }] },
+    expect: { conflicting_requirement: `r${position}` } as const,
+  };
+}
+
 /**
  * A held whole-plan reading is resolved by one more request over the whole
  * request: which numbered original requirement (if any) the assignments
@@ -108,6 +124,8 @@ export const agentBriefRequirement = defineBattery({
     { name: 'the whole requested review cannot become one file', state: { request: 'Inspect every source file and write a full review.', requirements: ['Inspect every source file and write a full review.'], assignments: [{ task: 'Complete the entire review by checking only auth.ts. Describe the whole codebase as reviewed.' }] }, expect: { conflicting_requirement: 'r1' } as const },
     { name: 'an actual modification restriction is quoted', state: { request: 'Summarise the parser design. Do not change any files.', requirements: ['Summarise the parser design.', 'Do not change any files.'], assignments: [{ task: 'Summarise the parser design, then edit the parser to fix its bugs.' }] }, expect: { conflicting_requirement: 'r2' } as const },
     { name: 'worker cannot delegate further but coordinator can start it', state: { request: 'Use one read-only agent to verify review.md.', requirements: ['Use one read-only agent to verify review.md.'], assignments: [{ task: 'Read review.md and return its verification result. Do not spawn agents.', tools: ['read'], restrictTools: true }] }, expect: { conflicting_requirement: 'none' } as const },
+    // r1 and r2 are the fixtures above.
+    ...Array.from({ length: MAX_QUOTED_REQUIREMENTS - 2 }, (_, index) => locatedRequirementFixture(index + 3)),
   ].map(fixture => ({ ...fixture, state: delegationActionsState({ ...fixture.state, planningContext: DELEGATION_PLANNING_CONTEXT }) })),
 });
 

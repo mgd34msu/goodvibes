@@ -3,6 +3,7 @@ import { prepareProtectedResearchReport, hasPreparedResearchReport, createAgentR
 import { AgentResearchRunRegistry } from './research-run-registry.js';
 import { AgentResearchSourceRegistry, resolveResearchSource, type AgentResearchSourceRecord } from './research-source-registry.js';
 import { bindResearchArtifacts, researchLedgers } from './research-ledgers.js';
+import { formatJsonStoreWriteReport } from './store-file.js';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import type { ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
@@ -524,8 +525,9 @@ function settleResearchRun(paths: ResearchLedgerPaths, runId: string, sourceIds:
   const used: string[] = [];
   if (sourceIds.length > 0) {
     // One locked write marks every source; each id still settles on its own.
+    const sources = AgentResearchSourceRegistry.fromShellPaths(paths);
     try {
-      const marked = AgentResearchSourceRegistry.fromShellPaths(paths).markUsedMany(sourceIds, { reportArtifactId: artifactId });
+      const marked = sources.markUsedMany(sourceIds, { reportArtifactId: artifactId });
       used.push(...marked.used.map(record => record.id));
       for (const failure of marked.failures) lines.push(`  source ${failure.id} not marked used: ${failure.reason}`);
     } catch (error) {
@@ -533,10 +535,15 @@ function settleResearchRun(paths: ResearchLedgerPaths, runId: string, sourceIds:
       for (const id of sourceIds) lines.push(`  source ${id} not marked used: ${reason}`);
     }
     if (used.length > 0) lines.push(`  sources marked used by this report: ${used.join(', ')}`);
+    const sourceNote = formatJsonStoreWriteReport(sources.lastWriteReport(), 'research source');
+    if (sourceNote) lines.push(`  ${sourceNote}`);
   }
+  const runs = AgentResearchRunRegistry.fromShellPaths(paths);
   try {
-    const run = AgentResearchRunRegistry.fromShellPaths(paths).complete(runId, { reportArtifactId: artifactId, sourceIds: used });
+    const run = runs.complete(runId, { reportArtifactId: artifactId, sourceIds: used });
     lines.push(`  run ${run.id} completed with this report`);
+    const runNote = formatJsonStoreWriteReport(runs.lastWriteReport(), 'research run');
+    if (runNote) lines.push(`  ${runNote}`);
     return { lines, runOpen: false };
   } catch (error) {
     lines.push(`  run ${runId} not completed: ${error instanceof Error ? error.message : String(error)}`);

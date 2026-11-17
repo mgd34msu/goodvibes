@@ -14,6 +14,7 @@ import {
 import { confirmParameter, requestParameter } from './effect-admission.js';
 import { toolErrorText } from './tool-error-text.js';
 import { readString } from './tool-args.js';
+import { formatJsonStoreWriteReport } from './store-file.js';
 
 export interface AgentResearchRunsToolArgs {
   readonly mode?: unknown | undefined;
@@ -339,6 +340,8 @@ function createAgentResearchRunsTool(shellPaths?: Pick<ShellPathService, 'resolv
     execute: async (rawArgs: Record<string, unknown>, options) => {
       if (!shellPaths) return failure('Research run ledger is unavailable because this runtime did not provide shell paths.');
       const registry = AgentResearchRunRegistry.fromShellPaths(shellPaths);
+      // A write over a damaged ledger says what it kept as found or copied aside.
+      const written = (text: string) => output([text, formatJsonStoreWriteReport(registry.lastWriteReport(), 'research run')].filter(Boolean).join('\n'));
       const args = rawArgs as AgentResearchRunsToolArgs;
       const mode = readMode(args.mode);
       try {
@@ -371,11 +374,11 @@ function createAgentResearchRunsTool(shellPaths?: Pick<ShellPathService, 'resolv
         if (mode === 'create') {
           assertWrite();
           const explicitUserRequest = readString(args.explicitUserRequest) || 'Recorded research run operation';
-          return output(formatMutationResult('Created Agent research run', registry.create(createInput(args, explicitUserRequest))));
+          return written(formatMutationResult('Created Agent research run', registry.create(createInput(args, explicitUserRequest))));
         }
         if (mode === 'start') {
           assertWrite();
-          return output(formatMutationResult('Started Agent research run', registry.start(requireId(args), readString(args.note))));
+          return written(formatMutationResult('Started Agent research run', registry.start(requireId(args), readString(args.note))));
         }
         if (mode === 'checkpoint') {
           assertWrite();
@@ -391,7 +394,7 @@ function createAgentResearchRunsTool(shellPaths?: Pick<ShellPathService, 'resolv
           }
           const progress = readProgress(args.progress);
           const note = readString(args.note);
-          return output(formatMutationResult('Checkpointed Agent research run', registry.checkpoint(requireId(args), {
+          return written(formatMutationResult('Checkpointed Agent research run', registry.checkpoint(requireId(args), {
             ...(phase ? { phase } : {}),
             ...(status ? { status } : {}),
             ...(progress === undefined ? {} : { progress }),
@@ -402,21 +405,21 @@ function createAgentResearchRunsTool(shellPaths?: Pick<ShellPathService, 'resolv
         }
         if (mode === 'pause') {
           assertWrite();
-          return output(formatMutationResult('Paused Agent research run', registry.pause(requireId(args), readString(args.note))));
+          return written(formatMutationResult('Paused Agent research run', registry.pause(requireId(args), readString(args.note))));
         }
         if (mode === 'resume') {
           assertWrite();
-          return output(formatMutationResult('Resumed Agent research run', registry.resume(requireId(args), readString(args.note))));
+          return written(formatMutationResult('Resumed Agent research run', registry.resume(requireId(args), readString(args.note))));
         }
         if (mode === 'cancel') {
           assertWrite();
-          return output(formatMutationResult('Cancelled Agent research run', registry.cancel(requireId(args), readString(args.note))));
+          return written(formatMutationResult('Cancelled Agent research run', registry.cancel(requireId(args), readString(args.note))));
         }
         if (mode === 'complete') {
           assertWrite();
           const reportArtifactId = readString(args.reportArtifactId);
           if (reportArtifactId && researchArtifactExists(toolRegistry, reportArtifactId) === false) return failure(unknownReportArtifact(reportArtifactId).message);
-          return output(formatMutationResult('Completed Agent research run', registry.complete(requireId(args), {
+          return written(formatMutationResult('Completed Agent research run', registry.complete(requireId(args), {
             note: readString(args.note),
             reportArtifactId: readString(args.reportArtifactId),
             sourceIds: readStringList(args.sourceIds),
@@ -424,10 +427,10 @@ function createAgentResearchRunsTool(shellPaths?: Pick<ShellPathService, 'resolv
         }
         if (mode === 'fail') {
           assertWrite();
-          return output(formatMutationResult('Failed Agent research run', registry.fail(requireId(args), readString(args.error) || readString(args.note))));
+          return written(formatMutationResult('Failed Agent research run', registry.fail(requireId(args), readString(args.error) || readString(args.note))));
         }
         assertWrite();
-        return output(formatMutationResult('Deleted Agent research run', registry.delete(requireId(args))));
+        return written(formatMutationResult('Deleted Agent research run', registry.delete(requireId(args))));
       } catch (error) {
         return failure(toolErrorText(error));
       }

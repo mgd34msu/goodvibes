@@ -1,6 +1,6 @@
 import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils/lifecycle-machine';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { readJsonStore, updateJsonStore, type JsonStoreSpec } from './store-file.js';
+import { readJsonStore, updateJsonStore, type JsonStoreSpec, type JsonStoreWriteReport } from './store-file.js';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
 import { assertNoSecretLikeText } from './persona-registry.js';
 
@@ -297,7 +297,23 @@ function usedSource(existing: AgentResearchSourceRecord, input: AgentResearchSou
 }
 
 export class AgentResearchSourceRegistry {
+  private lastWrite: JsonStoreWriteReport | undefined;
+
   public constructor(private readonly storePath: string) {}
+
+  /**
+   * What this registry's writes kept as found (the last write's count) or
+   * copied aside (the copy any write made), for the caller to report.
+   */
+  public lastWriteReport(): JsonStoreWriteReport | undefined {
+    return this.lastWrite;
+  }
+
+  private recordWrite(report: JsonStoreWriteReport | undefined): void {
+    if (!report) return;
+    const copyPath = report.copyPath ?? this.lastWrite?.copyPath;
+    this.lastWrite = { keptAsFound: report.keptAsFound, ...(copyPath === undefined ? {} : { copyPath }) };
+  }
 
   public static fromShellPaths(shellPaths: AgentResearchSourceStorePaths): AgentResearchSourceRegistry {
     return new AgentResearchSourceRegistry(researchSourceStorePath(shellPaths));
@@ -494,10 +510,12 @@ export class AgentResearchSourceRegistry {
 
   /** One locked read-modify-write: one read, at most one write; entries this build cannot read are written back as found. */
   private mutate<T>(change: (store: ResearchSourceStoreFile) => { readonly value: T; readonly sources: readonly AgentResearchSourceRecord[] }): T {
-    return updateJsonStore(this.storePath, SOURCE_STORE, (read) => {
+    const result = updateJsonStore(this.storePath, SOURCE_STORE, (read) => {
       const next = change({ version: STORE_VERSION, sources: read.entries });
       return { value: next.value, entries: next.sources };
-    }).value;
+    });
+    this.recordWrite(result.write);
+    return result.value;
   }
 
   private nextId(title: string, sources: readonly AgentResearchSourceRecord[]): string {

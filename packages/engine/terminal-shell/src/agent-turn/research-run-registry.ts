@@ -5,7 +5,7 @@ import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils/l
 import { holdProcessLock } from '@goodvibes-jev/engine/platform/platform/utils/process-lock';
 import type { HeldProcessLock } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { readJsonStore, updateJsonStore, type JsonStoreSpec } from './store-file.js';
+import { readJsonStore, updateJsonStore, type JsonStoreSpec, type JsonStoreWriteReport } from './store-file.js';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
 import { assertNoSecretLikeText } from './persona-registry.js';
 
@@ -382,7 +382,23 @@ export function researchRunLogTail(run: AgentResearchRunRecord, limit = 5): read
 }
 
 export class AgentResearchRunRegistry {
+  private lastWrite: JsonStoreWriteReport | undefined;
+
   public constructor(private readonly storePath: string) {}
+
+  /**
+   * What this registry's writes kept as found (the last write's count) or
+   * copied aside (the copy any write made), for the caller to report.
+   */
+  public lastWriteReport(): JsonStoreWriteReport | undefined {
+    return this.lastWrite;
+  }
+
+  private recordWrite(report: JsonStoreWriteReport | undefined): void {
+    if (!report) return;
+    const copyPath = report.copyPath ?? this.lastWrite?.copyPath;
+    this.lastWrite = { keptAsFound: report.keptAsFound, ...(copyPath === undefined ? {} : { copyPath }) };
+  }
 
   public static fromShellPaths(shellPaths: AgentResearchRunStorePaths): AgentResearchRunRegistry {
     return new AgentResearchRunRegistry(researchRunStorePath(shellPaths));
@@ -707,10 +723,12 @@ export class AgentResearchRunRegistry {
 
   /** One locked read-modify-write: one read, at most one write; entries this build cannot read are written back as found. */
   private mutate<T>(change: (runs: readonly AgentResearchRunRecord[]) => { readonly value: T; readonly runs: readonly AgentResearchRunRecord[] }): T {
-    const { value, runs } = updateJsonStore(this.storePath, RUN_STORE, (store) => {
+    const result = updateJsonStore(this.storePath, RUN_STORE, (store) => {
       const next = change(store.entries);
       return { value: next, entries: next.runs };
-    }).value;
+    });
+    this.recordWrite(result.write);
+    const { value, runs } = result.value;
     if (!runs.some((run) => run.status === 'running' && run.runningSession === PROCESS_SESSION)) releaseProcessSession(this.storePath);
     return value;
   }

@@ -14,6 +14,7 @@ import { clampReadLimit } from './read-helpers.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
 import { toolErrorText } from './tool-error-text.js';
 import { readString } from './tool-args.js';
+import { formatJsonStoreWriteReport } from './store-file.js';
 
 export interface AgentResearchSourcesToolArgs {
   readonly mode?: unknown | undefined;
@@ -362,6 +363,8 @@ function createAgentResearchSourcesTool(shellPaths?: Pick<ShellPathService, 'res
     execute: async (rawArgs: Record<string, unknown>, options) => {
       if (!shellPaths) return failure('Research source queue is unavailable because this runtime did not provide shell paths.');
       const registry = AgentResearchSourceRegistry.fromShellPaths(shellPaths);
+      // A write over a damaged store says what it kept as found or copied aside.
+      const written = (text: string) => output([text, formatJsonStoreWriteReport(registry.lastWriteReport(), 'research source')].filter(Boolean).join('\n'));
       const args = rawArgs as AgentResearchSourcesToolArgs;
       const mode = readMode(args.mode);
       try {
@@ -399,7 +402,7 @@ function createAgentResearchSourcesTool(shellPaths?: Pick<ShellPathService, 'res
         }
         if (mode === 'add') {
           assertWrite();
-          return output(formatMutationResult('Added Agent research source', registry.create(addInput(args))));
+          return written(formatMutationResult('Added Agent research source', registry.create(addInput(args))));
         }
         if (mode === 'review') {
           assertWrite();
@@ -417,24 +420,24 @@ function createAgentResearchSourcesTool(shellPaths?: Pick<ShellPathService, 'res
             ...(evidence ? { evidence } : {}),
             ...(tags === undefined ? {} : { tags }),
           });
-          return output(formatMutationResult('Reviewed Agent research source', source));
+          return written(formatMutationResult('Reviewed Agent research source', source));
         }
         if (mode === 'reject') {
           assertWrite();
-          return output(formatMutationResult('Rejected Agent research source', registry.reject(requireId(args), readString(args.note))));
+          return written(formatMutationResult('Rejected Agent research source', registry.reject(requireId(args), readString(args.note))));
         }
         if (mode === 'use') {
           assertWrite();
           const reportArtifactId = readString(args.reportArtifactId);
           if (reportArtifactId && researchArtifactExists(toolRegistry, reportArtifactId) === false) return failure(unknownReportArtifact(reportArtifactId).message);
           const note = readString(args.note);
-          return output(formatMutationResult('Marked Agent research source used', registry.markUsed(requireId(args), {
+          return written(formatMutationResult('Marked Agent research source used', registry.markUsed(requireId(args), {
             ...(reportArtifactId ? { reportArtifactId } : {}),
             ...(note ? { note } : {}),
           })));
         }
         assertWrite();
-        return output(formatMutationResult('Deleted Agent research source', registry.delete(requireId(args))));
+        return written(formatMutationResult('Deleted Agent research source', registry.delete(requireId(args))));
       } catch (error) {
         return failure(toolErrorText(error));
       }

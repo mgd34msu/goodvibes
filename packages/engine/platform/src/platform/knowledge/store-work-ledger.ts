@@ -1,4 +1,3 @@
-import { unlinkSync } from 'node:fs';
 import { knowledgeSchemaColumns } from './store-schema-validation-data.js';
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { readKnowledgeSourceSnapshot } from './store-source-generation.js';
@@ -81,9 +80,6 @@ export function validateWorkLedgerTable(db: Pick<SqlDatabase, 'exec'>): void {
   })) throw new Error('KnowledgeStore: current work ledger schema is missing or corrupt; refusing repair');
 }
 
-/** Sidecar an earlier build kept beside the database; removed when a ledger opens. */
-const RETIRED_MARKS_FILE_SUFFIX = '.work-ledger-revisions.json';
-
 /** Runs inside the existing schema transaction; no legacy authority is invented. */
 export function migrateWorkLedgerTableToVersion2(db: Pick<SqlDatabase, 'exec' | 'run'>): void {
   validateWorkLedgerTable(db);
@@ -119,10 +115,6 @@ export function createKnowledgeWorkLedgerStorage(sqlite: SQLiteStore, projectId:
   createEmptyWorkLedgerState(projectId); // Validate even before the first row exists.
   let closed = false;
   let closePromise: Promise<void> | undefined;
-  const databasePath = sqlite.databasePath;
-  if (databasePath) {
-    try { unlinkSync(`${databasePath}${RETIRED_MARKS_FILE_SUFFIX}`); } catch { /* absent, or not ours to remove */ }
-  }
   // The ledger as last read, at its stored revision. A read whose row still
   // has that revision costs one indexed lookup instead of a parse of the ledger.
   let cached: WorkLedgerState | undefined;

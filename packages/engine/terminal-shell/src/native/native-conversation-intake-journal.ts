@@ -1,5 +1,4 @@
 import { nativeWorkExecutionIdentitySchema } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
-import { unlinkSync } from 'node:fs';
 import { BoundedJsonFile, type BoundedJsonFileIO, type BoundedJsonFileTransaction } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 import { nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeSourceRefSchema, type NativeConversationIntakeSourceRef, type NativeConversationIntakeCaptureRequest, } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
 /**
@@ -143,7 +142,6 @@ function validateFile(value: unknown, policy: NativeIntakeJournalPolicy): Journa
  * unchanged: published-indeterminate bytes are never rolled back, treated as
  * absent or used for a POST without explicit confirmation.
  */
-const retiredOwnerFiles = new Set<string>();
 export class NativeConversationIntakeJournal {
     readonly path: string;
     private readonly policy: NativeIntakeJournalPolicy;
@@ -155,11 +153,6 @@ export class NativeConversationIntakeJournal {
             invalid: () => new NativeIntakeJournalError('invalid_journal'), limit: () => new NativeIntakeJournalError('invalid_journal'), io,
         });
         this.path = this.file.path;
-        // Earlier builds kept a process-owner side file next to the journal; nothing reads it now.
-        if (!retiredOwnerFiles.has(this.path)) {
-            retiredOwnerFiles.add(this.path);
-            try { unlinkSync(`${this.path}.owners`); } catch { /* absent */ }
-        }
     }
     private locked<T>(operation: (journal: BoundedJsonFileTransaction<JournalFile>) => T): Promise<T> {
         return this.file.transact(operation);

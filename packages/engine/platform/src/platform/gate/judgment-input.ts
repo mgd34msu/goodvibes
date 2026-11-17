@@ -22,6 +22,7 @@ import { findCredentialScopeDeclaration, isDaemonNeededSecretKey } from '../conf
 import { isSecretBearingConfigKey, isSecretReferenceValue } from '../config/secret-bearing-config-keys.js';
 import { CARD_FIELD_NAMES } from '../payments/card-material.js';
 import { findCardNumbersInContext } from '../security/card-shapes.js';
+import { readCredentialEnvName } from '../tools/exec/credential-env.js';
 import type { EntryType, JsonValue } from '@goodvibes-jev/judgment';
 import { credentialReferenceText, declaredValueSpan, evidenceCredentialMarker, inlineDeclarations, literalDeclarationValue, secretLiteral } from './inline-declarations.js';
 
@@ -364,13 +365,20 @@ function decodedUrlPart(part: string): string {
 }
 
 const MASKED_CREDENTIAL = '[credential]';
+/** A shell environment variable name: the shape the exec tool's credential names (PGPASSWORD, GITHUB_TOKEN, DB_PASSWORD) take. */
+const ENVIRONMENT_NAME = /^[A-Z_][A-Z0-9_]*$/;
+
+/** A declared key whose value is masked: a credential field, or an environment variable the exec tool withholds as a credential. */
+function maskedKey(key: string): boolean {
+  return protectedKey(key) === 'credential-material' || (ENVIRONMENT_NAME.test(key) && readCredentialEnvName(key));
+}
 
 /** Free text with the literal value of each credential declaration masked; the same string when there is none. */
 function maskCredentialText(text: string): string {
   const spans: { start: number; end: number }[] = [];
   for (const flags of [true, false]) {
     for (const declaration of inlineDeclarations(text, flags)) {
-      if (protectedKey(declaration.key) !== 'credential-material') continue;
+      if (!maskedKey(declaration.key)) continue;
       const span = declaredValueSpan(text, declaration, {
         kind: 'credential', evidence: false, authHeader: AUTH_HEADERS.has(declaration.key.toLowerCase()),
       });
@@ -390,8 +398,10 @@ function maskCredentialText(text: string): string {
 
 /**
  * A judgment state with the literal value of every credential declaration in
- * its text masked. The screen above refuses key- or token-shaped values and
- * passes shorter ones (a real but short password in a command); the decision
+ * its text masked. The screen above refuses key- or token-shaped values of a
+ * credential field and passes shorter ones (a real but short password in a
+ * command), and a credential environment variable (PGPASSWORD=..., GITHUB_TOKEN=...)
+ * passes whatever its value; the decision
  * model needs to know a credential is there, never its value, so the copy it
  * is sent, and the one the decision log keeps, carries a marker instead. One
  * scan of the state's strings per request; unchanged parts are returned as

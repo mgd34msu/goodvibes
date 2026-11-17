@@ -1,59 +1,59 @@
 // Proves: A credential, private key, URL password or card number in a call's arguments is sent to the hosted decision model.
-// Red when: The permission manager reads a call with the decision model although the judgment-input boundary refused its arguments, so the secret reaches the model's request.
+// Red when: The permission manager reads a call with the decision model although the judgment-input boundary refused its arguments, or the hosted decision port sends the literal of a credential the boundary passed (a short password, an environment credential), so the secret reaches the model's request.
 /**
  * A hosted decision is itself an outward transmission. In jev-decides the real
  * permission manager over a real settings manager checks one call of each kind
- * of secret: none reaches the decision port, and none is approved. A short
+ * of secret: none reaches the decision model, and none is approved. A short
  * literal in a credential declaration is not refused: that call is read and
- * decided, so the refusals are not a port that is never reached. (Masking the
- * short literal is the hosted port's own step, runtime/judgment-services.ts.)
+ * decided, so the refusals are not a model that is never reached, and the
+ * request carries a marker where the literal was.
  *
- * The decision port is the stand-in for the hosted model: it records every
- * request and answers the gate's readings and an act disposition.
+ * The decision port is the product's own (composeJudgment: settings, masking,
+ * decision log). The hosted model is the stand-in: a loopback decision server
+ * that records every request and answers the gate's readings and an act
+ * disposition.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
-import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { choiceAnswer, startScriptedDecisionServer, type ScriptedDecisionServer } from '@goodvibes-jev/judgment/testing';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
 import { createPermissionConfigReader, PermissionManager } from '../platform/src/platform/permissions/manager.ts';
 import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
-import { forgetGateReadings, gateReadingsPort } from './_helpers/gate-readings.ts';
+import { composeJudgment } from '../platform/src/platform/runtime/judgment-services.ts';
+import { forgetGateReadings, gateReadingAnswers } from './_helpers/gate-readings.ts';
 
 let dir: string;
-let sent: string[];
-let restore: () => void;
+let model: ScriptedDecisionServer;
+let teardowns: Array<() => unknown>;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'gv-judgment-privacy-'));
-  sent = [];
+  teardowns = [];
   forgetGateReadings();
-  const readings = gateReadingsPort();
-  const disposition = fakePort((name, question) => {
-    if (name !== 'disposition') throw new Error(`unexpected question ${name}`);
-    return choiceAnswer(question, 'act', 0.97);
-  });
-  const log = new SqliteDecisionLog(':memory:');
-  const port: JudgmentPort = { model: 'fixture-model', ask: (request) => {
-    sent.push(JSON.stringify(request));
-    return request.context?.site === 'engine.gate.autonomous-tool' ? disposition.port.ask(request) : readings.port.ask(request);
-  } };
-  const previous = installJudgmentPort(withDecisionLog(port, log));
-  restore = () => { installJudgmentPort(previous); log[Symbol.dispose](); forgetGateReadings(); };
+  const readings = gateReadingAnswers();
+  model = startScriptedDecisionServer({ model: 'fixture-model', script: (name, question, state) =>
+    name.endsWith('disposition') && question.type === 'choice' ? choiceAnswer(question, 'act', 0.97) : readings(name, question, state) });
 });
-afterEach(() => { restore(); rmSync(dir, { recursive: true, force: true }); });
+afterEach(async () => {
+  for (const teardown of teardowns.reverse()) await teardown();
+  await model.stop();
+  forgetGateReadings();
+  rmSync(dir, { recursive: true, force: true });
+});
 
-test('no secret in a call reaches the decision model and the call is not approved; a call the screen passes is read', async () => {
+test('no secret in a call reaches the decision model and the call is not approved; a credential the screen passes is read with its value masked', async () => {
   const config = new ConfigManager({ surfaceRoot: 'agent', workingDir: join(dir, 'workspace'), homeDir: join(dir, 'home'), configDir: join(dir, 'config'), ownsDaemonTier: true });
   expect(config.setMany([
     { key: 'permissions.mode' as ConfigKey, value: 'jev-decides' },
-    { key: 'judgment.endpoint' as ConfigKey, value: 'http://127.0.0.1:9/v1' },
+    { key: 'judgment.endpoint' as ConfigKey, value: model.baseURL },
     { key: 'judgment.model' as ConfigKey, value: 'fixture-model' },
     { key: 'judgment.keySource' as ConfigKey, value: 'secret' },
   ], { kind: 'owner', surface: 'fixture' }).ok).toBe(true);
+  composeJudgment({ config, env: {}, stateRoot: join(dir, 'state'),
+    secrets: { get: async (key) => (key === 'TYPESAFE_API_KEY' ? 'fixture-decision-key' : null) },
+    disposal: { add: (_label, dispose) => { teardowns.push(dispose); } } });
   const reader = createPermissionConfigReader(config);
   expect(reader.isDecisionModelReady?.()).toBe(true);
   const manager = new PermissionManager(async () => ({ approved: false }), reader, new PolicyRuntimeState(), null, null, null, {});
@@ -67,11 +67,21 @@ test('no secret in a call reaches the decision model and the call is not approve
   ];
   for (const [kind, tool, args] of secrets) {
     const result = await manager.checkDetailed(tool, args);
-    expect(`${kind}: ${sent.length} requests, approved ${result.approved}, ${result.reasonCode}`)
+    expect(`${kind}: ${model.requests.length} requests, approved ${result.approved}, ${result.reasonCode}`)
       .toBe(`${kind}: 0 requests, approved false, boundary_judgment_input`);
   }
-  // The control: a short literal in a credential declaration passes the screen, and the call is read and decided.
-  const short = await manager.checkDetailed(...exec('DB_PASSWORD=hunter2 make migrate'));
-  expect(sent.length).toBeGreaterThan(0);
-  expect(short).toMatchObject({ approved: true, sourceLayer: 'jev_decision' });
+  // The control: a credential the screen passes (a short password, an environment credential of
+  // any shape) is read and decided, and what reached the model names it without its value.
+  const passed = [
+    ['DB_PASSWORD=hunter2 make migrate', 'hunter2', 'DB_PASSWORD=[credential]'],
+    ['GITHUB_TOKEN=ghp_Q7vR2mX9kL4pT8wZ3nB6yC1dF5gH0jK2abcd gh repo list', 'ghp_Q7vR2mX9kL4pT8wZ3nB6yC1dF5gH0jK2abcd', 'GITHUB_TOKEN=[credential]'],
+  ] as const;
+  for (const [cmd, literal, marker] of passed) {
+    const before = model.requests.length;
+    const result = await manager.checkDetailed(...exec(cmd));
+    const wire = JSON.stringify(model.requests.slice(before));
+    expect({ cmd, read: model.requests.length > before, literal: wire.includes(literal), marker: wire.includes(marker), approved: result.approved, by: result.sourceLayer })
+      .toEqual({ cmd, read: true, literal: false, marker: true, approved: true, by: 'jev_decision' });
+  }
+  model.assertNoUnexpected();
 });

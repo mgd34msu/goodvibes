@@ -81,7 +81,12 @@ const YES_NO = ['mutates', 'outward', 'secrets', 'irreversible', 'beyondProject'
 
 /** A port answering the gate batteries from `table`, recording every request. */
 export function gateReadingsPort(table: GateReadingTable = []) {
-  return fakePort((wireName: string, question: Question, state: unknown) => {
+  return fakePort(gateReadingAnswers(table));
+}
+
+/** The answer to one gate battery question about `state`, from `table`; also a scripted decision server's script. */
+export function gateReadingAnswers(table: GateReadingTable = []): (wireName: string, question: Question, state: unknown) => unknown {
+  return (wireName, question, state) => {
     const name = wireName.includes('__') ? wireName.slice(wireName.indexOf('__') + 2) : wireName;
     const text = JSON.stringify(state);
     const reading = { ...defaultReading(state), ...(table.find(([match]) => text.includes(match))?.[1] ?? {}) };
@@ -97,7 +102,7 @@ export function gateReadingsPort(table: GateReadingTable = []) {
     // credential-env scrub) reads as a no, so a plain command runs plainly.
     if (question.type === 'noul') return noulAnswer(0.03);
     throw new Error(`gate-readings: no answer for question ${name}`);
-  });
+  };
 }
 
 /**

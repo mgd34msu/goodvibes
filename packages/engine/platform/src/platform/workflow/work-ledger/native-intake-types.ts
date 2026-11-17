@@ -167,7 +167,8 @@ const captureFields = {
   continuation: nativeConversationContinuationSchema.optional(),
   unsupportedSources: array(strictObject({ kind: enumSchema(['image', 'file', 'context']), label: string().min(1).max(200) })).max(100),
   sourceId: id, sourceRevision: id, sessionId: id,
-  owner: strictObject({ authorityId: id, authorityRevision: id, authorityScopes: array(id).max(100), scopeId: id, scopeRevision: id, projectRoot: string().min(1).max(4096) }),
+  // The owner's own credential holds every scope the daemon has (more than a hundred); the bound is that catalog's order of size, not a guess under it.
+  owner: strictObject({ authorityId: id, authorityRevision: id, authorityScopes: array(id).max(1000), scopeId: id, scopeRevision: id, projectRoot: string().min(1).max(4096) }),
   generation: revision.min(1), state: enumSchema(['captured', 'processing', 'turn', 'blocked', 'refused', 'associated', 'cancelled']),
   stage: enumSchema(['routing', 'extracting', 'checking', 'deciding', 'waiting']).nullable(),
   route: enumSchema(['converse', 'answer', 'contract']).nullable(), reason: enumSchema(['unsupported-source', 'missing-context', 'semantic', 'exhausted']).nullable(),

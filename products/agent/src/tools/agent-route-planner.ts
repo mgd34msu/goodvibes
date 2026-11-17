@@ -28,9 +28,9 @@ function freezeRouteDeclarations(value: unknown, visited = new Set<object>()): v
     throw new ToolInputProjectionError('held');
   }
   visited.add(value);
-  for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
-    if (!('value' in descriptor) || typeof descriptor.value === 'function') throw new ToolInputProjectionError('held');
-    freezeRouteDeclarations(descriptor.value, visited);
+  for (const child of Object.values(value)) {
+    if (typeof child === 'function') throw new ToolInputProjectionError('held');
+    freezeRouteDeclarations(child, visited);
   }
   Object.freeze(value);
 }

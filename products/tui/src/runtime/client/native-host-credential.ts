@@ -11,8 +11,6 @@ import { readTuiLegacyPairingBootstrap } from '../tui-host-pairing-bootstrap.ts'
 // Actual config owners retain only their latest selected frame. No host/token
 // string is a process-global lookup key, and independent owners cannot share a label.
 const observations = new WeakMap<ConfigManager, OwnedSelectionObservation>();
-const getObservation = WeakMap.prototype.get, setObservation = WeakMap.prototype.set;
-const applyObservation = Reflect.apply;
 
 // The pairing record each (home, origin) last read, kept while the store file is
 // the same file (one stat): a native request asks for its credential at every
@@ -100,10 +98,10 @@ export function resolveNativeHostCredential(options: NativeHostCredentialOptions
       ? readLocalOperatorToken(home) : null;
     // Full state, not merely the bearer: replacement and indeterminate state
     // invalidate queued reads, permits and mutation preflights as well.
-    let observation = retained ?? (applyObservation(getObservation, observations, [owner]) as OwnedSelectionObservation | undefined);
+    let observation = retained ?? observations.get(owner);
     if (!observation) {
       observation = new OwnedSelectionObservation();
-      applyObservation(setObservation, observations, [owner, observation]);
+      observations.set(owner, observation);
     }
     retained = observation;
     const identity = observation.observe([home, enabled, selected, baseUrl, pairing, local], owner);
@@ -123,7 +121,7 @@ export function resolveNativeHostCredential(options: NativeHostCredentialOptions
     return { available: false, identity, reason: 'The TUI host credential store is unavailable.' };
   } catch {
     if (retained) retained.retire();
-    else if (owner) (applyObservation(getObservation, observations, [owner]) as OwnedSelectionObservation | undefined)?.retire();
+    else if (owner) observations.get(owner)?.retire();
     return { available: false, identity: 'tui-host-credential-unavailable', reason: 'The selected TUI host credential is unavailable.' };
   }
 }

@@ -1,4 +1,3 @@
-import { types as nodeTypes } from 'node:util';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { gateJudgmentRegistry, prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
 import { SOURCE_SCREENING_LIMITS, type ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
@@ -28,15 +27,27 @@ export function captureCatalogData<T>(value: T, budget = { nodes: 0, characters:
   return visitCatalogData(value, budget, true);
 }
 
-/** Validate the same complete DTO grammar without allocating another frozen graph. */
-export function inspectCatalogData(value: unknown): WeakMap<object, Record<string, PropertyDescriptor>> {
-  const descriptors = new WeakMap<object, Record<string, PropertyDescriptor>>();
-  visitCatalogData(value, { nodes: 0, characters: 0, slots: 0 }, false, descriptors);
-  return descriptors;
+/**
+ * Validate the same complete DTO grammar without allocating another frozen
+ * graph. Answers each object's own property names (hidden ones included).
+ */
+export function inspectCatalogData(value: unknown): WeakMap<object, readonly string[]> {
+  const names = new WeakMap<object, readonly string[]>();
+  visitCatalogData(value, { nodes: 0, characters: 0, slots: 0 }, false, names);
+  return names;
 }
 
+const isEnumerable = (entry: object, key: string): boolean => Object.prototype.propertyIsEnumerable.call(entry, key);
+
+/**
+ * The plain-data grammar: plain objects and arrays, finite numbers, strings,
+ * booleans, null and undefined, no functions, symbols or `toJSON`, within the
+ * budgets. Hidden (non-enumerable) fields are data too and keep their
+ * enumerability in the copy. Values are read directly: the data is the
+ * program's own or arguments the registry already validated and froze.
+ */
 function visitCatalogData<T>(value: T, budget: { nodes: number; characters: number; slots: number }, copy: boolean,
-  observations?: WeakMap<object, Record<string, PropertyDescriptor>>): T {
+  observations?: WeakMap<object, readonly string[]>): T {
   const ancestors = new Set<object>();
   const copies = new WeakMap<object, object>();
   const invalid = (): never => { throw new ToolInputProjectionError('invalid'); };
@@ -45,28 +56,30 @@ function visitCatalogData<T>(value: T, budget: { nodes: number; characters: numb
     if (typeof entry === 'string') { budget.characters += entry.length; if (budget.characters > 1_000_000) return invalid(); return entry; }
     if (entry === null || entry === undefined || typeof entry === 'boolean') return entry;
     if (typeof entry === 'number') return Number.isFinite(entry) ? entry : invalid();
-    if (typeof entry !== 'object' || nodeTypes.isProxy(entry) || ancestors.has(entry)) return invalid();
+    if (typeof entry !== 'object' || ancestors.has(entry)) return invalid();
     const existing = copies.get(entry); if (existing) return existing;
     const array = Array.isArray(entry);
     const prototype: unknown = Object.getPrototypeOf(entry);
     if (array ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) return invalid();
-    const descriptors = Object.getOwnPropertyDescriptors(entry);
-    observations?.set(entry, descriptors);
-    if (Object.getOwnPropertySymbols(entry).length > 0 || Object.hasOwn(descriptors, 'toJSON')
-      || (array && Object.hasOwn(descriptors, 'constructor'))
-      || Object.values(descriptors).some((descriptor) => !('value' in descriptor) || typeof descriptor.value === 'function')) return invalid();
-    const length: unknown = array ? descriptors.length?.value : 0;
-    if (typeof length !== 'number' || !Number.isInteger(length) || length < 0 || length > 20_000) return invalid();
+    const names = Object.getOwnPropertyNames(entry);
+    observations?.set(entry, names);
+    if (Object.getOwnPropertySymbols(entry).length > 0 || Object.hasOwn(entry, 'toJSON')
+      || (array && Object.hasOwn(entry, 'constructor'))) return invalid();
+    const length = array ? (entry as unknown[]).length : 0;
+    if (length > 20_000) return invalid();
     if (array && (budget.slots += length) > 100_000) return invalid();
+    const record = entry as Record<string, unknown>;
     const result: object = copy ? (array ? new Array(length) : Object.create(null) as object) : entry;
     ancestors.add(entry);
     try {
-      for (const [key, descriptor] of Object.entries(descriptors)) {
+      for (const key of names) {
         if (array && key === 'length') continue;
+        const field = record[key];
+        if (typeof field === 'function') return invalid();
         budget.characters += key.length;
         if (budget.characters > 1_000_000) return invalid();
-        const child = capture(descriptor.value, depth + 1);
-        if (copy) Object.defineProperty(result, key, { value: child, enumerable: descriptor.enumerable });
+        const child = capture(field, depth + 1);
+        if (copy) Object.defineProperty(result, key, { value: child, enumerable: isEnumerable(entry, key) });
       }
       if (copy) Object.freeze(result);
       copies.set(entry, result); return result;
@@ -137,28 +150,15 @@ type CatalogRow = { readonly id: string; readonly description: string };
 /** Rows described once for a catalog that is read many times. */
 const preparedCatalogs = new WeakMap<object, { readonly describe: object; readonly rows: readonly CatalogRow[] }>();
 
-function catalogEntryDescriptors(entries: readonly unknown[]) {
-  if (!Array.isArray(entries) || nodeTypes.isProxy(entries) || Object.getPrototypeOf(entries) !== Array.prototype
-    || entries.length >= SOURCE_SCREENING_LIMITS.parts * SOURCE_SCREENING_LIMITS.sources) throw new ToolInputProjectionError('held');
-  const descriptors = Object.getOwnPropertyDescriptors(entries);
-  if (Object.getOwnPropertySymbols(entries).length || Object.keys(descriptors).some((key) => key !== 'length'
-    && (!/^(0|[1-9][0-9]*)$/.test(key) || !('value' in descriptors[key]!)))) throw new ToolInputProjectionError('invalid');
-  return descriptors;
-}
-function captureCatalogEntries<T>(entries: readonly T[], descriptors: ReturnType<typeof catalogEntryDescriptors>): T[] {
-  const capturedEntries: T[] = [];
+function captureCatalogEntries<T>(entries: readonly T[]): T[] {
+  if (!Array.isArray(entries) || entries.length >= SOURCE_SCREENING_LIMITS.parts * SOURCE_SCREENING_LIMITS.sources) throw new ToolInputProjectionError('held');
   const budget = { nodes: 0, characters: 0, slots: 0 };
-  for (let index = 0; index < entries.length; index++) {
-    const descriptor = descriptors[String(index)];
-    if (!descriptor || !('value' in descriptor)) throw new ToolInputProjectionError('invalid');
-    capturedEntries.push(captureCatalogData(descriptor.value as T, budget));
-  }
-  return capturedEntries;
+  return entries.map(entry => captureCatalogData(entry, budget));
 }
 
 /** Freeze a catalog and describe its rows once; later lookups reuse both. */
 export function prepareHarnessCatalog<T>(entries: readonly T[], describe: (entry: T) => CatalogDescription): readonly T[] {
-  const captured = Object.freeze(captureCatalogEntries(entries, catalogEntryDescriptors(entries)));
+  const captured = Object.freeze(captureCatalogEntries(entries));
   preparedCatalogs.set(captured, Object.freeze({ describe, rows: Object.freeze(captured.map(entry => catalogRow(describe(entry)))) }));
   return captured;
 }

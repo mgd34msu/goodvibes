@@ -5,24 +5,18 @@ import { dirname } from 'node:path';
 import { retainCliConfig } from '@goodvibes-jev/engine/terminal-shell';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
-import { captureCatalogMethods, captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureCatalogReadRequest } from './agent-harness-catalog-selection.ts';
 
-/** Capture native receiver slots without reading getters or projecting callbacks as JSON. */
-export function captureCatalogContextPaths(context: CommandContext, paths: readonly (readonly string[])[]): () => void {
-  const guards: (() => void)[] = [];
-  for (const path of paths) {
-    let subject: unknown = context;
-    for (const key of path) {
-      if (!subject || typeof subject !== 'object') break;
-      guards.push(captureCatalogMethods(subject, [key]));
-      let holder: object | null = subject, descriptor: PropertyDescriptor | undefined;
-      while (holder && !(descriptor = Object.getOwnPropertyDescriptor(holder, key))) holder = Object.getPrototypeOf(holder);
-      subject = descriptor?.value;
-    }
-  }
-  return () => { for (const guard of guards) guard(); };
+/**
+ * The command context's service slots are the program's own objects, read
+ * directly where they are used; nothing about them is re-checked per call.
+ * Kept so callers can still name the paths they read.
+ */
+export function captureCatalogContextPaths(_context: CommandContext, _paths: readonly (readonly string[])[]): () => void {
+  return contextPathsUnchecked;
 }
+const contextPathsUnchecked = (): void => {};
 
 export function captureStatefulCatalogRequest<T>(context: CommandContext, args: T, options: CatalogRankingOptions,
   paths: readonly (readonly string[])[] = [], captureSources: () => readonly (() => void)[] = () => []) {

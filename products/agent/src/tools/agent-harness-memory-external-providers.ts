@@ -452,7 +452,6 @@ async function readExternalProviderSnapshot(acquired: ReturnType<typeof acquireS
   acquired.assertCurrent();
   const result = read();
   acquired.assertCurrent();
-  if (nodeTypes.isProxy(result)) throw new ToolInputProjectionError('held');
   if (nodeTypes.isPromise(result)) {
     const snapshot = await awaitExternalProviderSnapshot(result, options.signal); acquired.assertCurrent();
     return { snapshot, fresh: undefined };

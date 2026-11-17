@@ -1,4 +1,3 @@
-import { types as nodeTypes } from 'node:util';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { rankHarnessCatalog, captureCatalogData, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
@@ -57,22 +56,10 @@ function modelToolSearchText(tool: HarnessModelToolDefinition): string {
 }
 
 
-/** Read registered definition data without invoking a replaced accessor/proxy. */
+/** The registered definitions as plain data for the ranking reader. */
 function captureModelTools(toolRegistry: ToolRegistry): readonly HarnessModelToolDefinition[] {
   const budget = { nodes: 0, characters: 0, slots: 0 };
-  return toolRegistry.list().map((tool) => {
-    let owner: object | null = tool;
-    for (let depth = 0; owner && depth < 64; depth++) {
-      if (nodeTypes.isProxy(owner)) throw new ToolInputProjectionError('invalid');
-      const descriptor = Object.getOwnPropertyDescriptor(owner, 'definition');
-      if (descriptor) {
-        if (!('value' in descriptor)) throw new ToolInputProjectionError('invalid');
-        return captureCatalogData(descriptor.value, budget) as HarnessModelToolDefinition;
-      }
-      owner = Object.getPrototypeOf(owner) as object | null;
-    }
-    throw new ToolInputProjectionError('invalid');
-  });
+  return toolRegistry.list().map((tool) => captureCatalogData(tool.definition, budget) as HarnessModelToolDefinition);
 }
 
 async function matchingModelTools(toolRegistry: ToolRegistry, input: string, options: CatalogRankingOptions) {

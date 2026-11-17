@@ -6,7 +6,7 @@ import { redactText } from '@goodvibes-jev/engine/terminal-shell';
 import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
-import { captureModelReadModelData, captureModelProviderReadingFacts, MODEL_PROVIDER_READING_FACT_FIELDS, captureModelReadingInput, captureModelReadingSnapshotGuard, assertModelReadingInputCurrent, modelReadingServicePath, withModelReadingSource, type ModelReadingOptions } from './agent-harness-model-reading-source.ts';
+import { captureModelReadModelData, captureModelProviderReadingFacts, captureModelReadingInput, captureModelReadingSnapshotGuard, assertModelReadingInputCurrent, modelReadingServicePath, withModelReadingSource, type ModelReadingOptions } from './agent-harness-model-reading-source.ts';
 import { protectPersonalOpsData } from './agent-harness-personal-ops-source.ts';
 import { readLocalServingBoolean, readLocalServingStatus, readLocalResourcePressure, readLocalServingSchemaStatus } from './agent-harness-local-model-readings.ts';
 import type { CommandContext } from '../input/command-registry.ts';
@@ -256,7 +256,7 @@ function setupServingReadModelSources(context: CommandContext): readonly LocalMo
 
 function sourceMethods(source: unknown, keys: readonly string[]): () => void {
   if (source === null || source === undefined) return () => {};
-  if (typeof source !== 'object' || nodeTypes.isProxy(source)) throw new Error('Unsupported local model source.');
+  if (typeof source !== 'object') throw new Error('Unsupported local model source.');
   return captureCatalogMethods(source, keys);
 }
 
@@ -266,33 +266,30 @@ const SERVING_COLLECTION_KEYS = ['localModelServers', 'localServers', 'servingDi
 /** Native Map keys are record identities, not arbitrary object field roles.
  * Preserve each key and complete original record in declared envelope fields. */
 function servingSnapshotData(original: unknown, captured: unknown): unknown {
-  const isMap = (value: unknown): value is Map<string, unknown> => value !== null && typeof value === 'object'
-    && !nodeTypes.isProxy(value) && Object.getPrototypeOf(value) === Map.prototype;
+  const isMap = (value: unknown): value is Map<string, unknown> => value instanceof Map;
   const rows = (value: unknown) => Object.entries(readRecord(value)).map(([recordId, metadata]) => ({
     id: readString(readRecord(metadata).id) || recordId, recordId, metadata,
   }));
   if (isMap(original)) return { records: rows(readRecord(captured).records) };
   if (captured === null || typeof captured !== 'object' || Array.isArray(captured)) return captured;
-  const snapshot = readRecord(captured), descriptors = original !== null && typeof original === 'object'
-    ? Object.getOwnPropertyDescriptors(original) : {};
+  const snapshot = readRecord(captured), fields = original !== null && typeof original === 'object'
+    ? original as Record<string, unknown> : {};
   return Object.fromEntries(Object.entries(snapshot).map(([key, value]) => [key,
-    SERVING_COLLECTION_KEYS.some(collection => collection === key) && isMap(descriptors[key]?.value) ? rows(value) : value]));
+    SERVING_COLLECTION_KEYS.some(collection => collection === key) && isMap(fields[key]) ? rows(value) : value]));
 }
 
 function captureServingSource(context: CommandContext, entry: LocalModelServingReadModelSource): {
   readonly data: unknown; readonly assertCurrent: () => void;
 } {
   const source = entry.source;
-  if ((typeof source === 'function' || source !== null && typeof source === 'object') && nodeTypes.isProxy(source)) throw new Error('Unsupported local serving source.');
   const methods = typeof source === 'function' ? () => {} : sourceMethods(source, SERVING_SNAPSHOT_METHODS);
   const read = typeof source === 'function' ? source : SERVING_SNAPSHOT_METHODS
     .map(key => modelReadingServicePath(source, [key])).find(method => typeof method === 'function');
-  if (typeof read === 'function' && nodeTypes.isProxy(read)) throw new Error('Unsupported local serving snapshot method.');
   const acquire = () => {
     methods();
-    const value: unknown = typeof read === 'function' ? Reflect.apply(read, source, []) : source;
+    const value: unknown = typeof read === 'function' ? read.call(source) : source;
     if (nodeTypes.isPromise(value)) {
-      void Reflect.apply(Promise.prototype.then, value, [undefined, () => {}]);
+      void value.then(undefined, () => {});
       throw new Error('Local serving diagnostics must publish synchronous native snapshots.');
     }
     methods(); return value;
@@ -672,29 +669,19 @@ export function captureLocalModelRegistry(context: CommandContext): {
   const acquireList = (method: unknown, receiver: unknown, retain: boolean): readonly unknown[] => {
     registryMethods(); apiMethods();
     if (method === undefined) return [];
-    if (typeof method !== 'function' || nodeTypes.isProxy(method)) throw new Error('Local model registry list method unavailable.');
-    const result: unknown = Reflect.apply(method, receiver, []);
+    if (typeof method !== 'function') throw new Error('Local model registry list method unavailable.');
+    const result: unknown = method.call(receiver);
     registryMethods(); apiMethods();
     if (nodeTypes.isPromise(result)) {
-      void Reflect.apply(Promise.prototype.then, result, [undefined, () => {}]);
+      void result.then(undefined, () => {});
       throw new Error('Local model registry must publish synchronous native arrays.');
     }
-    if (!Array.isArray(result) || nodeTypes.isProxy(result) || Object.getPrototypeOf(result) !== Array.prototype) throw new Error('Local model registry must publish native arrays.');
-    const descriptors = Object.getOwnPropertyDescriptors(result), keys = Reflect.ownKeys(result);
-    const length: unknown = Object.getOwnPropertyDescriptor(result, 'length')?.value;
-    if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0 || length > 20_000
-      || keys.length !== length + 1 || keys.some(key => typeof key !== 'string')) throw new Error('Unsupported complete local model registry array layout.');
-    const slots = captureCatalogMethods(result, Object.getOwnPropertyNames(result));
-    const assertArray = () => { slots(); if (Reflect.ownKeys(result).length !== keys.length) throw new Error('Local model registry array layout changed.'); };
-    assertArray();
-    const values: unknown[] = [];
-    for (let index = 0; index < length; index++) {
-      const field = descriptors[String(index)];
-      if (!field || !('value' in field)) throw new Error('Unsupported complete local model registry array layout.');
-      values.push(field.value);
-    }
-    assertArray(); if (retain) originalArrays.push(assertArray);
-    return Object.freeze(values);
+    if (!Array.isArray(result)) throw new Error('Local model registry must publish native arrays.');
+    if (result.length > 20_000) throw new Error('Unsupported complete local model registry array layout.');
+    const length = result.length;
+    const assertArray = () => { if (result.length !== length) throw new Error('Local model registry array layout changed.'); };
+    if (retain) originalArrays.push(assertArray);
+    return Object.freeze([...result]);
   };
   const snapshot = (retain = false): LocalModelRegistrySnapshot => {
     const providers = acquireList(providerList, registry, retain), models = acquireList(modelList, registry, retain);
@@ -706,20 +693,11 @@ export function captureLocalModelRegistry(context: CommandContext): {
   const original = snapshot(true);
   const providers = [...original.providers], models = [...original.models];
   const providerGuards = providers.map(provider => {
-    if (provider === null || typeof provider !== 'object' || nodeTypes.isProxy(provider)) throw new Error('Unsupported native provider adapter.');
-    const guard = captureCatalogMethods(provider, [...MODEL_PROVIDER_READING_FACT_FIELDS, 'isConfigured']);
-    const configured = modelReadingServicePath(provider, ['isConfigured']);
-    if (configured !== undefined && typeof configured === 'function' && nodeTypes.isProxy(configured)) throw new Error('Unsupported native provider metadata method.');
-    const configuredCall = typeof configured === 'function' ? captureCatalogMethods(configured, ['call']) : () => {};
-    if (typeof configured === 'function' && configured.call !== Function.prototype.call) throw new Error('Unsupported native provider metadata invocation.');
-    const modelsField = Object.getOwnPropertyDescriptor(provider, 'models');
+    if (provider === null || typeof provider !== 'object') throw new Error('Unsupported native provider adapter.');
+    // The provider's model list is replaced, not edited, when it changes.
+    const modelList = (provider as { readonly models?: unknown }).models;
     return () => {
-      guard(); configuredCall();
-      const current = Object.getOwnPropertyDescriptor(provider, 'models');
-      if ((modelsField === undefined) !== (current === undefined) || modelsField?.value !== current?.value
-        || modelsField?.get !== current?.get || modelsField?.set !== current?.set
-        || modelsField?.enumerable !== current?.enumerable || modelsField?.configurable !== current?.configurable
-        || modelsField?.writable !== current?.writable) throw new Error('Native provider model metadata changed.');
+      if ((provider as { readonly models?: unknown }).models !== modelList) throw new Error('Native provider model metadata changed.');
     };
   });
   const metadataSnapshot = (native: LocalModelRegistrySnapshot, initial = true): LocalModelRegistrySnapshot => {

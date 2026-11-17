@@ -23,7 +23,6 @@ interface Capture {
   released: boolean;
 }
 const captures = new WeakMap<object, Capture>();
-const nativeStoragePath = Object.getOwnPropertyDescriptor(ArtifactStore.prototype, 'storagePath');
 
 /** Safe text remains complete; redaction markers carry no replaced value. */
 function evidenceParts(text: string): readonly Record<string, string>[] {
@@ -72,10 +71,9 @@ export function createSetupSmokeReferenceCapture(context?: CommandContext,
     const store = (platform as { readonly artifactStore?: SetupSmokeArtifactStore }).artifactStore;
     const assertStore = store ? captureCatalogMethods(store, ['create']) : () => {};
     const create = store?.create;
-    // Only the platform's captured native getter is invoked. Custom fixture stores
-    // retain their opaque identity without acquiring an invented filesystem.
-    const nativeStore = store && Object.getPrototypeOf(store) === ArtifactStore.prototype ? store : undefined;
-    const storeRoot = nativeStore ? nativeStoragePath?.get?.call(nativeStore) as string : undefined;
+    // Only the platform's own store has a directory to watch; a custom store keeps its identity alone.
+    const nativeStore = store instanceof ArtifactStore ? store : undefined;
+    const storeRoot = nativeStore?.storagePath;
     const physicalStore = storeRoot ? captureAgentExportPath(storeRoot, storeRoot) : undefined;
     if (storeRoot && lstatSync(storeRoot).isSymbolicLink()) throw new ToolInputProjectionError('held');
     const safeFields = { ...rawFields };
@@ -103,8 +101,7 @@ export function createSetupSmokeReferenceCapture(context?: CommandContext,
         assertContext(); assertPlatform(); assertConfig(); assertWorkspace(); assertPaths(); assertStore();
         physicalHome?.assertCurrent(); physicalWorkspace?.assertCurrent();
         physicalStore?.assertCurrent();
-        if (nativeStore && (Object.getOwnPropertyDescriptor(ArtifactStore.prototype, 'storagePath')?.get !== nativeStoragePath?.get
-          || Object.hasOwn(nativeStore, 'storagePath') || nativeStoragePath?.get?.call(nativeStore) !== storeRoot
+        if (nativeStore && (nativeStore.storagePath !== storeRoot
           || (storeRoot && lstatSync(storeRoot).isSymbolicLink()))) throw new ToolInputProjectionError('stale');
         if (capture.released || context.platform !== platform || context.workspace !== workspace
           || workspace?.shellPaths !== paths || platform.configManager !== config

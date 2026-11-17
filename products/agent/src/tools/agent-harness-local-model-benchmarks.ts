@@ -1,6 +1,5 @@
 import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { declaredClassicModelStack } from '@goodvibes-jev/engine/platform/platform/routing';
-import { types as nodeTypes } from 'node:util';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
 import { localBenchmarkPrompt } from '@goodvibes-jev/engine/platform/platform/routing';
@@ -408,7 +407,7 @@ async function readOwnedLocalModelBenchmarkSnapshot(context: BenchmarkArtifactCo
     const result = await readContent.call(store, artifact.id); assertCurrent();
     const assertResultSlots = captureCatalogMethods(result, ['record', 'buffer']); assertResultSlots();
     const record = captureModelArtifactClockSource(result.record).native, bytes = result.buffer;
-    if (nodeTypes.isProxy(bytes) || !Buffer.isBuffer(bytes) || record.id !== artifact.id
+    if (!Buffer.isBuffer(bytes) || record.id !== artifact.id
       || record.sizeBytes !== bytes.byteLength) throw new ToolInputProjectionError('held');
     assertModelReadingInputCurrent(benchmarkArtifactDescriptor(record), JSON.stringify(benchmarkArtifactDescriptor(artifact)));
     const savedBytes = Buffer.from(bytes);

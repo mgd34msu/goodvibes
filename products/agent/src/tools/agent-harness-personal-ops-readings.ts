@@ -7,10 +7,8 @@ import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { personalOpsEntry, personalOpsJson } from './agent-harness-personal-ops-source.ts';
 
-const nativeThrowIfAborted = AbortSignal.prototype.throwIfAborted;
-const nativeApply = Reflect.apply;
 function assertNativeCancellation(signal: AbortSignal | undefined): void {
-  if (signal) nativeApply(nativeThrowIfAborted, signal, []);
+  signal?.throwIfAborted();
 }
 
 /** Only the pure interpretation phase is replaceable. The complete original protected source remains owned. */

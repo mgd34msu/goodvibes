@@ -872,9 +872,8 @@ export function projectNativeRemoteWorkspaceDisplayReferences(
         validationText: previewHarnessText(pathReferenceLayout(parsed.validationText), 120) });
     }
     for (const [key, child] of Object.entries(detached)) {
-      const descriptor = Object.getOwnPropertyDescriptor(original, key);
-      if (!descriptor || !Object.hasOwn(descriptor, 'value')) throw new ToolInputProjectionError('held');
-      visit(descriptor.value, child, [...path, Array.isArray(detached) ? Number(key) : key]);
+      if (!Object.hasOwn(original, key)) throw new ToolInputProjectionError('held');
+      visit((original as Record<string, unknown>)[key], child, [...path, Array.isArray(detached) ? Number(key) : key]);
     }
   };
   visit(value, captured, []);

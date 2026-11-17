@@ -163,14 +163,8 @@ class UnknownResearchActionError extends Error {
 }
 
 function readAction(args: AgentResearchToolArgs): AgentResearchAction {
-  // Inspect dispatch fields without invoking caller accessors. The complete
-  // report snapshot below must precede every report argument projection.
-  const routing: Record<string, unknown> = {};
-  for (const key of ['action', 'mode']) {
-    const descriptor = Object.getOwnPropertyDescriptor(args, key);
-    if (descriptor && !('value' in descriptor)) throw new Error('Unsupported research input.');
-    routing[key] = descriptor?.value;
-  }
+  // The arguments were validated and frozen when the call was prepared.
+  const routing: Record<string, unknown> = { action: args.action, mode: args.mode };
   const captured = snapshotJudgmentInput(routing, 'research') as AgentResearchToolArgs;
   const explicit = normalizeResearchAction(captured.action) ?? normalizeResearchAction(captured.mode);
   if (explicit) return explicit;

@@ -219,9 +219,9 @@ function admissionRefusal(action: string): string {
 
 export function requireConfirmedAction(args: Record<string, unknown>, options: Parameters<Tool['execute']>[1], action: string): string | null {
   if (!harnessCatalogInvocationAuthority(args, options)) return admissionRefusal(action);
-  const mode = Object.getOwnPropertyDescriptor(args, 'mode');
-  const outward = mode && 'value' in mode && typeof mode.value === 'string' && ['run_setup_smoke', 'run_local_model_smoke', 'run_memory_refinement',
-    'remote_pair_approve', 'remote_pair_reject', 'remote_peers_invoke', 'remote_work_cancel'].includes(mode.value);
+  const mode = args.mode;
+  const outward = typeof mode === 'string' && ['run_setup_smoke', 'run_local_model_smoke', 'run_memory_refinement',
+    'remote_pair_approve', 'remote_pair_reject', 'remote_peers_invoke', 'remote_work_cancel'].includes(mode);
   return harnessCatalogInvocationAuthority(args, options, outward ? 'send' : 'write')
     ? null : admissionRefusal(action);
 }

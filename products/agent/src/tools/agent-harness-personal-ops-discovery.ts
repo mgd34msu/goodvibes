@@ -1,7 +1,6 @@
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { capturePersonalOpsSnapshot } from './agent-harness-personal-ops-source.ts';
 import { captureModelReadingInput, captureModelReadingSnapshotGuard, modelReadingServicePath } from './agent-harness-model-reading-source.ts';
-import { types as nodeTypes } from 'node:util';
 import { captureCatalogData, captureCatalogMethods, prepareHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { LANE_DEPENDENCY_METHODS, personalOpsLaneMembers, readPersonalOpsSampleField, readPersonalOpsTool, type DiscoveryLane, type PersonalOpsToolContract } from './agent-harness-personal-ops-readings.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -14,9 +13,6 @@ import type { McpSchemaSummary, McpToolRecord, McpToolSchema, OperatorContractMe
 import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 const isFrozen = Object.isFrozen;
-const descriptorsOf = Object.getOwnPropertyDescriptors;
-const propertyKeys = Reflect.ownKeys;
-const isProxy = nodeTypes.isProxy;
 
 export function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -95,12 +91,10 @@ const immutableContractMetadata = new WeakMap<object, ContractMetadata>();
 
 function isFrozenDataTree(value: unknown, seen = new WeakSet<object>()): boolean {
   if (value === null || typeof value !== 'object') return true;
-  if (isProxy(value) || !isFrozen(value)) return false;
+  if (!isFrozen(value)) return false;
   if (seen.has(value)) return true;
   seen.add(value);
-  const descriptors = descriptorsOf(value);
-  return propertyKeys(descriptors).every(key => typeof key === 'string' && Object.hasOwn(descriptors[key]!, 'value')
-    && isFrozenDataTree(descriptors[key]!.value, seen));
+  return Object.values(value).every(child => isFrozenDataTree(child, seen));
 }
 
 /** Methods read per discovery batch; the lanes read every batch once each. */
@@ -147,13 +141,8 @@ async function readContractMethodLanes(lanes: readonly DiscoveryLane[], options:
   const operator = manifest.operator;
   const operatorCurrent = captureCatalogMethods(operator, ['methods']);
   const original = operator.methods;
-  if (!Array.isArray(original) || nodeTypes.isProxy(original) || Object.getPrototypeOf(original) !== Array.prototype)
-    throw new ToolInputProjectionError('invalid');
-  const descriptors = Object.getOwnPropertyDescriptors(original);
-  const keys = Reflect.ownKeys(descriptors);
-  if (keys.length !== original.length + 1 || keys.some(key => typeof key !== 'string' || (key !== 'length'
-    && (!Number.isSafeInteger(Number(key)) || String(Number(key)) !== key || Number(key) < 0 || Number(key) >= original.length
-      || !Object.hasOwn(descriptors[key]!, 'value'))))) throw new ToolInputProjectionError('invalid');
+  if (!Array.isArray(original)) throw new ToolInputProjectionError('invalid');
+  const ownKeyCount = Reflect.ownKeys(original).length;
   const arrayCurrent = captureCatalogMethods(original, Object.getOwnPropertyNames(original));
   const arrayIdentityCurrent = captureCatalogMethods(original, ['length']);
   const assertRoot = () => {
@@ -176,7 +165,7 @@ async function readContractMethodLanes(lanes: readonly DiscoveryLane[], options:
     const immutable = immutableContractMetadata.get(original);
     if (manifest === OPERATOR_CONTRACT && immutable?.manifest === manifest && immutable.operator === operator) return;
     arrayCurrent();
-    if (Reflect.ownKeys(original).length !== keys.length) throw new ToolInputProjectionError('held');
+    if (Reflect.ownKeys(original).length !== ownKeyCount) throw new ToolInputProjectionError('held');
     for (const method of captured) method.assertCurrent();
   };
   const assertCurrent = () => { callerCurrent?.(); assertSource(); };

@@ -6,10 +6,6 @@ import { captureServiceReadSource, captureSubscriptionReadSource, listBuiltinSub
 import type { CommandContext } from '../input/command-registry.ts';
 import { buildProviderAccountSnapshot, type ProviderAccountRecord, type ProviderAccountSnapshot } from '@/runtime/index.ts';
 import { clampReadLimit } from './agent-harness-read-helpers.ts';
-const nativeDateRoot = globalThis;
-const nativeOwnDescriptor = Object.getOwnPropertyDescriptor;
-const initialDateDescriptor = nativeOwnDescriptor(nativeDateRoot, 'Date');
-const nativeDate: DateConstructor | undefined = initialDateDescriptor && 'value' in initialDateDescriptor ? initialDateDescriptor.value : undefined;
 
 type ProviderCatalogContext = {
   readonly provider: Pick<CommandContext['provider'], 'providerRegistry'>;
@@ -69,23 +65,9 @@ async function loadSnapshot(context: ProviderCatalogContext, request?: ReturnTyp
   const list = subscriptions.list, listPending = subscriptions.listPending, get = subscriptions.get, getPending = subscriptions.getPending;
   const configuration = manager.getAutonomousPermissionSnapshot, incarnation = configuration.call(manager).incarnation;
   const environment = process.env, assertProcess = captureCatalogMethods(process, ['env']);
-  // The runtime global object can have a native proxy in its prototype chain.
-  // Retain its own Date slot directly; never inspect that proxy or accept a
-  // replacement constructor/accessor supplied by a caller.
-  const originalDate = nativeOwnDescriptor(nativeDateRoot, 'Date');
-  if (!nativeDate || !originalDate || !('value' in originalDate) || originalDate.value !== nativeDate) throw new ToolInputProjectionError('held');
-  const clock = nativeDate;
-  const assertGlobalClock = () => {
-    const current = nativeOwnDescriptor(nativeDateRoot, 'Date');
-    if (!current || !('value' in current) || current.value !== nativeDate
-      || current.enumerable !== originalDate.enumerable || current.configurable !== originalDate.configurable
-      || current.writable !== originalDate.writable) throw new ToolInputProjectionError('held');
-  };
-  const assertClock = captureCatalogMethods(clock, ['now']), now = clock.now;
   const expirationPhase = (expiresAt: number | undefined) => {
-    assertGlobalClock(); assertClock();
     if (expiresAt === undefined) return 'unspecified';
-    const observed = now.call(clock);
+    const observed = Date.now();
     return expiresAt <= observed ? 'expired' : expiresAt <= observed + 24 * 60 * 60 * 1000 ? 'expiring' : 'healthy';
   };
   const expirations: { readonly expiresAt: number | undefined; readonly phase: ReturnType<typeof expirationPhase> }[] = [];
@@ -98,7 +80,6 @@ async function loadSnapshot(context: ProviderCatalogContext, request?: ReturnTyp
       || platform.serviceRegistry !== services || platform.subscriptionManager !== subscriptions || platform.configManager !== manager
       || configuration.call(manager).incarnation !== incarnation || process.env !== environment) throw new ToolInputProjectionError('held');
     serviceCurrent(); subscriptionCurrent();
-    assertGlobalClock(); assertClock();
     for (const entry of expirations) if (expirationPhase(entry.expiresAt) !== entry.phase) throw new ToolInputProjectionError('held');
     for (const [name, present] of environmentPresence) if (Boolean(environment[name]) !== present) throw new ToolInputProjectionError('held');
     for (const guard of inspectionGuards) guard();
@@ -124,7 +105,7 @@ async function loadSnapshot(context: ProviderCatalogContext, request?: ReturnTyp
     const service = Object.values(serviceSnapshot.captured).find(entry => (entry.providerId ?? entry.name) === providerId);
     const keys = new Set<string>(service?.tokenKey ? [service.tokenKey] : []);
     for (const model of modelSnapshot.captured.filter(entry => entry.provider === providerId)) {
-      const raw: unknown = Object.getOwnPropertyDescriptor(model, 'providerEnvVars')?.value;
+      const raw: unknown = (model as { readonly providerEnvVars?: unknown }).providerEnvVars;
       if (Array.isArray(raw)) for (const key of raw) if (typeof key === 'string' && key.trim().length > 0) keys.add(key);
     }
     const normalized = providerId.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
@@ -188,10 +169,7 @@ async function loadSnapshot(context: ProviderCatalogContext, request?: ReturnTyp
 }
 
 function accountReadingEvidence(account: ProviderAccountRecord): Record<string, unknown> {
-  const fields = Object.getOwnPropertyDescriptors(account);
-  return Object.defineProperties({}, account.expiresAt === undefined ? fields : {
-    ...fields, expiresAt: { ...fields.expiresAt, value: new Date(account.expiresAt).toISOString() },
-  });
+  return account.expiresAt === undefined ? { ...account } : { ...account, expiresAt: new Date(account.expiresAt).toISOString() };
 }
 
 function lookupFromArgs(args: AgentHarnessProviderAccountArgs): { readonly source: ProviderAccountLookupSource; readonly input: string } | null {

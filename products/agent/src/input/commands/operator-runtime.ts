@@ -89,8 +89,7 @@ export function nativeSettingsCommandMutation(
   | undefined {
   const handler = nativeSettingsCommands.get(command);
   if (!handler) return undefined;
-  const descriptor = Object.getOwnPropertyDescriptor(command, 'handler');
-  if (!descriptor || !('value' in descriptor) || descriptor.value !== handler) throw new ToolInputProjectionError('binding-changed');
+  if (command.handler !== handler) throw new ToolInputProjectionError('binding-changed');
   const tokens = stripYesFlag(args).rest;
   const key = tokens[1];
   if (!key) return undefined;

@@ -175,51 +175,33 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
   assertCaller();
   // Keep the complete raw source for native currentness and exact self-write proofs.
   // These columns belong to records acquired through the retained Memory API.
-  // Preserve every other slot, including hidden and nested producer evidence.
+  // Preserve every other slot, including nested producer evidence. `source` is
+  // already a captured plain copy, so its slots are read directly.
   const projectMemoryRecord = (record: unknown): unknown => {
     if (!record || typeof record !== 'object' || Array.isArray(record)) throw new ToolInputProjectionError('invalid');
     const projected: Record<string, unknown> = Object.create(null);
-    for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(record))) {
-      let value: unknown = descriptor.value;
+    for (const [key, original] of Object.entries(record)) {
+      let value: unknown = original;
       if (['createdAt', 'updatedAt', 'reviewedAt', 'validFrom', 'validUntil'].includes(key) && typeof value === 'number') {
         if (!Number.isSafeInteger(value) || Math.abs(value) > 8_640_000_000_000_000) throw new ToolInputProjectionError('invalid');
         value = new Date(value).toISOString();
       }
-      Object.defineProperty(projected, key, { ...descriptor, value });
+      projected[key] = value;
     }
     return projected;
   };
-  const memoryReadingRecords: unknown[] = new Array(source.memoryRecords.length);
-  for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(source.memoryRecords))) {
-    if (key === 'length') continue;
-    const index = Number(key);
-    const indexed = Number.isSafeInteger(index) && index >= 0 && String(index) === key && index < source.memoryRecords.length;
-    Object.defineProperty(memoryReadingRecords, key, { ...descriptor, value: indexed ? projectMemoryRecord(descriptor.value) : descriptor.value });
-  }
-  const replaceSlots = <T extends object, R extends Record<string, unknown>>(record: T, replacements: R): Omit<T, keyof R> & R => {
-    const descriptors: Record<string, PropertyDescriptor> = Object.getOwnPropertyDescriptors(record);
-    for (const [key, value] of Object.entries(replacements)) descriptors[key] = { ...descriptors[key], value };
-    return Object.create(Object.getPrototypeOf(record), descriptors) as Omit<T, keyof R> & R;
-  };
+  const memoryReadingRecords: unknown[] = source.memoryRecords.map(projectMemoryRecord);
+  const replaceSlots = <T extends object, R extends Record<string, unknown>>(record: T, replacements: R): Omit<T, keyof R> & R =>
+    ({ ...record, ...replacements }) as Omit<T, keyof R> & R;
   const nativeClock = (value: unknown): string => {
     if (typeof value !== 'number' || !Number.isSafeInteger(value) || Math.abs(value) > 8_640_000_000_000_000) throw new ToolInputProjectionError('invalid');
     return new Date(value).toISOString();
   };
   const projectSessionMeta = <T extends { readonly timestamp?: number }>(record: T): Omit<T, 'timestamp'> & { readonly timestamp?: string | undefined } => {
-    const descriptor = Object.getOwnPropertyDescriptor(record, 'timestamp');
-    if (!descriptor || descriptor.value === undefined) return record as Omit<T, 'timestamp'>;
-    const value: unknown = descriptor.value;
-    return replaceSlots(record, { timestamp: nativeClock(value) });
+    if (record.timestamp === undefined) return record as Omit<T, 'timestamp'>;
+    return replaceSlots(record, { timestamp: nativeClock(record.timestamp) });
   };
-  const projectCollection = <T, R>(records: readonly T[], project: (record: T) => R): readonly R[] => {
-    const projected: R[] = new Array(records.length);
-    for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(records))) {
-      if (key === 'length') continue;
-      const index = Number(key), indexed = Number.isSafeInteger(index) && index >= 0 && String(index) === key && index < records.length;
-      Object.defineProperty(projected, key, { ...descriptor, value: indexed ? project(descriptor.value) : descriptor.value });
-    }
-    return projected;
-  };
+  const projectCollection = <T, R>(records: readonly T[], project: (record: T) => R): readonly R[] => records.map(record => project(record));
   // Only metadata acquired from this retained SessionManager owns these clock
   // slots. Keep hidden collection/record evidence and every original byte locally.
   const sessionList = projectCollection(source.sessionList, projectSessionMeta);

@@ -1,4 +1,3 @@
-import { types as nodeTypes } from 'node:util';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { SOURCE_SCREENING_LIMITS, type ProtectedSourceOwner, type ProtectedSource, type ProtectedResearchReference, type SourceScreeningHold } from '@goodvibes-jev/engine/platform/platform/security';
 import { ToolInputProjectionError, type ToolInputProjectionProblem, type ToolInputProjector, type ToolInputProjectionRequest, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -70,19 +69,15 @@ function freezePreparedInput(value: Record<string, unknown>): void {
   freeze(value);
 }
 
-/** Complete descriptor capture, including every source before display limits or parsing. */
+/** Complete capture, including every source before display limits or parsing. */
 export function captureResearchInput(value: unknown): Record<string, unknown> {
   let nodes = 0;
   const seen = new Set<object>();
   function inspect(entry: unknown, depth: number): void {
     if (++nodes > 20_000 || depth > 64) stop('invalid', 'The report arguments are nested too deeply or hold too many values.');
     if (!entry || typeof entry !== 'object' || seen.has(entry)) return;
-    if (nodeTypes.isProxy(entry)) stop('invalid', 'The report arguments must be plain JSON data.');
     seen.add(entry);
-    for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(entry))) {
-      if (!('value' in descriptor)) stop('invalid', 'The report arguments must be plain JSON data.');
-      inspect(descriptor.value, depth + 1);
-    }
+    for (const child of Object.values(entry)) inspect(child, depth + 1);
   }
   inspect(value, 0);
   let result: unknown;

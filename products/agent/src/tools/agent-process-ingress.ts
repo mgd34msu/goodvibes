@@ -1,17 +1,11 @@
-import { types as nodeTypes } from 'node:util';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { ToolInputProjectionError, type ToolInputProjector, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ToolInputProjector, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { createHarnessCatalogInputProjector } from './agent-harness-catalog-ingress.ts';
 
 /** Reuse the complete-input screening lease before generic registry readers. */
 export function createProcessInputProjector(registry: ToolRegistry, tool: 'terminal' | 'process' | 'agent_harness', fallback?: ToolInputProjector): ToolInputProjector {
   return createHarnessCatalogInputProjector(registry, fallback, (raw) => {
-    if (nodeTypes.isProxy(raw)) throw new ToolInputProjectionError('held');
-    if (tool === 'agent_harness') {
-      const mode = Object.getOwnPropertyDescriptor(raw, 'mode');
-      if (mode && !('value' in mode)) throw new ToolInputProjectionError('held');
-      if (mode?.value !== 'run_background_process') return false;
-    }
+    if (tool === 'agent_harness' && (raw as { readonly mode?: unknown }).mode !== 'run_background_process') return false;
     const args = snapshotJudgmentInput(raw) as Record<string, unknown>;
     // Protect any supplied command even on a route that will reject/ignore it.
     if (tool === 'terminal' || typeof args.command === 'string' && args.command.trim()) return true;

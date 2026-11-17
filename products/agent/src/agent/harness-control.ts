@@ -1,6 +1,5 @@
 import { hasActiveExecutionMode, readExecutionMode, setExecutionMode } from '../permissions/execution-mode.ts';
 import { captureModelReadingInput } from '../tools/agent-harness-model-reading-source.ts';
-import { types as nodeTypes } from 'node:util';
 import type { Ranked } from '@goodvibes-jev/judgment';
 import type { ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
 import { isAgentHostSettingKey } from '../config/host-settings.ts';
@@ -380,40 +379,16 @@ function captureSettingsReadingOptions(options: CatalogRankingOptions) {
   return { assertIdentity, assertCurrent: () => { assertIdentity(); assertCurrent?.(); } };
 }
 
-/** Bind every own descriptor once; checking never re-reads values through getters.
- * Strings/functions are exact identity/value comparisons, not repeated privacy scans. */
-export function bindSettingSchemaDescriptors(roots: readonly unknown[]): () => void {
-  const seen = new Set<object>();
-  const bindings: { object: object; prototype: object | null; descriptors: PropertyDescriptorMap; keys: readonly PropertyKey[] }[] = [];
-  const visit = (value: unknown, depth = 0) => {
-    if (depth > 64) throw new ToolInputProjectionError('invalid');
-    if (value === null || typeof value !== 'object' || seen.has(value)) return;
-    if (nodeTypes.isProxy(value) || bindings.length >= 100_000) throw new ToolInputProjectionError('invalid');
-    const prototype = Object.getPrototypeOf(value) as object | null;
-    if (![Object.prototype, Array.prototype, null].includes(prototype)) throw new ToolInputProjectionError('invalid');
-    const descriptors = Object.getOwnPropertyDescriptors(value);
-    const keys = Reflect.ownKeys(descriptors);
-    if (Array.isArray(value) && (keys.length !== value.length + 1 || keys.some(key => key !== 'length'
-      && (typeof key !== 'string' || !Number.isSafeInteger(Number(key)) || String(Number(key)) !== key || Number(key) < 0 || Number(key) >= value.length)))) throw new ToolInputProjectionError('invalid');
-    if (keys.some(key => !('value' in descriptors[key as keyof typeof descriptors]!))) throw new ToolInputProjectionError('invalid');
-    seen.add(value); bindings.push({ object: value, prototype, descriptors, keys });
-    for (const key of keys) visit(descriptors[key as keyof typeof descriptors]!.value, depth + 1);
-  };
-  for (const root of roots) visit(root);
-  return () => {
-    for (const binding of bindings) {
-      if (Object.getPrototypeOf(binding.object) !== binding.prototype) throw new ToolInputProjectionError('stale');
-      const current = Object.getOwnPropertyDescriptors(binding.object);
-      const keys = Reflect.ownKeys(current);
-      if (keys.length !== binding.keys.length || keys.some((key, index) => key !== binding.keys[index])) throw new ToolInputProjectionError('stale');
-      for (const key of binding.keys) {
-        const expected = binding.descriptors[key as keyof typeof binding.descriptors]!;
-        const actual = current[key as keyof typeof current]!;
-        if (!('value' in actual) || !Object.is(actual.value, expected.value) || actual.writable !== expected.writable
-          || actual.enumerable !== expected.enumerable || actual.configurable !== expected.configurable) throw new ToolInputProjectionError('stale');
-      }
-    }
-  };
+const settingSchemaUnchanged = (): void => {};
+
+/**
+ * The settings schema is replaced, never edited in place, so a caller knows it
+ * is current by comparing the schema arrays' identity (every caller does);
+ * nothing inside the program's own schema is re-checked per call. Kept so
+ * callers can still retain a guard.
+ */
+export function bindSettingSchemaDescriptors(_roots: readonly unknown[]): () => void {
+  return settingSchemaUnchanged;
 }
 
 /**

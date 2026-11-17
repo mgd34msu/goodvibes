@@ -1,4 +1,3 @@
-import { types as nodeTypes } from 'node:util';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolInputProjector, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { agentResearchReportSourceOwner, captureResearchInput, hasPreparedResearchReport, inheritPreparedResearchReport, prepareProtectedResearchReport } from '../agent/protected-research-report.ts';
@@ -41,22 +40,15 @@ export function createAgentHarnessResearchProjector(registry: ToolRegistry, isRe
   } };
 }
 
-/** Read only routing descriptors; unrelated private setup bodies keep their own boundary. */
+/** Read only the routing fields; unrelated private setup bodies keep their own boundary. */
 function reportRouting(input: Record<string, unknown>): Record<string, unknown> {
-  if (nodeTypes.isProxy(input)) throw new Error('Research routing input is unavailable.');
-  const descriptors = Object.getOwnPropertyDescriptors(input);
   const routing: Record<string, unknown> = {};
   for (const key of ['mode', 'action', 'id', 'actionId', 'workspaceActionId', 'command', 'target', 'query', 'category', 'categoryId']) {
-    const descriptor = descriptors[key];
-    if (descriptor && !('value' in descriptor)) throw new Error('Research routing input is unavailable.');
-    if (descriptor) routing[key] = descriptor.value;
+    if (Object.hasOwn(input, key)) routing[key] = input[key];
   }
-  const fields = descriptors.fields;
-  if (fields && !('value' in fields)) throw new Error('Research routing input is unavailable.');
-  if (fields?.value && typeof fields.value === 'object') {
-    if (nodeTypes.isProxy(fields.value)) throw new Error('Research routing input is unavailable.');
-    const fieldDescriptors = Object.getOwnPropertyDescriptors(fields.value);
-    routing.fields = Object.fromEntries(['sources', 'reportMarkdown'].filter(key => fieldDescriptors[key]).map(key => [key, '']));
+  const fields = input.fields;
+  if (fields && typeof fields === 'object') {
+    routing.fields = Object.fromEntries(['sources', 'reportMarkdown'].filter(key => Object.hasOwn(fields, key)).map(key => [key, '']));
   }
   return routing;
 }

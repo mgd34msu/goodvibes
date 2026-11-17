@@ -585,8 +585,7 @@ export function createAgentOperatorMethodTool(
       // Refuse here, before prepareOperatorRoute/fetch, rather than letting the
       // model discover a bare 404 from a route that was never wired up. The ad
       // must degrade at the source, not rely on the model coping with a 404.
-      const invocationDescriptor = Object.getOwnPropertyDescriptor(method, 'invokable');
-      if (invocationDescriptor && 'value' in invocationDescriptor && invocationDescriptor.value === false) {
+      if (method.invokable === false) {
         return {
           success: false,
           error: `operator method '${method.id}' is unavailable (route not served by this daemon). Do not retry it; the daemon has not wired this capability up.`,

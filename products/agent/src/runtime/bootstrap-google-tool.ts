@@ -19,7 +19,6 @@ import { startLoopbackListener } from '@goodvibes-jev/engine/platform/platform/g
 import { getOutwardApprovalStore, OUTWARD_APPROVAL_GESTURE } from '../trust/outward-approvals.ts';
 import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { retainGoogleConnectionOwners } from '../tools/agent-google-admission.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { createConnectedHost, resolveConnectedHost, type ConnectedHost } from '../agent/connected-host-client.ts';
 
 /** The slice of the runtime this wiring needs. Nothing wider. */
@@ -32,11 +31,8 @@ export interface GoogleToolWiringDeps {
 function readGoogleConfiguration(config: ConfigManager, key: string): unknown {
   let value: unknown = config.getRaw();
   for (const part of key.split('.')) {
-    if (!value || typeof value !== 'object') return undefined;
-    const descriptor = Object.getOwnPropertyDescriptor(value, part);
-    if (!descriptor) return undefined;
-    if (!('value' in descriptor)) throw new ToolInputProjectionError('held');
-    value = descriptor.value;
+    if (!value || typeof value !== 'object' || !Object.hasOwn(value, part)) return undefined;
+    value = (value as Record<string, unknown>)[part];
   }
   return value;
 }

@@ -404,21 +404,11 @@ export async function savePersonalOpsReviewArtifact(options: {
     };
   }
   const assertStoreMethods = captureCatalogMethods(store, ['create']);
-  const prototype: object | null = Object.getPrototypeOf(store);
-  const ownPath = Object.getOwnPropertyDescriptor(store, 'storagePath');
-  const inheritedPath = prototype ? Object.getOwnPropertyDescriptor(prototype, 'storagePath') : undefined;
-  const assertPathDescriptor = () => {
-    const own = Object.getOwnPropertyDescriptor(store, 'storagePath');
-    const inherited = prototype ? Object.getOwnPropertyDescriptor(prototype, 'storagePath') : undefined;
-    if (Object.getPrototypeOf(store) !== prototype || own?.value !== ownPath?.value || own?.get !== ownPath?.get || own?.set !== ownPath?.set
-      || inherited?.value !== inheritedPath?.value || inherited?.get !== inheritedPath?.get || inherited?.set !== inheritedPath?.set) throw new ToolInputProjectionError('stale');
-  };
-  assertPathDescriptor();
   const storagePath = store.storagePath;
   if (typeof storagePath !== 'string' || lstatSync(storagePath).isSymbolicLink()) throw new ToolInputProjectionError('held');
   const physicalRoot = captureAgentExportPath(storagePath, storagePath);
   const assertWriteCurrent = () => {
-    assertEffectCurrent(); assertContext(); assertPlatform(); assertStoreMethods(); assertPathDescriptor();
+    assertEffectCurrent(); assertContext(); assertPlatform(); assertStoreMethods();
     physicalRoot.assertCurrent();
     if (options.context.platform.artifactStore !== store || store.storagePath !== storagePath
       || lstatSync(storagePath).isSymbolicLink()

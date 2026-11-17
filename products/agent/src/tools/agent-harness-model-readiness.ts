@@ -8,7 +8,7 @@ import { assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-je
 import type { CommandContext } from '../input/command-registry.ts';
 import { readProviderHealthSignal } from './agent-harness-model-provider-health.ts';
 import { listProviderRegistryProviders } from './agent-harness-model-catalog.ts';
-import { captureModelReadingInput, captureModelReadingSnapshotGuard, modelReadingServicePath, withModelReadingSource, type ModelReadingOptions } from './agent-harness-model-reading-source.ts';
+import { modelReadingServicePath, withModelReadingSource, type ModelReadingOptions } from './agent-harness-model-reading-source.ts';
 import type { LocalModelBenchmarkEvidence, LocalModelDetection, LocalModelHardwareProfile, LocalModelRecipe, LocalModelRecipeFit, ModelCandidate, ModelReadinessDimension, ModelReadinessScore, ModelRouteReadinessScore } from './agent-harness-model-routing-types.ts';
 import { readRecord } from './agent-harness-model-routing-utils.ts';
 
@@ -61,28 +61,20 @@ function classicFit(options: ModelReadingOptions): LocalModelRecipeFit {
     reasons: ['Classic does not assess semantic hardware/recipe suitability.'] };
 }
 
-const batteryDefinitions = new WeakMap<object, () => void>();
-const getBatteryDefinition = batteryDefinitions.get.bind(batteryDefinitions);
-const setBatteryDefinition = batteryDefinitions.set.bind(batteryDefinitions);
+/** Batteries checked once against the routing registry. */
+const registeredBatteries = new WeakSet<object>();
+const batteryRegistered = (): void => {};
 
-/** Retain the exact native definition once; every reuse still validates it. */
+/**
+ * The batteries are module constants registered when the routing module
+ * loads; whether the registry serves this one is checked once, and nothing
+ * about the program's own definition is re-checked per call.
+ */
 function batteryDefinitionGuard(battery: typeof routeReadiness | typeof localRecipeFit): () => void {
-  const existing = getBatteryDefinition(battery);
-  if (existing) { existing(); return existing; }
-  const assertRegistry = captureCatalogMethods(routingRegistry, ['get']);
-  const get = routingRegistry.get;
-  const assertSlots = captureCatalogMethods(battery, ['name', 'version', 'items', 'composite', 'run']);
-  assertSlots();
-  const values = { name: battery.name, version: battery.version, items: battery.items, composite: battery.composite };
-  captureModelReadingInput(values);
-  const assertValues = captureModelReadingSnapshotGuard(values, true);
-  const assertCurrent = () => {
-    assertRegistry(); assertSlots(); assertValues(values);
-    if (Reflect.apply(get, routingRegistry, [values.name]) !== battery) throw new ToolInputProjectionError('held');
-    assertRegistry(); assertSlots(); assertValues(values);
-  };
-  assertCurrent(); setBatteryDefinition(battery, assertCurrent);
-  return assertCurrent;
+  if (registeredBatteries.has(battery)) return batteryRegistered;
+  if (routingRegistry.get(battery.name) !== battery) throw new ToolInputProjectionError('held');
+  registeredBatteries.add(battery);
+  return batteryRegistered;
 }
 
 function readinessAuthority(battery: typeof routeReadiness | typeof localRecipeFit, scoped: ModelReadingOptions) {

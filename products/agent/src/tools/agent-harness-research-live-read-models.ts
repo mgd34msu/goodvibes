@@ -4,7 +4,6 @@ import { captureCatalogMethods, captureCatalogSnapshot, type CatalogRankingOptio
 import { captureCatalogPath } from './agent-harness-research-catalog-source.ts';
 import { modelReadingServicePath, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
-const nativeApply = Reflect.apply, nativeIsPromise = nodeTypes.isPromise;
 
 import { previewHarnessText } from './agent-harness-text.ts';
 import { certificationRecords, firstAcross, publishedModelRoute, safeNullablePreview, safePreview, stringList } from './agent-harness-read-helpers.ts';
@@ -236,7 +235,6 @@ async function collectFromSource(source: unknown, path: string, kind: SourceCand
   methods: readonly string[], guards: (() => void)[], envelopes: unknown[], assertCurrent: () => void, visited = new WeakSet<object>()): Promise<readonly CollectedRecord[]> {
   assertCurrent();
   if (source == null || typeof source !== 'object') return [];
-  if (nodeTypes.isProxy(source)) throw new ToolInputProjectionError('held');
   if (visited.has(source)) return [];
   visited.add(source);
   if (Array.isArray(source)) {
@@ -280,10 +278,9 @@ async function collectFromSource(source: unknown, path: string, kind: SourceCand
     const original = modelReadingServicePath(source, [method]);
     if (original === undefined) continue;
     if (typeof original !== 'function') continue;
-    if (nodeTypes.isProxy(original)) throw new ToolInputProjectionError('held');
     assertCurrent();
     let raw: unknown;
-    try { const value: unknown = nativeApply(original, source, []); raw = nativeIsPromise(value) ? await value : value; } catch { assertCurrent(); throw new ToolInputProjectionError('held'); }
+    try { const value: unknown = original.call(source); raw = nodeTypes.isPromise(value) ? await value : value; } catch { assertCurrent(); throw new ToolInputProjectionError('held'); }
     assertCurrent();
     if (raw !== undefined) output.push(...await collectFromSource(raw, `${path}.${method}()`, kind, wrapperKeys, methods, guards, envelopes, assertCurrent, visited));
   }
@@ -293,7 +290,6 @@ async function collectFromSource(source: unknown, path: string, kind: SourceCand
   }
   if (output.length > 0) { assertCurrent(); return output; }
   // Empty native snapshots retain the original envelope as a legacy record.
-  // Native methods stay descriptor-bound; only complete original data is read.
   const record = backendData.captured;
   if (record === null || typeof record !== 'object' || Array.isArray(record)) throw new ToolInputProjectionError('held');
   return [{ path, kind, record: readObject(record) }];

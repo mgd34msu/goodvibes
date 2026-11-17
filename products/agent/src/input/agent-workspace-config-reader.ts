@@ -5,12 +5,12 @@ export interface AgentWorkspaceConfigReader {
 }
 
 export function getAgentWorkspaceConfigReader(context: CommandContext): AgentWorkspaceConfigReader | null {
-  const configManager: object = context.platform.configManager;
-  const get = Reflect.get(configManager, 'get');
-  if (typeof get !== 'function') return null;
+  const configManager = context.platform.configManager as { get?: unknown } | null | undefined;
+  if (!configManager || typeof configManager.get !== 'function') return null;
+  const get = configManager.get as (key: string) => unknown;
   return {
     get(key: string): unknown {
-      return Reflect.apply(get, configManager, [key]);
+      return get.call(configManager, key);
     },
   };
 }

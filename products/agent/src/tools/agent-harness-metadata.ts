@@ -93,7 +93,7 @@ export function describeCommandPolicy(commandName: string): CommandExecutionPoli
       effect: 'mixed',
       confirmation,
       preferredModelTool: settingsActions('list', 'get', 'set', 'reset', 'import'),
-      boundary: 'Settings can be changed through the first-class settings adapter, including daemon-owned ones, a write routes to the runtime that owns the key and reports the store it landed in. A change is applied only for what the owner asked in this turn, and confirm or explicitUserRequest arguments are not authority; owner-only keys such as payments.* are refused with the key and the reason.',
+      boundary: 'Settings can be changed through the first-class settings adapter, including daemon-owned ones, a write routes to the runtime that owns the key and reports the store it landed in. A change is applied only for what the owner asked in this turn, and confirm or explicitUserRequest arguments are not authority; payment card details, credential destinations and a credential reference to another key\'s secret are refused with the key and the reason; payment limits and every other setting are written when asked.',
     };
   }
   if (root === 'model' || root === 'effort') {

@@ -14,6 +14,16 @@ export function countUndecidedApprovals(broker: Pick<RuntimeServices['approvalBr
     .filter((approval) => approval.status === 'pending' || approval.status === 'claimed').length;
 }
 
+/** The id of the oldest approval the broker holds that is pending or claimed, or undefined when none is waiting. */
+export function oldestUndecidedApprovalId(broker: Pick<RuntimeServices['approvalBroker'], 'listApprovals'>): string | undefined {
+  let oldest: { readonly id: string; readonly createdAt: number } | undefined;
+  for (const approval of broker.listApprovals(Number.MAX_SAFE_INTEGER)) {
+    if (approval.status !== 'pending' && approval.status !== 'claimed') continue;
+    if (!oldest || approval.createdAt < oldest.createdAt) oldest = approval;
+  }
+  return oldest?.id;
+}
+
 /** Fraction of the model context window at which the context-warning flag activates. */
 const CONTEXT_WARNING_THRESHOLD = 0.85;
 
@@ -36,6 +46,8 @@ export interface UiSessionSnapshot {
   readonly contextWarningActive: boolean;
   /** True while the approval broker holds an approval that is pending or claimed. */
   readonly pendingApproval: boolean;
+  /** The oldest approval that is pending or claimed, so a reader can tell one waiting approval from the next. */
+  readonly pendingApprovalId?: string | undefined;
   readonly denialCount: number;
 }
 
@@ -81,6 +93,7 @@ export function createCoreReadModels(
         const usedTokens = state.conversation.estimatedContextTokens;
         const window = readCurrentContextWindow(runtimeServices.providerRegistry)?.knownContextWindow ?? null;
         const usage = deriveContextUsage(usedTokens, window);
+        const pendingApprovalId = approvalBroker ? oldestUndecidedApprovalId(approvalBroker) : undefined;
         return {
           session: state.session,
           totalTurns: state.conversation.totalTurns,
@@ -96,7 +109,8 @@ export function createCoreReadModels(
           // The gate reports its request only after the decision, so the
           // store flag never reads true while a prompt is open; the broker
           // holds the request for as long as it is undecided.
-          pendingApproval: approvalBroker ? countUndecidedApprovals(approvalBroker) > 0 : false,
+          pendingApproval: pendingApprovalId !== undefined,
+          pendingApprovalId,
           denialCount: state.permissions.denialCount,
         };
       },

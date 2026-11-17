@@ -197,7 +197,9 @@ export function evaluateContextualGuidance(
   if (snapshot.pendingApproval) {
     items.push({
       id: 'pending-approval',
-      occurrence: snapshot.pendingApprovalId ?? 'pending',
+      // Keyed by the approval waiting, so dismissing it never hides the next
+      // one; without an id, by session, so it never hides another session's.
+      occurrence: snapshot.pendingApprovalId ?? `${session}:pending`,
       category: 'recovery',
       title: 'A permission decision is waiting',
       summary: 'Operator approval is currently blocking the active workflow.',

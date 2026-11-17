@@ -115,6 +115,7 @@ import { createPowerChipSource } from './core/power-chip-source.ts';
 import { keepAwakeHolding } from './core/power-status.ts';
 import { createKeepAwakeForwarder, readServedKeepAwakeState, type PowerState } from '@goodvibes-jev/engine/platform/platform/power';
 import { resolveOperatorRpc } from './input/commands/operator-rpc.ts';
+import { wireGuidanceNotices } from './input/commands/guidance-runtime.ts';
 import { wrapRequestPermissionWithAlert } from './core/approval-alert.ts';
 import { createTerminalNotifier } from './core/terminal-notifier.ts';
 import { createDeferredRender } from './renderer/deferred-render.ts';
@@ -1334,6 +1335,8 @@ async function main() {
   unsubs.push(...turnUnsubs);
 
   unsubs.push(uiServices.events.turns.on('TURN_COMPLETED', (evt) => memoryProvenanceUi.onTurnCompleted(evt)));
+  // A new guidance occurrence reaches the notification history without /guidance.
+  unsubs.push(wireGuidanceNotices(commandContext, uiServices.events.turns, (notification) => { ctx.services.notificationDispatcher.dispatch(notification); }));
 
   /**
    * Send the failed turn's own prompt again. The orchestrator keeps that turn's

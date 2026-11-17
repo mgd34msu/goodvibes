@@ -17,6 +17,8 @@ const EMAIL_INBOX_MESSAGE_SCHEMA = objectSchema({
   unread: BOOLEAN_SCHEMA,
   bodyPreview: STRING_SCHEMA,
   messageId: STRING_SCHEMA,
+  /** The daemon's triage label for this message, when its inbox mirror holds a settled one. */
+  triageLabel: { type: 'string', enum: ['spam', 'priority', 'normal'] },
 }, ['uid', 'from', 'subject', 'date', 'unread', 'bodyPreview', 'messageId']);
 
 /**
@@ -287,7 +289,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     id: 'email.inbox.list',
     title: 'List Email Inbox',
     description:
-      'Return inbox message summaries fetched live from the configured IMAP account, newest first (ordered by server-assigned UID, never by the sender-written Date header). Read-only (EXAMINE / BODY.PEEK); never marks messages read. `before` pages backwards: pass the smallest UID of the page you have to get the next older page; `total` counts every match. When the server answered for a message and the daemon could not read the answer, the page is short and `unreadable` says so, an omitted message is not by itself evidence that it was deleted.',
+      'Return inbox message summaries fetched live from the configured IMAP account, newest first (ordered by server-assigned UID, never by the sender-written Date header). Read-only (EXAMINE / BODY.PEEK); never marks messages read. `before` pages backwards: pass the smallest UID of the page you have to get the next older page; `total` counts every match. When the server answered for a message and the daemon could not read the answer, the page is short and `unreadable` says so, an omitted message is not by itself evidence that it was deleted. A message the daemon\'s inbox mirror has labelled carries `triageLabel` (spam, priority or normal); one not labelled yet has none.',
     category: 'email',
     scopes: ['read:email'],
     http: { method: 'GET', path: '/api/email/inbox' },

@@ -51,6 +51,8 @@ export interface InboxListInput {
   limit?: number;
   since?: number;
   cursor?: string;
+  /** Only the mail rows of these UIDs in the live mailbox (the email provider's current account and generation). */
+  uids?: number[];
 }
 
 /** One item in the platform CHANNEL_INBOX_ITEM_SCHEMA wire shape. */
@@ -120,6 +122,8 @@ export interface InboxListQuery {
   limit: number;
   since?: number;
   after?: InboxPosition;
+  /** Mail UIDs to look up in the live mailbox's rows; see InboxListInput.uids. */
+  uids?: readonly number[];
 }
 
 /** Everything the aggregator reads from. Both are already-built collaborators. */
@@ -196,6 +200,7 @@ export function normalizeInboxQuery(
   const sinceRaw = firstNumber('since', query.since, fromBody.since);
   if (sinceRaw !== undefined && sinceRaw < 0) throw invalidNumber('since');
   const cursor = firstString(query.cursor, fromBody.cursor);
+  const uids = readUids(fromBody.uids);
 
   const limit = limitRaw === undefined
     ? DEFAULT_LIMIT
@@ -206,7 +211,33 @@ export function normalizeInboxQuery(
     limit,
     ...(sinceRaw !== undefined ? { since: Math.floor(sinceRaw) } : {}),
     ...(cursor ? { after: decodePageCursor(cursor) } : {}),
+    ...(uids ? { uids } : {}),
   };
+}
+
+/** Up to MAX_LIMIT positive integer UIDs, or a refusal; absent when not given. */
+function readUids(raw: unknown): number[] | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (!Array.isArray(raw) || raw.length > MAX_LIMIT || !raw.every((uid) => Number.isSafeInteger(uid) && (uid as number) > 0)) {
+    throw new HandlerError(`uids must be a list of at most ${MAX_LIMIT} positive integer UIDs; omit it to read the feed`, 'INVALID_ARGUMENT', 400);
+  }
+  return raw as number[];
+}
+
+/**
+ * The mirror ids of these UIDs in each pushed mail provider's live mailbox:
+ * `<provider>:<account scope>:<uidvalidity>:<uid>`. A provider that has not
+ * reported its account and generation names none, so nothing from an older
+ * mailbox generation is matched.
+ */
+function mailRowIds(poller: InboxAggregatorSources['poller'], providers: readonly string[], uids: readonly number[]): string[] {
+  const ids: string[] = [];
+  for (const status of poller.snapshotStatuses(providers)) {
+    const generation = status.mailboxProgress?.uidValidity ?? status.mailboxHistory?.uidValidity;
+    if (!status.mailboxScope || typeof generation !== 'number') continue;
+    for (const uid of uids) ids.push(`${status.id}:${status.mailboxScope}:${generation}:${uid}`);
+  }
+  return ids;
 }
 
 function firstString(...candidates: (string | undefined)[]): string | undefined {
@@ -274,7 +305,8 @@ export function aggregateInbox(
   query: InboxListQuery,
 ): InboxListOutput {
   const { store, poller } = sources;
-  const providers = query.providers;
+  const providers = query.uids ? query.providers ?? ['email'] : query.providers;
+  const ids = query.uids ? mailRowIds(poller, providers!, query.uids) : undefined;
 
   // One row past the page. `hasMore` then reports what the store actually
   // holds rather than being inferred from "the page came back full", which is
@@ -283,13 +315,14 @@ export function aggregateInbox(
     ...(providers ? { providers } : {}),
     ...(query.since !== undefined ? { since: query.since } : {}),
     ...(query.after ? { after: query.after } : {}),
-    limit: query.limit + 1,
+    ...(ids ? { ids } : {}),
+    limit: ids ? ids.length + 1 : query.limit + 1,
   });
-  const hasMore = fetched.length > query.limit;
+  const hasMore = !ids && fetched.length > query.limit;
   const pageItems = hasMore ? fetched.slice(0, query.limit) : fetched;
   const items = pageItems.map(toWireItem);
 
-  const total = store.countItems(providers, query.since);
+  const total = ids ? pageItems.length : store.countItems(providers, query.since);
   const storedByProvider = store.countItemsByProvider(providers, query.since);
   const pageByProvider = new Map<string, number>();
   for (const item of pageItems) {

@@ -29,7 +29,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, AlertTriangle, Archive, FileText, Inbox, Mail, MailOpen, Pencil, RefreshCw, Reply, Trash2 } from 'lucide-react';
-import { client as platformClient, invokeMethod } from '../../lib/goodvibes';
+import { client as platformClient } from '../../lib/goodvibes';
 import type { EmailDraftCreateInput, EmailSendInput, EmailUnreadableMessage } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { errorCode, formatError, isDaemonUnreachableError } from '../../lib/errors';
@@ -88,43 +88,6 @@ function UnreadableNote({ items }: { items: readonly EmailUnreadableMessage[] })
       </div>
     </div>
   );
-}
-
-interface MailMirrorAnswer {
-  readonly items?: readonly { readonly id?: unknown; readonly triageLabel?: unknown }[];
-  readonly providers?: readonly {
-    readonly provider?: unknown;
-    readonly mailboxScope?: unknown;
-    readonly mailboxProgress?: { readonly uidValidity?: unknown };
-    readonly mailboxHistory?: { readonly uidValidity?: unknown };
-  }[];
-}
-
-/**
- * Spam and priority labels by UID from a `channels.inbox.list` answer; normal mail
- * carries no mark. A mirror row is named `email:<account>:<uidvalidity>:<uid>`, and a
- * UID means this message only within this account and mailbox generation, so a label
- * counts only when both match what the email provider reports for the live mailbox.
- * Without that report nothing is labelled rather than labelling the wrong message.
- */
-function mailTriageLabels(answer: unknown): ReadonlyMap<number, 'spam' | 'priority'> {
-  const labels = new Map<number, 'spam' | 'priority'>();
-  if (!answer || typeof answer !== 'object') return labels;
-  const { items = [], providers = [] } = answer as MailMirrorAnswer;
-  const mailbox = providers.find((entry) => entry.provider === 'email');
-  const scope = typeof mailbox?.mailboxScope === 'string' ? mailbox.mailboxScope : '';
-  const generation = mailbox?.mailboxProgress?.uidValidity ?? mailbox?.mailboxHistory?.uidValidity;
-  if (!scope || typeof generation !== 'number') return labels;
-  const prefix = `email:${scope}:`;
-  for (const item of items) {
-    if (typeof item.id !== 'string' || !item.id.startsWith(prefix)) continue;
-    if (item.triageLabel !== 'spam' && item.triageLabel !== 'priority') continue;
-    const [validity, uidText, extra] = item.id.slice(prefix.length).split(':');
-    if (extra !== undefined || Number(validity) !== generation) continue;
-    const uid = Number(uidText);
-    if (Number.isSafeInteger(uid) && uid > 0) labels.set(uid, item.triageLabel);
-  }
-  return labels;
 }
 
 function normalizeRecipients(value: string): string {
@@ -237,16 +200,17 @@ export function MailView({ tabs }: MailViewProps = {}) {
       return Math.min(...last.messages.map((message) => message.uid));
     },
   });
-  // Triage labels live in the daemon's inbox store, one row per message named
-  // `email:<account>:<uidvalidity>:<uid>`, matched to this mailbox by account and
-  // generation (mailTriageLabels). Best effort: a daemon without that store, or one
-  // that refuses, leaves the list unlabelled, never failed.
-  const triage = useQuery({
-    queryKey: ['email', 'triage-labels'] as const,
-    queryFn: () => invokeMethod('channels.inbox.list', { provider: 'email', limit: 500 }),
-    retry: false,
-  });
-  const labels = useMemo(() => mailTriageLabels(triage.data), [triage.data]);
+  // Each listed message carries the daemon's triage label (email.inbox.list joins
+  // its inbox mirror by account and mailbox generation); normal mail has no mark.
+  const labels = useMemo(() => {
+    const byUid = new Map<number, 'spam' | 'priority'>();
+    for (const page of inbox.data?.pages ?? []) {
+      for (const message of page.messages) {
+        if (message.triageLabel === 'spam' || message.triageLabel === 'priority') byUid.set(message.uid, message.triageLabel);
+      }
+    }
+    return byUid;
+  }, [inbox.data]);
   const detail = useMailMessage(selectedUid);
   const drafts = useQuery({
     queryKey: ['email', 'drafts'] as const,
@@ -462,7 +426,7 @@ export function MailView({ tabs }: MailViewProps = {}) {
         Drafts
       </Button>
       <div className="dv-filters__end">
-        <IconButton label="Refresh inbox" icon={<RefreshCw />} onClick={() => { void inbox.refetch(); void triage.refetch(); if (showDrafts) void drafts.refetch(); }} />
+        <IconButton label="Refresh inbox" icon={<RefreshCw />} onClick={() => { void inbox.refetch(); if (showDrafts) void drafts.refetch(); }} />
       </div>
     </>
   );

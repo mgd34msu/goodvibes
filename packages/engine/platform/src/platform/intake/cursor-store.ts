@@ -192,6 +192,8 @@ export interface InboxQuery {
   after?: InboxPosition;
   /** Max items returned across the whole query. */
   limit: number;
+  /** Only these rows, by id (an indexed lookup). */
+  ids?: readonly string[];
 }
 
 /** One receipt to store beside its row, scored against the row revision it names. */
@@ -555,6 +557,11 @@ export class InboxCursorStore {
     if (typeof query.since === 'number' && Number.isFinite(query.since)) {
       clauses.push('seq > ?');
       params.push(Math.floor(query.since));
+    }
+    if (query.ids) {
+      if (query.ids.length === 0) return [];
+      clauses.push(`items.id IN (${query.ids.map(() => '?').join(', ')})`);
+      params.push(...query.ids);
     }
     if (query.after && Number.isFinite(query.after.receivedAt)) {
       // Strictly after the cursor row in (receivedAt DESC, id ASC) order: an

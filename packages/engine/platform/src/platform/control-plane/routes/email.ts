@@ -59,6 +59,8 @@ export interface EmailGatewayMessageSummary {
   readonly unread: boolean;
   readonly bodyPreview: string;
   readonly messageId: string;
+  /** The daemon's triage label, when its inbox mirror holds a settled one for this message. */
+  readonly triageLabel?: 'spam' | 'priority' | 'normal';
 }
 
 export interface EmailGatewayAttachment {
@@ -242,15 +244,53 @@ function readOptionalCount(value: unknown): number | undefined {
   return Math.max(1, Math.trunc(parsed));
 }
 
-export function createEmailInboxListHandler(service: EmailGatewayService): GatewayMethodHandler {
+/** Reads the daemon's own inbox mirror for the listed UIDs (`channels.inbox.list` with `uids`). */
+export type EmailTriageLabelReader = (uids: readonly number[]) => Promise<ReadonlyMap<number, NonNullable<EmailGatewayMessageSummary['triageLabel']>>>;
+
+/**
+ * The triage labels of these UIDs from the daemon's inbox mirror, in process:
+ * one indexed lookup of exactly the listed rows, no feed read and no second
+ * request from the client. Best effort: no mirror, or one that cannot be read
+ * now, leaves the list unlabelled.
+ */
+export function catalogTriageLabelReader(catalog: GatewayMethodCatalog): EmailTriageLabelReader {
+  return async (uids) => {
+    const labels = new Map<number, NonNullable<EmailGatewayMessageSummary['triageLabel']>>();
+    if (uids.length === 0 || !catalog.hasHandler('channels.inbox.list')) return labels;
+    try {
+      const mirror = await catalog.invoke('channels.inbox.list', { body: { provider: 'email', uids: [...uids] }, context: {} }) as {
+        readonly items?: readonly { readonly id?: unknown; readonly triageLabel?: unknown }[];
+      };
+      for (const item of mirror.items ?? []) {
+        if (typeof item.id !== 'string') continue;
+        const uid = Number(item.id.slice(item.id.lastIndexOf(':') + 1));
+        const label = item.triageLabel;
+        if (Number.isSafeInteger(uid) && (label === 'spam' || label === 'priority' || label === 'normal')) labels.set(uid, label);
+      }
+    } catch { /* No mirror now: the list is shown unlabelled. */ }
+    return labels;
+  };
+}
+
+export function createEmailInboxListHandler(service: EmailGatewayService, triageLabels?: EmailTriageLabelReader): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    return service.listInbox({
+    const result = await service.listInbox({
       limit: readOptionalCount(params.limit),
       since: readOptionalString(params.since),
       unreadOnly: readOptionalBoolean(params.unreadOnly),
       ...(params.before === undefined ? {} : { before: readUid(params.before) }),
     });
+    if (!triageLabels || result.messages.length === 0) return result;
+    const labels = await triageLabels(result.messages.map((message) => message.uid));
+    if (labels.size === 0) return result;
+    return {
+      ...result,
+      messages: result.messages.map((message) => {
+        const triageLabel = labels.get(message.uid);
+        return triageLabel === undefined ? message : { ...message, triageLabel };
+      }),
+    };
   };
 }
 
@@ -547,7 +587,7 @@ export function registerEmailGatewayMethods(
   ownerAddresses: OwnerAddressSource = new Set(),
 ): void {
   const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
-  attach('email.inbox.list', createEmailInboxListHandler(service));
+  attach('email.inbox.list', createEmailInboxListHandler(service, catalogTriageLabelReader(catalog)));
   attach('email.inbox.read', createEmailInboxReadHandler(service));
   attach('email.inbox.update', createEmailInboxUpdateHandler(service));
   attach('email.attachment.get', createEmailAttachmentGetHandler(service));

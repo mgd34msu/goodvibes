@@ -154,9 +154,7 @@ export const coreConfigDefaults = {
   notifications: {
     webhookUrls: [],
     adaptiveSuppression: true,
-    burstWindowMs: 1_000,
     burstThreshold: 3,
-    burstCooldownMs: 3_000,
     pushApproval: true,
     pushNeedsInput: true,
     pushCompletion: true,
@@ -773,7 +771,8 @@ export const coreTailConfigSettings: ConfigSettingDefinition[] = [
     key: 'cache.stableTtl',
     type: 'enum',
     default: '1h',
-    description: 'Cache TTL for stable content (system prompt + tools): 5m (ephemeral) or 1h (persistent)',
+    description: 'Cache TTL for stable content (system prompt + tools): 5m or 1h. On Anthropic a 1h write is billed at '
+      + '2x the input rate (5m: 1.25x) and session cost prices it that way; 1h pays off when a session pauses more than five minutes between requests.',
     enumValues: ['5m', '1h'],
   },
   {

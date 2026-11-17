@@ -356,7 +356,7 @@ export class AnthropicCompatProvider implements LLMProvider {
       return {
         content: text,
         toolCalls,
-        usage: { inputTokens: state.inputTokens, outputTokens: state.outputTokens, cacheReadTokens: state.cacheReadTokens, cacheWriteTokens: state.cacheWriteTokens },
+        usage: { inputTokens: state.inputTokens, outputTokens: state.outputTokens, cacheReadTokens: state.cacheReadTokens, cacheWriteTokens: state.cacheWriteTokens, ...(state.cacheWriteLongTokens > 0 ? { cacheWriteLongTokens: state.cacheWriteLongTokens } : {}) },
         stopReason: resolveCompletedStopReason(state.stopReason, text),
         ...withProviderStopReason(state.rawStopReason),
         ...(rateLimit ? { rateLimit } : {}),

@@ -29,6 +29,7 @@ export interface AnthropicSSEEvent {
       output_tokens: number;
       cache_read_input_tokens?: number | undefined;
       cache_creation_input_tokens?: number | undefined;
+      cache_creation?: AnthropicCacheCreation | undefined;
     };
   };
   usage?: {
@@ -36,7 +37,27 @@ export interface AnthropicSSEEvent {
     output_tokens?: number | undefined;
     cache_read_input_tokens?: number | undefined;
     cache_creation_input_tokens?: number | undefined;
+    cache_creation?: AnthropicCacheCreation | undefined;
   };
+}
+
+/** Cache writes split by lifetime; a one-hour write is billed at a higher rate than a five-minute one. */
+export interface AnthropicCacheCreation {
+  ephemeral_5m_input_tokens?: number | undefined;
+  ephemeral_1h_input_tokens?: number | undefined;
+}
+
+/** The one-hour share of a cache write, when the usage reports the split. */
+export function oneHourCacheWriteTokens(usage: { readonly cache_creation?: unknown } | undefined): number | undefined {
+  const split = usage?.cache_creation;
+  if (!split || typeof split !== 'object') return undefined;
+  const tokens = (split as AnthropicCacheCreation).ephemeral_1h_input_tokens;
+  return typeof tokens === 'number' && Number.isFinite(tokens) && tokens > 0 ? tokens : undefined;
+}
+
+/** The usage field for a one-hour cache write count, absent when there was none. */
+export function withOneHourCacheWrites(tokens: number | undefined): { cacheWriteLongTokens?: number } {
+  return tokens !== undefined && tokens > 0 ? { cacheWriteLongTokens: tokens } : {};
 }
 
 /** Mutable accumulator for a single Anthropic streaming response. */
@@ -46,6 +67,8 @@ export interface AnthropicSSEState {
   outputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
+  /** The part of cacheWriteTokens written with the one-hour lifetime. */
+  cacheWriteLongTokens: number;
   rawStopReason: string | undefined;
   stopReason: ChatStopReason;
   messageStopped: boolean;
@@ -60,6 +83,7 @@ export function createAnthropicSSEState(): AnthropicSSEState {
     outputTokens: 0,
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
+    cacheWriteLongTokens: 0,
     rawStopReason: undefined,
     stopReason: 'unknown',
     messageStopped: false,
@@ -121,12 +145,15 @@ export function processAnthropicSSEEvent(
     if (event.usage?.output_tokens) state.outputTokens = event.usage.output_tokens;
     if (event.usage?.cache_read_input_tokens != null) state.cacheReadTokens = event.usage.cache_read_input_tokens;
     if (event.usage?.cache_creation_input_tokens != null) state.cacheWriteTokens = event.usage.cache_creation_input_tokens;
+    const deltaLong = oneHourCacheWriteTokens(event.usage);
+    if (deltaLong !== undefined) state.cacheWriteLongTokens = deltaLong;
   } else if (event.type === 'message_start') {
     if (event.message?.usage) {
       state.inputTokens = event.message.usage.input_tokens;
       state.outputTokens = event.message.usage.output_tokens;
       state.cacheReadTokens = event.message.usage.cache_read_input_tokens ?? 0;
       state.cacheWriteTokens = event.message.usage.cache_creation_input_tokens ?? 0;
+      state.cacheWriteLongTokens = oneHourCacheWriteTokens(event.message.usage) ?? 0;
     }
   }
 }

@@ -418,6 +418,8 @@ export interface ChatResponse {
     outputTokens: number;
     cacheReadTokens?: number;  // Anthropic: tokens read from prompt cache
     cacheWriteTokens?: number; // Anthropic: tokens written to prompt cache
+    /** The part of cacheWriteTokens written with a one-hour lifetime, billed at a higher rate. */
+    cacheWriteLongTokens?: number;
   };
   /** Normalized stop reason, use this for cross-provider comparisons. */
   stopReason: ChatStopReason;

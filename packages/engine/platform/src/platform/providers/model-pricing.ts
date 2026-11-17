@@ -19,6 +19,7 @@
  */
 
 import type { CatalogModel } from './model-catalog.js';
+import { oneHourWriteCostMultiplier } from './cache-capability.js';
 import { validManualModelPrice as validManualPrice, type ManualModelPrice } from '../config/manual-model-prices.js';
 export { validateManualModelPrices } from '../config/manual-model-prices.js';
 export type { ManualModelPrice } from '../config/manual-model-prices.js';
@@ -122,6 +123,8 @@ export interface UsageTokenCounts {
   readonly outputTokens: number;
   readonly cacheReadTokens?: number | undefined;
   readonly cacheWriteTokens?: number | undefined;
+  /** The part of cacheWriteTokens written with a one-hour lifetime (Anthropic reports the split). */
+  readonly cacheWriteLongTokens?: number | undefined;
 }
 
 /**
@@ -141,11 +144,17 @@ export function computeUsageCostUsd(
   const mult = cacheRateMultipliers(provider);
   const cacheReadRate = rates.cacheReadPerMTok ?? rates.inputPerMTok * mult.read;
   const cacheWriteRate = rates.cacheWritePerMTok ?? rates.inputPerMTok * mult.write;
+  // A catalog's single cache-write rate is the five-minute one; a one-hour
+  // write is billed at the provider's own multiple of the input rate.
+  const cacheWrite = usage.cacheWriteTokens ?? 0;
+  const longMultiplier = provider ? oneHourWriteCostMultiplier(provider) : undefined;
+  const longWrite = longMultiplier === undefined ? 0 : Math.min(cacheWrite, Math.max(0, usage.cacheWriteLongTokens ?? 0));
   return (
     usage.inputTokens * rates.inputPerMTok +
     usage.outputTokens * rates.outputPerMTok +
     (usage.cacheReadTokens ?? 0) * cacheReadRate +
-    (usage.cacheWriteTokens ?? 0) * cacheWriteRate
+    (cacheWrite - longWrite) * cacheWriteRate +
+    longWrite * rates.inputPerMTok * (longMultiplier ?? 1)
   ) / 1_000_000;
 }
 

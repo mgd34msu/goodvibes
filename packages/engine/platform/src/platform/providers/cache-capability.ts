@@ -138,6 +138,17 @@ export function supportsCaching(providerName: string): boolean {
   return getCacheCapability(providerName).type !== 'none';
 }
 
+/**
+ * The price of a one-hour cache write as a multiple of the fresh input rate,
+ * from the provider's own row; undefined when the provider has no one-hour
+ * lifetime. The cost path prices one-hour writes with it.
+ */
+export function oneHourWriteCostMultiplier(providerName: string): number | undefined {
+  const cap = getCacheCapability(providerName);
+  if (cap.type !== 'explicit') return undefined;
+  return cap.ttlOptions.find((option) => option.label === '1h')?.writeCostMultiplier;
+}
+
 /** Get the best TTL option for stable content (system prompt + tools). */
 export function getStableTtl(cap: ProviderCacheCapability): { label: string; seconds: number } | null {
   if (cap.type !== 'explicit') return null;

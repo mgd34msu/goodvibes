@@ -17,7 +17,7 @@ import {
   toAnthropicMessages,
   toAnthropicTools,
 } from './tool-formats.js';
-import { assembleAnthropicContentBlocks } from './anthropic-sse-assembler.js';
+import { assembleAnthropicContentBlocks, oneHourCacheWriteTokens, withOneHourCacheWrites } from './anthropic-sse-assembler.js';
 import { resolveCompletedStopReason, withProviderStopReason } from './provider-stop-reason.js';
 import { ProviderError } from '../types/errors.js';
 import { withRetry } from '../utils/retry.js';
@@ -41,6 +41,7 @@ type AnthropicMessageStream = AsyncIterable<MessageStreamEvent> & {
       output_tokens: number;
       cache_read_input_tokens?: number | null | undefined;
       cache_creation_input_tokens?: number | null | undefined;
+      cache_creation?: unknown;
     };
   }>;
   /**
@@ -218,6 +219,7 @@ export class AnthropicMessagesProvider implements LLMProvider {
             outputTokens: finalMessage.usage.output_tokens,
             ...(finalMessage.usage.cache_read_input_tokens != null ? { cacheReadTokens: finalMessage.usage.cache_read_input_tokens } : {}),
             ...(finalMessage.usage.cache_creation_input_tokens != null ? { cacheWriteTokens: finalMessage.usage.cache_creation_input_tokens } : {}),
+            ...withOneHourCacheWrites(oneHourCacheWriteTokens(finalMessage.usage)),
           },
           stopReason: resolveCompletedStopReason(stopReason, parsed.text),
           ...withProviderStopReason(rawStopReason),

@@ -34,7 +34,7 @@ import {
   fromAnthropicContent,
   normalizeAnthropicModel,
 } from './tool-formats.js';
-import { createAnthropicSSEState, readAnthropicSSEStream, assembleAnthropicContentBlocks } from './anthropic-sse-assembler.js';
+import { createAnthropicSSEState, readAnthropicSSEStream, assembleAnthropicContentBlocks, oneHourCacheWriteTokens, withOneHourCacheWrites } from './anthropic-sse-assembler.js';
 import { withProviderStopReason } from './provider-stop-reason.js';
 import type { AnthropicContentBlock } from './tool-formats.js';
 import { summarizeError, toProviderError } from '../utils/error-display.js';
@@ -363,7 +363,7 @@ export class AnthropicProvider implements LLMProvider {
       return {
         content: text,
         toolCalls,
-        usage: { inputTokens: state.inputTokens, outputTokens: state.outputTokens, cacheReadTokens: state.cacheReadTokens, cacheWriteTokens: state.cacheWriteTokens },
+        usage: { inputTokens: state.inputTokens, outputTokens: state.outputTokens, cacheReadTokens: state.cacheReadTokens, cacheWriteTokens: state.cacheWriteTokens, ...(state.cacheWriteLongTokens > 0 ? { cacheWriteLongTokens: state.cacheWriteLongTokens } : {}) },
         stopReason: state.stopReason,
         ...withProviderStopReason(state.rawStopReason),
         cacheMetrics: {
@@ -676,6 +676,7 @@ export class AnthropicProvider implements LLMProvider {
         outputTokens: typeof usage['output_tokens'] === 'number' ? usage['output_tokens'] : 0,
         ...(typeof usage['cache_read_input_tokens'] === 'number' ? { cacheReadTokens: usage['cache_read_input_tokens'] } : {}),
         ...(typeof usage['cache_creation_input_tokens'] === 'number' ? { cacheWriteTokens: usage['cache_creation_input_tokens'] } : {}),
+        ...withOneHourCacheWrites(oneHourCacheWriteTokens(usage)),
       },
       stopReason: rawStopReason ? mapAnthropicStopReason(rawStopReason) : (text ? 'completed' : 'unknown'),
       ...(rawStopReason ? { providerStopReason: rawStopReason } : {}),

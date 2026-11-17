@@ -498,6 +498,12 @@ export class ConversationManager {
     return cloneMessages(this.messages.slice(-Math.max(0, count)));
   }
 
+  /** The text of one message, read in place (no copy); undefined when the index is out of range or the content is not plain text. */
+  public messageTextAt(index: number): string | undefined {
+    const content = this.messages[index]?.content;
+    return typeof content === 'string' ? content : undefined;
+  }
+
   /** True when a system message satisfies the test; scans in place so a per-check liveness probe does not deep-copy the history. */
   public hasSystemMessage(test: (message: Readonly<Extract<ConversationMessageSnapshot, { role: 'system' }>>) => boolean): boolean {
     return this.messages.some((message) => message.role === 'system' && test(message));

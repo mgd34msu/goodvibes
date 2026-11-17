@@ -8,7 +8,6 @@ const { nodeLabel } = createKnowledgeLabels(' confidence=');
 import type { KnowledgeService } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { CommandContext, SlashCommand } from '../command-registry.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
 
 type KnowledgeAskInput = Parameters<KnowledgeService['ask']>[0];
 type KnowledgeAskResult = Awaited<ReturnType<KnowledgeService['ask']>>;
@@ -49,68 +48,56 @@ export const knowledgeCommand: SlashCommand = {
     if (!knowledge) {
       return;
     }
-    const conversation = context.session.conversationManager;
-    const sessionId = context.session.runtime.sessionId;
-    const lifetime = conversation.captureHistoryReadingLifetime();
-    const assertCurrent = () => {
-      lifetime.assertCurrent();
-      if (
-        context.session.conversationManager !== conversation ||
-        context.session.runtime.sessionId !== sessionId ||
-        context.clients?.knowledgeApi !== knowledge
-      )
-        throw new JudgmentAuthorityRetiredError();
-    };
-    const readingOptions = { signal: lifetime.signal, assertCurrent };
-    const print = (text: string) => {
-      assertCurrent();
-      context.print(text);
-    };
     if (args.length === 0 && context.openKnowledgeView) {
       context.openKnowledgeView();
       return;
     }
     const sub = (args[0] ?? 'status').toLowerCase();
     const rest = args.slice(1);
+    // A knowledge read does not depend on the transcript: its answer is printed
+    // once, in the session that asked for it.
+    const sessionId = context.session.runtime.sessionId;
+    const print = (text: string): void => context.print(text);
 
-    assertCurrent();
-    if (
-      await handleKnowledgeReadCommand(
-        sub,
-        rest,
-        print,
-        {
-          status: () => knowledge.status.get(),
-          nodes: (limit) => knowledge.graph.nodes.list(limit, readingOptions),
-          issues: (limit) => knowledge.graph.issues.list(limit, readingOptions),
-          sources: (limit) => knowledge.sources.list(limit, readingOptions),
-          search: (query, limit) => knowledge.graph.items.search(query, limit),
-          get: (id) => knowledge.graph.items.get(id, {}, readingOptions),
-          lint: () => knowledge.status.lint(),
-          candidates: (limit) => knowledge.consolidation.candidates(limit),
-          reports: (limit) => knowledge.consolidation.reports(limit),
-          schedules: (limit) => knowledge.jobs.schedules.list(limit),
-          packet: (query, scopes) => knowledge.packets.buildPrompt(query, scopes),
-          assertCurrent,
-        },
-        {
-          statusTitle: '[knowledge] Structured knowledge status',
-          headingSuffix: ':',
-          fieldSeparator: ': ',
-          scoreSeparator: '=',
-          nodeKind: 'kind',
-        },
-      )
-    )
+    const answer = await handleKnowledgeReadCommand(
+      sub,
+      rest,
+      {
+        status: () => knowledge.status.get(),
+        nodes: (limit) => knowledge.graph.nodes.list(limit),
+        issues: (limit) => knowledge.graph.issues.list(limit),
+        sources: (limit) => knowledge.sources.list(limit),
+        search: (query, limit) => knowledge.graph.items.search(query, limit),
+        get: (id) => knowledge.graph.items.get(id),
+        lint: () => knowledge.status.lint(),
+        candidates: (limit) => knowledge.consolidation.candidates(limit),
+        reports: (limit) => knowledge.consolidation.reports(limit),
+        schedules: (limit) => knowledge.jobs.schedules.list(limit),
+        packet: (query, scopes) => knowledge.packets.buildPrompt(query, scopes),
+      },
+      {
+        statusTitle: '[knowledge] Structured knowledge status',
+        headingSuffix: ':',
+        fieldSeparator: ': ',
+        scoreSeparator: '=',
+        nodeKind: 'kind',
+      },
+    );
+    if (answer) {
+      print(
+        context.session.runtime.sessionId === sessionId
+          ? answer.join('\n')
+          : `[knowledge] The session changed while /knowledge ${sub} was reading, so its answer is not shown here. Run it again.`,
+      );
       return;
-    assertCurrent();
+    }
     if (
       await handleKnowledgeMutationCommand(
         sub,
         rest,
         print,
         {
-          sessionId: () => context.session.runtime.sessionId,
+          sessionId: () => sessionId,
           url: (input) => knowledge.ingest.url(input),
           bookmarksFile: (input) => knowledge.ingest.bookmarksFile(input),
           urlsFile: (input) => knowledge.ingest.urlsFile(input),
@@ -124,7 +111,6 @@ export const knowledgeCommand: SlashCommand = {
       )
     )
       return;
-    assertCurrent();
     switch (sub) {
       case 'ask': {
         const ask = requireKnowledgeAsk(context);

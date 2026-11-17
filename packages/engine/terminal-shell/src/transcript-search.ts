@@ -1,12 +1,12 @@
 import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
-import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 import type { BlockMeta } from './work-tree-types.js';
 export interface SearchHistory {
     getAllLines(): readonly Line[];
 }
 export interface SearchConversation {
     getBlockRegistry(): readonly BlockMeta[];
-    getMessageSnapshot(): readonly ConversationMessageSnapshot[];
+    /** One message's plain text, read in place: search runs on every keystroke and must not copy the transcript. */
+    messageTextAt(index: number): string | undefined;
     isCollapsed(index: number): boolean;
     setCollapsed(key: string, collapsed: boolean): void;
     getDisplayBlocks(): unknown;
@@ -155,26 +155,20 @@ export class SearchManager {
                             collapseKeys: allKeys, primaryKey: block.collapseKey,
                         });
                     }
-                    if (block.groupMemberIndexes.length > 0) {
-                        // Read in ONE snapshot pass: getMessageSnapshot() clones the
-                        // whole message array and search() runs on every keystroke, so a
-                        // per-member read would stall typing outright.
-                        const snapshot = conversationManager.getMessageSnapshot();
-                        for (const [k, memberIdx] of block.groupMemberIndexes.entries()) {
-                            const content = snapshot[memberIdx]?.content;
-                            if (typeof content !== 'string')
-                                continue;
-                            const memberKey = block.groupMemberKeys?.[k] ?? `msg_${memberIdx}`;
-                            const memberHits = countOccurrences(content.toLowerCase(), lowerQuery);
-                            for (let i = 0; i < memberHits; i++) {
-                                hiddenMatches.push({
-                                    line: block.startLine, col: 0, length: query.length,
-                                    // Revealing a member-specific hit only needs the group
-                                    // header (to unfold the group at all) and that member's own
-                                    // key, not its siblings, which stay exactly as they were.
-                                    collapseKeys: [block.collapseKey, memberKey], primaryKey: memberKey,
-                                });
-                            }
+                    for (const [k, memberIdx] of block.groupMemberIndexes.entries()) {
+                        const content = conversationManager.messageTextAt(memberIdx);
+                        if (content === undefined)
+                            continue;
+                        const memberKey = block.groupMemberKeys?.[k] ?? `msg_${memberIdx}`;
+                        const memberHits = countOccurrences(content.toLowerCase(), lowerQuery);
+                        for (let i = 0; i < memberHits; i++) {
+                            hiddenMatches.push({
+                                line: block.startLine, col: 0, length: query.length,
+                                // Revealing a member-specific hit only needs the group
+                                // header (to unfold the group at all) and that member's own
+                                // key, not its siblings, which stay exactly as they were.
+                                collapseKeys: [block.collapseKey, memberKey], primaryKey: memberKey,
+                            });
                         }
                     }
                 }

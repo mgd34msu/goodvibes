@@ -2,7 +2,6 @@ import { handleKnowledgeMutationCommand, printKnowledgeIngestResult } from '@goo
 import { handleKnowledgeReadCommand } from '@goodvibes-jev/engine/terminal-shell/knowledge-read-command';
 import { readKnowledgeAskArguments } from '@goodvibes-jev/engine/terminal-shell/command-arguments';
 import { readFlag, readStringListFlag, readPositiveIntFlag, positionalArgs } from '@goodvibes-jev/engine/terminal-shell/command-arguments';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { CommandContext, SlashCommand } from '../command-registry.ts';
 import { requireYesFlag, stripYesFlag } from './confirmation.ts';
 import { parseBrowserImportScope } from './knowledge-browser-flags.ts';
@@ -67,104 +66,6 @@ function parseConnectorInputFlag(args: string[]): unknown {
   return trimmed;
 }
 
-function retainKnowledgeCommand(
-  context: CommandContext,
-  args: readonly string[],
-  knowledge: NonNullable<NonNullable<CommandContext['clients']>['agentKnowledgeApi']>,
-) {
-  const session = context.session,
-    runtime = session.runtime,
-    sessionId = runtime.sessionId;
-  const conversation = session.conversationManager,
-    getSnapshot = conversation.getMessageSnapshot;
-  // Length plus the newest message: conversations grow by appending, and this
-  // runs on every print, so it must not serialize the whole transcript.
-  const fingerprint = (): string | undefined => {
-    if (typeof getSnapshot !== 'function') return undefined;
-    const snapshot: unknown = getSnapshot.call(conversation);
-    if (!Array.isArray(snapshot)) return JSON.stringify(snapshot);
-    return `${snapshot.length}:${snapshot.length === 0 ? '' : JSON.stringify(snapshot[snapshot.length - 1])}`;
-  };
-  const messages = fingerprint();
-  const clients = context.clients,
-    extensions = context.extensions,
-    output = context.print,
-    invokedByModel = context.invokedByModel;
-  const service = extensions.agentKnowledgeService;
-  const originalArgs = [...args];
-  const supplied = context.judgmentReadingOptions,
-    signal = supplied?.signal;
-  const callerCurrent = supplied?.assertCurrent,
-    shouldStop = supplied?.shouldStop;
-  const operations: (() => void)[] = [];
-  // Calls that write. Once one has been issued, a result that is lost to a stale
-  // guard still leaves a write that may have applied.
-  const writeKeys = new Set<PropertyKey>(['url', 'bookmarksFile', 'urlsFile', 'review', 'reindex', 'run', 'artifact', 'browserHistory', 'connectorInput']);
-  let writeIssued = false;
-  const changed = () => new Error('Agent Knowledge command is no longer current.');
-  const assertCurrent = () => {
-    signal?.throwIfAborted();
-    const current: unknown = callerCurrent?.();
-    if (current !== undefined) {
-      drainOwned(current);
-      throw changed();
-    }
-    if (shouldStop) {
-      const stopped: unknown = shouldStop();
-      if (stopped !== false) {
-        drainOwned(stopped);
-        throw changed();
-      }
-    }
-    signal?.throwIfAborted();
-    if (
-      context.judgmentReadingOptions !== supplied ||
-      supplied?.signal !== signal ||
-      supplied?.assertCurrent !== callerCurrent ||
-      supplied?.shouldStop !== shouldStop ||
-      context.session !== session ||
-      session.runtime !== runtime ||
-      runtime.sessionId !== sessionId ||
-      session.conversationManager !== conversation ||
-      conversation.getMessageSnapshot !== getSnapshot ||
-      fingerprint() !== messages ||
-      context.clients !== clients ||
-      clients?.agentKnowledgeApi !== knowledge ||
-      context.extensions !== extensions ||
-      extensions.agentKnowledgeService !== service ||
-      context.print !== output ||
-      context.invokedByModel !== invokedByModel ||
-      args.length !== originalArgs.length ||
-      args.some((arg, index) => arg !== originalArgs[index])
-    )
-      throw changed();
-    for (const check of operations) check();
-    signal?.throwIfAborted();
-  };
-  const options = { signal, assertCurrent, shouldStop };
-  return {
-    assertCurrent,
-    print(text: string) {
-      assertCurrent();
-      output.call(context, text);
-    },
-    /** Says a lost result may have been a write; uses the captured output because the guard that failed may be the context itself. */
-    reportSuperseded(): void {
-      if (!writeIssued) return;
-      output.call(context, '[knowledge] The command was superseded before it finished (the conversation or session changed). The write it started may already have been applied: check /knowledge status or /knowledge list before running it again.');
-    },
-    retain<Owner extends object, Key extends keyof Owner>(owner: Owner, key: Key, getOwner: () => Owner | undefined) {
-      const method = owner[key];
-      operations.push(() => {
-        if (getOwner() !== owner || owner[key] !== method) throw changed();
-      });
-      assertCurrent();
-      if (writeKeys.has(key)) writeIssued = true;
-      return { owner, method, options, assertCurrent };
-    },
-  };
-}
-
 export const knowledgeCommand: SlashCommand = {
   name: 'knowledge',
   aliases: ['know'],
@@ -191,124 +92,81 @@ export const knowledgeCommand: SlashCommand = {
       printScopeFlagRejection(context, disallowedScopeFlag);
       return;
     }
-    const command = retainKnowledgeCommand(context, args, knowledge);
-    const print = command.print;
+    // A knowledge read does not depend on the transcript: it carries the caller's
+    // abort signal and its answer is printed once. A write is recorded under the
+    // session it was asked in, so it is sent only while that session is still open.
+    const sessionId = context.session.runtime.sessionId;
+    const reading = { signal: context.judgmentReadingOptions?.signal };
+    const print = (text: string): void => context.print(text);
+    const sameSession = (): void => {
+      if (context.session.runtime.sessionId !== sessionId)
+        throw new Error('The session changed before this write was sent, so nothing was written. Run the command again in the session it belongs to.');
+    };
 
     try {
-      command.assertCurrent();
-      command.assertCurrent();
-      if (
-        await handleKnowledgeReadCommand(
-          sub,
-          rest,
-          print,
-          {
-            status: async () => {
-              const read = command.retain(knowledge.status, 'get', () => knowledge.status);
-              const result = await read.method.call(read.owner, {}, read.options);
-              read.assertCurrent();
-              return result;
-            },
-            nodes: async (limit) => {
-              const read = command.retain(knowledge.graph.nodes, 'list', () => knowledge.graph.nodes);
-              const result = await read.method.call(read.owner, limit, read.options);
-              read.assertCurrent();
-              return result;
-            },
-            issues: async (limit) => {
-              const read = command.retain(knowledge.graph.issues, 'list', () => knowledge.graph.issues);
-              const result = await read.method.call(read.owner, limit, read.options);
-              read.assertCurrent();
-              return result;
-            },
-            sources: async (limit) => {
-              const read = command.retain(knowledge.sources, 'list', () => knowledge.sources);
-              const result = await read.method.call(read.owner, limit, read.options);
-              read.assertCurrent();
-              return result;
-            },
-            search: async (query, limit) => {
-              const read = command.retain(knowledge.graph.items, 'search', () => knowledge.graph.items);
-              const result = await read.method.call(read.owner, query, limit, read.options);
-              read.assertCurrent();
-              return result;
-            },
-            get: async (id) => {
-              const read = command.retain(knowledge.graph.items, 'get', () => knowledge.graph.items);
-              const result = await read.method.call(read.owner, id, {}, read.options);
-              read.assertCurrent();
-              return result;
-            },
-            lint: async () => {
-              const read = command.retain(knowledge.status, 'lint', () => knowledge.status);
-              const result = await read.method.call(read.owner);
-              read.assertCurrent();
-              return result;
-            },
-            packet: async (query, scopes) => {
-              const read = command.retain(knowledge.packets, 'buildPrompt', () => knowledge.packets);
-              const result = await read.method.call(read.owner, query, scopes, undefined, read.options);
-              read.assertCurrent();
-              return result;
-            },
-            candidates: (limit) => knowledge.consolidation.candidates(limit),
-            reports: (limit) => knowledge.consolidation.reports(limit),
-            schedules: (limit) => knowledge.jobs.schedules.list(limit),
-            assertCurrent: command.assertCurrent,
-          },
-          {
-            statusTitle: '[knowledge] Agent Knowledge status',
-            headingSuffix: '',
-            fieldSeparator: ' ',
-            scoreSeparator: ' ',
-            nodeKind: 'type',
-          },
-        )
-      )
+      const answer = await handleKnowledgeReadCommand(
+        sub,
+        rest,
+        {
+          status: () => knowledge.status.get({}, reading),
+          nodes: (limit) => knowledge.graph.nodes.list(limit, reading),
+          issues: (limit) => knowledge.graph.issues.list(limit, reading),
+          sources: (limit) => knowledge.sources.list(limit, reading),
+          search: (query, limit) => knowledge.graph.items.search(query, limit, reading),
+          get: (id) => knowledge.graph.items.get(id, {}, reading),
+          lint: () => knowledge.status.lint(),
+          packet: (query, scopes) => knowledge.packets.buildPrompt(query, scopes, undefined, reading),
+          candidates: (limit) => knowledge.consolidation.candidates(limit),
+          reports: (limit) => knowledge.consolidation.reports(limit),
+          schedules: (limit) => knowledge.jobs.schedules.list(limit),
+        },
+        {
+          statusTitle: '[knowledge] Agent Knowledge status',
+          headingSuffix: '',
+          fieldSeparator: ' ',
+          scoreSeparator: ' ',
+          nodeKind: 'type',
+        },
+      );
+      if (answer) {
+        // The one check of a read: the answer belongs to the session that asked.
+        print(
+          context.session.runtime.sessionId === sessionId
+            ? answer.join('\n')
+            : `[knowledge] The session changed while /knowledge ${sub} was reading, so its answer is not shown here. Run it again.`,
+        );
         return;
-      command.assertCurrent();
+      }
       if (
         await handleKnowledgeMutationCommand(
           sub,
           rest,
           print,
           {
-            sessionId: () => context.session.runtime.sessionId,
-            url: async (input) => {
-              const operation = command.retain(knowledge.ingest, 'url', () => knowledge.ingest);
-              const result = await operation.method.call(operation.owner, input);
-              operation.assertCurrent();
-              return result;
+            sessionId: () => sessionId,
+            url: (input) => {
+              sameSession();
+              return knowledge.ingest.url(input);
             },
-            bookmarksFile: async (input) => {
-              const operation = command.retain(knowledge.ingest, 'bookmarksFile', () => knowledge.ingest);
-              const result = await operation.method.call(operation.owner, input);
-              operation.assertCurrent();
-              return result;
+            bookmarksFile: (input) => {
+              sameSession();
+              return knowledge.ingest.bookmarksFile(input);
             },
-            urlsFile: async (input) => {
-              const operation = command.retain(knowledge.ingest, 'urlsFile', () => knowledge.ingest);
-              const result = await operation.method.call(operation.owner, input);
-              operation.assertCurrent();
-              return result;
+            urlsFile: (input) => {
+              sameSession();
+              return knowledge.ingest.urlsFile(input);
             },
-            review: async (input) => {
-              const operation = command.retain(knowledge.graph.issues, 'review', () => knowledge.graph.issues);
-              const result = await operation.method.call(operation.owner, input);
-              operation.assertCurrent();
-              return result;
+            review: (input) => {
+              sameSession();
+              return knowledge.graph.issues.review(input);
             },
-            reindex: async () => {
-              const operation = command.retain(knowledge.status, 'reindex', () => knowledge.status);
-              const result = await operation.method.call(operation.owner);
-              operation.assertCurrent();
-              return result;
+            reindex: () => {
+              sameSession();
+              return knowledge.status.reindex();
             },
-            run: async (id, options) => {
-              const operation = command.retain(knowledge.jobs, 'run', () => knowledge.jobs);
-              const result = await operation.method.call(operation.owner, id, options);
-              operation.assertCurrent();
-              return result;
+            run: (id, options) => {
+              sameSession();
+              return knowledge.jobs.run(id, options);
             },
             describeError: (error) => (error instanceof Error ? error.message : String(error)),
             allow(verb, subject, usage) {
@@ -333,7 +191,6 @@ export const knowledgeCommand: SlashCommand = {
         )
       )
         return;
-      command.assertCurrent();
       switch (sub) {
         case 'ask': {
           const service = context.extensions.agentKnowledgeService;
@@ -343,15 +200,13 @@ export const knowledgeCommand: SlashCommand = {
             );
             return;
           }
-          const ask = command.retain(service, 'ask', () => context.extensions.agentKnowledgeService);
           const input = readKnowledgeAskArguments(rest, false);
           const query = input.query;
           if (!query) {
             print('[knowledge] Usage: /knowledge ask <query> [--limit <n>] [--mode <concise|standard|detailed>]');
             return;
           }
-          const result = await ask.method.call(ask.owner, input);
-          ask.assertCurrent();
+          const result = await service.ask(input);
           print(renderKnowledgeAskResult(result));
           break;
         }
@@ -370,16 +225,15 @@ export const knowledgeCommand: SlashCommand = {
             );
             return;
           }
-          const ingest = command.retain(knowledge.ingest, 'artifact', () => knowledge.ingest);
-          const result = await ingest.method.call(ingest.owner, {
+          sameSession();
+          const result = await knowledge.ingest.artifact({
             path,
             title: readFlag(rest, '--title'),
             tags: readStringListFlag(rest, '--tags'),
             folderPath: readFlag(rest, '--folder'),
-            sessionId: context.session.runtime.sessionId,
+            sessionId,
             connectorId: readFlag(rest, '--connector') ?? 'goodvibes-agent-file',
           });
-          ingest.assertCurrent();
           printKnowledgeIngestResult(print, result.source, path);
           if (result.source.summary) print(`  ${result.source.summary}`);
           if (result.artifactId) print(`  artifact: ${result.artifactId}`);
@@ -400,16 +254,15 @@ export const knowledgeCommand: SlashCommand = {
             );
             return;
           }
-          const ingest = command.retain(knowledge.ingest, 'artifact', () => knowledge.ingest);
-          const result = await ingest.method.call(ingest.owner, {
+          sameSession();
+          const result = await knowledge.ingest.artifact({
             artifactId,
             title: readFlag(rest, '--title'),
             tags: readStringListFlag(rest, '--tags'),
             folderPath: readFlag(rest, '--folder'),
-            sessionId: context.session.runtime.sessionId,
+            sessionId,
             connectorId: readFlag(rest, '--connector') ?? 'goodvibes-agent-artifact-browser',
           });
-          ingest.assertCurrent();
           printKnowledgeIngestResult(print, result.source, artifactId);
           if (result.source.summary) print(`  ${result.source.summary}`);
           if (result.artifactId) print(`  artifact: ${result.artifactId}`);
@@ -431,17 +284,16 @@ export const knowledgeCommand: SlashCommand = {
             print(`[knowledge] ${scope.message}`);
             return;
           }
-          const ingest = command.retain(knowledge.ingest, 'browserHistory', () => knowledge.ingest);
-          const result = await ingest.method.call(ingest.owner, {
+          sameSession();
+          const result = await knowledge.ingest.browserHistory({
             browsers: scope.scope.browsers,
             sourceKinds: scope.scope.sourceKinds,
             homeOverride: readFlag(rest, '--home'),
             limit: scope.scope.limit,
             sinceMs: scope.scope.sinceMs,
             connectorId: 'goodvibes-agent-browser-history',
-            sessionId: context.session.runtime.sessionId,
+            sessionId,
           });
-          ingest.assertCurrent();
           print(`[knowledge] Imported browser knowledge: ${result.imported} ok, ${result.failed} failed`);
           if (result.profiles.length > 0) print(`  profiles ${result.profiles.length}`);
           if (result.errors.length > 0) {
@@ -475,16 +327,15 @@ export const knowledgeCommand: SlashCommand = {
             );
             return;
           }
-          const ingest = command.retain(knowledge.ingest, 'connectorInput', () => knowledge.ingest);
-          const result = await ingest.method.call(ingest.owner, {
+          sameSession();
+          const result = await knowledge.ingest.connectorInput({
             connectorId,
             input,
             path,
             content,
-            sessionId: context.session.runtime.sessionId,
+            sessionId,
             fetchMode: rest.includes('--allow-private-hosts') ? 'allow-private-hosts' : 'public-only',
           });
-          ingest.assertCurrent();
           print(`[knowledge] Imported connector input: ${result.imported} ok, ${result.failed} failed`);
           if (result.errors.length > 0) {
             for (const error of result.errors.slice(0, 10)) print(`  error ${error}`);
@@ -495,16 +346,7 @@ export const knowledgeCommand: SlashCommand = {
         case 'map': {
           const limit = readPositiveIntFlag(rest, '--limit', 50);
           const query = positionalArgs(rest, ['--limit']).join(' ').trim();
-          const read = command.retain(knowledge.graph, 'map', () => knowledge.graph);
-          const result = await read.method.call(
-            read.owner,
-            {
-              limit,
-              ...(query.length > 0 ? { query } : {}),
-            },
-            read.options,
-          );
-          read.assertCurrent();
+          const result = await knowledge.graph.map({ limit, ...(query.length > 0 ? { query } : {}) }, reading);
           print(formatKnowledgeMap(result));
           break;
         }
@@ -516,9 +358,7 @@ export const knowledgeCommand: SlashCommand = {
               print('[knowledge] Usage: /knowledge connectors doctor <connectorId>');
               return;
             }
-            const read = command.retain(knowledge.connectors, 'doctor', () => knowledge.connectors);
-            const report = await read.method.call(read.owner, second);
-            read.assertCurrent();
+            const report = await knowledge.connectors.doctor(second);
             if (!report) {
               print(`[knowledge] Connector doctor report unavailable ${second}`);
               return;
@@ -601,12 +441,6 @@ export const knowledgeCommand: SlashCommand = {
           );
       }
     } catch (error) {
-      try {
-        command.assertCurrent();
-      } catch {
-        command.reportSuperseded();
-        return;
-      }
       print(`[knowledge] ${error instanceof Error ? error.message : String(error)}`);
     }
   },

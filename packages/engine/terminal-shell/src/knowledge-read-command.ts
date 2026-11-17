@@ -12,26 +12,40 @@ export interface KnowledgeReadPorts {
   readonly reports: (limit: number) => ReturnType<KnowledgeApi['consolidation']['reports']>;
   readonly schedules: (limit: number) => ReturnType<KnowledgeApi['jobs']['schedules']['list']>;
   readonly packet: (query: string, scopes: string[]) => ReturnType<KnowledgeApi['packets']['buildPrompt']>;
-  readonly assertCurrent: () => void;
 }
-/** Read commands share behavior without resolving any knowledge segment or granting mutation authority. */
+export interface KnowledgeReadPresentation {
+  readonly statusTitle: string;
+  readonly headingSuffix: string;
+  readonly fieldSeparator: string;
+  readonly scoreSeparator: string;
+  readonly nodeKind: string;
+}
+/**
+ * Read commands share behavior without resolving any knowledge segment or granting mutation authority.
+ * One read, then the lines of the answer: the caller prints them once. `null` means `sub` is not a read.
+ */
 export async function handleKnowledgeReadCommand(
+  sub: string,
+  rest: string[],
+  ports: KnowledgeReadPorts,
+  presentation: KnowledgeReadPresentation,
+): Promise<string[] | null> {
+  const lines: string[] = [];
+  const print = (text: string): void => {
+    lines.push(text);
+  };
+  return (await readKnowledge(sub, rest, print, ports, presentation)) ? lines : null;
+}
+async function readKnowledge(
   sub: string,
   rest: string[],
   print: (text: string) => void,
   ports: KnowledgeReadPorts,
-  presentation: {
-    readonly statusTitle: string;
-    readonly headingSuffix: string;
-    readonly fieldSeparator: string;
-    readonly scoreSeparator: string;
-    readonly nodeKind: string;
-  },
+  presentation: KnowledgeReadPresentation,
 ): Promise<boolean> {
   switch (sub) {
     case 'status': {
       const status = await ports.status();
-      ports.assertCurrent();
       print(
         [
           presentation.statusTitle,
@@ -50,7 +64,6 @@ export async function handleKnowledgeReadCommand(
       const kind = (readFlag(rest, '--kind') ?? 'sources').toLowerCase();
       if (kind === 'nodes') {
         const nodes = await ports.nodes(limit);
-        ports.assertCurrent();
         if (nodes.length === 0) {
           print('[knowledge] No nodes.');
           return true;
@@ -64,7 +77,6 @@ export async function handleKnowledgeReadCommand(
       }
       if (kind === 'issues') {
         const issues = await ports.issues(limit);
-        ports.assertCurrent();
         if (issues.length === 0) {
           print('[knowledge] No issues.');
           return true;
@@ -77,7 +89,6 @@ export async function handleKnowledgeReadCommand(
         return true;
       }
       const sources = await ports.sources(limit);
-      ports.assertCurrent();
       if (sources.length === 0) {
         print('[knowledge] No sources.');
         return true;
@@ -100,7 +111,6 @@ export async function handleKnowledgeReadCommand(
       }
       const limit = Math.max(1, Number.parseInt(readFlag(rest, '--limit') ?? '10', 10) || 10);
       const results = await ports.search(query, limit);
-      ports.assertCurrent();
       if (results.length === 0) {
         print('[knowledge] No results.');
         return true;
@@ -120,7 +130,6 @@ export async function handleKnowledgeReadCommand(
         return true;
       }
       const item = await ports.get(id);
-      ports.assertCurrent();
       if (!item) {
         print(`[knowledge] Unknown item${presentation.fieldSeparator}${id}`);
         return true;
@@ -152,7 +161,6 @@ export async function handleKnowledgeReadCommand(
     }
     case 'lint': {
       const issues = await ports.lint();
-      ports.assertCurrent();
       if (issues.length === 0) {
         print('[knowledge] No lint issues.');
         return true;
@@ -168,7 +176,6 @@ export async function handleKnowledgeReadCommand(
       const [limitArg] = positionalArgs(rest);
       const limit = Math.max(1, Number.parseInt(limitArg ?? '10', 10) || 10);
       const issues = await ports.issues(limit);
-      ports.assertCurrent();
       if (issues.length === 0) {
         print('Knowledge review queue is empty.');
         return true;
@@ -184,7 +191,6 @@ export async function handleKnowledgeReadCommand(
       const [limitArg] = positionalArgs(rest);
       const limit = Math.max(1, Number.parseInt(limitArg ?? '10', 10) || 10);
       const candidates = await ports.candidates(limit);
-      ports.assertCurrent();
       if (candidates.length === 0) {
         print('[knowledge] No consolidation candidates.');
         return true;
@@ -200,7 +206,6 @@ export async function handleKnowledgeReadCommand(
       const [limitArg] = positionalArgs(rest);
       const limit = Math.max(1, Number.parseInt(limitArg ?? '10', 10) || 10);
       const reports = await ports.reports(limit);
-      ports.assertCurrent();
       if (reports.length === 0) {
         print('[knowledge] No consolidation reports.');
         return true;
@@ -214,7 +219,6 @@ export async function handleKnowledgeReadCommand(
     }
     case 'schedules': {
       const schedules = await ports.schedules(20);
-      ports.assertCurrent();
       if (schedules.length === 0) {
         print('[knowledge] No knowledge schedules.');
         return true;
@@ -234,7 +238,6 @@ export async function handleKnowledgeReadCommand(
         return true;
       }
       const prompt = await ports.packet(query, scopeValues);
-      ports.assertCurrent();
       print(prompt ?? '[knowledge] No structured knowledge matched that task.');
       break;
     }

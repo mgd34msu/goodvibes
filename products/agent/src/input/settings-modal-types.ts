@@ -18,6 +18,8 @@ export interface SettingsModalOpenOptions {
   readonly onSettingApplied?: SettingsModalChangeHandler;
   /** Repaint after a registered host preference changes outside this modal. */
   readonly requestRender?: () => void;
+  /** Prints a failed credential save where it is still seen after the modal closes. */
+  readonly reportError?: (message: string) => void;
 }
 
 export type SettingsCategory = CommonSettingsCategory | 'flags' | 'fleet' | 'cluster';

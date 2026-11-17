@@ -136,6 +136,7 @@ export class SettingsModal extends TerminalSettingsModalState<
   private configManager: ConfigManager | null = null;
   private unsubscribeHostSetting: (() => void) | null = null;
   private requestHostSettingRender: (() => void) | null = null;
+  private reportError: ((message: string) => void) | null = null;
   private secretsManager: SettingsSecretsManager | null = null;
   private featureFlagManager: FeatureFlagManager | null = null;
   private mcpRegistry: McpRegistry | null = null;
@@ -165,6 +166,7 @@ export class SettingsModal extends TerminalSettingsModalState<
     this.unsubscribeHostSetting?.();
     this.unsubscribeHostSetting = null;
     this.requestHostSettingRender = options?.requestRender ?? null;
+    this.reportError = options?.reportError ?? null;
     this.configManager = configManager;
     this.secretsManager = secretsManager ?? null;
     this.featureFlagManager = featureFlagManager;
@@ -640,6 +642,9 @@ export class SettingsModal extends TerminalSettingsModalState<
     let warning: string | null = null;
     let routedValue: { readonly value: unknown } | null = null;
     const session = this.secretWriteSession;
+    // The transcript outlives the modal: a credential save that fails after
+    // Esc is still reported there. Only the status line belongs to the session.
+    const reportFailure = this.reportError;
     this.lastSettingEffectMessage = 'Saving credential…';
     this.pendingSecretWrite = setSecretBackedSettingValue({
       key,
@@ -660,7 +665,10 @@ export class SettingsModal extends TerminalSettingsModalState<
       onWriteReported: (report) => {
         if (report.ok) effectMessage = report.message;
         // A cleared credential whose stored value could not be removed still completes; keep that warning.
-        else warning = report.message;
+        else {
+          warning = report.message;
+          reportFailure?.(report.message);
+        }
         if (session === this.secretWriteSession) this.lastSettingEffectMessage = report.message;
       },
     })

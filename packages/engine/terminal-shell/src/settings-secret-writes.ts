@@ -18,6 +18,29 @@ export interface SettingsDaemonCredentialWriter {
   set(configKey: string, value: string): Promise<unknown>;
   clear(configKey: string): Promise<void>;
 }
+type SecretWriteStep = 'policy' | 'daemon' | 'store' | 'config';
+const SECRET_WRITE_FAILURE: Record<SecretWriteStep, { readonly reason: string; readonly next: string }> = {
+  policy: { reason: 'the settings policy could not be read', next: 'Check the managed settings policy file, then retry.' },
+  daemon: { reason: 'the daemon refused it or could not be reached', next: 'Check that the daemon is running and this app is connected to it, then retry.' },
+  store: { reason: 'the secret store could not write it', next: 'Check secret storage access and storage.secretPolicy, then retry.' },
+  config: { reason: 'the setting that points at the stored value could not be saved', next: 'Check whether the setting is locked by policy, then retry.' },
+};
+/**
+ * The reason a credential write failed, from the step that failed and the
+ * error's status or code only. The error text itself is never shown: a store
+ * or transport error may echo the credential.
+ */
+function describeSecretWriteFailure(key: string, step: SecretWriteStep, error: unknown): string {
+  const failure = SECRET_WRITE_FAILURE[step];
+  let detail = '';
+  if (error && typeof error === 'object') {
+    const status = (error as { readonly status?: unknown }).status;
+    const code = (error as { readonly code?: unknown }).code;
+    if (typeof status === 'number' && Number.isInteger(status)) detail = ` (status ${status})`;
+    else if (typeof code === 'string' && /^[A-Za-z][A-Za-z0-9_.-]{0,47}$/.test(code)) detail = ` (${code})`;
+  }
+  return `The credential ${key} was not saved: ${failure.reason}${detail}. ${failure.next}`;
+}
 export async function setSecretBackedSettingValue(args: {
   route?:
     | {
@@ -45,10 +68,13 @@ export async function setSecretBackedSettingValue(args: {
       if (setting.type === 'boolean') configManager.getHostBooleanSetting(setting.key).getResolved();
     }
   };
+  let step: SecretWriteStep = 'policy';
   try {
     assertPolicyAvailable();
+    step = 'config';
     const update = buildSecretBackedConfigUpdate(key, value);
     if ((update.secretKey || update.clearSecretKey) && args.route?.applies(key)) {
+      step = 'daemon';
       // The trimmed text, as the local path stores: a token pasted with a trailing newline must not reach the daemon with it.
       await args.route.write(key, value.trim());
       args.onDaemonWrite?.();
@@ -56,11 +82,13 @@ export async function setSecretBackedSettingValue(args: {
     }
     if ((update.secretKey || update.clearSecretKey) && defaultSecretBackedScope(key) === 'daemon' && args.daemonCredentials) {
       const writer = args.daemonCredentials;
+      step = 'daemon';
       if (value.trim().length === 0) await writer.clear(key);
       else await writer.set(key, value.trim());
       return true;
     }
     if ((update.secretKey || update.clearSecretKey) && !secretsManager) {
+      step = 'store';
       throw new Error('Credential storage is unavailable.');
     }
     configManager.validateDynamic?.(key, update.configValue);
@@ -69,9 +97,12 @@ export async function setSecretBackedSettingValue(args: {
     // Publishing a reference is the commit: readers must never see it before
     // the cross-process secret write has actually completed.
     if (update.secretKey && update.secretValue !== undefined) {
+      step = 'store';
       await secretsManager!.set(update.secretKey, update.secretValue, { scope, medium });
     }
+    step = 'policy';
     assertPolicyAvailable();
+    step = 'config';
     configManager.validateDynamic?.(key, update.configValue);
     await setConfigValue(key, update.configValue);
     // A clear unpublishes the reference first and only then deletes the value:
@@ -88,12 +119,12 @@ export async function setSecretBackedSettingValue(args: {
       }
     }
     return true;
-  } catch {
-    // Store/transport errors may echo credential material. Never display or log them.
-    const message = 'The credential could not be saved. Check storage access and settings policy, then retry.';
-    logger.error('SettingsModal: failed to save secret config value', { key });
+  } catch (error) {
+    // Store/transport errors may echo credential material. Never display or log their text.
+    const message = describeSecretWriteFailure(key, step, error);
+    logger.error('SettingsModal: failed to save secret config value', { key, step });
     args.onFailure?.(message);
-    args.onError?.(`Saving that credential failed: ${message}`);
+    args.onError?.(message);
     return false;
   }
 }

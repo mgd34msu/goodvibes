@@ -627,12 +627,15 @@ export class SettingsModal extends TerminalSettingsModalState<
     let effectMessage: string | null = null;
     let secretWriteError: string | null = null;
     const session = this.secretWriteSession;
+    // The transcript outlives the modal: a credential save that fails after
+    // Esc is still reported there. Only the status line belongs to the session.
+    const report = this.reportError;
     return {
       reportError: (message: string) => {
         secretWriteError = message;
+        report?.(message);
         if (session !== this.secretWriteSession) return;
         this.lastSettingEffectMessage = message;
-        this.reportError?.(message);
       },
       setSecretConfigValue: async (key: ConfigKey, value: unknown) => {
         if (!configManager) throw new Error('Settings owner unavailable.');
@@ -864,8 +867,9 @@ export class SettingsModal extends TerminalSettingsModalState<
 
     // Selecting 'prompt' for payments.cvvHandling states the tradeoff at the
     // moment of selection, not just in the documentation region, see the
-    // platform's own CVV_PROMPT_TRADEOFF_WARNING (platform/payments).
-    if (key === PAYMENTS_CVV_HANDLING_CONFIG_KEY && value === 'prompt') {
+    // platform's own CVV_PROMPT_TRADEOFF_WARNING (platform/payments). A refused
+    // write keeps its "Save failed" reason: the mode is not in effect.
+    if (key === PAYMENTS_CVV_HANDLING_CONFIG_KEY && value === 'prompt' && result.failed !== true) {
       this.lastSettingEffectMessage = CVV_PROMPT_TRADEOFF_WARNING;
     }
     return result.failed !== true;

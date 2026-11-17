@@ -314,6 +314,10 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     configure: () => {
       input.settingsModal.open(configManager, featureFlags, subscriptionManager, serviceRegistry, mcpRegistry, secretsManager, {
         requestRender: render,
+        reportError: (message: string) => {
+          commandContext.print?.(message);
+          render();
+        },
         onSettingApplied: (change) => {
           // Forced dark/light applies immediately (mode flip + full
           // repaint via clearScreen's resetDiff); auto only re-probes at startup,

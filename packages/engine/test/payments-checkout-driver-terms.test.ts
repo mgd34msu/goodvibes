@@ -39,7 +39,11 @@ function driverOn(page: { url: string; submit: string; text: string }) {
 test('with no decision model, only the merchant\'s page with the approved total and submit control passes the last check', async () => {
   const retire = configureDecisionModelPolicy(() => 'No Decision Model');
   try {
-    const shown = (page: { url: string; submit: string; text: string }) => driverOn(page).verifyTerms(TERMS, { assertCurrent: () => {} });
+    const shown = (page: { url: string; submit: string; text: string }) => {
+      const driver = driverOn(page);
+      if (!driver.verifyTerms) throw new Error('The browser checkout driver no longer checks the terms on the live page.');
+      return driver.verifyTerms(TERMS, { assertCurrent: () => {} });
+    };
     const checkout = { url: 'https://www.shop.example/checkout', submit: 'place', text: 'Kettle $10.99 Standard delivery $2.00 Total $12.99' };
     expect(await shown(checkout)).toBe(true);
     expect(await shown({ ...checkout, text: 'Kettle $110.99 Standard delivery $2.00 Total $112.99' })).toBe(false);

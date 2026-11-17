@@ -1,5 +1,5 @@
-import { agentAccountsWriteGuard, createAgentAccountsInputProjector } from './agent-accounts-admission.ts';
-import { toolErrorText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { agentAccountsWriteGuard, createAgentAccountsInputProjector } from './accounts-admission.js';
+import { toolErrorText } from './tool-error-text.js';
 /**
  * The `accounts` tool: the durable record of every account the agent created.
  *
@@ -24,12 +24,14 @@ import { toolErrorText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { AgentAccountRegistry, type AgentAccountRecord } from '@goodvibes-jev/engine/platform/platform/google';
-import { mintAddressFor } from '@goodvibes-jev/engine/platform/platform/google';
-import { containsSecretLikeText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { getSessionExpectationBook, type DaemonExpectationClient } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { ConnectedHostVerbError } from '../runtime/client/daemon-verbs.ts';
-import { evaluateOutwardEffect, getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
+import { ACCOUNT_REGISTRY_PATH_SEGMENTS, AgentAccountRegistry, mintAddressFor, type AgentAccountRecord } from '@goodvibes-jev/engine/platform/platform/google';
+import { readSurfaceEmailSettings } from '@goodvibes-jev/engine/platform/platform/email';
+import { containsSecretLikeText } from './memory-safety.js';
+import { getSessionExpectationBook, type DaemonExpectationClient } from './session-expectations.js';
+import { ConnectedHostVerbError } from './connected-host-verb-error.js';
+import { isHostFailure } from './connected-host-client.js';
+import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
+import { evaluateOutwardEffect, getProcessUntrustedContentLedger as getSessionUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 
 const ACCOUNT_ACTIONS = ['list', 'alias', 'record', 'forget', 'sweep'] as const;
@@ -142,7 +144,10 @@ export function createAgentAccountsTool(options: AgentAccountsToolOptions): Tool
             } catch (error) {
               // The daemon refused for a reason that is not about reaching it (the
               // mailbox cannot be read, an unusable address): that is the answer.
-              if (error instanceof ConnectedHostVerbError) return failure(`The daemon would not watch for this signup's verification mail: ${error.message}`);
+              // A host that answered with a refusal (over the wire, or the daemon hosting this turn in process).
+              if (error instanceof ConnectedHostVerbError || (isHostFailure(error) && error.refusal.status !== undefined)) {
+                return failure(`The daemon would not watch for this signup's verification mail: ${error.message}`);
+              }
               throw error;
             }
           }
@@ -277,4 +282,27 @@ export function createAgentAccountsTool(options: AgentAccountsToolOptions): Tool
 
 export function registerAgentAccountsTool(registry: ToolRegistry, options: AgentAccountsToolOptions): void {
   if (!registry.has('accounts')) registry.register(createAgentAccountsTool(options), { inputProjection: createAgentAccountsInputProjector() });
+}
+
+/**
+ * The accounts register as a turn composes it, in either process: the
+ * Agent's register under the home, and the owner's mailbox read from this
+ * process's settings at call time. `expectations`: the daemon's
+ * verification-mail book; absent, the session book is used.
+ */
+export function agentAccountsToolOptions(shellPaths: ShellPathService, settings: { get(key: string): unknown },
+  expectations?: DaemonExpectationClient): AgentAccountsToolOptions {
+  return {
+    shellPaths,
+    // The platform registry takes its store path and its "does this look like a
+    // credential" rule as inputs rather than deriving either: the path so no
+    // product writes into another's storage root, the predicate because the
+    // wording of that judgement belongs to the product that shows it.
+    registry: new AgentAccountRegistry({
+      storePath: shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, ...ACCOUNT_REGISTRY_PATH_SEGMENTS),
+      containsSecretLikeText,
+    }),
+    baseAddress: () => readSurfaceEmailSettings((key) => settings.get(key)).fromAddress ?? null,
+    ...(expectations ? { expectations } : {}),
+  };
 }

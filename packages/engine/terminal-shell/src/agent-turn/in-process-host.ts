@@ -21,10 +21,12 @@
  * credential is being made, a call is refused with that said and nothing is
  * sent, instead of a request whose outcome would be unclear.
  */
+import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
 import type { HostedDaemonRequestPath } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
+import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { delegatedOperatorConnection, forgetDelegatedCredential, storedDelegatedCredential } from './agent-delegation-credential.js';
-import type { ConnectedHostConnection } from './connected-host-client.js';
+import { createConnectedHost, type ConnectedHostConnection } from './connected-host-client.js';
 
 /** The daemon hosting this Agent turn, as the connected-host client reaches it. */
 export interface AgentInProcessHost {
@@ -97,4 +99,23 @@ export function createAgentInProcessHost(options: AgentInProcessHostOptions): Ag
   };
 
   return { connection };
+}
+
+/**
+ * The verb caller the platform's client seams take, over the daemon hosting
+ * this turn: a verb goes through the daemon's own request path with the
+ * Agent's credential. A refusal is the host's answer (a `HostFailure` with its
+ * status); without a credential yet, `probe` says so and nothing is sent.
+ */
+export function inProcessVerbCaller(host: AgentInProcessHost): Pick<DaemonVerbCaller, 'probe' | 'invoke'> {
+  const client = createConnectedHost(() => host.connection(), { validateResponses: false });
+  return {
+    probe: () => {
+      const connection = host.connection();
+      return connection.token ? { available: true } : { available: false, reason: connection.unavailable?.reason ?? 'the Agent has no credential for this daemon yet' };
+    },
+    // The seam names verbs by id; the contract's typed input is the caller's to keep.
+    invoke: async <T = unknown>(methodId: string, input?: unknown): Promise<T> =>
+      await client.invoke(methodId as OperatorMethodId, (input ?? {}) as OperatorMethodInput<OperatorMethodId>) as T,
+  };
 }

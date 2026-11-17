@@ -51,6 +51,9 @@ import { registerAgentReminderScheduleTool } from './reminder-schedule-tool.js';
 import { registerAgentScheduleEditTool } from './schedule-edit-tool.js';
 import { registerAgentScheduleTool } from './schedule-tool.js';
 import { createAgentInProcessHost, type AgentInProcessHost } from './in-process-host.js';
+import { agentAccountsToolOptions, registerAgentAccountsTool } from './accounts-tool.js';
+import { createDaemonExpectationClient, type DaemonExpectationClient } from './session-expectations.js';
+import { inProcessVerbCaller } from './in-process-host.js';
 import { connectedHostBaseUrl } from './connected-host-dial.js';
 import type { ConnectedHostConfigReader } from './connected-host-client.js';
 import type { HostedDaemonRequestPath } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
@@ -97,6 +100,12 @@ export interface AgentTurnToolDeps {
    * (in-process-host.ts). Absent in the Agent's own process.
    */
   readonly inProcessHost?: AgentInProcessHost | undefined;
+  /**
+   * The daemon's verification-mail book, which a signup alias (`accounts`)
+   * opens its watch in: this daemon's own in a turn it hosts. Absent: the
+   * session book, as in the Agent's own process.
+   */
+  readonly accountExpectations?: DaemonExpectationClient | undefined;
   /** The home's one memory store, and this process's access to it: local, or the daemon's once adopted. */
   readonly memoryRegistry: MemoryRegistry;
   readonly memoryAccess: MemoryAccess;
@@ -138,6 +147,7 @@ export function registerAgentTurnTools(registry: ToolRegistry, deps: AgentTurnTo
   registerAgentOperatorActionTool(registry, deps.shellPaths, deps.settings, deps.inProcessHost);
   registerAgentOperatorBriefingTool(registry, deps.shellPaths, deps.settings, deps.inProcessHost);
   registerAgentOperatorMethodTool(registry, deps.shellPaths, deps.settings, deps.inProcessHost);
+  registerAgentAccountsTool(registry, agentAccountsToolOptions(deps.shellPaths, deps.settings, deps.accountExpectations));
   // Schedules are created and changed through agent_operator_method and agent_operator_action, as nested calls.
   registerAgentAutonomyScheduleTool(registry, deps.shellPaths, deps.settings, deps.inProcessHost);
   registerAgentReminderScheduleTool(registry, deps.shellPaths, deps.settings, deps.artifactStore, deps.inProcessHost);
@@ -170,7 +180,7 @@ export const AGENT_SHELL_TOOL_NAMES: readonly string[] = Object.freeze([
  * `registerAgentTurnTools`.
  */
 export const AGENT_NOT_YET_HOSTED_TOOL_NAMES: readonly string[] = Object.freeze([
-  'accounts', 'agent_knowledge', 'agent_knowledge_ingest',
+  'agent_knowledge', 'agent_knowledge_ingest',
   'agent_learning_consolidation', 'agent_model_compare', 'agent_research_report',
 ]);
 
@@ -195,6 +205,7 @@ function hostedAgentSection(): string {
     'You are the GoodVibes Agent, answering in a session the daemon hosts rather than in the Agent\'s own process. Your policy, persona, skills, routines and memory below are the Agent\'s, and the Agent tools `profile`, `occasions`, `agent_artifacts`, `agent_documents`, `agent_research_runs`, `agent_research_sources`, `agent_review_packet_presets`, `agent_review_packet_share`, `agent_media_generate`, `agent_notify`, `agent_local_registry`, `agent_channel_send`, `browser` (the daemon\'s browser), `google` (the daemon\'s Google account and calendar) and, in the daemon\'s own project, `agent_work_plan` are here, so recording what you learn works as the policy says.',
     'The connected-host operator tools `agent_operator_action`, `agent_operator_briefing` and `agent_operator_method` are here too: their host is this daemon, reached in process with the Agent\'s own credential, so each call is judged as the Agent\'s.',
     'The schedule tools `schedule`, `agent_autonomy_schedule`, `agent_reminder_schedule` and `agent_schedule_edit` are here too: they list, create, edit, run, pause, resume and delete this daemon\'s own schedules through `agent_operator_method` and `agent_operator_action`, so each change is judged as the Agent\'s.',
+    '`accounts` is here too: the Agent\'s register of the accounts it created, and a signup alias opens this daemon\'s own watch for the verification mail.',
     `These work through the Agent's own command registry and session and are not here: ${names(AGENT_SHELL_TOOL_NAMES)}. Use the platform tool that covers the same facts, or say the request runs when the owner continues in the GoodVibes Agent itself.`,
     `These are not in this hosted turn yet: ${names(AGENT_NOT_YET_HOSTED_TOOL_NAMES)}. Where the request needs one, say which and that it runs in the GoodVibes Agent itself. A call to any listed tool is refused.`,
   ].join('\n');
@@ -279,6 +290,7 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
         channelDeliveryRouter: deps.channelDeliveryRouter,
         settings: deps.settings,
         ...(operatorHost ? { inProcessHost: operatorHost } : {}),
+        ...(operatorHost ? { accountExpectations: createDaemonExpectationClient(inProcessVerbCaller(operatorHost)) } : {}),
         ...(browser ? { browser: {
           browser: () => browser,
           // A file: page is a local read, held to the same decision this session's read tool gets.

@@ -4,9 +4,6 @@ import { ToolRegistry, registerAllTools } from '@goodvibes-jev/engine/platform/p
 import { controlSurfacesFor } from './control-surfaces.ts';
 import { installAgentToolPolicyGuard } from '../tools/agent-tool-policy-guard.ts';
 import { agentBrowserProfileRoot, agentBrowserScreenshotRoot, agentBrowserToolBackend } from './agent-browser.ts';
-import { registerAgentAccountsTool } from '../tools/agent-accounts-tool.ts';
-import { AgentAccountRegistry, ACCOUNT_REGISTRY_PATH_SEGMENTS } from '@goodvibes-jev/engine/platform/platform/google';
-import { containsSecretLikeText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { registerAgentKnowledgeIngestTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { registerAgentKnowledgeTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { registerAgentLearningConsolidationTool } from '../tools/agent-learning-consolidation-tool.ts';
@@ -23,7 +20,6 @@ import { connectedHostFamilyRemote } from '../agent/operator-gateway-call.ts';
 import { compactRegisteredToolDefinitions } from '../tools/tool-definition-compaction.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { readSurfaceEmailSettings } from '@goodvibes-jev/engine/platform/platform/email';
 import type { RuntimeServices } from './services.ts';
 import { readDaemonOperatorToken } from './daemon-operator-token.ts';
 import { agentOwnerQuestions } from './client/owner-questions.ts';
@@ -184,26 +180,6 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     },
     memoryRegistry: services.memoryRegistry,
     memoryAccess: services.memorySpineClient,
-  });
-  // Accounts the agent creates are recorded here at creation time. Autonomous
-  // signup is authorized; doing it invisibly is not, and this is what makes it
-  // enumerable and revocable.
-  registerAgentAccountsTool(toolRegistry, {
-    shellPaths: services.shellPaths,
-    // The platform registry takes its store path and its "does this look like a
-    // credential" rule as inputs rather than deriving either: the path so no
-    // product writes into another's storage root, the predicate because the
-    // wording of that judgement belongs to the product that shows it.
-    registry: new AgentAccountRegistry({
-      storePath: services.shellPaths.resolveUserPath(
-        GOODVIBES_AGENT_SURFACE_ROOT,
-        ...ACCOUNT_REGISTRY_PATH_SEGMENTS,
-      ),
-      containsSecretLikeText,
-    }),
-    baseAddress: () => {
-      return readSurfaceEmailSettings((key) => (configManager as { get: (key: string) => unknown }).get(key)).fromAddress ?? null;
-    },
   });
   registerAgentKnowledgeIngestTool(toolRegistry, services.shellPaths, configManager);
   registerAgentKnowledgeTool(toolRegistry, services.shellPaths, configManager);

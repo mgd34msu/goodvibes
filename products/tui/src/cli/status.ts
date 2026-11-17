@@ -13,6 +13,8 @@ import { serviceSettingsIssues, type CliServicePosture } from './service-posture
 import type { InstallSelfCheckFinding } from '../runtime/install-self-check.ts';
 import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers/provider-model';
 import { describeConfiguredEffort } from '../providers/reasoning-effort-surface.ts';
+import { describeCrashLog, summarizeCrashLog, surfaceCrashLogPath, type CrashLogSummary } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 
 /** The marker that decides first-run state: the user's marker when its file exists. */
 function effectiveMarker(marker: OnboardingCheckMarkerState | undefined): OnboardingCheckMarkerState | null {
@@ -104,6 +106,8 @@ export interface CliDoctorFinding {
 
 export interface CliStatusSnapshot {
   readonly title: 'GoodVibes status' | 'GoodVibes doctor';
+  /** This program's crash log: faults recorded, the newest, and where the records are. */
+  readonly crashLog: CrashLogSummary;
   readonly workingDirectory: string;
   readonly homeDirectory: string;
   readonly provider: {
@@ -547,6 +551,7 @@ export function buildCliStatusSnapshot(options: CliStatusOptions): CliStatusSnap
   );
   return {
     title: options.doctor ? 'GoodVibes doctor' : 'GoodVibes status',
+    crashLog: summarizeCrashLog(surfaceCrashLogPath(options.homeDirectory, GOODVIBES_TUI_SURFACE_ROOT)),
     workingDirectory: options.workingDirectory,
     homeDirectory: options.homeDirectory,
     provider: {
@@ -646,6 +651,9 @@ export function renderCliStatus(options: CliStatusOptions): string {
     `  checked: ${marker?.exists ? 'yes' : 'no'}`,
     `  scope: ${marker?.scope ?? 'none'}`,
     `  updatedAt: ${marker?.payload ? new Date(marker.payload.updatedAt).toISOString() : 'n/a'}`,
+    '',
+    'Crashes:',
+    `  ${describeCrashLog(snapshot.crashLog) ?? `none recorded (${snapshot.crashLog.path})`}`,
     '',
     ...renderWorkspaceSection(snapshot.workspace),
     ...renderSandboxSection(snapshot.sandbox),

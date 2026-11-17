@@ -14,6 +14,8 @@ import { formatAgentRecordSource } from '@goodvibes-jev/engine/terminal-shell/ag
 import { formatAgentKnowledgeFailureKind } from '@goodvibes-jev/engine/terminal-shell/agent-turn/knowledge-format';
 import { readApprovalPostureFromConfig, type ApprovalPosture } from '../permissions/approval-posture.ts';
 import { appendTemporalLabel } from './temporal-label.ts';
+import { describeCrashLog, summarizeCrashLog, surfaceCrashLogPath, type CrashLogSummary } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 
 /**
  * The marker that decides first-run state, when it holds a payload this build
@@ -80,6 +82,8 @@ export interface CliDoctorFinding {
 
 export interface CliStatusSnapshot {
   readonly title: 'GoodVibes Agent status' | 'GoodVibes Agent doctor';
+  /** This program's crash log: faults recorded, the newest, and where the records are. */
+  readonly crashLog: CrashLogSummary;
   readonly workingDirectory: string;
   readonly homeDirectory: string;
   readonly provider: {
@@ -363,6 +367,7 @@ export function buildCliStatusSnapshot(options: CliStatusOptions): CliStatusSnap
   const posture = readApprovalPosture(config);
   return {
     title: options.doctor ? 'GoodVibes Agent doctor' : 'GoodVibes Agent status',
+    crashLog: summarizeCrashLog(surfaceCrashLogPath(options.homeDirectory, GOODVIBES_AGENT_SURFACE_ROOT)),
     workingDirectory: options.workingDirectory,
     homeDirectory: options.homeDirectory,
     provider: { ...common.provider },
@@ -466,6 +471,9 @@ export function renderCliStatus(options: CliStatusOptions, snapshot: CliStatusSn
     `  checked ${marker?.exists ? 'yes' : 'no'}`,
     `  scope ${marker?.scope ?? 'none'}`,
     `  updated ${marker?.payload ? appendTemporalLabel(new Date(marker.payload.updatedAt).toISOString(), marker.payload.updatedAt) : 'n/a'}`,
+    '',
+    'Crashes',
+    `  ${describeCrashLog(snapshot.crashLog) ?? `none recorded (${snapshot.crashLog.path})`}`,
     '',
     'Checkpoints',
     ...(snapshot.checkpoints

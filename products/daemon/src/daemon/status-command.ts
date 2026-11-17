@@ -30,6 +30,7 @@
  * line saying it failed; only an unreachable daemon is a failed command.
  */
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { describeCrashLog, summarizeCrashLog, type CrashLogSummary } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { resolveRemoteDaemonTarget } from '@goodvibes-jev/engine/terminal-shell/cluster-remote-daemon-target';
 import type { DaemonFailureCode, DaemonFetch, DaemonVerbOutcome, RemoteDaemonTarget } from '@goodvibes-jev/engine/terminal-shell';
 import { callDaemonMethod, callDaemonRoute } from '@goodvibes-jev/engine/terminal-shell/raw-reply-route';
@@ -354,6 +355,13 @@ function hostedSessionLines(outcome: DaemonVerbOutcome<HostedSessionsPayload>): 
 
 export interface RunStatusCommandInput extends RemoteCommandDeps {
   readonly flags: RemoteCommandFlags;
+  /** This machine's daemon crash log, read when the target is local (and above all when it does not answer). */
+  readonly crashLogPath?: string | undefined;
+}
+
+function crashLines(summary: CrashLogSummary | null): string[] {
+  if (!summary) return [];
+  return [`  crashes:  ${describeCrashLog(summary) ?? `none recorded (${summary.path})`}`];
 }
 
 /**
@@ -370,6 +378,8 @@ export async function runStatusCommand(input: RunStatusCommandInput): Promise<Da
   if (!resolved.ok) return resolved.result;
   const target = resolved.target;
   const fetchImpl = input.fetchImpl ?? fetch;
+  // One small local file read; it is how a daemon that died says why.
+  const crashLog = target.isLocal && input.crashLogPath ? summarizeCrashLog(input.crashLogPath) : null;
 
   // `/status` answers with the payload itself; `/api/cluster/*` wraps it. Each
   // call states which, because reading one as the other turns a healthy 200
@@ -377,7 +387,12 @@ export async function runStatusCommand(input: RunStatusCommandInput): Promise<Da
   const identity = await callDaemonRoute<ControlStatusPayload>(
     target, '/status', { method: 'GET', envelope: 'raw' }, fetchImpl,
   );
-  if (!identity.ok) return failure(identity.code, identity.error, identity.fix, flags.json);
+  if (!identity.ok) {
+    if (!crashLog) return failure(identity.code, identity.error, identity.fix, flags.json);
+    return flags.json
+      ? { exitCode: 1, lines: [JSON.stringify({ ok: false, code: identity.code, error: identity.error, fix: identity.fix, crashLog }, null, 2)] }
+      : { exitCode: 1, lines: [identity.error, `  ${identity.fix}`, ...crashLines(crashLog)] };
+  }
 
   const [health, channels, cluster, hosted] = await Promise.all([
     callDaemonRoute<HealthPayload>(target, '/api/health', { method: 'GET', envelope: 'raw' }, fetchImpl),
@@ -416,6 +431,7 @@ export async function runStatusCommand(input: RunStatusCommandInput): Promise<Da
               rolledBack: local.rolledBack,
             }
             : { available: false, reason: local.unavailableReason },
+          ...(crashLog ? { crashLog } : {}),
         },
       }, null, 2)],
     };
@@ -430,6 +446,7 @@ export async function runStatusCommand(input: RunStatusCommandInput): Promise<Da
       ...optionalLine('  state:    ', identity.data.status),
       ...healthLines(health),
       ...localStateLines(local),
+      ...crashLines(crashLog),
       ...channelLines(channels),
       ...clusterLines(identity.data, cluster),
       ...hostedSessionLines(hosted),

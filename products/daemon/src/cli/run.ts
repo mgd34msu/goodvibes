@@ -162,8 +162,11 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
             surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT, daemonHome: daemonHomeDirectory, configManager: config, diagnosticMode: 'structural' }) }));
       }
       case 'status': {
-        const { runStatusCommand } = await import('../daemon/status-command.js');
-        return result(await runStatusCommand({ ...remote, flags: remoteFlags }));
+        const [{ runStatusCommand }, { surfaceCrashLogPath }] = await Promise.all([
+          import('../daemon/status-command.js'), import('@goodvibes-jev/engine/platform/platform/runtime/operations'),
+        ]);
+        return result(await runStatusCommand({ ...remote, flags: remoteFlags,
+          crashLogPath: surfaceCrashLogPath(homeDirectory, GOODVIBES_DAEMON_SURFACE_ROOT) }));
       }
       case 'update': {
         const { runUpdateCommand } = await import('../daemon/status-command.js');

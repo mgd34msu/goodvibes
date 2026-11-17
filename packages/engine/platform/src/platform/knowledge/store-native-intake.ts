@@ -24,22 +24,70 @@ export function createNativeConversationCaptureTable(db: Pick<SqlDatabase, 'run'
  * revision, when the input is captured; the input's row names it and every later
  * write of the row (route, proposal, decisions, association) leaves it alone.
  * A row written by an earlier build carries its transcript inline and is read as is.
+ *
+ * Each message of a session is captured with the whole conversation so far, and
+ * the capture's source revision is a hash over all of it, so every revision must
+ * stay readable in full. A revision that extends the session's previous stored
+ * one is stored as only the messages it adds (`{ base, depth, append }`); a full
+ * copy is kept every {@link TRANSCRIPT_FULL_COPY_EVERY} revisions so a read
+ * follows at most that many rows. Storage grows with the conversation instead
+ * of with its square; a stored plain array is a full copy.
  */
+const TRANSCRIPT_FULL_COPY_EVERY = 16;
+interface TranscriptDelta { readonly base: string; readonly depth: number; readonly append: readonly unknown[] }
+function readTranscriptRow(db: SqlReader, projectId: string, sessionId: string, revision: string): unknown[] | TranscriptDelta {
+  const row = db.exec('SELECT messages_json FROM native_conversation_transcripts WHERE project_id = ? AND session_id = ? AND revision = ?', [projectId, sessionId, revision])[0]?.values[0];
+  if (typeof row?.[0] !== 'string') throw new NativeConversationStorageError('invalid');
+  const stored = JSON.parse(row[0]) as unknown;
+  if (Array.isArray(stored)) return stored as unknown[];
+  const delta = stored as Partial<TranscriptDelta> | null;
+  if (!delta || typeof delta.base !== 'string' || typeof delta.depth !== 'number' || !Number.isInteger(delta.depth)
+    || delta.depth < 1 || delta.depth >= TRANSCRIPT_FULL_COPY_EVERY || !Array.isArray(delta.append)) throw new NativeConversationStorageError('invalid');
+  return delta as TranscriptDelta;
+}
+function readTranscript(db: SqlReader, projectId: string, sessionId: string, revision: string): unknown[] {
+  const parts: (readonly unknown[])[] = [];
+  let current = revision;
+  for (let hops = 0; hops < TRANSCRIPT_FULL_COPY_EVERY; hops += 1) {
+    const stored = readTranscriptRow(db, projectId, sessionId, current);
+    if (Array.isArray(stored)) return [...stored, ...parts.reverse().flat()];
+    parts.push(stored.append);
+    current = stored.base;
+  }
+  throw new NativeConversationStorageError('invalid');
+}
+function encodeTranscript(db: SqlReader, projectId: string, sessionId: string, revision: string,
+  messages: readonly { readonly role: string; readonly content: string }[]): string {
+  const previous = db.exec('SELECT revision FROM native_conversation_transcripts WHERE project_id = ? AND session_id = ? AND revision <> ? ORDER BY rowid DESC LIMIT 1', [projectId, sessionId, revision])[0]?.values[0];
+  if (typeof previous?.[0] === 'string') {
+    try {
+      const stored = readTranscriptRow(db, projectId, sessionId, previous[0]);
+      const depth = (Array.isArray(stored) ? 0 : stored.depth) + 1;
+      if (depth < TRANSCRIPT_FULL_COPY_EVERY) {
+        const base = readTranscript(db, projectId, sessionId, previous[0]) as Array<{ readonly role?: unknown; readonly content?: unknown }>;
+        if (base.length <= messages.length && base.every((message, index) => message.role === messages[index]!.role && message.content === messages[index]!.content)) {
+          return JSON.stringify({ base: previous[0], depth, append: messages.slice(base.length) });
+        }
+      }
+    } catch { /* An unreadable earlier revision is not a base: this one is stored whole. */ }
+  }
+  return JSON.stringify(messages);
+}
 function transcriptOf(db: SqlReader, projectId: string, stored: unknown): unknown {
   const continuation = (stored as { continuation?: unknown } | null)?.continuation;
   if (!continuation || typeof continuation !== 'object' || Object.hasOwn(continuation, 'messages')) return stored;
   const { sessionId, revision } = continuation as { sessionId?: unknown; revision?: unknown };
-  const row = db.exec('SELECT messages_json FROM native_conversation_transcripts WHERE project_id = ? AND session_id = ? AND revision = ?', [projectId, String(sessionId), String(revision)])[0]?.values[0];
-  if (typeof row?.[0] !== 'string') throw new NativeConversationStorageError('invalid');
-  return { ...(stored as object), continuation: { ...continuation, messages: JSON.parse(row[0]) as unknown } };
+  return { ...(stored as object), continuation: { ...continuation, messages: readTranscript(db, projectId, String(sessionId), String(revision)) } };
 }
 function storedRow(db: Pick<SqlDatabase, 'exec' | 'run'>, projectId: string, current: NativeConversationCapture | null, next: NativeConversationCapture): string {
   if (!next.continuation) return JSON.stringify(next);
   const { messages, ...reference } = next.continuation;
   // The continuation is part of the captured source and never changes after capture.
+  // The transcript table is created with the schema on every open of the store.
   if (!current) {
-    if ((db.exec("SELECT 1 FROM sqlite_master WHERE type='table' AND name='native_conversation_transcripts'")[0]?.values.length ?? 0) === 0) db.run(TRANSCRIPT_TABLE);
-    db.run('INSERT OR IGNORE INTO native_conversation_transcripts(project_id, session_id, revision, messages_json) VALUES (?, ?, ?, ?)', [projectId, reference.sessionId, reference.revision, JSON.stringify(messages)]);
+    const exists = (db.exec('SELECT 1 FROM native_conversation_transcripts WHERE project_id = ? AND session_id = ? AND revision = ?', [projectId, reference.sessionId, reference.revision])[0]?.values.length ?? 0) > 0;
+    if (!exists) db.run('INSERT INTO native_conversation_transcripts(project_id, session_id, revision, messages_json) VALUES (?, ?, ?, ?)',
+      [projectId, reference.sessionId, reference.revision, encodeTranscript(db, projectId, reference.sessionId, reference.revision, messages)]);
   } else if ((db.exec('SELECT 1 FROM native_conversation_transcripts WHERE project_id = ? AND session_id = ? AND revision = ?', [projectId, reference.sessionId, reference.revision])[0]?.values.length ?? 0) === 0) {
     // A row from an earlier build held its transcript inline: keep it inline.
     return JSON.stringify(next);

@@ -69,6 +69,14 @@ function setupSignature(transports: readonly ChannelTransport[], gaps: readonly 
 
 type NotifierSettings = Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'onDidChangeIncarnation'>>;
 
+/**
+ * The longest the notifier keeps resolved channels before a delivery resolves
+ * them again. The service registry has no change signal, so an edit there (or
+ * a token rotated in a password manager behind a secret reference) is picked
+ * up within this time even when nothing fails; six lookups per ten minutes.
+ */
+const CHANNELS_MAX_AGE_MS = 10 * 60_000;
+
 /** Resolve the Slack and Discord notification channels from the services, settings and environment. */
 async function resolveNotifierChannels(
   serviceRegistry: Pick<ServiceRegistry, 'resolveSecret'>,
@@ -148,8 +156,12 @@ function transportFor(channel: NotifierChannel, integration: SlackIntegration | 
  * {@link Notifier.channelGaps} and gets no channel.
  *
  * A notifier built by {@link Notifier.fromConfig} resolves its channels again
- * before each delivery and on every settings change, so a token or webhook
- * saved during a session reaches the next notification without a restart.
+ * on every settings change, and before a delivery only when they may be out
+ * of date: none is resolved yet, the last resolution or a send failed, a
+ * stored secret changed, or the last resolution is older than
+ * {@link CHANNELS_MAX_AGE_MS}. A token or webhook saved during a session
+ * reaches the next notification without a restart, and a burst of
+ * notifications (every worker agent ending) does not repeat the secret lookups.
  *
  * Which events are announced and how they are worded belongs to
  * `notification-dispatcher.ts`; failures are retried by the delivery queue and
@@ -160,6 +172,11 @@ export class Notifier implements NotificationDeadLetterSource {
   private gaps: readonly NotifierChannelGap[];
   private readonly resolveChannels: (() => Promise<NotifierChannelSetup>) | undefined;
   private _resolving: Promise<void> | undefined;
+  /** When the channels were last resolved; undefined until a resolution succeeded. */
+  private _resolvedAt: number | undefined;
+  /** Set by a failed resolution or send, or a secret change: the next delivery resolves again first. */
+  private _stale = false;
+  private stopWatchingSecrets: (() => void) | undefined;
   private readonly _channelListeners = new Set<() => void>();
   private stopWatchingSettings: (() => void) | undefined;
   private unsubscribe: (() => void) | undefined;
@@ -170,7 +187,7 @@ export class Notifier implements NotificationDeadLetterSource {
   private readonly _active = new Set<Promise<void>>();
 
   constructor(options?: NotifierChannelSetup & {
-    /** Resolves the channels again, before each delivery and on {@link Notifier.refresh}. */
+    /** Resolves the channels again: on {@link Notifier.refresh}, and before a delivery when they may be out of date. */
     resolveChannels?: (() => Promise<NotifierChannelSetup>) | undefined;
     delivery?: Partial<DeliveryQueueConfig> | undefined;
     featureFlags?: Pick<FeatureFlagManager, 'isEnabled'> | null | undefined;
@@ -182,6 +199,8 @@ export class Notifier implements NotificationDeadLetterSource {
     this.transports = transportsFor(options ?? {});
     this.gaps = options?.gaps ?? [];
     this.resolveChannels = options?.resolveChannels;
+    // The setup passed in is the first resolution.
+    if (this.resolveChannels) this._resolvedAt = Date.now();
     this._queue = new DeliveryQueue<NotificationEnvelope | string>({
       ...(options?.delivery ?? {}),
       featureFlags: options?.featureFlags,
@@ -213,7 +232,7 @@ export class Notifier implements NotificationDeadLetterSource {
        * as bot tokens. Without it (or `resolveConfigSecret`) a stored reference cannot
        * be read and the channel is not built from config.
        */
-      secretsManager?: Pick<SecretsManager, 'get' | 'getGlobalHome'> | null;
+      secretsManager?: (Pick<SecretsManager, 'get' | 'getGlobalHome'> & Partial<Pick<SecretsManager, 'onDidChange'>>) | null;
     } = {},
   ): Promise<Notifier> {
     const resolveConfigSecret = options.resolveConfigSecret ?? ((value: unknown) => resolveSecretInput(value, options.secretsManager
@@ -227,6 +246,8 @@ export class Notifier implements NotificationDeadLetterSource {
       featureFlags: options.featureFlags, metadataOnly: options.metadataOnly, configManager,
     });
     notifier.stopWatchingSettings = configManager?.onDidChangeIncarnation?.(() => { void notifier.refresh(); });
+    // A stored token or webhook changed: the next delivery resolves the channels first.
+    notifier.stopWatchingSecrets = options.secretsManager?.onDidChange?.(() => { notifier._stale = true; });
     return notifier;
   }
 
@@ -255,6 +276,8 @@ export class Notifier implements NotificationDeadLetterSource {
     if (!resolve || this._closed) return Promise.resolve();
     return this._resolving ??= resolve().then((setup) => {
       if (this._closed) return;
+      this._resolvedAt = Date.now();
+      this._stale = false;
       const before = setupSignature(this.transports, this.gaps);
       this.transports = transportsFor(setup);
       this.gaps = setup.gaps ?? [];
@@ -263,8 +286,16 @@ export class Notifier implements NotificationDeadLetterSource {
         try { listener(); } catch (error) { logger.warn('Notifier: channel listener failed', { error: error instanceof Error ? error.message : String(error) }); }
       }
     }, (error: unknown) => {
+      this._stale = true;
       logger.warn('Notifier: notification channels could not be resolved; keeping the current ones', { error: error instanceof Error ? error.message : String(error) });
     }).finally(() => { this._resolving = undefined; });
+  }
+
+  /** Whether the channels held may be out of date, so a delivery resolves them first. */
+  private channelsMayBeStale(): boolean {
+    if (!this.resolveChannels) return false;
+    return this._stale || this.transports.length === 0 || this._resolvedAt === undefined
+      || Date.now() - this._resolvedAt >= CHANNELS_MAX_AGE_MS;
   }
 
   /** Told when the set of channels or channel gaps changes. Returns the unsubscribe function. */
@@ -305,9 +336,10 @@ export class Notifier implements NotificationDeadLetterSource {
     // A 'retrying' outcome is accepted: the queue still holds the message and
     // will resend it. 'dead_letter' means the queue gave up; the entry stays in
     // the dead-letter list until it is resent or cleared.
-    // Channels are resolved at send time: a webhook or token saved since the
-    // last notification is used now (a few secret lookups per notification).
-    await this.refresh();
+    // Channels are resolved again only when they may be out of date (see the
+    // class comment): settings changes already refresh them, so the six secret
+    // lookups are not paid by every notification.
+    if (this.channelsMayBeStale()) await this.refresh();
     const failures: unknown[] = [];
     for (const transport of this.transports) {
       try {
@@ -372,6 +404,11 @@ export class Notifier implements NotificationDeadLetterSource {
 
   private async postEnvelope(envelope: NotificationEnvelope, send: (text: string) => Promise<void>): Promise<void> {
     try { await send(envelope.prepare().text); }
+    catch (error) {
+      // A refused token or a moved webhook: the next delivery resolves the channels again.
+      this._stale = true;
+      throw error;
+    }
     finally { envelope.refreshPrivacy(); }
   }
 
@@ -384,6 +421,8 @@ export class Notifier implements NotificationDeadLetterSource {
     this._closed = true;
     this.stopWatchingSettings?.();
     this.stopWatchingSettings = undefined;
+    this.stopWatchingSecrets?.();
+    this.stopWatchingSecrets = undefined;
     this._channelListeners.clear();
     this.detach();
     this._queue.dispose();

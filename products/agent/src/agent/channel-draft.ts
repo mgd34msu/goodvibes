@@ -482,7 +482,7 @@ export async function saveDraft(
   // `sent` is final: saveDraft may set most statuses, but it must not undo one.
   if (existing?.status === 'sent' && input.status !== undefined && input.status !== 'sent') {
     const move = channelDraftLifecycle.check(existing.status, input.status);
-    if (!move.ok) throw new Error(`Draft ${existing.id}: ${move.reason}.`);
+    if (!move.ok) throw new Error(`Draft ${existing.id}: ${move.reason}. Nothing was changed; save the message as a new draft to send it again.`);
   }
 
   const id = existing?.id ?? generateDraftId();

@@ -1,96 +1,58 @@
 import type { SQLiteStore } from '../state/sqlite-store.js';
-import type {
-  KnowledgeConsolidationCandidateRecord,
-  KnowledgeEdgeRecord,
-  KnowledgeExtractionRecord,
-  KnowledgeIssueRecord,
-  KnowledgeNodeRecord,
-  KnowledgeNodeRevisionRecord,
-  KnowledgeRefinementTaskRecord,
-  KnowledgeSemanticEnrichmentStateRecord,
-  KnowledgeSourceRecord,
-  KnowledgeUsageRecord,
-} from './types.js';
+import { selectRecords } from './store-row-table.js';
+import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from './types.js';
 
 /**
  * The store internals needed to cascade a single-record hard delete. Both node and
  * source deletes cascade edges, issues, usage records, consolidation candidates and
  * refinement tasks; node delete also
  * purges revision history and source delete purges derived extraction/enrichment
- * rows. Honest hard delete, no soft-hide.
+ * rows. Honest hard delete, no soft-hide. Each cascade is one indexed or
+ * filtered DELETE; the tables read the database, so nothing else is updated.
  */
 export interface KnowledgeRecordDeleteView {
   readonly sqlite: SQLiteStore;
-  readonly sources: Map<string, KnowledgeSourceRecord>;
-  readonly nodes: Map<string, KnowledgeNodeRecord>;
-  readonly edges: Map<string, KnowledgeEdgeRecord>;
-  readonly issues: Map<string, KnowledgeIssueRecord>;
-  readonly extractions: Map<string, KnowledgeExtractionRecord>;
-  readonly usageRecords: Map<string, KnowledgeUsageRecord>;
-  readonly consolidationCandidates: Map<string, KnowledgeConsolidationCandidateRecord>;
-  readonly refinementTasks: Map<string, KnowledgeRefinementTaskRecord>;
-  readonly nodeRevisions: Map<string, KnowledgeNodeRevisionRecord[]>;
-  readonly semanticEnrichmentStates: Map<string, KnowledgeSemanticEnrichmentStateRecord>;
+  readonly sources: ReadonlyMap<string, KnowledgeSourceRecord>;
+  readonly nodes: ReadonlyMap<string, KnowledgeNodeRecord>;
 }
 
-/** Statements and map removals of one delete, applied together or not at all. */
+/** The statements of one delete, applied together or not at all. */
 interface DeletePlan {
-  readonly statements: Array<readonly [string, string]>;
-  readonly commit: Array<() => void>;
+  readonly statements: Array<readonly [string, readonly string[]]>;
   readonly planned: Set<string>;
 }
 
 function newPlan(): DeletePlan {
-  return { statements: [], commit: [], planned: new Set() };
+  return { statements: [], planned: new Set() };
 }
 
-function planDelete(plan: DeletePlan, table: string, column: string, id: string, forget: () => void): void {
-  const key = `${table}:${column}:${id}`;
+function planDelete(plan: DeletePlan, sql: string, params: readonly string[]): void {
+  const key = `${sql}\u0000${params.join('\u0000')}`;
   if (plan.planned.has(key)) return;
   plan.planned.add(key);
-  plan.statements.push([`DELETE FROM ${table} WHERE ${column} = ?`, id]);
-  plan.commit.push(forget);
+  plan.statements.push([sql, params]);
 }
 
 function runPlan(view: KnowledgeRecordDeleteView, plan: DeletePlan): void {
   view.sqlite.run('SAVEPOINT knowledge_record_delete');
   try {
-    for (const [sql, id] of plan.statements) view.sqlite.run(sql, [id]);
+    for (const [sql, params] of plan.statements) view.sqlite.run(sql, [...params]);
     view.sqlite.run('RELEASE SAVEPOINT knowledge_record_delete');
   } catch (error) {
     view.sqlite.run('ROLLBACK TO SAVEPOINT knowledge_record_delete');
     view.sqlite.run('RELEASE SAVEPOINT knowledge_record_delete');
     throw error;
   }
-  for (const forget of plan.commit) forget();
 }
 
-function planNodeDelete(view: KnowledgeRecordDeleteView, plan: DeletePlan, id: string): void {
-  for (const [edgeId, edge] of view.edges) {
-    if ((edge.fromKind === 'node' && edge.fromId === id) || (edge.toKind === 'node' && edge.toId === id)) {
-      planDelete(plan, 'knowledge_edges', 'id', edgeId, () => { view.edges.delete(edgeId); });
-    }
-  }
-  for (const [issueId, issue] of view.issues) {
-    if (issue.nodeId === id) planDelete(plan, 'knowledge_issues', 'id', issueId, () => { view.issues.delete(issueId); });
-  }
-  for (const [usageId, usage] of view.usageRecords) {
-    if (usage.targetKind === 'node' && usage.targetId === id) {
-      planDelete(plan, 'knowledge_usage_records', 'id', usageId, () => { view.usageRecords.delete(usageId); });
-    }
-  }
-  for (const [candidateId, candidate] of view.consolidationCandidates) {
-    if (candidate.subjectKind === 'node' && candidate.subjectId === id) {
-      planDelete(plan, 'knowledge_consolidation_candidates', 'id', candidateId, () => { view.consolidationCandidates.delete(candidateId); });
-    }
-  }
-  for (const [taskId, task] of view.refinementTasks) {
-    if ((task.subjectKind === 'node' && task.subjectId === id) || task.gapId === id) {
-      planDelete(plan, 'knowledge_refinement_tasks', 'id', taskId, () => { view.refinementTasks.delete(taskId); });
-    }
-  }
-  planDelete(plan, 'knowledge_node_revisions', 'node_id', id, () => { view.nodeRevisions.delete(id); });
-  planDelete(plan, 'knowledge_nodes', 'id', id, () => { view.nodes.delete(id); });
+function planNodeDelete(plan: DeletePlan, id: string): void {
+  planDelete(plan, "DELETE FROM knowledge_edges WHERE (from_kind = 'node' AND from_id = ?) OR (to_kind = 'node' AND to_id = ?)", [id, id]);
+  planDelete(plan, 'DELETE FROM knowledge_issues WHERE node_id = ?', [id]);
+  planDelete(plan, "DELETE FROM knowledge_usage_records WHERE target_kind = 'node' AND target_id = ?", [id]);
+  planDelete(plan, "DELETE FROM knowledge_consolidation_candidates WHERE subject_kind = 'node' AND subject_id = ?", [id]);
+  planDelete(plan, "DELETE FROM knowledge_refinement_tasks WHERE (subject_kind = 'node' AND subject_id = ?) OR gap_id = ?", [id, id]);
+  planDelete(plan, 'DELETE FROM knowledge_node_revisions WHERE node_id = ?', [id]);
+  planDelete(plan, 'DELETE FROM knowledge_nodes WHERE id = ?', [id]);
 }
 
 /** Source ids a node records as supporting it, besides its owning `sourceId`. */
@@ -103,7 +65,7 @@ function otherSupportingSourceIds(node: KnowledgeNodeRecord, deletedSourceId: st
 export function deleteKnowledgeNodeRecord(view: KnowledgeRecordDeleteView, id: string): boolean {
   if (!view.nodes.has(id)) return false;
   const plan = newPlan();
-  planNodeDelete(view, plan, id);
+  planNodeDelete(plan, id);
   runPlan(view, plan);
   return true;
 }
@@ -116,39 +78,18 @@ export function deleteKnowledgeNodeRecord(view: KnowledgeRecordDeleteView, id: s
 export function deleteKnowledgeSourceRecord(view: KnowledgeRecordDeleteView, id: string): boolean {
   if (!view.sources.has(id)) return false;
   const plan = newPlan();
-  for (const [nodeId, node] of view.nodes) {
-    if (node.sourceId !== id) continue;
+  for (const node of selectRecords(view.nodes, 'source_id = ?', [id], '', (record) => record.sourceId === id)) {
     if (otherSupportingSourceIds(node, id).some((other) => view.sources.has(other))) continue;
-    planNodeDelete(view, plan, nodeId);
+    planNodeDelete(plan, node.id);
   }
-  for (const [edgeId, edge] of view.edges) {
-    if ((edge.fromKind === 'source' && edge.fromId === id) || (edge.toKind === 'source' && edge.toId === id)) {
-      planDelete(plan, 'knowledge_edges', 'id', edgeId, () => { view.edges.delete(edgeId); });
-    }
-  }
-  for (const [extractionId, extraction] of view.extractions) {
-    if (extraction.sourceId === id) planDelete(plan, 'knowledge_extractions', 'id', extractionId, () => { view.extractions.delete(extractionId); });
-  }
-  for (const [issueId, issue] of view.issues) {
-    if (issue.sourceId === id) planDelete(plan, 'knowledge_issues', 'id', issueId, () => { view.issues.delete(issueId); });
-  }
-  for (const [usageId, usage] of view.usageRecords) {
-    if (usage.targetKind === 'source' && usage.targetId === id) {
-      planDelete(plan, 'knowledge_usage_records', 'id', usageId, () => { view.usageRecords.delete(usageId); });
-    }
-  }
-  for (const [candidateId, candidate] of view.consolidationCandidates) {
-    if (candidate.subjectKind === 'source' && candidate.subjectId === id) {
-      planDelete(plan, 'knowledge_consolidation_candidates', 'id', candidateId, () => { view.consolidationCandidates.delete(candidateId); });
-    }
-  }
-  for (const [taskId, task] of view.refinementTasks) {
-    if (task.subjectKind === 'source' && task.subjectId === id) {
-      planDelete(plan, 'knowledge_refinement_tasks', 'id', taskId, () => { view.refinementTasks.delete(taskId); });
-    }
-  }
-  planDelete(plan, 'knowledge_semantic_enrichment_state', 'source_id', id, () => { view.semanticEnrichmentStates.delete(id); });
-  planDelete(plan, 'knowledge_sources', 'id', id, () => { view.sources.delete(id); });
+  planDelete(plan, "DELETE FROM knowledge_edges WHERE (from_kind = 'source' AND from_id = ?) OR (to_kind = 'source' AND to_id = ?)", [id, id]);
+  planDelete(plan, 'DELETE FROM knowledge_extractions WHERE source_id = ?', [id]);
+  planDelete(plan, 'DELETE FROM knowledge_issues WHERE source_id = ?', [id]);
+  planDelete(plan, "DELETE FROM knowledge_usage_records WHERE target_kind = 'source' AND target_id = ?", [id]);
+  planDelete(plan, "DELETE FROM knowledge_consolidation_candidates WHERE subject_kind = 'source' AND subject_id = ?", [id]);
+  planDelete(plan, "DELETE FROM knowledge_refinement_tasks WHERE subject_kind = 'source' AND subject_id = ?", [id]);
+  planDelete(plan, 'DELETE FROM knowledge_semantic_enrichment_state WHERE source_id = ?', [id]);
+  planDelete(plan, 'DELETE FROM knowledge_sources WHERE id = ?', [id]);
   runPlan(view, plan);
   return true;
 }

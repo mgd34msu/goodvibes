@@ -29,11 +29,10 @@ import type { PlanningSourceIdentity } from './store-planning-source-selector.js
 import { countWorkPlanTasksInSpace, listWorkPlanTaskRecordIds, readWorkPlanStatusCounts, readWorkPlanTaskImportRecord, workPlanTaskView, writeWorkPlanCommit, type WorkPlanTaskCommit, type WorkPlanTaskCommitResult, type WorkPlanTaskView } from './store-work-plan-tasks.js';
 import { applyKnowledgeImport, assertKnowledgeImportRecordSizes, type KnowledgeImportInput, type KnowledgeImportReceipt, type PrepareKnowledgeImportGraph } from './store-import.js';
 import { prepareKnowledgeEdgeRecord, writeKnowledgeEdgeRow, findKnowledgeEdge } from './store-edge-writes.js';
-import { IndexedRecordMap, edgeEndpointKey, extractionSourceKey, nodeSlugKey, sourceUriKey } from './store-indexed-map.js';
+import { createKnowledgeTables } from './store-table-specs.js';
 import { createKnowledgeEdgeChanges, validateKnowledgeEdgeChanges, trimKnowledgeEdgeChanges, type KnowledgeEdgeGenerationSnapshot } from './store-edge-generations.js';
 import {
   ensureKnowledgeScopeVerdictTable,
-  loadKnowledgeScopeVerdicts,
   pruneOrphanScopeVerdicts,
   splitScopeVerdictKey,
   writeKnowledgeScopeVerdict,
@@ -166,7 +165,6 @@ import {
   listKnowledgeUsageRecords,
   type KnowledgeStoreReadView,
 } from './store-read.js';
-import { loadKnowledgeStoreSnapshot } from './store-load.js';
 import {
   ensureKnowledgeSpaceMetadata,
   getExplicitKnowledgeSpaceId,
@@ -176,7 +174,7 @@ import {
 } from './spaces.js';
 
 /**
- * Retained job-run history cap (in-memory mirror AND sqlite rows). Runs are
+ * Retained job-run history cap (stored rows). Runs are
  * append-per-execution; without a cap the history accretes one record per run
  * for the daemon's whole life and survives restarts (the incident's ~1,400
  * zero-result self-improvement objects were this class).
@@ -282,25 +280,29 @@ export class KnowledgeStore {
   private readonly declareSemanticSourceFormat: (() => void) | undefined;
   private readonly ledgerStorage = new Map<string, KnowledgeWorkLedgerStorage>();
   private initPromise: Promise<void> | null = null;
-  /** SQLite's count of other connections' commits when the maps were last loaded; see refreshIfChanged(). */
-  private loadedDataVersion = -1;
-  // Indexed by the keys ingest and scope selection look records up by, so
-  // those lookups do not walk the whole collection (store-indexed-map.ts).
-  private readonly sources = new IndexedRecordMap<KnowledgeSourceRecord>((record) => record.canonicalUri ? sourceUriKey(record.canonicalUri) : undefined);
-  private readonly nodes = new IndexedRecordMap<KnowledgeNodeRecord>((record) => nodeSlugKey(record.kind, record.slug));
-  private readonly edges = new IndexedRecordMap<KnowledgeEdgeRecord>(edgeEndpointKey);
-  private readonly issues = new Map<string, KnowledgeIssueRecord>();
-  private readonly extractions = new IndexedRecordMap<KnowledgeExtractionRecord>((record) => extractionSourceKey(record.sourceId));
-  private readonly jobRuns = new Map<string, KnowledgeJobRunRecord>();
-  private readonly refinementTasks = new Map<string, KnowledgeRefinementTaskRecord>();
-  private readonly usageRecords = new Map<string, KnowledgeUsageRecord>();
-  private readonly consolidationCandidates = new Map<string, KnowledgeConsolidationCandidateRecord>();
-  private readonly consolidationReports = new Map<string, KnowledgeConsolidationReportRecord>();
-  private readonly schedules = new Map<string, KnowledgeScheduleRecord>();
-  private readonly nodeRevisions = new Map<string, KnowledgeNodeRevisionRecord[]>();
-  private readonly semanticEnrichmentStates = new Map<string, KnowledgeSemanticEnrichmentStateRecord>();
+  /** SQLite's count of other connections' commits at the last refreshIfChanged(). */
+  private seenDataVersion = -1;
+  // The SQLite file is the one owner of every row. Each table reads it and
+  // keeps only a decode memo checked against the stored row, so a row another
+  // process committed or a write that rolled back reads as stored
+  // (store-row-table.ts). Writers write rows; `set` only binds the written
+  // record to its row so later reads return that same object.
+  readonly #tables = createKnowledgeTables(() => this.sqlite);
+  private readonly sources = this.#tables.sources;
+  private readonly nodes = this.#tables.nodes;
+  private readonly edges = this.#tables.edges;
+  private readonly issues = this.#tables.issues;
+  private readonly extractions = this.#tables.extractions;
+  private readonly jobRuns = this.#tables.jobRuns;
+  private readonly refinementTasks = this.#tables.refinementTasks;
+  private readonly usageRecords = this.#tables.usageRecords;
+  private readonly consolidationCandidates = this.#tables.consolidationCandidates;
+  private readonly consolidationReports = this.#tables.consolidationReports;
+  private readonly schedules = this.#tables.schedules;
+  private readonly nodeRevisions = this.#tables.nodeRevisions;
+  private readonly semanticEnrichmentStates = this.#tables.semanticEnrichmentStates;
   /** Stored ordinary-view readings by `kind:id`; see getScopeVerdict. */
-  private readonly scopeVerdicts = new Map<string, KnowledgeScopeVerdict>();
+  private readonly scopeVerdicts = this.#tables.scopeVerdicts;
 
   /**
    * The construction every production site uses: the family is required here, so
@@ -365,12 +367,7 @@ export class KnowledgeStore {
 
   async init(): Promise<void> {
     if (this.closed) throw new Error('KnowledgeStore is closed');
-    if (this.ready) {
-      // Another process's commit since the maps were loaded: load them again
-      // before this operation reads them. One statement when nothing changed.
-      this.adoptForeignCommits();
-      return;
-    }
+    if (this.ready) return;
     if (this.initPromise) return this.initPromise;
     this.initPromise = this.initialize();
     try {
@@ -514,27 +511,16 @@ export class KnowledgeStore {
   }
 
   /**
-   * Reads are served from maps loaded at start, so a record another process
-   * committed since (the daemon next to a terminal) would stay invisible.
-   * This loads the maps again when SQLite reports another connection's commit
-   * (`data_version`, one statement), and resolves true when it did. Every
-   * operation that passes init() does the same, so a write is never built on
-   * maps older than the file.
+   * Resolves true when another process committed to the knowledge file since
+   * the previous call. Nothing is loaded: every read already asks the file, so
+   * such a commit is seen by the next read anyway. One statement.
    */
   refreshIfChanged(): Promise<boolean> {
     if (!this.ready || this.closed) return Promise.resolve(false);
-    try {
-      return Promise.resolve(this.adoptForeignCommits());
-    } catch (error) {
-      logger.warn('[knowledge-store] could not load the changed knowledge file', { path: this.dbPath, error: summarizeError(error) });
-      return Promise.resolve(false);
-    }
-  }
-
-  private adoptForeignCommits(): boolean {
-    if (this.closed || this.sqlite.dataVersion() === this.loadedDataVersion) return false;
-    this.refreshSnapshot();
-    return true;
+    const version = this.sqlite.dataVersion();
+    const changed = this.seenDataVersion !== -1 && version !== this.seenDataVersion;
+    this.seenDataVersion = version;
+    return Promise.resolve(changed);
   }
 
   /**
@@ -547,11 +533,10 @@ export class KnowledgeStore {
     return getKnowledgeStoreStatus(this.asReadView());
   }
 
-  /** Cheap count of retained in-memory records, for MemoryGovernor cache visibility. */
+  /** Decoded records this process holds for reuse (the rows themselves live in the file), for MemoryGovernor cache visibility. */
   retainedEntryCount(): number {
-    const status = this.status() as unknown as Record<string, unknown>;
     let total = 0;
-    for (const value of Object.values(status)) if (typeof value === 'number') total += value;
+    for (const table of Object.values(this.#tables)) total += table.retainedCount;
     return total;
   }
 
@@ -588,9 +573,9 @@ export class KnowledgeStore {
   }
 
   /**
-   * Single-pass cursor over sources (insertion order, no materialization).
-   * O(N) for a full scan, offset paging in a loop re-walks the Map from zero
-   * per page (O(N²/page)). Map iterators tolerate concurrent upsert/delete.
+   * Single-pass cursor over the stored sources, in stored order, as read at
+   * the first step; writes made while it runs do not disturb it. Offset
+   * paging in a loop re-walks from zero per page (O(N²/page)).
    */
   iterateSources(): IterableIterator<KnowledgeSourceRecord> {
     return this.sources.values();
@@ -785,11 +770,7 @@ export class KnowledgeStore {
       const decision = decide(view);
       if (decision.put.length === 0 && decision.remove.length === 0) return { changed: false, value: { value: decision.value, changed: false, head: view.head } };
       const revision = writeWorkPlanCommit(db, spaceId, workPlanId, decision.put, decision.remove, decision.at);
-      if (legacy) {
-        // The maps may not hold a row another process wrote since they were loaded.
-        if (!this.sources.has(legacy.id)) this.sources.set(legacy.id, legacy);
-        deleteKnowledgeSourceRecord(this.asRecordDeleteView(), legacy.id);
-      }
+      if (legacy) deleteKnowledgeSourceRecord(this.asRecordDeleteView(), legacy.id);
       // The plan as this commit left it, by status: one aggregate in the same transaction.
       const statusCounts = readWorkPlanStatusCounts(db, spaceId, workPlanId);
       return { changed: true, value: { value: decision.value, changed: true, head: { revision, updatedAt: decision.at }, statusCounts } };
@@ -1559,9 +1540,7 @@ export class KnowledgeStore {
       record.createdAt,
       record.updatedAt,
     ]);
-    // The unique endpoint-tuple index makes SQL replace the other row; mirror that in memory.
-    const displaced = findKnowledgeEdge(this.edges, record);
-    if (displaced && displaced.id !== record.id) this.edges.delete(displaced.id);
+    // The unique endpoint-tuple index makes SQL replace any other row for these endpoints.
     this.edges.set(record.id, record);
     await this.save();
   }
@@ -1691,9 +1670,7 @@ export class KnowledgeStore {
     const record = prepareKnowledgeExtractionRecord(input, existing, this.sources.get(input.sourceId));
     assertKnowledgeWriteCurrent(assertCurrent);
     writeKnowledgeExtractionRow(this.sqlite, record);
-    // The unique source_id index makes SQL replace the other row for this source; mirror that in memory.
-    const displaced = this.getExtractionBySourceId(record.sourceId);
-    if (displaced && displaced.id !== record.id) this.extractions.delete(displaced.id);
+    // The unique source_id index makes SQL replace any other row for this source.
     this.extractions.set(record.id, record);
     await this.save();
     return record;
@@ -1751,7 +1728,7 @@ export class KnowledgeStore {
       now,
     ]);
     this.jobRuns.set(record.id, record);
-    // Retention on write: keep the run history bounded in memory AND on disk.
+    // Retention on write: keep the stored run history bounded.
     this.pruneJobRuns(MAX_RETAINED_JOB_RUNS);
     await this.save();
     return record;
@@ -1759,24 +1736,24 @@ export class KnowledgeStore {
 
   /**
    * Bound the retained job-run history to `keep` records. Active (queued /
-   * running) runs are never pruned; settled runs beyond the cap are removed
-   * oldest-first from BOTH the in-memory mirror and the sqlite table, so the
-   * history cannot accrete without bound across uptime or restarts. Also the
-   * MemoryGovernor's trim hook for this store (a real reclaim, not a no-op).
+   * running) runs are never pruned; settled runs beyond the cap are deleted
+   * oldest-first, so the history cannot accrete without bound across uptime
+   * or restarts. Also the MemoryGovernor's trim hook for this store (a real
+   * reclaim: the rows and their decoded records go). Two counting statements
+   * when nothing is over the cap.
    */
   pruneJobRuns(keep: number): number {
     const cap = Math.max(0, Math.trunc(keep));
-    if (this.jobRuns.size <= cap) return 0;
-    const settled = [...this.jobRuns.values()]
-      .filter((run) => run.status !== 'queued' && run.status !== 'running')
-      .sort((a, b) => a.updatedAt - b.updatedAt);
-    const active = this.jobRuns.size - settled.length;
-    const toDrop = settled.slice(0, Math.max(0, this.jobRuns.size - Math.max(cap, active)));
-    for (const run of toDrop) {
-      this.jobRuns.delete(run.id);
-      this.sqlite.run('DELETE FROM knowledge_job_runs WHERE id = ?', [run.id]);
+    if (!this.sqlite.isReady || !(this.jobRuns.size > cap)) return 0;
+    const counts = this.sqlite.exec("SELECT COUNT(*), COALESCE(SUM(status IN ('queued', 'running')), 0) FROM knowledge_job_runs")[0]?.values[0];
+    const drop = Number(counts?.[0] ?? 0) - Math.max(cap, Number(counts?.[1] ?? 0));
+    if (!(drop > 0)) return 0;
+    const ids = this.sqlite.exec("SELECT id FROM knowledge_job_runs WHERE status NOT IN ('queued', 'running') ORDER BY updated_at ASC LIMIT ?", [drop])[0]?.values ?? [];
+    for (const [id] of ids) {
+      this.sqlite.run('DELETE FROM knowledge_job_runs WHERE id = ?', [String(id)]);
+      this.jobRuns.delete(String(id));
     }
-    return toDrop.length;
+    return ids.length;
   }
 
   /** Drops one settled run; an active run is kept. Returns whether a row was removed. */
@@ -1832,18 +1809,15 @@ export class KnowledgeStore {
     return record;
   }
 
-  /** Drop the oldest usage records beyond `keep`, from the in-memory mirror and the sqlite table. */
+  /** Delete the oldest usage records beyond `keep`: one ordered read over the created_at index and one DELETE. */
   pruneUsageRecords(keep: number): number {
-    const cap = Math.max(0, Math.trunc(keep));
-    if (this.usageRecords.size <= cap) return 0;
-    const oldest = [...this.usageRecords.values()]
-      .sort((a, b) => a.createdAt - b.createdAt)
-      .slice(0, this.usageRecords.size - cap);
-    for (const record of oldest) {
-      this.sqlite.run('DELETE FROM knowledge_usage_records WHERE id = ?', [record.id]);
-      this.usageRecords.delete(record.id);
-    }
-    return oldest.length;
+    const drop = this.usageRecords.size - Math.max(0, Math.trunc(keep));
+    if (!this.sqlite.isReady || !(drop > 0)) return 0;
+    const oldest = 'SELECT id FROM knowledge_usage_records ORDER BY created_at ASC LIMIT ?';
+    const ids = this.sqlite.exec(oldest, [drop])[0]?.values ?? [];
+    this.sqlite.run(`DELETE FROM knowledge_usage_records WHERE id IN (${oldest})`, [drop]);
+    for (const [id] of ids) this.usageRecords.delete(String(id));
+    return ids.length;
   }
 
   async upsertConsolidationCandidate(
@@ -1951,7 +1925,7 @@ export class KnowledgeStore {
     return record;
   }
 
-  /** Drop the oldest consolidation reports beyond `keep`, from the in-memory mirror and the sqlite table. */
+  /** Delete the oldest consolidation reports beyond `keep`. */
   pruneConsolidationReports(keep: number): number {
     const cap = Math.max(0, Math.trunc(keep));
     if (this.consolidationReports.size <= cap) return 0;
@@ -2075,12 +2049,11 @@ export class KnowledgeStore {
     });
     try {
       const verdictTableCreated = ensureKnowledgeScopeVerdictTable(this.sqlite);
-      this.refreshSnapshot();
       // Retention is an initialization mutation, never a side effect of adopting
       // another writer's current image during a guarded source action. Publish
       // it through the same baseline check before admitting caller mutations.
       validateNativeWorkRows(this.sqlite);
-      const pruned = this.pruneJobRuns(MAX_RETAINED_JOB_RUNS) + this.pruneConsolidationReports(MAX_RETAINED_CONSOLIDATION_REPORTS) + trimKnowledgeEdgeChanges(this.sqlite) + pruneOrphanScopeVerdicts(this.sqlite, this.scopeVerdicts)
+      const pruned = this.pruneJobRuns(MAX_RETAINED_JOB_RUNS) + this.pruneConsolidationReports(MAX_RETAINED_CONSOLIDATION_REPORTS) + trimKnowledgeEdgeChanges(this.sqlite) + pruneOrphanScopeVerdicts(this.sqlite)
         + pruneSettledNativeWork(this.sqlite);
       if (pruned > 0 || verdictTableCreated) await this.sqlite.save();
       this.ready = true;
@@ -2090,48 +2063,6 @@ export class KnowledgeStore {
       this.sqlite.close();
       throw error;
     }
-  }
-
-  private refreshSnapshot(): void {
-    // Version first: a commit landing during the load is loaded again next time.
-    // One read transaction, so the maps show one committed state.
-    let snapshot!: ReturnType<typeof loadKnowledgeStoreSnapshot>;
-    this.sqlite.assertPersistedReadFrame(() => {
-      this.loadedDataVersion = this.sqlite.dataVersion();
-      snapshot = loadKnowledgeStoreSnapshot(this.sqlite);
-      return undefined;
-    });
-    this.sources.clear();
-    for (const record of snapshot.sources) this.sources.set(record.id, record);
-    this.nodes.clear();
-    for (const record of snapshot.nodes) this.nodes.set(record.id, retainKnowledgeNodeRecord(record));
-    this.edges.clear();
-    for (const record of snapshot.edges) this.edges.set(record.id, record);
-    this.issues.clear();
-    for (const record of snapshot.issues) this.issues.set(record.id, record);
-    this.extractions.clear();
-    for (const record of snapshot.extractions) this.extractions.set(record.id, record);
-    this.jobRuns.clear();
-    for (const record of snapshot.jobRuns) this.jobRuns.set(record.id, record);
-    this.refinementTasks.clear();
-    for (const record of snapshot.refinementTasks) this.refinementTasks.set(record.id, record);
-    this.usageRecords.clear();
-    for (const record of snapshot.usageRecords) this.usageRecords.set(record.id, record);
-    this.consolidationCandidates.clear();
-    for (const record of snapshot.consolidationCandidates) this.consolidationCandidates.set(record.id, record);
-    this.consolidationReports.clear();
-    for (const record of snapshot.consolidationReports) this.consolidationReports.set(record.id, record);
-    this.schedules.clear();
-    for (const record of snapshot.schedules) this.schedules.set(record.id, record);
-    this.nodeRevisions.clear();
-    for (const record of snapshot.nodeRevisions) {
-      const list = this.nodeRevisions.get(record.nodeId) ?? [];
-      list.push(record);
-      this.nodeRevisions.set(record.nodeId, list.sort((a, b) => a.revision - b.revision));
-    }
-    this.semanticEnrichmentStates.clear();
-    for (const record of snapshot.semanticEnrichmentStates) this.semanticEnrichmentStates.set(record.sourceId, record);
-    loadKnowledgeScopeVerdicts(this.sqlite, this.scopeVerdicts);
   }
 }
 

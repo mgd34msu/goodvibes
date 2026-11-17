@@ -1,11 +1,11 @@
 /**
  * A record map that also answers "the record whose key is K" in one lookup.
  *
- * The knowledge store's in-memory maps are mutated from several write paths
- * (upserts, imports, deletes, history restores, reloads). The secondary index
- * is kept by the map itself, on every set, delete and clear, so no write path
- * can forget it and a lookup by canonical URI, by source, by kind and slug or
- * by edge endpoints is a map read instead of a walk over every record.
+ * An import stages its change in a copy of the store's tables before writing
+ * it (store-import.ts). The secondary index is kept by the map itself, on
+ * every set, delete and clear, so a lookup in the staged copy by canonical
+ * URI, by source, by kind and slug or by edge endpoints is a map read instead
+ * of a walk over every record.
  *
  * Keys are unique where the database makes them unique (a source per URI, an
  * extraction per source, a node per kind and slug, an edge per endpoint
@@ -70,9 +70,20 @@ export class IndexedRecordMap<V> extends Map<string, V> {
   }
 }
 
+/** A map that answers secondary-key lookups itself: this class, or a store table read through SQL (store-row-table.ts). */
+interface IndexedLookup<V> {
+  lookup(key: string): V | undefined;
+  copy(): Map<string, V>;
+}
+
+function isIndexedLookup<V>(map: ReadonlyMap<string, V>): map is ReadonlyMap<string, V> & IndexedLookup<V> {
+  const candidate = map as ReadonlyMap<string, V> & Partial<IndexedLookup<V>>;
+  return typeof candidate.lookup === 'function' && typeof candidate.copy === 'function';
+}
+
 /** Copy a record map for staging, keeping its index when it has one. */
 export function copyRecordMap<V>(map: ReadonlyMap<string, V>): Map<string, V> {
-  return map instanceof IndexedRecordMap ? (map as IndexedRecordMap<V>).copy() : new Map(map);
+  return isIndexedLookup(map) ? map.copy() : new Map(map);
 }
 
 /** Look up by secondary key on an indexed map; a plain map is walked with `matches`. */
@@ -81,7 +92,7 @@ export function lookupRecord<V>(
   key: string,
   matches: (value: V) => boolean,
 ): V | undefined {
-  if (map instanceof IndexedRecordMap) return (map as IndexedRecordMap<V>).lookup(key);
+  if (isIndexedLookup(map)) return map.lookup(key);
   for (const value of map.values()) if (matches(value)) return value;
   return undefined;
 }

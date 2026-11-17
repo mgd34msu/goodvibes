@@ -37,15 +37,16 @@ export function splitScopeVerdictKey(key: string): readonly [string, string] {
   return index < 0 ? ['', key] : [key.slice(0, index), key.slice(index + 1)];
 }
 
-export function loadKnowledgeScopeVerdicts(db: Pick<SqlDatabase, 'exec'>, into: Map<string, KnowledgeScopeVerdict>): void {
-  into.clear();
-  if (!db.exec(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='${TABLE}'`)[0]?.values.length) return;
-  const rows = db.exec(`SELECT record_kind, record_id, content_version, included, decided_at FROM ${TABLE}`)[0]?.values ?? [];
-  for (const [kind, id, version, included, decidedAt] of rows) {
-    if (typeof kind !== 'string' || typeof id !== 'string' || typeof version !== 'string') continue;
-    const key = `${kind}:${id}`;
-    into.set(key, { key, version, included: included === null ? null : Number(included) === 1, decidedAt: Number(decidedAt) || 0 });
-  }
+/** One stored reading, decoded from its row (the store reads them through SQL, store-table-specs.ts). */
+export function mapScopeVerdictRow(columns: string[], values: unknown[]): KnowledgeScopeVerdict {
+  const at = (name: string): unknown => values[columns.indexOf(name)];
+  const included = at('included');
+  return {
+    key: `${String(at('record_kind'))}:${String(at('record_id'))}`,
+    version: String(at('content_version')),
+    included: included === null || included === undefined ? null : Number(included) === 1,
+    decidedAt: Number(at('decided_at')) || 0,
+  };
 }
 
 export function writeKnowledgeScopeVerdict(db: Pick<SqlDatabase, 'run'>, verdict: KnowledgeScopeVerdict): void {
@@ -55,13 +56,12 @@ export function writeKnowledgeScopeVerdict(db: Pick<SqlDatabase, 'run'>, verdict
 }
 
 /** Readings of records that no longer exist; removed at open. Returns the number removed. */
-export function pruneOrphanScopeVerdicts(db: Pick<SqlDatabase, 'run' | 'exec'>, verdicts: Map<string, KnowledgeScopeVerdict>): number {
+export function pruneOrphanScopeVerdicts(db: Pick<SqlDatabase, 'run' | 'exec'>): number {
   const orphan = `(record_kind = 'source' AND record_id NOT IN (SELECT id FROM knowledge_sources))
     OR (record_kind = 'node' AND record_id NOT IN (SELECT id FROM knowledge_nodes))
     OR (record_kind = 'issue' AND record_id NOT IN (SELECT id FROM knowledge_issues))`;
   const count = Number(db.exec(`SELECT COUNT(*) FROM ${TABLE} WHERE ${orphan}`)[0]?.values[0]?.[0] ?? 0);
   if (count === 0) return 0;
   db.run(`DELETE FROM ${TABLE} WHERE ${orphan}`);
-  loadKnowledgeScopeVerdicts(db, verdicts);
   return count;
 }

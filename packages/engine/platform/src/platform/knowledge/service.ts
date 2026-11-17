@@ -271,8 +271,8 @@ export class KnowledgeService {
   }
 
   /**
-   * Adopt a knowledge file another process saved since this store last loaded or wrote it.
-   * Call it only at the start of a read a person asked for; never inside a multi-step operation.
+   * Whether another process committed to the knowledge file since the last call.
+   * Nothing is loaded: every store read already asks the file.
    */
   refreshFromDisk(): Promise<boolean> {
     return this.store.refreshIfChanged();

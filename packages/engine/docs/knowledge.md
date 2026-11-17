@@ -1085,9 +1085,9 @@ run reset again.
 
 ## Recovery, cancellation and closed stores
 
-- A knowledge store whose publication outcome could not be confirmed no longer refuses writes until restart: the next operation adopts the published image from disk and continues. While a batch still holds unsaved rows the reload waits and the write is refused with the fence named.
+- The knowledge file is the only copy of the rows: every read asks it. A commit by another process on the same file (the terminal next to the daemon) or a write that rolled back is seen by the next read, with nothing reloaded and no write held for a reload. A record that has not changed is the same object on every read, so a step that compares what it read earlier against the store refuses only when that row really changed.
 - Cancelling a refinement task that is already `closed` or `suppressed` is refused with the task's state ("Nothing was changed"); the daemon route answers 409 with code `KNOWLEDGE_REFINEMENT_TASK_REFUSED`. Cancelling an already cancelled task stays idempotent.
 - A repair abandoned by its caller keeps its task active until the next run settles it; Home Graph readiness stops counting an active task as repairing once it has been untouched for 10 minutes.
 - `extracting` and `needs_review` refinement states are retired. They stay in the task type for older rows but nothing moves a task into them; Home Graph readiness no longer has a `needs_review` state or a `needsReviewTaskCount` field.
-- Work that was admitted before a store closed reports "KnowledgeStore is closed". Reads after close still return the last loaded records.
+- Work that was admitted before a store closed reports "KnowledgeStore is closed". Reads after close return no records.
 - Refused native intake, execution intent and execution record moves name the current state, the proposed state and the legal moves.

@@ -15,6 +15,7 @@ import type {
 } from './types.js';
 import { isInKnowledgeSpaceScope, normalizeKnowledgeSpaceId } from './spaces.js';
 import { extractionSourceKey, lookupRecord, nodeSlugKey, sourceUriKey } from './store-indexed-map.js';
+import { selectRecords, sqlLimit } from './store-row-table.js';
 
 export interface KnowledgeStoreReadView {
   readonly ready: boolean;
@@ -180,14 +181,21 @@ export function listKnowledgeExtractionsForSources(
   sourceIds: ReadonlySet<string>,
 ): KnowledgeExtractionRecord[] {
   if (sourceIds.size === 0) return [];
-  return [...view.extractions.values()]
-    .filter((extraction) => sourceIds.has(extraction.sourceId))
+  return selectRecords(view.extractions, 'source_id IN (SELECT value FROM json_each(?))', [JSON.stringify([...sourceIds])], '',
+    (extraction) => sourceIds.has(extraction.sourceId))
     .sort(byUpdatedAtDesc);
 }
 
+/** `column = ?` for each given filter value, and the values in that order. */
+function filterSql(filters: ReadonlyArray<readonly [string, string | undefined]>): { readonly where: string; readonly params: string[] } {
+  const selected = filters.filter((filter): filter is readonly [string, string] => Boolean(filter[1]));
+  return { where: selected.map(([column]) => `${column} = ?`).join(' AND '), params: selected.map(([, value]) => value) };
+}
+
 export function listKnowledgeJobRuns(view: KnowledgeStoreReadView, limit = 100, jobId?: string): KnowledgeJobRunRecord[] {
-  return [...view.jobRuns.values()]
-    .filter((run) => !jobId || run.jobId === jobId)
+  const filter = filterSql([['job_id', jobId]]);
+  return selectRecords(view.jobRuns, filter.where, [...filter.params, sqlLimit(limit)], ' ORDER BY requested_at DESC, id ASC LIMIT ?',
+    (run) => !jobId || run.jobId === jobId)
     .sort(byRequestedAtDesc)
     .slice(0, sliceLimit(limit));
 }
@@ -203,8 +211,10 @@ export function listKnowledgeRefinementTasks(
     readonly gapId?: string | undefined;
   } = {},
 ): KnowledgeRefinementTaskRecord[] {
-  return [...view.refinementTasks.values()]
-    .filter((task) => (
+  const filter = filterSql([['space_id', input.spaceId], ['state', input.state], ['subject_kind', input.subjectKind],
+    ['subject_id', input.subjectId], ['gap_id', input.gapId]]);
+  return selectRecords(view.refinementTasks, filter.where, [...filter.params, sqlLimit(limit)], ' ORDER BY updated_at DESC, id ASC LIMIT ?',
+    (task) => (
       (!input.spaceId || task.spaceId === input.spaceId)
       && (!input.state || task.state === input.state)
       && (!input.subjectKind || task.subjectKind === input.subjectKind)
@@ -224,8 +234,9 @@ export function listKnowledgeUsageRecords(
     readonly usageKind?: KnowledgeUsageRecord['usageKind'] | undefined;
   } = {},
 ): KnowledgeUsageRecord[] {
-  return [...view.usageRecords.values()]
-    .filter((record) => (
+  const filter = filterSql([['target_kind', input.targetKind], ['target_id', input.targetId], ['usage_kind', input.usageKind]]);
+  return selectRecords(view.usageRecords, filter.where, [...filter.params, sqlLimit(limit)], ' ORDER BY created_at DESC, id ASC LIMIT ?',
+    (record) => (
       (!input.targetKind || record.targetKind === input.targetKind)
       && (!input.targetId || record.targetId === input.targetId)
       && (!input.usageKind || record.usageKind === input.usageKind)
@@ -243,8 +254,10 @@ export function listKnowledgeConsolidationCandidates(
     readonly subjectId?: string | undefined;
   } = {},
 ): KnowledgeConsolidationCandidateRecord[] {
-  return [...view.consolidationCandidates.values()]
-    .filter((record) => (
+  const filter = filterSql([['status', input.status], ['subject_kind', input.subjectKind], ['subject_id', input.subjectId]]);
+  return selectRecords(view.consolidationCandidates, filter.where, [...filter.params, sqlLimit(limit)],
+    ' ORDER BY score DESC, updated_at DESC, id ASC LIMIT ?',
+    (record) => (
       (!input.status || record.status === input.status)
       && (!input.subjectKind || record.subjectKind === input.subjectKind)
       && (!input.subjectId || record.subjectId === input.subjectId)
@@ -310,12 +323,9 @@ export function getKnowledgeConsolidationCandidateBySubject(
   subjectId: string,
   candidateType: KnowledgeConsolidationCandidateRecord['candidateType'],
 ): KnowledgeConsolidationCandidateRecord | null {
-  for (const candidate of view.consolidationCandidates.values()) {
-    if (candidate.subjectKind === subjectKind && candidate.subjectId === subjectId && candidate.candidateType === candidateType) {
-      return candidate;
-    }
-  }
-  return null;
+  return selectRecords(view.consolidationCandidates, 'subject_kind = ? AND subject_id = ? AND candidate_type = ?',
+    [subjectKind, subjectId, candidateType], ' ORDER BY rowid LIMIT 1',
+    (candidate) => candidate.subjectKind === subjectKind && candidate.subjectId === subjectId && candidate.candidateType === candidateType)[0] ?? null;
 }
 
 export function getKnowledgeConsolidationReport(
@@ -349,10 +359,8 @@ export function edgesForKnowledgeStore(
   kind: KnowledgeEdgeRecord['fromKind'] | KnowledgeEdgeRecord['toKind'],
   id: string,
 ): KnowledgeEdgeRecord[] {
-  return [...view.edges.values()].filter((edge) => (
-    (edge.fromKind === kind && edge.fromId === id)
-    || (edge.toKind === kind && edge.toId === id)
-  ));
+  return selectRecords(view.edges, '(from_kind = ? AND from_id = ?) OR (to_kind = ? AND to_id = ?)', [kind, id, kind, id], ' ORDER BY rowid',
+    (edge) => (edge.fromKind === kind && edge.fromId === id) || (edge.toKind === kind && edge.toId === id));
 }
 
 export function getKnowledgeItem(view: KnowledgeStoreReadView, id: string): KnowledgeItemView | null {

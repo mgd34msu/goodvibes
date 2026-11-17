@@ -155,7 +155,8 @@ export interface SQLiteStoreOptions {
 }
 
 type BunStatement = Statement<unknown, SQLQueryBindings[]>;
-const STATEMENT_CACHE_LIMIT = 256;
+// The knowledge tables alone prepare about a hundred statements (store-row-table.ts).
+const STATEMENT_CACHE_LIMIT = 512;
 const SPLIT_CACHE_LIMIT = 256;
 const splitCache = new Map<string, readonly string[]>();
 
@@ -345,6 +346,9 @@ export class SQLiteStore {
   #implicit = false;
   #commitFailure: unknown;
   #closedMessage: string | undefined;
+  #readEpoch = 0;
+  #epochDataVersion = -1;
+  #epochTurnChecked = false;
   readonly #adapter: SqlDatabase;
   private readonly dbPath: string | null;
   private initPromise: Promise<void> | null = null;
@@ -388,6 +392,7 @@ export class SQLiteStore {
 
   run(sql: string, params?: (string | number | Uint8Array | null)[]): void {
     const db = this.getDb();
+    this.#readEpoch += 1;
     this.#beginWrite();
     if (params?.length) this.#statement(sql).run(...bindings(params));
     else db.run(sql);
@@ -396,7 +401,10 @@ export class SQLiteStore {
   exec(sql: string, params?: (string | number)[]): SqlRows {
     this.getDb();
     const statements = splitSqlStatements(sql);
-    if (statements.some((text) => !isReadOnlySql(text))) this.#beginWrite();
+    if (statements.some((text) => !isReadOnlySql(text))) {
+      this.#readEpoch += 1;
+      this.#beginWrite();
+    }
     const results: SqlRows = [];
     for (const text of statements) {
       const statement = this.#statement(text);
@@ -413,6 +421,26 @@ export class SQLiteStore {
    */
   contentRevision(): number {
     return this.#file?.revision() ?? 0;
+  }
+
+  /**
+   * A number that moves whenever a row this connection reads may differ from
+   * the last read: every write or rollback by this process, and another
+   * process's commit. The commit check (`PRAGMA data_version`, one statement)
+   * runs once per turn that asks, so within one synchronous turn the rows
+   * other processes committed are read as of the turn's first ask.
+   */
+  readEpoch(): number {
+    if (!this.#epochTurnChecked && this.#db) {
+      this.#epochTurnChecked = true;
+      queueMicrotask(() => { this.#epochTurnChecked = false; });
+      const version = this.dataVersion();
+      if (version !== this.#epochDataVersion) {
+        this.#epochDataVersion = version;
+        this.#readEpoch += 1;
+      }
+    }
+    return this.#readEpoch;
   }
 
   /** SQLite's count of commits by other connections, as this connection last saw it. */
@@ -813,6 +841,7 @@ export class SQLiteStore {
     this.#file = null;
     this.#db = null;
     this.#closedMessage = reason;
+    this.#readEpoch += 1;
     file?.close();
   }
 
@@ -925,6 +954,7 @@ export class SQLiteStore {
     if (!db?.inTransaction) return;
     try { db.run('COMMIT'); }
     catch (error) {
+      this.#readEpoch += 1;
       try { if (db.inTransaction) db.run('ROLLBACK'); } catch { /* the failure below is what matters */ }
       throw error;
     }
@@ -935,7 +965,10 @@ export class SQLiteStore {
     this.#commitPending();
     const db = this.getDb();
     if (!isEphemeralDbPath(this.dbPath)) assertSynchronous(() => this.beforePersist?.(), 'SQLiteStore: persistence owner must complete synchronously');
-    if (db.inTransaction) { body(); return; }
-    db.transaction(body).immediate();
+    // A body that throws rolls back what it wrote; the epoch moves either way.
+    try {
+      if (db.inTransaction) { body(); return; }
+      db.transaction(body).immediate();
+    } finally { this.#readEpoch += 1; }
   }
 }

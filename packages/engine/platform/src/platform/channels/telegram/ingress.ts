@@ -52,6 +52,14 @@ const POLL_TIMEOUT_SECONDS = 25;
 const BACKOFF_MIN_MS = 1_000;
 const BACKOFF_MAX_MS = 60_000;
 /**
+ * How many times one update is handed to the processor when it answers with a
+ * failure a second attempt can fix (408, 409, 429, 5xx) or throws, before it is
+ * skipped. A webhook update gets the same from Telegram's own redelivery.
+ */
+const UPDATE_ATTEMPTS = 3;
+/** Longest wait honoured between two attempts at one update, so other chats are not held long behind it. */
+const UPDATE_RETRY_MAX_MS = 10_000;
+/**
  * Extra random delay added to a conflict retry, so two consumers of one token
  * do not fall into lockstep and terminate each other's long poll forever.
  */
@@ -181,20 +189,24 @@ export function describeWebhookUrlProblem(rawUrl: string): string | null {
   return null;
 }
 
-/**
- * Tells the sender of an update that could not be processed why nothing
- * started, with the reason the processor gave. A failed notice is logged; the
- * skip itself already reached the owner through the processing health.
- */
-async function notifySkippedSender(api: TelegramBotApi, scope: TelegramReceiveScope, response: Response): Promise<void> {
-  let reason = `HTTP ${response.status}`;
+/** The reason a processor's failure answer gave, or its status. */
+async function skippedReason(response: Response): Promise<string> {
   try {
     const body: unknown = await response.clone().json();
     const error = body && typeof body === 'object' ? (body as Record<string, unknown>).error : undefined;
-    if (typeof error === 'string' && error.trim()) reason = error.trim().slice(0, 300);
+    if (typeof error === 'string' && error.trim()) return error.trim().slice(0, 300);
   } catch {
     // The status is the reason when the answer carried no readable error.
   }
+  return `HTTP ${response.status}`;
+}
+
+/**
+ * Tells the sender of an update that could not be processed why nothing
+ * started. A failed notice is logged; the skip itself already reached the
+ * owner through the processing health.
+ */
+async function notifySkippedSender(api: TelegramBotApi, scope: TelegramReceiveScope, reason: string): Promise<void> {
   const text = `Your message could not be taken (${reason}), so nothing was started. Send it again in a few minutes.`;
   try {
     await api.sendMessage({ chatId: scope.conversationId, text, threadId: scope.threadId });
@@ -1116,10 +1128,13 @@ export class TelegramIngressSupervisor {
    * An update's job ends when the session broker has accepted it: a message
    * that arrives while every agent is busy is queued there and started when
    * one ends, so the processor answers it as accepted. An update the processor
-   * could not handle is not fetched again: running the whole pipeline again
-   * would store the message twice and hold every other chat behind it. It is
-   * skipped, the owner sees it in the processing health, and the sender is
-   * told nothing started.
+   * answered with a failure a second attempt can fix (or that threw) is handed
+   * to it again, up to UPDATE_ATTEMPTS times with a short wait (its Retry-After
+   * when given, capped at UPDATE_RETRY_MAX_MS); the provider message claim is
+   * released on a failed start and the broker keeps the durable one, so a
+   * second attempt never stores or starts the message twice. An update that
+   * still fails is skipped, the owner sees it in the processing health, and
+   * the sender is told nothing started.
    */
   private async dispatchBatch(
     updates: readonly TelegramUpdate[],
@@ -1137,32 +1152,51 @@ export class TelegramIngressSupervisor {
       const scope = telegramUpdateReceiveScope(update);
       const messageUpdate = ['message', 'edited_message', 'channel_post', 'edited_channel_post'].some(key => Object.hasOwn(update, key));
       if (messageUpdate && !scope) receiveProgress?.gap();
-      try {
-        const response = await processTelegramUpdate(update, context, {
-          sendMessage: (input) => api.sendMessage(input),
-          botId: api.botId,
-          ...(sourceAccount ? { acquireSourceAccount: sourceAccount.acquire } : {}),
-        });
-        const outcome = ingressOutcome(response);
-        if (outcome === 'failed' && updateId !== null) {
-          receiveProgress?.gap(scope);
-          this.processing.recordFailure(`Telegram update could not be processed (HTTP ${response.status}) and was skipped`, { updateId });
-          // The sender, who passed the channel policy to get this far, is told
-          // why nothing started instead of hearing nothing.
-          if (scope) await notifySkippedSender(api, scope, response);
-        } else {
-          if (!response.ok) receiveProgress?.gap(scope);
-          if (outcome === 'processed') this.processing.recordSuccess();
-          else if (outcome === 'failed') this.processing.recordFailure(`Telegram update could not be processed (HTTP ${response.status}) and was skipped`, { updateId });
+      let attempt = 0;
+      let settled = false;
+      while (!settled) {
+        attempt += 1;
+        const lastAttempt = attempt >= UPDATE_ATTEMPTS;
+        try {
+          const response = await processTelegramUpdate(update, context, {
+            sendMessage: (input) => api.sendMessage(input),
+            botId: api.botId,
+            ...(sourceAccount ? { acquireSourceAccount: sourceAccount.acquire } : {}),
+          });
+          const outcome = ingressOutcome(response);
+          if (outcome === 'failed' && updateId !== null && !lastAttempt) {
+            const dictated = Number(response.headers.get('retry-after'));
+            await this.delay(Math.min(UPDATE_RETRY_MAX_MS, Number.isFinite(dictated) && dictated > 0 ? dictated * 1_000 : BACKOFF_MIN_MS * 2 ** (attempt - 1)));
+          } else if (outcome === 'failed' && updateId !== null) {
+            settled = true;
+            receiveProgress?.gap(scope);
+            this.processing.recordFailure(`Telegram update could not be processed after ${attempt} tries (HTTP ${response.status}) and was skipped`, { updateId });
+            // The sender, who passed the channel policy to get this far, is told
+            // why nothing started instead of hearing nothing.
+            if (scope) await notifySkippedSender(api, scope, await skippedReason(response));
+          } else {
+            settled = true;
+            if (!response.ok) receiveProgress?.gap(scope);
+            if (outcome === 'processed') this.processing.recordSuccess();
+            else if (outcome === 'failed') this.processing.recordFailure(`Telegram update could not be processed (HTTP ${response.status}) and was skipped`, { updateId });
+          }
+        } catch (error) {
+          if (error instanceof PaymentReplyHistoryError) throw error;
+          if (!lastAttempt && updateId !== null) {
+            await this.delay(BACKOFF_MIN_MS * 2 ** (attempt - 1));
+          } else {
+            settled = true;
+            receiveProgress?.gap(scope);
+            // Still advance past it, a cursor wedged on one poison update
+            // redelivers it forever. What is no longer true is that skipping is
+            // quiet: IngressProcessingHealth degrades the surface and reaches the
+            // owner, and the sender is told nothing started.
+            this.processing.recordFailure(summarizeError(error), { updateId });
+            if (scope) await notifySkippedSender(api, scope, 'it could not be processed');
+          }
         }
-      } catch (error) {
-        if (error instanceof PaymentReplyHistoryError) throw error;
-        receiveProgress?.gap(scope);
-        // Still advance past it, a cursor wedged on one poison update
-        // redelivers it forever. What is no longer true is that skipping is
-        // quiet: IngressProcessingHealth degrades the surface and reaches the
-        // owner. See its header for the day this cost.
-        this.processing.recordFailure(summarizeError(error), { updateId });
+        // A stop during the wait leaves the offset where it is, so the update is fetched again on the next start.
+        if (!settled && this.stopped) return;
       }
       if (updateId !== null) {
         offset = Math.max(offset ?? 0, updateId + 1);

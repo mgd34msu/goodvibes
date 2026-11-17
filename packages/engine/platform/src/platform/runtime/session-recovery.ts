@@ -9,9 +9,15 @@
  * scope layer in session-persistence-scope.ts.
  *
  * SUPERSESSION, when is a snapshot still live crash data?
- * A snapshot is offered when it is strictly newer than ITS OWN session's
- * durable store file (`<scope>/sessions/<sessionId>.jsonl`), or when that
- * session has no store file at all. It is NOT judged against the last-session
+ * A snapshot is offered when ITS OWN session's durable store file
+ * (`<scope>/sessions/<sessionId>.jsonl`) has not been saved since the snapshot
+ * was written, or when that session has no store file at all. Each snapshot
+ * records which save of the store it was taken over (the store file's
+ * identity: inode, size and times); any later save replaces the file, so a
+ * different identity means a save came after it. No clock or timestamp order is
+ * compared, so a turn begun within the filesystem's timestamp step of the last
+ * save is still offered. A snapshot written before snapshots recorded this
+ * falls back to comparing modification times. It is NOT judged against the last-session
  * pointer, which advances on every turn-completion persist of ANY session:
  * under that older rule, one message typed in an unrelated session (or in a
  * `--continue`d resume of this one) silently buried a snapshot that still held
@@ -162,11 +168,15 @@ function publishRecoverySnapshot(
   options?: SessionPersistenceOptions,
 ): void {
   const lines: string[] = [];
+  // The save of the store this snapshot extends (null: none yet); see SUPERSESSION.
+  let storeAtWrite: string | null | undefined;
+  try { storeAtWrite = sessionStoreIdentity(resolveSessionsDirPath(options), sessionId); } catch { storeAtWrite = undefined; }
   lines.push(JSON.stringify({
     type: 'meta',
     sessionId,
     title,
     timestamp,
+    ...(storeAtWrite === undefined ? {} : { storeAtWrite }),
     ...(snapshot.titleSource ? { titleSource: snapshot.titleSource } : {}),
     ...(snapshot.returnContext ? { returnContext: loadedReturnContext(snapshot.returnContext) } : {}),
     ...(snapshot.turn ? { turn: snapshot.turn } : {}),
@@ -301,10 +311,19 @@ export function deleteRecoveryFile(options?: SessionPersistenceOptions, sessionI
 }
 
 /** Read the first-line meta of a recovery file into a RecoveryFileInfo. */
-function readRecoveryMetaObservation(recoveryFile: string): { readonly info: RecoveryFileInfo; readonly physical: string; readonly mtimeNs: bigint } {
+interface RecoveryMetaObservation {
+  readonly info: RecoveryFileInfo;
+  readonly physical: string;
+  readonly mtimeNs: bigint;
+  /** The store save the snapshot was written over (null: none); undefined on a snapshot that did not record it. */
+  readonly storeAtWrite: string | null | undefined;
+}
+
+function readRecoveryMetaObservation(recoveryFile: string): RecoveryMetaObservation {
   const { header: meta, physical, mtimeNs } = readRecoveryHeaderObservation(recoveryFile);
   if (meta['type'] !== 'meta') throw new Error('Invalid recovery header');
-  return { physical, mtimeNs, info: {
+  const recorded = meta['storeAtWrite'];
+  return { physical, mtimeNs, storeAtWrite: typeof recorded === 'string' || recorded === null ? recorded : undefined, info: {
     title: typeof meta['title'] === 'string' ? meta['title'] : '',
     timestamp: typeof meta['timestamp'] === 'number' ? meta['timestamp'] : 0,
     sessionId: typeof meta['sessionId'] === 'string' ? meta['sessionId'] : '',
@@ -328,6 +347,16 @@ function sessionStoreMtimeNs(sessionsDir: string, sessionId: string): bigint | n
   }
 }
 
+/** Which save of `sessionId`'s store file is on disk (its identity), or null when it has none. One `lstat`. */
+function sessionStoreIdentity(sessionsDir: string, sessionId: string): string | null {
+  if (!sessionId.trim()) return null;
+  try {
+    return fileObservationIdentity(resolveSessionStorePath(sessionsDir, sessionId), { allowLinks: true });
+  } catch {
+    return null;
+  }
+}
+
 /**
  * True when another running process has this session open, so its snapshot is
  * that process's working state. This process's own hold does not count: a
@@ -343,14 +372,21 @@ function isOpenInAnotherProcess(surface: SessionSurface | undefined, sessionId: 
  * session, the only thing that can make a snapshot stale.
  *
  * No store file for that session (including a snapshot with no session id)
- * means nothing has superseded it: offer it.
+ * means nothing has superseded it: offer it. A snapshot that recorded the save
+ * it was written over is superseded exactly when the store on disk is another
+ * save (SUPERSESSION above).
  *
- * Equal mtimes count as superseded, deliberately. Filesystem mtime resolution
- * and clock skew make "same timestamp" indistinguishable from "the store was
- * written last", and a snapshot whose content the store already holds is worth
- * nothing, so the tie goes to not re-offering data the user already has.
+ * A snapshot from before that record is compared by modification time, and
+ * equal mtimes count as superseded: with no record, "same timestamp" cannot be
+ * told from "the store was written last".
  */
-function isSupersededByOwnStore(sessionsDir: string, sessionId: string, snapshotMtimeNs: bigint): boolean {
+function isSupersededByOwnStore(sessionsDir: string, sessionId: string, snapshot: Pick<RecoveryMetaObservation, 'mtimeNs' | 'storeAtWrite'>): boolean {
+  if (snapshot.storeAtWrite !== undefined) {
+    // The snapshot names the save it extends: superseded exactly when a later save replaced it.
+    const current = sessionStoreIdentity(sessionsDir, sessionId);
+    return current !== null && current !== snapshot.storeAtWrite;
+  }
+  const snapshotMtimeNs = snapshot.mtimeNs;
   const storeMtimeNs = sessionStoreMtimeNs(sessionsDir, sessionId);
   if (storeMtimeNs === null) return false;
   // Preserve the original native timestamps on both sides. Converting one
@@ -409,13 +445,13 @@ export function findSessionCrashSnapshot(surface: SessionSurface, sessionId: str
   try {
     const path = pickRecoverySnapshotPath(options, sessionId);
     if (!path) return null;
-    const { info, mtimeNs } = readRecoveryMetaObservation(path);
+    const selected = readRecoveryMetaObservation(path);
+    const { info } = selected;
     if (info.sessionId !== sessionId) return null;
-    const storeMtimeNs = sessionStoreMtimeNs(resolveSessionsDirPath(options), sessionId);
-    // Equal times count as superseded (see isSupersededByOwnStore).
-    if (storeMtimeNs !== null && mtimeNs <= storeMtimeNs) return null;
+    const sessionsDir = resolveSessionsDirPath(options);
+    if (isSupersededByOwnStore(sessionsDir, sessionId, selected)) return null;
     if (isOpenInAnotherProcess(surface, sessionId)) return null;
-    return { info, hasSavedCopy: storeMtimeNs !== null };
+    return { info, hasSavedCopy: sessionStoreIdentity(sessionsDir, sessionId) !== null };
   } catch (error) {
     logger.warn('[Recovery] Per-session check failed', { error: summarizeError(error) });
     return null;
@@ -449,8 +485,8 @@ function findLiveRecoveryCandidate(
         // Unreadable/partial snapshot, skip to the next candidate.
         continue;
       }
-      const { info, physical, mtimeNs } = selected;
-      if (isSupersededByOwnStore(sessionsDir, info.sessionId, mtimeNs)) continue;
+      const { info, physical } = selected;
+      if (isSupersededByOwnStore(sessionsDir, info.sessionId, selected)) continue;
       if (isOpenInAnotherProcess(surface, info.sessionId)) continue;
       return { path: entry.path, info, physical };
     }

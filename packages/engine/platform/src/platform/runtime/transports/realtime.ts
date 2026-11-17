@@ -22,8 +22,14 @@ export interface RealtimeTransport {
 }
 
 export function createRealtimeTransport(options: RealtimeTransportOptions): RealtimeTransport {
-  const { webSocketImpl: _webSocketImpl, ...daemonOptions } = options;
-  const baseTransport = createDaemonHttpTransport(daemonOptions);
+  const baseTransport = createDaemonHttpTransport({
+    baseUrl: options.baseUrl,
+    authToken: options.authToken,
+    fetchImpl: options.fetchImpl,
+    ...(options.retry ? { retry: options.retry } : {}),
+    ...(options.onRetryScheduled ? { onRetryScheduled: options.onRetryScheduled } : {}),
+    ...(options.onRetryExecuted ? { onRetryExecuted: options.onRetryExecuted } : {}),
+  });
   const WebSocketImpl = options.webSocketImpl ?? WebSocket;
   const events = createRemoteUiRuntimeEvents(
     createWebSocketConnector(options.baseUrl, options.authToken, WebSocketImpl),

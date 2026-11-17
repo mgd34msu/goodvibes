@@ -45,7 +45,7 @@ export function renderGoodVibesHelp(binary = 'goodvibes'): string {
     '                             Move a support snapshot (config + diagnostics + posture)',
     '  remote|bridge              Inspect remote runner/node posture',
     '  hooks validate             Validate hooks.json against the hook loader schema',
-    '  plugin init|validate       Scaffold a plugin or validate a plugin directory',
+    '  plugin init|validate|trust Scaffold, validate, or set what a plugin may do',
     '  plugin bundles ...         Browse/install/list SHA-256-pinned capability bundles',
     '  completion <shell>         Generate shell completion script',
     '  help [command]             Print this help or command-specific help',
@@ -267,14 +267,18 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'plugin bundles browse <index-url-or-file>',
       'plugin bundles install <ref> --sha256 <pin>',
       'plugin bundles list',
+      'plugin trust <name> <untrusted|limited|trusted> [note]',
+      'plugin verify <name>',
+      'plugin capabilities <name>',
     ],
     summary:
-      'Scaffold a minimal valid plugin (manifest.json + entry file), validate a plugin directory against the plugin loader checks, or browse/install/list SHA-256-pinned capability bundles from a governed marketplace index. Bundle installs are never unpinned; a missing or mismatched --sha256 is refused, not overridable.',
+      'Scaffold a minimal valid plugin (manifest.json + entry file), validate a plugin directory against the plugin loader checks, browse/install/list SHA-256-pinned capability bundles from a governed marketplace index, or set and inspect a plugin\'s trust tier (what it may register), which every GoodVibes app on this machine applies the next time it starts the plugin. Bundle installs are never unpinned; a missing or mismatched --sha256 is refused, not overridable. Marking a plugin trusted when its signature does not verify needs --yes.',
     examples: [
       'plugin init my-plugin',
       'plugin validate .goodvibes/plugins/my-plugin',
       'plugin bundles browse ./marketplace-index.json',
       'plugin bundles install ./bundle.json --sha256 <64-hex> --yes',
+      'plugin trust my-plugin limited',
     ],
   },
 };

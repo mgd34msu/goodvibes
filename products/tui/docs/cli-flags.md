@@ -54,12 +54,19 @@ goodvibes --resume user-sess-1234
 
 ### `--yes`, `-y`
 
-Most CLI commands act immediately and never ask for confirmation, so this flag has no effect on them. Its one concrete effect today is on `plugin bundles install`, where without it the command only verifies the bundle and prints the activation plan, and with it the bundle is installed: its files are unpacked into the same install directory `/marketplace` uses (`.goodvibes/plugins`, `skills`, `hooks/packs` or `policies/packs`), with an install receipt that records the pin and the granted and withheld capabilities. `/marketplace rollback`, `history` and `uninstall` work on it like any installed entry.
+Most CLI commands act immediately and never ask for confirmation, so this flag has no effect on them. It has an effect on two lines. On `plugin bundles install`, without it the command only verifies the bundle and prints the activation plan, and with it the bundle is installed: its files are unpacked into the same install directory `/marketplace` uses (`.goodvibes/plugins`, `skills`, `hooks/packs` or `policies/packs`), with an install receipt that records the pin and the granted and withheld capabilities. `/marketplace rollback`, `history` and `uninstall` work on it like any installed entry.
 
 ```sh
 goodvibes plugin bundles install <ref> --sha256 <pin>          # preview only
 goodvibes plugin bundles install <ref> --sha256 <pin> --yes    # installs it
 goodvibes plugin bundles install <remote> --ref <tag> --sha256 <pin> --yes
+```
+
+It also answers the one question `plugin trust` asks: marking a plugin `trusted` when its manifest signature does not verify against the publisher key saved with `/plugin trust-key` is refused without `--yes`. `goodvibes plugin trust <name> <untrusted|limited|trusted>`, `plugin verify <name>` and `plugin capabilities <name>` set and inspect what a plugin may register without starting the app; the tier is shared by every GoodVibes app on the machine (`~/.goodvibes/plugin-trust.json`), and each applies it the next time it starts the plugin.
+
+```sh
+goodvibes plugin trust my-plugin limited
+goodvibes plugin trust my-plugin trusted --yes   # signature does not verify; recorded in its trust note
 ```
 
 A bundle is a tar archive whose top-level `goodvibes-bundle.json` is the capability manifest and whose other files are installed beside it (a bare manifest is a bundle with no payload); the pin is the SHA-256 of the archive bytes (for a git source, of `git archive --format=tar` of the ref). Links, absolute paths and paths with `..` in an archive are refused. A bundle reference may be a file path, an `https` URL or a git remote with `--ref`. The command refuses a URL that is not `https` or that names this machine or an internal network address (redirects are checked the same way), a bundle larger than 64 MiB, a fetch or git archive that takes longer than 60 seconds, and a git remote or ref that begins with `-` or uses a `name::address` helper transport. A refusal names the reason and happens before anything is fetched or checked against the pin.

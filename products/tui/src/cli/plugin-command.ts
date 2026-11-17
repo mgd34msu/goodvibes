@@ -1,11 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { discoverPlugins } from '@goodvibes-jev/engine/platform/platform/plugins';
+import { discoverPlugins, PluginManager } from '@goodvibes-jev/engine/platform/platform/plugins';
 import { validateManifestV2 } from '@/runtime/index.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CliCommandOutput, CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
 import { handlePluginBundlesCommand } from './plugin-bundles-command.ts';
+import { pluginTrustConfirmation, runPluginTrustSubcommand, type PluginTrustControls } from '@goodvibes-jev/engine/terminal-shell/plugin-trust-command';
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 
 // ---------------------------------------------------------------------------
 // `goodvibes plugin init` / `plugin validate`, scaffold and check plugins
@@ -96,7 +98,9 @@ function renderValidation(result: PluginValidation, json: boolean): CliCommandOu
 const ENTRY_FILE_CONTENTS = `// Minimal GoodVibes plugin entry point.
 // The loader calls init(api) once after the plugin is loaded.
 export function init(api) {
-  // Register commands, tools, or hooks through the sandboxed api here.
+  // Register commands, tools, or hooks through the sandboxed api here. A tool,
+  // provider or hook needs "capabilities" in manifest.json (e.g. "register.tool")
+  // and the limited trust tier: goodvibes plugin trust <name> limited.
   void api;
 }
 `;
@@ -170,6 +174,49 @@ function handlePluginInit(runtime: CliCommandRuntime): CliCommandOutput {
   return { output: lines.join('\n'), exitCode: validation.ok ? 0 : 1 };
 }
 
+/**
+ * `goodvibes plugin trust|verify|capabilities`: the same lines as `/plugin` in
+ * the terminal and agent apps, for a machine run without them (a daemon host).
+ * No plugin is loaded; the tier goes to the trust file every app shares, and
+ * each app applies it the next time it starts the plugin.
+ */
+async function handlePluginTrustCli(runtime: CliCommandRuntime, args: readonly string[]): Promise<CliCommandOutput> {
+  const goodvibesHome = join(runtime.homeDirectory, '.goodvibes');
+  const stateFilePath = join(goodvibesHome, GOODVIBES_TUI_SURFACE_ROOT, 'plugins.json');
+  const manager = new PluginManager({
+    pathOptions: { cwd: runtime.workingDirectory, homeDir: runtime.homeDirectory },
+    stateFilePath,
+    trustFilePath: join(goodvibesHome, 'plugin-trust.json'),
+  });
+  // The publisher keys saved with /plugin trust-key, read without loading (or rewriting) that app's state.
+  const savedKey = (name: string): string | undefined => {
+    try {
+      const keys = (JSON.parse(readFileSync(stateFilePath, 'utf-8')) as { publisherKeys?: Record<string, unknown> }).publisherKeys;
+      const key = keys?.[name];
+      return typeof key === 'string' ? key : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const controls: PluginTrustControls = {
+    list: () => manager.list(),
+    capabilities: (name) => manager.capabilities(name),
+    verify: (name, key = savedKey(name)) => manager.verify(name, key),
+    trust: (name, tier, note) => manager.trust(name, tier, note),
+    trustSigned: (name, key = savedKey(name)) => manager.trustSigned(name, key),
+    setPublisherKey: () => ({ ok: false, error: 'save a publisher key from the terminal or agent app: /plugin trust-key <name> <key.pem>' }),
+  };
+  const question = pluginTrustConfirmation(controls, args);
+  if (question && !runtime.cli.flags.yes) {
+    return { output: `${question.title.replace(/\?$/, '')}: not done. ${question.detail}\nRun the same line with --yes to confirm it.`, exitCode: 2 };
+  }
+  const lines: string[] = [];
+  const handled = await runPluginTrustSubcommand(controls, args, (text) => lines.push(text));
+  if (!handled) return { output: 'Usage: goodvibes plugin trust <name> <untrusted|limited|trusted> [note] | verify <name> | capabilities <name>', exitCode: 2 };
+  const failed = lines.some((line) => line.startsWith('Error:') || line.startsWith('Usage:'));
+  return { output: lines.join('\n'), exitCode: failed ? 1 : 0 };
+}
+
 export async function handlePluginCommand(runtime: CliCommandRuntime): Promise<CliCommandOutput> {
   const json = runtime.cli.flags.outputFormat === 'json';
   const [sub] = runtime.cli.commandArgs;
@@ -186,5 +233,8 @@ export async function handlePluginCommand(runtime: CliCommandRuntime): Promise<C
   if (sub === 'bundles') {
     return handlePluginBundlesCommand(runtime, runtime.cli.commandArgs.slice(1));
   }
-  return { output: 'Usage: goodvibes plugin [init <name> [directory]|validate <path>|bundles browse|install|list]', exitCode: 2 };
+  if (sub === 'trust' || sub === 'verify' || sub === 'capabilities') {
+    return handlePluginTrustCli(runtime, runtime.cli.commandArgs);
+  }
+  return { output: 'Usage: goodvibes plugin [init <name> [directory]|validate <path>|bundles browse|install|list|trust <name> <tier>|verify <name>|capabilities <name>]', exitCode: 2 };
 }

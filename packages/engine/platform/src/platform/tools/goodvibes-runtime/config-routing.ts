@@ -28,7 +28,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { ConfigManager } from '../../config/manager.js';
-import { configKeyScope, describeConfigOwnership, isDaemonOwnedConfigKey } from '../../config/config-ownership.js';
+import { configKeyScope, describeConfigOwnership, isDaemonOwnedConfigKey, userTierOverlaysSurface } from '../../config/config-ownership.js';
 import {
   applyConfigWrite,
   resolveConfigWriteRoute,
@@ -36,7 +36,7 @@ import {
 } from '../../config/daemon-config-route.js';
 import { loadDaemonConfigSnapshot } from '../../config/daemon-config-read.js';
 import { DEFAULT_CONFIG_SNAPSHOT } from '../../config/manager-bootstrap.js';
-import { persistSharedKey } from '../../config/shared-config-tier.js';
+import { isSharedConfigKey, persistSharedKey } from '../../config/shared-config-tier.js';
 import { isValidConfigKey, type ConfigKey } from '../../config/schema.js';
 import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
 import { agentSettingsWriteRefusal } from '../../gate/policy/agent-settings-refusals.js';
@@ -222,12 +222,15 @@ export function localStorePathForKey(
   key: string,
   options: ConfigRoutingOptions = {},
 ): string {
-  const scope = configKeyScope(key);
-  if (scope === 'daemon') return configManager.getDaemonTierPath() ?? configManager.getConfigPath();
-  if (scope === 'user') return configManager.getSharedTierPath() ?? configManager.getConfigPath();
-  // A client-owned key belongs to the surface this turn is FOR, which is not
+  if (configKeyScope(key) === 'daemon') return configManager.getDaemonTierPath() ?? configManager.getConfigPath();
+  // A surface's own key belongs to the surface this turn is FOR, which is not
   // always the surface this process is.
-  return options.clientOwnedStore?.settingsPath ?? configManager.getConfigPath();
+  if (usesClientOwnedStore(key, options)) return options.clientOwnedStore!.settingsPath;
+  // The same destination the manager's own set picks: the shared tier for the
+  // keys it holds, otherwise this surface's file (where a surface's own
+  // provider.model override lives).
+  if (isSharedConfigKey(key)) return configManager.getSharedTierPath() ?? configManager.getConfigPath();
+  return configManager.getConfigPath();
 }
 
 /**
@@ -239,15 +242,32 @@ export function localStorePathForKey(
  *, it is how a hosted agent turn was told the TUI's wake-word setting was its
  * own.
  */
-export function readClientOwnedValue(store: ClientOwnedStore, key: string): unknown {
+export function readClientOwnedValue(store: ClientOwnedStore, key: string, sharedTierPath?: string | null): unknown {
   const onDisk = readKeyFromFile(store.settingsPath, key);
   if (onDisk.present) return onDisk.value;
+  // A user-level key without a surface override follows the user's shared
+  // default (ConfigManager.setUserDefault), as it does in that surface.
+  if (sharedTierPath && configKeyScope(key) === 'user') {
+    const shared = readKeyFromFile(sharedTierPath, key);
+    if (shared.present) return shared.value;
+  }
   return readDotPath(DEFAULT_CONFIG_SNAPSHOT, key).value;
 }
 
+/**
+ * True when a surface keeps `key` in its own settings file: a client-owned
+ * key, or a user-level key whose surface value overrides the shared default
+ * (provider.model, provider.reasoningEffort), which an ordinary set in that
+ * surface writes to its own file.
+ */
+export function isSurfaceFileConfigKey(key: string): boolean {
+  const scope = configKeyScope(key);
+  return scope === 'client' || (scope === 'user' && !userTierOverlaysSurface(key));
+}
+
 /** True when this key's owner is the originating surface's file, not the host's. */
-function usesClientOwnedStore(key: string, options: ConfigRoutingOptions): boolean {
-  return options.clientOwnedStore !== undefined && configKeyScope(key) === 'client';
+export function usesClientOwnedStore(key: string, options: ConfigRoutingOptions): boolean {
+  return options.clientOwnedStore !== undefined && isSurfaceFileConfigKey(key);
 }
 
 /**
@@ -290,7 +310,7 @@ export async function applyRoutedConfigWrite(
     }
     return {
       key,
-      scope: 'client',
+      scope: configKeyScope(key),
       ownership: describeConfigOwnership(key),
       appliedBy: 'local',
       persistedTo: store.settingsPath,
@@ -384,7 +404,7 @@ export async function readRoutedConfigValue(
     return {
       key,
       value: usesClientOwnedStore(key, options)
-        ? readClientOwnedValue(options.clientOwnedStore!, key)
+        ? readClientOwnedValue(options.clientOwnedStore!, key, configManager.getSharedTierPath())
         : configManager.get(key),
       available: true,
       readFrom: 'file',
@@ -516,7 +536,7 @@ function localRead(
   return {
     key,
     value: usesClientOwnedStore(key, options)
-      ? readClientOwnedValue(options.clientOwnedStore!, key)
+      ? readClientOwnedValue(options.clientOwnedStore!, key, configManager.getSharedTierPath())
       : configManager.get(key),
     available: true,
     readFrom: 'file',

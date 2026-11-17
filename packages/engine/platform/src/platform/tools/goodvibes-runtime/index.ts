@@ -14,6 +14,7 @@ import {
   readRoutedConfigValues,
   resolveRouterDeps,
   settingsWriteRefusal,
+  usesClientOwnedStore,
   type ConfigReadResult,
   type ConfigRoutingOptions,
 } from './config-routing.js';
@@ -257,10 +258,10 @@ async function resetRoutedSetting(
   routing: ConfigRoutingOptions,
 ): Promise<{ success: boolean; output?: string; error?: string }> {
   const route = resolveConfigWriteRoute(key, resolveRouterDeps(configManager, routing));
-  // A client-owned key in a hosted turn belongs to the originating surface's
-  // file, exactly as for set; resetting the host's store would change the
-  // wrong surface.
-  const clientOwned = routing.clientOwnedStore !== undefined && configKeyScope(key) === 'client';
+  // A key the originating surface keeps in its own file belongs there in a
+  // hosted turn, exactly as for set; resetting the host's store would change
+  // the wrong surface.
+  const clientOwned = usesClientOwnedStore(key, routing);
   if (route.mode === 'daemon' || clientOwned) {
     const setting = configManager.getSchema().find((entry) => entry.key === key);
     if (!setting) return { success: false, error: `No schema default is known for ${key}, so it cannot be reset.` };

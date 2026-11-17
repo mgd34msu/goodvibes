@@ -13,7 +13,7 @@ import { applyRemoteSettingsPrecondition, assertRemoteSettingsPrecondition, capt
 import type { ToolExecuteOptions } from '../../types/tools.js';
 import { assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolPreparedSettingsMutation } from '../input-projection.js';
 import { assertCurrentToolExecution, claimCurrentToolSettingsDispatch, commitCurrentToolSettings, currentToolSettingsPresentation } from '../registry.js';
-import { applyRoutedConfigWrite, readClientOwnedValue, resolveRouterDeps, type ClientOwnedStore, type ConfigRoutingOptions } from './config-routing.js';
+import { applyRoutedConfigWrite, readClientOwnedValue, resolveRouterDeps, usesClientOwnedStore, type ClientOwnedStore, type ConfigRoutingOptions } from './config-routing.js';
 
 /**
  * A client-owned key of the surface a hosted session was created for: that
@@ -92,10 +92,11 @@ export function createAgentSettingsInputProjector(configManager: ConfigManager, 
       // The one refusal of a settings write, before any local or remote write is prepared.
       const refusal = agentSettingsWriteRefusal({ mode: args.mode, key, value: args.value });
       if (refusal) throw new ToolInputProjectionError('held', refusal);
-      // A client-owned key of the surface a hosted session was created for
-      // belongs to that surface's own file, never to the hosting manager's
-      // store: it is prepared against that file alone (see ClientStoreCapture).
-      const clientStore = routing.clientOwnedStore && configKeyScope(key) === 'client' ? routing.clientOwnedStore : undefined;
+      // A key the surface a hosted session was created for keeps in its own
+      // file (a client-owned key, or its own provider.model override) belongs
+      // to that file, never to the hosting manager's store: it is prepared
+      // against that file alone (see ClientStoreCapture).
+      const clientStore = usesClientOwnedStore(key, routing) ? routing.clientOwnedStore : undefined;
       const route = await resolvePreparedConfigWriteRoute(key, resolveRouterDeps(configManager, routing));
       request.assertCurrent(); request.signal?.throwIfAborted();
       let local: ToolPreparedSettingsMutation | undefined;
@@ -111,7 +112,7 @@ export function createAgentSettingsInputProjector(configManager: ConfigManager, 
         const admitted = admitSettingValue(key, setting, args.mode === 'set' ? args.value : setting.default);
         if (!admitted.ok) throw new ToolInputProjectionError('held', `${key} was not changed: ${admitted.reason}.`);
         const stamp = clientStoreStamp(clientStore.settingsPath);
-        const previous = readClientOwnedValue(clientStore, key);
+        const previous = readClientOwnedValue(clientStore, key, configManager.getSharedTierPath());
         client = { store: clientStore, stamp, value: admitted.value, configManager, routing };
         source = clientStore.settingsPath;
         effect = { operation: args.mode, key, value: admitted.value,

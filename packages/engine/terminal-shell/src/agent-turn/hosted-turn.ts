@@ -357,8 +357,9 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
           modelCatalog: providerRegistry,
           providerRegistry,
           // The winner becomes the Agent's own model setting: this session's settings
-          // tool writes the Agent's client-owned keys to the Agent's settings file and
-          // re-reads them there, which `verifiedInOwningStore` reports.
+          // tool writes the keys the Agent keeps in its own settings file (its
+          // provider.model override among them) to that file and re-reads them
+          // there, which `verifiedInOwningStore` reports.
           applyModelRoute: async (registryKey, parentOptions, ownership) => {
             const applied = await registry.executeNested(`model-route-${randomUUID()}`, 'goodvibes_settings',
               { mode: 'set', key: 'provider.model', value: registryKey }, parentOptions, ownership);

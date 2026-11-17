@@ -44,6 +44,12 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
     registry.register({
       name: 'tasks',
       effect: 'local-state',
+      // A title, value, note or error is free text, kept as typed.
+      rawRest: (args) => {
+        const sub = args[0]?.toLowerCase();
+        if (sub === 'create' || sub === 'update') return 3;
+        return sub !== undefined && ['complete', 'fail', 'cancel', 'pause', 'resume', 'retry'].includes(sub) ? 2 : undefined;
+      },
       aliases: ['task'],
       description: policy.description,
       hidden: policy.hidden,

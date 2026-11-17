@@ -35,9 +35,11 @@ export function createTtsRuntimeCommands<Context extends TtsContext>(policy: {
       description: policy.description,
       hidden: policy.hidden,
       usage: policy.alwaysSpeakControls ? '<prompt>|stop|on|off' : '<prompt>|stop',
+      // The prompt is free text, sent as typed: quotes and spacing included.
+      rawRest: 0,
       handler(args, context) {
         // A control word counts only on its own; `/tts stop the timer` is a prompt that starts with "stop".
-        const first = args.length === 1 ? args[0]!.toLowerCase() : '';
+        const first = args.length === 1 ? args[0]!.trim().toLowerCase() : '';
         if (first === 'stop' || first === 'cancel') {
           if (!context.stopSpokenOutput) {
             context.print('Live TTS is not available in this runtime.');

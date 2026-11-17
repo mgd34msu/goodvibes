@@ -201,6 +201,8 @@ const TEAMWORK_USAGE = 'Usage: /teamwork [review|modes|mode <id>|create-mode <id
 export function registerTeamworkRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'teamwork',
+    // A title is free text, kept as typed.
+    rawRest: (args) => (['create-mode', 'recipe', 'create-archetype'].includes((args[0] ?? '').toLowerCase()) ? 2 : undefined),
     aliases: ['teammates'],
     description: 'Packaged task modes, teammate templates, and orchestration recipes; create-mode, create-archetype and recipe start the agents they describe',
     usage: `[review|modes|mode <id>|create-mode <id> <title...>|recipes|recipe <id> [title...]|templates|archetypes|validate|archetype <name>|create-archetype <name> <title...>]`,

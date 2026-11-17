@@ -15,6 +15,8 @@ function unknownCatalogEntry(entryId: string): Error {
 export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'plugin',
+    // A summary is free text, kept as typed.
+    rawRest: (args) => ((args[0] ?? '').toLowerCase() === 'publish-local' ? 3 : undefined),
     aliases: [],
     description: 'Manage plugins, trust, review, and ecosystem paths',
     usage: 'list | dirs | inspect <name> | review | installed | catalog-review <id> | publish-local <id> <path> <summary...> | unpublish <id> | install <id> [project|user] | update <id> [project|user] | uninstall <id> [project|user] | enable <name> | disable <name> | reload',

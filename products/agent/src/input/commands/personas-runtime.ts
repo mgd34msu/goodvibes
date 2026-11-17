@@ -156,6 +156,8 @@ export function registerPersonasRuntimeCommands(registry: CommandRegistry): void
       if ((sub !== 'delete' && sub !== 'remove') || !id) return undefined;
       return { title: `Delete Agent persona ${id}?`, detail: `The persona ${id} is removed from the Agent-local registry and cannot be recovered.`, confirmLabel: 'Delete' };
     },
+    // A search or a stale reason is free text, kept as typed.
+    rawRest: (args) => ((args[0] ?? '').toLowerCase() === 'search' ? 1 : (args[0] ?? '').toLowerCase() === 'stale' ? 2 : undefined),
     effect: 'local-state',
     aliases: ['persona'],
     description: 'Manage Agent-local personas',

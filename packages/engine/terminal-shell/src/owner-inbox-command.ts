@@ -150,6 +150,8 @@ export function createOwnerInboxCommands<Context extends OwnerInboxCommandContex
     // Reading the inbox is open to a model; answering is the owner's (the handler checks).
     effect: 'mixed',
     readVerbs: ['', 'all', 'list', 'show'],
+    // An answer is free text, delivered as typed.
+    rawRest: (args) => (args[0] === 'answer' ? 2 : undefined),
     async handler(args, context) {
       // Read before the first await: a model running this command must not answer for the owner.
       const owner = policy.isOwner(context, 'questions');
@@ -208,8 +210,10 @@ export function createOwnerInboxCommands<Context extends OwnerInboxCommandContex
             if (!item) { say(context, `[inbox] ${resolved.id} is no longer in the inbox.`); return; }
           }
           const words = rest.join(' ').trim();
+          // With options, the first word is the choice and the rest, as typed, its note.
+          const space = words.search(/\s/);
           const answer = item.options.length > 0
-            ? { option: rest[0]!, ...(rest.length > 1 ? { text: rest.slice(1).join(' ') } : {}) }
+            ? { option: space < 0 ? words : words.slice(0, space), ...(space < 0 ? {} : { text: words.slice(space).trim() }) }
             : { text: words };
           const outcome = await inbox.answer(item.id, answer);
           if (outcome.applied) {

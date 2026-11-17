@@ -17,6 +17,18 @@ export const WORKSTREAM_SHARED_USAGE = [
   'drop <draft> <item> | move <draft> <item> <position> | approve <draft> | launch <draft> | discard <draft>',
 ].join(' | ');
 
+/**
+ * Where `/workstream`'s free text starts (a goal, a request, a brief, an
+ * answer), so it reaches the plan as typed, quotes and spacing included.
+ */
+export function workstreamRawRest(args: readonly string[]): number | undefined {
+  const action = args[0];
+  if (action === 'start' || action === 'propose') return 1;
+  if (action === 'retask') return 2;
+  if (action === 'edit' || action === 'reply') return 3;
+  return undefined;
+}
+
 export interface WorkstreamCommandDeps {
   readonly print: (text: string) => void;
   readonly sessionId: string;

@@ -17,6 +17,8 @@ export function registerQueueRuntimeCommands(registry: CommandRegistry): void {
     description: 'Mid-turn message queue: list, edit, or delete still-undelivered messages',
     usage: '[list | edit <n> <text> | delete <n>]',
     argsHint: '[list|edit <n> <text>|delete <n>]',
+    // The replacement text is kept as typed.
+    rawRest: (args) => ((args[0] ?? '').toLowerCase() === 'edit' ? 2 : undefined),
     handler(args, ctx) {
       const list = ctx.listQueuedMessages?.() ?? [];
       const sub = (args[0] ?? 'list').toLowerCase();

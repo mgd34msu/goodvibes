@@ -10,6 +10,11 @@
  * fleet.* / checkpoints.* / memory.* document in lib/queries.ts), so this
  * polls while a turn is active and refetches explicitly on every mutation
  * success.
+ *
+ * Editing does not hold a message: when the reply ends while the operator is
+ * still typing, the message is sent as it was. The poll then no longer lists
+ * the row being edited; the panel keeps the draft, says the message was sent
+ * before the change was saved, and offers to move the draft into the composer.
  */
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -26,11 +31,13 @@ export interface QueuedMessagesPanelProps {
   sessionId: string;
   /** Poll only while a turn is actually active, a queued message can only exist then. */
   active: boolean;
+  /** Put text into the composer (a correction whose message was sent before it was saved). */
+  onMoveToComposer: (text: string) => void;
 }
 
 const POLL_INTERVAL_MS = 2000;
 
-export function QueuedMessagesPanel({ sessionId, active }: QueuedMessagesPanelProps) {
+export function QueuedMessagesPanel({ sessionId, active, onMoveToComposer }: QueuedMessagesPanelProps) {
   const queryClient = useQueryClient();
   const [editingId, setEditingId] = useState('');
   const [draftText, setDraftText] = useState('');
@@ -71,7 +78,14 @@ export function QueuedMessagesPanel({ sessionId, active }: QueuedMessagesPanelPr
   });
 
   const messages = list.data?.messages ?? [];
-  if (messages.length === 0) return confirm.element;
+  // The row being edited left the queue: the daemon sent it as first written.
+  const sentWhileEditing = editingId !== '' && list.data !== undefined && !messages.some((message) => message.id === editingId);
+  const closeEditor = (): void => {
+    setEditingId('');
+    setDraftText('');
+    editMutation.reset();
+  };
+  if (messages.length === 0 && !sentWhileEditing) return confirm.element;
 
   return (
     <div className="queued-messages-panel" aria-label="Queued messages">
@@ -80,6 +94,28 @@ export function QueuedMessagesPanel({ sessionId, active }: QueuedMessagesPanelPr
         <Clock size={14} aria-hidden="true" />
         Queued: will be sent once the current reply finishes. Edit or drop it before then.
       </p>
+      {sentWhileEditing && (
+        <div className="queued-message" role="status">
+          <span className="queued-message__text">This message was sent before your change was saved.</span>
+          <div className="queued-message__edit-actions">
+            <Button variant="ghost" size="sm" onClick={closeEditor} aria-label="Discard the unsaved change">
+              Discard
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={!draftText.trim()}
+              onClick={() => {
+                onMoveToComposer(draftText.trim());
+                closeEditor();
+              }}
+              aria-label="Move the unsaved change into the composer"
+            >
+              Move to composer
+            </Button>
+          </div>
+        </div>
+      )}
       <ul className="queued-messages-list">
         {messages.map((message) => (
           <li key={message.id} className="queued-message">
@@ -156,9 +192,9 @@ export function QueuedMessagesPanel({ sessionId, active }: QueuedMessagesPanelPr
           </li>
         ))}
       </ul>
-      {(editMutation.isError || deleteMutation.isError) && (
+      {((editMutation.isError && !sentWhileEditing) || deleteMutation.isError) && (
         <p className="banner warning" role="alert">
-          {formatError(editMutation.error ?? deleteMutation.error)}
+          {formatError((sentWhileEditing ? null : editMutation.error) ?? deleteMutation.error)}
         </p>
       )}
     </div>

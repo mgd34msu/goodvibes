@@ -796,7 +796,13 @@ export function ChatView({
         workingLabel={workingLabel}
       />
       <div className="chat-dock">
-        {activeSessionId && <QueuedMessagesPanel sessionId={activeSessionId} active={isStreaming} />}
+        {activeSessionId && (
+          <QueuedMessagesPanel
+            sessionId={activeSessionId}
+            active={isStreaming}
+            onMoveToComposer={(text) => setDraft((current) => (current.trim() ? `${current.trimEnd()}\n${text}` : text))}
+          />
+        )}
         <ChatTurnNotice label={noticeLabel} onRetryStream={streamHealth === 'paused' ? retryStream : undefined} />
         <Composer
           layout={isNewChat ? 'centered' : 'docked'}

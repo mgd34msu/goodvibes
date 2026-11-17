@@ -71,6 +71,15 @@
       "text": "export type RuntimeEventFeeds<TDomain extends string, TEvent extends EventLike = EventLike> = { readonly domains: readonly TDomain[]; domain(domain: TDomain): RuntimeEventFeed<TEvent>; } & { readonly [K in TDomain]: RuntimeEventFeed<TEvent>; };"
     },
     {
+      "name": "StreamTextAssembler",
+      "kind": "interface",
+      "required": [
+        "clear",
+        "complete"
+      ],
+      "text": "export interface StreamTextAssembler { complete<TPayload>(payload: TPayload): TPayload; clear(): void; }"
+    },
+    {
       "name": "TransportActivityInfo",
       "kind": "interface",
       "required": [
@@ -118,7 +127,7 @@
     {
       "name": "composeMiddleware",
       "kind": "function",
-      "text": "export declare function composeMiddleware(middleware: readonly TransportMiddleware[], innerFetch: (ctx: TransportContext) => Promise<Response>): (ctx: TransportContext) => Promise<void>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; Response = interface Response extends Body { readonly headers: Headers; readonly ok: boolean; readonly redirected: boolean; readonly status: number; readonly statusText: string; readonly type: ResponseType; readonly url: string; clone(): Response; }"
+      "text": "export declare function composeMiddleware(middleware: readonly TransportMiddleware[], innerFetch: (ctx: TransportContext) => Promise<Response | void>): (ctx: TransportContext) => Promise<void>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; Response = interface Response extends Body { readonly headers: Headers; readonly ok: boolean; readonly redirected: boolean; readonly status: number; readonly statusText: string; readonly type: ResponseType; readonly url: string; clone(): Response; }"
     },
     {
       "name": "createClientTransport",
@@ -144,6 +153,11 @@
       "name": "createRuntimeEventFeeds",
       "kind": "function",
       "text": "export declare function createRuntimeEventFeeds<TDomain extends string, TEvent extends EventLike>(domains: readonly TDomain[], createFeed: (domain: TDomain) => RuntimeEventFeed<TEvent>): RuntimeEventFeeds<TDomain, TEvent>;"
+    },
+    {
+      "name": "createStreamTextAssembler",
+      "kind": "function",
+      "text": "export declare function createStreamTextAssembler(): StreamTextAssembler;"
     },
     {
       "name": "createUuidV4",
@@ -183,7 +197,7 @@
     {
       "name": "sendWebSocketMessage",
       "kind": "function",
-      "text": "export declare function sendWebSocketMessage(socket: { send(data: string): unknown; readonly bufferedAmount?: number; getBufferedAmount?(): number; readonly readyState?: number; }, text: string, signal?: AbortSignal): Promise<void>; ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+      "text": "export declare function sendWebSocketMessage(socket: { send(data: string): unknown; readonly bufferedAmount?: number; getBufferedAmount?(): number; readonly readyState?: number; }, message: string | Iterable<string>, signal?: AbortSignal): Promise<void>; ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; Iterable = interface Iterable<T, TReturn = any, TNext = any> { [Symbol.iterator](): Iterator<T, TReturn, TNext>; } ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
     },
     {
       "name": "transportErrorFromUnknown",
@@ -260,9 +274,23 @@
       "text": "export interface EventEnvelopeContext { readonly sessionId: string; readonly source: string; readonly traceId?: string | undefined; readonly turnId?: string | undefined; readonly agentId?: string | undefined; readonly taskId?: string | undefined; }"
     },
     {
+      "name": "StreamTextAssembler",
+      "kind": "interface",
+      "required": [
+        "clear",
+        "complete"
+      ],
+      "text": "export interface StreamTextAssembler { complete<TPayload>(payload: TPayload): TPayload; clear(): void; }"
+    },
+    {
       "name": "createEventEnvelope",
       "kind": "function",
       "text": "export declare function createEventEnvelope<TType extends string, TPayload>(type: TType, payload: TPayload, context: EventEnvelopeContext): EventEnvelope<TType, TPayload>;"
+    },
+    {
+      "name": "createStreamTextAssembler",
+      "kind": "function",
+      "text": "export declare function createStreamTextAssembler(): StreamTextAssembler;"
     }
   ],
   "./event-feeds": [
@@ -327,7 +355,7 @@
     {
       "name": "composeMiddleware",
       "kind": "function",
-      "text": "export declare function composeMiddleware(middleware: readonly TransportMiddleware[], innerFetch: (ctx: TransportContext) => Promise<Response>): (ctx: TransportContext) => Promise<void>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; Response = interface Response extends Body { readonly headers: Headers; readonly ok: boolean; readonly redirected: boolean; readonly status: number; readonly statusText: string; readonly type: ResponseType; readonly url: string; clone(): Response; }"
+      "text": "export declare function composeMiddleware(middleware: readonly TransportMiddleware[], innerFetch: (ctx: TransportContext) => Promise<Response | void>): (ctx: TransportContext) => Promise<void>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; Response = interface Response extends Body { readonly headers: Headers; readonly ok: boolean; readonly redirected: boolean; readonly status: number; readonly statusText: string; readonly type: ResponseType; readonly url: string; clone(): Response; }"
     }
   ],
   "./observer": [
@@ -375,9 +403,29 @@
       "text": "export type PipeId = string;"
     },
     {
+      "name": "RELAY_CHALLENGE_BYTES",
+      "kind": "const",
+      "text": "RELAY_CHALLENGE_BYTES = 32"
+    },
+    {
       "name": "RELAY_CURVE",
       "kind": "const",
       "text": "RELAY_CURVE: \"P-256\""
+    },
+    {
+      "name": "RELAY_DEFAULT_MAX_MESSAGE_BYTES",
+      "kind": "const",
+      "text": "RELAY_DEFAULT_MAX_MESSAGE_BYTES: number"
+    },
+    {
+      "name": "RELAY_ERROR_ADVICE",
+      "kind": "const",
+      "text": "RELAY_ERROR_ADVICE: Readonly<Record<RelayErrorCode, RelayErrorAdvice>> ;; via Readonly = type Readonly<T> = { readonly [P in keyof T]: T[P]; }; ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
+    },
+    {
+      "name": "RELAY_FRAME_OVERHEAD_BYTES",
+      "kind": "const",
+      "text": "RELAY_FRAME_OVERHEAD_BYTES = 1024"
     },
     {
       "name": "RELAY_KEY_BYTES",
@@ -405,6 +453,15 @@
       "text": "RELAY_PUBLIC_KEY_BYTES = 65"
     },
     {
+      "name": "RelayChallengeFrame",
+      "kind": "interface",
+      "required": [
+        "nonce",
+        "t"
+      ],
+      "text": "export interface RelayChallengeFrame { readonly t: 'challenge'; readonly nonce: string; }"
+    },
+    {
       "name": "RelayConnectFrame",
       "kind": "interface",
       "required": [
@@ -422,12 +479,22 @@
         "pipe",
         "t"
       ],
-      "text": "export interface RelayConnectedFrame { readonly t: 'connected'; readonly pipe: PipeId; }"
+      "text": "export interface RelayConnectedFrame { readonly t: 'connected'; readonly pipe: PipeId; readonly maxMessageBytes?: number; }"
     },
     {
       "name": "RelayControlFrame",
       "kind": "type",
-      "text": "export type RelayControlFrame = RelayRegisterFrame | RelayRegisteredFrame | RelayConnectFrame | RelayConnectedFrame | RelayPipeOpenFrame | RelayPipeCloseFrame | RelayErrorFrame;"
+      "text": "export type RelayControlFrame = RelayRegisterFrame | RelayChallengeFrame | RelayProveFrame | RelayRegisteredFrame | RelayConnectFrame | RelayConnectedFrame | RelayPipeOpenFrame | RelayPipeCloseFrame | RelayErrorFrame | RelayPingFrame | RelayPongFrame;"
+    },
+    {
+      "name": "RelayErrorAdvice",
+      "kind": "interface",
+      "required": [
+        "next",
+        "retryable",
+        "state"
+      ],
+      "text": "export interface RelayErrorAdvice { readonly state: string; readonly next: readonly string[]; readonly retryable: boolean; }"
     },
     {
       "name": "RelayErrorCode",
@@ -486,6 +553,15 @@
       "text": "export interface RelayPairingPayload { readonly protocol: number; readonly relayUrl: string; readonly rid: RendezvousId; readonly daemonPublicKey: string; readonly label?: string; }"
     },
     {
+      "name": "RelayPingFrame",
+      "kind": "interface",
+      "required": [
+        "n",
+        "t"
+      ],
+      "text": "export interface RelayPingFrame { readonly t: 'ping'; readonly n: number; }"
+    },
+    {
       "name": "RelayPipeCloseFrame",
       "kind": "interface",
       "required": [
@@ -502,6 +578,25 @@
         "t"
       ],
       "text": "export interface RelayPipeOpenFrame { readonly t: 'pipe-open'; readonly pipe: PipeId; }"
+    },
+    {
+      "name": "RelayPongFrame",
+      "kind": "interface",
+      "required": [
+        "n",
+        "t"
+      ],
+      "text": "export interface RelayPongFrame { readonly t: 'pong'; readonly n: number; }"
+    },
+    {
+      "name": "RelayProveFrame",
+      "kind": "interface",
+      "required": [
+        "key",
+        "sig",
+        "t"
+      ],
+      "text": "export interface RelayProveFrame { readonly t: 'prove'; readonly key: string; readonly sig: string; }"
     },
     {
       "name": "RelayRegisterFrame",
@@ -521,7 +616,7 @@
         "rid",
         "t"
       ],
-      "text": "export interface RelayRegisteredFrame { readonly t: 'registered'; readonly rid: RendezvousId; }"
+      "text": "export interface RelayRegisteredFrame { readonly t: 'registered'; readonly rid: RendezvousId; readonly maxMessageBytes?: number; }"
     },
     {
       "name": "RelayRole",
@@ -554,9 +649,35 @@
       "text": "export interface SerializedRelayIdentity { readonly v: 1; readonly privateKeyJwk: JsonWebKey; readonly publicKeyRaw: string; } ;; via JsonWebKey = interface JsonWebKey { alg?: string; crv?: string; d?: string; dp?: string; dq?: string; e?: string; ext?: boolean; k?: string; key_ops?: string[]; kty?: string; n?: string; oth?: RsaOtherPrimesInfo[]; p?: string; q?: string; qi?: string; use?: string; x?: string; y?: string; }"
     },
     {
+      "name": "TunnelFragmentHeader",
+      "kind": "interface",
+      "required": [
+        "count",
+        "id",
+        "index",
+        "kind"
+      ],
+      "text": "export interface TunnelFragmentHeader { readonly id: string; readonly kind: 'fragment'; readonly index: number; readonly count: number; }"
+    },
+    {
+      "name": "TunnelFragmentJoiner",
+      "kind": "class",
+      "publicMembers": [
+        "constructor",
+        "drop",
+        "push"
+      ],
+      "text": "export declare class TunnelFragmentJoiner { constructor(maxBytes: number); push(header: TunnelFragmentHeader, body: Uint8Array<ArrayBuffer>): TunnelFragmentResult; drop(id: string): void; } ;; via ArrayBuffer = interface ArrayBuffer { readonly byteLength: number; slice(begin?: number, end?: number): ArrayBuffer; } ;; Uint8Array = interface Uint8Array<TArrayBuffer extends ArrayBufferLike = ArrayBufferLike> { readonly BYTES_PER_ELEMENT: number; readonly buffer: TArrayBuffer; readonly byteLength: number; readonly byteOffset: number; copyWithin(target: number, start: number, end?: number): this; every(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; fill(value: number, start?: number, end?: number): this; filter(predicate: (value: number, index: number, array: this) => any, thisArg?: any): Uint8Array<ArrayBuffer>; find(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number | undefined; findIndex(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number; forEach(callbackfn: (value: number, index: number, array: this) => void, thisArg?: any): void; indexOf(searchElement: number, fromIndex?: number): number; join(separator?: string): string; lastIndexOf(searchElement: number, fromIndex?: number): number; readonly length: number; map(callbackfn: (value: number, index: number, array: this) => number, thisArg?: any): Uint8Array<ArrayBuffer>; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduce<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduceRight<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reverse(): this; set(array: ArrayLike<number>, offset?: number): void; slice(start?: number, end?: number): Uint8Array<ArrayBuffer>; some(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; sort(compareFn?: (a: number, b: number) => number): this; subarray(begin?: number, end?: number): Uint8Array<TArrayBuffer>; toLocaleString(): string; toString(): string; valueOf(): this; [index: number]: number; }"
+    },
+    {
+      "name": "TunnelFragmentResult",
+      "kind": "type",
+      "text": "export type TunnelFragmentResult = { readonly kind: 'pending'; } | { readonly kind: 'frame'; readonly header: TunnelHeader; readonly body: Uint8Array<ArrayBuffer>; } | { readonly kind: 'too-large'; readonly id: string; } | { readonly kind: 'malformed'; readonly id: string; }; ;; via ArrayBuffer = interface ArrayBuffer { readonly byteLength: number; slice(begin?: number, end?: number): ArrayBuffer; } ;; Uint8Array = interface Uint8Array<TArrayBuffer extends ArrayBufferLike = ArrayBufferLike> { readonly BYTES_PER_ELEMENT: number; readonly buffer: TArrayBuffer; readonly byteLength: number; readonly byteOffset: number; copyWithin(target: number, start: number, end?: number): this; every(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; fill(value: number, start?: number, end?: number): this; filter(predicate: (value: number, index: number, array: this) => any, thisArg?: any): Uint8Array<ArrayBuffer>; find(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number | undefined; findIndex(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number; forEach(callbackfn: (value: number, index: number, array: this) => void, thisArg?: any): void; indexOf(searchElement: number, fromIndex?: number): number; join(separator?: string): string; lastIndexOf(searchElement: number, fromIndex?: number): number; readonly length: number; map(callbackfn: (value: number, index: number, array: this) => number, thisArg?: any): Uint8Array<ArrayBuffer>; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduce<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduceRight<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reverse(): this; set(array: ArrayLike<number>, offset?: number): void; slice(start?: number, end?: number): Uint8Array<ArrayBuffer>; some(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; sort(compareFn?: (a: number, b: number) => number): this; subarray(begin?: number, end?: number): Uint8Array<TArrayBuffer>; toLocaleString(): string; toString(): string; valueOf(): this; [index: number]: number; }"
+    },
+    {
       "name": "TunnelHeader",
       "kind": "type",
-      "text": "export type TunnelHeader = TunnelRequestHeader | TunnelRequestCancelHeader | TunnelResponseHeader | TunnelStreamOpenHeader | TunnelStreamDataHeader | TunnelStreamOverflowHeader | TunnelStreamCloseHeader;"
+      "text": "export type TunnelHeader = TunnelFragmentHeader | TunnelRequestHeader | TunnelRequestCancelHeader | TunnelResponseHeader | TunnelStreamOpenHeader | TunnelStreamDataHeader | TunnelStreamOverflowHeader | TunnelStreamCloseHeader;"
     },
     {
       "name": "TunnelRequestCancelHeader",
@@ -652,6 +773,11 @@
       "text": "export declare function concatBytes(...parts: readonly Uint8Array<ArrayBuffer>[]): Uint8Array<ArrayBuffer>; ;; via ArrayBuffer = interface ArrayBuffer { readonly byteLength: number; slice(begin?: number, end?: number): ArrayBuffer; } ;; Uint8Array = interface Uint8Array<TArrayBuffer extends ArrayBufferLike = ArrayBufferLike> { readonly BYTES_PER_ELEMENT: number; readonly buffer: TArrayBuffer; readonly byteLength: number; readonly byteOffset: number; copyWithin(target: number, start: number, end?: number): this; every(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; fill(value: number, start?: number, end?: number): this; filter(predicate: (value: number, index: number, array: this) => any, thisArg?: any): Uint8Array<ArrayBuffer>; find(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number | undefined; findIndex(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number; forEach(callbackfn: (value: number, index: number, array: this) => void, thisArg?: any): void; indexOf(searchElement: number, fromIndex?: number): number; join(separator?: string): string; lastIndexOf(searchElement: number, fromIndex?: number): number; readonly length: number; map(callbackfn: (value: number, index: number, array: this) => number, thisArg?: any): Uint8Array<ArrayBuffer>; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduce<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduceRight<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reverse(): this; set(array: ArrayLike<number>, offset?: number): void; slice(start?: number, end?: number): Uint8Array<ArrayBuffer>; some(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; sort(compareFn?: (a: number, b: number) => number): this; subarray(begin?: number, end?: number): Uint8Array<TArrayBuffer>; toLocaleString(): string; toString(): string; valueOf(): this; [index: number]: number; }"
     },
     {
+      "name": "createRelayChallenge",
+      "kind": "function",
+      "text": "export declare function createRelayChallenge(): RelayChallengeFrame;"
+    },
+    {
       "name": "createRelayPairingPayload",
       "kind": "function",
       "text": "export declare function createRelayPairingPayload(input: { readonly relayUrl: string; readonly rid: RendezvousId; readonly daemonPublicKey: string; readonly label?: string; }): RelayPairingPayload;"
@@ -675,6 +801,11 @@
       "name": "decodeUtf8",
       "kind": "function",
       "text": "export declare function decodeUtf8(bytes: Uint8Array<ArrayBuffer>): string; ;; via ArrayBuffer = interface ArrayBuffer { readonly byteLength: number; slice(begin?: number, end?: number): ArrayBuffer; } ;; Uint8Array = interface Uint8Array<TArrayBuffer extends ArrayBufferLike = ArrayBufferLike> { readonly BYTES_PER_ELEMENT: number; readonly buffer: TArrayBuffer; readonly byteLength: number; readonly byteOffset: number; copyWithin(target: number, start: number, end?: number): this; every(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; fill(value: number, start?: number, end?: number): this; filter(predicate: (value: number, index: number, array: this) => any, thisArg?: any): Uint8Array<ArrayBuffer>; find(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number | undefined; findIndex(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number; forEach(callbackfn: (value: number, index: number, array: this) => void, thisArg?: any): void; indexOf(searchElement: number, fromIndex?: number): number; join(separator?: string): string; lastIndexOf(searchElement: number, fromIndex?: number): number; readonly length: number; map(callbackfn: (value: number, index: number, array: this) => number, thisArg?: any): Uint8Array<ArrayBuffer>; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduce<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduceRight<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reverse(): this; set(array: ArrayLike<number>, offset?: number): void; slice(start?: number, end?: number): Uint8Array<ArrayBuffer>; some(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; sort(compareFn?: (a: number, b: number) => number): this; subarray(begin?: number, end?: number): Uint8Array<TArrayBuffer>; toLocaleString(): string; toString(): string; valueOf(): this; [index: number]: number; }"
+    },
+    {
+      "name": "deriveRendezvousId",
+      "kind": "function",
+      "text": "export declare function deriveRendezvousId(publicKeyRaw: Uint8Array<ArrayBuffer>): Promise<RendezvousId>; ;; via ArrayBuffer = interface ArrayBuffer { readonly byteLength: number; slice(begin?: number, end?: number): ArrayBuffer; } ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; Uint8Array = interface Uint8Array<TArrayBuffer extends ArrayBufferLike = ArrayBufferLike> { readonly BYTES_PER_ELEMENT: number; readonly buffer: TArrayBuffer; readonly byteLength: number; readonly byteOffset: number; copyWithin(target: number, start: number, end?: number): this; every(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; fill(value: number, start?: number, end?: number): this; filter(predicate: (value: number, index: number, array: this) => any, thisArg?: any): Uint8Array<ArrayBuffer>; find(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number | undefined; findIndex(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number; forEach(callbackfn: (value: number, index: number, array: this) => void, thisArg?: any): void; indexOf(searchElement: number, fromIndex?: number): number; join(separator?: string): string; lastIndexOf(searchElement: number, fromIndex?: number): number; readonly length: number; map(callbackfn: (value: number, index: number, array: this) => number, thisArg?: any): Uint8Array<ArrayBuffer>; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduce<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduceRight<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reverse(): this; set(array: ArrayLike<number>, offset?: number): void; slice(start?: number, end?: number): Uint8Array<ArrayBuffer>; some(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; sort(compareFn?: (a: number, b: number) => number): this; subarray(begin?: number, end?: number): Uint8Array<TArrayBuffer>; toLocaleString(): string; toString(): string; valueOf(): this; [index: number]: number; }"
     },
     {
       "name": "deriveSharedSecret",
@@ -717,6 +848,11 @@
       "text": "export declare function finishInitiatorHandshake(state: RelayInitiatorState, message2: Uint8Array<ArrayBuffer>): Promise<RelayHandshakeKeys>; ;; via ArrayBuffer = interface ArrayBuffer { readonly byteLength: number; slice(begin?: number, end?: number): ArrayBuffer; } ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; Uint8Array = interface Uint8Array<TArrayBuffer extends ArrayBufferLike = ArrayBufferLike> { readonly BYTES_PER_ELEMENT: number; readonly buffer: TArrayBuffer; readonly byteLength: number; readonly byteOffset: number; copyWithin(target: number, start: number, end?: number): this; every(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; fill(value: number, start?: number, end?: number): this; filter(predicate: (value: number, index: number, array: this) => any, thisArg?: any): Uint8Array<ArrayBuffer>; find(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number | undefined; findIndex(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number; forEach(callbackfn: (value: number, index: number, array: this) => void, thisArg?: any): void; indexOf(searchElement: number, fromIndex?: number): number; join(separator?: string): string; lastIndexOf(searchElement: number, fromIndex?: number): number; readonly length: number; map(callbackfn: (value: number, index: number, array: this) => number, thisArg?: any): Uint8Array<ArrayBuffer>; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduce<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduceRight<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reverse(): this; set(array: ArrayLike<number>, offset?: number): void; slice(start?: number, end?: number): Uint8Array<ArrayBuffer>; some(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; sort(compareFn?: (a: number, b: number) => number): this; subarray(begin?: number, end?: number): Uint8Array<TArrayBuffer>; toLocaleString(): string; toString(): string; valueOf(): this; [index: number]: number; }"
     },
     {
+      "name": "fragmentTunnelFrame",
+      "kind": "function",
+      "text": "export declare function fragmentTunnelFrame(frame: Uint8Array<ArrayBuffer>, maxFrameBytes: number): Uint8Array<ArrayBuffer>[]; ;; via ArrayBuffer = interface ArrayBuffer { readonly byteLength: number; slice(begin?: number, end?: number): ArrayBuffer; } ;; Uint8Array = interface Uint8Array<TArrayBuffer extends ArrayBufferLike = ArrayBufferLike> { readonly BYTES_PER_ELEMENT: number; readonly buffer: TArrayBuffer; readonly byteLength: number; readonly byteOffset: number; copyWithin(target: number, start: number, end?: number): this; every(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; fill(value: number, start?: number, end?: number): this; filter(predicate: (value: number, index: number, array: this) => any, thisArg?: any): Uint8Array<ArrayBuffer>; find(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number | undefined; findIndex(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number; forEach(callbackfn: (value: number, index: number, array: this) => void, thisArg?: any): void; indexOf(searchElement: number, fromIndex?: number): number; join(separator?: string): string; lastIndexOf(searchElement: number, fromIndex?: number): number; readonly length: number; map(callbackfn: (value: number, index: number, array: this) => number, thisArg?: any): Uint8Array<ArrayBuffer>; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduce<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduceRight<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reverse(): this; set(array: ArrayLike<number>, offset?: number): void; slice(start?: number, end?: number): Uint8Array<ArrayBuffer>; some(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; sort(compareFn?: (a: number, b: number) => number): this; subarray(begin?: number, end?: number): Uint8Array<TArrayBuffer>; toLocaleString(): string; toString(): string; valueOf(): this; [index: number]: number; }"
+    },
+    {
       "name": "framePipePayload",
       "kind": "function",
       "text": "export declare function framePipePayload(pipeIdBytes: Uint8Array<ArrayBuffer>, payload: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>; ;; via ArrayBuffer = interface ArrayBuffer { readonly byteLength: number; slice(begin?: number, end?: number): ArrayBuffer; } ;; Uint8Array = interface Uint8Array<TArrayBuffer extends ArrayBufferLike = ArrayBufferLike> { readonly BYTES_PER_ELEMENT: number; readonly buffer: TArrayBuffer; readonly byteLength: number; readonly byteOffset: number; copyWithin(target: number, start: number, end?: number): this; every(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; fill(value: number, start?: number, end?: number): this; filter(predicate: (value: number, index: number, array: this) => any, thisArg?: any): Uint8Array<ArrayBuffer>; find(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number | undefined; findIndex(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number; forEach(callbackfn: (value: number, index: number, array: this) => void, thisArg?: any): void; indexOf(searchElement: number, fromIndex?: number): number; join(separator?: string): string; lastIndexOf(searchElement: number, fromIndex?: number): number; readonly length: number; map(callbackfn: (value: number, index: number, array: this) => number, thisArg?: any): Uint8Array<ArrayBuffer>; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduce<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduceRight<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reverse(): this; set(array: ArrayLike<number>, offset?: number): void; slice(start?: number, end?: number): Uint8Array<ArrayBuffer>; some(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; sort(compareFn?: (a: number, b: number) => number): this; subarray(begin?: number, end?: number): Uint8Array<TArrayBuffer>; toLocaleString(): string; toString(): string; valueOf(): this; [index: number]: number; }"
@@ -752,14 +888,34 @@
       "text": "export declare function importRawPublicKey(bytes: Uint8Array<ArrayBuffer>): Promise<CryptoKey>; ;; via ArrayBuffer = interface ArrayBuffer { readonly byteLength: number; slice(begin?: number, end?: number): ArrayBuffer; } ;; CryptoKey = interface CryptoKey { readonly algorithm: KeyAlgorithm; readonly extractable: boolean; readonly type: KeyType; readonly usages: KeyUsage[]; } ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; Uint8Array = interface Uint8Array<TArrayBuffer extends ArrayBufferLike = ArrayBufferLike> { readonly BYTES_PER_ELEMENT: number; readonly buffer: TArrayBuffer; readonly byteLength: number; readonly byteOffset: number; copyWithin(target: number, start: number, end?: number): this; every(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; fill(value: number, start?: number, end?: number): this; filter(predicate: (value: number, index: number, array: this) => any, thisArg?: any): Uint8Array<ArrayBuffer>; find(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number | undefined; findIndex(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number; forEach(callbackfn: (value: number, index: number, array: this) => void, thisArg?: any): void; indexOf(searchElement: number, fromIndex?: number): number; join(separator?: string): string; lastIndexOf(searchElement: number, fromIndex?: number): number; readonly length: number; map(callbackfn: (value: number, index: number, array: this) => number, thisArg?: any): Uint8Array<ArrayBuffer>; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduce<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduceRight<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reverse(): this; set(array: ArrayLike<number>, offset?: number): void; slice(start?: number, end?: number): Uint8Array<ArrayBuffer>; some(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; sort(compareFn?: (a: number, b: number) => number): this; subarray(begin?: number, end?: number): Uint8Array<TArrayBuffer>; toLocaleString(): string; toString(): string; valueOf(): this; [index: number]: number; }"
     },
     {
+      "name": "proveRelayRegistration",
+      "kind": "function",
+      "text": "export declare function proveRelayRegistration(identity: RelayKeyPair, rid: RendezvousId, nonce: string): Promise<RelayProveFrame>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+    },
+    {
       "name": "randomBytes",
       "kind": "function",
       "text": "export declare function randomBytes(n: number): Uint8Array<ArrayBuffer>; ;; via ArrayBuffer = interface ArrayBuffer { readonly byteLength: number; slice(begin?: number, end?: number): ArrayBuffer; } ;; Uint8Array = interface Uint8Array<TArrayBuffer extends ArrayBufferLike = ArrayBufferLike> { readonly BYTES_PER_ELEMENT: number; readonly buffer: TArrayBuffer; readonly byteLength: number; readonly byteOffset: number; copyWithin(target: number, start: number, end?: number): this; every(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; fill(value: number, start?: number, end?: number): this; filter(predicate: (value: number, index: number, array: this) => any, thisArg?: any): Uint8Array<ArrayBuffer>; find(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number | undefined; findIndex(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number; forEach(callbackfn: (value: number, index: number, array: this) => void, thisArg?: any): void; indexOf(searchElement: number, fromIndex?: number): number; join(separator?: string): string; lastIndexOf(searchElement: number, fromIndex?: number): number; readonly length: number; map(callbackfn: (value: number, index: number, array: this) => number, thisArg?: any): Uint8Array<ArrayBuffer>; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduce<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduceRight<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reverse(): this; set(array: ArrayLike<number>, offset?: number): void; slice(start?: number, end?: number): Uint8Array<ArrayBuffer>; some(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; sort(compareFn?: (a: number, b: number) => number): this; subarray(begin?: number, end?: number): Uint8Array<TArrayBuffer>; toLocaleString(): string; toString(): string; valueOf(): this; [index: number]: number; }"
     },
     {
+      "name": "relayErrorAdvice",
+      "kind": "function",
+      "text": "export declare function relayErrorAdvice(code: string): RelayErrorAdvice;"
+    },
+    {
       "name": "relayIdentityPublicKeyBase64Url",
       "kind": "function",
       "text": "export declare function relayIdentityPublicKeyBase64Url(pair: RelayKeyPair): Promise<string>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+    },
+    {
+      "name": "relayIdentityRendezvousId",
+      "kind": "function",
+      "text": "export declare function relayIdentityRendezvousId(pair: RelayKeyPair): Promise<RendezvousId>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+    },
+    {
+      "name": "resolveRelayPairing",
+      "kind": "function",
+      "text": "export declare function resolveRelayPairing(pairing: RelayPairingPayload | string): RelayPairingPayload;"
     },
     {
       "name": "respondToHandshake",
@@ -787,9 +943,19 @@
       "text": "export declare function toBase64Url(bytes: Uint8Array<ArrayBuffer>): string; ;; via ArrayBuffer = interface ArrayBuffer { readonly byteLength: number; slice(begin?: number, end?: number): ArrayBuffer; } ;; Uint8Array = interface Uint8Array<TArrayBuffer extends ArrayBufferLike = ArrayBufferLike> { readonly BYTES_PER_ELEMENT: number; readonly buffer: TArrayBuffer; readonly byteLength: number; readonly byteOffset: number; copyWithin(target: number, start: number, end?: number): this; every(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; fill(value: number, start?: number, end?: number): this; filter(predicate: (value: number, index: number, array: this) => any, thisArg?: any): Uint8Array<ArrayBuffer>; find(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number | undefined; findIndex(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number; forEach(callbackfn: (value: number, index: number, array: this) => void, thisArg?: any): void; indexOf(searchElement: number, fromIndex?: number): number; join(separator?: string): string; lastIndexOf(searchElement: number, fromIndex?: number): number; readonly length: number; map(callbackfn: (value: number, index: number, array: this) => number, thisArg?: any): Uint8Array<ArrayBuffer>; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduce<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduceRight<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reverse(): this; set(array: ArrayLike<number>, offset?: number): void; slice(start?: number, end?: number): Uint8Array<ArrayBuffer>; some(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; sort(compareFn?: (a: number, b: number) => number): this; subarray(begin?: number, end?: number): Uint8Array<TArrayBuffer>; toLocaleString(): string; toString(): string; valueOf(): this; [index: number]: number; }"
     },
     {
+      "name": "tunnelFrameLimit",
+      "kind": "function",
+      "text": "export declare function tunnelFrameLimit(maxMessageBytes: number): number;"
+    },
+    {
       "name": "unframePipePayload",
       "kind": "function",
       "text": "export declare function unframePipePayload(frame: Uint8Array<ArrayBuffer>): { readonly pipeId: Uint8Array<ArrayBuffer>; readonly payload: Uint8Array<ArrayBuffer>; } | null; ;; via ArrayBuffer = interface ArrayBuffer { readonly byteLength: number; slice(begin?: number, end?: number): ArrayBuffer; } ;; Uint8Array = interface Uint8Array<TArrayBuffer extends ArrayBufferLike = ArrayBufferLike> { readonly BYTES_PER_ELEMENT: number; readonly buffer: TArrayBuffer; readonly byteLength: number; readonly byteOffset: number; copyWithin(target: number, start: number, end?: number): this; every(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; fill(value: number, start?: number, end?: number): this; filter(predicate: (value: number, index: number, array: this) => any, thisArg?: any): Uint8Array<ArrayBuffer>; find(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number | undefined; findIndex(predicate: (value: number, index: number, obj: this) => boolean, thisArg?: any): number; forEach(callbackfn: (value: number, index: number, array: this) => void, thisArg?: any): void; indexOf(searchElement: number, fromIndex?: number): number; join(separator?: string): string; lastIndexOf(searchElement: number, fromIndex?: number): number; readonly length: number; map(callbackfn: (value: number, index: number, array: this) => number, thisArg?: any): Uint8Array<ArrayBuffer>; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduce(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduce<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number): number; reduceRight(callbackfn: (previousValue: number, currentValue: number, currentIndex: number, array: this) => number, initialValue: number): number; reduceRight<U>(callbackfn: (previousValue: U, currentValue: number, currentIndex: number, array: this) => U, initialValue: U): U; reverse(): this; set(array: ArrayLike<number>, offset?: number): void; slice(start?: number, end?: number): Uint8Array<ArrayBuffer>; some(predicate: (value: number, index: number, array: this) => unknown, thisArg?: any): boolean; sort(compareFn?: (a: number, b: number) => number): this; subarray(begin?: number, end?: number): Uint8Array<TArrayBuffer>; toLocaleString(): string; toString(): string; valueOf(): this; [index: number]: number; }"
+    },
+    {
+      "name": "verifyRelayRegistration",
+      "kind": "function",
+      "text": "export declare function verifyRelayRegistration(rid: RendezvousId, nonce: string, proof: RelayProveFrame): Promise<boolean>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
     }
   ],
   "./uuid": [

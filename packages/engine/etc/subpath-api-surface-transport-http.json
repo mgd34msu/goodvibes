@@ -18,7 +18,7 @@
     {
       "name": "ContractInvokeOptions",
       "kind": "interface",
-      "text": "export interface ContractInvokeOptions { readonly signal?: AbortSignal | undefined; readonly headers?: HeadersInit | undefined; readonly responseSchema?: ZodType | undefined; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; HeadersInit = type HeadersInit = [string, string][] | Record<string, string> | Headers; ;; ZodType = export interface ZodType<out Output = unknown, out Input = unknown, out Internals extends core.$ZodTypeInternals<Output, Input> = core.$ZodTypeInternals<Output, Input>> extends core.$ZodType<Output, Input, Internals> { def: Internals[\"def\"]; type: Internals[\"def\"][\"type\"]; _def: Internals[\"def\"]; _output: Internals[\"output\"]; _input: Internals[\"input\"]; \"~standard\": ZodStandardSchemaWithJSON<this>; toJSONSchema(params?: core.ToJSONSchemaParams): core.ZodStandardJSONSchemaPayload<this>; check(...checks: (core.CheckFn<core.output<this>> | core.$ZodCheck<core.output<this>>)[]): this; with(...checks: (core.CheckFn<core.output<this>> | core.$ZodCheck<core.output<this>>)[]): this; clone(def?: Internals[\"def\"], params?: { parent: boolean; }): this; register<R extends core.$ZodRegistry>(registry: R, ...meta: this extends R[\"_schema\"] ? undefined extends R[\"_meta\"] ? [core.$replace<R[\"_meta\"], this>?] : [core.$replace<R[\"_meta\"], this>] : [\"Incompatible schema\"]): this; brand<T extends PropertyKey = PropertyKey, Dir extends \"in\" | \"out\" | \"inout\" = \"out\">(value?: T): PropertyKey extends T ? this : core.$ZodBranded<this, T, Dir>; parse(data: unknown, params?: core.ParseContext<core.$ZodIssue>): core.output<this>; safeParse(data: unknown, params?: core.ParseContext<core.$ZodIssue>): parse.ZodSafeParseResult<core.output<this>>; parseAsync(data: unknown, params?: core.ParseContext<core.$ZodIssue>): Promise<core.output<this>>; safeParseAsync(data: unknown, params?: core.ParseContext<core.$ZodIssue>): Promise<parse.ZodSafeParseResult<core.output<this>>>; spa: (data: unknown, params?: core.ParseContext<core.$ZodIssue>) => Promise<parse.ZodSafeParseResult<core.output<this>>>; validate(data: unknown, params?: core.ParseContext<core.$ZodIssue>): data is core.input<this>; validateAsync(data: unknown, params?: core.ParseContext<core.$ZodIssue>): Promise<boolean>; encode(data: core.output<this>, params?: core.ParseContext<core.$ZodIssue>): core.input<this>; decode(data: core.input<this>, params?: core.ParseContext<core.$ZodIssue>): core.output<this>; encodeAsync(data: core.output<this>, params?: core.ParseContext<core.$ZodIssue>): Promise<core.input<this>>; decodeAsync(data: core.input<this>, params?: core.ParseContext<core.$ZodIssue>): Promise<core.output<this>>; safeEncode(data: core.output<this>, params?: core.ParseContext<core.$ZodIssue>): parse.ZodSafeParseResult<core.input<this>>; safeDecode(data: core.input<this>, params?: core.ParseContext<core.$ZodIssue>): parse.ZodSafeParseResult<core.output<this>>; safeEncodeAsync(data: core.output<this>, params?: core.ParseContext<core.$ZodIssue>): Promise<parse.ZodSafeParseResult<core.input<this>>>; safeDecodeAsync(data: core.input<this>, params?: core.ParseContext<core.$ZodIssue>): Promise<parse.ZodSafeParseResult<core.output<this>>>; refine<Ch extends (arg: core.output<this>) => unknown | Promise<unknown>>(check: Ch, params?: string | core.$ZodCustomParams): Ch extends (arg: any) => arg is infer R ? this & ZodType<R, core.input<this>> : this; superRefine(refinement: (arg: core.output<this>, ctx: core.$RefinementCtx<core.output<this>>) => void | Promise<void>, params?: core.$ZodSuperRefineParams): this; overwrite(fn: (x: core.output<this>) => core.output<this>): this; optional(): ZodOptional<this>; exactOptional(): ZodExactOptional<this>; nonoptional(params?: string | core.$ZodNonOptionalParams): ZodNonOptional<this>; nullable(): ZodNullable<this>; nullish(): ZodOptional<ZodNullable<this>>; default(def: util.NoUndefined<core.output<this>>): ZodDefault<this>; default(def: () => util.NoUndefined<core.output<this>>): ZodDefault<this>; prefault(def: () => core.input<this>): ZodPrefault<this>; prefault(def: core.input<this>): ZodPrefault<this>; array(): ZodArray<this>; or<T extends core.SomeType>(option: T): ZodUnion<[this, T]>; and<T extends core.SomeType>(incoming: T): ZodIntersection<this, T>; transform<NewOut>(transform: (arg: core.output<this>, ctx: core.$RefinementCtx<core.output<this>>) => NewOut | Promise<NewOut>): ZodPipe<this, ZodTransform<Awaited<NewOut>, core.output<this>>>; catch(def: core.output<this>): ZodCatch<this>; catch(def: (ctx: core.$ZodCatchCtx) => core.output<this>): ZodCatch<this>; pipe<T extends core.$ZodType<any, core.output<this>>>(target: T | core.$ZodType<any, core.output<this>>): ZodPipe<this, T>; readonly(): ZodReadonly<this>; describe(description: string): this; description?: string; meta(): core.$replace<core.GlobalMeta, this> | undefined; meta(data: core.$replace<core.GlobalMeta, this>): this; isOptional(): boolean; isNullable(): boolean; apply<T, TArgs extends unknown[] = []>(fn: (schema: this, ...args: TArgs) => T, ...args: TArgs): T; }"
+      "text": "export interface ContractInvokeOptions { readonly signal?: AbortSignal | undefined; readonly headers?: HeadersInit | undefined; readonly idempotencyKey?: string | undefined; readonly responseSchema?: ZodType | undefined; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; HeadersInit = type HeadersInit = [string, string][] | Record<string, string> | Headers; ;; ZodType = export interface ZodType<out Output = unknown, out Input = unknown, out Internals extends core.$ZodTypeInternals<Output, Input> = core.$ZodTypeInternals<Output, Input>> extends core.$ZodType<Output, Input, Internals> { def: Internals[\"def\"]; type: Internals[\"def\"][\"type\"]; _def: Internals[\"def\"]; _output: Internals[\"output\"]; _input: Internals[\"input\"]; \"~standard\": ZodStandardSchemaWithJSON<this>; toJSONSchema(params?: core.ToJSONSchemaParams): core.ZodStandardJSONSchemaPayload<this>; check(...checks: (core.CheckFn<core.output<this>> | core.$ZodCheck<core.output<this>>)[]): this; with(...checks: (core.CheckFn<core.output<this>> | core.$ZodCheck<core.output<this>>)[]): this; clone(def?: Internals[\"def\"], params?: { parent: boolean; }): this; register<R extends core.$ZodRegistry>(registry: R, ...meta: this extends R[\"_schema\"] ? undefined extends R[\"_meta\"] ? [core.$replace<R[\"_meta\"], this>?] : [core.$replace<R[\"_meta\"], this>] : [\"Incompatible schema\"]): this; brand<T extends PropertyKey = PropertyKey, Dir extends \"in\" | \"out\" | \"inout\" = \"out\">(value?: T): PropertyKey extends T ? this : core.$ZodBranded<this, T, Dir>; parse(data: unknown, params?: core.ParseContext<core.$ZodIssue>): core.output<this>; safeParse(data: unknown, params?: core.ParseContext<core.$ZodIssue>): parse.ZodSafeParseResult<core.output<this>>; parseAsync(data: unknown, params?: core.ParseContext<core.$ZodIssue>): Promise<core.output<this>>; safeParseAsync(data: unknown, params?: core.ParseContext<core.$ZodIssue>): Promise<parse.ZodSafeParseResult<core.output<this>>>; spa: (data: unknown, params?: core.ParseContext<core.$ZodIssue>) => Promise<parse.ZodSafeParseResult<core.output<this>>>; validate(data: unknown, params?: core.ParseContext<core.$ZodIssue>): data is core.input<this>; validateAsync(data: unknown, params?: core.ParseContext<core.$ZodIssue>): Promise<boolean>; encode(data: core.output<this>, params?: core.ParseContext<core.$ZodIssue>): core.input<this>; decode(data: core.input<this>, params?: core.ParseContext<core.$ZodIssue>): core.output<this>; encodeAsync(data: core.output<this>, params?: core.ParseContext<core.$ZodIssue>): Promise<core.input<this>>; decodeAsync(data: core.input<this>, params?: core.ParseContext<core.$ZodIssue>): Promise<core.output<this>>; safeEncode(data: core.output<this>, params?: core.ParseContext<core.$ZodIssue>): parse.ZodSafeParseResult<core.input<this>>; safeDecode(data: core.input<this>, params?: core.ParseContext<core.$ZodIssue>): parse.ZodSafeParseResult<core.output<this>>; safeEncodeAsync(data: core.output<this>, params?: core.ParseContext<core.$ZodIssue>): Promise<parse.ZodSafeParseResult<core.input<this>>>; safeDecodeAsync(data: core.input<this>, params?: core.ParseContext<core.$ZodIssue>): Promise<parse.ZodSafeParseResult<core.output<this>>>; refine<Ch extends (arg: core.output<this>) => unknown | Promise<unknown>>(check: Ch, params?: string | core.$ZodCustomParams): Ch extends (arg: any) => arg is infer R ? this & ZodType<R, core.input<this>> : this; superRefine(refinement: (arg: core.output<this>, ctx: core.$RefinementCtx<core.output<this>>) => void | Promise<void>, params?: core.$ZodSuperRefineParams): this; overwrite(fn: (x: core.output<this>) => core.output<this>): this; optional(): ZodOptional<this>; exactOptional(): ZodExactOptional<this>; nonoptional(params?: string | core.$ZodNonOptionalParams): ZodNonOptional<this>; nullable(): ZodNullable<this>; nullish(): ZodOptional<ZodNullable<this>>; default(def: util.NoUndefined<core.output<this>>): ZodDefault<this>; default(def: () => util.NoUndefined<core.output<this>>): ZodDefault<this>; prefault(def: () => core.input<this>): ZodPrefault<this>; prefault(def: core.input<this>): ZodPrefault<this>; array(): ZodArray<this>; or<T extends core.SomeType>(option: T): ZodUnion<[this, T]>; and<T extends core.SomeType>(incoming: T): ZodIntersection<this, T>; transform<NewOut>(transform: (arg: core.output<this>, ctx: core.$RefinementCtx<core.output<this>>) => NewOut | Promise<NewOut>): ZodPipe<this, ZodTransform<Awaited<NewOut>, core.output<this>>>; catch(def: core.output<this>): ZodCatch<this>; catch(def: (ctx: core.$ZodCatchCtx) => core.output<this>): ZodCatch<this>; pipe<T extends core.$ZodType<any, core.output<this>>>(target: T | core.$ZodType<any, core.output<this>>): ZodPipe<this, T>; readonly(): ZodReadonly<this>; describe(description: string): this; description?: string; meta(): core.$replace<core.GlobalMeta, this> | undefined; meta(data: core.$replace<core.GlobalMeta, this>): this; isOptional(): boolean; isNullable(): boolean; apply<T, TArgs extends unknown[] = []>(fn: (schema: this, ...args: TArgs) => T, ...args: TArgs): T; }"
     },
     {
       "name": "ContractRouteDefinition",
@@ -51,6 +51,11 @@
       "text": "DEFAULT_HTTP_RETRY_POLICY: ResolvedHttpRetryPolicy"
     },
     {
+      "name": "DEFAULT_IDEMPOTENT_MAX_ATTEMPTS",
+      "kind": "const",
+      "text": "DEFAULT_IDEMPOTENT_MAX_ATTEMPTS = 3"
+    },
+    {
       "name": "DEFAULT_STREAM_RECONNECT_POLICY",
       "kind": "const",
       "text": "DEFAULT_STREAM_RECONNECT_POLICY: ResolvedStreamReconnectPolicy"
@@ -63,7 +68,7 @@
     {
       "name": "HttpJsonRequestOptions",
       "kind": "interface",
-      "text": "export interface HttpJsonRequestOptions { readonly method?: string | undefined; readonly body?: unknown | undefined; readonly headers?: HeadersInit | undefined; readonly signal?: AbortSignal | undefined; readonly retry?: false | HttpRetryPolicy | undefined; readonly methodId?: string | undefined; readonly idempotent?: boolean | undefined; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; HeadersInit = type HeadersInit = [string, string][] | Record<string, string> | Headers;"
+      "text": "export interface HttpJsonRequestOptions { readonly method?: string | undefined; readonly body?: unknown | undefined; readonly headers?: HeadersInit | undefined; readonly signal?: AbortSignal | undefined; readonly retry?: false | HttpRetryPolicy | undefined; readonly methodId?: string | undefined; readonly idempotent?: boolean | undefined; readonly idempotencyKey?: string | undefined; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; HeadersInit = type HeadersInit = [string, string][] | Record<string, string> | Headers;"
     },
     {
       "name": "HttpJsonTransport",
@@ -119,6 +124,11 @@
       "text": "export interface JsonSchemaValidationFailure { readonly path: string; readonly expected: string; readonly received: string; }"
     },
     {
+      "name": "JsonSchemaValidationOptions",
+      "kind": "interface",
+      "text": "export interface JsonSchemaValidationOptions { readonly signal?: AbortSignal | undefined; readonly assertCurrent?: (() => void) | undefined; readonly isolatedTester?: Pick<SharedRegexTester, 'test'> | undefined; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; Pick = type Pick<T, K extends keyof T> = { [P in K]: T[P]; }; ;; SharedRegexTester = export interface SharedRegexTester extends AsyncDisposable { test(source: string, input: string, signal?: AbortSignal): Promise<boolean>; }"
+    },
+    {
       "name": "JsonValue",
       "kind": "type",
       "text": "export type JsonValue = JsonPrimitive | { readonly [key: string]: JsonValue; } | readonly JsonValue[]; ;; via JsonPrimitive = export type JsonPrimitive = string | number | boolean | null;"
@@ -141,12 +151,12 @@
     {
       "name": "RawServerSentEventHandlers",
       "kind": "interface",
-      "text": "export interface ServerSentEventHandlers { readonly onEvent?: ((eventName: string, payload: unknown) => void) | undefined; readonly onReady?: ((payload: unknown) => void) | undefined; readonly onError?: ((error: unknown) => void) | undefined; readonly onReconnect?: (input: { readonly attempt: number; readonly delayMs: number; }) => void; readonly onClose?: (() => void) | undefined; readonly onTerminate?: (input: { readonly error: unknown; readonly reconnectAttempts: number; }) => void; readonly onEventId?: ((id: string) => void) | undefined; }"
+      "text": "export interface ServerSentEventHandlers { readonly onEvent?: ((eventName: string, payload: unknown) => void) | undefined; readonly onReady?: ((payload: unknown) => void) | undefined; readonly onError?: ((error: unknown) => void) | undefined; readonly onReconnect?: (input: { readonly attempt: number; readonly delayMs: number; }) => void; readonly onClose?: (() => void) | undefined; readonly onTerminate?: (input: { readonly error: unknown; readonly reconnectAttempts: number; readonly final?: boolean | undefined; }) => void; readonly onEventId?: ((id: string) => void) | undefined; }"
     },
     {
       "name": "RawServerSentEventOptions",
       "kind": "interface",
-      "text": "export interface ServerSentEventOptions { readonly signal?: AbortSignal | undefined; readonly headers?: HeadersInit | undefined; readonly authToken?: string | null | undefined; readonly getAuthToken?: AuthTokenResolver | undefined; readonly lastEventId?: string | null | undefined; readonly reconnect?: StreamReconnectPolicy | undefined; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; HeadersInit = type HeadersInit = [string, string][] | Record<string, string> | Headers;"
+      "text": "export interface ServerSentEventOptions { readonly signal?: AbortSignal | undefined; readonly headers?: HeadersInit | undefined; readonly authToken?: string | null | undefined; readonly getAuthToken?: AuthTokenResolver | undefined; readonly lastEventId?: string | null | undefined; readonly reconnect?: StreamReconnectPolicy | undefined; readonly idleTimeoutMs?: number | undefined; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; HeadersInit = type HeadersInit = [string, string][] | Record<string, string> | Headers;"
     },
     {
       "name": "RequiredKeys",
@@ -193,9 +203,14 @@
       "text": "export interface ResolvedStreamReconnectPolicy extends ResolvedBackoffPolicy { readonly enabled: boolean; }"
     },
     {
+      "name": "SSE_HEARTBEAT_INTERVAL_MS",
+      "kind": "const",
+      "text": "SSE_HEARTBEAT_INTERVAL_MS = 15000"
+    },
+    {
       "name": "ServerSentEventHandlers",
       "kind": "interface",
-      "text": "export interface ServerSentEventHandlers { readonly onEvent?: ((eventName: string, payload: unknown) => void) | undefined; readonly onReady?: ((payload: unknown) => void) | undefined; readonly onError?: ((error: unknown) => void) | undefined; readonly onReconnect?: (input: { readonly attempt: number; readonly delayMs: number; }) => void; readonly onClose?: (() => void) | undefined; readonly onTerminate?: (input: { readonly error: unknown; readonly reconnectAttempts: number; }) => void; readonly onEventId?: ((id: string) => void) | undefined; }"
+      "text": "export interface ServerSentEventHandlers { readonly onEvent?: ((eventName: string, payload: unknown) => void) | undefined; readonly onReady?: ((payload: unknown) => void) | undefined; readonly onError?: ((error: unknown) => void) | undefined; readonly onReconnect?: (input: { readonly attempt: number; readonly delayMs: number; }) => void; readonly onClose?: (() => void) | undefined; readonly onTerminate?: (input: { readonly error: unknown; readonly reconnectAttempts: number; readonly final?: boolean | undefined; }) => void; readonly onEventId?: ((id: string) => void) | undefined; }"
     },
     {
       "name": "ServerSentEventOptions",
@@ -335,7 +350,7 @@
     {
       "name": "firstJsonSchemaFailureAsync",
       "kind": "function",
-      "text": "export declare function firstJsonSchemaFailureAsync(schema: Record<string, unknown>, value: unknown, options?: Omit<RegexAdmissionOptions, 'operation'>): Promise<JsonSchemaValidationFailure | undefined>; ;; via Omit = type Omit<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; }; ;; RegexAdmissionOptions = export interface RegexAdmissionOptions extends JudgmentReadingOptions { readonly reading?: RegexReadingCapability | undefined; readonly operation: string; readonly maxPatternChars?: number | undefined; readonly maxInputChars?: number | undefined; readonly timeoutMs?: number | undefined; }"
+      "text": "export declare function firstJsonSchemaFailureAsync(schema: Record<string, unknown>, value: unknown, options?: JsonSchemaValidationOptions): Promise<JsonSchemaValidationFailure | undefined>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
     },
     {
       "name": "generateIdempotencyKey",
@@ -358,19 +373,29 @@
       "text": "export declare function invokeContractRoute<T = unknown>(transport: HttpTransport, route: ContractRouteDefinition & ContractRouteLike, input?: Record<string, unknown>, options?: ContractInvokeOptions): Promise<T>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
     },
     {
+      "name": "isLinearSchemaPattern",
+      "kind": "function",
+      "text": "export declare function isLinearSchemaPattern(source: string): boolean;"
+    },
+    {
       "name": "isPrivateNetworkHost",
       "kind": "function",
       "text": "export declare function isPrivateNetworkHost(hostname: string): boolean;"
     },
     {
+      "name": "isRetryableCall",
+      "kind": "function",
+      "text": "export declare function isRetryableCall(method: string, policy: ResolvedHttpRetryPolicy, idempotent?: boolean): boolean;"
+    },
+    {
       "name": "isRetryableHttpStatus",
       "kind": "function",
-      "text": "export declare function isRetryableHttpStatus(method: string, status: number, policy: ResolvedHttpRetryPolicy): boolean;"
+      "text": "export declare function isRetryableHttpStatus(method: string, status: number, policy: ResolvedHttpRetryPolicy, idempotent?: boolean): boolean;"
     },
     {
       "name": "isRetryableNetworkError",
       "kind": "function",
-      "text": "export declare function isRetryableNetworkError(method: string, policy: ResolvedHttpRetryPolicy): boolean;"
+      "text": "export declare function isRetryableNetworkError(method: string, policy: ResolvedHttpRetryPolicy, idempotent?: boolean): boolean;"
     },
     {
       "name": "mergeClientInput",
@@ -463,11 +488,6 @@
       "text": "export declare function resolveHttpRetryPolicy(defaultPolicy?: HttpRetryPolicy, override?: false | HttpRetryPolicy): ResolvedHttpRetryPolicy;"
     },
     {
-      "name": "retainJsonSchemaSource",
-      "kind": "function",
-      "text": "export declare function retainJsonSchemaSource<T>(source: T): { readonly snapshot: T; readonly assertCurrent: () => void; };"
-    },
-    {
       "name": "sleepWithSignal",
       "kind": "function",
       "text": "export declare function sleepWithSignal(delayMs: number, signal?: AbortSignal): Promise<void>; ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
@@ -476,6 +496,11 @@
       "name": "splitClientArgs",
       "kind": "function",
       "text": "export declare function splitClientArgs<TInput, TOptions>(args: readonly unknown[]): readonly [TInput | undefined, TOptions | undefined];"
+    },
+    {
+      "name": "sseIdleDeadlineMs",
+      "kind": "function",
+      "text": "export declare function sseIdleDeadlineMs(heartbeatIntervalMs?: number): number;"
     }
   ],
   "./auth": [
@@ -570,6 +595,11 @@
       "text": "export interface JsonSchemaValidationFailure { readonly path: string; readonly expected: string; readonly received: string; }"
     },
     {
+      "name": "JsonSchemaValidationOptions",
+      "kind": "interface",
+      "text": "export interface JsonSchemaValidationOptions { readonly signal?: AbortSignal | undefined; readonly assertCurrent?: (() => void) | undefined; readonly isolatedTester?: Pick<SharedRegexTester, 'test'> | undefined; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; Pick = type Pick<T, K extends keyof T> = { [P in K]: T[P]; }; ;; SharedRegexTester = export interface SharedRegexTester extends AsyncDisposable { test(source: string, input: string, signal?: AbortSignal): Promise<boolean>; }"
+    },
+    {
       "name": "MethodArgs",
       "kind": "type",
       "text": "export type MethodArgs<TInput, TOptions> = [ TInput ] extends [undefined] ? [input?: undefined, options?: TOptions] : [TInput] extends [object] ? [RequiredKeys<TInput>] extends [never] ? [input?: TInput, options?: TOptions] : [input: TInput, options?: TOptions] : [input: TInput, options?: TOptions];"
@@ -597,7 +627,12 @@
     {
       "name": "firstJsonSchemaFailureAsync",
       "kind": "function",
-      "text": "export declare function firstJsonSchemaFailureAsync(schema: Record<string, unknown>, value: unknown, options?: Omit<RegexAdmissionOptions, 'operation'>): Promise<JsonSchemaValidationFailure | undefined>; ;; via Omit = type Omit<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; }; ;; RegexAdmissionOptions = export interface RegexAdmissionOptions extends JudgmentReadingOptions { readonly reading?: RegexReadingCapability | undefined; readonly operation: string; readonly maxPatternChars?: number | undefined; readonly maxInputChars?: number | undefined; readonly timeoutMs?: number | undefined; }"
+      "text": "export declare function firstJsonSchemaFailureAsync(schema: Record<string, unknown>, value: unknown, options?: JsonSchemaValidationOptions): Promise<JsonSchemaValidationFailure | undefined>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
+    },
+    {
+      "name": "isLinearSchemaPattern",
+      "kind": "function",
+      "text": "export declare function isLinearSchemaPattern(source: string): boolean;"
     },
     {
       "name": "mergeClientInput",
@@ -614,7 +649,7 @@
     {
       "name": "ContractInvokeOptions",
       "kind": "interface",
-      "text": "export interface ContractInvokeOptions { readonly signal?: AbortSignal | undefined; readonly headers?: HeadersInit | undefined; readonly responseSchema?: ZodType | undefined; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; HeadersInit = type HeadersInit = [string, string][] | Record<string, string> | Headers; ;; ZodType = export interface ZodType<out Output = unknown, out Input = unknown, out Internals extends core.$ZodTypeInternals<Output, Input> = core.$ZodTypeInternals<Output, Input>> extends core.$ZodType<Output, Input, Internals> { def: Internals[\"def\"]; type: Internals[\"def\"][\"type\"]; _def: Internals[\"def\"]; _output: Internals[\"output\"]; _input: Internals[\"input\"]; \"~standard\": ZodStandardSchemaWithJSON<this>; toJSONSchema(params?: core.ToJSONSchemaParams): core.ZodStandardJSONSchemaPayload<this>; check(...checks: (core.CheckFn<core.output<this>> | core.$ZodCheck<core.output<this>>)[]): this; with(...checks: (core.CheckFn<core.output<this>> | core.$ZodCheck<core.output<this>>)[]): this; clone(def?: Internals[\"def\"], params?: { parent: boolean; }): this; register<R extends core.$ZodRegistry>(registry: R, ...meta: this extends R[\"_schema\"] ? undefined extends R[\"_meta\"] ? [core.$replace<R[\"_meta\"], this>?] : [core.$replace<R[\"_meta\"], this>] : [\"Incompatible schema\"]): this; brand<T extends PropertyKey = PropertyKey, Dir extends \"in\" | \"out\" | \"inout\" = \"out\">(value?: T): PropertyKey extends T ? this : core.$ZodBranded<this, T, Dir>; parse(data: unknown, params?: core.ParseContext<core.$ZodIssue>): core.output<this>; safeParse(data: unknown, params?: core.ParseContext<core.$ZodIssue>): parse.ZodSafeParseResult<core.output<this>>; parseAsync(data: unknown, params?: core.ParseContext<core.$ZodIssue>): Promise<core.output<this>>; safeParseAsync(data: unknown, params?: core.ParseContext<core.$ZodIssue>): Promise<parse.ZodSafeParseResult<core.output<this>>>; spa: (data: unknown, params?: core.ParseContext<core.$ZodIssue>) => Promise<parse.ZodSafeParseResult<core.output<this>>>; validate(data: unknown, params?: core.ParseContext<core.$ZodIssue>): data is core.input<this>; validateAsync(data: unknown, params?: core.ParseContext<core.$ZodIssue>): Promise<boolean>; encode(data: core.output<this>, params?: core.ParseContext<core.$ZodIssue>): core.input<this>; decode(data: core.input<this>, params?: core.ParseContext<core.$ZodIssue>): core.output<this>; encodeAsync(data: core.output<this>, params?: core.ParseContext<core.$ZodIssue>): Promise<core.input<this>>; decodeAsync(data: core.input<this>, params?: core.ParseContext<core.$ZodIssue>): Promise<core.output<this>>; safeEncode(data: core.output<this>, params?: core.ParseContext<core.$ZodIssue>): parse.ZodSafeParseResult<core.input<this>>; safeDecode(data: core.input<this>, params?: core.ParseContext<core.$ZodIssue>): parse.ZodSafeParseResult<core.output<this>>; safeEncodeAsync(data: core.output<this>, params?: core.ParseContext<core.$ZodIssue>): Promise<parse.ZodSafeParseResult<core.input<this>>>; safeDecodeAsync(data: core.input<this>, params?: core.ParseContext<core.$ZodIssue>): Promise<parse.ZodSafeParseResult<core.output<this>>>; refine<Ch extends (arg: core.output<this>) => unknown | Promise<unknown>>(check: Ch, params?: string | core.$ZodCustomParams): Ch extends (arg: any) => arg is infer R ? this & ZodType<R, core.input<this>> : this; superRefine(refinement: (arg: core.output<this>, ctx: core.$RefinementCtx<core.output<this>>) => void | Promise<void>, params?: core.$ZodSuperRefineParams): this; overwrite(fn: (x: core.output<this>) => core.output<this>): this; optional(): ZodOptional<this>; exactOptional(): ZodExactOptional<this>; nonoptional(params?: string | core.$ZodNonOptionalParams): ZodNonOptional<this>; nullable(): ZodNullable<this>; nullish(): ZodOptional<ZodNullable<this>>; default(def: util.NoUndefined<core.output<this>>): ZodDefault<this>; default(def: () => util.NoUndefined<core.output<this>>): ZodDefault<this>; prefault(def: () => core.input<this>): ZodPrefault<this>; prefault(def: core.input<this>): ZodPrefault<this>; array(): ZodArray<this>; or<T extends core.SomeType>(option: T): ZodUnion<[this, T]>; and<T extends core.SomeType>(incoming: T): ZodIntersection<this, T>; transform<NewOut>(transform: (arg: core.output<this>, ctx: core.$RefinementCtx<core.output<this>>) => NewOut | Promise<NewOut>): ZodPipe<this, ZodTransform<Awaited<NewOut>, core.output<this>>>; catch(def: core.output<this>): ZodCatch<this>; catch(def: (ctx: core.$ZodCatchCtx) => core.output<this>): ZodCatch<this>; pipe<T extends core.$ZodType<any, core.output<this>>>(target: T | core.$ZodType<any, core.output<this>>): ZodPipe<this, T>; readonly(): ZodReadonly<this>; describe(description: string): this; description?: string; meta(): core.$replace<core.GlobalMeta, this> | undefined; meta(data: core.$replace<core.GlobalMeta, this>): this; isOptional(): boolean; isNullable(): boolean; apply<T, TArgs extends unknown[] = []>(fn: (schema: this, ...args: TArgs) => T, ...args: TArgs): T; }"
+      "text": "export interface ContractInvokeOptions { readonly signal?: AbortSignal | undefined; readonly headers?: HeadersInit | undefined; readonly idempotencyKey?: string | undefined; readonly responseSchema?: ZodType | undefined; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; HeadersInit = type HeadersInit = [string, string][] | Record<string, string> | Headers; ;; ZodType = export interface ZodType<out Output = unknown, out Input = unknown, out Internals extends core.$ZodTypeInternals<Output, Input> = core.$ZodTypeInternals<Output, Input>> extends core.$ZodType<Output, Input, Internals> { def: Internals[\"def\"]; type: Internals[\"def\"][\"type\"]; _def: Internals[\"def\"]; _output: Internals[\"output\"]; _input: Internals[\"input\"]; \"~standard\": ZodStandardSchemaWithJSON<this>; toJSONSchema(params?: core.ToJSONSchemaParams): core.ZodStandardJSONSchemaPayload<this>; check(...checks: (core.CheckFn<core.output<this>> | core.$ZodCheck<core.output<this>>)[]): this; with(...checks: (core.CheckFn<core.output<this>> | core.$ZodCheck<core.output<this>>)[]): this; clone(def?: Internals[\"def\"], params?: { parent: boolean; }): this; register<R extends core.$ZodRegistry>(registry: R, ...meta: this extends R[\"_schema\"] ? undefined extends R[\"_meta\"] ? [core.$replace<R[\"_meta\"], this>?] : [core.$replace<R[\"_meta\"], this>] : [\"Incompatible schema\"]): this; brand<T extends PropertyKey = PropertyKey, Dir extends \"in\" | \"out\" | \"inout\" = \"out\">(value?: T): PropertyKey extends T ? this : core.$ZodBranded<this, T, Dir>; parse(data: unknown, params?: core.ParseContext<core.$ZodIssue>): core.output<this>; safeParse(data: unknown, params?: core.ParseContext<core.$ZodIssue>): parse.ZodSafeParseResult<core.output<this>>; parseAsync(data: unknown, params?: core.ParseContext<core.$ZodIssue>): Promise<core.output<this>>; safeParseAsync(data: unknown, params?: core.ParseContext<core.$ZodIssue>): Promise<parse.ZodSafeParseResult<core.output<this>>>; spa: (data: unknown, params?: core.ParseContext<core.$ZodIssue>) => Promise<parse.ZodSafeParseResult<core.output<this>>>; validate(data: unknown, params?: core.ParseContext<core.$ZodIssue>): data is core.input<this>; validateAsync(data: unknown, params?: core.ParseContext<core.$ZodIssue>): Promise<boolean>; encode(data: core.output<this>, params?: core.ParseContext<core.$ZodIssue>): core.input<this>; decode(data: core.input<this>, params?: core.ParseContext<core.$ZodIssue>): core.output<this>; encodeAsync(data: core.output<this>, params?: core.ParseContext<core.$ZodIssue>): Promise<core.input<this>>; decodeAsync(data: core.input<this>, params?: core.ParseContext<core.$ZodIssue>): Promise<core.output<this>>; safeEncode(data: core.output<this>, params?: core.ParseContext<core.$ZodIssue>): parse.ZodSafeParseResult<core.input<this>>; safeDecode(data: core.input<this>, params?: core.ParseContext<core.$ZodIssue>): parse.ZodSafeParseResult<core.output<this>>; safeEncodeAsync(data: core.output<this>, params?: core.ParseContext<core.$ZodIssue>): Promise<parse.ZodSafeParseResult<core.input<this>>>; safeDecodeAsync(data: core.input<this>, params?: core.ParseContext<core.$ZodIssue>): Promise<parse.ZodSafeParseResult<core.output<this>>>; refine<Ch extends (arg: core.output<this>) => unknown | Promise<unknown>>(check: Ch, params?: string | core.$ZodCustomParams): Ch extends (arg: any) => arg is infer R ? this & ZodType<R, core.input<this>> : this; superRefine(refinement: (arg: core.output<this>, ctx: core.$RefinementCtx<core.output<this>>) => void | Promise<void>, params?: core.$ZodSuperRefineParams): this; overwrite(fn: (x: core.output<this>) => core.output<this>): this; optional(): ZodOptional<this>; exactOptional(): ZodExactOptional<this>; nonoptional(params?: string | core.$ZodNonOptionalParams): ZodNonOptional<this>; nullable(): ZodNullable<this>; nullish(): ZodOptional<ZodNullable<this>>; default(def: util.NoUndefined<core.output<this>>): ZodDefault<this>; default(def: () => util.NoUndefined<core.output<this>>): ZodDefault<this>; prefault(def: () => core.input<this>): ZodPrefault<this>; prefault(def: core.input<this>): ZodPrefault<this>; array(): ZodArray<this>; or<T extends core.SomeType>(option: T): ZodUnion<[this, T]>; and<T extends core.SomeType>(incoming: T): ZodIntersection<this, T>; transform<NewOut>(transform: (arg: core.output<this>, ctx: core.$RefinementCtx<core.output<this>>) => NewOut | Promise<NewOut>): ZodPipe<this, ZodTransform<Awaited<NewOut>, core.output<this>>>; catch(def: core.output<this>): ZodCatch<this>; catch(def: (ctx: core.$ZodCatchCtx) => core.output<this>): ZodCatch<this>; pipe<T extends core.$ZodType<any, core.output<this>>>(target: T | core.$ZodType<any, core.output<this>>): ZodPipe<this, T>; readonly(): ZodReadonly<this>; describe(description: string): this; description?: string; meta(): core.$replace<core.GlobalMeta, this> | undefined; meta(data: core.$replace<core.GlobalMeta, this>): this; isOptional(): boolean; isNullable(): boolean; apply<T, TArgs extends unknown[] = []>(fn: (schema: this, ...args: TArgs) => T, ...args: TArgs): T; }"
     },
     {
       "name": "ContractRouteDefinition",
@@ -639,7 +674,7 @@
       "required": [
         "handlers"
       ],
-      "text": "export interface ContractStreamOptions extends ContractInvokeOptions { readonly handlers: ServerSentEventHandlers; } ;; via ServerSentEventHandlers = export interface ServerSentEventHandlers { readonly onEvent?: ((eventName: string, payload: unknown) => void) | undefined; readonly onReady?: ((payload: unknown) => void) | undefined; readonly onError?: ((error: unknown) => void) | undefined; readonly onReconnect?: (input: { readonly attempt: number; readonly delayMs: number; }) => void; readonly onClose?: (() => void) | undefined; readonly onTerminate?: (input: { readonly error: unknown; readonly reconnectAttempts: number; }) => void; readonly onEventId?: ((id: string) => void) | undefined; }"
+      "text": "export interface ContractStreamOptions extends ContractInvokeOptions { readonly handlers: ServerSentEventHandlers; } ;; via ServerSentEventHandlers = export interface ServerSentEventHandlers { readonly onEvent?: ((eventName: string, payload: unknown) => void) | undefined; readonly onReady?: ((payload: unknown) => void) | undefined; readonly onError?: ((error: unknown) => void) | undefined; readonly onReconnect?: (input: { readonly attempt: number; readonly delayMs: number; }) => void; readonly onClose?: (() => void) | undefined; readonly onTerminate?: (input: { readonly error: unknown; readonly reconnectAttempts: number; readonly final?: boolean | undefined; }) => void; readonly onEventId?: ((id: string) => void) | undefined; }"
     },
     {
       "name": "invokeContractRoute",
@@ -686,7 +721,7 @@
     {
       "name": "HttpJsonRequestOptions",
       "kind": "interface",
-      "text": "export interface HttpJsonRequestOptions { readonly method?: string | undefined; readonly body?: unknown | undefined; readonly headers?: HeadersInit | undefined; readonly signal?: AbortSignal | undefined; readonly retry?: false | HttpRetryPolicy | undefined; readonly methodId?: string | undefined; readonly idempotent?: boolean | undefined; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; HeadersInit = type HeadersInit = [string, string][] | Record<string, string> | Headers;"
+      "text": "export interface HttpJsonRequestOptions { readonly method?: string | undefined; readonly body?: unknown | undefined; readonly headers?: HeadersInit | undefined; readonly signal?: AbortSignal | undefined; readonly retry?: false | HttpRetryPolicy | undefined; readonly methodId?: string | undefined; readonly idempotent?: boolean | undefined; readonly idempotencyKey?: string | undefined; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; HeadersInit = type HeadersInit = [string, string][] | Record<string, string> | Headers;"
     },
     {
       "name": "HttpRetryPolicy",
@@ -833,12 +868,12 @@
     {
       "name": "isRetryableHttpStatus",
       "kind": "function",
-      "text": "export declare function isRetryableHttpStatus(method: string, status: number, policy: ResolvedHttpRetryPolicy): boolean;"
+      "text": "export declare function isRetryableHttpStatus(method: string, status: number, policy: ResolvedHttpRetryPolicy, idempotent?: boolean): boolean;"
     },
     {
       "name": "isRetryableNetworkError",
       "kind": "function",
-      "text": "export declare function isRetryableNetworkError(method: string, policy: ResolvedHttpRetryPolicy): boolean;"
+      "text": "export declare function isRetryableNetworkError(method: string, policy: ResolvedHttpRetryPolicy, idempotent?: boolean): boolean;"
     },
     {
       "name": "mergeHeaders",
@@ -900,7 +935,7 @@
     {
       "name": "HttpJsonRequestOptions",
       "kind": "interface",
-      "text": "export interface HttpJsonRequestOptions { readonly method?: string | undefined; readonly body?: unknown | undefined; readonly headers?: HeadersInit | undefined; readonly signal?: AbortSignal | undefined; readonly retry?: false | HttpRetryPolicy | undefined; readonly methodId?: string | undefined; readonly idempotent?: boolean | undefined; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; HeadersInit = type HeadersInit = [string, string][] | Record<string, string> | Headers;"
+      "text": "export interface HttpJsonRequestOptions { readonly method?: string | undefined; readonly body?: unknown | undefined; readonly headers?: HeadersInit | undefined; readonly signal?: AbortSignal | undefined; readonly retry?: false | HttpRetryPolicy | undefined; readonly methodId?: string | undefined; readonly idempotent?: boolean | undefined; readonly idempotencyKey?: string | undefined; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; HeadersInit = type HeadersInit = [string, string][] | Record<string, string> | Headers;"
     },
     {
       "name": "HttpJsonTransport",
@@ -1089,6 +1124,11 @@
       "text": "export declare function isPrivateNetworkHost(hostname: string): boolean;"
     },
     {
+      "name": "isTailnetHost",
+      "kind": "function",
+      "text": "export declare function isTailnetHost(hostname: string): boolean;"
+    },
+    {
       "name": "normalizeBaseUrl",
       "kind": "function",
       "text": "export declare function normalizeBaseUrl(baseUrl: string): string;"
@@ -1098,7 +1138,7 @@
     {
       "name": "DEFAULT_STREAM_MAX_ATTEMPTS",
       "kind": "const",
-      "text": "DEFAULT_STREAM_MAX_ATTEMPTS = 10"
+      "text": "DEFAULT_STREAM_MAX_ATTEMPTS: number"
     },
     {
       "name": "DEFAULT_STREAM_RECONNECT_POLICY",
@@ -1136,6 +1176,11 @@
       "text": "DEFAULT_HTTP_RETRY_POLICY: ResolvedHttpRetryPolicy"
     },
     {
+      "name": "DEFAULT_IDEMPOTENT_MAX_ATTEMPTS",
+      "kind": "const",
+      "text": "DEFAULT_IDEMPOTENT_MAX_ATTEMPTS = 3"
+    },
+    {
       "name": "HttpRetryPolicy",
       "kind": "interface",
       "text": "export interface HttpRetryPolicy extends BackoffPolicy { readonly retryOnStatuses?: readonly number[] | undefined; readonly retryOnMethods?: readonly string[] | undefined; readonly retryOnNetworkError?: boolean | undefined; readonly perMethodPolicy?: Readonly<Record<string, PerMethodRetryPolicy>> | undefined; } ;; via Readonly = type Readonly<T> = { readonly [P in keyof T]: T[P]; }; ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
@@ -1167,14 +1212,19 @@
       "text": "export declare function getHttpRetryDelay(attempt: number, policy: ResolvedHttpRetryPolicy): number;"
     },
     {
+      "name": "isRetryableCall",
+      "kind": "function",
+      "text": "export declare function isRetryableCall(method: string, policy: ResolvedHttpRetryPolicy, idempotent?: boolean): boolean;"
+    },
+    {
       "name": "isRetryableHttpStatus",
       "kind": "function",
-      "text": "export declare function isRetryableHttpStatus(method: string, status: number, policy: ResolvedHttpRetryPolicy): boolean;"
+      "text": "export declare function isRetryableHttpStatus(method: string, status: number, policy: ResolvedHttpRetryPolicy, idempotent?: boolean): boolean;"
     },
     {
       "name": "isRetryableNetworkError",
       "kind": "function",
-      "text": "export declare function isRetryableNetworkError(method: string, policy: ResolvedHttpRetryPolicy): boolean;"
+      "text": "export declare function isRetryableNetworkError(method: string, policy: ResolvedHttpRetryPolicy, idempotent?: boolean): boolean;"
     },
     {
       "name": "normalizeHttpRetryPolicy",
@@ -1191,7 +1241,7 @@
     {
       "name": "ServerSentEventHandlers",
       "kind": "interface",
-      "text": "export interface ServerSentEventHandlers { readonly onEvent?: ((eventName: string, payload: unknown) => void) | undefined; readonly onReady?: ((payload: unknown) => void) | undefined; readonly onError?: ((error: unknown) => void) | undefined; readonly onReconnect?: (input: { readonly attempt: number; readonly delayMs: number; }) => void; readonly onClose?: (() => void) | undefined; readonly onTerminate?: (input: { readonly error: unknown; readonly reconnectAttempts: number; }) => void; readonly onEventId?: ((id: string) => void) | undefined; }"
+      "text": "export interface ServerSentEventHandlers { readonly onEvent?: ((eventName: string, payload: unknown) => void) | undefined; readonly onReady?: ((payload: unknown) => void) | undefined; readonly onError?: ((error: unknown) => void) | undefined; readonly onReconnect?: (input: { readonly attempt: number; readonly delayMs: number; }) => void; readonly onClose?: (() => void) | undefined; readonly onTerminate?: (input: { readonly error: unknown; readonly reconnectAttempts: number; readonly final?: boolean | undefined; }) => void; readonly onEventId?: ((id: string) => void) | undefined; }"
     },
     {
       "name": "ServerSentEventOptions",
@@ -1214,14 +1264,19 @@
   ],
   "./sse-stream": [
     {
+      "name": "SSE_HEARTBEAT_INTERVAL_MS",
+      "kind": "const",
+      "text": "SSE_HEARTBEAT_INTERVAL_MS = 15000"
+    },
+    {
       "name": "ServerSentEventHandlers",
       "kind": "interface",
-      "text": "export interface ServerSentEventHandlers { readonly onEvent?: ((eventName: string, payload: unknown) => void) | undefined; readonly onReady?: ((payload: unknown) => void) | undefined; readonly onError?: ((error: unknown) => void) | undefined; readonly onReconnect?: (input: { readonly attempt: number; readonly delayMs: number; }) => void; readonly onClose?: (() => void) | undefined; readonly onTerminate?: (input: { readonly error: unknown; readonly reconnectAttempts: number; }) => void; readonly onEventId?: ((id: string) => void) | undefined; }"
+      "text": "export interface ServerSentEventHandlers { readonly onEvent?: ((eventName: string, payload: unknown) => void) | undefined; readonly onReady?: ((payload: unknown) => void) | undefined; readonly onError?: ((error: unknown) => void) | undefined; readonly onReconnect?: (input: { readonly attempt: number; readonly delayMs: number; }) => void; readonly onClose?: (() => void) | undefined; readonly onTerminate?: (input: { readonly error: unknown; readonly reconnectAttempts: number; readonly final?: boolean | undefined; }) => void; readonly onEventId?: ((id: string) => void) | undefined; }"
     },
     {
       "name": "ServerSentEventOptions",
       "kind": "interface",
-      "text": "export interface ServerSentEventOptions { readonly signal?: AbortSignal | undefined; readonly headers?: HeadersInit | undefined; readonly authToken?: string | null | undefined; readonly getAuthToken?: AuthTokenResolver | undefined; readonly lastEventId?: string | null | undefined; readonly reconnect?: StreamReconnectPolicy | undefined; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; AuthTokenResolver = export type AuthTokenResolver = () => MaybePromise<string | null | undefined>; ;; HeadersInit = type HeadersInit = [string, string][] | Record<string, string> | Headers; ;; StreamReconnectPolicy = export interface StreamReconnectPolicy extends BackoffPolicy { readonly enabled?: boolean | undefined; }"
+      "text": "export interface ServerSentEventOptions { readonly signal?: AbortSignal | undefined; readonly headers?: HeadersInit | undefined; readonly authToken?: string | null | undefined; readonly getAuthToken?: AuthTokenResolver | undefined; readonly lastEventId?: string | null | undefined; readonly reconnect?: StreamReconnectPolicy | undefined; readonly idleTimeoutMs?: number | undefined; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; AuthTokenResolver = export type AuthTokenResolver = () => MaybePromise<string | null | undefined>; ;; HeadersInit = type HeadersInit = [string, string][] | Record<string, string> | Headers; ;; StreamReconnectPolicy = export interface StreamReconnectPolicy extends BackoffPolicy { readonly enabled?: boolean | undefined; }"
     },
     {
       "name": "ServerSentEventStreamHandle",
@@ -1245,6 +1300,11 @@
       "name": "openServerSentEventStream",
       "kind": "function",
       "text": "export declare function openRawServerSentEventStream(fetchImpl: FetchLike, url: string, handlers: ServerSentEventHandlers, options?: ServerSentEventOptions): Promise<ServerSentEventStreamHandle>; ;; via FetchLike = export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+    },
+    {
+      "name": "sseIdleDeadlineMs",
+      "kind": "function",
+      "text": "export declare function sseIdleDeadlineMs(heartbeatIntervalMs?: number): number;"
     }
   ]
 }

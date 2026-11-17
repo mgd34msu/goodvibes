@@ -54,7 +54,7 @@
     {
       "name": "PeerRemoteClientOptions",
       "kind": "interface",
-      "text": "export interface PeerRemoteClientOptions { readonly validateResponses?: boolean | undefined; readonly regexReading?: RegexReadingCapability | undefined; readonly getRegexReading?: ContractRegexReadingFactory | undefined; } ;; via ContractRegexReadingFactory = export type ContractRegexReadingFactory = (context: ContractRegexReadingContext) => RegexReadingCapability; ;; RegexReadingCapability = export interface RegexReadingCapability { readonly signal: AbortSignal; readonly assertCurrent: () => void; readonly read: (source: string, flags: string, maxInputChars: number, signal: AbortSignal) => Promise<YesNoReading>; }"
+      "text": "export interface PeerRemoteClientOptions { readonly validateResponses?: boolean | undefined; readonly regexReading?: RegexReadingCapability | undefined; readonly getRegexReading?: ContractRegexReadingFactory | undefined; } ;; via ContractRegexReadingFactory = export type ContractRegexReadingFactory = (context: ContractRegexReadingContext) => RegexReadingCapability; ;; RegexReadingCapability = export interface RegexReadingCapability { readonly signal: AbortSignal; readonly assertCurrent: () => void; }"
     },
     {
       "name": "createPeerApiClient",
@@ -129,7 +129,7 @@
     {
       "name": "PeerRemoteClientOptions",
       "kind": "interface",
-      "text": "export interface PeerRemoteClientOptions { readonly validateResponses?: boolean | undefined; readonly regexReading?: RegexReadingCapability | undefined; readonly getRegexReading?: ContractRegexReadingFactory | undefined; } ;; via ContractRegexReadingFactory = export type ContractRegexReadingFactory = (context: ContractRegexReadingContext) => RegexReadingCapability; ;; RegexReadingCapability = export interface RegexReadingCapability { readonly signal: AbortSignal; readonly assertCurrent: () => void; readonly read: (source: string, flags: string, maxInputChars: number, signal: AbortSignal) => Promise<YesNoReading>; }"
+      "text": "export interface PeerRemoteClientOptions { readonly validateResponses?: boolean | undefined; readonly regexReading?: RegexReadingCapability | undefined; readonly getRegexReading?: ContractRegexReadingFactory | undefined; } ;; via ContractRegexReadingFactory = export type ContractRegexReadingFactory = (context: ContractRegexReadingContext) => RegexReadingCapability; ;; RegexReadingCapability = export interface RegexReadingCapability { readonly signal: AbortSignal; readonly assertCurrent: () => void; }"
     },
     {
       "name": "createPeerRemoteClient",

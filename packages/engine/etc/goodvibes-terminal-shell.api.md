@@ -4,10 +4,8 @@
 
 ```ts
 
-import { Battery } from '@goodvibes-jev/judgment';
 import { BatteryRun } from '@goodvibes-jev/judgment';
 import { CallOptions } from '@goodvibes-jev/judgment';
-import { ChoiceItem } from '@goodvibes-jev/judgment';
 import { EntryType } from '@goodvibes-jev/judgment';
 import { Fixture } from '@goodvibes-jev/judgment';
 import { FixtureCheck } from '@goodvibes-jev/judgment';
@@ -15,6 +13,7 @@ import { JevContinuation } from '@goodvibes-jev/judgment/decisions';
 import { JevDecision } from '@goodvibes-jev/judgment/decisions';
 import type { JevDecisionBinding } from '@goodvibes-jev/judgment/decisions';
 import { JevVersionRef } from '@goodvibes-jev/judgment/decisions';
+import type { JsonValue } from '@goodvibes-jev/judgment';
 import type { JudgmentBackendSettings } from '@goodvibes-jev/judgment/decisions';
 import type { JudgmentPort } from '@goodvibes-jev/judgment/decisions';
 import { JudgmentPort as JudgmentPort_2 } from '@goodvibes-jev/judgment';
@@ -33,11 +32,11 @@ import { z } from 'zod/v4';
 export function allowTerminalWrite<T>(fn: () => T): T;
 
 // Warning: (ae-forgotten-export) The symbol "ConfigManager" needs to be exported by the entry point index.d.ts
+// Warning: (ae-forgotten-export) The symbol "ModeManager" needs to be exported by the entry point index.d.ts
+// Warning: (ae-forgotten-export) The symbol "PrintLevelRouter" needs to be exported by the entry point index.d.ts
 //
 // @public
-export function applyConfiguredHitlMode(configManager: ConfigManager, modeManager: {
-    setHITLMode(mode: 'quiet' | 'balanced' | 'operator'): void;
-}): void;
+export function applyConfiguredHitlMode(configManager: ConfigManager, modeManager: Pick<ModeManager, 'setHITLMode' | 'attachRouter'>, router?: PrintLevelRouter): () => void;
 
 // @public (undocumented)
 export function applyRuntimeCommandEndpointFlagOverrides(configManager: ConfigManager, command: GoodVibesCliCommand, flags: Pick<GoodVibesCliFlags, 'hostname' | 'port'>): readonly string[];
@@ -143,6 +142,12 @@ export interface BottomBarStyle {
 }
 
 // @public
+export function callDaemonMethod<T>(target: RemoteDaemonTarget, methodId: string, options?: {
+    readonly input?: unknown;
+    readonly readOnly?: boolean;
+}, fetchImpl?: DaemonFetch): Promise<DaemonVerbOutcome<T>>;
+
+// @public
 export function callDaemonRoute<T>(target: RemoteDaemonTarget, path: string, init?: {
     method: 'GET' | 'POST';
     body?: unknown;
@@ -150,24 +155,7 @@ export function callDaemonRoute<T>(target: RemoteDaemonTarget, path: string, ini
 }, fetchImpl?: DaemonFetch): Promise<DaemonVerbOutcome<T>>;
 
 // @public
-export function callDaemonVerb<T>(target: RemoteDaemonTarget, path: string, init?: {
-    method: 'GET' | 'POST';
-    body?: unknown;
-    timeoutMs?: number;
-    signal?: AbortSignal;
-}, fetchImpl?: DaemonFetch): Promise<DaemonVerbOutcome<T>>;
-
-// @public
-export function callDaemonWsVerb<T>(target: RemoteDaemonTarget, methodId: string, options?: CallDaemonWsVerbOptions): Promise<DaemonVerbOutcome<T>>;
-
-// @public (undocumented)
-export interface CallDaemonWsVerbOptions {
-    // (undocumented)
-    readonly body?: unknown;
-    readonly socketFactory?: DaemonWebSocketFactory | undefined;
-    // (undocumented)
-    readonly timeoutMs?: number | undefined;
-}
+export function callDaemonVerb<T>(target: RemoteDaemonTarget, path: string, init?: DaemonCallInit, fetchImpl?: DaemonFetch): Promise<DaemonVerbOutcome<T>>;
 
 // @public
 export function catalogCommandSpec<TCommand extends string, TField extends string>(catalog: Pick<CliCatalog<TCommand, TField, unknown>, 'commands'>, command: TCommand): CommandSpec<TCommand, TField>;
@@ -290,9 +278,6 @@ export interface ConformanceOptions {
     readonly onlyIds?: readonly string[];
 }
 
-// @public
-export function createArchivableFleetRegistry(deps: ProcessRegistryDeps): ArchivableProcessRegistry;
-
 // Warning: (ae-forgotten-export) The symbol "Line" needs to be exported by the entry point index.d.ts
 //
 // @public (undocumented)
@@ -302,11 +287,6 @@ export function createBottomBarLine(width: number, style: BottomBarStyle): Line;
 export function createCliFlagParser<Flags>(parse: (argv: readonly string[], binary: string) => {
     readonly flags: Flags;
 }): (argv: readonly string[], binary?: string) => Flags;
-
-// @public
-export function createFleetServices(deps: FleetServicesDeps): {
-    processRegistry: ArchivableProcessRegistry;
-};
 
 // @public
 export function createHerdrSessionReporter(options?: HerdrSessionReporterOptions): HerdrSessionReporter;
@@ -329,7 +309,35 @@ export function createSplitPaneLayout(totalRows: number, ratio: number, options?
 export function createTerminalLifecycle(deps: TerminalLifecycleDeps): TerminalLifecycle;
 
 // @public
-export const DAEMON_WS_TIMEOUT_MS = 15000;
+export const DAEMON_FAILURE_CODES: readonly ["token-missing", "invalid-port", "invalid-host", "unreachable", "auth-refused", "route-missing", "unreadable-reply", "refused"];
+
+// @public
+export interface DaemonCallInit {
+    // (undocumented)
+    readonly body?: unknown;
+    // (undocumented)
+    readonly method: 'GET' | 'POST';
+    readonly readOnly?: boolean;
+    // (undocumented)
+    readonly signal?: AbortSignal;
+    // (undocumented)
+    readonly timeoutMs?: number;
+}
+
+// @public
+export interface DaemonFailure {
+    // (undocumented)
+    readonly code: DaemonFailureCode;
+    // (undocumented)
+    readonly error: string;
+    // (undocumented)
+    readonly fix: string;
+    // (undocumented)
+    readonly ok: false;
+}
+
+// @public (undocumented)
+export type DaemonFailureCode = (typeof DAEMON_FAILURE_CODES)[number];
 
 // @public
 export type DaemonFetch = (input: string, init?: RequestInit) => Promise<Response>;
@@ -341,39 +349,13 @@ export type DaemonReplyEnvelope = 'wrapped' | 'raw';
 export type DaemonVerbOutcome<T> = {
     readonly ok: true;
     readonly data: T;
-} | {
-    readonly ok: false;
-    readonly error: string;
-    readonly fix: string;
-};
-
-// @public
-export interface DaemonWebSocket {
-    // (undocumented)
-    readonly bufferedAmount?: number;
-    // (undocumented)
-    close(): void;
-    // (undocumented)
-    onclose: ((event: unknown) => void) | null;
-    // (undocumented)
-    onerror: ((event: unknown) => void) | null;
-    // (undocumented)
-    onmessage: ((event: {
-        data: unknown;
-    }) => void) | null;
-    // (undocumented)
-    onopen: ((event: unknown) => void) | null;
-    // (undocumented)
-    send(data: string): void;
-}
-
-// @public (undocumented)
-export type DaemonWebSocketFactory = (url: string, init: {
-    readonly headers: Readonly<Record<string, string>>;
-}) => DaemonWebSocket;
+} | DaemonFailure;
 
 // @public
 export function describeAge(at: number, now: number): string;
+
+// @public
+export function describeIrreversibleClusterCommand(parsed: ParsedClusterCommand): string | null;
 
 // @public
 export function downsampleColor(rawColor: string, caps: TermColorCaps, role: 'fg' | 'bg'): string | null;
@@ -428,19 +410,6 @@ export function findCatalogFlagArityConflicts<TCommand extends string, TField ex
 export function findMethodsMissingHandlers(catalog: GatewayCatalogConformanceView, options?: ConformanceOptions): string[];
 
 // @public
-export function fitLabelDetailColumns(label: string, detail: string, totalWidth: number, labelRatio?: number): {
-    labelWidth: number;
-    detailWidth: number;
-};
-
-// @public (undocumented)
-export interface FleetServicesDeps extends Omit<ProcessRegistryDeps, 'observedAgents' | 'priceUsage'> {
-    readonly observeExternalAgents?: boolean | undefined;
-    // Warning: (ae-forgotten-export) The symbol "ProviderRegistry" needs to be exported by the entry point index.d.ts
-    readonly providerRegistry: Pick<ProviderRegistry, 'resolveModelPricing'>;
-}
-
-// @public
 export const FOLD_PREVIEW_MIN_COLS = 6;
 
 // @public
@@ -487,14 +456,22 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
     readonly acpHost?: Pick<AcpHostService, 'spawnAgent' | 'list'> | undefined;
     // Warning: (ae-forgotten-export) The symbol "ApprovalSource" needs to be exported by the entry point index.d.ts
     readonly approvalBroker: ApprovalSource;
+    readonly approvalList?: {
+        listApprovals(limit: number): readonly {
+            readonly id: string;
+            readonly status: string;
+            readonly createdAt: number;
+            readonly request: {
+                readonly tool: string;
+            };
+        }[];
+    } | undefined;
     // Warning: (ae-forgotten-export) The symbol "ApprovalRaiseService" needs to be exported by the entry point index.d.ts
     readonly approvalRaise?: ApprovalRaiseService | undefined;
     // Warning: (ae-forgotten-export) The symbol "AutomationManager" needs to be exported by the entry point index.d.ts
     //
     // (undocumented)
     readonly automationManager?: Pick<AutomationManager, 'listJobs' | 'createJob' | 'updateJob' | 'setEnabled' | 'attachCheckinEvaluator' | 'listRuns' | 'runNow'> | undefined;
-    // (undocumented)
-    readonly browserJudgment?: EmailCompositionDeps['browserJudgment'];
     // Warning: (ae-forgotten-export) The symbol "CalendarGatewayService" needs to be exported by the entry point index.d.ts
     readonly calendarGateway?: CalendarGatewayService | undefined;
     // Warning: (ae-forgotten-export) The symbol "ChannelDeliveryRouter" needs to be exported by the entry point index.d.ts
@@ -532,9 +509,12 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
     // Warning: (ae-forgotten-export) The symbol "MemoryGatewayService" needs to be exported by the entry point index.d.ts
     readonly memoryGovernor?: MemoryGatewayService | undefined;
     // Warning: (ae-forgotten-export) The symbol "MemoryProjectionSource" needs to be exported by the entry point index.d.ts
-    readonly memoryRegistry?: MemoryProjectionSource | undefined;
+    // Warning: (ae-forgotten-export) The symbol "MemoryRegistry" needs to be exported by the entry point index.d.ts
+    readonly memoryRegistry?: (MemoryProjectionSource & Partial<Pick<MemoryRegistry, 'decideConsolidationProposal'>>) | undefined;
     // (undocumented)
     readonly onCiAutoWatch?: ((observer: (toolName: string, args: Record<string, unknown>, success: boolean) => void) => void) | undefined;
+    // Warning: (ae-forgotten-export) The symbol "OwnerInboxGatewayService" needs to be exported by the entry point index.d.ts
+    readonly ownerInbox?: OwnerInboxGatewayService | undefined;
     // Warning: (ae-forgotten-export) The symbol "PairingGatewayService" needs to be exported by the entry point index.d.ts
     readonly pairingTokens?: PairingGatewayService | undefined;
     readonly pairingWebOrigin?: (() => string | undefined) | undefined;
@@ -542,6 +522,8 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
     readonly personalCapture?: Pick<PersonalCaptureHolder, 'setPort'> | undefined;
     // Warning: (ae-forgotten-export) The symbol "PowerGatewayService" needs to be exported by the entry point index.d.ts
     readonly powerManager?: PowerGatewayService | undefined;
+    // Warning: (ae-forgotten-export) The symbol "ProviderRegistry" needs to be exported by the entry point index.d.ts
+    //
     // (undocumented)
     readonly providerRegistry?: ProviderRegistry | undefined;
     readonly relayAvailable?: (() => boolean) | undefined;
@@ -550,7 +532,8 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
     // Warning: (ae-forgotten-export) The symbol "RuntimeStore" needs to be exported by the entry point index.d.ts
     readonly runtimeStore: Pick<RuntimeStore, 'getState'>;
     // Warning: (ae-forgotten-export) The symbol "VapidSecretStore" needs to be exported by the entry point index.d.ts
-    readonly secretsManager: VapidSecretStore;
+    // Warning: (ae-forgotten-export) The symbol "CalendarCompositionDeps" needs to be exported by the entry point index.d.ts
+    readonly secretsManager: VapidSecretStore & CalendarCompositionDeps['secretsManager'];
     // Warning: (ae-forgotten-export) The symbol "InboundIntakeBroker" needs to be exported by the entry point index.d.ts
     readonly sessionIntake?: InboundIntakeBroker | undefined;
     readonly sessionLister?: {
@@ -618,7 +601,7 @@ export function getVisibleWindow(total: number, selectedIndex: number, visibleCo
 export const GOODVIBES_CLI_CATALOG: CliCatalog<GoodVibesCliCommand, GoodVibesCliFlagField, GoodVibesCliFlags>;
 
 // @public (undocumented)
-export type GoodVibesCliCommand = 'tui' | 'run' | 'serve' | 'web' | 'service' | 'status' | 'doctor' | 'onboarding' | 'models' | 'providers' | 'auth' | 'subscription' | 'secrets' | 'sessions' | 'tasks' | 'pair' | 'surfaces' | 'listener' | 'control-plane' | 'support-bundle' | 'remote' | 'bridge' | 'hooks' | 'plugin' | 'completion' | 'help' | 'version' | 'unknown';
+export type GoodVibesCliCommand = 'tui' | 'open' | 'run' | 'serve' | 'web' | 'service' | 'status' | 'doctor' | 'onboarding' | 'models' | 'providers' | 'auth' | 'subscription' | 'secrets' | 'sessions' | 'tasks' | 'pair' | 'surfaces' | 'listener' | 'control-plane' | 'support-bundle' | 'remote' | 'bridge' | 'hooks' | 'plugin' | 'completion' | 'help' | 'version' | 'unknown';
 
 // @public
 export type GoodVibesCliFlagField = keyof GoodVibesCliFlags;
@@ -627,8 +610,6 @@ export type GoodVibesCliFlagField = keyof GoodVibesCliFlags;
 export interface GoodVibesCliFlags {
     // (undocumented)
     readonly answerPermissions?: boolean | undefined;
-    // (undocumented)
-    readonly autoApprove?: boolean;
     // (undocumented)
     readonly configOverrides: readonly string[];
     // (undocumented)
@@ -659,6 +640,7 @@ export interface GoodVibesCliFlags {
     readonly open: boolean;
     // (undocumented)
     readonly outputFormat: GoodVibesCliOutputFormat;
+    readonly permissionMode?: 'just-vibes' | 'yolo' | undefined;
     // (undocumented)
     readonly port: number | undefined;
     // (undocumented)
@@ -777,14 +759,16 @@ export function inferProviderFromModel(model: string): string | undefined;
 
 // @public
 export class InfiniteBuffer {
+    // Warning: (ae-forgotten-export) The symbol "CompactLine" needs to be exported by the entry point index.d.ts
+    addCompactLines(lines: readonly CompactLine[]): void;
     // (undocumented)
     addLine(line: Line): void;
     // (undocumented)
     addLines(lines: Line[]): void;
     // (undocumented)
     clear(): void;
-    // (undocumented)
     getAllLines(): Line[];
+    getLine(index: number): Line | undefined;
     // (undocumented)
     getLineCount(): number;
     // (undocumented)
@@ -870,32 +854,6 @@ export function nearestAnsi16Fg(r: number, g: number, b: number): number;
 
 // @public
 export function nearestAnsi256(r: number, g: number, b: number): number;
-
-// Warning: (ae-forgotten-export) The symbol "NOTICE_SEVERITY_OPTIONS" needs to be exported by the entry point index.d.ts
-//
-// @public (undocumented)
-export type NoticeSeverity = Exclude<keyof typeof NOTICE_SEVERITY_OPTIONS, 'unknown'>;
-
-// @public
-export const noticeSeverity: Battery<    {
-readonly severity: ChoiceItem<    {
-readonly info: "An ordinary update, successful outcome or description of work; no current failure or advisory.";
-readonly warning: "A recoverable problem, incomplete outcome, caution or limitation that deserves attention.";
-readonly critical: "An actual failed operation, lost work, crash or blocked action that needs attention.";
-readonly unknown: "Unintelligible or disconnected material that conveys no notice, update, task description or advisory.";
-}>;
-}>;
-
-// @public (undocumented)
-export interface NoticeSeverityReading {
-    // (undocumented)
-    readonly assertCurrent: () => void;
-    // (undocumented)
-    readonly provenance?: 'classic';
-    readonly recordPublication: () => void;
-    // (undocumented)
-    readonly severity: NoticeSeverity | undefined;
-}
 
 // @public (undocumented)
 export interface OverlaySurfaceMetrics {
@@ -1033,6 +991,7 @@ export const processOutputEndpoint: {
     name: string;
     version: number;
     description: string;
+    context?: string;
     items: {
         listening: YesNoItem;
     };
@@ -1064,6 +1023,7 @@ export const processOutputError: {
     name: string;
     version: number;
     description: string;
+    context?: string;
     items: {
         error: YesNoItem;
     };
@@ -1153,6 +1113,7 @@ export interface ProcessRegistryDeps {
     readonly runtimeBus?: RuntimeEventBus | undefined;
     // Warning: (ae-forgotten-export) The symbol "SharedSessionBroker" needs to be exported by the entry point index.d.ts
     readonly sessionBroker?: Pick<SharedSessionBroker, 'listSessions'> | undefined;
+    readonly slowRefreshMs?: number | undefined;
     // (undocumented)
     readonly stalledThresholdMs?: number | undefined;
     readonly stallTellMs?: number | undefined;
@@ -1171,16 +1132,13 @@ export interface ProcessRegistryDeps {
     // (undocumented)
     readonly workflow: {
         readonly workflowManager: Pick<WorkflowManager, 'list' | 'cancel'>;
-        readonly triggerManager: Pick<TriggerManager_2, 'list' | 'remove' | 'disable' | 'enable'>;
+        readonly hookActions: Pick<HookActionManager, 'list' | 'remove' | 'disable' | 'enable'>;
         readonly scheduleManager: Pick<ScheduleManager, 'list' | 'remove' | 'disable' | 'enable'>;
     };
 }
 
 // @public
 export function rawReplyReader(target: RemoteDaemonTarget, fetchImpl?: DaemonFetch): DaemonFetch;
-
-// @public
-export function readNoticeSeverity(text: string, options?: Pick<JudgmentReadingOptions, 'signal' | 'assertCurrent'>): Promise<NoticeSeverityReading>;
 
 // @public (undocumented)
 export function readProcessOutput(evidence: ProcessOutputEvidence, lineIds: readonly string[], options: Pick<JudgmentReadingOptions, 'signal' | 'assertCurrent'> & {
@@ -1251,11 +1209,12 @@ export interface RemoteTargetFlags {
 export type RemoteTargetResolution = {
     readonly ok: true;
     readonly target: RemoteDaemonTarget;
-} | {
-    readonly ok: false;
-    readonly error: string;
-    readonly fix: string;
-};
+} | DaemonFailure;
+
+// Warning: (ae-forgotten-export) The symbol "ContractView" needs to be exported by the entry point index.d.ts
+//
+// @public (undocumented)
+export function renderContractStatus(contract: ContractView): string;
 
 // Warning: (ae-forgotten-export) The symbol "CreateGroupResult" needs to be exported by the entry point index.d.ts
 //
@@ -1309,6 +1268,11 @@ export interface RenderScheduler {
 // @public
 export function renderStatus(report: GroupStatusReport, now: number): string[];
 
+// Warning: (ae-forgotten-export) The symbol "WorkstreamDraft" needs to be exported by the entry point index.d.ts
+//
+// @public (undocumented)
+export function renderWorkstreamDraft(draft: WorkstreamDraft): string;
+
 // @public
 export function resolveCatalogCommand<TCommand extends string, TField extends string>(catalog: Pick<CliCatalog<TCommand, TField, unknown>, 'commands'>, token: string): TCommand | undefined;
 
@@ -1329,8 +1293,13 @@ export interface ResolveRemoteTargetInput {
 // @public (undocumented)
 export function resolveRuntimeEndpointBinding(config: Pick<ConfigManager, 'get'>, endpoint: RuntimeEndpointId): RuntimeEndpointBinding;
 
+// Warning: (ae-forgotten-export) The symbol "ContractOperatorService" needs to be exported by the entry point index.d.ts
+//
 // @public
-export function retainCliConfig(manager: ConfigManager): {
+export function resolveWorkstreamContract(service: ContractOperatorService, reference: string, sessionId: string): ContractView | null;
+
+// @public
+export function retainCliConfig(manager: Pick<ConfigManager, 'getRaw' | 'getConfigurationIncarnation'>): {
     raw: Readonly<GoodVibesConfig>;
     assertCurrent: () => void;
 };
@@ -1387,6 +1356,9 @@ export type RuntimeEndpointId = 'controlPlane' | 'httpListener' | 'web';
 export type RuntimeHostMode = 'local' | 'network' | 'custom';
 
 // @public
+export function runWorkstreamCommand(action: string, args: readonly string[], deps: WorkstreamCommandDeps): Promise<boolean>;
+
+// @public
 export function safeTerminalLink(value: string | undefined): string | undefined;
 
 // @public
@@ -1401,7 +1373,6 @@ export class SelectionManager {
     extendSelection(col: number, viewportRow: number, scrollTop: number, vHeight: number, lineCount: number): void;
     // (undocumented)
     focus: SelectionPoint | null;
-    // (undocumented)
     getSelectedText(history: InfiniteBuffer): string;
     // (undocumented)
     hasSelection(): boolean;
@@ -1666,11 +1637,25 @@ export interface VisibleWindow {
     readonly total: number;
 }
 
-// @public
-export function wrapSynced(diff: string, caps: TermColorCaps): string;
+// @public (undocumented)
+export const WORKSTREAM_SHARED_USAGE: string;
+
+// @public (undocumented)
+export interface WorkstreamCommandDeps {
+    // (undocumented)
+    readonly contracts?: ContractOperatorService | undefined;
+    // Warning: (ae-forgotten-export) The symbol "WorkstreamDraftService" needs to be exported by the entry point index.d.ts
+    //
+    // (undocumented)
+    readonly drafts?: WorkstreamDraftService | undefined;
+    // (undocumented)
+    readonly print: (text: string) => void;
+    // (undocumented)
+    readonly sessionId: string;
+}
 
 // @public
-export function wrapWithHangingIndent(text: string, width: number, indent: string, maxLines?: number): string[];
+export function wrapSynced(diff: string, caps: TermColorCaps): string;
 
 // @public (undocumented)
 export function writeBottomBarText(line: Line, startX: number, maxWidth: number, text: string, style: BottomBarStyle): void;
@@ -1680,13 +1665,13 @@ export function writeTreeStatusMarker(line: Line, glyph: string | null, fg: stri
 
 // Warnings were encountered during analysis:
 //
-// platform/src/platform/control-plane/routes/register-gateway-verb-groups.ts:252:30 - (ae-forgotten-export) The symbol "CheckinSessionView" needs to be exported by the entry point index.d.ts
-// platform/src/platform/control-plane/routes/register-gateway-verb-groups.ts:322:5 - (ae-forgotten-export) The symbol "CredentialWriteConfig" needs to be exported by the entry point index.d.ts
-// platform/src/platform/control-plane/routes/register-gateway-verb-groups.ts:323:5 - (ae-forgotten-export) The symbol "CredentialWriteSecrets" needs to be exported by the entry point index.d.ts
-// platform/src/platform/runtime/fleet/registry.ts:106:5 - (ae-forgotten-export) The symbol "WorkflowManager" needs to be exported by the entry point index.d.ts
-// platform/src/platform/runtime/fleet/registry.ts:108:5 - (ae-forgotten-export) The symbol "TriggerManager_2" needs to be exported by the entry point index.d.ts
-// platform/src/platform/runtime/fleet/registry.ts:109:5 - (ae-forgotten-export) The symbol "ScheduleManager" needs to be exported by the entry point index.d.ts
-// terminal-shell/src/cli-config-owner.ts:36:55 - (ae-forgotten-export) The symbol "GoodVibesConfig" needs to be exported by the entry point index.d.ts
+// platform/src/platform/control-plane/routes/register-gateway-verb-groups.ts:261:30 - (ae-forgotten-export) The symbol "CheckinSessionView" needs to be exported by the entry point index.d.ts
+// platform/src/platform/control-plane/routes/register-gateway-verb-groups.ts:331:5 - (ae-forgotten-export) The symbol "CredentialWriteConfig" needs to be exported by the entry point index.d.ts
+// platform/src/platform/control-plane/routes/register-gateway-verb-groups.ts:332:5 - (ae-forgotten-export) The symbol "CredentialWriteSecrets" needs to be exported by the entry point index.d.ts
+// platform/src/platform/runtime/fleet/registry.ts:131:5 - (ae-forgotten-export) The symbol "WorkflowManager" needs to be exported by the entry point index.d.ts
+// platform/src/platform/runtime/fleet/registry.ts:133:5 - (ae-forgotten-export) The symbol "HookActionManager" needs to be exported by the entry point index.d.ts
+// platform/src/platform/runtime/fleet/registry.ts:134:5 - (ae-forgotten-export) The symbol "ScheduleManager" needs to be exported by the entry point index.d.ts
+// terminal-shell/src/cli-config-owner.ts:8:103 - (ae-forgotten-export) The symbol "GoodVibesConfig" needs to be exported by the entry point index.d.ts
 // terminal-shell/src/terminal-output-guard.ts:74:3 - (ae-forgotten-export) The symbol "WritableStreamLike" needs to be exported by the entry point index.d.ts
 
 // (No @packageDocumentation comment for this package)

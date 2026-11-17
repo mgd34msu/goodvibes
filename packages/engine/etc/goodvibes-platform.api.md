@@ -5,7 +5,6 @@
 ```ts
 
 import { Battery } from '@goodvibes-jev/judgment';
-import { Battery as Battery_2 } from '@goodvibes-jev/judgment/decisions';
 import type { CallOptions } from '@goodvibes-jev/judgment';
 import { ChoiceItem } from '@goodvibes-jev/judgment';
 import { ChoiceReading } from '@goodvibes-jev/judgment/decisions';
@@ -14,94 +13,9 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment/decisions';
 import type { JudgmentPort as JudgmentPort_2 } from '@goodvibes-jev/judgment';
 import type { Questions } from '@goodvibes-jev/judgment/decisions';
 import { YesNoItem } from '@goodvibes-jev/judgment';
-import { YesNoItem as YesNoItem_2 } from '@goodvibes-jev/judgment/decisions';
 import { YesNoReading } from '@goodvibes-jev/judgment/decisions';
 import { z } from 'zod/v4';
 import type { ZodType } from 'zod/v4';
-
-// @public (undocumented)
-export type AccountsSnapshotResponse = z.infer<typeof AccountsSnapshotResponseSchema>;
-
-// @public
-export const AccountsSnapshotResponseSchema: z.ZodObject<{
-    capturedAt: z.ZodNumber;
-    providers: z.ZodArray<z.ZodObject<{
-        providerId: z.ZodString;
-        active: z.ZodBoolean;
-        modelCount: z.ZodNumber;
-        configured: z.ZodBoolean;
-        oauthReady: z.ZodBoolean;
-        pendingLogin: z.ZodBoolean;
-        availableRoutes: z.ZodArray<z.ZodEnum<{
-            "api-key": "api-key";
-            "service-oauth": "service-oauth";
-            subscription: "subscription";
-            unconfigured: "unconfigured";
-        }>>;
-        preferredRoute: z.ZodEnum<{
-            "api-key": "api-key";
-            "service-oauth": "service-oauth";
-            subscription: "subscription";
-            unconfigured: "unconfigured";
-        }>;
-        activeRoute: z.ZodEnum<{
-            "api-key": "api-key";
-            "service-oauth": "service-oauth";
-            subscription: "subscription";
-            unconfigured: "unconfigured";
-        }>;
-        activeRouteReason: z.ZodString;
-        authFreshness: z.ZodEnum<{
-            unconfigured: "unconfigured";
-            expired: "expired";
-            expiring: "expiring";
-            healthy: "healthy";
-            pending: "pending";
-        }>;
-        fallbackRoute: z.ZodOptional<z.ZodEnum<{
-            "api-key": "api-key";
-            "service-oauth": "service-oauth";
-            subscription: "subscription";
-            unconfigured: "unconfigured";
-        }>>;
-        fallbackRisk: z.ZodOptional<z.ZodString>;
-        expiresAt: z.ZodOptional<z.ZodNumber>;
-        tokenType: z.ZodOptional<z.ZodString>;
-        notes: z.ZodArray<z.ZodString>;
-        usageWindows: z.ZodArray<z.ZodObject<{
-            label: z.ZodString;
-            detail: z.ZodString;
-        }, z.core.$strict>>;
-        issues: z.ZodArray<z.ZodString>;
-        recommendedActions: z.ZodArray<z.ZodObject<{
-            description: z.ZodString;
-            command: z.ZodOptional<z.ZodObject<{
-                name: z.ZodString;
-                args: z.ZodArray<z.ZodString>;
-            }, z.core.$strip>>;
-        }, z.core.$strip>>;
-        routeRecords: z.ZodArray<z.ZodObject<{
-            route: z.ZodEnum<{
-                "api-key": "api-key";
-                "service-oauth": "service-oauth";
-                subscription: "subscription";
-                unconfigured: "unconfigured";
-            }>;
-            usable: z.ZodBoolean;
-            freshness: z.ZodEnum<{
-                unconfigured: "unconfigured";
-                expired: "expired";
-                expiring: "expiring";
-                healthy: "healthy";
-                pending: "pending";
-            }>;
-            detail: z.ZodString;
-            issues: z.ZodArray<z.ZodString>;
-        }, z.core.$strict>>;
-    }, z.core.$strip>>;
-    configuredCount: z.ZodNumber;
-    issueCount: z.ZodNumber;
-}, z.core.$strict>;
 
 // @public
 export function admitRegex(source: string, flags: string, options: RegexAdmissionOptions): Promise<AdmittedRegex>;
@@ -186,12 +100,6 @@ export type AgentEvent =
     callId: string;
     tool: string;
 }
-/** Agent is performing final output assembly. */
-| {
-    type: 'AGENT_FINALIZING';
-    agentId: string;
-    taskId?: string;
-}
 /** Agent completed successfully. */
 | {
     type: 'AGENT_COMPLETED';
@@ -253,7 +161,6 @@ export type AgentUsage = {
     cacheWriteTokens?: number | undefined;
 };
 
-// Warning: (ae-forgotten-export) The symbol "FleetEvent" needs to be exported by the entry point index.d.ts
 // Warning: (ae-forgotten-export) The symbol "ConfigEvent" needs to be exported by the entry point index.d.ts
 //
 // @public
@@ -266,7 +173,7 @@ export function applyPerMethodPolicy(base: ResolvedHttpRetryPolicy, methodId: st
 export function assertDecisionModelsEnabled(feature: string): void;
 
 // @public
-export type AuthStateKind = 'anonymous' | 'session' | 'token';
+export type AuthStateKind = 'anonymous' | 'token';
 
 // @public
 export type AuthTokenInput = string | {
@@ -290,7 +197,7 @@ export interface AuthTransitionInfo {
 }
 
 // @public
-export type AuthTransitionReason = 'login' | 'logout' | 'refresh' | 'expire' | 'revoke';
+export type AuthTransitionReason = 'login' | 'logout' | 'replace' | 'refresh' | 'expire';
 
 // @public (undocumented)
 export const AUTOMATION_RUN_OUTCOMES: readonly ["success", "partial", "failed", "cancelled"];
@@ -317,18 +224,18 @@ export type AutomationEvent = {
     jobId: string;
     reason: string;
 } | {
-    type: 'AUTOMATION_RUN_QUEUED';
-    jobId: string;
-    runId: string;
-    scheduledAt: number;
-    forced: boolean;
-} | {
     type: 'AUTOMATION_RUN_STARTED';
     jobId: string;
     runId: string;
     startedAt: number;
     attempt: number;
-} | {
+}
+/**
+* The one terminal event: every run that ends announces it once, whatever
+* the outcome. A subscriber that needs "the run is over" listens for this
+* type only.
+*/
+| {
     type: 'AUTOMATION_RUN_COMPLETED';
     jobId: string;
     runId: string;
@@ -336,7 +243,11 @@ export type AutomationEvent = {
     completedAt: number;
     durationMs: number;
     outcome: AutomationRunOutcome;
-} | {
+    error?: string | undefined;
+    retryable?: boolean | undefined;
+}
+/** Detail of a failed run (its retry reading); the run's end is announced by AUTOMATION_RUN_COMPLETED. */
+| {
     type: 'AUTOMATION_RUN_FAILED';
     jobId: string;
     runId: string;
@@ -344,17 +255,6 @@ export type AutomationEvent = {
     failedAt: number;
     error: string;
     retryable: boolean;
-} | {
-    type: 'AUTOMATION_RUN_CANCELLED';
-    jobId: string;
-    runId: string;
-    cancelledAt: number;
-    reason: string;
-} | {
-    type: 'AUTOMATION_SCHEDULE_ERROR';
-    jobId: string;
-    scheduleText: string;
-    error: string;
 } | {
     type: 'AUTOMATION_JOB_AUTO_DISABLED';
     jobId: string;
@@ -377,9 +277,11 @@ export type AutomationScheduleKind = (typeof AUTOMATION_SCHEDULE_KINDS)[number];
 // @public (undocumented)
 export class AutoRefreshCoordinator {
     constructor(options: AutoRefreshCoordinatorOptions);
+    currentToken(): Promise<string | null>;
     // Warning: (ae-forgotten-export) The symbol "RefreshOutcome" needs to be exported by the entry point index.d.ts
     ensureFreshToken(): Promise<RefreshOutcome>;
     refreshAndRetryOnce<T>(fn: () => Promise<T>, usedToken?: string | null): Promise<T>;
+    get sessionCleared(): boolean;
     withRetryOn401<T>(fn: () => Promise<T>, usedToken?: string | null): Promise<T>;
 }
 
@@ -452,8 +354,8 @@ export interface BrowserTokenStoreOptions {
     readonly storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | undefined;
 }
 
-// @public (undocumented)
-export function buildEventSourceUrl(baseUrl: string, domain: RuntimeEventDomain): string;
+// @public
+export function buildEventSourceUrl(baseUrl: string, domains: RuntimeEventDomain | readonly RuntimeEventDomain[]): string;
 
 // @public (undocumented)
 export function buildUrl(baseUrl: string, path: string): string;
@@ -467,7 +369,7 @@ export function captureJudgmentPort(site: string, options?: JudgmentReadingOptio
 // @public
 export function categoryDependsOnWording(fixed: DaemonErrorCategory | undefined, status: number | undefined, fromProvider: boolean): boolean;
 
-// @public (undocumented)
+// @public
 export function categoryForCode(code: string | undefined): DaemonErrorCategory | undefined;
 
 // @public
@@ -498,6 +400,9 @@ export const CLAIM_VERIFICATION_KINDS: readonly ["files_verified", "git_corrobor
 export type ClaimVerificationKind = (typeof CLAIM_VERIFICATION_KINDS)[number];
 
 // @public
+export function classifyFailure(error: unknown): FailureClassification | undefined;
+
+// @public
 export function clientInputRecord<TInput>(input: TInput | undefined): Record<string, unknown> | undefined;
 
 // @public (undocumented)
@@ -513,6 +418,21 @@ export interface ClientTransport<TKind extends string, TOperator, TPeer> {
     // (undocumented)
     readonly peer: TPeer;
 }
+
+// @public (undocumented)
+export function commandOk(...lines: readonly string[]): CommandResult;
+
+// @public (undocumented)
+export function commandRefused(init: Refusal | RefusalInit): CommandResult;
+
+// @public
+export type CommandResult = {
+    readonly ok: true;
+    readonly lines: readonly string[];
+} | {
+    readonly ok: false;
+    readonly refusal: Refusal;
+};
 
 // @public (undocumented)
 export type CommunicationEvent = {
@@ -633,35 +553,6 @@ export type CompactionEvent =
     strategy: string;
     error: string;
 }
-/** Session resume repair pipeline completed. */
-| {
-    type: 'COMPACTION_RESUME_REPAIR';
-    sessionId: string;
-    repaired: boolean;
-    actionsCount: number;
-    safeToResume: boolean;
-}
-/** Quality score computed after a strategy run. */
-| {
-    type: 'COMPACTION_QUALITY_SCORE';
-    sessionId: string;
-    strategy: string;
-    score: number;
-    grade: string;
-    compressionRatio: number;
-    retentionScore: number;
-    isLowQuality: boolean;
-    description: string;
-}
-/** Strategy switched automatically due to low quality score. */
-| {
-    type: 'COMPACTION_STRATEGY_SWITCH';
-    sessionId: string;
-    fromStrategy: string;
-    toStrategy: string;
-    reason: string;
-    score: number;
-}
 /**
 * Mandatory post-compaction receipt: emitted after every automatic (and the
 * manual) compaction path so a compaction is never silent. Carries what was
@@ -735,10 +626,10 @@ export type CompanionChatSessionsListTotals = {
 export type CompanionChatSessionStatus = "active" | "closed";
 
 // @public
-export function compileLegacyRegex(source: string, flags: string, options: RegexAdmissionOptions, schema?: boolean): RegExp;
+export function compileLegacyRegex(source: string, flags: string, options: RegexAdmissionOptions): RegExp;
 
 // @public
-export function composeMiddleware(middleware: readonly TransportMiddleware[], innerFetch: (ctx: TransportContext) => Promise<Response>): (ctx: TransportContext) => Promise<void>;
+export function composeMiddleware(middleware: readonly TransportMiddleware[], innerFetch: (ctx: TransportContext) => Promise<Response | void>): (ctx: TransportContext) => Promise<void>;
 
 // @public
 export function computeBackoffDelay(attempt: number, policy: ResolvedBackoffPolicy): number;
@@ -749,21 +640,13 @@ export class ConfigurationError extends GoodVibesError {
     constructor(message: string, options?: GoodVibesErrorOptions);
 }
 
-// @public (undocumented)
-export type ConfiguredVia = z.infer<typeof ConfiguredViaSchema>;
-
-// @public (undocumented)
-export const ConfiguredViaSchema: z.ZodEnum<{
-    subscription: "subscription";
-    anonymous: "anonymous";
-    env: "env";
-    secrets: "secrets";
-}>;
-
 // Warning: (ae-forgotten-export) The symbol "CONNECTION_OPTIONS" needs to be exported by the entry point index.d.ts
 //
 // @public (undocumented)
 export type ConnectionFailure = keyof typeof CONNECTION_OPTIONS;
+
+// @public
+export function connectionForCode(code: string | undefined): ConnectionFailure | undefined;
 
 // @public
 export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'failed';
@@ -892,6 +775,7 @@ export type ContractEvent = ({
     origin: ContractOrigin;
     ask: string;
     ownerAgentId: string;
+    gateProblems?: readonly string[];
 } | {
     type: 'CONTRACT_STATUS_CHANGED';
     contractId: string;
@@ -1107,6 +991,7 @@ export interface ContractHttpDefinition {
 export interface ContractInvokeOptions {
     // (undocumented)
     readonly headers?: HeadersInit | undefined;
+    readonly idempotencyKey?: string | undefined;
     readonly responseSchema?: ZodType | undefined;
     // (undocumented)
     readonly signal?: AbortSignal | undefined;
@@ -1176,7 +1061,7 @@ export interface ContractPlanProblem {
     readonly targetId?: string | undefined;
 }
 
-// @public (undocumented)
+// @public @deprecated (undocumented)
 export interface ContractRegexReadingContext {
     // (undocumented)
     readonly assertCurrent: () => void;
@@ -1190,7 +1075,7 @@ export interface ContractRegexReadingContext {
     readonly signal?: AbortSignal | undefined;
 }
 
-// @public (undocumented)
+// @public @deprecated (undocumented)
 export type ContractRegexReadingFactory = (context: ContractRegexReadingContext) => RegexReadingCapability;
 
 // @public
@@ -1258,44 +1143,6 @@ export const CONTROL_PLANE_PRINCIPAL_KINDS: readonly ["user", "bot", "service", 
 // @public (undocumented)
 export const CONTROL_PLANE_TRANSPORT_KINDS: readonly ["local", "http", "sse", "ws", "websocket", "webhook"];
 
-// @public (undocumented)
-export type ControlAuthCurrentResponse = z.infer<typeof ControlAuthCurrentResponseSchema>;
-
-// @public
-export const ControlAuthCurrentResponseSchema: z.ZodObject<{
-    authenticated: z.ZodBoolean;
-    authMode: z.ZodEnum<{
-        session: "session";
-        anonymous: "anonymous";
-        invalid: "invalid";
-        "shared-token": "shared-token";
-    }>;
-    tokenPresent: z.ZodBoolean;
-    authorizationHeaderPresent: z.ZodBoolean;
-    sessionCookiePresent: z.ZodBoolean;
-    principalId: z.ZodNullable<z.ZodString>;
-    principalKind: z.ZodNullable<z.ZodEnum<{
-        user: "user";
-        service: "service";
-        bot: "bot";
-        token: "token";
-    }>>;
-    admin: z.ZodBoolean;
-    scopes: z.ZodArray<z.ZodString>;
-    roles: z.ZodArray<z.ZodString>;
-}, z.core.$strip>;
-
-// @public (undocumented)
-export type ControlAuthLoginResponse = z.infer<typeof ControlAuthLoginResponseSchema>;
-
-// @public
-export const ControlAuthLoginResponseSchema: z.ZodObject<{
-    authenticated: z.ZodBoolean;
-    token: z.ZodString;
-    username: z.ZodString;
-    expiresAt: z.ZodNumber;
-}, z.core.$strip>;
-
 // @public
 export type ControlPlaneAuthMode = 'anonymous' | 'invalid' | 'session' | 'shared-token';
 
@@ -1342,11 +1189,6 @@ export type ControlPlaneEvent = {
     principalId: string;
     principalKind: ControlPlanePrincipalKind;
     scopes: string[];
-} | {
-    type: 'CONTROL_PLANE_AUTH_REJECTED';
-    clientId: string;
-    principalId: string;
-    reason: string;
 };
 
 // @public (undocumented)
@@ -1357,23 +1199,6 @@ export type ControlPlanePrincipalKind = (typeof CONTROL_PLANE_PRINCIPAL_KINDS)[n
 
 // @public (undocumented)
 export type ControlPlaneTransportKind = (typeof CONTROL_PLANE_TRANSPORT_KINDS)[number];
-
-// @public (undocumented)
-export type ControlStatusResponse = z.infer<typeof ControlStatusResponseSchema>;
-
-// @public
-export const ControlStatusResponseSchema: z.ZodObject<{
-    status: z.ZodString;
-    version: z.ZodString;
-    buildVersion: z.ZodOptional<z.ZodString>;
-    platformVersion: z.ZodOptional<z.ZodString>;
-    receipts: z.ZodOptional<z.ZodArray<z.ZodObject<{
-        id: z.ZodString;
-        text: z.ZodString;
-        at: z.ZodNumber;
-    }, z.core.$strip>>>;
-    cluster: z.ZodOptional<z.ZodUnknown>;
-}, z.core.$strict>;
 
 // @public
 export function createBrowserGoodVibesPlatform(options?: BrowserGoodVibesPlatformOptions): GoodVibesPlatform;
@@ -1406,7 +1231,7 @@ export function createFetch(fetchImpl?: FetchLike, fallbackFetch?: FetchLike): F
 export function createGoodVibesAuthClient(operator: OperatorApiClient, tokenStore: GoodVibesTokenStore | null, getAuthToken?: AuthTokenResolver, observer?: PlatformObserver | undefined, autoRefreshOptions?: AutoRefreshOptions,
 existingCoordinator?: AutoRefreshCoordinator | null): GoodVibesAuthClient;
 
-// @public (undocumented)
+// @public
 export function createGoodVibesCloudflareWorker(options?: GoodVibesCloudflareWorkerOptions): GoodVibesCloudflareWorker;
 
 // @public
@@ -1435,7 +1260,7 @@ export function createOperatorApiClient(options: OperatorApiClientOptions): Oper
 
 // Warning: (ae-forgotten-export) The symbol "ContractExternalWorkAdapter" needs to be exported by the entry point index.d.ts
 //
-// @public
+// @public (undocumented)
 export function createOperatorContractWorkAdapter(client: Pick<OperatorRemoteClient, 'invoke'>): ContractExternalWorkAdapter;
 
 // @public
@@ -1464,6 +1289,15 @@ export function createRuntimeEventFeed<TEvent extends EventLike>(subscribe: Enve
 
 // @public (undocumented)
 export function createRuntimeEventFeeds<TDomain extends string, TEvent extends EventLike>(domains: readonly TDomain[], createFeed: (domain: TDomain) => RuntimeEventFeed<TEvent>): RuntimeEventFeeds<TDomain, TEvent>;
+
+// @public
+export function createSharedRegexTester(options: {
+    readonly operation: string;
+    readonly timeoutMs?: number | undefined;
+}): SharedRegexTester;
+
+// @public (undocumented)
+export function createStreamTextAssembler(): StreamTextAssembler;
 
 // @public (undocumented)
 export function createTransportPaths(baseUrl: string): TransportPaths;
@@ -1510,52 +1344,6 @@ export type CriterionStatus = (typeof CRITERION_STATUSES)[number];
 
 // @public (undocumented)
 export type CriterionVerdict = (typeof CRITERION_VERDICTS)[number];
-
-// @public (undocumented)
-export type CurrentModelResponse = z.infer<typeof CurrentModelResponseSchema>;
-
-// @public (undocumented)
-export const CurrentModelResponseSchema: z.ZodObject<{
-    model: z.ZodNullable<z.ZodObject<{
-        registryKey: z.ZodString;
-        provider: z.ZodString;
-        id: z.ZodString;
-    }, z.core.$strict>>;
-    configured: z.ZodBoolean;
-    configuredVia: z.ZodOptional<z.ZodEnum<{
-        subscription: "subscription";
-        anonymous: "anonymous";
-        env: "env";
-        secrets: "secrets";
-    }>>;
-    routes: z.ZodOptional<z.ZodArray<z.ZodObject<{
-        route: z.ZodEnum<{
-            none: "none";
-            "api-key": "api-key";
-            "service-oauth": "service-oauth";
-            anonymous: "anonymous";
-            "secret-ref": "secret-ref";
-            "subscription-oauth": "subscription-oauth";
-        }>;
-        label: z.ZodString;
-        configured: z.ZodBoolean;
-        usable: z.ZodOptional<z.ZodBoolean>;
-        freshness: z.ZodOptional<z.ZodEnum<{
-            unconfigured: "unconfigured";
-            expired: "expired";
-            expiring: "expiring";
-            healthy: "healthy";
-            pending: "pending";
-        }>>;
-        detail: z.ZodOptional<z.ZodString>;
-        envVars: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        secretKeys: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        serviceNames: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        providerId: z.ZodOptional<z.ZodString>;
-        repairHints: z.ZodOptional<z.ZodArray<z.ZodString>>;
-    }, z.core.$strict>>>;
-    effort: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-}, z.core.$strict>;
 
 // @public (undocumented)
 export type DaemonErrorCategory = 'authentication' | 'authorization' | 'billing' | 'rate_limit' | 'timeout' | 'network' | 'bad_request' | 'not_found' | 'permission' | 'tool' | 'config' | 'protocol' | 'service' | 'internal' | 'unknown';
@@ -1618,14 +1406,17 @@ export class DecisionModelsDisabledError extends Error {
 // @public (undocumented)
 export const DEFAULT_HTTP_RETRY_POLICY: ResolvedHttpRetryPolicy;
 
-// @public (undocumented)
+// @public
+export const DEFAULT_IDEMPOTENT_MAX_ATTEMPTS = 3;
+
+// @public
 export const DEFAULT_STREAM_RECONNECT_POLICY: ResolvedStreamReconnectPolicy;
 
 // @public
-export const DEFAULT_WS_MAX_ATTEMPTS = 10;
+export const DEFAULT_WS_MAX_ATTEMPTS: number;
 
-// @public (undocumented)
-export const DELIVERY_KINDS: readonly ["notification", "reply", "action", "callback"];
+// @public
+export const DELIVERY_KINDS: readonly ["notification", "reply", "callback"];
 
 // @public (undocumented)
 export type DeliveryEvent = {
@@ -1653,7 +1444,6 @@ export type DeliveryEvent = {
     targetId: string;
     completedAt: number;
     durationMs: number;
-    statusCode?: number;
 } | {
     type: 'DELIVERY_FAILED';
     deliveryId: string;
@@ -1664,6 +1454,11 @@ export type DeliveryEvent = {
     failedAt: number;
     error: string;
     retryable: boolean;
+} | {
+    type: 'DELIVERY_WAITING';
+    jobId: string;
+    runId: string;
+    surface: 'agent';
 } | {
     type: 'DELIVERY_DEAD_LETTERED';
     deliveryId: string;
@@ -1699,9 +1494,11 @@ export type DistributedWorkStatus = 'queued' | 'claimed' | 'completed' | 'failed
 // @public (undocumented)
 export type DistributedWorkType = (typeof DISTRIBUTED_WORK_TYPES)[number];
 
+// Warning: (ae-forgotten-export) The symbol "DomainEventConnectionEnd" needs to be exported by the entry point index.d.ts
+//
 // @public (undocumented)
 export type DomainEventConnector<TDomain extends string, TEvent extends EventLike = EventLike> = (domain: TDomain, onEnvelope: (envelope: SerializedEventEnvelope<TEvent>) => void,
-onEnded?: () => void) => void | Promise<() => void>;
+onEnded?: (end?: DomainEventConnectionEnd) => void) => void | Promise<() => void>;
 
 // @public
 export type DomainEventMap = {
@@ -1836,20 +1633,6 @@ export interface EventEnvelopeContext {
 }
 
 // @public (undocumented)
-export interface EventEnvelopeShape {
-    // (undocumented)
-    readonly event: Record<string, unknown>;
-    // (undocumented)
-    readonly sessionId: string;
-    // (undocumented)
-    readonly source: string;
-    // (undocumented)
-    readonly timestamp: number;
-    // (undocumented)
-    readonly traceId: string;
-}
-
-// @public (undocumented)
 export type EventForType<TEvent extends EventLike, TType extends TEvent['type']> = Extract<TEvent, {
     type: TType;
 }>;
@@ -1872,6 +1655,16 @@ export type FailureCategory = keyof typeof CATEGORY_OPTIONS & DaemonErrorCategor
 
 // @public
 export type FailureClass = 'retryable' | 'terminal';
+
+// @public
+export interface FailureClassification {
+    // (undocumented)
+    readonly category: DaemonErrorCategory;
+    // (undocumented)
+    readonly retryable: boolean;
+    // (undocumented)
+    readonly retryAfterMs?: number | undefined;
+}
 
 // @public (undocumented)
 export interface FailureConclusions {
@@ -1977,11 +1770,85 @@ export interface FieldSpec {
     readonly values?: readonly string[] | undefined;
 }
 
-// @public @deprecated (undocumented)
+// @public
 export function firstJsonSchemaFailure(schema: Record<string, unknown>, value: unknown, path?: string, root?: Record<string, unknown>, _depth?: number): JsonSchemaValidationFailure | undefined;
 
 // @public
-export function firstJsonSchemaFailureAsync(schema: Record<string, unknown>, value: unknown, options?: Omit<RegexAdmissionOptions, 'operation'>): Promise<JsonSchemaValidationFailure | undefined>;
+export function firstJsonSchemaFailureAsync(schema: Record<string, unknown>, value: unknown, options?: JsonSchemaValidationOptions): Promise<JsonSchemaValidationFailure | undefined>;
+
+// @public
+export const FLEET_ATTENTION_REASONS: readonly ["approval", "input", "pick", "conflict"];
+
+// @public
+export const FLEET_NODE_KINDS: readonly ["agent", "contract", "contract-group", "contract-unit", "workflow", "trigger", "hook-action", "schedule", "watcher", "background-process", "acp-agent", "observed-external", "code-index"];
+
+// @public
+export const FLEET_NODE_STATES: readonly ["thinking", "executing-tool", "awaiting-approval", "streaming", "stalled", "retrying", "done", "failed", "killed", "interrupted", "idle", "queued", "paused"];
+
+// @public (undocumented)
+export type FleetAttentionReason = (typeof FLEET_ATTENTION_REASONS)[number];
+
+// @public (undocumented)
+export type FleetEvent =
+/** A node appeared in the fleet for the first time. */
+    {
+    type: 'FLEET_NODE_STARTED';
+    nodeId: string;
+    kind: FleetNodeKind;
+    label: string;
+    state: FleetNodeState;
+    parentId?: string | undefined;
+    sessionId?: string | undefined;
+}
+/** A node's coarse state changed (non-terminal, non-block transition). */
+| {
+    type: 'FLEET_NODE_STATE_CHANGED';
+    nodeId: string;
+    kind: FleetNodeKind;
+    state: FleetNodeState;
+    previousState: FleetNodeState;
+    label: string;
+    sessionId?: string | undefined;
+}
+/** A node reached a terminal state (done/failed/killed/interrupted). */
+| {
+    type: 'FLEET_NODE_FINISHED';
+    nodeId: string;
+    kind: FleetNodeKind;
+    state: FleetNodeState;
+    previousState: FleetNodeState;
+    label: string;
+    sessionId?: string | undefined;
+}
+/** A node became blocked waiting for a human (approve/deny, input, a ready best-of-N pick, or a merge conflict). */
+| {
+    type: 'FLEET_NODE_BLOCKED_ON_USER';
+    nodeId: string;
+    kind: FleetNodeKind;
+    reason: FleetAttentionReason;
+    label: string;
+    detail?: string | undefined;
+    sessionId?: string | undefined;
+    agentId?: string | undefined;
+}
+/** A previously blocked node is no longer waiting on a human. */
+| {
+    type: 'FLEET_NODE_UNBLOCKED';
+    nodeId: string;
+    kind: FleetNodeKind;
+    state: FleetNodeState;
+    label: string;
+    sessionId?: string | undefined;
+};
+
+// @public (undocumented)
+export type FleetEventType = FleetEvent['type'];
+
+// @public (undocumented)
+export type FleetNodeKind = (typeof FLEET_NODE_KINDS)[number];
+
+// @public (undocumented)
+export type FleetNodeState = (typeof FLEET_NODE_STATES)[number];
 
 // @public
 export type ForensicsEvent =
@@ -2002,6 +1869,9 @@ export type ForensicsEventType = ForensicsEvent['type'];
 export function forgetFailureReadings(): void;
 
 // @public
+export function formatRefusal(value: Refusal): string;
+
+// @public
 function forSession<TDomain extends string, TEvent extends EventLike = EventLike>(events: DomainEvents<TDomain, TEvent>, sessionId: string): DomainEvents<TDomain, TEvent>;
 export { forSession }
 export { forSession as forSessionRuntime }
@@ -2010,8 +1880,8 @@ export { forSession as forSessionRuntime }
 export const FOUNDATION_METADATA: {
     readonly productId: "goodvibes";
     readonly productVersion: "3.3.0";
-    readonly operatorMethodCount: 572;
-    readonly operatorEventCount: 34;
+    readonly operatorMethodCount: 608;
+    readonly operatorEventCount: 36;
     readonly peerEndpointCount: 6;
 };
 
@@ -2029,14 +1899,6 @@ export const GATE_EVENT_VALIDATORS: {
 };
 
 // @public
-export interface GateBoundaryCheckRecord {
-    // (undocumented)
-    readonly check: string;
-    // (undocumented)
-    readonly result: 'pass' | 'refuse' | 'skipped';
-}
-
-// @public (undocumented)
 export type GateEvent =
 /** A tool call has reached the gate. */
     {
@@ -2049,71 +1911,6 @@ export type GateEvent =
     riskLevel?: string | undefined;
     summary?: string | undefined;
     reasons?: readonly string[] | undefined;
-}
-/** Policy rules have been collected from all sources. */
-| {
-    type: 'RULES_COLLECTED';
-    callId: string;
-    tool: string;
-    ruleCount: number;
-}
-/** Tool arguments have been normalised for policy evaluation. */
-| {
-    type: 'INPUT_NORMALIZED';
-    callId: string;
-    tool: string;
-}
-/** User and managed policy rules have been evaluated. */
-| {
-    type: 'POLICY_EVALUATED';
-    callId: string;
-    tool: string;
-    result: 'allow' | 'deny' | 'unknown';
-}
-/** Remembered approvals (session and durable) have been evaluated. */
-| {
-    type: 'SESSION_OVERRIDE_EVALUATED';
-    callId: string;
-    tool: string;
-    overrideApplied: boolean;
-}
-/**
-* The deterministic boundary ran: catastrophic commands, surface authority,
-* card shapes and the outward-effect check. `refusedBy` names the check
-* that refused the call, when one did.
-*/
-| {
-    type: 'BOUNDARY_CHECKED';
-    callId: string;
-    tool: string;
-    passed: boolean;
-    refusedBy?: string | undefined;
-    checks: readonly GateBoundaryCheckRecord[];
-}
-/** Jev read the call: its risk family, the facts behind its stakes, and the stakes code composed. */
-| {
-    type: 'STAKES_READ';
-    callId: string;
-    tool: string;
-    family: string;
-    stakes: 'low' | 'medium' | 'high' | 'critical';
-    mutates: boolean;
-    outward: boolean;
-    secrets: boolean;
-    irreversible: boolean;
-    beyondProject: boolean;
-    weakensSecurity: boolean;
-    obfuscated: boolean;
-    uncertain: readonly string[];
-}
-/** The active preset mapped the call's stakes to an action. */
-| {
-    type: 'PRESET_EVALUATED';
-    callId: string;
-    tool: string;
-    preset: string;
-    stakes: 'low' | 'medium' | 'high' | 'critical';
-    result: 'allow' | 'ask' | 'deny';
 }
 /**
 * The active preset changed (normal, accept-edits, plan, auto, custom).
@@ -2186,6 +1983,7 @@ export interface GoodVibesAuthClient {
     clearToken(): Promise<void>;
     // (undocumented)
     current(): Promise<GoodVibesCurrentAuth>;
+    currentToken(): Promise<string | null>;
     ensureFreshToken(): Promise<void>;
     getToken(): Promise<string | null>;
     // (undocumented)
@@ -2215,7 +2013,7 @@ export interface GoodVibesCloudflareMessageBatch<Body = unknown> {
     readonly messages: readonly GoodVibesCloudflareQueueMessage<Body>[];
 }
 
-// @public (undocumented)
+// @public
 export interface GoodVibesCloudflareQueue<Body = unknown> {
     // (undocumented)
     send(message: Body): Promise<void>;
@@ -2225,6 +2023,7 @@ export interface GoodVibesCloudflareQueue<Body = unknown> {
 export interface GoodVibesCloudflareQueueMessage<Body = unknown> {
     // (undocumented)
     ack?(): void;
+    readonly attempts?: number | undefined;
     // (undocumented)
     readonly body: Body;
     // (undocumented)
@@ -2238,7 +2037,8 @@ export type GoodVibesCloudflareQueuePayload = {
     readonly enqueuedAt?: number | undefined;
 } | {
     readonly type: 'batch.job.create';
-    readonly body: Record<string, unknown>;
+    readonly body?: Record<string, unknown> | undefined;
+    readonly payloadKey?: string | undefined;
     readonly jobId?: string | undefined;
     readonly enqueuedAt?: number | undefined;
 };
@@ -2246,21 +2046,48 @@ export type GoodVibesCloudflareQueuePayload = {
 // @public (undocumented)
 export interface GoodVibesCloudflareWorker {
     // (undocumented)
-    fetch(request: Request, env: GoodVibesCloudflareWorkerEnv, ctx: GoodVibesCloudflareExecutionContext): Promise<Response>;
+    fetch(request: Request, env: GoodVibesCloudflareWorkerEnv, ctx?: GoodVibesCloudflareExecutionContext): Promise<Response>;
     // (undocumented)
-    queue(batch: GoodVibesCloudflareMessageBatch<GoodVibesCloudflareQueuePayload>, env: GoodVibesCloudflareWorkerEnv, ctx: GoodVibesCloudflareExecutionContext): Promise<void>;
+    queue(batch: GoodVibesCloudflareMessageBatch<GoodVibesCloudflareQueuePayload>, env: GoodVibesCloudflareWorkerEnv, ctx?: GoodVibesCloudflareExecutionContext): Promise<void>;
     // (undocumented)
-    scheduled(event: unknown, env: GoodVibesCloudflareWorkerEnv, ctx: GoodVibesCloudflareExecutionContext): Promise<void>;
+    scheduled(event: unknown, env: GoodVibesCloudflareWorkerEnv, ctx?: GoodVibesCloudflareExecutionContext): Promise<void>;
 }
 
 // @public (undocumented)
 export interface GoodVibesCloudflareWorkerEnv {
+    GOODVIBES_ACCESS_CLIENT_ID?: string | undefined;
+    // (undocumented)
+    GOODVIBES_ACCESS_CLIENT_SECRET?: string | undefined;
+    // (undocumented)
+    GOODVIBES_ACCESS_CLIENT_SECRET_STORE?: GoodVibesCloudflareSecretBinding | undefined;
+    GOODVIBES_ALLOW_INSECURE_DAEMON_URL?: string | undefined;
+    GOODVIBES_ALLOW_PRIVATE_DAEMON_URL?: string | undefined;
+    // Warning: (ae-forgotten-export) The symbol "GoodVibesCloudflareR2Bucket" needs to be exported by the entry point index.d.ts
+    //
+    // (undocumented)
+    GOODVIBES_ARTIFACTS?: GoodVibesCloudflareR2Bucket | undefined;
     // (undocumented)
     GOODVIBES_BATCH_QUEUE?: GoodVibesCloudflareQueue<GoodVibesCloudflareQueuePayload> | undefined;
+    // Warning: (ae-forgotten-export) The symbol "GoodVibesCloudflareDurableObjectNamespace" needs to be exported by the entry point index.d.ts
+    //
+    // (undocumented)
+    GOODVIBES_COORDINATOR?: GoodVibesCloudflareDurableObjectNamespace | undefined;
     // (undocumented)
     GOODVIBES_DAEMON_URL?: string | undefined;
+    GOODVIBES_FREE_TIER_MODE?: string | undefined;
+    // Warning: (ae-forgotten-export) The symbol "GoodVibesCloudflareKvNamespace" needs to be exported by the entry point index.d.ts
+    //
+    // (undocumented)
+    GOODVIBES_KV?: GoodVibesCloudflareKvNamespace | undefined;
+    // (undocumented)
+    GOODVIBES_MAX_QUEUE_MESSAGES_PER_DAY?: string | undefined;
+    // (undocumented)
+    GOODVIBES_MAX_QUEUE_OPS_PER_DAY?: string | undefined;
+    GOODVIBES_MAX_QUEUE_PAYLOAD_BYTES?: string | undefined;
     // (undocumented)
     GOODVIBES_OPERATOR_TOKEN?: string | undefined;
+    // Warning: (ae-forgotten-export) The symbol "GoodVibesCloudflareSecretBinding" needs to be exported by the entry point index.d.ts
+    GOODVIBES_OPERATOR_TOKEN_STORE?: GoodVibesCloudflareSecretBinding | undefined;
     // (undocumented)
     GOODVIBES_QUEUE_JOB_PAYLOADS?: string | undefined;
     // (undocumented)
@@ -2274,7 +2101,7 @@ export interface GoodVibesCloudflareWorkerOptions {
     readonly authToken?: string | undefined;
     // (undocumented)
     readonly daemonUrl?: string | undefined;
-    // (undocumented)
+    readonly maxQueuePayloadBytes?: number | undefined;
     readonly maxRequestBodyBytes?: number | undefined;
     // (undocumented)
     readonly queueJobPayloads?: boolean | undefined;
@@ -2304,6 +2131,8 @@ export class GoodVibesError extends Error {
     // (undocumented)
     readonly method?: string | undefined;
     // (undocumented)
+    readonly next?: readonly string[] | undefined;
+    // (undocumented)
     readonly operation?: string | undefined;
     // (undocumented)
     readonly phase?: string | undefined;
@@ -2313,7 +2142,6 @@ export class GoodVibesError extends Error {
     readonly providerCode?: string | undefined;
     // (undocumented)
     readonly providerType?: string | undefined;
-    // (undocumented)
     readonly recoverable: boolean;
     // (undocumented)
     readonly requestId?: string | undefined;
@@ -2321,6 +2149,8 @@ export class GoodVibesError extends Error {
     readonly retryAfterMs?: number | undefined;
     // (undocumented)
     readonly source: ErrorSource;
+    // (undocumented)
+    readonly state?: string | undefined;
     // (undocumented)
     readonly status?: number | undefined;
     // (undocumented)
@@ -2342,6 +2172,7 @@ export interface GoodVibesErrorOptions {
     readonly hint?: string | undefined;
     // (undocumented)
     readonly method?: string | undefined;
+    readonly next?: readonly string[] | undefined;
     // (undocumented)
     readonly operation?: string | undefined;
     // (undocumented)
@@ -2360,6 +2191,7 @@ export interface GoodVibesErrorOptions {
     readonly retryAfterMs?: number | undefined;
     // (undocumented)
     readonly source?: ErrorSource | undefined;
+    readonly state?: string | undefined;
     // (undocumented)
     readonly status?: number | undefined;
     // (undocumented)
@@ -2431,37 +2263,8 @@ export interface GoodVibesTokenStore {
 
 // @public
 export type GoodVibesUIEvent =
-/** A full re-render has been requested. */
-    {
-    type: 'UI_RENDER_REQUEST';
-}
-/** Scroll by a relative delta (positive = down, negative = up). */
-| {
-    type: 'UI_SCROLL_DELTA';
-    delta: number;
-}
-/** Scroll to an absolute line number. */
-| {
-    type: 'UI_SCROLL_TO';
-    line: number;
-}
-/** A collapsible block's collapsed state was toggled. */
-| {
-    type: 'UI_BLOCK_TOGGLE_COLLAPSE';
-    blockIndex: number;
-}
-/** A block was requested to re-run. */
-| {
-    type: 'UI_BLOCK_RERUN';
-    blockIndex: number;
-    content: string;
-}
-/** The screen was cleared. */
-| {
-    type: 'UI_CLEAR_SCREEN';
-}
 /** A panel was opened. */
-| {
+    {
     type: 'UI_PANEL_OPEN';
     panelId: string;
 }
@@ -2470,12 +2273,12 @@ export type GoodVibesUIEvent =
     type: 'UI_PANEL_CLOSE';
     panelId: string;
 }
-/** A panel was focused. */
+/** A panel became the focused (top) panel. */
 | {
     type: 'UI_PANEL_FOCUS';
     panelId: string;
 }
-/** The active view changed (e.g. chat -> search -> help). */
+/** The view that fills the screen changed (e.g. main -> agent:a1). */
 | {
     type: 'UI_VIEW_CHANGED';
     from: string;
@@ -2500,6 +2303,7 @@ export interface HttpJsonRequestOptions {
     readonly body?: unknown | undefined;
     // (undocumented)
     readonly headers?: HeadersInit | undefined;
+    readonly idempotencyKey?: string | undefined;
     readonly idempotent?: boolean | undefined;
     // (undocumented)
     readonly method?: string | undefined;
@@ -2605,7 +2409,9 @@ export function injectTraceparentAsync(headers: Record<string, string>): Promise
 export function installDecisionModelPolicyObserver(observer: () => DecisionModelPolicyState, onUnavailable?: (error: unknown) => boolean, operationOwner?: <T>(operation: () => T) => T): void;
 
 // @public
-export function installJudgmentPort(port: JudgmentPort | undefined): JudgmentPort | undefined;
+export function installJudgmentPort(port: JudgmentPort | undefined, options?: {
+    readonly alongside?: boolean | undefined;
+}): JudgmentPort | undefined;
 
 // @public (undocumented)
 export function invokeContractRoute<T = unknown>(transport: HttpTransport, route: ContractRouteDefinition & ContractRouteLike, input?: Record<string, unknown>, options?: ContractInvokeOptions): Promise<T>;
@@ -2638,6 +2444,9 @@ export function isKnownErrorCode(value: string): value is EngineErrorCode;
 // @public (undocumented)
 export function isKnownEventType(type: unknown): type is string;
 
+// @public
+export function isLinearSchemaPattern(source: string): boolean;
+
 // @public (undocumented)
 export function isOperatorMethodId(value: string): value is (typeof OPERATOR_METHOD_IDS)[number];
 
@@ -2648,10 +2457,16 @@ export function isPeerEndpointId(value: string): value is (typeof PEER_ENDPOINT_
 export function isPrivateNetworkHost(hostname: string): boolean;
 
 // @public (undocumented)
-export function isRetryableHttpStatus(method: string, status: number, policy: ResolvedHttpRetryPolicy): boolean;
+export function isRefusal(value: unknown): value is Refusal;
+
+// @public
+export function isRetryableCall(method: string, policy: ResolvedHttpRetryPolicy, idempotent?: boolean): boolean;
 
 // @public (undocumented)
-export function isRetryableNetworkError(method: string, policy: ResolvedHttpRetryPolicy): boolean;
+export function isRetryableHttpStatus(method: string, status: number, policy: ResolvedHttpRetryPolicy, idempotent?: boolean): boolean;
+
+// @public (undocumented)
+export function isRetryableNetworkError(method: string, policy: ResolvedHttpRetryPolicy, idempotent?: boolean): boolean;
 
 // @public (undocumented)
 export function isRuntimeEventDomain(value: string): value is RuntimeEventDomain;
@@ -2678,6 +2493,14 @@ export interface JsonSchemaValidationFailure {
     readonly path: string;
     // (undocumented)
     readonly received: string;
+}
+
+// @public
+export interface JsonSchemaValidationOptions {
+    readonly assertCurrent?: (() => void) | undefined;
+    readonly isolatedTester?: Pick<SharedRegexTester, 'test'> | undefined;
+    // (undocumented)
+    readonly signal?: AbortSignal | undefined;
 }
 
 // @public (undocumented)
@@ -2844,95 +2667,6 @@ export function listOperatorMethods(): readonly OperatorMethodContract[];
 export function listPeerEndpoints(): readonly PeerEndpointContract[];
 
 // @public (undocumented)
-export type ListProviderModelsResponse = z.infer<typeof ListProviderModelsResponseSchema>;
-
-// @public (undocumented)
-export const ListProviderModelsResponseSchema: z.ZodObject<{
-    providers: z.ZodArray<z.ZodObject<{
-        id: z.ZodString;
-        label: z.ZodString;
-        configured: z.ZodBoolean;
-        configuredVia: z.ZodOptional<z.ZodEnum<{
-            subscription: "subscription";
-            anonymous: "anonymous";
-            env: "env";
-            secrets: "secrets";
-        }>>;
-        envVars: z.ZodArray<z.ZodString>;
-        routes: z.ZodOptional<z.ZodArray<z.ZodObject<{
-            route: z.ZodEnum<{
-                none: "none";
-                "api-key": "api-key";
-                "service-oauth": "service-oauth";
-                anonymous: "anonymous";
-                "secret-ref": "secret-ref";
-                "subscription-oauth": "subscription-oauth";
-            }>;
-            label: z.ZodString;
-            configured: z.ZodBoolean;
-            usable: z.ZodOptional<z.ZodBoolean>;
-            freshness: z.ZodOptional<z.ZodEnum<{
-                unconfigured: "unconfigured";
-                expired: "expired";
-                expiring: "expiring";
-                healthy: "healthy";
-                pending: "pending";
-            }>>;
-            detail: z.ZodOptional<z.ZodString>;
-            envVars: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            secretKeys: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            serviceNames: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            providerId: z.ZodOptional<z.ZodString>;
-            repairHints: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        }, z.core.$strict>>>;
-        models: z.ZodArray<z.ZodObject<{
-            id: z.ZodString;
-            registryKey: z.ZodString;
-            provider: z.ZodString;
-            label: z.ZodOptional<z.ZodString>;
-            contextWindow: z.ZodOptional<z.ZodNumber>;
-            reasoningOptions: z.ZodOptional<z.ZodObject<{
-                levels: z.ZodArray<z.ZodString>;
-                source: z.ZodEnum<{
-                    catalog: "catalog";
-                    declared: "declared";
-                    fallback: "fallback";
-                    family: "family";
-                }>;
-                effectiveByRequested: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodNullable<z.ZodString>>>;
-            }, z.core.$strict>>;
-        }, z.core.$strict>>;
-    }, z.core.$strict>>;
-    currentModel: z.ZodNullable<z.ZodObject<{
-        registryKey: z.ZodString;
-        provider: z.ZodString;
-        id: z.ZodString;
-    }, z.core.$strict>>;
-    secretsResolutionSkipped: z.ZodBoolean;
-}, z.core.$strict>;
-
-// @public (undocumented)
-export type LocalAuthStatusResponse = z.infer<typeof LocalAuthStatusResponseSchema>;
-
-// @public (undocumented)
-export const LocalAuthStatusResponseSchema: z.ZodObject<{
-    userStorePath: z.ZodString;
-    bootstrapCredentialPath: z.ZodString;
-    bootstrapCredentialPresent: z.ZodBoolean;
-    userCount: z.ZodNumber;
-    sessionCount: z.ZodNumber;
-    users: z.ZodArray<z.ZodObject<{
-        username: z.ZodString;
-        roles: z.ZodArray<z.ZodString>;
-    }, z.core.$strict>>;
-    sessions: z.ZodArray<z.ZodObject<{
-        id: z.ZodString;
-        username: z.ZodString;
-        expiresAt: z.ZodNumber;
-    }, z.core.$strict>>;
-}, z.core.$strict>;
-
-// @public (undocumented)
 export type MaybePromise<T> = T | Promise<T>;
 
 // @public
@@ -3045,35 +2779,6 @@ export type MethodArgs<TInput, TOptions> = [
 TInput
 ] extends [undefined] ? [input?: undefined, options?: TOptions] : [TInput] extends [object] ? [RequiredKeys<TInput>] extends [never] ? [input?: TInput, options?: TOptions] : [input: TInput, options?: TOptions] : [input: TInput, options?: TOptions];
 
-// @public (undocumented)
-export type ModelChangedEvent = z.infer<typeof ModelChangedEventSchema>;
-
-// @public
-export const ModelChangedEventSchema: z.ZodObject<{
-    type: z.ZodLiteral<"MODEL_CHANGED">;
-    registryKey: z.ZodString;
-    provider: z.ZodString;
-    previous: z.ZodOptional<z.ZodObject<{
-        registryKey: z.ZodString;
-        provider: z.ZodString;
-    }, z.core.$strict>>;
-}, z.core.$strict>;
-
-// @public (undocumented)
-export type ModelReasoningOptions = z.infer<typeof ModelReasoningOptionsSchema>;
-
-// @public
-export const ModelReasoningOptionsSchema: z.ZodObject<{
-    levels: z.ZodArray<z.ZodString>;
-    source: z.ZodEnum<{
-        catalog: "catalog";
-        declared: "declared";
-        fallback: "fallback";
-        family: "family";
-    }>;
-    effectiveByRequested: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodNullable<z.ZodString>>>;
-}, z.core.$strict>;
-
 // @public
 export type NamedProps<T> = {
     [K in keyof T as string extends K ? never : number extends K ? never : K]: T[K];
@@ -3133,7 +2838,7 @@ export function openServerSentEventStream(transport: HttpTransport, pathOrUrl: s
 export const OPERATOR_CONTRACT: OperatorContractManifest;
 
 // @public (undocumented)
-export const OPERATOR_METHOD_IDS: readonly ["accounts.snapshot", "acp.agents.list", "acp.sessions.create", "approvals.approve", "approvals.cancel", "approvals.claim", "approvals.deny", "approvals.list", "approvals.raise", "artifacts.content.get", "artifacts.create", "artifacts.get", "artifacts.list", "automation.heartbeat.list", "automation.heartbeat.run", "automation.integration.snapshot", "automation.jobs.create", "automation.jobs.delete", "automation.jobs.disable", "automation.jobs.enable", "automation.jobs.list", "automation.jobs.run", "automation.jobs.update", "automation.runs.cancel", "automation.runs.get", "automation.runs.list", "automation.runs.retry", "automation.schedules.create", "automation.schedules.delete", "automation.schedules.disable", "automation.schedules.enable", "automation.schedules.list", "automation.schedules.run", "batch.jobs.cancel", "batch.jobs.create", "batch.jobs.get", "batch.jobs.list", "batch.run", "batch.runtime.get", "browser.click", "browser.extract", "browser.history.back", "browser.history.forward", "browser.navigate", "browser.press", "browser.provision", "browser.readText", "browser.screenshot", "browser.scroll", "browser.select", "browser.sessions.attach", "browser.sessions.close", "browser.sessions.launch", "browser.sessions.list", "browser.sessions.release", "browser.snapshot", "browser.status", "browser.tabs.close", "browser.tabs.create", "browser.tabs.list", "browser.tabs.switch", "browser.type", "browser.waitFor", "calendar.events.create", "calendar.events.get", "calendar.events.list", "calendar.ics.export", "calendar.ics.import", "channels.accounts.action.default", "channels.accounts.action.named", "channels.accounts.get", "channels.accounts.list", "channels.accounts.surface.list", "channels.actions.invoke", "channels.actions.list", "channels.actions.surface.list", "channels.agent_tools.list", "channels.agent_tools.surface.list", "channels.allowlist.edit", "channels.allowlist.resolve", "channels.authorize", "channels.capabilities.list", "channels.capabilities.surface.list", "channels.directory.query", "channels.doctor.get", "channels.drafts.delete", "channels.drafts.get", "channels.drafts.list", "channels.drafts.save", "channels.inbox.list", "channels.lifecycle.get", "channels.policies.audit", "channels.policies.list", "channels.policies.update", "channels.profiles.delete", "channels.profiles.get", "channels.profiles.list", "channels.profiles.set", "channels.repairs.list", "channels.routing.assign", "channels.routing.delete", "channels.routing.list", "channels.setup.get", "channels.status", "channels.targets.resolve", "channels.test.send", "channels.tools.invoke", "channels.tools.list", "channels.tools.surface.list", "checkin.config.get", "checkin.config.set", "checkin.receipts.list", "checkin.run", "checkpoints.create", "checkpoints.diff", "checkpoints.list", "checkpoints.restore", "checkpoints.restorePreview", "checkpoints.revertHunk", "checkpoints.revertHunkPreview", "ci.status", "ci.watches.create", "ci.watches.delete", "ci.watches.list", "ci.watches.run", "cloudflare.credentials.verify", "cloudflare.disable", "cloudflare.provision", "cloudflare.resources.list", "cloudflare.status", "cloudflare.token.create", "cloudflare.token.requirements.get", "cloudflare.worker.verify", "companion.chat.events.stream", "companion.chat.messages.create", "companion.chat.messages.edit", "companion.chat.messages.list", "companion.chat.messages.retry", "companion.chat.messages.steer", "companion.chat.sessions.close", "companion.chat.sessions.create", "companion.chat.sessions.delete", "companion.chat.sessions.get", "companion.chat.sessions.list", "companion.chat.sessions.update", "companion.chat.turns.cancel", "config.get", "config.reset", "config.set", "continuity.snapshot", "contracts.cancel", "contracts.get", "contracts.list", "contracts.reply", "contracts.start", "control.auth.current", "control.auth.login", "control.clients.list", "control.contract", "control.events.catalog", "control.events.stream", "control.messages.list", "control.methods.get", "control.methods.list", "control.snapshot", "control.status", "control.web", "cost.attribution.get", "credentials.delete", "credentials.get", "credentials.set", "deliveries.get", "deliveries.list", "devices.artifacts.list", "devices.artifacts.read", "devices.capability.request", "devices.grants.list", "devices.grants.revoke", "devices.housekeeping.run", "devices.nodes.list", "email.draft.create", "email.expectation.cancel", "email.expectation.list", "email.expectation.open", "email.inbound.status", "email.inbox.list", "email.inbox.read", "email.send", "flags.graduation.report", "fleet.archive", "fleet.archiveFinished", "fleet.archived.list", "fleet.attempts.judge", "fleet.attempts.list", "fleet.attempts.pick", "fleet.conflicts.list", "fleet.conflicts.resolve", "fleet.graph.get", "fleet.list", "fleet.observed.steer", "fleet.snapshot", "fleet.unarchive", "health.snapshot", "homeassistant.conversation.cancel", "homeassistant.conversation.health", "homeassistant.conversation.stream", "homeassistant.conversation.submit", "homeassistant.homeGraph.askHomeGraph", "homeassistant.homeGraph.browse", "homeassistant.homeGraph.export", "homeassistant.homeGraph.generateHomeGraphPacket", "homeassistant.homeGraph.generateRoomPage", "homeassistant.homeGraph.import", "homeassistant.homeGraph.ingestHomeGraphArtifact", "homeassistant.homeGraph.ingestHomeGraphNote", "homeassistant.homeGraph.ingestHomeGraphUrl", "homeassistant.homeGraph.linkHomeGraphKnowledge", "homeassistant.homeGraph.listHomeGraphIssues", "homeassistant.homeGraph.map", "homeassistant.homeGraph.pages.list", "homeassistant.homeGraph.refinement.run", "homeassistant.homeGraph.refinement.task.cancel", "homeassistant.homeGraph.refinement.task.get", "homeassistant.homeGraph.refinement.tasks.list", "homeassistant.homeGraph.refreshDevicePassport", "homeassistant.homeGraph.reindex", "homeassistant.homeGraph.reset", "homeassistant.homeGraph.reviewHomeGraphFact", "homeassistant.homeGraph.sources.list", "homeassistant.homeGraph.status", "homeassistant.homeGraph.syncHomeGraph", "homeassistant.homeGraph.unlinkHomeGraphKnowledge", "inbound.telegram.cancel", "inbound.telegram.configure", "inbound.telegram.decide", "inbound.telegram.list", "inbound.telegram.read", "inbound.telegram.release", "inbound.telegram.revoke", "inbound.telegram.status", "intelligence.snapshot", "judgment.battery.run", "knowledge.ask", "knowledge.candidate.decide", "knowledge.candidate.get", "knowledge.candidates.list", "knowledge.connector.doctor", "knowledge.connector.get", "knowledge.connectors.list", "knowledge.extraction.get", "knowledge.extractions.list", "knowledge.graphql.execute", "knowledge.graphql.schema", "knowledge.ingest.artifact", "knowledge.ingest.bookmarks", "knowledge.ingest.browserHistory", "knowledge.ingest.connector", "knowledge.ingest.url", "knowledge.ingest.urls", "knowledge.issue.review", "knowledge.issues.list", "knowledge.item.get", "knowledge.job-runs.list", "knowledge.job.get", "knowledge.job.run", "knowledge.jobs.list", "knowledge.lint", "knowledge.map", "knowledge.nodes.list", "knowledge.packet", "knowledge.projection.materialize", "knowledge.projection.render", "knowledge.projections.list", "knowledge.refinement.run", "knowledge.refinement.task.cancel", "knowledge.refinement.task.get", "knowledge.refinement.tasks.list", "knowledge.reindex", "knowledge.report.get", "knowledge.reports.list", "knowledge.schedule.delete", "knowledge.schedule.enable", "knowledge.schedule.get", "knowledge.schedule.save", "knowledge.schedules.list", "knowledge.search", "knowledge.source.extraction.get", "knowledge.sources.list", "knowledge.status", "knowledge.usage.list", "local_auth.bootstrap.delete", "local_auth.sessions.delete", "local_auth.status", "local_auth.users.create", "local_auth.users.delete", "local_auth.users.password.rotate", "mcp.config.get", "mcp.config.reload", "mcp.servers.list", "mcp.servers.remove", "mcp.servers.reveal", "mcp.servers.upsert", "mcp.tools.list", "media.analyze", "media.generate", "media.providers.list", "media.transform", "memory.consolidation.receipts", "memory.doctor", "memory.embeddings.default.set", "memory.projections.get", "memory.projections.list", "memory.records.add", "memory.records.delete", "memory.records.export", "memory.records.get", "memory.records.import", "memory.records.links.add", "memory.records.links.list", "memory.records.list", "memory.records.search", "memory.records.search-semantic", "memory.records.update", "memory.records.update-review", "memory.review-queue", "memory.vector.rebuild", "memory.vector.stats", "models.current.get", "models.current.set", "models.list", "multimodal.analyze", "multimodal.packet", "multimodal.providers.list", "multimodal.status", "multimodal.writeback", "occasions.acknowledge", "occasions.answer", "occasions.confirm", "occasions.conflict.resolve", "occasions.gifts", "occasions.interview.answer", "occasions.interview.get", "occasions.interview.record", "occasions.list", "occasions.pending", "occasions.plans.confirm", "occasions.plans.list", "occasions.plans.propose", "occasions.propose", "occasions.remove", "occasions.state", "occasions.sweep", "ops.memory.get", "pairing.handoff.complete", "pairing.handoff.create", "pairing.posture.get", "pairing.tokens.create", "pairing.tokens.delete", "pairing.tokens.list", "pairing.tokens.migrate", "pairing.tokens.rename", "pairing.tokens.revokeShared", "panels.list", "panels.open", "payments.budget.status", "payments.cards.create", "payments.cards.delete", "payments.cards.list", "payments.checkout.approve", "payments.checkout.begin", "payments.checkout.fillCard", "payments.purchase.approve", "payments.purchase.cancel", "payments.purchase.deny", "payments.purchase.reconcile", "payments.purchase.status", "payments.purchases.list", "permissions.rules.delete", "permissions.rules.list", "power.keepAwake.set", "power.status.get", "principals.create", "principals.delete", "principals.get", "principals.list", "principals.resolve", "principals.update", "profile.append", "profile.forget", "profile.get", "profile.person", "profile.provenance", "profile.read", "profile.set", "profile.status", "profile.undo", "projectPlanning.decisions.list", "projectPlanning.decisions.record", "projectPlanning.evaluate", "projectPlanning.language.get", "projectPlanning.language.upsert", "projectPlanning.state.get", "projectPlanning.state.upsert", "projectPlanning.status", "projectPlanning.workPlan.clearCompleted", "projectPlanning.workPlan.snapshot", "projectPlanning.workPlan.task.create", "projectPlanning.workPlan.task.delete", "projectPlanning.workPlan.task.get", "projectPlanning.workPlan.task.status", "projectPlanning.workPlan.task.update", "projectPlanning.workPlan.tasks.list", "projectPlanning.workPlan.tasks.reorder", "providers.get", "providers.list", "providers.usage.get", "push.subscriptions.create", "push.subscriptions.delete", "push.subscriptions.list", "push.subscriptions.reconcile", "push.subscriptions.verify", "push.vapid.get", "quota.fanout.get", "quota.snapshot.get", "relay.pairing.mint", "relay.reachability.get", "remote.node_host.contract", "remote.pair.requests.approve", "remote.pair.requests.list", "remote.pair.requests.reject", "remote.peers.disconnect", "remote.peers.invoke", "remote.peers.list", "remote.peers.token.revoke", "remote.peers.token.rotate", "remote.snapshot", "remote.work.cancel", "remote.work.list", "review.snapshot", "rewind.apply", "rewind.conversation.host.register", "rewind.conversation.host.release", "rewind.conversation.hosts.list", "rewind.conversation.requests.answer", "rewind.conversation.requests.take", "rewind.plan", "routes.bindings.create", "routes.bindings.delete", "routes.bindings.list", "routes.bindings.update", "routes.snapshot", "runtime.metrics.get", "scheduler.capacity", "security.settings", "services.install", "services.restart", "services.start", "services.status", "services.stop", "services.uninstall", "sessions.changes.get", "sessions.close", "sessions.contextUsage.get", "sessions.create", "sessions.delete", "sessions.detach", "sessions.followUp", "sessions.get", "sessions.hosted.attach", "sessions.hosted.create", "sessions.hosted.detach", "sessions.hosted.kill", "sessions.hosted.list", "sessions.inputs.cancel", "sessions.inputs.deliver", "sessions.inputs.list", "sessions.integration.snapshot", "sessions.list", "sessions.messages.create", "sessions.messages.list", "sessions.permissionMode.get", "sessions.permissionMode.set", "sessions.queuedMessages.delete", "sessions.queuedMessages.edit", "sessions.queuedMessages.list", "sessions.register", "sessions.reopen", "sessions.search", "sessions.steer", "sessions.toolCalls.cancel", "sessions.turns.cancel", "settings.snapshot", "skills.create", "skills.delete", "skills.get", "skills.list", "skills.update", "stepup.challenge.mint", "stepup.credentials.list", "stepup.credentials.register", "stepup.credentials.remove", "surfaces.list", "tailscale.get", "tailscale.serve.run", "tasks.cancel", "tasks.create", "tasks.get", "tasks.list", "tasks.retry", "tasks.status", "telemetry.errors.list", "telemetry.events.list", "telemetry.metrics.get", "telemetry.otlp.logs", "telemetry.otlp.metrics", "telemetry.otlp.traces", "telemetry.snapshot", "telemetry.stream", "telemetry.traces.list", "update.check", "update.status", "voice.local.install", "voice.local.status", "voice.providers.list", "voice.realtime.session", "voice.status", "voice.stt", "voice.tts", "voice.tts.stream", "voice.voices.list", "voice.wake.model.get", "voice.wake.provision", "voice.wake.status", "watchers.create", "watchers.delete", "watchers.list", "watchers.run", "watchers.start", "watchers.stop", "watchers.triggers.migrate", "watchers.triggers.status", "watchers.update", "web_search.providers.list", "web_search.query", "workLedger.execution.cancel", "workLedger.execution.resume", "workLedger.execution.start", "workLedger.execution.status", "workLedger.history", "workLedger.importLegacy", "workLedger.intake.admit", "workLedger.intake.cancel", "workLedger.intake.capture", "workLedger.intake.get", "workLedger.intake.resume", "workLedger.prepareLegacyImport", "workLedger.project", "workLedger.snapshot", "workLedger.submission.get", "workLedger.submit", "workLedger.turn.cancel", "workLedger.turn.session", "workLedger.turn.start", "workLedger.turn.startAgent", "workLedger.turn.status", "workspaces.registrations.add", "workspaces.registrations.list", "workspaces.registrations.remove", "workspaces.resolve", "worktrees.discard", "worktrees.setup.run", "worktrees.snapshot"];
+export const OPERATOR_METHOD_IDS: readonly ["accounts.snapshot", "acp.agents.list", "acp.sessions.create", "approvals.approve", "approvals.cancel", "approvals.claim", "approvals.deny", "approvals.list", "approvals.raise", "artifacts.content.get", "artifacts.create", "artifacts.get", "artifacts.list", "automation.heartbeat.list", "automation.heartbeat.run", "automation.integration.snapshot", "automation.jobs.create", "automation.jobs.delete", "automation.jobs.disable", "automation.jobs.enable", "automation.jobs.list", "automation.jobs.run", "automation.jobs.update", "automation.runs.cancel", "automation.runs.get", "automation.runs.list", "automation.runs.retry", "automation.schedules.create", "automation.schedules.delete", "automation.schedules.disable", "automation.schedules.enable", "automation.schedules.list", "automation.schedules.run", "batch.jobs.cancel", "batch.jobs.create", "batch.jobs.get", "batch.jobs.list", "batch.run", "batch.runtime.get", "browser.click", "browser.extract", "browser.history.back", "browser.history.forward", "browser.navigate", "browser.press", "browser.provision", "browser.readText", "browser.screenshot", "browser.scroll", "browser.select", "browser.sessions.attach", "browser.sessions.close", "browser.sessions.launch", "browser.sessions.list", "browser.sessions.release", "browser.snapshot", "browser.status", "browser.tabs.close", "browser.tabs.create", "browser.tabs.list", "browser.tabs.switch", "browser.type", "browser.waitFor", "calendar.calendars.list", "calendar.events.create", "calendar.events.delete", "calendar.events.get", "calendar.events.list", "calendar.events.update", "calendar.ics.export", "calendar.ics.import", "channels.accounts.action.default", "channels.accounts.action.named", "channels.accounts.get", "channels.accounts.list", "channels.accounts.surface.list", "channels.actions.invoke", "channels.actions.list", "channels.actions.surface.list", "channels.agent_tools.list", "channels.agent_tools.surface.list", "channels.allowlist.edit", "channels.allowlist.resolve", "channels.authorize", "channels.capabilities.list", "channels.capabilities.surface.list", "channels.directory.query", "channels.doctor.get", "channels.drafts.delete", "channels.drafts.get", "channels.drafts.list", "channels.drafts.save", "channels.inbox.applyLabels", "channels.inbox.list", "channels.lifecycle.get", "channels.policies.audit", "channels.policies.list", "channels.policies.update", "channels.profiles.delete", "channels.profiles.get", "channels.profiles.list", "channels.profiles.set", "channels.repairs.list", "channels.routing.assign", "channels.routing.delete", "channels.routing.list", "channels.setup.get", "channels.status", "channels.targets.resolve", "channels.test.send", "channels.tools.invoke", "channels.tools.list", "channels.tools.surface.list", "checkin.config.get", "checkin.config.set", "checkin.receipts.list", "checkin.run", "checkpoints.create", "checkpoints.diff", "checkpoints.list", "checkpoints.restore", "checkpoints.restorePreview", "checkpoints.revertHunk", "checkpoints.revertHunkPreview", "ci.status", "ci.watches.create", "ci.watches.delete", "ci.watches.list", "ci.watches.run", "cloudflare.credentials.verify", "cloudflare.disable", "cloudflare.provision", "cloudflare.resources.list", "cloudflare.status", "cloudflare.token.create", "cloudflare.token.requirements.get", "cloudflare.worker.verify", "companion.chat.events.stream", "companion.chat.messages.create", "companion.chat.messages.edit", "companion.chat.messages.list", "companion.chat.messages.retry", "companion.chat.messages.search", "companion.chat.messages.steer", "companion.chat.sessions.close", "companion.chat.sessions.create", "companion.chat.sessions.delete", "companion.chat.sessions.get", "companion.chat.sessions.list", "companion.chat.sessions.update", "companion.chat.turns.cancel", "config.get", "config.reset", "config.set", "config.setMany", "continuity.snapshot", "contracts.budget", "contracts.cancel", "contracts.dispatch", "contracts.get", "contracts.list", "contracts.remove", "contracts.reply", "contracts.retryUnit", "contracts.start", "contracts.status", "contracts.summaries", "control.auth.current", "control.auth.login", "control.clients.list", "control.contract", "control.events.catalog", "control.events.stream", "control.messages.list", "control.methods.get", "control.methods.list", "control.snapshot", "control.status", "control.web", "cost.attribution.get", "credentials.delete", "credentials.get", "credentials.set", "deliveries.get", "deliveries.list", "devices.artifacts.delete", "devices.artifacts.list", "devices.artifacts.read", "devices.capability.request", "devices.grants.list", "devices.grants.revoke", "devices.housekeeping.run", "devices.nodes.list", "email.attachment.get", "email.draft.create", "email.drafts.list", "email.expectation.cancel", "email.expectation.list", "email.expectation.open", "email.inbound.status", "email.inbox.list", "email.inbox.read", "email.inbox.update", "email.send", "flags.graduation.report", "flags.status", "fleet.archive", "fleet.archiveFinished", "fleet.archived.list", "fleet.attempts.judge", "fleet.attempts.list", "fleet.attempts.pick", "fleet.conflicts.list", "fleet.conflicts.resolve", "fleet.conflicts.retry", "fleet.graph.get", "fleet.interrupt", "fleet.list", "fleet.observed.steer", "fleet.resume", "fleet.snapshot", "fleet.stop", "fleet.unarchive", "health.snapshot", "homeassistant.conversation.cancel", "homeassistant.conversation.health", "homeassistant.conversation.stream", "homeassistant.conversation.submit", "homeassistant.homeGraph.askHomeGraph", "homeassistant.homeGraph.browse", "homeassistant.homeGraph.export", "homeassistant.homeGraph.generateHomeGraphPacket", "homeassistant.homeGraph.generateRoomPage", "homeassistant.homeGraph.import", "homeassistant.homeGraph.ingestHomeGraphArtifact", "homeassistant.homeGraph.ingestHomeGraphNote", "homeassistant.homeGraph.ingestHomeGraphUrl", "homeassistant.homeGraph.linkHomeGraphKnowledge", "homeassistant.homeGraph.listHomeGraphIssues", "homeassistant.homeGraph.map", "homeassistant.homeGraph.pages.list", "homeassistant.homeGraph.refinement.run", "homeassistant.homeGraph.refinement.task.cancel", "homeassistant.homeGraph.refinement.task.get", "homeassistant.homeGraph.refinement.tasks.list", "homeassistant.homeGraph.refreshDevicePassport", "homeassistant.homeGraph.reindex", "homeassistant.homeGraph.reset", "homeassistant.homeGraph.reviewHomeGraphFact", "homeassistant.homeGraph.sources.list", "homeassistant.homeGraph.status", "homeassistant.homeGraph.syncHomeGraph", "homeassistant.homeGraph.unlinkHomeGraphKnowledge", "inbound.telegram.cancel", "inbound.telegram.configure", "inbound.telegram.decide", "inbound.telegram.list", "inbound.telegram.read", "inbound.telegram.release", "inbound.telegram.revoke", "inbound.telegram.status", "inbox.answer", "inbox.delivery", "inbox.list", "inbox.post", "inbox.withdraw", "intelligence.snapshot", "judgment.battery.run", "knowledge.ask", "knowledge.candidate.decide", "knowledge.candidate.get", "knowledge.candidates.list", "knowledge.connector.doctor", "knowledge.connector.get", "knowledge.connectors.list", "knowledge.extraction.get", "knowledge.extractions.list", "knowledge.graphql.execute", "knowledge.graphql.schema", "knowledge.ingest.artifact", "knowledge.ingest.bookmarks", "knowledge.ingest.browserHistory", "knowledge.ingest.connector", "knowledge.ingest.url", "knowledge.ingest.urls", "knowledge.issue.review", "knowledge.issues.list", "knowledge.item.get", "knowledge.job-runs.list", "knowledge.job.get", "knowledge.job.run", "knowledge.jobs.list", "knowledge.lint", "knowledge.map", "knowledge.nodes.list", "knowledge.packet", "knowledge.projection.materialize", "knowledge.projection.render", "knowledge.projections.list", "knowledge.refinement.run", "knowledge.refinement.task.cancel", "knowledge.refinement.task.get", "knowledge.refinement.tasks.list", "knowledge.reindex", "knowledge.report.get", "knowledge.reports.list", "knowledge.schedule.delete", "knowledge.schedule.enable", "knowledge.schedule.get", "knowledge.schedule.save", "knowledge.schedules.list", "knowledge.search", "knowledge.source.extraction.get", "knowledge.sources.list", "knowledge.status", "knowledge.usage.list", "local_auth.bootstrap.delete", "local_auth.sessions.delete", "local_auth.status", "local_auth.users.create", "local_auth.users.delete", "local_auth.users.password.rotate", "mcp.config.get", "mcp.config.reload", "mcp.servers.list", "mcp.servers.remove", "mcp.servers.reveal", "mcp.servers.upsert", "mcp.tools.list", "media.analyze", "media.generate", "media.providers.list", "media.transform", "memory.consolidation.decide", "memory.consolidation.receipts", "memory.doctor", "memory.embeddings.default.set", "memory.projections.get", "memory.projections.list", "memory.records.add", "memory.records.delete", "memory.records.export", "memory.records.get", "memory.records.import", "memory.records.links.add", "memory.records.links.list", "memory.records.list", "memory.records.search", "memory.records.search-semantic", "memory.records.update", "memory.records.update-review", "memory.review-queue", "memory.vector.rebuild", "memory.vector.stats", "models.current.get", "models.current.set", "models.list", "multimodal.analyze", "multimodal.packet", "multimodal.providers.list", "multimodal.status", "multimodal.writeback", "notifications.deadLetters.list", "notifications.deadLetters.replay", "occasions.acknowledge", "occasions.answer", "occasions.confirm", "occasions.conflict.resolve", "occasions.gifts", "occasions.interview.answer", "occasions.interview.get", "occasions.interview.record", "occasions.list", "occasions.pending", "occasions.plans.confirm", "occasions.plans.list", "occasions.plans.propose", "occasions.plans.remove", "occasions.plans.update", "occasions.propose", "occasions.remove", "occasions.state", "occasions.sweep", "occasions.update", "ops.doctor", "ops.memory.get", "pairing.handoff.complete", "pairing.handoff.create", "pairing.posture.get", "pairing.tokens.create", "pairing.tokens.delete", "pairing.tokens.list", "pairing.tokens.migrate", "pairing.tokens.rename", "pairing.tokens.revokeShared", "panels.list", "panels.open", "payments.budget.status", "payments.cards.create", "payments.cards.delete", "payments.cards.list", "payments.checkout.approve", "payments.checkout.begin", "payments.purchase.approve", "payments.purchase.cancel", "payments.purchase.deny", "payments.purchase.reconcile", "payments.purchase.securityCode", "payments.purchase.status", "payments.purchases.list", "payments.standing.create", "payments.standing.delete", "payments.standing.list", "permissions.rules.delete", "permissions.rules.list", "power.keepAwake.set", "power.status.get", "principals.create", "principals.delete", "principals.get", "principals.list", "principals.resolve", "principals.update", "profile.append", "profile.forget", "profile.get", "profile.person", "profile.provenance", "profile.read", "profile.set", "profile.status", "profile.undo", "projectPlanning.decisions.list", "projectPlanning.decisions.record", "projectPlanning.language.get", "projectPlanning.state.get", "projectPlanning.status", "projectPlanning.workPlan.clearCompleted", "projectPlanning.workPlan.snapshot", "projectPlanning.workPlan.task.create", "projectPlanning.workPlan.task.delete", "projectPlanning.workPlan.task.get", "projectPlanning.workPlan.task.status", "projectPlanning.workPlan.task.update", "projectPlanning.workPlan.tasks.list", "projectPlanning.workPlan.tasks.reorder", "providers.get", "providers.list", "providers.usage.get", "push.subscriptions.create", "push.subscriptions.delete", "push.subscriptions.list", "push.subscriptions.reconcile", "push.subscriptions.verify", "push.vapid.get", "quota.fanout.get", "quota.snapshot.get", "relay.pairing.mint", "relay.reachability.get", "remote.node_host.contract", "remote.pair.requests.approve", "remote.pair.requests.list", "remote.pair.requests.reject", "remote.peers.disconnect", "remote.peers.get", "remote.peers.invoke", "remote.peers.list", "remote.peers.token.revoke", "remote.peers.token.rotate", "remote.snapshot", "remote.work.cancel", "remote.work.list", "review.snapshot", "rewind.apply", "rewind.conversation.host.register", "rewind.conversation.host.release", "rewind.conversation.hosts.list", "rewind.conversation.requests.answer", "rewind.conversation.requests.take", "rewind.plan", "rewind.undo", "routes.bindings.create", "routes.bindings.delete", "routes.bindings.list", "routes.bindings.update", "routes.snapshot", "runtime.metrics.get", "scheduler.capacity", "security.settings", "services.install", "services.restart", "services.start", "services.status", "services.stop", "services.uninstall", "sessions.changes.get", "sessions.close", "sessions.contextUsage.get", "sessions.create", "sessions.delete", "sessions.detach", "sessions.followUp", "sessions.get", "sessions.hosted.attach", "sessions.hosted.create", "sessions.hosted.detach", "sessions.hosted.kill", "sessions.hosted.list", "sessions.hosted.workspaces", "sessions.inputs.cancel", "sessions.inputs.deliver", "sessions.inputs.list", "sessions.integration.snapshot", "sessions.list", "sessions.messages.create", "sessions.messages.list", "sessions.permissionMode.get", "sessions.permissionMode.set", "sessions.queuedMessages.delete", "sessions.queuedMessages.edit", "sessions.queuedMessages.list", "sessions.register", "sessions.reopen", "sessions.search", "sessions.steer", "sessions.toolCalls.cancel", "sessions.turns.cancel", "settings.snapshot", "skills.create", "skills.delete", "skills.get", "skills.list", "skills.update", "stepup.challenge.mint", "stepup.credentials.list", "stepup.credentials.register", "stepup.credentials.remove", "surfaces.list", "tailscale.get", "tailscale.serve.run", "tailscale.serve.stop", "tasks.cancel", "tasks.create", "tasks.get", "tasks.list", "tasks.retry", "tasks.status", "telemetry.errors.list", "telemetry.events.list", "telemetry.metrics.get", "telemetry.otlp.logs", "telemetry.otlp.metrics", "telemetry.otlp.traces", "telemetry.snapshot", "telemetry.stream", "telemetry.traces.list", "update.check", "update.status", "voice.local.install", "voice.local.status", "voice.providers.list", "voice.realtime.session", "voice.status", "voice.stt", "voice.tts", "voice.tts.stream", "voice.voices.list", "voice.wake.model.get", "voice.wake.provision", "voice.wake.status", "watchers.create", "watchers.delete", "watchers.list", "watchers.run", "watchers.start", "watchers.stop", "watchers.triggers.status", "watchers.update", "web_search.providers.list", "web_search.query", "workLedger.execution.cancel", "workLedger.execution.resume", "workLedger.execution.start", "workLedger.execution.status", "workLedger.history", "workLedger.importLegacy", "workLedger.intake.admit", "workLedger.intake.cancel", "workLedger.intake.capture", "workLedger.intake.get", "workLedger.intake.resume", "workLedger.prepareLegacyImport", "workLedger.project", "workLedger.snapshot", "workLedger.submission.get", "workLedger.submit", "workLedger.turn.cancel", "workLedger.turn.session", "workLedger.turn.start", "workLedger.turn.startAgent", "workLedger.turn.status", "workspaces.registrations.add", "workspaces.registrations.list", "workspaces.registrations.remove", "workspaces.resolve", "worktrees.discard", "worktrees.setup.run", "worktrees.snapshot"];
 
 // @public
 export const OPERATOR_WORK_CANCEL_REASON = "cancelled by the requester";
@@ -3447,6 +3152,9 @@ export interface OperatorMethodContract {
     readonly dangerous?: boolean | undefined;
     // (undocumented)
     readonly description: string;
+    readonly effect?: 'read' | 'write' | 'outward' | undefined;
+    // Warning: (ae-forgotten-export) The symbol "ContractErrorCode" needs to be exported by the entry point index.d.ts
+    readonly errorCodes?: readonly ContractErrorCode[] | undefined;
     // (undocumented)
     readonly events?: readonly string[] | undefined;
     // (undocumented)
@@ -3461,8 +3169,11 @@ export interface OperatorMethodContract {
     readonly metadata?: Record<string, unknown> | undefined;
     // (undocumented)
     readonly outputSchema?: JsonSchema | undefined;
+    readonly ownerOnly?: boolean | undefined;
     // (undocumented)
     readonly pluginId?: string | undefined;
+    // Warning: (ae-forgotten-export) The symbol "ContractReplayKey" needs to be exported by the entry point index.d.ts
+    readonly replay?: ContractReplayKey | undefined;
     // (undocumented)
     readonly scopes: readonly string[];
     // (undocumented)
@@ -3635,7 +3346,6 @@ export interface OperatorMethodInputMap {
     // (undocumented)
     "automation.jobs.create": ({
         id?: string;
-        admission?: "autonomous";
         name?: string;
         description?: string;
         prompt: string;
@@ -3728,19 +3438,16 @@ export interface OperatorMethodInputMap {
     "automation.jobs.delete": {
         jobId: string;
         expectedMutationRevision?: string;
-        admission?: "autonomous";
     };
     // (undocumented)
     "automation.jobs.disable": {
         jobId: string;
         expectedMutationRevision?: string;
-        admission?: "autonomous";
     };
     // (undocumented)
     "automation.jobs.enable": {
         jobId: string;
         expectedMutationRevision?: string;
-        admission?: "autonomous";
     };
     // (undocumented)
     "automation.jobs.list": {
@@ -3755,7 +3462,6 @@ export interface OperatorMethodInputMap {
     "automation.jobs.update": ({
         jobId: string;
         expectedMutationRevision?: string;
-        admission?: "autonomous";
         name?: string;
         description?: string;
         prompt?: string;
@@ -3870,7 +3576,6 @@ export interface OperatorMethodInputMap {
     // (undocumented)
     "automation.schedules.create": ({
         name?: string;
-        admission?: "autonomous";
         prompt: string;
         cron?: string;
         every?: string;
@@ -3950,19 +3655,16 @@ export interface OperatorMethodInputMap {
     "automation.schedules.delete": {
         scheduleId: string;
         expectedMutationRevision?: string;
-        admission?: "autonomous";
     };
     // (undocumented)
     "automation.schedules.disable": {
         scheduleId: string;
         expectedMutationRevision?: string;
-        admission?: "autonomous";
     };
     // (undocumented)
     "automation.schedules.enable": {
         scheduleId: string;
         expectedMutationRevision?: string;
-        admission?: "autonomous";
     };
     // (undocumented)
     "automation.schedules.list": {};
@@ -4211,6 +3913,8 @@ export interface OperatorMethodInputMap {
         readonly [key: string]: unknown;
     });
     // (undocumented)
+    "calendar.calendars.list": {};
+    // (undocumented)
     "calendar.events.create": ({
         title: string;
         start: string;
@@ -4218,6 +3922,14 @@ export interface OperatorMethodInputMap {
         description?: string;
         attendees?: readonly string[];
         location?: string;
+        calendarId?: string;
+        confirm: boolean;
+    } & {
+        readonly [key: string]: unknown;
+    });
+    // (undocumented)
+    "calendar.events.delete": ({
+        eventId: string;
         calendarId?: string;
         confirm: boolean;
     } & {
@@ -4236,6 +3948,20 @@ export interface OperatorMethodInputMap {
         limit?: number;
     };
     // (undocumented)
+    "calendar.events.update": ({
+        eventId: string;
+        title?: string;
+        start?: string;
+        end?: string;
+        description?: string;
+        attendees?: readonly string[];
+        location?: string;
+        calendarId?: string;
+        confirm: boolean;
+    } & {
+        readonly [key: string]: unknown;
+    });
+    // (undocumented)
     "calendar.ics.export": {
         calendarId?: string;
         from?: string;
@@ -4245,6 +3971,7 @@ export interface OperatorMethodInputMap {
     "calendar.ics.import": ({
         icsContent: string;
         calendarId?: string;
+        replace?: boolean;
         confirm: boolean;
     } & {
         readonly [key: string]: unknown;
@@ -4382,7 +4109,6 @@ export interface OperatorMethodInputMap {
     // (undocumented)
     "channels.drafts.delete": {
         draftId: string;
-        admission?: "autonomous";
     };
     // (undocumented)
     "channels.drafts.get": {
@@ -4410,7 +4136,13 @@ export interface OperatorMethodInputMap {
         tags?: readonly string[];
         sentResponseId?: string;
         sendError?: string;
-        admission?: "autonomous";
+    } & {
+        readonly [key: string]: unknown;
+    });
+    // (undocumented)
+    "channels.inbox.applyLabels": ({
+        itemIds: readonly string[];
+        labels: readonly string[];
     } & {
         readonly [key: string]: unknown;
     });
@@ -4492,7 +4224,7 @@ export interface OperatorMethodInputMap {
         channelId?: string;
         model?: string;
         provider?: string;
-        permissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+        permissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
         metadata?: ({} & {
             readonly [key: string]: ({} & {
                 readonly [key: string]: JsonValue;
@@ -4505,7 +4237,6 @@ export interface OperatorMethodInputMap {
     };
     // (undocumented)
     "channels.routing.assign": ({
-        admission?: "autonomous";
         channelId?: string;
         surfaceKind: string;
         routeId?: string;
@@ -4517,7 +4248,6 @@ export interface OperatorMethodInputMap {
     // (undocumented)
     "channels.routing.delete": {
         assignmentId: string;
-        admission?: "autonomous";
     };
     // (undocumented)
     "channels.routing.list": {
@@ -4682,6 +4412,7 @@ export interface OperatorMethodInputMap {
         accountId?: string;
         apiToken?: string;
         apiTokenRef?: string;
+        bootstrapToken?: string;
         workerName?: string;
         disableWorkerSubdomain?: boolean;
         disableCron?: boolean;
@@ -4726,7 +4457,6 @@ export interface OperatorMethodInputMap {
         kvNamespaceName?: string;
         kvNamespaceId?: string;
         durableObjectNamespaceName?: string;
-        durableObjectNamespaceId?: string;
         r2BucketName?: string;
         secretsStoreName?: string;
         secretsStoreId?: string;
@@ -4793,6 +4523,7 @@ export interface OperatorMethodInputMap {
         persistConfig?: boolean;
         storeApiToken?: boolean;
         returnGeneratedToken?: boolean;
+        reuse?: boolean;
     } & {
         readonly [key: string]: unknown;
     });
@@ -4887,6 +4618,13 @@ export interface OperatorMethodInputMap {
         readonly [key: string]: unknown;
     });
     // (undocumented)
+    "companion.chat.messages.search": {
+        query: string;
+        limit?: number;
+        cursor?: string;
+        includeClosed?: boolean;
+    };
+    // (undocumented)
     "companion.chat.messages.steer": ({
         sessionId: string;
         clientMessageId?: string;
@@ -4974,25 +4712,89 @@ export interface OperatorMethodInputMap {
     };
     // (undocumented)
     "config.set": ({
-        key: string;
+        key?: string;
+        value?: ({} & {
+            readonly [key: string]: JsonValue;
+        }) | boolean | null | number | readonly JsonValue[] | string;
+        settingsPrecondition?: ({
+            version: number;
+            action: "apply" | "capture";
+            reference?: string;
+        } & {
+            readonly [key: string]: unknown;
+        });
+        settingsImportPrecondition?: ({
+            version: number;
+            action: "apply" | "capture";
+            reference?: string;
+        } & {
+            readonly [key: string]: unknown;
+        });
     } & {
         readonly [key: string]: unknown;
+    }) & ({
+        key: string;
+        value: ({} & {
+            readonly [key: string]: JsonValue;
+        }) | boolean | null | number | readonly JsonValue[] | string;
+    } | {
+        settingsPrecondition: ({
+            version: number;
+            action: "apply" | "capture";
+            reference?: string;
+        } & {
+            readonly [key: string]: unknown;
+        });
+    } | {
+        settingsImportPrecondition: ({
+            version: number;
+            action: "apply" | "capture";
+            reference?: string;
+        } & {
+            readonly [key: string]: unknown;
+        });
     });
     // (undocumented)
+    "config.setMany": {
+        entries: readonly ({
+            key: string;
+            value: ({} & {
+                readonly [key: string]: JsonValue;
+            }) | boolean | null | number | readonly JsonValue[] | string;
+        })[];
+    };
+    // (undocumented)
     "continuity.snapshot": {};
+    // (undocumented)
+    "contracts.budget": {
+        contractId: string;
+        maxCostUsd?: number;
+        maxTokens?: number;
+    };
     // (undocumented)
     "contracts.cancel": {
         contractId: string;
         reason?: string;
     };
     // (undocumented)
+    "contracts.dispatch": {
+        ask: string;
+        workspaceRoot?: string;
+        idempotencyKey?: string;
+    };
+    // (undocumented)
     "contracts.get": {
         contractId: string;
+        includeInputFiles?: boolean;
     };
     // (undocumented)
     "contracts.list": {
         sessionId?: string;
         includeTerminal?: boolean;
+    };
+    // (undocumented)
+    "contracts.remove": {
+        contractId: string;
     };
     // (undocumented)
     "contracts.reply": {
@@ -5001,11 +4803,27 @@ export interface OperatorMethodInputMap {
         text: string;
     };
     // (undocumented)
+    "contracts.retryUnit": {
+        contractId: string;
+        unitId: string;
+    };
+    // (undocumented)
     "contracts.start": {
         ask: string;
         sessionId?: string;
         workspaceRoot?: string;
         isolation?: "auto" | "shared" | "worktree";
+        idempotencyKey?: string;
+    };
+    // (undocumented)
+    "contracts.status": {
+        contractId: string;
+        ifRevision?: string;
+    };
+    // (undocumented)
+    "contracts.summaries": {
+        sessionId?: string;
+        includeTerminal?: boolean;
     };
     // (undocumented)
     "control.auth.current": {};
@@ -5072,6 +4890,10 @@ export interface OperatorMethodInputMap {
     // (undocumented)
     "deliveries.list": {};
     // (undocumented)
+    "devices.artifacts.delete": {
+        artifactId: string;
+    };
+    // (undocumented)
     "devices.artifacts.list": {
         nodeId?: string;
         limit?: number;
@@ -5108,6 +4930,11 @@ export interface OperatorMethodInputMap {
     // (undocumented)
     "devices.nodes.list": {};
     // (undocumented)
+    "email.attachment.get": {
+        uid: number;
+        index: number;
+    };
+    // (undocumented)
     "email.draft.create": ({
         to: string;
         subject: string;
@@ -5117,6 +4944,10 @@ export interface OperatorMethodInputMap {
     } & {
         readonly [key: string]: unknown;
     });
+    // (undocumented)
+    "email.drafts.list": {
+        limit?: number;
+    };
     // (undocumented)
     "email.expectation.cancel": {
         id: string;
@@ -5138,10 +4969,17 @@ export interface OperatorMethodInputMap {
         limit?: number;
         since?: string;
         unreadOnly?: boolean;
+        before?: number;
     };
     // (undocumented)
     "email.inbox.read": {
         uid: number;
+    };
+    // (undocumented)
+    "email.inbox.update": {
+        uid: number;
+        action: "archive" | "delete" | "seen" | "unseen";
+        uidValidity?: number;
     };
     // (undocumented)
     "email.send": ({
@@ -5150,11 +4988,14 @@ export interface OperatorMethodInputMap {
         body: string;
         inReplyTo?: string;
         confirm: boolean;
+        clientSendId?: string;
     } & {
         readonly [key: string]: unknown;
     });
     // (undocumented)
     "flags.graduation.report": {};
+    // (undocumented)
+    "flags.status": {};
     // (undocumented)
     "fleet.archive": {
         id: string;
@@ -5186,8 +5027,17 @@ export interface OperatorMethodInputMap {
         itemId: string;
     };
     // (undocumented)
+    "fleet.conflicts.retry": {
+        itemId: string;
+    };
+    // (undocumented)
     "fleet.graph.get": {
         workstreamId: string;
+    };
+    // (undocumented)
+    "fleet.interrupt": {
+        id: string;
+        cascade?: boolean;
     };
     // (undocumented)
     "fleet.list": {
@@ -5200,9 +5050,20 @@ export interface OperatorMethodInputMap {
     "fleet.observed.steer": {
         id: string;
         text: string;
+        submit?: boolean;
+    };
+    // (undocumented)
+    "fleet.resume": {
+        id: string;
+        cascade?: boolean;
     };
     // (undocumented)
     "fleet.snapshot": {};
+    // (undocumented)
+    "fleet.stop": {
+        id: string;
+        cascade?: boolean;
+    };
     // (undocumented)
     "fleet.unarchive": {
         id: string;
@@ -5709,60 +5570,50 @@ export interface OperatorMethodInputMap {
         };
     };
     // (undocumented)
+    "inbox.answer": {
+        itemId: string;
+        option?: string;
+        text?: string;
+    };
+    // (undocumented)
+    "inbox.delivery": {
+        itemId: string;
+        state: "delivered" | "undeliverable";
+        reason?: string;
+    };
+    // (undocumented)
+    "inbox.list": {
+        itemId?: string;
+        status?: "all" | "closed" | "open";
+        kinds?: readonly ("approval" | "claim" | "purchase" | "question" | "queued-action")[];
+        sessionId?: string;
+        limit?: number;
+    };
+    // (undocumented)
+    "inbox.post": {
+        kind: "question" | "queued-action";
+        title: string;
+        detail?: string;
+        options?: readonly string[];
+        sessionId?: string;
+        askedBy?: string;
+        key?: string;
+        expiresAt?: number;
+        metadata?: ({} & {
+            readonly [key: string]: ({} & {
+                readonly [key: string]: JsonValue;
+            }) | boolean | null | number | readonly JsonValue[] | string;
+        });
+    };
+    // (undocumented)
+    "inbox.withdraw": {
+        itemId: string;
+        reason?: string;
+    };
+    // (undocumented)
     "intelligence.snapshot": {};
     // (undocumented)
     "judgment.battery.run": {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.voice.speech-seams";
-        batteryVersion: 2;
-        input: {
-            sessionId: string;
-            messageId: string;
-            start: number;
-            end: number;
-            contentRevision: string;
-            cursor: number;
-        };
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.errors.daemon-refusal";
-        batteryVersion: 1;
-        input: {
-            errorRef: string;
-        };
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.palette.command-rank";
-        batteryVersion: 1;
-        input: {
-            query: {
-                kind: "inline";
-                text: string;
-            } | {
-                kind: "reference";
-                queryRef: string;
-            };
-            registryVersion: string;
-            candidates: readonly ({
-                kind: "builtin";
-                commandId: string;
-            } | {
-                kind: "chat";
-                sessionId: string;
-            })[];
-        };
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.mail.reply-subject";
-        batteryVersion: 1;
-        input: {
-            subjectRef: string;
-        };
-    } | {
         protocolVersion: 1;
         requestId: string;
         battery: "webui.models.catalog-provider-match";
@@ -5770,43 +5621,6 @@ export interface OperatorMethodInputMap {
         input: {
             providerId: string;
             keys: readonly string[];
-        };
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.credentials.provider-key";
-        batteryVersion: 1;
-        input: {
-            providerId: string;
-            keys: readonly string[];
-        };
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.settings.card-material-key";
-        batteryVersion: 1;
-        input: {
-            keys: readonly string[];
-        };
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.config.credential-key";
-        batteryVersion: 1;
-        input: {
-            keys: readonly string[];
-        };
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.code.language";
-        batteryVersion: 2;
-        input: {
-            sessionId: string;
-            messageId: string;
-            start: number;
-            end: number;
-            contentRevision: string;
         };
     };
     // (undocumented)
@@ -6261,6 +6075,7 @@ export interface OperatorMethodInputMap {
     };
     // (undocumented)
     "local_auth.users.password.rotate": ({
+        username: string;
         password: string;
     } & {
         readonly [key: string]: unknown;
@@ -6406,6 +6221,11 @@ export interface OperatorMethodInputMap {
         readonly [key: string]: unknown;
     });
     // (undocumented)
+    "memory.consolidation.decide": {
+        proposalId: string;
+        action: "both-stand" | "delete" | "keep" | "keep-both" | "keep-first" | "keep-second";
+    };
+    // (undocumented)
     "memory.consolidation.receipts": {};
     // (undocumented)
     "memory.doctor": {};
@@ -6423,6 +6243,7 @@ export interface OperatorMethodInputMap {
     "memory.projections.list": {};
     // (undocumented)
     "memory.records.add": ({
+        id?: string;
         cls: "architecture" | "constraint" | "decision" | "fact" | "incident" | "ownership" | "pattern" | "risk" | "runbook";
         summary: string;
         scope?: "project" | "session" | "team";
@@ -6650,6 +6471,22 @@ export interface OperatorMethodInputMap {
         });
     } & {
         readonly [key: string]: unknown;
+    }) & ({
+        artifact: {
+            artifactId?: string;
+            mimeType?: string;
+            dataBase64?: string;
+            uri?: string;
+            allowPrivateHosts?: boolean;
+            filename?: string;
+            metadata?: ({} & {
+                readonly [key: string]: ({} & {
+                    readonly [key: string]: JsonValue;
+                }) | boolean | null | number | readonly JsonValue[] | string;
+            });
+        };
+    } | {
+        artifactId: string;
     });
     // (undocumented)
     "multimodal.packet": ({
@@ -6662,12 +6499,12 @@ export interface OperatorMethodInputMap {
                 mimeType: string;
                 filename?: string;
                 sizeBytes: number;
-                sha256: string;
+                sha256?: string;
                 createdAt: number;
                 expiresAt?: number;
                 sourceUri?: string;
-                acquisitionMode?: string;
-                fetchMode?: string;
+                acquisitionMode?: "inline-data" | "local-path" | "remote-fetch" | "unknown";
+                fetchMode?: "allow-private-hosts" | "not-applicable" | "public-only" | "unknown";
                 metadata: ({} & {
                     readonly [key: string]: ({} & {
                         readonly [key: string]: JsonValue;
@@ -6720,12 +6557,12 @@ export interface OperatorMethodInputMap {
                 mimeType: string;
                 filename?: string;
                 sizeBytes: number;
-                sha256: string;
+                sha256?: string;
                 createdAt: number;
                 expiresAt?: number;
                 sourceUri?: string;
-                acquisitionMode?: string;
-                fetchMode?: string;
+                acquisitionMode?: "inline-data" | "local-path" | "remote-fetch" | "unknown";
+                fetchMode?: "allow-private-hosts" | "not-applicable" | "public-only" | "unknown";
                 metadata: ({} & {
                     readonly [key: string]: ({} & {
                         readonly [key: string]: JsonValue;
@@ -6771,36 +6608,43 @@ export interface OperatorMethodInputMap {
         readonly [key: string]: unknown;
     });
     // (undocumented)
+    "notifications.deadLetters.list": {
+        channel?: string;
+    };
+    // (undocumented)
+    "notifications.deadLetters.replay": {
+        ids?: readonly string[];
+    };
+    // (undocumented)
     "occasions.acknowledge": {
-        admission?: "autonomous";
         occasionId: string;
         source?: "conversation" | "explicit" | "gift-flow";
         occurrence?: string;
     };
     // (undocumented)
     "occasions.answer": {
-        admission?: "autonomous";
         occasionId: string;
         answer: "acknowledged" | "later" | "no" | "yes";
         occurrence?: string;
     };
     // (undocumented)
     "occasions.confirm": {
-        admission?: "autonomous";
         title: string;
         date: string;
         kind: "gift-giving" | "neither" | "remember-only";
         person?: string;
         recurrence?: "annual" | "once";
         leadDays?: number;
+        self?: boolean;
         surface: string;
         said: string;
         authority: string;
     };
     // (undocumented)
     "occasions.conflict.resolve": {
-        admission?: "autonomous";
         occasionId: string;
+        keep?: string;
+        authority?: string;
     };
     // (undocumented)
     "occasions.gifts": {
@@ -6808,7 +6652,6 @@ export interface OperatorMethodInputMap {
     };
     // (undocumented)
     "occasions.interview.answer": {
-        admission?: "autonomous";
         interviewId: string;
         stepId: string;
         text: string;
@@ -6819,7 +6662,6 @@ export interface OperatorMethodInputMap {
     };
     // (undocumented)
     "occasions.interview.record": {
-        admission?: "autonomous";
         interviewId: string;
         landedOn: string;
     };
@@ -6829,12 +6671,12 @@ export interface OperatorMethodInputMap {
     "occasions.pending": {};
     // (undocumented)
     "occasions.plans.confirm": {
-        admission?: "autonomous";
         title: string;
         from: string;
         to: string;
         away?: boolean;
         destination?: string;
+        details?: readonly string[];
         surface: string;
         said: string;
         authority: string;
@@ -6848,6 +6690,29 @@ export interface OperatorMethodInputMap {
         to: string;
         away?: boolean;
         destination?: string;
+        details?: readonly string[];
+    };
+    // (undocumented)
+    "occasions.plans.remove": {
+        planId: string;
+        planFrom?: string;
+        confirmed: boolean;
+        authority: string;
+    };
+    // (undocumented)
+    "occasions.plans.update": {
+        planId: string;
+        planFrom?: string;
+        title?: string;
+        from?: string;
+        to?: string;
+        away?: boolean;
+        destination?: string;
+        details?: readonly string[];
+        confirmed: boolean;
+        surface: string;
+        said: string;
+        authority: string;
     };
     // (undocumented)
     "occasions.propose": {
@@ -6857,10 +6722,10 @@ export interface OperatorMethodInputMap {
         person?: string;
         recurrence?: "annual" | "once";
         leadDays?: number;
+        self?: boolean;
     };
     // (undocumented)
     "occasions.remove": {
-        admission?: "autonomous";
         occasionId: string;
         confirmed: boolean;
         authority: string;
@@ -6868,8 +6733,25 @@ export interface OperatorMethodInputMap {
     // (undocumented)
     "occasions.state": {};
     // (undocumented)
-    "occasions.sweep": {
-        admission?: "autonomous";
+    "occasions.sweep": {};
+    // (undocumented)
+    "occasions.update": {
+        occasionId: string;
+        title?: string;
+        date?: string;
+        kind?: "gift-giving" | "neither" | "remember-only";
+        person?: string;
+        recurrence?: "annual" | "once";
+        leadDays?: null | number;
+        self?: boolean;
+        confirmed: boolean;
+        surface: string;
+        said: string;
+        authority: string;
+    };
+    // (undocumented)
+    "ops.doctor": {
+        symptom: string;
     };
     // (undocumented)
     "ops.memory.get": {};
@@ -6905,6 +6787,8 @@ export interface OperatorMethodInputMap {
     // (undocumented)
     "pairing.tokens.create": {
         name: string;
+        attemptId?: string;
+        client?: "agent";
     };
     // (undocumented)
     "pairing.tokens.delete": {
@@ -6915,6 +6799,7 @@ export interface OperatorMethodInputMap {
     // (undocumented)
     "pairing.tokens.migrate": {
         name: string;
+        attemptId?: string;
     };
     // (undocumented)
     "pairing.tokens.rename": {
@@ -6966,7 +6851,8 @@ export interface OperatorMethodInputMap {
         merchantDomain: string;
         checkoutUrl: string;
         item: string;
-        cardId: string;
+        cardId?: string;
+        merchantDiscovered?: boolean;
         requestedLines: readonly ({
             label: string;
             quantity: number;
@@ -6978,6 +6864,10 @@ export interface OperatorMethodInputMap {
         })[];
         tax?: string;
         fees?: readonly ({
+            label: string;
+            amount: string;
+        })[];
+        discounts?: readonly ({
             label: string;
             amount: string;
         })[];
@@ -7002,18 +6892,8 @@ export interface OperatorMethodInputMap {
         preferredTier?: "fast" | "fastest" | "normal";
         expirySeparator?: string;
         twoDigitYear?: boolean;
+        standingId?: string;
         requestedMax?: string;
-    };
-    // (undocumented)
-    "payments.checkout.fillCard": {
-        sessionId: string;
-        pageId: string;
-        targets: readonly ({
-            field: "cardholderName" | "cvv" | "expiry" | "expiryMonth" | "expiryYear" | "number";
-            ref: string;
-        })[];
-        expirySeparator?: string;
-        twoDigitYear?: boolean;
     };
     // (undocumented)
     "payments.purchase.approve": {
@@ -7046,6 +6926,13 @@ export interface OperatorMethodInputMap {
         confirm: true;
     };
     // (undocumented)
+    "payments.purchase.securityCode": {
+        purchaseId: string;
+        windowId: string;
+        code: string;
+        confirm: boolean;
+    };
+    // (undocumented)
     "payments.purchase.status": {
         purchaseId?: string;
     };
@@ -7054,6 +6941,23 @@ export interface OperatorMethodInputMap {
         limit?: number;
         dayKey?: string;
     };
+    // (undocumented)
+    "payments.standing.create": {
+        confirm: boolean;
+        item: string;
+        merchants: readonly string[];
+        maxPerPurchase: string;
+        maxPerPeriod: string;
+        periodDays: number;
+        expires?: string;
+    };
+    // (undocumented)
+    "payments.standing.delete": {
+        confirm: boolean;
+        id: string;
+    };
+    // (undocumented)
+    "payments.standing.list": {};
     // (undocumented)
     "permissions.rules.delete": {
         ruleId: string;
@@ -7112,7 +7016,6 @@ export interface OperatorMethodInputMap {
     };
     // (undocumented)
     "profile.append": {
-        admission?: "autonomous";
         section: string;
         text: string;
         surface: string;
@@ -7121,7 +7024,6 @@ export interface OperatorMethodInputMap {
     };
     // (undocumented)
     "profile.forget": {
-        admission?: "autonomous";
         fieldId?: string;
         section?: string;
         text?: string;
@@ -7143,7 +7045,6 @@ export interface OperatorMethodInputMap {
     "profile.read": {};
     // (undocumented)
     "profile.set": {
-        admission?: "autonomous";
         fieldId: string;
         value: string;
         surface: string;
@@ -7154,7 +7055,6 @@ export interface OperatorMethodInputMap {
     "profile.status": {};
     // (undocumented)
     "profile.undo": {
-        admission?: "autonomous";
         fieldId: string;
         authority: string;
     };
@@ -7186,34 +7086,9 @@ export interface OperatorMethodInputMap {
         readonly [key: string]: unknown;
     });
     // (undocumented)
-    "projectPlanning.evaluate": ({
-        projectId?: string;
-        knowledgeSpaceId?: string;
-        planningId?: string;
-        state?: ({} & {
-            readonly [key: string]: ({} & {
-                readonly [key: string]: JsonValue;
-            }) | boolean | null | number | readonly JsonValue[] | string;
-        });
-    } & {
-        readonly [key: string]: unknown;
-    });
-    // (undocumented)
     "projectPlanning.language.get": ({
         projectId?: string;
         knowledgeSpaceId?: string;
-    } & {
-        readonly [key: string]: unknown;
-    });
-    // (undocumented)
-    "projectPlanning.language.upsert": ({
-        projectId?: string;
-        knowledgeSpaceId?: string;
-        language: ({} & {
-            readonly [key: string]: ({} & {
-                readonly [key: string]: JsonValue;
-            }) | boolean | null | number | readonly JsonValue[] | string;
-        });
     } & {
         readonly [key: string]: unknown;
     });
@@ -7223,18 +7098,6 @@ export interface OperatorMethodInputMap {
         knowledgeSpaceId?: string;
         planningId?: string;
     };
-    // (undocumented)
-    "projectPlanning.state.upsert": ({
-        projectId?: string;
-        knowledgeSpaceId?: string;
-        state: ({} & {
-            readonly [key: string]: ({} & {
-                readonly [key: string]: JsonValue;
-            }) | boolean | null | number | readonly JsonValue[] | string;
-        });
-    } & {
-        readonly [key: string]: unknown;
-    });
     // (undocumented)
     "projectPlanning.status": ({
         projectId?: string;
@@ -7281,6 +7144,7 @@ export interface OperatorMethodInputMap {
             contractId?: string;
             phaseId?: string;
             agentId?: string;
+            sessionId?: string;
             turnId?: string;
             decisionId?: string;
             sourceMessageId?: string;
@@ -7450,6 +7314,10 @@ export interface OperatorMethodInputMap {
         readonly [key: string]: unknown;
     });
     // (undocumented)
+    "remote.peers.get": {
+        peerId: string;
+    };
+    // (undocumented)
     "remote.peers.invoke": ({
         peerId: string;
         command: string;
@@ -7533,7 +7401,10 @@ export interface OperatorMethodInputMap {
         messagesRemaining?: number;
         droppedMessages?: number;
         undoSnapshotId?: string;
+        undoExpiresAfter?: string;
+        undone?: boolean;
         unavailableReason?: string;
+        unavailableCode?: "CONVERSATION_CHANGED" | "UNDO_POINT_GONE";
     };
     // (undocumented)
     "rewind.conversation.requests.take": {
@@ -7546,6 +7417,11 @@ export interface OperatorMethodInputMap {
         sessionId: string;
         turnId?: string;
         scope: "both" | "conversation" | "files";
+    };
+    // (undocumented)
+    "rewind.undo": {
+        sessionId: string;
+        undoSnapshotId: string;
     };
     // (undocumented)
     "routes.bindings.create": ({
@@ -7650,6 +7526,7 @@ export interface OperatorMethodInputMap {
     "sessions.followUp": ({
         sessionId: string;
         body: string;
+        messageId?: string;
         surfaceKind?: string;
         surfaceId?: string;
         routing?: {
@@ -7708,6 +7585,8 @@ export interface OperatorMethodInputMap {
         includeTerminated?: boolean;
     };
     // (undocumented)
+    "sessions.hosted.workspaces": {};
+    // (undocumented)
     "sessions.inputs.cancel": {
         sessionId: string;
         inputId: string;
@@ -7737,6 +7616,7 @@ export interface OperatorMethodInputMap {
     "sessions.messages.create": ({
         sessionId: string;
         body: string;
+        messageId?: string;
         surfaceKind?: string;
         surfaceId?: string;
         kind?: string;
@@ -7776,7 +7656,7 @@ export interface OperatorMethodInputMap {
     // (undocumented)
     "sessions.permissionMode.set": {
         sessionId: string;
-        mode: "plan" | "safe-jev" | "safe-owner" | "yolo";
+        mode: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
     };
     // (undocumented)
     "sessions.queuedMessages.delete": {
@@ -7831,6 +7711,7 @@ export interface OperatorMethodInputMap {
     "sessions.steer": ({
         sessionId: string;
         body: string;
+        messageId?: string;
         surfaceKind?: string;
         surfaceId?: string;
         routing?: {
@@ -7930,6 +7811,8 @@ export interface OperatorMethodInputMap {
     "tailscale.get": {};
     // (undocumented)
     "tailscale.serve.run": {};
+    // (undocumented)
+    "tailscale.serve.stop": {};
     // (undocumented)
     "tasks.cancel": {
         taskId: string;
@@ -8279,11 +8162,6 @@ export interface OperatorMethodInputMap {
         watcherId: string;
     };
     // (undocumented)
-    "watchers.triggers.migrate": {
-        olderInstancesClosed: true;
-        confirm: true;
-    };
-    // (undocumented)
     "watchers.triggers.status": {};
     // (undocumented)
     "watchers.update": ({
@@ -8470,14 +8348,14 @@ export interface OperatorMethodInputMap {
         projectId: string;
         inputId: string;
         sourceRevision: string;
-        permissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+        permissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
     };
     // (undocumented)
     "workLedger.turn.startAgent": {
         projectId: string;
         inputId: string;
         sourceRevision: string;
-        permissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+        permissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
     };
     // (undocumented)
     "workLedger.turn.status": {
@@ -8582,16 +8460,19 @@ export interface OperatorMethodOutputMap {
             title: string;
             binaryPath: string;
             cwd: string;
-            state: string;
+            state: "failed" | "idle" | "prompting" | "starting" | "stopped";
             startedAt: number;
             completedAt?: number;
             sessionId?: string;
             progress?: string;
-            pendingPermission?: string;
             error?: {
                 binary: string;
-                stage: string;
+                stage: "initialize" | "prompt" | "session" | "spawn";
                 message: string;
+            };
+            lastRefusal?: {
+                at: number;
+                reason: string;
             };
             promptCount: number;
         };
@@ -8960,15 +8841,15 @@ export interface OperatorMethodOutputMap {
     // (undocumented)
     "approvals.list": ({
         awaitingDecision: boolean;
-        mode: "allow-all" | "background-restricted" | "custom" | "default" | "plan" | "safe-jev" | "safe-owner" | "yolo";
+        mode: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
         lastDecision?: {
             callId: string;
             toolName: string;
             category: "delegate" | "execute" | "read" | "write";
-            machineState: "collect_rules" | "decision_emitted" | "evaluate_policy" | "evaluate_runtime_mode" | "evaluate_session_override" | "final_safety_checks" | "normalize_input";
+            machineState: "awaiting_owner" | "check_boundary" | "collect_rules" | "decision_emitted" | "evaluate_policy" | "evaluate_preset" | "evaluate_session_override" | "normalize_input" | "read_stakes";
             outcome: "approved" | "deferred" | "denied";
-            reason: "config_allow" | "config_deny" | "managed_policy_allow" | "managed_policy_deny" | "mode_allow_all" | "mode_background_restricted" | "mode_denied" | "mode_plan_deny" | "safety_guardrail" | "session_cached_approval" | "session_cached_denial" | "user_approved" | "user_denied" | "user_rule_allow" | "user_rule_deny";
-            sourceLayer: "config_policy" | "managed_policy" | "runtime_mode" | "safety_check" | "session_override" | "user_prompt" | "user_rule";
+            reason: "boundary_card_details" | "boundary_catastrophic" | "boundary_judgment_input" | "boundary_outward_effect" | "boundary_surface_authority" | "config_allow" | "config_deny" | "invocation_already_admitted" | "jev_act" | "jev_defer" | "jev_reject" | "jev_revise" | "managed_policy_allow" | "managed_policy_deny" | "mode_allow_all" | "mode_denied" | "mode_queued_for_owner" | "owner_approved_outward" | "plan_mode" | "preset_allow" | "preset_deny" | "safety_guardrail" | "session_cached_allow" | "session_cached_deny" | "user_approved" | "user_denied" | "user_rule_allow" | "user_rule_deny";
+            sourceLayer: "boundary" | "config_policy" | "invocation_admission" | "jev_decision" | "managed_policy" | "runtime_mode" | "safety_check" | "session_override" | "stakes_preset" | "user_prompt" | "user_rule";
             persisted: boolean;
             classification?: string;
             riskLevel?: "critical" | "high" | "low" | "medium";
@@ -8977,7 +8858,7 @@ export interface OperatorMethodOutputMap {
         };
         approvalCount: number;
         denialCount: number;
-        cachedChecks: number;
+        promptCount: number;
         totalChecks: number;
         approvals: readonly ({
             id: string;
@@ -9163,8 +9044,8 @@ export interface OperatorMethodOutputMap {
             createdAt: number;
             expiresAt?: number;
             sourceUri?: string;
-            acquisitionMode?: string;
-            fetchMode?: string;
+            acquisitionMode?: "inline-data" | "local-path" | "remote-fetch" | "unknown";
+            fetchMode?: "allow-private-hosts" | "not-applicable" | "public-only" | "unknown";
             metadata: ({} & {
                 readonly [key: string]: ({} & {
                     readonly [key: string]: JsonValue;
@@ -9186,8 +9067,8 @@ export interface OperatorMethodOutputMap {
             createdAt: number;
             expiresAt?: number;
             sourceUri?: string;
-            acquisitionMode?: string;
-            fetchMode?: string;
+            acquisitionMode?: "inline-data" | "local-path" | "remote-fetch" | "unknown";
+            fetchMode?: "allow-private-hosts" | "not-applicable" | "public-only" | "unknown";
             metadata: ({} & {
                 readonly [key: string]: ({} & {
                     readonly [key: string]: JsonValue;
@@ -9209,8 +9090,8 @@ export interface OperatorMethodOutputMap {
             createdAt: number;
             expiresAt?: number;
             sourceUri?: string;
-            acquisitionMode?: string;
-            fetchMode?: string;
+            acquisitionMode?: "inline-data" | "local-path" | "remote-fetch" | "unknown";
+            fetchMode?: "allow-private-hosts" | "not-applicable" | "public-only" | "unknown";
             metadata: ({} & {
                 readonly [key: string]: ({} & {
                     readonly [key: string]: JsonValue;
@@ -12092,10 +11973,22 @@ export interface OperatorMethodOutputMap {
         readonly [key: string]: unknown;
     });
     // (undocumented)
+    "calendar.calendars.list": {
+        calendars: readonly ({
+            calendarId: string;
+            displayName: string;
+        })[];
+    };
+    // (undocumented)
     "calendar.events.create": {
         eventId: string;
         uid: string;
         createdAt: string;
+    };
+    // (undocumented)
+    "calendar.events.delete": {
+        eventId: string;
+        deleted: boolean;
     };
     // (undocumented)
     "calendar.events.get": {
@@ -12104,6 +11997,7 @@ export interface OperatorMethodOutputMap {
         title: string;
         start: string;
         end: string;
+        allDay?: boolean;
         location?: string;
         description?: string;
         attendees?: readonly string[];
@@ -12116,10 +12010,16 @@ export interface OperatorMethodOutputMap {
             title: string;
             start: string;
             end: string;
+            allDay?: boolean;
             location?: string;
             description?: string;
             attendees?: readonly string[];
         })[];
+    };
+    // (undocumented)
+    "calendar.events.update": {
+        eventId: string;
+        updatedAt: string;
     };
     // (undocumented)
     "calendar.ics.export": {
@@ -12131,6 +12031,12 @@ export interface OperatorMethodOutputMap {
         imported: number;
         eventIds: readonly string[];
         errors: readonly string[];
+        attendeesLeftOff?: readonly ({
+            eventId: string;
+            title: string;
+            attendees: readonly string[];
+            next: string;
+        })[];
     };
     // (undocumented)
     "channels.accounts.action.default": {
@@ -12723,6 +12629,25 @@ export interface OperatorMethodOutputMap {
         created: boolean;
     };
     // (undocumented)
+    "channels.inbox.applyLabels": {
+        results: readonly ({
+            itemId: string;
+            state: string;
+            applied: readonly string[];
+            effects?: readonly ({
+                tag: string;
+                action: string;
+                outcome: string;
+                reason?: string;
+            })[];
+            reason?: string;
+            changedDuringWrite?: boolean;
+        })[];
+        applied: number;
+        refused: number;
+        failed: number;
+    };
+    // (undocumented)
     "channels.inbox.list": {
         items: readonly ({
             id: string;
@@ -12906,7 +12831,7 @@ export interface OperatorMethodOutputMap {
             channelId?: string;
             model?: string;
             provider?: string;
-            permissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            permissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
             updatedAt: number;
             metadata?: ({} & {
                 readonly [key: string]: ({} & {
@@ -12923,7 +12848,7 @@ export interface OperatorMethodOutputMap {
             channelId?: string;
             model?: string;
             provider?: string;
-            permissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            permissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
             updatedAt: number;
             metadata?: ({} & {
                 readonly [key: string]: ({} & {
@@ -12940,7 +12865,7 @@ export interface OperatorMethodOutputMap {
             channelId?: string;
             model?: string;
             provider?: string;
-            permissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            permissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
             updatedAt: number;
             metadata?: ({} & {
                 readonly [key: string]: ({} & {
@@ -13160,6 +13085,10 @@ export interface OperatorMethodOutputMap {
             deliveryChannel: string;
             quietHours: string;
         };
+        schedule: {
+            state: "failed" | "not-needed" | "scheduled";
+            reason?: string;
+        };
     };
     // (undocumented)
     "checkin.config.set": {
@@ -13264,6 +13193,11 @@ export interface OperatorMethodOutputMap {
         })[];
         retentionFailure?: {
             error: string;
+            at: number;
+        };
+        historyTrimmed?: {
+            count: number;
+            reason: string;
             at: number;
         };
     };
@@ -13494,6 +13428,7 @@ export interface OperatorMethodOutputMap {
         generatedSecrets?: ({} & {
             readonly [key: string]: unknown;
         });
+        warnings?: readonly string[];
     };
     // (undocumented)
     "cloudflare.resources.list": {
@@ -13550,6 +13485,13 @@ export interface OperatorMethodOutputMap {
             readonly [key: string]: unknown;
         });
         warnings: readonly string[];
+        tunnelConnector?: ({
+            state: "connected" | "failed" | "not-configured" | "not-installed" | "starting" | "stopped";
+            detail: string;
+            next?: readonly string[];
+        } & {
+            readonly [key: string]: unknown;
+        });
     };
     // (undocumented)
     "cloudflare.token.create": {
@@ -13557,6 +13499,12 @@ export interface OperatorMethodOutputMap {
         tokenId?: string;
         tokenName: string;
         tokenSource: string;
+        reused?: boolean;
+        replaced?: {
+            tokenId: string;
+            revoked: boolean;
+            reason?: string;
+        };
         apiTokenRef?: string;
         generatedToken?: string;
         accountId: string;
@@ -13670,6 +13618,21 @@ export interface OperatorMethodOutputMap {
         regeneratedFrom: string;
         supersededMessageIds: readonly string[];
         turnStarted: boolean;
+    };
+    // (undocumented)
+    "companion.chat.messages.search": {
+        query: string;
+        items: readonly ({
+            sessionId: string;
+            sessionTitle: string;
+            messageId: string;
+            role: string;
+            snippet: string;
+            createdAt: number;
+        })[];
+        total: number;
+        hasMore: boolean;
+        nextCursor?: string;
     };
     // (undocumented)
     "companion.chat.messages.steer": {
@@ -13886,6 +13849,20 @@ export interface OperatorMethodOutputMap {
         readonly [key: string]: unknown;
     });
     // (undocumented)
+    "config.setMany": {
+        success: boolean;
+        revision: number;
+        entries: readonly ({
+            key: string;
+            value?: ({} & {
+                readonly [key: string]: JsonValue;
+            }) | boolean | null | number | readonly JsonValue[] | string;
+            persistedTo?: string;
+            tier?: string;
+            daemonOwned?: boolean;
+        })[];
+    };
+    // (undocumented)
     "continuity.snapshot": {
         sessionId: string;
         status: string;
@@ -13920,8 +13897,1410 @@ export interface OperatorMethodOutputMap {
         };
     };
     // (undocumented)
+    "contracts.budget": {
+        budget: {
+            maxTokens?: number;
+            maxCostUsd?: number;
+        };
+    };
+    // (undocumented)
     "contracts.cancel": {
         cancelled: boolean;
+    };
+    // (undocumented)
+    "contracts.dispatch": {
+        contract: {
+            originalSource?: {
+                goal: string;
+                criteria: readonly string[];
+                conversationContext?: readonly ({
+                    role: "assistant" | "system" | "tool" | "user";
+                    content: string;
+                })[];
+                selectedDiffContext?: {
+                    kind: "session";
+                    revision: string;
+                    fileIndex: number;
+                    hunkIndex: number;
+                    unifiedDiff: string;
+                    provenance: {
+                        kind: "session";
+                        sessionId: string;
+                        baselineCheckpointId: string;
+                        latestCheckpointId: string;
+                    };
+                } | {
+                    kind: "workspace";
+                    baselineId: string;
+                    revision: string;
+                    fileIndex: number;
+                    hunkIndex: number;
+                    unifiedDiff: string;
+                    provenance: {
+                        kind: "workspace";
+                        baselineId: string;
+                        to: "WORKING";
+                    };
+                };
+            };
+            taskEvidence?: string;
+            reviewInventory?: {
+                paths: readonly string[];
+                source: "filesystem" | "git";
+                errors: readonly string[];
+            };
+            reviewExclusions?: readonly ({
+                files: readonly string[];
+                reason: string;
+            })[];
+            nativeSource?: {
+                sourceId: string;
+                sourceRevision: string;
+                inputRevision: string;
+                criteriaId: string;
+                criteriaRevision: string;
+                goal: string;
+                criteria: readonly string[];
+            };
+            nativeDecisions?: {
+                schemaVersion: 1;
+                history: readonly ({
+                    schemaVersion: 1;
+                    stage: "attempts" | "evidence" | "fix-plan" | "plan" | "shape" | "stall";
+                    targetId: string;
+                    decision: {
+                        schemaVersion: 1;
+                        decisionId: string;
+                        binding: {
+                            sourceId: string;
+                            inputRevision: string;
+                            actionId: string;
+                            actionRevision: string;
+                            authorityId: string;
+                            authorityRevision: string;
+                            scopeId: string;
+                            scopeRevision: string;
+                        };
+                        judgmentDecisionIds: readonly string[];
+                        evidence: readonly ({
+                            id: string;
+                            revision: string;
+                        })[];
+                        summary: string;
+                        outcome: "act";
+                    } | {
+                        schemaVersion: 1;
+                        decisionId: string;
+                        binding: {
+                            sourceId: string;
+                            inputRevision: string;
+                            actionId: string;
+                            actionRevision: string;
+                            authorityId: string;
+                            authorityRevision: string;
+                            scopeId: string;
+                            scopeRevision: string;
+                        };
+                        judgmentDecisionIds: readonly string[];
+                        evidence: readonly ({
+                            id: string;
+                            revision: string;
+                        })[];
+                        summary: string;
+                        outcome: "revise";
+                        next: {
+                            id: string;
+                            revision: string;
+                            kind: "gather-evidence" | "reconsider" | "revise-action";
+                        };
+                    } | {
+                        schemaVersion: 1;
+                        decisionId: string;
+                        binding: {
+                            sourceId: string;
+                            inputRevision: string;
+                            actionId: string;
+                            actionRevision: string;
+                            authorityId: string;
+                            authorityRevision: string;
+                            scopeId: string;
+                            scopeRevision: string;
+                        };
+                        judgmentDecisionIds: readonly string[];
+                        evidence: readonly ({
+                            id: string;
+                            revision: string;
+                        })[];
+                        summary: string;
+                        outcome: "defer";
+                        until: {
+                            id: string;
+                            revision: string;
+                        };
+                    } | {
+                        schemaVersion: 1;
+                        decisionId: string;
+                        binding: {
+                            sourceId: string;
+                            inputRevision: string;
+                            actionId: string;
+                            actionRevision: string;
+                            authorityId: string;
+                            authorityRevision: string;
+                            scopeId: string;
+                            scopeRevision: string;
+                        };
+                        judgmentDecisionIds: readonly string[];
+                        evidence: readonly ({
+                            id: string;
+                            revision: string;
+                        })[];
+                        summary: string;
+                        outcome: "reject";
+                    };
+                    operationRevision: string;
+                })[];
+                pending: ({} & {
+                    readonly [key: string]: {
+                        schemaVersion: 1;
+                        stage: "attempts" | "evidence" | "fix-plan" | "plan" | "shape" | "stall";
+                        targetId: string;
+                        decision: {
+                            schemaVersion: 1;
+                            decisionId: string;
+                            binding: {
+                                sourceId: string;
+                                inputRevision: string;
+                                actionId: string;
+                                actionRevision: string;
+                                authorityId: string;
+                                authorityRevision: string;
+                                scopeId: string;
+                                scopeRevision: string;
+                            };
+                            judgmentDecisionIds: readonly string[];
+                            evidence: readonly ({
+                                id: string;
+                                revision: string;
+                            })[];
+                            summary: string;
+                            outcome: "act";
+                        } | {
+                            schemaVersion: 1;
+                            decisionId: string;
+                            binding: {
+                                sourceId: string;
+                                inputRevision: string;
+                                actionId: string;
+                                actionRevision: string;
+                                authorityId: string;
+                                authorityRevision: string;
+                                scopeId: string;
+                                scopeRevision: string;
+                            };
+                            judgmentDecisionIds: readonly string[];
+                            evidence: readonly ({
+                                id: string;
+                                revision: string;
+                            })[];
+                            summary: string;
+                            outcome: "revise";
+                            next: {
+                                id: string;
+                                revision: string;
+                                kind: "gather-evidence" | "reconsider" | "revise-action";
+                            };
+                        } | {
+                            schemaVersion: 1;
+                            decisionId: string;
+                            binding: {
+                                sourceId: string;
+                                inputRevision: string;
+                                actionId: string;
+                                actionRevision: string;
+                                authorityId: string;
+                                authorityRevision: string;
+                                scopeId: string;
+                                scopeRevision: string;
+                            };
+                            judgmentDecisionIds: readonly string[];
+                            evidence: readonly ({
+                                id: string;
+                                revision: string;
+                            })[];
+                            summary: string;
+                            outcome: "defer";
+                            until: {
+                                id: string;
+                                revision: string;
+                            };
+                        } | {
+                            schemaVersion: 1;
+                            decisionId: string;
+                            binding: {
+                                sourceId: string;
+                                inputRevision: string;
+                                actionId: string;
+                                actionRevision: string;
+                                authorityId: string;
+                                authorityRevision: string;
+                                scopeId: string;
+                                scopeRevision: string;
+                            };
+                            judgmentDecisionIds: readonly string[];
+                            evidence: readonly ({
+                                id: string;
+                                revision: string;
+                            })[];
+                            summary: string;
+                            outcome: "reject";
+                        };
+                        operationRevision: string;
+                    };
+                });
+                spent: ({} & {
+                    readonly [key: string]: number;
+                });
+                plannerOutputs: ({} & {
+                    readonly [key: string]: string;
+                });
+                attemptChoices: ({} & {
+                    readonly [key: string]: string;
+                });
+                attemptedChoices: ({} & {
+                    readonly [key: string]: readonly string[];
+                });
+            };
+            nativeProgress?: {
+                schemaVersion: 1;
+                state: "deciding" | "deferred" | "refused";
+                stage: string;
+                targetId: string;
+                until?: {
+                    id: string;
+                    revision: string;
+                };
+            };
+            nativeWaiting?: {
+                schemaVersion: 1;
+                requests: readonly ({
+                    logicalRequestId: string;
+                    attempt: {
+                        attempt: number;
+                        endpointIndex: number;
+                        dispatched?: boolean;
+                        endpointKind: "hosted" | "local";
+                        requestedModel: string;
+                        latencyMs: number;
+                        outcome: "aborted" | "answered" | "internal" | "invalid-request" | "invalid-response" | "rejected" | "unavailable" | "unrecorded";
+                        requestId?: string;
+                        status?: number;
+                    };
+                    elapsedMs: number;
+                    nextDelayMs: number;
+                })[];
+            };
+            durableAdmission?: {
+                schemaVersion: 1;
+                key: {
+                    workId: string;
+                    criteriaId: string;
+                    criteriaRevision: string;
+                    attemptId: string;
+                };
+                binding: {
+                    sourceId: string;
+                    inputRevision: string;
+                    actionId: string;
+                    actionRevision: string;
+                    authorityId: string;
+                    authorityRevision: string;
+                    scopeId: string;
+                    scopeRevision: string;
+                };
+                input: {
+                    ask: string;
+                    sessionId: string;
+                    origin: "agent-tool" | "cli" | "external" | "hosted" | "proposal" | "turn";
+                    projectRoot: string;
+                    nativeSource?: {
+                        sourceId: string;
+                        sourceRevision: string;
+                        inputRevision: string;
+                        criteriaId: string;
+                        criteriaRevision: string;
+                        goal: string;
+                        criteria: readonly string[];
+                    };
+                    proposedUnits?: readonly ({
+                        task: string;
+                        template?: string;
+                    })[];
+                    parentAgentId?: string;
+                    budget?: {
+                        maxTokens?: number;
+                        maxCostUsd?: number;
+                    };
+                    isolation?: "auto" | "shared" | "worktree";
+                    selectedModel?: {
+                        id: string;
+                        provider: string;
+                        registryKey: string;
+                        displayName: string;
+                    };
+                    taskEvidence?: string;
+                };
+                contractId: string;
+                ownerAgentId: string;
+                payloadRevision: string;
+            } | {
+                schemaVersion: 2;
+                key: {
+                    workId: string;
+                    criteriaId: string;
+                    criteriaRevision: string;
+                    attemptId: string;
+                };
+                binding: {
+                    sourceId: string;
+                    inputRevision: string;
+                    actionId: string;
+                    actionRevision: string;
+                    authorityId: string;
+                    authorityRevision: string;
+                    scopeId: string;
+                    scopeRevision: string;
+                };
+                input: {
+                    ask: string;
+                    sessionId: string;
+                    origin: "agent-tool" | "cli" | "external" | "hosted" | "proposal" | "turn";
+                    projectRoot: string;
+                    nativeSource?: {
+                        sourceId: string;
+                        sourceRevision: string;
+                        inputRevision: string;
+                        criteriaId: string;
+                        criteriaRevision: string;
+                        goal: string;
+                        criteria: readonly string[];
+                    };
+                    proposedUnits?: readonly ({
+                        task: string;
+                        template?: string;
+                    })[];
+                    parentAgentId?: string;
+                    budget?: {
+                        maxTokens?: number;
+                        maxCostUsd?: number;
+                    };
+                    isolation?: "auto" | "shared" | "worktree";
+                    selectedModel?: {
+                        id: string;
+                        provider: string;
+                        registryKey: string;
+                        displayName: string;
+                    };
+                    taskEvidence?: string;
+                };
+                contractId: string;
+                ownerAgentId: string;
+                payloadRevision: string;
+                execution: {
+                    isolation: "shared";
+                } | {
+                    isolation: "worktree";
+                    branch: string;
+                    worktreePath: string;
+                    baseBranch: string;
+                };
+            };
+            durableLaunchState?: "launch-claimed" | "prepared";
+            inputSnapshot?: {
+                version: 1;
+                id: string;
+                sourceRoot: string;
+                sourceIdentity: string;
+                gitIdentity: string;
+                ownerHead: string;
+                ownerRef: string;
+                indexFingerprint: string;
+                inputTree: string;
+                inputCommit: string;
+                capturedAt: number;
+                dirty: boolean;
+                exclusions: readonly string[];
+                files?: readonly ({
+                    path: string;
+                    kind: "file" | "missing" | "symlink";
+                    mode: "0" | "100644" | "100755" | "120000";
+                    oid?: string;
+                    identity?: string;
+                    digest?: string;
+                })[];
+            } | {
+                version: 2;
+                id: string;
+                sourceRoot: string;
+                sourceIdentity: string;
+                gitIdentity: string;
+                ownerHead: string;
+                ownerRef: string;
+                indexFingerprint: string;
+                inputTree: string;
+                inputCommit: string;
+                capturedAt: number;
+                dirty: boolean;
+                exclusions: readonly string[];
+                files?: readonly ({
+                    path: string;
+                    kind: "missing";
+                    mode: "0";
+                } | {
+                    path: string;
+                    kind: "file";
+                    mode: "100644" | "100755";
+                    oid: string;
+                    identity: string;
+                    digest?: string;
+                } | {
+                    path: string;
+                    kind: "symlink";
+                    mode: "120000";
+                    oid: string;
+                    identity: string;
+                    digest?: string;
+                })[];
+            } | {
+                version: 3;
+                id: string;
+                sourceRoot: string;
+                sourceIdentity: string;
+                gitIdentity: string;
+                ownerHead: string;
+                ownerRef: string;
+                indexFingerprint: string;
+                inputTree: string;
+                inputCommit: string;
+                capturedAt: number;
+                dirty: boolean;
+                exclusions: readonly string[];
+            };
+            id: string;
+            schemaVersion: number;
+            sessionId: string;
+            origin: "agent-tool" | "cli" | "external" | "hosted" | "proposal" | "turn";
+            ask: string;
+            selectedModel?: {
+                id: string;
+                provider: string;
+                registryKey: string;
+                displayName: string;
+            };
+            ownerAgentId: string;
+            parentAgentId?: string;
+            projectRoot: string;
+            isolation: "shared" | "worktree";
+            branch?: string;
+            worktreePath?: string;
+            baseBranch?: string;
+            baseline?: {
+                version?: 2 | 3 | 4;
+                head: null | string;
+                dirty: ({} & {
+                    readonly [key: string]: null | string;
+                });
+            };
+            sessionMode?: boolean;
+            proposedUnits?: readonly ({
+                task: string;
+                template?: string;
+            })[];
+            draftPlan?: {
+                goal: string;
+                units: readonly ({
+                    id: string;
+                    title: string;
+                    brief: string;
+                    dependsOn: readonly string[];
+                    files?: readonly string[];
+                    attempts?: number;
+                })[];
+            };
+            budget?: {
+                maxTokens?: number;
+                maxCostUsd?: number;
+            };
+            goal: string;
+            criteria: readonly ({
+                id: string;
+                text: string;
+                origin: "derived" | "fix" | "integration" | "owner" | "stated";
+                quote?: string;
+                serves: readonly string[];
+                contribution?: {
+                    kind: "outcome" | "scaffolding" | "secondary" | "support";
+                    reason: string;
+                    verification: string;
+                };
+                disposition: "excluded" | "judged" | "met-by-structure";
+                dispositionReason?: string;
+                status: "met" | "unmet" | "unread" | "unshown";
+                readings: readonly ({
+                    checkId: string;
+                    at: number;
+                    probabilityUnmet: number;
+                    verdict: "met" | "unmet" | "unshown";
+                    outcome: "act" | "confirm" | "escalate";
+                    severity?: "critical" | "major" | "minor";
+                    decisionId?: string;
+                    severityDecisionId?: string;
+                    rationale?: string;
+                })[];
+            })[];
+            groups: readonly ({
+                id: string;
+                title: string;
+                goal: string;
+                kind: "fix" | "integration" | "work";
+                repairs?: {
+                    scope: "deliverable" | "group" | "unit";
+                    targetId: string;
+                    criterionIds: readonly string[];
+                };
+                dependsOn: readonly string[];
+                criteria: readonly ({
+                    id: string;
+                    text: string;
+                    origin: "derived" | "fix" | "integration" | "owner" | "stated";
+                    quote?: string;
+                    serves: readonly string[];
+                    contribution?: {
+                        kind: "outcome" | "scaffolding" | "secondary" | "support";
+                        reason: string;
+                        verification: string;
+                    };
+                    disposition: "excluded" | "judged" | "met-by-structure";
+                    dispositionReason?: string;
+                    status: "met" | "unmet" | "unread" | "unshown";
+                    readings: readonly ({
+                        checkId: string;
+                        at: number;
+                        probabilityUnmet: number;
+                        verdict: "met" | "unmet" | "unshown";
+                        outcome: "act" | "confirm" | "escalate";
+                        severity?: "critical" | "major" | "minor";
+                        decisionId?: string;
+                        severityDecisionId?: string;
+                        rationale?: string;
+                    })[];
+                })[];
+                unitIds: readonly string[];
+                status: "awaiting-owner" | "blocked" | "cancelled" | "failed" | "fixing" | "judging" | "passed" | "pending" | "running";
+                checks: readonly ({
+                    id: string;
+                    at: number;
+                    trigger: "agent-failed" | "completion" | "fix-passed" | "owner-amend" | "resume" | "turn-end";
+                    claims?: {
+                        kind: "files_verified" | "git_corroborated" | "unverifiable_no_claims" | "unverified" | "verified_empty";
+                        summary: string;
+                    };
+                    gates?: readonly ({
+                        gate: string;
+                        passed: boolean;
+                        output: string;
+                        durationMs: number;
+                        skipped?: boolean;
+                        outcome?: "failed" | "passed" | "unverified";
+                        required?: boolean;
+                        reason?: string;
+                        completion?: {
+                            kind: "command-exit";
+                            exitCode: number;
+                        } | {
+                            kind: "assertions";
+                            runner: "bun-junit" | "registered-protocol";
+                            checks: {
+                                passed: number;
+                                failed: number;
+                                skipped: number;
+                            };
+                        };
+                        provenance?: {
+                            sourceBefore: string;
+                            sourceAfter: string;
+                            definitionBefore: string;
+                            definitionAfter: string;
+                            root?: string;
+                            scope?: readonly string[];
+                        };
+                    })[];
+                    goal: {
+                        probabilityUnmet: number;
+                        verdict: "met" | "unmet" | "unshown";
+                        outcome: "act" | "confirm" | "escalate";
+                    };
+                    quality: {
+                        placeholder?: {
+                            verdict: "no" | "uncertain" | "yes";
+                            outcome: "act" | "confirm" | "escalate";
+                        };
+                        tests_weakened?: {
+                            verdict: "no" | "uncertain" | "yes";
+                            outcome: "act" | "confirm" | "escalate";
+                        };
+                        breaks_existing?: {
+                            verdict: "no" | "uncertain" | "yes";
+                            outcome: "act" | "confirm" | "escalate";
+                        };
+                        out_of_scope?: {
+                            verdict: "no" | "uncertain" | "yes";
+                            outcome: "act" | "confirm" | "escalate";
+                        };
+                        hidden_failure?: {
+                            verdict: "no" | "uncertain" | "yes";
+                            outcome: "act" | "confirm" | "escalate";
+                        };
+                        unsupported_claims?: {
+                            verdict: "no" | "uncertain" | "yes";
+                            outcome: "act" | "confirm" | "escalate";
+                        };
+                    };
+                    result: "await-owner" | "native-decision" | "nudge" | "pass" | "recorded" | "stall";
+                    problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
+                    qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
+                    decisionIds: readonly string[];
+                    evidenceDigest?: string;
+                    reviewedFiles?: readonly ({
+                        path: string;
+                        sha256: string;
+                    } | {
+                        path: string;
+                        observationId: string;
+                    })[];
+                })[];
+                fixRounds: number;
+                baseline?: {
+                    version?: 2 | 3 | 4;
+                    head: null | string;
+                    dirty: ({} & {
+                        readonly [key: string]: null | string;
+                    });
+                };
+                usage: {
+                    inputTokens: number;
+                    outputTokens: number;
+                    cacheReadTokens: number;
+                    cacheWriteTokens: number;
+                    reasoningTokens?: number;
+                    llmCallCount: number;
+                    turnCount: number;
+                    toolCallCount: number;
+                    costUsd: null | number;
+                    costState: "estimated" | "priced" | "unpriced";
+                    costSource?: "catalog" | "mixed" | "provider" | "user";
+                    pricingAsOf?: string;
+                };
+            })[];
+            units: readonly ({
+                id: string;
+                groupId: string;
+                title: string;
+                goal: string;
+                brief: string;
+                role: "design" | "implement" | "integration" | "research";
+                dependsOn: readonly string[];
+                files: readonly string[];
+                attempts: number;
+                criteria: readonly ({
+                    id: string;
+                    text: string;
+                    origin: "derived" | "fix" | "integration" | "owner" | "stated";
+                    quote?: string;
+                    serves: readonly string[];
+                    contribution?: {
+                        kind: "outcome" | "scaffolding" | "secondary" | "support";
+                        reason: string;
+                        verification: string;
+                    };
+                    disposition: "excluded" | "judged" | "met-by-structure";
+                    dispositionReason?: string;
+                    status: "met" | "unmet" | "unread" | "unshown";
+                    readings: readonly ({
+                        checkId: string;
+                        at: number;
+                        probabilityUnmet: number;
+                        verdict: "met" | "unmet" | "unshown";
+                        outcome: "act" | "confirm" | "escalate";
+                        severity?: "critical" | "major" | "minor";
+                        decisionId?: string;
+                        severityDecisionId?: string;
+                        rationale?: string;
+                    })[];
+                })[];
+                status: "awaiting-owner" | "blocked" | "cancelled" | "checking" | "failed" | "fixing" | "held" | "held-merge" | "nudged" | "passed" | "pending" | "running";
+                agentIds: readonly string[];
+                activeAgentId?: string;
+                route?: {
+                    model: string;
+                    provider: string;
+                    fallbackModels?: readonly string[];
+                    routing?: {
+                        providerSelection?: "concrete" | "inherit-current" | "synthetic";
+                        providerFailurePolicy?: "fail" | "ordered-fallbacks";
+                        fallbackModels?: readonly string[];
+                    };
+                    reasoningEffort?: string;
+                    reason: string;
+                };
+                checks: readonly ({
+                    id: string;
+                    at: number;
+                    trigger: "agent-failed" | "completion" | "fix-passed" | "owner-amend" | "resume" | "turn-end";
+                    claims?: {
+                        kind: "files_verified" | "git_corroborated" | "unverifiable_no_claims" | "unverified" | "verified_empty";
+                        summary: string;
+                    };
+                    gates?: readonly ({
+                        gate: string;
+                        passed: boolean;
+                        output: string;
+                        durationMs: number;
+                        skipped?: boolean;
+                        outcome?: "failed" | "passed" | "unverified";
+                        required?: boolean;
+                        reason?: string;
+                        completion?: {
+                            kind: "command-exit";
+                            exitCode: number;
+                        } | {
+                            kind: "assertions";
+                            runner: "bun-junit" | "registered-protocol";
+                            checks: {
+                                passed: number;
+                                failed: number;
+                                skipped: number;
+                            };
+                        };
+                        provenance?: {
+                            sourceBefore: string;
+                            sourceAfter: string;
+                            definitionBefore: string;
+                            definitionAfter: string;
+                            root?: string;
+                            scope?: readonly string[];
+                        };
+                    })[];
+                    goal: {
+                        probabilityUnmet: number;
+                        verdict: "met" | "unmet" | "unshown";
+                        outcome: "act" | "confirm" | "escalate";
+                    };
+                    quality: {
+                        placeholder?: {
+                            verdict: "no" | "uncertain" | "yes";
+                            outcome: "act" | "confirm" | "escalate";
+                        };
+                        tests_weakened?: {
+                            verdict: "no" | "uncertain" | "yes";
+                            outcome: "act" | "confirm" | "escalate";
+                        };
+                        breaks_existing?: {
+                            verdict: "no" | "uncertain" | "yes";
+                            outcome: "act" | "confirm" | "escalate";
+                        };
+                        out_of_scope?: {
+                            verdict: "no" | "uncertain" | "yes";
+                            outcome: "act" | "confirm" | "escalate";
+                        };
+                        hidden_failure?: {
+                            verdict: "no" | "uncertain" | "yes";
+                            outcome: "act" | "confirm" | "escalate";
+                        };
+                        unsupported_claims?: {
+                            verdict: "no" | "uncertain" | "yes";
+                            outcome: "act" | "confirm" | "escalate";
+                        };
+                    };
+                    result: "await-owner" | "native-decision" | "nudge" | "pass" | "recorded" | "stall";
+                    problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
+                    qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
+                    decisionIds: readonly string[];
+                    evidenceDigest?: string;
+                    reviewedFiles?: readonly ({
+                        path: string;
+                        sha256: string;
+                    } | {
+                        path: string;
+                        observationId: string;
+                    })[];
+                })[];
+                nudges: readonly ({
+                    id: string;
+                    checkId: string;
+                    at: number;
+                    kinds: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
+                    criterionIds: readonly string[];
+                    text: string;
+                    delivery: "bus" | "hold" | "wake";
+                    agentId: string;
+                    consumedAt?: number;
+                })[];
+                fixRounds: number;
+                freshAgents: number;
+                transportRetries: number;
+                touchedPaths: readonly string[];
+                baseline?: {
+                    version?: 2 | 3 | 4;
+                    head: null | string;
+                    dirty: ({} & {
+                        readonly [key: string]: null | string;
+                    });
+                };
+                usage: {
+                    inputTokens: number;
+                    outputTokens: number;
+                    cacheReadTokens: number;
+                    cacheWriteTokens: number;
+                    reasoningTokens?: number;
+                    llmCallCount: number;
+                    turnCount: number;
+                    toolCallCount: number;
+                    costUsd: null | number;
+                    costState: "estimated" | "priced" | "unpriced";
+                    costSource?: "catalog" | "mixed" | "provider" | "user";
+                    pricingAsOf?: string;
+                };
+                answer?: string;
+                lastOutput?: string;
+                readEvidence?: readonly ({
+                    path: string;
+                    returnedRanges: readonly string[];
+                    returnedLines: number;
+                    returnedContent?: string;
+                    contentKind?: "cited-source" | "declared-reference";
+                })[];
+                commandEvidence?: readonly ({
+                    agentId: string;
+                    callId: string;
+                    turn: number;
+                    callIndex: number;
+                    command: string;
+                    success: boolean;
+                    head: string;
+                })[];
+                lastReport?: {
+                    version: 1;
+                    summary?: string;
+                    filesCreated?: readonly string[];
+                    filesModified?: readonly string[];
+                    filesDeleted?: readonly string[];
+                    archetype: "engineer";
+                    gatheredContext?: readonly string[];
+                    plannedActions?: readonly string[];
+                    appliedChanges?: readonly string[];
+                    decisions?: readonly ({
+                        what: string;
+                        why: string;
+                    })[];
+                    issues?: readonly string[];
+                    uncertainties?: readonly string[];
+                } | {
+                    version: 1;
+                    summary?: string;
+                    filesCreated?: readonly string[];
+                    filesModified?: readonly string[];
+                    filesDeleted?: readonly string[];
+                    archetype: "tester";
+                    testsWritten?: readonly string[];
+                    testsPassed?: number;
+                    testsFailed?: number;
+                    coverage?: {
+                        lines: number;
+                        branches: number;
+                        functions: number;
+                    };
+                    failures?: readonly ({
+                        test: string;
+                        error: string;
+                    })[];
+                } | {
+                    version: 1;
+                    summary?: string;
+                    filesCreated?: readonly string[];
+                    filesModified?: readonly string[];
+                    filesDeleted?: readonly string[];
+                    archetype: string;
+                    result?: string;
+                };
+                failureReason?: string;
+                attemptOf?: string;
+                attemptIndex?: number;
+                attemptSelection?: {
+                    engineGroupId: string;
+                    candidateIds: readonly string[];
+                    proposedId?: string;
+                    outcome: "act" | "confirm" | "escalate";
+                    reasons: string;
+                    decisionId?: string;
+                    pickedId?: string;
+                };
+                attemptUnits?: readonly ({
+                    id: string;
+                    groupId: string;
+                    title: string;
+                    goal: string;
+                    brief: string;
+                    role: "design" | "implement" | "integration" | "research";
+                    dependsOn: readonly string[];
+                    files: readonly string[];
+                    attempts: number;
+                    criteria: readonly ({
+                        id: string;
+                        text: string;
+                        origin: "derived" | "fix" | "integration" | "owner" | "stated";
+                        quote?: string;
+                        serves: readonly string[];
+                        contribution?: {
+                            kind: "outcome" | "scaffolding" | "secondary" | "support";
+                            reason: string;
+                            verification: string;
+                        };
+                        disposition: "excluded" | "judged" | "met-by-structure";
+                        dispositionReason?: string;
+                        status: "met" | "unmet" | "unread" | "unshown";
+                        readings: readonly ({
+                            checkId: string;
+                            at: number;
+                            probabilityUnmet: number;
+                            verdict: "met" | "unmet" | "unshown";
+                            outcome: "act" | "confirm" | "escalate";
+                            severity?: "critical" | "major" | "minor";
+                            decisionId?: string;
+                            severityDecisionId?: string;
+                            rationale?: string;
+                        })[];
+                    })[];
+                    status: "awaiting-owner" | "blocked" | "cancelled" | "checking" | "failed" | "fixing" | "held" | "held-merge" | "nudged" | "passed" | "pending" | "running";
+                    agentIds: readonly string[];
+                    activeAgentId?: string;
+                    route?: {
+                        model: string;
+                        provider: string;
+                        fallbackModels?: readonly string[];
+                        routing?: {
+                            providerSelection?: "concrete" | "inherit-current" | "synthetic";
+                            providerFailurePolicy?: "fail" | "ordered-fallbacks";
+                            fallbackModels?: readonly string[];
+                        };
+                        reasoningEffort?: string;
+                        reason: string;
+                    };
+                    checks: readonly ({
+                        id: string;
+                        at: number;
+                        trigger: "agent-failed" | "completion" | "fix-passed" | "owner-amend" | "resume" | "turn-end";
+                        claims?: {
+                            kind: "files_verified" | "git_corroborated" | "unverifiable_no_claims" | "unverified" | "verified_empty";
+                            summary: string;
+                        };
+                        gates?: readonly ({
+                            gate: string;
+                            passed: boolean;
+                            output: string;
+                            durationMs: number;
+                            skipped?: boolean;
+                            outcome?: "failed" | "passed" | "unverified";
+                            required?: boolean;
+                            reason?: string;
+                            completion?: {
+                                kind: "command-exit";
+                                exitCode: number;
+                            } | {
+                                kind: "assertions";
+                                runner: "bun-junit" | "registered-protocol";
+                                checks: {
+                                    passed: number;
+                                    failed: number;
+                                    skipped: number;
+                                };
+                            };
+                            provenance?: {
+                                sourceBefore: string;
+                                sourceAfter: string;
+                                definitionBefore: string;
+                                definitionAfter: string;
+                                root?: string;
+                                scope?: readonly string[];
+                            };
+                        })[];
+                        goal: {
+                            probabilityUnmet: number;
+                            verdict: "met" | "unmet" | "unshown";
+                            outcome: "act" | "confirm" | "escalate";
+                        };
+                        quality: {
+                            placeholder?: {
+                                verdict: "no" | "uncertain" | "yes";
+                                outcome: "act" | "confirm" | "escalate";
+                            };
+                            tests_weakened?: {
+                                verdict: "no" | "uncertain" | "yes";
+                                outcome: "act" | "confirm" | "escalate";
+                            };
+                            breaks_existing?: {
+                                verdict: "no" | "uncertain" | "yes";
+                                outcome: "act" | "confirm" | "escalate";
+                            };
+                            out_of_scope?: {
+                                verdict: "no" | "uncertain" | "yes";
+                                outcome: "act" | "confirm" | "escalate";
+                            };
+                            hidden_failure?: {
+                                verdict: "no" | "uncertain" | "yes";
+                                outcome: "act" | "confirm" | "escalate";
+                            };
+                            unsupported_claims?: {
+                                verdict: "no" | "uncertain" | "yes";
+                                outcome: "act" | "confirm" | "escalate";
+                            };
+                        };
+                        result: "await-owner" | "native-decision" | "nudge" | "pass" | "recorded" | "stall";
+                        problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
+                        qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
+                        decisionIds: readonly string[];
+                        evidenceDigest?: string;
+                        reviewedFiles?: readonly ({
+                            path: string;
+                            sha256: string;
+                        } | {
+                            path: string;
+                            observationId: string;
+                        })[];
+                    })[];
+                    nudges: readonly ({
+                        id: string;
+                        checkId: string;
+                        at: number;
+                        kinds: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
+                        criterionIds: readonly string[];
+                        text: string;
+                        delivery: "bus" | "hold" | "wake";
+                        agentId: string;
+                        consumedAt?: number;
+                    })[];
+                    fixRounds: number;
+                    freshAgents: number;
+                    transportRetries: number;
+                    touchedPaths: readonly string[];
+                    baseline?: {
+                        version?: 2 | 3 | 4;
+                        head: null | string;
+                        dirty: ({} & {
+                            readonly [key: string]: null | string;
+                        });
+                    };
+                    usage: {
+                        inputTokens: number;
+                        outputTokens: number;
+                        cacheReadTokens: number;
+                        cacheWriteTokens: number;
+                        reasoningTokens?: number;
+                        llmCallCount: number;
+                        turnCount: number;
+                        toolCallCount: number;
+                        costUsd: null | number;
+                        costState: "estimated" | "priced" | "unpriced";
+                        costSource?: "catalog" | "mixed" | "provider" | "user";
+                        pricingAsOf?: string;
+                    };
+                    answer?: string;
+                    lastOutput?: string;
+                    readEvidence?: readonly ({
+                        path: string;
+                        returnedRanges: readonly string[];
+                        returnedLines: number;
+                        returnedContent?: string;
+                        contentKind?: "cited-source" | "declared-reference";
+                    })[];
+                    commandEvidence?: readonly ({
+                        agentId: string;
+                        callId: string;
+                        turn: number;
+                        callIndex: number;
+                        command: string;
+                        success: boolean;
+                        head: string;
+                    })[];
+                    lastReport?: {
+                        version: 1;
+                        summary?: string;
+                        filesCreated?: readonly string[];
+                        filesModified?: readonly string[];
+                        filesDeleted?: readonly string[];
+                        archetype: "engineer";
+                        gatheredContext?: readonly string[];
+                        plannedActions?: readonly string[];
+                        appliedChanges?: readonly string[];
+                        decisions?: readonly ({
+                            what: string;
+                            why: string;
+                        })[];
+                        issues?: readonly string[];
+                        uncertainties?: readonly string[];
+                    } | {
+                        version: 1;
+                        summary?: string;
+                        filesCreated?: readonly string[];
+                        filesModified?: readonly string[];
+                        filesDeleted?: readonly string[];
+                        archetype: "tester";
+                        testsWritten?: readonly string[];
+                        testsPassed?: number;
+                        testsFailed?: number;
+                        coverage?: {
+                            lines: number;
+                            branches: number;
+                            functions: number;
+                        };
+                        failures?: readonly ({
+                            test: string;
+                            error: string;
+                        })[];
+                    } | {
+                        version: 1;
+                        summary?: string;
+                        filesCreated?: readonly string[];
+                        filesModified?: readonly string[];
+                        filesDeleted?: readonly string[];
+                        archetype: string;
+                        result?: string;
+                    };
+                    failureReason?: string;
+                    attemptOf?: string;
+                    attemptIndex?: number;
+                    attemptSelection?: {
+                        engineGroupId: string;
+                        candidateIds: readonly string[];
+                        proposedId?: string;
+                        outcome: "act" | "confirm" | "escalate";
+                        reasons: string;
+                        decisionId?: string;
+                        pickedId?: string;
+                    };
+                })[];
+            })[];
+            shape?: {
+                forbids_delegation: {
+                    verdict: "no" | "uncertain" | "yes";
+                    probability: number;
+                    outcome: "act" | "confirm" | "escalate";
+                };
+                requests_parallel_agents: {
+                    verdict: "no" | "uncertain" | "yes";
+                    probability: number;
+                    outcome: "act" | "confirm" | "escalate";
+                };
+                forbids_writing: {
+                    verdict: "no" | "uncertain" | "yes";
+                    probability: number;
+                    outcome: "act" | "confirm" | "escalate";
+                };
+                asks_for_attempts: {
+                    verdict: "no" | "uncertain" | "yes";
+                    probability: number;
+                    outcome: "act" | "confirm" | "escalate";
+                };
+                project_review?: {
+                    verdict: "no" | "uncertain" | "yes";
+                    probability: number;
+                    outcome: "act" | "confirm" | "escalate";
+                };
+                decisionIds: readonly string[];
+            };
+            status: "awaiting-owner" | "cancelled" | "checking-plan" | "committing" | "failed" | "fixing" | "judging" | "passed" | "planning" | "queued" | "running" | "shaping";
+            statusBeforeOwner?: "awaiting-owner" | "cancelled" | "checking-plan" | "committing" | "failed" | "fixing" | "judging" | "passed" | "planning" | "queued" | "running" | "shaping";
+            resumeFrom?: "awaiting-owner" | "cancelled" | "checking-plan" | "committing" | "failed" | "fixing" | "judging" | "passed" | "planning" | "queued" | "running" | "shaping";
+            checks: readonly ({
+                id: string;
+                at: number;
+                trigger: "agent-failed" | "completion" | "fix-passed" | "owner-amend" | "resume" | "turn-end";
+                claims?: {
+                    kind: "files_verified" | "git_corroborated" | "unverifiable_no_claims" | "unverified" | "verified_empty";
+                    summary: string;
+                };
+                gates?: readonly ({
+                    gate: string;
+                    passed: boolean;
+                    output: string;
+                    durationMs: number;
+                    skipped?: boolean;
+                    outcome?: "failed" | "passed" | "unverified";
+                    required?: boolean;
+                    reason?: string;
+                    completion?: {
+                        kind: "command-exit";
+                        exitCode: number;
+                    } | {
+                        kind: "assertions";
+                        runner: "bun-junit" | "registered-protocol";
+                        checks: {
+                            passed: number;
+                            failed: number;
+                            skipped: number;
+                        };
+                    };
+                    provenance?: {
+                        sourceBefore: string;
+                        sourceAfter: string;
+                        definitionBefore: string;
+                        definitionAfter: string;
+                        root?: string;
+                        scope?: readonly string[];
+                    };
+                })[];
+                goal: {
+                    probabilityUnmet: number;
+                    verdict: "met" | "unmet" | "unshown";
+                    outcome: "act" | "confirm" | "escalate";
+                };
+                quality: {
+                    placeholder?: {
+                        verdict: "no" | "uncertain" | "yes";
+                        outcome: "act" | "confirm" | "escalate";
+                    };
+                    tests_weakened?: {
+                        verdict: "no" | "uncertain" | "yes";
+                        outcome: "act" | "confirm" | "escalate";
+                    };
+                    breaks_existing?: {
+                        verdict: "no" | "uncertain" | "yes";
+                        outcome: "act" | "confirm" | "escalate";
+                    };
+                    out_of_scope?: {
+                        verdict: "no" | "uncertain" | "yes";
+                        outcome: "act" | "confirm" | "escalate";
+                    };
+                    hidden_failure?: {
+                        verdict: "no" | "uncertain" | "yes";
+                        outcome: "act" | "confirm" | "escalate";
+                    };
+                    unsupported_claims?: {
+                        verdict: "no" | "uncertain" | "yes";
+                        outcome: "act" | "confirm" | "escalate";
+                    };
+                };
+                result: "await-owner" | "native-decision" | "nudge" | "pass" | "recorded" | "stall";
+                problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
+                qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
+                decisionIds: readonly string[];
+                evidenceDigest?: string;
+                reviewedFiles?: readonly ({
+                    path: string;
+                    sha256: string;
+                } | {
+                    path: string;
+                    observationId: string;
+                })[];
+            })[];
+            fixRounds: number;
+            escalations: readonly ({
+                id: string;
+                at: number;
+                scope: "deliverable" | "group" | "plan" | "shape" | "unit";
+                targetId: string;
+                reason: "attempts-undecided" | "fix-rounds-exhausted" | "owner-decision-needed" | "plan-unresolved" | "stalled" | "unsettled" | "writing-unclear";
+                question: string;
+                unmetCriterionIds: readonly string[];
+                decisionIds?: readonly string[];
+                failurePause?: boolean;
+                resolvedAt?: number;
+                reply?: {
+                    text: string;
+                    reading: "amend" | "approve" | "reject" | "unclear";
+                    outcome: "act" | "confirm" | "escalate";
+                    decisionId?: string;
+                };
+            })[];
+            decisions: readonly ({
+                id: string;
+                at: number;
+                action: "attempts-reduced" | "attempts-selected" | "cancelled" | "checked" | "committed" | "created" | "escalated" | "failed" | "fix-planned" | "fresh-agent" | "group-passed" | "nudged" | "owner-replied" | "passed" | "plan-accepted" | "plan-repaired" | "planned" | "queued" | "reaped" | "regressed" | "resumed" | "shaped" | "silence-retry" | "spawned" | "stalled" | "transport-retry" | "woke";
+                targetId: string;
+                reason: string;
+                decisionIds: readonly string[];
+                route?: {
+                    model: string;
+                    provider: string;
+                    fallbackModels?: readonly string[];
+                    routing?: {
+                        providerSelection?: "concrete" | "inherit-current" | "synthetic";
+                        providerFailurePolicy?: "fail" | "ordered-fallbacks";
+                        fallbackModels?: readonly string[];
+                    };
+                    reasoningEffort?: string;
+                    reason: string;
+                };
+                record?: {
+                    kind: "amended" | "fix-scheduled" | "receipt";
+                };
+            })[];
+            usage: {
+                inputTokens: number;
+                outputTokens: number;
+                cacheReadTokens: number;
+                cacheWriteTokens: number;
+                reasoningTokens?: number;
+                llmCallCount: number;
+                turnCount: number;
+                toolCallCount: number;
+                costUsd: null | number;
+                costState: "estimated" | "priced" | "unpriced";
+                costSource?: "catalog" | "mixed" | "provider" | "user";
+                pricingAsOf?: string;
+            };
+            judgmentUsage: {
+                calls: number;
+                inputTokens: number;
+                outputTokens: number;
+            };
+            plannerAgentIds: readonly string[];
+            agentUsage?: ({} & {
+                readonly [key: string]: {
+                    usage: {
+                        inputTokens: number;
+                        outputTokens: number;
+                        cacheReadTokens: number;
+                        cacheWriteTokens: number;
+                        reasoningTokens?: number;
+                        llmCallCount: number;
+                        turnCount: number;
+                        toolCallCount: number;
+                        costUsd: null | number;
+                        costState: "estimated" | "priced" | "unpriced";
+                        costSource?: "catalog" | "mixed" | "provider" | "user";
+                        pricingAsOf?: string;
+                    };
+                    agent?: ({} & {
+                        readonly [key: string]: JsonValue;
+                    }) | boolean | null | number | readonly JsonValue[] | string;
+                    toolCallCount: number;
+                };
+            });
+            answer?: string;
+            statusLine?: string;
+            commit?: {
+                status: "applied" | "committed" | "failed" | "skipped";
+                hash?: string;
+                note: string;
+            };
+            failureKind?: "budget" | "judgment-unavailable" | "max_turns" | "other" | "owner-rejected" | "planning" | "transport" | "zombie";
+            error?: string;
+            createdAt: number;
+            completedAt?: number;
+        };
+        ownerAgentId: string;
+        replayed?: boolean;
     };
     // (undocumented)
     "contracts.get": {
@@ -14345,7 +15724,7 @@ export interface OperatorMethodOutputMap {
             capturedAt: number;
             dirty: boolean;
             exclusions: readonly string[];
-            files: readonly ({
+            files?: readonly ({
                 path: string;
                 kind: "file" | "missing" | "symlink";
                 mode: "0" | "100644" | "100755" | "120000";
@@ -14367,7 +15746,7 @@ export interface OperatorMethodOutputMap {
             capturedAt: number;
             dirty: boolean;
             exclusions: readonly string[];
-            files: readonly ({
+            files?: readonly ({
                 path: string;
                 kind: "missing";
                 mode: "0";
@@ -14386,6 +15765,20 @@ export interface OperatorMethodOutputMap {
                 identity: string;
                 digest?: string;
             })[];
+        } | {
+            version: 3;
+            id: string;
+            sourceRoot: string;
+            sourceIdentity: string;
+            gitIdentity: string;
+            ownerHead: string;
+            ownerRef: string;
+            indexFingerprint: string;
+            inputTree: string;
+            inputCommit: string;
+            capturedAt: number;
+            dirty: boolean;
+            exclusions: readonly string[];
         };
         id: string;
         schemaVersion: number;
@@ -14406,7 +15799,7 @@ export interface OperatorMethodOutputMap {
         worktreePath?: string;
         baseBranch?: string;
         baseline?: {
-            version?: 2;
+            version?: 2 | 3 | 4;
             head: null | string;
             dirty: ({} & {
                 readonly [key: string]: null | string;
@@ -14532,6 +15925,8 @@ export interface OperatorMethodOutputMap {
                         sourceAfter: string;
                         definitionBefore: string;
                         definitionAfter: string;
+                        root?: string;
+                        scope?: readonly string[];
                     };
                 })[];
                 goal: {
@@ -14580,7 +15975,7 @@ export interface OperatorMethodOutputMap {
             })[];
             fixRounds: number;
             baseline?: {
-                version?: 2;
+                version?: 2 | 3 | 4;
                 head: null | string;
                 dirty: ({} & {
                     readonly [key: string]: null | string;
@@ -14686,6 +16081,8 @@ export interface OperatorMethodOutputMap {
                         sourceAfter: string;
                         definitionBefore: string;
                         definitionAfter: string;
+                        root?: string;
+                        scope?: readonly string[];
                     };
                 })[];
                 goal: {
@@ -14748,7 +16145,7 @@ export interface OperatorMethodOutputMap {
             transportRetries: number;
             touchedPaths: readonly string[];
             baseline?: {
-                version?: 2;
+                version?: 2 | 3 | 4;
                 head: null | string;
                 dirty: ({} & {
                     readonly [key: string]: null | string;
@@ -14927,6 +16324,8 @@ export interface OperatorMethodOutputMap {
                             sourceAfter: string;
                             definitionBefore: string;
                             definitionAfter: string;
+                            root?: string;
+                            scope?: readonly string[];
                         };
                     })[];
                     goal: {
@@ -14989,7 +16388,7 @@ export interface OperatorMethodOutputMap {
                 transportRetries: number;
                 touchedPaths: readonly string[];
                 baseline?: {
-                    version?: 2;
+                    version?: 2 | 3 | 4;
                     head: null | string;
                     dirty: ({} & {
                         readonly [key: string]: null | string;
@@ -15150,6 +16549,8 @@ export interface OperatorMethodOutputMap {
                     sourceAfter: string;
                     definitionBefore: string;
                     definitionAfter: string;
+                    root?: string;
+                    scope?: readonly string[];
                 };
             })[];
             goal: {
@@ -15234,6 +16635,9 @@ export interface OperatorMethodOutputMap {
                 reasoningEffort?: string;
                 reason: string;
             };
+            record?: {
+                kind: "amended" | "fix-scheduled" | "receipt";
+            };
         })[];
         usage: {
             inputTokens: number;
@@ -15255,6 +16659,28 @@ export interface OperatorMethodOutputMap {
             outputTokens: number;
         };
         plannerAgentIds: readonly string[];
+        agentUsage?: ({} & {
+            readonly [key: string]: {
+                usage: {
+                    inputTokens: number;
+                    outputTokens: number;
+                    cacheReadTokens: number;
+                    cacheWriteTokens: number;
+                    reasoningTokens?: number;
+                    llmCallCount: number;
+                    turnCount: number;
+                    toolCallCount: number;
+                    costUsd: null | number;
+                    costState: "estimated" | "priced" | "unpriced";
+                    costSource?: "catalog" | "mixed" | "provider" | "user";
+                    pricingAsOf?: string;
+                };
+                agent?: ({} & {
+                    readonly [key: string]: JsonValue;
+                }) | boolean | null | number | readonly JsonValue[] | string;
+                toolCallCount: number;
+            };
+        });
         answer?: string;
         statusLine?: string;
         commit?: {
@@ -15690,7 +17116,7 @@ export interface OperatorMethodOutputMap {
                 capturedAt: number;
                 dirty: boolean;
                 exclusions: readonly string[];
-                files: readonly ({
+                files?: readonly ({
                     path: string;
                     kind: "file" | "missing" | "symlink";
                     mode: "0" | "100644" | "100755" | "120000";
@@ -15712,7 +17138,7 @@ export interface OperatorMethodOutputMap {
                 capturedAt: number;
                 dirty: boolean;
                 exclusions: readonly string[];
-                files: readonly ({
+                files?: readonly ({
                     path: string;
                     kind: "missing";
                     mode: "0";
@@ -15731,6 +17157,20 @@ export interface OperatorMethodOutputMap {
                     identity: string;
                     digest?: string;
                 })[];
+            } | {
+                version: 3;
+                id: string;
+                sourceRoot: string;
+                sourceIdentity: string;
+                gitIdentity: string;
+                ownerHead: string;
+                ownerRef: string;
+                indexFingerprint: string;
+                inputTree: string;
+                inputCommit: string;
+                capturedAt: number;
+                dirty: boolean;
+                exclusions: readonly string[];
             };
             id: string;
             schemaVersion: number;
@@ -15751,7 +17191,7 @@ export interface OperatorMethodOutputMap {
             worktreePath?: string;
             baseBranch?: string;
             baseline?: {
-                version?: 2;
+                version?: 2 | 3 | 4;
                 head: null | string;
                 dirty: ({} & {
                     readonly [key: string]: null | string;
@@ -15877,6 +17317,8 @@ export interface OperatorMethodOutputMap {
                             sourceAfter: string;
                             definitionBefore: string;
                             definitionAfter: string;
+                            root?: string;
+                            scope?: readonly string[];
                         };
                     })[];
                     goal: {
@@ -15925,7 +17367,7 @@ export interface OperatorMethodOutputMap {
                 })[];
                 fixRounds: number;
                 baseline?: {
-                    version?: 2;
+                    version?: 2 | 3 | 4;
                     head: null | string;
                     dirty: ({} & {
                         readonly [key: string]: null | string;
@@ -16031,6 +17473,8 @@ export interface OperatorMethodOutputMap {
                             sourceAfter: string;
                             definitionBefore: string;
                             definitionAfter: string;
+                            root?: string;
+                            scope?: readonly string[];
                         };
                     })[];
                     goal: {
@@ -16093,7 +17537,7 @@ export interface OperatorMethodOutputMap {
                 transportRetries: number;
                 touchedPaths: readonly string[];
                 baseline?: {
-                    version?: 2;
+                    version?: 2 | 3 | 4;
                     head: null | string;
                     dirty: ({} & {
                         readonly [key: string]: null | string;
@@ -16272,6 +17716,8 @@ export interface OperatorMethodOutputMap {
                                 sourceAfter: string;
                                 definitionBefore: string;
                                 definitionAfter: string;
+                                root?: string;
+                                scope?: readonly string[];
                             };
                         })[];
                         goal: {
@@ -16334,7 +17780,7 @@ export interface OperatorMethodOutputMap {
                     transportRetries: number;
                     touchedPaths: readonly string[];
                     baseline?: {
-                        version?: 2;
+                        version?: 2 | 3 | 4;
                         head: null | string;
                         dirty: ({} & {
                             readonly [key: string]: null | string;
@@ -16495,6 +17941,8 @@ export interface OperatorMethodOutputMap {
                         sourceAfter: string;
                         definitionBefore: string;
                         definitionAfter: string;
+                        root?: string;
+                        scope?: readonly string[];
                     };
                 })[];
                 goal: {
@@ -16579,6 +18027,9 @@ export interface OperatorMethodOutputMap {
                     reasoningEffort?: string;
                     reason: string;
                 };
+                record?: {
+                    kind: "amended" | "fix-scheduled" | "receipt";
+                };
             })[];
             usage: {
                 inputTokens: number;
@@ -16600,6 +18051,28 @@ export interface OperatorMethodOutputMap {
                 outputTokens: number;
             };
             plannerAgentIds: readonly string[];
+            agentUsage?: ({} & {
+                readonly [key: string]: {
+                    usage: {
+                        inputTokens: number;
+                        outputTokens: number;
+                        cacheReadTokens: number;
+                        cacheWriteTokens: number;
+                        reasoningTokens?: number;
+                        llmCallCount: number;
+                        turnCount: number;
+                        toolCallCount: number;
+                        costUsd: null | number;
+                        costState: "estimated" | "priced" | "unpriced";
+                        costSource?: "catalog" | "mixed" | "provider" | "user";
+                        pricingAsOf?: string;
+                    };
+                    agent?: ({} & {
+                        readonly [key: string]: JsonValue;
+                    }) | boolean | null | number | readonly JsonValue[] | string;
+                    toolCallCount: number;
+                };
+            });
             answer?: string;
             statusLine?: string;
             commit?: {
@@ -16614,12 +18087,21 @@ export interface OperatorMethodOutputMap {
         })[];
     };
     // (undocumented)
+    "contracts.remove": {
+        removed: boolean;
+    };
+    // (undocumented)
     "contracts.reply": {
         escalationId: string;
         reading: "amend" | "approve" | "reject" | "unclear";
         outcome: "act" | "confirm" | "escalate";
         action: "amended" | "approved" | "asked-again" | "refused" | "stopped";
         nextEscalationId?: string;
+    };
+    // (undocumented)
+    "contracts.retryUnit": {
+        outcome: "committed" | "refused" | "restarted";
+        reason: string;
     };
     // (undocumented)
     "contracts.start": {
@@ -17044,7 +18526,7 @@ export interface OperatorMethodOutputMap {
                 capturedAt: number;
                 dirty: boolean;
                 exclusions: readonly string[];
-                files: readonly ({
+                files?: readonly ({
                     path: string;
                     kind: "file" | "missing" | "symlink";
                     mode: "0" | "100644" | "100755" | "120000";
@@ -17066,7 +18548,7 @@ export interface OperatorMethodOutputMap {
                 capturedAt: number;
                 dirty: boolean;
                 exclusions: readonly string[];
-                files: readonly ({
+                files?: readonly ({
                     path: string;
                     kind: "missing";
                     mode: "0";
@@ -17085,6 +18567,20 @@ export interface OperatorMethodOutputMap {
                     identity: string;
                     digest?: string;
                 })[];
+            } | {
+                version: 3;
+                id: string;
+                sourceRoot: string;
+                sourceIdentity: string;
+                gitIdentity: string;
+                ownerHead: string;
+                ownerRef: string;
+                indexFingerprint: string;
+                inputTree: string;
+                inputCommit: string;
+                capturedAt: number;
+                dirty: boolean;
+                exclusions: readonly string[];
             };
             id: string;
             schemaVersion: number;
@@ -17105,7 +18601,7 @@ export interface OperatorMethodOutputMap {
             worktreePath?: string;
             baseBranch?: string;
             baseline?: {
-                version?: 2;
+                version?: 2 | 3 | 4;
                 head: null | string;
                 dirty: ({} & {
                     readonly [key: string]: null | string;
@@ -17231,6 +18727,8 @@ export interface OperatorMethodOutputMap {
                             sourceAfter: string;
                             definitionBefore: string;
                             definitionAfter: string;
+                            root?: string;
+                            scope?: readonly string[];
                         };
                     })[];
                     goal: {
@@ -17279,7 +18777,7 @@ export interface OperatorMethodOutputMap {
                 })[];
                 fixRounds: number;
                 baseline?: {
-                    version?: 2;
+                    version?: 2 | 3 | 4;
                     head: null | string;
                     dirty: ({} & {
                         readonly [key: string]: null | string;
@@ -17385,6 +18883,8 @@ export interface OperatorMethodOutputMap {
                             sourceAfter: string;
                             definitionBefore: string;
                             definitionAfter: string;
+                            root?: string;
+                            scope?: readonly string[];
                         };
                     })[];
                     goal: {
@@ -17447,7 +18947,7 @@ export interface OperatorMethodOutputMap {
                 transportRetries: number;
                 touchedPaths: readonly string[];
                 baseline?: {
-                    version?: 2;
+                    version?: 2 | 3 | 4;
                     head: null | string;
                     dirty: ({} & {
                         readonly [key: string]: null | string;
@@ -17626,6 +19126,8 @@ export interface OperatorMethodOutputMap {
                                 sourceAfter: string;
                                 definitionBefore: string;
                                 definitionAfter: string;
+                                root?: string;
+                                scope?: readonly string[];
                             };
                         })[];
                         goal: {
@@ -17688,7 +19190,7 @@ export interface OperatorMethodOutputMap {
                     transportRetries: number;
                     touchedPaths: readonly string[];
                     baseline?: {
-                        version?: 2;
+                        version?: 2 | 3 | 4;
                         head: null | string;
                         dirty: ({} & {
                             readonly [key: string]: null | string;
@@ -17849,6 +19351,8 @@ export interface OperatorMethodOutputMap {
                         sourceAfter: string;
                         definitionBefore: string;
                         definitionAfter: string;
+                        root?: string;
+                        scope?: readonly string[];
                     };
                 })[];
                 goal: {
@@ -17933,6 +19437,9 @@ export interface OperatorMethodOutputMap {
                     reasoningEffort?: string;
                     reason: string;
                 };
+                record?: {
+                    kind: "amended" | "fix-scheduled" | "receipt";
+                };
             })[];
             usage: {
                 inputTokens: number;
@@ -17954,6 +19461,28 @@ export interface OperatorMethodOutputMap {
                 outputTokens: number;
             };
             plannerAgentIds: readonly string[];
+            agentUsage?: ({} & {
+                readonly [key: string]: {
+                    usage: {
+                        inputTokens: number;
+                        outputTokens: number;
+                        cacheReadTokens: number;
+                        cacheWriteTokens: number;
+                        reasoningTokens?: number;
+                        llmCallCount: number;
+                        turnCount: number;
+                        toolCallCount: number;
+                        costUsd: null | number;
+                        costState: "estimated" | "priced" | "unpriced";
+                        costSource?: "catalog" | "mixed" | "provider" | "user";
+                        pricingAsOf?: string;
+                    };
+                    agent?: ({} & {
+                        readonly [key: string]: JsonValue;
+                    }) | boolean | null | number | readonly JsonValue[] | string;
+                    toolCallCount: number;
+                };
+            });
             answer?: string;
             statusLine?: string;
             commit?: {
@@ -17967,6 +19496,95 @@ export interface OperatorMethodOutputMap {
             completedAt?: number;
         };
         ownerAgentId: string;
+        replayed?: boolean;
+    };
+    // (undocumented)
+    "contracts.status": {
+        id: string;
+        sessionId: string;
+        ownerAgentId: string;
+        origin: "agent-tool" | "cli" | "external" | "hosted" | "proposal" | "turn";
+        ask: string;
+        goal: string;
+        status: "awaiting-owner" | "cancelled" | "checking-plan" | "committing" | "failed" | "fixing" | "judging" | "passed" | "planning" | "queued" | "running" | "shaping";
+        statusLine?: string;
+        failureKind?: "budget" | "judgment-unavailable" | "max_turns" | "other" | "owner-rejected" | "planning" | "transport" | "zombie";
+        error?: string;
+        groupCount: number;
+        unitCount: number;
+        unitsPassed: number;
+        unitsFailed: number;
+        openEscalationIds: readonly string[];
+        openEscalation?: {
+            id: string;
+            at: number;
+            question: string;
+        };
+        usage: {
+            inputTokens: number;
+            outputTokens: number;
+            cacheReadTokens: number;
+            cacheWriteTokens: number;
+            reasoningTokens?: number;
+            llmCallCount: number;
+            turnCount: number;
+            toolCallCount: number;
+            costUsd: null | number;
+            costState: "estimated" | "priced" | "unpriced";
+            costSource?: "catalog" | "mixed" | "provider" | "user";
+            pricingAsOf?: string;
+        };
+        createdAt: number;
+        completedAt?: number;
+        updatedAt: number;
+        revision: string;
+    } | {
+        id: string;
+        revision: string;
+        notModified: true;
+    };
+    // (undocumented)
+    "contracts.summaries": {
+        contracts: readonly ({
+            id: string;
+            sessionId: string;
+            ownerAgentId: string;
+            origin: "agent-tool" | "cli" | "external" | "hosted" | "proposal" | "turn";
+            ask: string;
+            goal: string;
+            status: "awaiting-owner" | "cancelled" | "checking-plan" | "committing" | "failed" | "fixing" | "judging" | "passed" | "planning" | "queued" | "running" | "shaping";
+            statusLine?: string;
+            failureKind?: "budget" | "judgment-unavailable" | "max_turns" | "other" | "owner-rejected" | "planning" | "transport" | "zombie";
+            error?: string;
+            groupCount: number;
+            unitCount: number;
+            unitsPassed: number;
+            unitsFailed: number;
+            openEscalationIds: readonly string[];
+            openEscalation?: {
+                id: string;
+                at: number;
+                question: string;
+            };
+            usage: {
+                inputTokens: number;
+                outputTokens: number;
+                cacheReadTokens: number;
+                cacheWriteTokens: number;
+                reasoningTokens?: number;
+                llmCallCount: number;
+                turnCount: number;
+                toolCallCount: number;
+                costUsd: null | number;
+                costState: "estimated" | "priced" | "unpriced";
+                costSource?: "catalog" | "mixed" | "provider" | "user";
+                pricingAsOf?: string;
+            };
+            createdAt: number;
+            completedAt?: number;
+            updatedAt: number;
+            revision: string;
+        })[];
     };
     // (undocumented)
     "control.auth.current": {
@@ -17977,6 +19595,7 @@ export interface OperatorMethodOutputMap {
         sessionCookiePresent: boolean;
         principalId: null | string;
         principalKind: null | "bot" | "service" | "token" | "user";
+        credential: null | "agent" | "device-token" | "local" | "shared-token" | "user-session";
         admin: boolean;
         scopes: readonly string[];
         roles: readonly string[];
@@ -18036,6 +19655,7 @@ export interface OperatorMethodOutputMap {
                         sessionCookiePresent: boolean;
                         principalId: null | string;
                         principalKind: null | "bot" | "service" | "token" | "user";
+                        credential: null | "agent" | "device-token" | "local" | "shared-token" | "user-session";
                         admin: boolean;
                         scopes: readonly string[];
                         roles: readonly string[];
@@ -18099,7 +19719,19 @@ export interface OperatorMethodOutputMap {
                     });
                     pluginId?: string;
                     dangerous?: boolean;
+                    effect?: "outward" | "read" | "write";
+                    ownerOnly?: boolean;
                     invokable?: boolean;
+                    replay?: {
+                        in: string;
+                        name: string;
+                        behavior: string;
+                    };
+                    errorCodes?: readonly ({
+                        code: string;
+                        status: number;
+                        meaning: string;
+                    })[];
                     metadata?: ({} & {
                         readonly [key: string]: JsonValue;
                     });
@@ -18241,7 +19873,19 @@ export interface OperatorMethodOutputMap {
             });
             pluginId?: string;
             dangerous?: boolean;
+            effect?: "outward" | "read" | "write";
+            ownerOnly?: boolean;
             invokable?: boolean;
+            replay?: {
+                in: string;
+                name: string;
+                behavior: string;
+            };
+            errorCodes?: readonly ({
+                code: string;
+                status: number;
+                meaning: string;
+            })[];
             metadata?: ({} & {
                 readonly [key: string]: JsonValue;
             });
@@ -18271,7 +19915,19 @@ export interface OperatorMethodOutputMap {
             });
             pluginId?: string;
             dangerous?: boolean;
+            effect?: "outward" | "read" | "write";
+            ownerOnly?: boolean;
             invokable?: boolean;
+            replay?: {
+                in: string;
+                name: string;
+                behavior: string;
+            };
+            errorCodes?: readonly ({
+                code: string;
+                status: number;
+                meaning: string;
+            })[];
             metadata?: ({} & {
                 readonly [key: string]: JsonValue;
             });
@@ -18490,6 +20146,20 @@ export interface OperatorMethodOutputMap {
         }))[];
     };
     // (undocumented)
+    "devices.artifacts.delete": {
+        deleted: boolean;
+        removal: {
+            artifactId: string;
+            nodeId: string;
+            capabilityId: string;
+            fileName: string;
+            reason: string;
+            removedAt: number;
+            byteLength: number;
+        };
+        detail: string;
+    };
+    // (undocumented)
     "devices.artifacts.list": {
         artifacts: readonly ({
             artifactId: string;
@@ -18642,9 +20312,29 @@ export interface OperatorMethodOutputMap {
         captureRetentionHours: number;
     };
     // (undocumented)
+    "email.attachment.get": {
+        filename: string;
+        contentType: string;
+        sizeBytes: number;
+        contentBase64: string;
+    };
+    // (undocumented)
     "email.draft.create": {
         draftId: string;
         uid?: number;
+        mailbox: string;
+    };
+    // (undocumented)
+    "email.drafts.list": {
+        drafts: readonly ({
+            uid: number;
+            to: string;
+            subject: string;
+            date: string;
+            inReplyTo: string;
+            body: string;
+        })[];
+        total: number;
         mailbox: string;
     };
     // (undocumented)
@@ -18810,7 +20500,12 @@ export interface OperatorMethodOutputMap {
             contentType: string;
             sizeBytes: number;
         })[];
-        replySubjectRef?: string;
+    };
+    // (undocumented)
+    "email.inbox.update": {
+        uid: number;
+        action: string;
+        movedTo?: string;
     };
     // (undocumented)
     "email.send": {
@@ -18853,6 +20548,14 @@ export interface OperatorMethodOutputMap {
         releaseBlockers: readonly string[];
     };
     // (undocumented)
+    "flags.status": {
+        pendingRestart: readonly ({
+            featureId: string;
+            running: "disabled" | "enabled" | "killed";
+            saved: "disabled" | "enabled" | "killed";
+        })[];
+    };
+    // (undocumented)
     "fleet.archive": {
         archived: boolean;
         count: number;
@@ -18863,7 +20566,7 @@ export interface OperatorMethodOutputMap {
         capturedAt: number;
         nodes: readonly (({
             id: string;
-            kind: "acp-agent" | "agent" | "background-process" | "code-index" | "contract" | "contract-group" | "contract-unit" | "observed-external" | "schedule" | "trigger" | "watcher" | "workflow";
+            kind: "acp-agent" | "agent" | "background-process" | "code-index" | "contract" | "contract-group" | "contract-unit" | "hook-action" | "observed-external" | "schedule" | "trigger" | "watcher" | "workflow";
             parentId?: string;
             label: string;
             task?: string;
@@ -19085,6 +20788,11 @@ export interface OperatorMethodOutputMap {
         files: readonly string[];
     };
     // (undocumented)
+    "fleet.conflicts.retry": {
+        itemId: string;
+        outcome: "conflict" | "merged" | "not-conflicted";
+    };
+    // (undocumented)
     "fleet.graph.get": {
         workstreamId: string;
         title: string;
@@ -19115,10 +20823,16 @@ export interface OperatorMethodOutputMap {
         };
     };
     // (undocumented)
+    "fleet.interrupt": {
+        id: string;
+        action: string;
+        affected: readonly string[];
+    };
+    // (undocumented)
     "fleet.list": {
         items: readonly (({
             id: string;
-            kind: "acp-agent" | "agent" | "background-process" | "code-index" | "contract" | "contract-group" | "contract-unit" | "observed-external" | "schedule" | "trigger" | "watcher" | "workflow";
+            kind: "acp-agent" | "agent" | "background-process" | "code-index" | "contract" | "contract-group" | "contract-unit" | "hook-action" | "observed-external" | "schedule" | "trigger" | "watcher" | "workflow";
             parentId?: string;
             label: string;
             task?: string;
@@ -19207,11 +20921,17 @@ export interface OperatorMethodOutputMap {
         reason?: string;
     };
     // (undocumented)
+    "fleet.resume": {
+        id: string;
+        action: string;
+        affected: readonly string[];
+    };
+    // (undocumented)
     "fleet.snapshot": {
         capturedAt: number;
         nodes: readonly (({
             id: string;
-            kind: "acp-agent" | "agent" | "background-process" | "code-index" | "contract" | "contract-group" | "contract-unit" | "observed-external" | "schedule" | "trigger" | "watcher" | "workflow";
+            kind: "acp-agent" | "agent" | "background-process" | "code-index" | "contract" | "contract-group" | "contract-unit" | "hook-action" | "observed-external" | "schedule" | "trigger" | "watcher" | "workflow";
             parentId?: string;
             label: string;
             task?: string;
@@ -19291,6 +21011,12 @@ export interface OperatorMethodOutputMap {
         }))[];
         truncated: boolean;
         totalCount: number;
+    };
+    // (undocumented)
+    "fleet.stop": {
+        id: string;
+        action: string;
+        affected: readonly string[];
     };
     // (undocumented)
     "fleet.unarchive": {
@@ -20748,13 +22474,13 @@ export interface OperatorMethodOutputMap {
     });
     // (undocumented)
     "inbound.telegram.cancel": {
-        accountIdentity?: {
-            id: string;
-            username: string;
-            revision: string;
-        };
-        outcome?: string;
-        reason?: string;
+        outcome: "cancelled";
+        execution: "not-started";
+    } | {
+        outcome: "held";
+        reason: "account-not-chosen" | "account-proof-changed" | "account-proof-required" | "account-proof-unavailable" | "already-decided" | "chat-not-selected" | "configuration-not-current" | "configuration-unavailable" | "handoff-held" | "lifecycle-changed" | "lifetime-exceeds-configuration" | "message-edited" | "message-identity-missing" | "missing-source-proof" | "no-configuration" | "not-durably-resolved" | "not-owner" | "owner-changed" | "review-closed" | "review-held" | "review-queue-refused" | "source-unavailable" | "tracking-full" | "workspace-changed";
+        message: string;
+        nextStep: string;
         ref?: {
             sessionId: string;
             inputId: string;
@@ -20762,131 +22488,33 @@ export interface OperatorMethodOutputMap {
             sourceRevision: string;
             requestId: string;
         };
-        configurationId?: string;
-        expiresAt?: number;
-        pendingRetentionMs?: number;
-        processing?: string;
-        restart?: string;
         route?: string;
-        execution?: "not-started";
+        accountIdentity?: {
+            id: string;
+            username: string;
+            revision: string;
+        };
         approvalId?: string;
         source?: string;
-        recovery?: string;
-        record?: {
-            id: string;
-            ref: {
-                sessionId: string;
-                inputId: string;
-                sourceId: string;
-                sourceRevision: string;
-                requestId: string;
-            };
-            origin: {
-                kind: "external-original";
-                accountId: string;
-                accountRevision: string;
-                routeId: string;
-                routeRevision: string;
-            };
-            configurationId: string;
-            ownerRevision: string;
-            owner?: {
-                kind: "pairing-token";
-                principalId: string;
-                tokenId: string;
-                authorityId: string;
-                authorityRevision: string;
-                scopes: readonly string[];
-            };
-            workspaceRevision: string;
-            approvalId: string;
-            choices: {
-                processingPurpose: "accept-external-message-for-owner-review";
-                sourceRetention: "memory-only-until-review-close-or-deadline";
-                sourceRetentionMs: number;
-                derivedRecord: "external-source-reference-only-v1";
-                derivedRecordRetentionMs: number;
-                execution: "none";
-                ownerMayReadOriginal: true;
-            };
-            acceptedAt: number;
-            sourceExpiresAt: number;
-            recordExpiresAt: number;
-            state: "accepted-for-review" | "cancelled";
-            execution: "not-started";
-        };
-        records?: readonly ({
-            id: string;
-            ref: {
-                sessionId: string;
-                inputId: string;
-                sourceId: string;
-                sourceRevision: string;
-                requestId: string;
-            };
-            origin: {
-                kind: "external-original";
-                accountId: string;
-                accountRevision: string;
-                routeId: string;
-                routeRevision: string;
-            };
-            configurationId: string;
-            ownerRevision: string;
-            owner?: {
-                kind: "pairing-token";
-                principalId: string;
-                tokenId: string;
-                authorityId: string;
-                authorityRevision: string;
-                scopes: readonly string[];
-            };
-            workspaceRevision: string;
-            approvalId: string;
-            choices: {
-                processingPurpose: "accept-external-message-for-owner-review";
-                sourceRetention: "memory-only-until-review-close-or-deadline";
-                sourceRetentionMs: number;
-                derivedRecord: "external-source-reference-only-v1";
-                derivedRecordRetentionMs: number;
-                execution: "none";
-                ownerMayReadOriginal: true;
-            };
-            acceptedAt: number;
-            sourceExpiresAt: number;
-            recordExpiresAt: number;
-            state: "accepted-for-review" | "cancelled";
-            execution: "not-started";
-        })[];
-        pending?: readonly ({
-            ref: {
-                sessionId: string;
-                inputId: string;
-                sourceId: string;
-                sourceRevision: string;
-                requestId: string;
-            };
-            approvalId: string;
-            sourceExpiresAt: number;
-            outcome: string;
-        })[];
-        original?: {
-            text: string;
-            unsupportedSources: readonly ({
-                kind: string;
-                label: string;
-            })[];
-        };
     };
     // (undocumented)
     "inbound.telegram.configure": {
-        accountIdentity?: {
+        outcome: "configured";
+        configurationId: string;
+        accountIdentity: {
             id: string;
             username: string;
             revision: string;
         };
-        outcome?: string;
-        reason?: string;
+        expiresAt: number;
+        pendingRetentionMs: number;
+        processing: "requires-per-message-approval";
+        restart: "selected-route-held-without-original-or-grant";
+    } | {
+        outcome: "held";
+        reason: "account-not-chosen" | "account-proof-changed" | "account-proof-required" | "account-proof-unavailable" | "already-decided" | "chat-not-selected" | "configuration-not-current" | "configuration-unavailable" | "handoff-held" | "lifecycle-changed" | "lifetime-exceeds-configuration" | "message-edited" | "message-identity-missing" | "missing-source-proof" | "no-configuration" | "not-durably-resolved" | "not-owner" | "owner-changed" | "review-closed" | "review-held" | "review-queue-refused" | "source-unavailable" | "tracking-full" | "workspace-changed";
+        message: string;
+        nextStep: string;
         ref?: {
             sessionId: string;
             inputId: string;
@@ -20894,131 +22522,41 @@ export interface OperatorMethodOutputMap {
             sourceRevision: string;
             requestId: string;
         };
-        configurationId?: string;
-        expiresAt?: number;
-        pendingRetentionMs?: number;
-        processing?: string;
-        restart?: string;
         route?: string;
-        execution?: "not-started";
+        accountIdentity?: {
+            id: string;
+            username: string;
+            revision: string;
+        };
         approvalId?: string;
         source?: string;
-        recovery?: string;
-        record?: {
-            id: string;
-            ref: {
-                sessionId: string;
-                inputId: string;
-                sourceId: string;
-                sourceRevision: string;
-                requestId: string;
-            };
-            origin: {
-                kind: "external-original";
-                accountId: string;
-                accountRevision: string;
-                routeId: string;
-                routeRevision: string;
-            };
-            configurationId: string;
-            ownerRevision: string;
-            owner?: {
-                kind: "pairing-token";
-                principalId: string;
-                tokenId: string;
-                authorityId: string;
-                authorityRevision: string;
-                scopes: readonly string[];
-            };
-            workspaceRevision: string;
-            approvalId: string;
-            choices: {
-                processingPurpose: "accept-external-message-for-owner-review";
-                sourceRetention: "memory-only-until-review-close-or-deadline";
-                sourceRetentionMs: number;
-                derivedRecord: "external-source-reference-only-v1";
-                derivedRecordRetentionMs: number;
-                execution: "none";
-                ownerMayReadOriginal: true;
-            };
-            acceptedAt: number;
-            sourceExpiresAt: number;
-            recordExpiresAt: number;
-            state: "accepted-for-review" | "cancelled";
-            execution: "not-started";
-        };
-        records?: readonly ({
-            id: string;
-            ref: {
-                sessionId: string;
-                inputId: string;
-                sourceId: string;
-                sourceRevision: string;
-                requestId: string;
-            };
-            origin: {
-                kind: "external-original";
-                accountId: string;
-                accountRevision: string;
-                routeId: string;
-                routeRevision: string;
-            };
-            configurationId: string;
-            ownerRevision: string;
-            owner?: {
-                kind: "pairing-token";
-                principalId: string;
-                tokenId: string;
-                authorityId: string;
-                authorityRevision: string;
-                scopes: readonly string[];
-            };
-            workspaceRevision: string;
-            approvalId: string;
-            choices: {
-                processingPurpose: "accept-external-message-for-owner-review";
-                sourceRetention: "memory-only-until-review-close-or-deadline";
-                sourceRetentionMs: number;
-                derivedRecord: "external-source-reference-only-v1";
-                derivedRecordRetentionMs: number;
-                execution: "none";
-                ownerMayReadOriginal: true;
-            };
-            acceptedAt: number;
-            sourceExpiresAt: number;
-            recordExpiresAt: number;
-            state: "accepted-for-review" | "cancelled";
-            execution: "not-started";
-        })[];
-        pending?: readonly ({
-            ref: {
-                sessionId: string;
-                inputId: string;
-                sourceId: string;
-                sourceRevision: string;
-                requestId: string;
-            };
-            approvalId: string;
-            sourceExpiresAt: number;
-            outcome: string;
-        })[];
-        original?: {
-            text: string;
-            unsupportedSources: readonly ({
-                kind: string;
-                label: string;
-            })[];
-        };
     };
     // (undocumented)
     "inbound.telegram.decide": {
-        accountIdentity?: {
-            id: string;
-            username: string;
-            revision: string;
+        outcome: "started" | "transferred" | "unknown";
+        ref: {
+            sessionId: string;
+            inputId: string;
+            sourceId: string;
+            sourceRevision: string;
+            requestId: string;
         };
-        outcome?: string;
-        reason?: string;
+        execution: "not-started";
+    } | {
+        outcome: "denied";
+        ref: {
+            sessionId: string;
+            inputId: string;
+            sourceId: string;
+            sourceRevision: string;
+            requestId: string;
+        };
+        execution: "not-started";
+    } | {
+        outcome: "held";
+        reason: "account-not-chosen" | "account-proof-changed" | "account-proof-required" | "account-proof-unavailable" | "already-decided" | "chat-not-selected" | "configuration-not-current" | "configuration-unavailable" | "handoff-held" | "lifecycle-changed" | "lifetime-exceeds-configuration" | "message-edited" | "message-identity-missing" | "missing-source-proof" | "no-configuration" | "not-durably-resolved" | "not-owner" | "owner-changed" | "review-closed" | "review-held" | "review-queue-refused" | "source-unavailable" | "tracking-full" | "workspace-changed";
+        message: string;
+        nextStep: string;
         ref?: {
             sessionId: string;
             inputId: string;
@@ -21026,149 +22564,19 @@ export interface OperatorMethodOutputMap {
             sourceRevision: string;
             requestId: string;
         };
-        configurationId?: string;
-        expiresAt?: number;
-        pendingRetentionMs?: number;
-        processing?: string;
-        restart?: string;
         route?: string;
-        execution?: "not-started";
+        accountIdentity?: {
+            id: string;
+            username: string;
+            revision: string;
+        };
         approvalId?: string;
         source?: string;
-        recovery?: string;
-        record?: {
-            id: string;
-            ref: {
-                sessionId: string;
-                inputId: string;
-                sourceId: string;
-                sourceRevision: string;
-                requestId: string;
-            };
-            origin: {
-                kind: "external-original";
-                accountId: string;
-                accountRevision: string;
-                routeId: string;
-                routeRevision: string;
-            };
-            configurationId: string;
-            ownerRevision: string;
-            owner?: {
-                kind: "pairing-token";
-                principalId: string;
-                tokenId: string;
-                authorityId: string;
-                authorityRevision: string;
-                scopes: readonly string[];
-            };
-            workspaceRevision: string;
-            approvalId: string;
-            choices: {
-                processingPurpose: "accept-external-message-for-owner-review";
-                sourceRetention: "memory-only-until-review-close-or-deadline";
-                sourceRetentionMs: number;
-                derivedRecord: "external-source-reference-only-v1";
-                derivedRecordRetentionMs: number;
-                execution: "none";
-                ownerMayReadOriginal: true;
-            };
-            acceptedAt: number;
-            sourceExpiresAt: number;
-            recordExpiresAt: number;
-            state: "accepted-for-review" | "cancelled";
-            execution: "not-started";
-        };
-        records?: readonly ({
-            id: string;
-            ref: {
-                sessionId: string;
-                inputId: string;
-                sourceId: string;
-                sourceRevision: string;
-                requestId: string;
-            };
-            origin: {
-                kind: "external-original";
-                accountId: string;
-                accountRevision: string;
-                routeId: string;
-                routeRevision: string;
-            };
-            configurationId: string;
-            ownerRevision: string;
-            owner?: {
-                kind: "pairing-token";
-                principalId: string;
-                tokenId: string;
-                authorityId: string;
-                authorityRevision: string;
-                scopes: readonly string[];
-            };
-            workspaceRevision: string;
-            approvalId: string;
-            choices: {
-                processingPurpose: "accept-external-message-for-owner-review";
-                sourceRetention: "memory-only-until-review-close-or-deadline";
-                sourceRetentionMs: number;
-                derivedRecord: "external-source-reference-only-v1";
-                derivedRecordRetentionMs: number;
-                execution: "none";
-                ownerMayReadOriginal: true;
-            };
-            acceptedAt: number;
-            sourceExpiresAt: number;
-            recordExpiresAt: number;
-            state: "accepted-for-review" | "cancelled";
-            execution: "not-started";
-        })[];
-        pending?: readonly ({
-            ref: {
-                sessionId: string;
-                inputId: string;
-                sourceId: string;
-                sourceRevision: string;
-                requestId: string;
-            };
-            approvalId: string;
-            sourceExpiresAt: number;
-            outcome: string;
-        })[];
-        original?: {
-            text: string;
-            unsupportedSources: readonly ({
-                kind: string;
-                label: string;
-            })[];
-        };
     };
     // (undocumented)
     "inbound.telegram.list": {
-        accountIdentity?: {
-            id: string;
-            username: string;
-            revision: string;
-        };
-        outcome?: string;
-        reason?: string;
-        ref?: {
-            sessionId: string;
-            inputId: string;
-            sourceId: string;
-            sourceRevision: string;
-            requestId: string;
-        };
-        configurationId?: string;
-        expiresAt?: number;
-        pendingRetentionMs?: number;
-        processing?: string;
-        restart?: string;
-        route?: string;
-        execution?: "not-started";
-        approvalId?: string;
-        source?: string;
-        recovery?: string;
-        record?: {
+        outcome: "listed";
+        records: readonly ({
             id: string;
             ref: {
                 sessionId: string;
@@ -21187,7 +22595,7 @@ export interface OperatorMethodOutputMap {
             configurationId: string;
             ownerRevision: string;
             owner?: {
-                kind: "pairing-token";
+                kind: "local" | "pairing-token";
                 principalId: string;
                 tokenId: string;
                 authorityId: string;
@@ -21208,53 +22616,10 @@ export interface OperatorMethodOutputMap {
             acceptedAt: number;
             sourceExpiresAt: number;
             recordExpiresAt: number;
-            state: "accepted-for-review" | "cancelled";
-            execution: "not-started";
-        };
-        records?: readonly ({
-            id: string;
-            ref: {
-                sessionId: string;
-                inputId: string;
-                sourceId: string;
-                sourceRevision: string;
-                requestId: string;
-            };
-            origin: {
-                kind: "external-original";
-                accountId: string;
-                accountRevision: string;
-                routeId: string;
-                routeRevision: string;
-            };
-            configurationId: string;
-            ownerRevision: string;
-            owner?: {
-                kind: "pairing-token";
-                principalId: string;
-                tokenId: string;
-                authorityId: string;
-                authorityRevision: string;
-                scopes: readonly string[];
-            };
-            workspaceRevision: string;
-            approvalId: string;
-            choices: {
-                processingPurpose: "accept-external-message-for-owner-review";
-                sourceRetention: "memory-only-until-review-close-or-deadline";
-                sourceRetentionMs: number;
-                derivedRecord: "external-source-reference-only-v1";
-                derivedRecordRetentionMs: number;
-                execution: "none";
-                ownerMayReadOriginal: true;
-            };
-            acceptedAt: number;
-            sourceExpiresAt: number;
-            recordExpiresAt: number;
-            state: "accepted-for-review" | "cancelled";
+            state: "accepted-for-review" | "cancelled" | "reviewed";
             execution: "not-started";
         })[];
-        pending?: readonly ({
+        pending: readonly ({
             ref: {
                 sessionId: string;
                 inputId: string;
@@ -21264,43 +22629,13 @@ export interface OperatorMethodOutputMap {
             };
             approvalId: string;
             sourceExpiresAt: number;
-            outcome: string;
+            outcome: "approved" | "awaiting-owner" | "cancelled" | "deciding" | "started" | "transferred" | "unknown" | "held";
         })[];
-        original?: {
-            text: string;
-            unsupportedSources: readonly ({
-                kind: string;
-                label: string;
-            })[];
-        };
     };
     // (undocumented)
     "inbound.telegram.read": {
-        accountIdentity?: {
-            id: string;
-            username: string;
-            revision: string;
-        };
-        outcome?: string;
-        reason?: string;
-        ref?: {
-            sessionId: string;
-            inputId: string;
-            sourceId: string;
-            sourceRevision: string;
-            requestId: string;
-        };
-        configurationId?: string;
-        expiresAt?: number;
-        pendingRetentionMs?: number;
-        processing?: string;
-        restart?: string;
-        route?: string;
-        execution?: "not-started";
-        approvalId?: string;
-        source?: string;
-        recovery?: string;
-        record?: {
+        outcome: "recorded";
+        record: {
             id: string;
             ref: {
                 sessionId: string;
@@ -21319,7 +22654,7 @@ export interface OperatorMethodOutputMap {
             configurationId: string;
             ownerRevision: string;
             owner?: {
-                kind: "pairing-token";
+                kind: "local" | "pairing-token";
                 principalId: string;
                 tokenId: string;
                 authorityId: string;
@@ -21340,64 +22675,11 @@ export interface OperatorMethodOutputMap {
             acceptedAt: number;
             sourceExpiresAt: number;
             recordExpiresAt: number;
-            state: "accepted-for-review" | "cancelled";
+            state: "accepted-for-review" | "cancelled" | "reviewed";
             execution: "not-started";
         };
-        records?: readonly ({
-            id: string;
-            ref: {
-                sessionId: string;
-                inputId: string;
-                sourceId: string;
-                sourceRevision: string;
-                requestId: string;
-            };
-            origin: {
-                kind: "external-original";
-                accountId: string;
-                accountRevision: string;
-                routeId: string;
-                routeRevision: string;
-            };
-            configurationId: string;
-            ownerRevision: string;
-            owner?: {
-                kind: "pairing-token";
-                principalId: string;
-                tokenId: string;
-                authorityId: string;
-                authorityRevision: string;
-                scopes: readonly string[];
-            };
-            workspaceRevision: string;
-            approvalId: string;
-            choices: {
-                processingPurpose: "accept-external-message-for-owner-review";
-                sourceRetention: "memory-only-until-review-close-or-deadline";
-                sourceRetentionMs: number;
-                derivedRecord: "external-source-reference-only-v1";
-                derivedRecordRetentionMs: number;
-                execution: "none";
-                ownerMayReadOriginal: true;
-            };
-            acceptedAt: number;
-            sourceExpiresAt: number;
-            recordExpiresAt: number;
-            state: "accepted-for-review" | "cancelled";
-            execution: "not-started";
-        })[];
-        pending?: readonly ({
-            ref: {
-                sessionId: string;
-                inputId: string;
-                sourceId: string;
-                sourceRevision: string;
-                requestId: string;
-            };
-            approvalId: string;
-            sourceExpiresAt: number;
-            outcome: string;
-        })[];
+        source: "available-in-memory" | "expired-or-lost";
+        recovery: "new-original-required" | "owner-review-available";
         original?: {
             text: string;
             unsupportedSources: readonly ({
@@ -21405,16 +22687,47 @@ export interface OperatorMethodOutputMap {
                 label: string;
             })[];
         };
+    } | {
+        outcome: "approved" | "awaiting-owner" | "cancelled" | "deciding" | "started" | "transferred" | "unknown";
+        ref: {
+            sessionId: string;
+            inputId: string;
+            sourceId: string;
+            sourceRevision: string;
+            requestId: string;
+        };
+        source: "awaiting-owner" | "released";
+        approvalId: string;
+    } | {
+        outcome: "held";
+        reason: "account-not-chosen" | "account-proof-changed" | "account-proof-required" | "account-proof-unavailable" | "already-decided" | "chat-not-selected" | "configuration-not-current" | "configuration-unavailable" | "handoff-held" | "lifecycle-changed" | "lifetime-exceeds-configuration" | "message-edited" | "message-identity-missing" | "missing-source-proof" | "no-configuration" | "not-durably-resolved" | "not-owner" | "owner-changed" | "review-closed" | "review-held" | "review-queue-refused" | "source-unavailable" | "tracking-full" | "workspace-changed";
+        message: string;
+        nextStep: string;
+        ref?: {
+            sessionId: string;
+            inputId: string;
+            sourceId: string;
+            sourceRevision: string;
+            requestId: string;
+        };
+        route?: string;
+        accountIdentity?: {
+            id: string;
+            username: string;
+            revision: string;
+        };
+        approvalId?: string;
+        source?: string;
     };
     // (undocumented)
     "inbound.telegram.release": {
-        accountIdentity?: {
-            id: string;
-            username: string;
-            revision: string;
-        };
-        outcome?: string;
-        reason?: string;
+        outcome: "released";
+        route: "normal-handling-resumes";
+    } | {
+        outcome: "held";
+        reason: "account-not-chosen" | "account-proof-changed" | "account-proof-required" | "account-proof-unavailable" | "already-decided" | "chat-not-selected" | "configuration-not-current" | "configuration-unavailable" | "handoff-held" | "lifecycle-changed" | "lifetime-exceeds-configuration" | "message-edited" | "message-identity-missing" | "missing-source-proof" | "no-configuration" | "not-durably-resolved" | "not-owner" | "owner-changed" | "review-closed" | "review-held" | "review-queue-refused" | "source-unavailable" | "tracking-full" | "workspace-changed";
+        message: string;
+        nextStep: string;
         ref?: {
             sessionId: string;
             inputId: string;
@@ -21422,131 +22735,24 @@ export interface OperatorMethodOutputMap {
             sourceRevision: string;
             requestId: string;
         };
-        configurationId?: string;
-        expiresAt?: number;
-        pendingRetentionMs?: number;
-        processing?: string;
-        restart?: string;
         route?: string;
-        execution?: "not-started";
+        accountIdentity?: {
+            id: string;
+            username: string;
+            revision: string;
+        };
         approvalId?: string;
         source?: string;
-        recovery?: string;
-        record?: {
-            id: string;
-            ref: {
-                sessionId: string;
-                inputId: string;
-                sourceId: string;
-                sourceRevision: string;
-                requestId: string;
-            };
-            origin: {
-                kind: "external-original";
-                accountId: string;
-                accountRevision: string;
-                routeId: string;
-                routeRevision: string;
-            };
-            configurationId: string;
-            ownerRevision: string;
-            owner?: {
-                kind: "pairing-token";
-                principalId: string;
-                tokenId: string;
-                authorityId: string;
-                authorityRevision: string;
-                scopes: readonly string[];
-            };
-            workspaceRevision: string;
-            approvalId: string;
-            choices: {
-                processingPurpose: "accept-external-message-for-owner-review";
-                sourceRetention: "memory-only-until-review-close-or-deadline";
-                sourceRetentionMs: number;
-                derivedRecord: "external-source-reference-only-v1";
-                derivedRecordRetentionMs: number;
-                execution: "none";
-                ownerMayReadOriginal: true;
-            };
-            acceptedAt: number;
-            sourceExpiresAt: number;
-            recordExpiresAt: number;
-            state: "accepted-for-review" | "cancelled";
-            execution: "not-started";
-        };
-        records?: readonly ({
-            id: string;
-            ref: {
-                sessionId: string;
-                inputId: string;
-                sourceId: string;
-                sourceRevision: string;
-                requestId: string;
-            };
-            origin: {
-                kind: "external-original";
-                accountId: string;
-                accountRevision: string;
-                routeId: string;
-                routeRevision: string;
-            };
-            configurationId: string;
-            ownerRevision: string;
-            owner?: {
-                kind: "pairing-token";
-                principalId: string;
-                tokenId: string;
-                authorityId: string;
-                authorityRevision: string;
-                scopes: readonly string[];
-            };
-            workspaceRevision: string;
-            approvalId: string;
-            choices: {
-                processingPurpose: "accept-external-message-for-owner-review";
-                sourceRetention: "memory-only-until-review-close-or-deadline";
-                sourceRetentionMs: number;
-                derivedRecord: "external-source-reference-only-v1";
-                derivedRecordRetentionMs: number;
-                execution: "none";
-                ownerMayReadOriginal: true;
-            };
-            acceptedAt: number;
-            sourceExpiresAt: number;
-            recordExpiresAt: number;
-            state: "accepted-for-review" | "cancelled";
-            execution: "not-started";
-        })[];
-        pending?: readonly ({
-            ref: {
-                sessionId: string;
-                inputId: string;
-                sourceId: string;
-                sourceRevision: string;
-                requestId: string;
-            };
-            approvalId: string;
-            sourceExpiresAt: number;
-            outcome: string;
-        })[];
-        original?: {
-            text: string;
-            unsupportedSources: readonly ({
-                kind: string;
-                label: string;
-            })[];
-        };
     };
     // (undocumented)
     "inbound.telegram.revoke": {
-        accountIdentity?: {
-            id: string;
-            username: string;
-            revision: string;
-        };
-        outcome?: string;
-        reason?: string;
+        outcome: "revoked";
+        route: "remains-selected-and-held";
+    } | {
+        outcome: "held";
+        reason: "account-not-chosen" | "account-proof-changed" | "account-proof-required" | "account-proof-unavailable" | "already-decided" | "chat-not-selected" | "configuration-not-current" | "configuration-unavailable" | "handoff-held" | "lifecycle-changed" | "lifetime-exceeds-configuration" | "message-edited" | "message-identity-missing" | "missing-source-proof" | "no-configuration" | "not-durably-resolved" | "not-owner" | "owner-changed" | "review-closed" | "review-held" | "review-queue-refused" | "source-unavailable" | "tracking-full" | "workspace-changed";
+        message: string;
+        nextStep: string;
         ref?: {
             sessionId: string;
             inputId: string;
@@ -21554,131 +22760,86 @@ export interface OperatorMethodOutputMap {
             sourceRevision: string;
             requestId: string;
         };
-        configurationId?: string;
-        expiresAt?: number;
-        pendingRetentionMs?: number;
-        processing?: string;
-        restart?: string;
         route?: string;
-        execution?: "not-started";
+        accountIdentity?: {
+            id: string;
+            username: string;
+            revision: string;
+        };
         approvalId?: string;
         source?: string;
-        recovery?: string;
-        record?: {
-            id: string;
-            ref: {
-                sessionId: string;
-                inputId: string;
-                sourceId: string;
-                sourceRevision: string;
-                requestId: string;
-            };
-            origin: {
-                kind: "external-original";
-                accountId: string;
-                accountRevision: string;
-                routeId: string;
-                routeRevision: string;
-            };
-            configurationId: string;
-            ownerRevision: string;
-            owner?: {
-                kind: "pairing-token";
-                principalId: string;
-                tokenId: string;
-                authorityId: string;
-                authorityRevision: string;
-                scopes: readonly string[];
-            };
-            workspaceRevision: string;
-            approvalId: string;
-            choices: {
-                processingPurpose: "accept-external-message-for-owner-review";
-                sourceRetention: "memory-only-until-review-close-or-deadline";
-                sourceRetentionMs: number;
-                derivedRecord: "external-source-reference-only-v1";
-                derivedRecordRetentionMs: number;
-                execution: "none";
-                ownerMayReadOriginal: true;
-            };
-            acceptedAt: number;
-            sourceExpiresAt: number;
-            recordExpiresAt: number;
-            state: "accepted-for-review" | "cancelled";
-            execution: "not-started";
-        };
-        records?: readonly ({
-            id: string;
-            ref: {
-                sessionId: string;
-                inputId: string;
-                sourceId: string;
-                sourceRevision: string;
-                requestId: string;
-            };
-            origin: {
-                kind: "external-original";
-                accountId: string;
-                accountRevision: string;
-                routeId: string;
-                routeRevision: string;
-            };
-            configurationId: string;
-            ownerRevision: string;
-            owner?: {
-                kind: "pairing-token";
-                principalId: string;
-                tokenId: string;
-                authorityId: string;
-                authorityRevision: string;
-                scopes: readonly string[];
-            };
-            workspaceRevision: string;
-            approvalId: string;
-            choices: {
-                processingPurpose: "accept-external-message-for-owner-review";
-                sourceRetention: "memory-only-until-review-close-or-deadline";
-                sourceRetentionMs: number;
-                derivedRecord: "external-source-reference-only-v1";
-                derivedRecordRetentionMs: number;
-                execution: "none";
-                ownerMayReadOriginal: true;
-            };
-            acceptedAt: number;
-            sourceExpiresAt: number;
-            recordExpiresAt: number;
-            state: "accepted-for-review" | "cancelled";
-            execution: "not-started";
-        })[];
-        pending?: readonly ({
-            ref: {
-                sessionId: string;
-                inputId: string;
-                sourceId: string;
-                sourceRevision: string;
-                requestId: string;
-            };
-            approvalId: string;
-            sourceExpiresAt: number;
-            outcome: string;
-        })[];
-        original?: {
-            text: string;
-            unsupportedSources: readonly ({
-                kind: string;
-                label: string;
-            })[];
-        };
     };
     // (undocumented)
     "inbound.telegram.status": {
-        accountIdentity?: {
+        outcome: "recorded";
+        record: {
             id: string;
-            username: string;
-            revision: string;
+            ref: {
+                sessionId: string;
+                inputId: string;
+                sourceId: string;
+                sourceRevision: string;
+                requestId: string;
+            };
+            origin: {
+                kind: "external-original";
+                accountId: string;
+                accountRevision: string;
+                routeId: string;
+                routeRevision: string;
+            };
+            configurationId: string;
+            ownerRevision: string;
+            owner?: {
+                kind: "local" | "pairing-token";
+                principalId: string;
+                tokenId: string;
+                authorityId: string;
+                authorityRevision: string;
+                scopes: readonly string[];
+            };
+            workspaceRevision: string;
+            approvalId: string;
+            choices: {
+                processingPurpose: "accept-external-message-for-owner-review";
+                sourceRetention: "memory-only-until-review-close-or-deadline";
+                sourceRetentionMs: number;
+                derivedRecord: "external-source-reference-only-v1";
+                derivedRecordRetentionMs: number;
+                execution: "none";
+                ownerMayReadOriginal: true;
+            };
+            acceptedAt: number;
+            sourceExpiresAt: number;
+            recordExpiresAt: number;
+            state: "accepted-for-review" | "cancelled" | "reviewed";
+            execution: "not-started";
         };
-        outcome?: string;
-        reason?: string;
+        source: "available-in-memory" | "expired-or-lost";
+        recovery: "new-original-required" | "owner-review-available";
+        original?: {
+            text: string;
+            unsupportedSources: readonly ({
+                kind: string;
+                label: string;
+            })[];
+        };
+    } | {
+        outcome: "approved" | "awaiting-owner" | "cancelled" | "deciding" | "started" | "transferred" | "unknown";
+        ref: {
+            sessionId: string;
+            inputId: string;
+            sourceId: string;
+            sourceRevision: string;
+            requestId: string;
+        };
+        source: "awaiting-owner" | "released";
+        approvalId: string;
+    } | {
+        outcome: "held";
+        reason: "account-not-chosen" | "account-proof-changed" | "account-proof-required" | "account-proof-unavailable" | "already-decided" | "chat-not-selected" | "configuration-not-current" | "configuration-unavailable" | "handoff-held" | "lifecycle-changed" | "lifetime-exceeds-configuration" | "message-edited" | "message-identity-missing" | "missing-source-proof" | "no-configuration" | "not-durably-resolved" | "not-owner" | "owner-changed" | "review-closed" | "review-held" | "review-queue-refused" | "source-unavailable" | "tracking-full" | "workspace-changed";
+        message: string;
+        nextStep: string;
         ref?: {
             sessionId: string;
             inputId: string;
@@ -21686,433 +22847,258 @@ export interface OperatorMethodOutputMap {
             sourceRevision: string;
             requestId: string;
         };
-        configurationId?: string;
-        expiresAt?: number;
-        pendingRetentionMs?: number;
-        processing?: string;
-        restart?: string;
         route?: string;
-        execution?: "not-started";
+        accountIdentity?: {
+            id: string;
+            username: string;
+            revision: string;
+        };
         approvalId?: string;
         source?: string;
-        recovery?: string;
-        record?: {
+    };
+    // (undocumented)
+    "inbox.answer": {
+        applied: boolean;
+        item?: {
             id: string;
-            ref: {
-                sessionId: string;
-                inputId: string;
-                sourceId: string;
-                sourceRevision: string;
-                requestId: string;
+            kind: "approval" | "claim" | "purchase" | "question" | "queued-action";
+            status: "answered" | "expired" | "open" | "withdrawn";
+            sessionId?: string;
+            title: string;
+            detail: string;
+            options: readonly string[];
+            askedBy?: string;
+            createdAt: number;
+            expiresAt?: number;
+            answer?: {
+                option?: string;
+                text?: string;
             };
-            origin: {
-                kind: "external-original";
-                accountId: string;
-                accountRevision: string;
-                routeId: string;
-                routeRevision: string;
+            answeredBy?: {
+                actor: string;
+                surface: string;
             };
-            configurationId: string;
-            ownerRevision: string;
-            owner?: {
-                kind: "pairing-token";
-                principalId: string;
-                tokenId: string;
-                authorityId: string;
-                authorityRevision: string;
-                scopes: readonly string[];
+            closedAt?: number;
+            withdrawnReason?: string;
+            key?: string;
+            metadata?: ({} & {
+                readonly [key: string]: ({} & {
+                    readonly [key: string]: JsonValue;
+                }) | boolean | null | number | readonly JsonValue[] | string;
+            });
+            delivery?: {
+                state: "delivered" | "undeliverable" | "waiting";
+                to: string;
+                reason?: string;
             };
-            workspaceRevision: string;
-            approvalId: string;
-            choices: {
-                processingPurpose: "accept-external-message-for-owner-review";
-                sourceRetention: "memory-only-until-review-close-or-deadline";
-                sourceRetentionMs: number;
-                derivedRecord: "external-source-reference-only-v1";
-                derivedRecordRetentionMs: number;
-                execution: "none";
-                ownerMayReadOriginal: true;
-            };
-            acceptedAt: number;
-            sourceExpiresAt: number;
-            recordExpiresAt: number;
-            state: "accepted-for-review" | "cancelled";
-            execution: "not-started";
         };
-        records?: readonly ({
+        delivery?: {
+            state: "delivered" | "undeliverable" | "waiting";
+            to: string;
+            reason?: string;
+        };
+        refusal?: {
+            code: string;
+            state: string;
+            reason: string;
+            next: readonly string[];
+            retryable: boolean;
+            retryAfterMs?: number;
+            status?: number;
+        };
+    };
+    // (undocumented)
+    "inbox.delivery": {
+        applied: boolean;
+        item?: {
             id: string;
-            ref: {
-                sessionId: string;
-                inputId: string;
-                sourceId: string;
-                sourceRevision: string;
-                requestId: string;
+            kind: "approval" | "claim" | "purchase" | "question" | "queued-action";
+            status: "answered" | "expired" | "open" | "withdrawn";
+            sessionId?: string;
+            title: string;
+            detail: string;
+            options: readonly string[];
+            askedBy?: string;
+            createdAt: number;
+            expiresAt?: number;
+            answer?: {
+                option?: string;
+                text?: string;
             };
-            origin: {
-                kind: "external-original";
-                accountId: string;
-                accountRevision: string;
-                routeId: string;
-                routeRevision: string;
+            answeredBy?: {
+                actor: string;
+                surface: string;
             };
-            configurationId: string;
-            ownerRevision: string;
-            owner?: {
-                kind: "pairing-token";
-                principalId: string;
-                tokenId: string;
-                authorityId: string;
-                authorityRevision: string;
-                scopes: readonly string[];
+            closedAt?: number;
+            withdrawnReason?: string;
+            key?: string;
+            metadata?: ({} & {
+                readonly [key: string]: ({} & {
+                    readonly [key: string]: JsonValue;
+                }) | boolean | null | number | readonly JsonValue[] | string;
+            });
+            delivery?: {
+                state: "delivered" | "undeliverable" | "waiting";
+                to: string;
+                reason?: string;
             };
-            workspaceRevision: string;
-            approvalId: string;
-            choices: {
-                processingPurpose: "accept-external-message-for-owner-review";
-                sourceRetention: "memory-only-until-review-close-or-deadline";
-                sourceRetentionMs: number;
-                derivedRecord: "external-source-reference-only-v1";
-                derivedRecordRetentionMs: number;
-                execution: "none";
-                ownerMayReadOriginal: true;
+        };
+        delivery?: {
+            state: "delivered" | "undeliverable" | "waiting";
+            to: string;
+            reason?: string;
+        };
+        refusal?: {
+            code: string;
+            state: string;
+            reason: string;
+            next: readonly string[];
+            retryable: boolean;
+            retryAfterMs?: number;
+            status?: number;
+        };
+    };
+    // (undocumented)
+    "inbox.list": {
+        items: readonly ({
+            id: string;
+            kind: "approval" | "claim" | "purchase" | "question" | "queued-action";
+            status: "answered" | "expired" | "open" | "withdrawn";
+            sessionId?: string;
+            title: string;
+            detail: string;
+            options: readonly string[];
+            askedBy?: string;
+            createdAt: number;
+            expiresAt?: number;
+            answer?: {
+                option?: string;
+                text?: string;
             };
-            acceptedAt: number;
-            sourceExpiresAt: number;
-            recordExpiresAt: number;
-            state: "accepted-for-review" | "cancelled";
-            execution: "not-started";
+            answeredBy?: {
+                actor: string;
+                surface: string;
+            };
+            closedAt?: number;
+            withdrawnReason?: string;
+            key?: string;
+            metadata?: ({} & {
+                readonly [key: string]: ({} & {
+                    readonly [key: string]: JsonValue;
+                }) | boolean | null | number | readonly JsonValue[] | string;
+            });
+            delivery?: {
+                state: "delivered" | "undeliverable" | "waiting";
+                to: string;
+                reason?: string;
+            };
         })[];
-        pending?: readonly ({
-            ref: {
-                sessionId: string;
-                inputId: string;
-                sourceId: string;
-                sourceRevision: string;
-                requestId: string;
+        revision: number;
+    };
+    // (undocumented)
+    "inbox.post": {
+        created: boolean;
+        item: {
+            id: string;
+            kind: "approval" | "claim" | "purchase" | "question" | "queued-action";
+            status: "answered" | "expired" | "open" | "withdrawn";
+            sessionId?: string;
+            title: string;
+            detail: string;
+            options: readonly string[];
+            askedBy?: string;
+            createdAt: number;
+            expiresAt?: number;
+            answer?: {
+                option?: string;
+                text?: string;
             };
-            approvalId: string;
-            sourceExpiresAt: number;
-            outcome: string;
-        })[];
-        original?: {
-            text: string;
-            unsupportedSources: readonly ({
-                kind: string;
-                label: string;
-            })[];
+            answeredBy?: {
+                actor: string;
+                surface: string;
+            };
+            closedAt?: number;
+            withdrawnReason?: string;
+            key?: string;
+            metadata?: ({} & {
+                readonly [key: string]: ({} & {
+                    readonly [key: string]: JsonValue;
+                }) | boolean | null | number | readonly JsonValue[] | string;
+            });
+            delivery?: {
+                state: "delivered" | "undeliverable" | "waiting";
+                to: string;
+                reason?: string;
+            };
+        };
+    };
+    // (undocumented)
+    "inbox.withdraw": {
+        applied: boolean;
+        item?: {
+            id: string;
+            kind: "approval" | "claim" | "purchase" | "question" | "queued-action";
+            status: "answered" | "expired" | "open" | "withdrawn";
+            sessionId?: string;
+            title: string;
+            detail: string;
+            options: readonly string[];
+            askedBy?: string;
+            createdAt: number;
+            expiresAt?: number;
+            answer?: {
+                option?: string;
+                text?: string;
+            };
+            answeredBy?: {
+                actor: string;
+                surface: string;
+            };
+            closedAt?: number;
+            withdrawnReason?: string;
+            key?: string;
+            metadata?: ({} & {
+                readonly [key: string]: ({} & {
+                    readonly [key: string]: JsonValue;
+                }) | boolean | null | number | readonly JsonValue[] | string;
+            });
+            delivery?: {
+                state: "delivered" | "undeliverable" | "waiting";
+                to: string;
+                reason?: string;
+            };
+        };
+        delivery?: {
+            state: "delivered" | "undeliverable" | "waiting";
+            to: string;
+            reason?: string;
+        };
+        refusal?: {
+            code: string;
+            state: string;
+            reason: string;
+            next: readonly string[];
+            retryable: boolean;
+            retryAfterMs?: number;
+            status?: number;
         };
     };
     // (undocumented)
     "intelligence.snapshot": {
         diagnosticsStatus: string;
         symbolSearchStatus: string;
-        completionsStatus: string;
         hoverStatus: string;
+        languageServers: readonly ({
+            language: string;
+            state: string;
+        })[];
         errorCount: number;
         warningCount: number;
-        totalRequests: number;
-        avgLatencyMs: number;
     };
     // (undocumented)
     "judgment.battery.run": {
         protocolVersion: 1;
         requestId: string;
-        battery: "webui.voice.speech-seams";
-        batteryVersion: 2;
-        status: "settled";
-        value: {
-            endOffsets: readonly number[];
-            nextCursor: null | number;
-        };
-        readings: ({} & {
-            readonly [key: string]: {
-                kind: "yes-no";
-                probability: number;
-                verdict: "no" | "uncertain" | "yes";
-                outcome: "act" | "confirm" | "escalate";
-            } | {
-                kind: "choice";
-                choice: string;
-                confidence: number;
-                probabilities: ({} & {
-                    readonly [key: string]: number;
-                });
-                outcome: "act" | "confirm" | "escalate";
-            };
-        });
-        outcome: "act" | "confirm" | "escalate";
-        evidence: readonly ({
-            decisionId: string;
-            model: string;
-            requestedModel: string;
-            usage: {
-                inputTokens: number;
-                outputTokens: number;
-            };
-            latencyMs: number;
-        })[];
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.voice.speech-seams";
-        batteryVersion: 2;
-        status: "held";
-        reason: "uncertain";
-        readings: ({} & {
-            readonly [key: string]: {
-                kind: "yes-no";
-                probability: number;
-                verdict: "no" | "uncertain" | "yes";
-                outcome: "act" | "confirm" | "escalate";
-            } | {
-                kind: "choice";
-                choice: string;
-                confidence: number;
-                probabilities: ({} & {
-                    readonly [key: string]: number;
-                });
-                outcome: "act" | "confirm" | "escalate";
-            };
-        });
-        outcome: "confirm" | "escalate";
-        evidence: readonly ({
-            decisionId: string;
-            model: string;
-            requestedModel: string;
-            usage: {
-                inputTokens: number;
-                outputTokens: number;
-            };
-            latencyMs: number;
-        })[];
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.errors.daemon-refusal";
-        batteryVersion: 1;
-        status: "settled";
-        value: {
-            session_not_found: boolean;
-            session_closed: boolean;
-            session_active: boolean;
-            session_not_local: boolean;
-            method_unknown: boolean;
-        };
-        readings: ({} & {
-            readonly [key: string]: {
-                kind: "yes-no";
-                probability: number;
-                verdict: "no" | "uncertain" | "yes";
-                outcome: "act" | "confirm" | "escalate";
-            } | {
-                kind: "choice";
-                choice: string;
-                confidence: number;
-                probabilities: ({} & {
-                    readonly [key: string]: number;
-                });
-                outcome: "act" | "confirm" | "escalate";
-            };
-        });
-        outcome: "act" | "confirm" | "escalate";
-        evidence: readonly ({
-            decisionId: string;
-            model: string;
-            requestedModel: string;
-            usage: {
-                inputTokens: number;
-                outputTokens: number;
-            };
-            latencyMs: number;
-        })[];
-        structuralBasis?: {
-            method_unknown: "http-status-not-404";
-        };
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.errors.daemon-refusal";
-        batteryVersion: 1;
-        status: "held";
-        reason: "uncertain";
-        readings: ({} & {
-            readonly [key: string]: {
-                kind: "yes-no";
-                probability: number;
-                verdict: "no" | "uncertain" | "yes";
-                outcome: "act" | "confirm" | "escalate";
-            } | {
-                kind: "choice";
-                choice: string;
-                confidence: number;
-                probabilities: ({} & {
-                    readonly [key: string]: number;
-                });
-                outcome: "act" | "confirm" | "escalate";
-            };
-        });
-        outcome: "confirm" | "escalate";
-        evidence: readonly ({
-            decisionId: string;
-            model: string;
-            requestedModel: string;
-            usage: {
-                inputTokens: number;
-                outputTokens: number;
-            };
-            latencyMs: number;
-        })[];
-        structuralBasis?: {
-            method_unknown: "http-status-not-404";
-        };
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.palette.command-rank";
-        batteryVersion: 1;
-        status: "settled";
-        value: {
-            registryVersion: string;
-            accepted: readonly ({
-                candidateIndex: number;
-                probability: number;
-            })[];
-            rejected: readonly number[];
-        };
-        readings: ({} & {
-            readonly [key: string]: {
-                kind: "yes-no";
-                probability: number;
-                verdict: "no" | "uncertain" | "yes";
-                outcome: "act" | "confirm" | "escalate";
-            } | {
-                kind: "choice";
-                choice: string;
-                confidence: number;
-                probabilities: ({} & {
-                    readonly [key: string]: number;
-                });
-                outcome: "act" | "confirm" | "escalate";
-            };
-        });
-        outcome: "act" | "confirm" | "escalate";
-        evidence: readonly ({
-            decisionId: string;
-            model: string;
-            requestedModel: string;
-            usage: {
-                inputTokens: number;
-                outputTokens: number;
-            };
-            latencyMs: number;
-        })[];
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.palette.command-rank";
-        batteryVersion: 1;
-        status: "held";
-        reason: "uncertain";
-        readings: ({} & {
-            readonly [key: string]: {
-                kind: "yes-no";
-                probability: number;
-                verdict: "no" | "uncertain" | "yes";
-                outcome: "act" | "confirm" | "escalate";
-            } | {
-                kind: "choice";
-                choice: string;
-                confidence: number;
-                probabilities: ({} & {
-                    readonly [key: string]: number;
-                });
-                outcome: "act" | "confirm" | "escalate";
-            };
-        });
-        outcome: "confirm" | "escalate";
-        evidence: readonly ({
-            decisionId: string;
-            model: string;
-            requestedModel: string;
-            usage: {
-                inputTokens: number;
-                outputTokens: number;
-            };
-            latencyMs: number;
-        })[];
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.mail.reply-subject";
-        batteryVersion: 1;
-        status: "settled";
-        value: {
-            alreadyReply: boolean;
-        };
-        readings: ({} & {
-            readonly [key: string]: {
-                kind: "yes-no";
-                probability: number;
-                verdict: "no" | "uncertain" | "yes";
-                outcome: "act" | "confirm" | "escalate";
-            } | {
-                kind: "choice";
-                choice: string;
-                confidence: number;
-                probabilities: ({} & {
-                    readonly [key: string]: number;
-                });
-                outcome: "act" | "confirm" | "escalate";
-            };
-        });
-        outcome: "act" | "confirm" | "escalate";
-        evidence: readonly ({
-            decisionId: string;
-            model: string;
-            requestedModel: string;
-            usage: {
-                inputTokens: number;
-                outputTokens: number;
-            };
-            latencyMs: number;
-        })[];
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.mail.reply-subject";
-        batteryVersion: 1;
-        status: "held";
-        reason: "uncertain";
-        readings: ({} & {
-            readonly [key: string]: {
-                kind: "yes-no";
-                probability: number;
-                verdict: "no" | "uncertain" | "yes";
-                outcome: "act" | "confirm" | "escalate";
-            } | {
-                kind: "choice";
-                choice: string;
-                confidence: number;
-                probabilities: ({} & {
-                    readonly [key: string]: number;
-                });
-                outcome: "act" | "confirm" | "escalate";
-            };
-        });
-        outcome: "confirm" | "escalate";
-        evidence: readonly ({
-            decisionId: string;
-            model: string;
-            requestedModel: string;
-            usage: {
-                inputTokens: number;
-                outputTokens: number;
-            };
-            latencyMs: number;
-        })[];
-    } | {
-        protocolVersion: 1;
-        requestId: string;
         battery: "webui.models.catalog-provider-match";
         batteryVersion: 1;
         status: "settled";
@@ -22124,14 +23110,6 @@ export interface OperatorMethodOutputMap {
                 kind: "yes-no";
                 probability: number;
                 verdict: "no" | "uncertain" | "yes";
-                outcome: "act" | "confirm" | "escalate";
-            } | {
-                kind: "choice";
-                choice: string;
-                confidence: number;
-                probabilities: ({} & {
-                    readonly [key: string]: number;
-                });
                 outcome: "act" | "confirm" | "escalate";
             };
         });
@@ -22158,294 +23136,6 @@ export interface OperatorMethodOutputMap {
                 kind: "yes-no";
                 probability: number;
                 verdict: "no" | "uncertain" | "yes";
-                outcome: "act" | "confirm" | "escalate";
-            } | {
-                kind: "choice";
-                choice: string;
-                confidence: number;
-                probabilities: ({} & {
-                    readonly [key: string]: number;
-                });
-                outcome: "act" | "confirm" | "escalate";
-            };
-        });
-        outcome: "confirm" | "escalate";
-        evidence: readonly ({
-            decisionId: string;
-            model: string;
-            requestedModel: string;
-            usage: {
-                inputTokens: number;
-                outputTokens: number;
-            };
-            latencyMs: number;
-        })[];
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.credentials.provider-key";
-        batteryVersion: 1;
-        status: "settled";
-        value: {
-            matches: readonly boolean[];
-        };
-        readings: ({} & {
-            readonly [key: string]: {
-                kind: "yes-no";
-                probability: number;
-                verdict: "no" | "uncertain" | "yes";
-                outcome: "act" | "confirm" | "escalate";
-            } | {
-                kind: "choice";
-                choice: string;
-                confidence: number;
-                probabilities: ({} & {
-                    readonly [key: string]: number;
-                });
-                outcome: "act" | "confirm" | "escalate";
-            };
-        });
-        outcome: "act" | "confirm" | "escalate";
-        evidence: readonly ({
-            decisionId: string;
-            model: string;
-            requestedModel: string;
-            usage: {
-                inputTokens: number;
-                outputTokens: number;
-            };
-            latencyMs: number;
-        })[];
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.credentials.provider-key";
-        batteryVersion: 1;
-        status: "held";
-        reason: "uncertain";
-        readings: ({} & {
-            readonly [key: string]: {
-                kind: "yes-no";
-                probability: number;
-                verdict: "no" | "uncertain" | "yes";
-                outcome: "act" | "confirm" | "escalate";
-            } | {
-                kind: "choice";
-                choice: string;
-                confidence: number;
-                probabilities: ({} & {
-                    readonly [key: string]: number;
-                });
-                outcome: "act" | "confirm" | "escalate";
-            };
-        });
-        outcome: "confirm" | "escalate";
-        evidence: readonly ({
-            decisionId: string;
-            model: string;
-            requestedModel: string;
-            usage: {
-                inputTokens: number;
-                outputTokens: number;
-            };
-            latencyMs: number;
-        })[];
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.settings.card-material-key";
-        batteryVersion: 1;
-        status: "settled";
-        value: {
-            matches: readonly boolean[];
-        };
-        readings: ({} & {
-            readonly [key: string]: {
-                kind: "yes-no";
-                probability: number;
-                verdict: "no" | "uncertain" | "yes";
-                outcome: "act" | "confirm" | "escalate";
-            } | {
-                kind: "choice";
-                choice: string;
-                confidence: number;
-                probabilities: ({} & {
-                    readonly [key: string]: number;
-                });
-                outcome: "act" | "confirm" | "escalate";
-            };
-        });
-        outcome: "act" | "confirm" | "escalate";
-        evidence: readonly ({
-            decisionId: string;
-            model: string;
-            requestedModel: string;
-            usage: {
-                inputTokens: number;
-                outputTokens: number;
-            };
-            latencyMs: number;
-        })[];
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.settings.card-material-key";
-        batteryVersion: 1;
-        status: "held";
-        reason: "uncertain";
-        readings: ({} & {
-            readonly [key: string]: {
-                kind: "yes-no";
-                probability: number;
-                verdict: "no" | "uncertain" | "yes";
-                outcome: "act" | "confirm" | "escalate";
-            } | {
-                kind: "choice";
-                choice: string;
-                confidence: number;
-                probabilities: ({} & {
-                    readonly [key: string]: number;
-                });
-                outcome: "act" | "confirm" | "escalate";
-            };
-        });
-        outcome: "confirm" | "escalate";
-        evidence: readonly ({
-            decisionId: string;
-            model: string;
-            requestedModel: string;
-            usage: {
-                inputTokens: number;
-                outputTokens: number;
-            };
-            latencyMs: number;
-        })[];
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.config.credential-key";
-        batteryVersion: 1;
-        status: "settled";
-        value: {
-            matches: readonly boolean[];
-        };
-        readings: ({} & {
-            readonly [key: string]: {
-                kind: "yes-no";
-                probability: number;
-                verdict: "no" | "uncertain" | "yes";
-                outcome: "act" | "confirm" | "escalate";
-            } | {
-                kind: "choice";
-                choice: string;
-                confidence: number;
-                probabilities: ({} & {
-                    readonly [key: string]: number;
-                });
-                outcome: "act" | "confirm" | "escalate";
-            };
-        });
-        outcome: "act" | "confirm" | "escalate";
-        evidence: readonly ({
-            decisionId: string;
-            model: string;
-            requestedModel: string;
-            usage: {
-                inputTokens: number;
-                outputTokens: number;
-            };
-            latencyMs: number;
-        })[];
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.config.credential-key";
-        batteryVersion: 1;
-        status: "held";
-        reason: "uncertain";
-        readings: ({} & {
-            readonly [key: string]: {
-                kind: "yes-no";
-                probability: number;
-                verdict: "no" | "uncertain" | "yes";
-                outcome: "act" | "confirm" | "escalate";
-            } | {
-                kind: "choice";
-                choice: string;
-                confidence: number;
-                probabilities: ({} & {
-                    readonly [key: string]: number;
-                });
-                outcome: "act" | "confirm" | "escalate";
-            };
-        });
-        outcome: "confirm" | "escalate";
-        evidence: readonly ({
-            decisionId: string;
-            model: string;
-            requestedModel: string;
-            usage: {
-                inputTokens: number;
-                outputTokens: number;
-            };
-            latencyMs: number;
-        })[];
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.code.language";
-        batteryVersion: 2;
-        status: "settled";
-        value: {
-            language: "bash" | "c" | "cpp" | "csharp" | "css" | "diff" | "dockerfile" | "go" | "ini" | "java" | "javascript" | "json" | "markdown" | "php" | "plaintext" | "python" | "ruby" | "rust" | "shell" | "sql" | "typescript" | "wasm" | "xml" | "yaml";
-        };
-        readings: ({} & {
-            readonly [key: string]: {
-                kind: "yes-no";
-                probability: number;
-                verdict: "no" | "uncertain" | "yes";
-                outcome: "act" | "confirm" | "escalate";
-            } | {
-                kind: "choice";
-                choice: string;
-                confidence: number;
-                probabilities: ({} & {
-                    readonly [key: string]: number;
-                });
-                outcome: "act" | "confirm" | "escalate";
-            };
-        });
-        outcome: "act" | "confirm" | "escalate";
-        evidence: readonly ({
-            decisionId: string;
-            model: string;
-            requestedModel: string;
-            usage: {
-                inputTokens: number;
-                outputTokens: number;
-            };
-            latencyMs: number;
-        })[];
-    } | {
-        protocolVersion: 1;
-        requestId: string;
-        battery: "webui.code.language";
-        batteryVersion: 2;
-        status: "held";
-        reason: "uncertain";
-        readings: ({} & {
-            readonly [key: string]: {
-                kind: "yes-no";
-                probability: number;
-                verdict: "no" | "uncertain" | "yes";
-                outcome: "act" | "confirm" | "escalate";
-            } | {
-                kind: "choice";
-                choice: string;
-                confidence: number;
-                probabilities: ({} & {
-                    readonly [key: string]: number;
-                });
                 outcome: "act" | "confirm" | "escalate";
             };
         });
@@ -24021,8 +24711,8 @@ export interface OperatorMethodOutputMap {
             createdAt: number;
             expiresAt?: number;
             sourceUri?: string;
-            acquisitionMode?: string;
-            fetchMode?: string;
+            acquisitionMode?: "inline-data" | "local-path" | "remote-fetch" | "unknown";
+            fetchMode?: "allow-private-hosts" | "not-applicable" | "public-only" | "unknown";
             metadata: ({} & {
                 readonly [key: string]: ({} & {
                     readonly [key: string]: JsonValue;
@@ -24817,6 +25507,13 @@ export interface OperatorMethodOutputMap {
             protocolEra?: "legacy" | "modern";
             phase?: "closed" | "gave-up" | "idle" | "negotiating" | "ready" | "restart-wait" | "starting";
             lastError?: string;
+            reconnect?: {
+                state: "auth_required" | "configured" | "connected" | "connecting" | "degraded" | "disconnected" | "reconnecting";
+                attempt: number;
+                maxAttempts: number;
+                nextAttemptAt?: number;
+                stoppedReason?: string;
+            };
         })[];
         security: readonly (({} & {
             readonly [key: string]: unknown;
@@ -25018,6 +25715,20 @@ export interface OperatorMethodOutputMap {
                 readonly [key: string]: JsonValue;
             }) | boolean | null | number | readonly JsonValue[] | string;
         });
+    };
+    // (undocumented)
+    "memory.consolidation.decide": {
+        decided: boolean;
+        proposalId: string;
+        action?: string;
+        changed?: readonly string[];
+        removed?: readonly string[];
+        refusal?: {
+            code: string;
+            state: string;
+            reason: string;
+            next: readonly string[];
+        };
     };
     // (undocumented)
     "memory.consolidation.receipts": {
@@ -25570,8 +26281,8 @@ export interface OperatorMethodOutputMap {
                 createdAt: number;
                 expiresAt?: number;
                 sourceUri?: string;
-                acquisitionMode?: string;
-                fetchMode?: string;
+                acquisitionMode?: "inline-data" | "local-path" | "remote-fetch" | "unknown";
+                fetchMode?: "allow-private-hosts" | "not-applicable" | "public-only" | "unknown";
                 metadata: ({} & {
                     readonly [key: string]: ({} & {
                         readonly [key: string]: JsonValue;
@@ -25622,8 +26333,8 @@ export interface OperatorMethodOutputMap {
                 createdAt: number;
                 expiresAt?: number;
                 sourceUri?: string;
-                acquisitionMode?: string;
-                fetchMode?: string;
+                acquisitionMode?: "inline-data" | "local-path" | "remote-fetch" | "unknown";
+                fetchMode?: "allow-private-hosts" | "not-applicable" | "public-only" | "unknown";
                 metadata: ({} & {
                     readonly [key: string]: ({} & {
                         readonly [key: string]: JsonValue;
@@ -25696,8 +26407,8 @@ export interface OperatorMethodOutputMap {
                 createdAt: number;
                 expiresAt?: number;
                 sourceUri?: string;
-                acquisitionMode?: string;
-                fetchMode?: string;
+                acquisitionMode?: "inline-data" | "local-path" | "remote-fetch" | "unknown";
+                fetchMode?: "allow-private-hosts" | "not-applicable" | "public-only" | "unknown";
                 metadata: ({} & {
                     readonly [key: string]: ({} & {
                         readonly [key: string]: JsonValue;
@@ -25715,10 +26426,38 @@ export interface OperatorMethodOutputMap {
         };
     };
     // (undocumented)
+    "notifications.deadLetters.list": {
+        entries: readonly ({
+            id: string;
+            channel: string;
+            event: string;
+            summary: string;
+            createdAt: number;
+            deadAt: number;
+            attempts: number;
+            finalError: string;
+            failureClass: "retryable" | "terminal";
+            status?: number;
+        })[];
+        total: number;
+    };
+    // (undocumented)
+    "notifications.deadLetters.replay": {
+        results: readonly ({
+            id: string;
+            outcome: "dead_letter" | "delivered" | "not-found" | "retrying";
+        })[];
+        delivered: number;
+        retrying: number;
+        failed: number;
+        notFound: number;
+    };
+    // (undocumented)
     "occasions.acknowledge": {
         ok: boolean;
         reason: null | string;
         reply: string;
+        changed: boolean;
     };
     // (undocumented)
     "occasions.answer": {
@@ -25754,6 +26493,10 @@ export interface OperatorMethodOutputMap {
     "occasions.conflict.resolve": {
         occasionId: string;
         resolved: boolean;
+        reason: null | string;
+        dates: readonly string[];
+        removed: readonly string[];
+        disclosure: string;
     };
     // (undocumented)
     "occasions.gifts": {
@@ -25984,6 +26727,31 @@ export interface OperatorMethodOutputMap {
         conflictsWith: readonly string[];
     };
     // (undocumented)
+    "occasions.plans.remove": {
+        ok: boolean;
+        reason: null | string;
+        occasionId: string;
+        disclosure: string;
+        droppedRecords: number;
+    };
+    // (undocumented)
+    "occasions.plans.update": {
+        ok: boolean;
+        reason: null | string;
+        occasionId: string;
+        disclosure: string;
+        droppedRecords: number;
+        written: boolean;
+        proposal: {
+            ok: boolean;
+            reason: null | string;
+            line: string;
+            replaces: string;
+            confirmation: string;
+            unchanged: boolean;
+        };
+    };
+    // (undocumented)
     "occasions.propose": {
         ok: boolean;
         reason: null | string;
@@ -26008,6 +26776,7 @@ export interface OperatorMethodOutputMap {
         openItems: number;
         interviews: number;
         mirrors: number;
+        attributions: number;
         lastSweep: null | {
             sweptAt: number;
             expiredAcknowledgements: number;
@@ -26069,6 +26838,51 @@ export interface OperatorMethodOutputMap {
         stopped: "delivery-processing-stopped" | "request-retired-after-delivery";
     };
     // (undocumented)
+    "occasions.update": {
+        ok: boolean;
+        reason: null | string;
+        occasionId: string;
+        disclosure: string;
+        droppedRecords: number;
+        written: boolean;
+        proposal: {
+            ok: boolean;
+            reason: null | string;
+            line: string;
+            replaces: string;
+            confirmation: string;
+            unchanged: boolean;
+        };
+    };
+    // (undocumented)
+    "ops.doctor": {
+        symptom: string;
+        playbooks: readonly ({
+            id: string;
+            name: string;
+            checks: readonly ({
+                id: string;
+                label: string;
+                outcome: "fail" | "pass" | "unknown";
+                severity: "critical" | "error" | "info" | "warning";
+                summary: string;
+            })[];
+            steps: readonly ({
+                step: number;
+                title: string;
+                action: string;
+                kind: "command" | "config" | "escalate" | "observe" | "wait";
+                command?: string;
+                expectedOutcome?: string;
+                automatable: boolean;
+            })[];
+        })[];
+        available: readonly ({
+            id: string;
+            name: string;
+        })[];
+    };
+    // (undocumented)
     "ops.memory.get": {
         tier: "critical" | "elevated" | "high" | "normal";
         budgetMb: number;
@@ -26094,6 +26908,15 @@ export interface OperatorMethodOutputMap {
             elevatedPct: number;
             highPct: number;
             criticalPct: number;
+        };
+        hardLimit: {
+            pct: number;
+            mb: number;
+            ceilingMb: number;
+        };
+        configFallback?: {
+            settings: readonly string[];
+            reason: string;
         };
     };
     // (undocumented)
@@ -26160,6 +26983,7 @@ export interface OperatorMethodOutputMap {
     "pairing.tokens.delete": {
         id: string;
         revoked: boolean;
+        alsoRevoked: readonly string[];
     };
     // (undocumented)
     "pairing.tokens.list": {
@@ -26168,6 +26992,8 @@ export interface OperatorMethodOutputMap {
             name: string;
             createdAt: number;
             lastSeenAt?: number;
+            mintedBy?: string;
+            client?: "agent";
         })[];
         legacySharedRevoked: boolean;
     };
@@ -26231,6 +27057,12 @@ export interface OperatorMethodOutputMap {
         };
         reservationCount: number;
         isPaymentsLeader: boolean;
+        stopped?: {
+            store: string;
+            reason: string;
+            path?: string;
+            message: string;
+        };
     };
     // (undocumented)
     "payments.cards.create": {
@@ -26291,13 +27123,6 @@ export interface OperatorMethodOutputMap {
         challengeStep: null | string;
     };
     // (undocumented)
-    "payments.checkout.fillCard": {
-        ok: boolean;
-        filled: readonly string[];
-        failedField: null | string;
-        reason: null | string;
-    };
-    // (undocumented)
     "payments.purchase.approve": {
         purchaseId: string;
         windowId: string;
@@ -26334,6 +27159,22 @@ export interface OperatorMethodOutputMap {
         outcome: null | string;
         totalMinorUnits: null | number;
         currency: null | string;
+        reason?: null | string;
+        challengeStep?: null | string;
+        exceeded?: null | {
+            limit: "card-limit" | "daily-item-budget" | "daily-overage-budget" | "per-purchase-ceiling" | "requested-maximum";
+            setting?: string;
+            availableMinorUnits: number;
+            neededMinorUnits: number;
+            excessMinorUnits: number;
+            unset: boolean;
+        };
+    };
+    // (undocumented)
+    "payments.purchase.securityCode": {
+        purchaseId: string;
+        windowId: string;
+        accepted: true;
     };
     // (undocumented)
     "payments.purchase.status": {
@@ -26354,11 +27195,34 @@ export interface OperatorMethodOutputMap {
             outcome: null | string;
             totalMinorUnits: null | number;
             currency: null | string;
+            reason?: null | string;
+            challengeStep?: null | string;
+            exceeded?: null | {
+                limit: "card-limit" | "daily-item-budget" | "daily-overage-budget" | "per-purchase-ceiling" | "requested-maximum";
+                setting?: string;
+                availableMinorUnits: number;
+                neededMinorUnits: number;
+                excessMinorUnits: number;
+                unset: boolean;
+            };
         })[];
         unreadable?: readonly ({
             purchaseId: string;
             reason: string;
         })[];
+        securityCodes?: readonly ({
+            purchaseId: string;
+            windowId: string;
+            merchantDomain: string;
+            cardLast4: string;
+            deadlineMs: number;
+        })[];
+        stopped?: {
+            store: string;
+            reason: string;
+            path?: string;
+            message: string;
+        };
     };
     // (undocumented)
     "payments.purchases.list": {
@@ -26393,6 +27257,7 @@ export interface OperatorMethodOutputMap {
             merchantRecognised: boolean;
             merchantQualifier: null | string;
             merchantDiscovered: boolean;
+            standingAuthorizationId?: string;
         })[];
         total: number;
         reconciliations?: readonly ({
@@ -26404,6 +27269,48 @@ export interface OperatorMethodOutputMap {
             merchantDomain: string;
             totalMinorUnits: number;
             currency: string;
+        })[];
+    };
+    // (undocumented)
+    "payments.standing.create": {
+        created: boolean;
+        authorization: {
+            id: string;
+            item: string;
+            merchants: readonly string[];
+            currency: string;
+            maxPerPurchaseMinorUnits: number;
+            maxPerPeriodMinorUnits: number;
+            periodDays: number;
+            spentMinorUnits: number;
+            leftMinorUnits: number;
+            createdAt: string;
+            expiresAt: null | string;
+            live: boolean;
+            summary: string;
+        };
+    };
+    // (undocumented)
+    "payments.standing.delete": {
+        id: string;
+        deleted: boolean;
+    };
+    // (undocumented)
+    "payments.standing.list": {
+        authorizations: readonly ({
+            id: string;
+            item: string;
+            merchants: readonly string[];
+            currency: string;
+            maxPerPurchaseMinorUnits: number;
+            maxPerPeriodMinorUnits: number;
+            periodDays: number;
+            spentMinorUnits: number;
+            leftMinorUnits: number;
+            createdAt: string;
+            expiresAt: null | string;
+            live: boolean;
+            summary: string;
         })[];
     };
     // (undocumented)
@@ -26847,222 +27754,7 @@ export interface OperatorMethodOutputMap {
         readonly [key: string]: unknown;
     });
     // (undocumented)
-    "projectPlanning.evaluate": ({
-        operationProvenance?: "classic";
-        semanticAssessment?: "not-evaluated";
-        readinessAssessment?: {
-            basis: "native-structure-and-owner-approval" | "semantic-and-native";
-            semanticAssessment: "ambiguous" | "not-evaluated" | "specified" | "unavailable";
-        };
-        ok: boolean;
-        projectId: string;
-        knowledgeSpaceId: string;
-        readiness: string;
-        gaps: readonly (({
-            id: string;
-            kind: string;
-            severity: string;
-            message: string;
-            question?: ({
-                id: string;
-                prompt: string;
-                whyItMatters?: string;
-                recommendedAnswer?: string;
-                consequence?: string;
-                status?: string;
-                answer?: string;
-                answeredAt?: number;
-                metadata?: ({} & {
-                    readonly [key: string]: ({} & {
-                        readonly [key: string]: JsonValue;
-                    }) | boolean | null | number | readonly JsonValue[] | string;
-                });
-            } & {
-                readonly [key: string]: unknown;
-            });
-            relatedTaskIds?: readonly string[];
-            metadata?: ({} & {
-                readonly [key: string]: ({} & {
-                    readonly [key: string]: JsonValue;
-                }) | boolean | null | number | readonly JsonValue[] | string;
-            });
-        } & {
-            readonly [key: string]: unknown;
-        }))[];
-        nextQuestion?: ({
-            id: string;
-            prompt: string;
-            whyItMatters?: string;
-            recommendedAnswer?: string;
-            consequence?: string;
-            status?: string;
-            answer?: string;
-            answeredAt?: number;
-            metadata?: ({} & {
-                readonly [key: string]: ({} & {
-                    readonly [key: string]: JsonValue;
-                }) | boolean | null | number | readonly JsonValue[] | string;
-            });
-        } & {
-            readonly [key: string]: unknown;
-        });
-        state: ({
-            id: string;
-            projectId: string;
-            knowledgeSpaceId: string;
-            goal: string;
-            scope?: string;
-            knownContext: readonly string[];
-            openQuestions: readonly (({
-                id: string;
-                prompt: string;
-                whyItMatters?: string;
-                recommendedAnswer?: string;
-                consequence?: string;
-                status?: string;
-                answer?: string;
-                answeredAt?: number;
-                metadata?: ({} & {
-                    readonly [key: string]: ({} & {
-                        readonly [key: string]: JsonValue;
-                    }) | boolean | null | number | readonly JsonValue[] | string;
-                });
-            } & {
-                readonly [key: string]: unknown;
-            }))[];
-            answeredQuestions: readonly (({
-                id: string;
-                prompt: string;
-                whyItMatters?: string;
-                recommendedAnswer?: string;
-                consequence?: string;
-                status?: string;
-                answer?: string;
-                answeredAt?: number;
-                metadata?: ({} & {
-                    readonly [key: string]: ({} & {
-                        readonly [key: string]: JsonValue;
-                    }) | boolean | null | number | readonly JsonValue[] | string;
-                });
-            } & {
-                readonly [key: string]: unknown;
-            }))[];
-            decisions: readonly (({
-                id: string;
-                title: string;
-                context?: string;
-                decision: string;
-                alternatives?: readonly string[];
-                reasoning?: string;
-                consequences?: readonly string[];
-                status?: string;
-                createdAt?: number;
-                updatedAt?: number;
-                metadata?: ({} & {
-                    readonly [key: string]: ({} & {
-                        readonly [key: string]: JsonValue;
-                    }) | boolean | null | number | readonly JsonValue[] | string;
-                });
-            } & {
-                readonly [key: string]: unknown;
-            }))[];
-            assumptions: readonly string[];
-            constraints: readonly string[];
-            risks: readonly string[];
-            tasks: readonly (({
-                id: string;
-                title: string;
-                why?: string;
-                status?: string;
-                dependencies?: readonly string[];
-                likelyFiles?: readonly string[];
-                verification?: readonly string[];
-                canRunConcurrently?: boolean;
-                needsReview?: boolean;
-                blockedOnUserInput?: boolean;
-                recommendedAgent?: string;
-                metadata?: ({} & {
-                    readonly [key: string]: ({} & {
-                        readonly [key: string]: JsonValue;
-                    }) | boolean | null | number | readonly JsonValue[] | string;
-                });
-            } & {
-                readonly [key: string]: unknown;
-            }))[];
-            dependencies: readonly JsonValue[];
-            verificationGates: readonly JsonValue[];
-            agentAssignments: readonly JsonValue[];
-            readiness: string;
-            readinessAssessment?: {
-                basis: "native-structure-and-owner-approval" | "semantic-and-native";
-                semanticAssessment: "ambiguous" | "not-evaluated" | "specified" | "unavailable";
-            };
-            executionApproved: boolean;
-            createdAt: number;
-            updatedAt: number;
-            metadata?: ({} & {
-                readonly [key: string]: ({} & {
-                    readonly [key: string]: JsonValue;
-                }) | boolean | null | number | readonly JsonValue[] | string;
-            });
-        } & {
-            readonly [key: string]: unknown;
-        });
-    } & {
-        readonly [key: string]: unknown;
-    });
-    // (undocumented)
     "projectPlanning.language.get": ({
-        ok: boolean;
-        projectId: string;
-        knowledgeSpaceId: string;
-        language?: null | ({
-            projectId: string;
-            knowledgeSpaceId: string;
-            terms: readonly JsonValue[];
-            ambiguities: readonly JsonValue[];
-            examples?: readonly string[];
-            updatedAt: number;
-            metadata?: ({} & {
-                readonly [key: string]: ({} & {
-                    readonly [key: string]: JsonValue;
-                }) | boolean | null | number | readonly JsonValue[] | string;
-            });
-        } & {
-            readonly [key: string]: unknown;
-        });
-        source?: ({
-            id: string;
-            connectorId: string;
-            sourceType: "bookmark" | "bookmark-list" | "dataset" | "document" | "history" | "image" | "manual" | "other" | "repo" | "url";
-            title?: string;
-            sourceUri?: string;
-            canonicalUri?: string;
-            summary?: string;
-            description?: string;
-            tags: readonly string[];
-            folderPath?: string;
-            status: string;
-            artifactId?: string;
-            contentHash?: string;
-            lastCrawledAt?: number;
-            crawlError?: string;
-            sessionId?: string;
-            metadata: ({} & {
-                readonly [key: string]: ({} & {
-                    readonly [key: string]: JsonValue;
-                }) | boolean | null | number | readonly JsonValue[] | string;
-            });
-            createdAt: number;
-            updatedAt: number;
-        } & {
-            readonly [key: string]: unknown;
-        });
-    } & {
-        readonly [key: string]: unknown;
-    });
-    // (undocumented)
-    "projectPlanning.language.upsert": ({
         ok: boolean;
         projectId: string;
         knowledgeSpaceId: string;
@@ -27253,147 +27945,6 @@ export interface OperatorMethodOutputMap {
         readonly [key: string]: unknown;
     });
     // (undocumented)
-    "projectPlanning.state.upsert": ({
-        ok: boolean;
-        projectId: string;
-        knowledgeSpaceId: string;
-        state?: null | ({
-            id: string;
-            projectId: string;
-            knowledgeSpaceId: string;
-            goal: string;
-            scope?: string;
-            knownContext: readonly string[];
-            openQuestions: readonly (({
-                id: string;
-                prompt: string;
-                whyItMatters?: string;
-                recommendedAnswer?: string;
-                consequence?: string;
-                status?: string;
-                answer?: string;
-                answeredAt?: number;
-                metadata?: ({} & {
-                    readonly [key: string]: ({} & {
-                        readonly [key: string]: JsonValue;
-                    }) | boolean | null | number | readonly JsonValue[] | string;
-                });
-            } & {
-                readonly [key: string]: unknown;
-            }))[];
-            answeredQuestions: readonly (({
-                id: string;
-                prompt: string;
-                whyItMatters?: string;
-                recommendedAnswer?: string;
-                consequence?: string;
-                status?: string;
-                answer?: string;
-                answeredAt?: number;
-                metadata?: ({} & {
-                    readonly [key: string]: ({} & {
-                        readonly [key: string]: JsonValue;
-                    }) | boolean | null | number | readonly JsonValue[] | string;
-                });
-            } & {
-                readonly [key: string]: unknown;
-            }))[];
-            decisions: readonly (({
-                id: string;
-                title: string;
-                context?: string;
-                decision: string;
-                alternatives?: readonly string[];
-                reasoning?: string;
-                consequences?: readonly string[];
-                status?: string;
-                createdAt?: number;
-                updatedAt?: number;
-                metadata?: ({} & {
-                    readonly [key: string]: ({} & {
-                        readonly [key: string]: JsonValue;
-                    }) | boolean | null | number | readonly JsonValue[] | string;
-                });
-            } & {
-                readonly [key: string]: unknown;
-            }))[];
-            assumptions: readonly string[];
-            constraints: readonly string[];
-            risks: readonly string[];
-            tasks: readonly (({
-                id: string;
-                title: string;
-                why?: string;
-                status?: string;
-                dependencies?: readonly string[];
-                likelyFiles?: readonly string[];
-                verification?: readonly string[];
-                canRunConcurrently?: boolean;
-                needsReview?: boolean;
-                blockedOnUserInput?: boolean;
-                recommendedAgent?: string;
-                metadata?: ({} & {
-                    readonly [key: string]: ({} & {
-                        readonly [key: string]: JsonValue;
-                    }) | boolean | null | number | readonly JsonValue[] | string;
-                });
-            } & {
-                readonly [key: string]: unknown;
-            }))[];
-            dependencies: readonly JsonValue[];
-            verificationGates: readonly JsonValue[];
-            agentAssignments: readonly JsonValue[];
-            readiness: string;
-            readinessAssessment?: {
-                basis: "native-structure-and-owner-approval" | "semantic-and-native";
-                semanticAssessment: "ambiguous" | "not-evaluated" | "specified" | "unavailable";
-            };
-            executionApproved: boolean;
-            createdAt: number;
-            updatedAt: number;
-            metadata?: ({} & {
-                readonly [key: string]: ({} & {
-                    readonly [key: string]: JsonValue;
-                }) | boolean | null | number | readonly JsonValue[] | string;
-            });
-        } & {
-            readonly [key: string]: unknown;
-        });
-        revision?: {
-            sourceId: string;
-            generation: string;
-        };
-        source?: ({
-            id: string;
-            connectorId: string;
-            sourceType: "bookmark" | "bookmark-list" | "dataset" | "document" | "history" | "image" | "manual" | "other" | "repo" | "url";
-            title?: string;
-            sourceUri?: string;
-            canonicalUri?: string;
-            summary?: string;
-            description?: string;
-            tags: readonly string[];
-            folderPath?: string;
-            status: string;
-            artifactId?: string;
-            contentHash?: string;
-            lastCrawledAt?: number;
-            crawlError?: string;
-            sessionId?: string;
-            metadata: ({} & {
-                readonly [key: string]: ({} & {
-                    readonly [key: string]: JsonValue;
-                }) | boolean | null | number | readonly JsonValue[] | string;
-            });
-            createdAt: number;
-            updatedAt: number;
-        } & {
-            readonly [key: string]: unknown;
-        });
-    } & {
-        readonly [key: string]: unknown;
-    });
-    // (undocumented)
     "projectPlanning.status": ({
         ok: boolean;
         projectId: string;
@@ -27414,6 +27965,18 @@ export interface OperatorMethodOutputMap {
         projectId: string;
         knowledgeSpaceId: string;
         workPlanId: string;
+        changed: boolean;
+        revision: number;
+        updatedAt: number;
+        counts: {
+            total: number;
+            pending: number;
+            in_progress: number;
+            blocked: number;
+            done: number;
+            failed: number;
+            cancelled: number;
+        };
         task?: ({
             taskId: string;
             projectId: string;
@@ -27430,6 +27993,7 @@ export interface OperatorMethodOutputMap {
             contractId?: string;
             phaseId?: string;
             agentId?: string;
+            sessionId?: string;
             turnId?: string;
             decisionId?: string;
             sourceMessageId?: string;
@@ -27464,6 +28028,7 @@ export interface OperatorMethodOutputMap {
             contractId?: string;
             phaseId?: string;
             agentId?: string;
+            sessionId?: string;
             turnId?: string;
             decisionId?: string;
             sourceMessageId?: string;
@@ -27498,6 +28063,7 @@ export interface OperatorMethodOutputMap {
             contractId?: string;
             phaseId?: string;
             agentId?: string;
+            sessionId?: string;
             turnId?: string;
             decisionId?: string;
             sourceMessageId?: string;
@@ -27517,58 +28083,42 @@ export interface OperatorMethodOutputMap {
             readonly [key: string]: unknown;
         });
         clearedTaskIds?: readonly string[];
-        snapshot: ({
-            ok: boolean;
+        reclaimedTaskIds?: readonly string[];
+        tasks?: readonly (({
+            taskId: string;
             projectId: string;
             knowledgeSpaceId: string;
-            workPlanId: string;
-            tasks: readonly (({
-                taskId: string;
-                projectId: string;
-                knowledgeSpaceId: string;
-                title: string;
-                notes?: string;
-                owner?: string;
-                status: string;
-                priority?: number;
-                order: number;
-                source?: string;
-                tags: readonly string[];
-                parentTaskId?: string;
-                contractId?: string;
-                phaseId?: string;
-                agentId?: string;
-                turnId?: string;
-                decisionId?: string;
-                sourceMessageId?: string;
-                linkedArtifactIds: readonly string[];
-                linkedSourceIds: readonly string[];
-                linkedNodeIds: readonly string[];
-                originSurface?: string;
-                createdAt: number;
-                updatedAt: number;
-                completedAt?: number;
-                metadata?: ({} & {
-                    readonly [key: string]: ({} & {
-                        readonly [key: string]: JsonValue;
-                    }) | boolean | null | number | readonly JsonValue[] | string;
-                });
-            } & {
-                readonly [key: string]: unknown;
-            }))[];
-            counts: {
-                total: number;
-                pending: number;
-                in_progress: number;
-                blocked: number;
-                done: number;
-                failed: number;
-                cancelled: number;
-            };
+            title: string;
+            notes?: string;
+            owner?: string;
+            status: string;
+            priority?: number;
+            order: number;
+            source?: string;
+            tags: readonly string[];
+            parentTaskId?: string;
+            contractId?: string;
+            phaseId?: string;
+            agentId?: string;
+            sessionId?: string;
+            turnId?: string;
+            decisionId?: string;
+            sourceMessageId?: string;
+            linkedArtifactIds: readonly string[];
+            linkedSourceIds: readonly string[];
+            linkedNodeIds: readonly string[];
+            originSurface?: string;
+            createdAt: number;
             updatedAt: number;
+            completedAt?: number;
+            metadata?: ({} & {
+                readonly [key: string]: ({} & {
+                    readonly [key: string]: JsonValue;
+                }) | boolean | null | number | readonly JsonValue[] | string;
+            });
         } & {
             readonly [key: string]: unknown;
-        });
+        }))[];
     } & {
         readonly [key: string]: unknown;
     });
@@ -27578,6 +28128,7 @@ export interface OperatorMethodOutputMap {
         projectId: string;
         knowledgeSpaceId: string;
         workPlanId: string;
+        revision: number;
         tasks: readonly (({
             taskId: string;
             projectId: string;
@@ -27594,6 +28145,7 @@ export interface OperatorMethodOutputMap {
             contractId?: string;
             phaseId?: string;
             agentId?: string;
+            sessionId?: string;
             turnId?: string;
             decisionId?: string;
             sourceMessageId?: string;
@@ -27631,6 +28183,18 @@ export interface OperatorMethodOutputMap {
         projectId: string;
         knowledgeSpaceId: string;
         workPlanId: string;
+        changed: boolean;
+        revision: number;
+        updatedAt: number;
+        counts: {
+            total: number;
+            pending: number;
+            in_progress: number;
+            blocked: number;
+            done: number;
+            failed: number;
+            cancelled: number;
+        };
         task?: ({
             taskId: string;
             projectId: string;
@@ -27647,6 +28211,7 @@ export interface OperatorMethodOutputMap {
             contractId?: string;
             phaseId?: string;
             agentId?: string;
+            sessionId?: string;
             turnId?: string;
             decisionId?: string;
             sourceMessageId?: string;
@@ -27681,6 +28246,7 @@ export interface OperatorMethodOutputMap {
             contractId?: string;
             phaseId?: string;
             agentId?: string;
+            sessionId?: string;
             turnId?: string;
             decisionId?: string;
             sourceMessageId?: string;
@@ -27715,6 +28281,7 @@ export interface OperatorMethodOutputMap {
             contractId?: string;
             phaseId?: string;
             agentId?: string;
+            sessionId?: string;
             turnId?: string;
             decisionId?: string;
             sourceMessageId?: string;
@@ -27734,58 +28301,42 @@ export interface OperatorMethodOutputMap {
             readonly [key: string]: unknown;
         });
         clearedTaskIds?: readonly string[];
-        snapshot: ({
-            ok: boolean;
+        reclaimedTaskIds?: readonly string[];
+        tasks?: readonly (({
+            taskId: string;
             projectId: string;
             knowledgeSpaceId: string;
-            workPlanId: string;
-            tasks: readonly (({
-                taskId: string;
-                projectId: string;
-                knowledgeSpaceId: string;
-                title: string;
-                notes?: string;
-                owner?: string;
-                status: string;
-                priority?: number;
-                order: number;
-                source?: string;
-                tags: readonly string[];
-                parentTaskId?: string;
-                contractId?: string;
-                phaseId?: string;
-                agentId?: string;
-                turnId?: string;
-                decisionId?: string;
-                sourceMessageId?: string;
-                linkedArtifactIds: readonly string[];
-                linkedSourceIds: readonly string[];
-                linkedNodeIds: readonly string[];
-                originSurface?: string;
-                createdAt: number;
-                updatedAt: number;
-                completedAt?: number;
-                metadata?: ({} & {
-                    readonly [key: string]: ({} & {
-                        readonly [key: string]: JsonValue;
-                    }) | boolean | null | number | readonly JsonValue[] | string;
-                });
-            } & {
-                readonly [key: string]: unknown;
-            }))[];
-            counts: {
-                total: number;
-                pending: number;
-                in_progress: number;
-                blocked: number;
-                done: number;
-                failed: number;
-                cancelled: number;
-            };
+            title: string;
+            notes?: string;
+            owner?: string;
+            status: string;
+            priority?: number;
+            order: number;
+            source?: string;
+            tags: readonly string[];
+            parentTaskId?: string;
+            contractId?: string;
+            phaseId?: string;
+            agentId?: string;
+            sessionId?: string;
+            turnId?: string;
+            decisionId?: string;
+            sourceMessageId?: string;
+            linkedArtifactIds: readonly string[];
+            linkedSourceIds: readonly string[];
+            linkedNodeIds: readonly string[];
+            originSurface?: string;
+            createdAt: number;
             updatedAt: number;
+            completedAt?: number;
+            metadata?: ({} & {
+                readonly [key: string]: ({} & {
+                    readonly [key: string]: JsonValue;
+                }) | boolean | null | number | readonly JsonValue[] | string;
+            });
         } & {
             readonly [key: string]: unknown;
-        });
+        }))[];
     } & {
         readonly [key: string]: unknown;
     });
@@ -27795,6 +28346,18 @@ export interface OperatorMethodOutputMap {
         projectId: string;
         knowledgeSpaceId: string;
         workPlanId: string;
+        changed: boolean;
+        revision: number;
+        updatedAt: number;
+        counts: {
+            total: number;
+            pending: number;
+            in_progress: number;
+            blocked: number;
+            done: number;
+            failed: number;
+            cancelled: number;
+        };
         task?: ({
             taskId: string;
             projectId: string;
@@ -27811,6 +28374,7 @@ export interface OperatorMethodOutputMap {
             contractId?: string;
             phaseId?: string;
             agentId?: string;
+            sessionId?: string;
             turnId?: string;
             decisionId?: string;
             sourceMessageId?: string;
@@ -27845,6 +28409,7 @@ export interface OperatorMethodOutputMap {
             contractId?: string;
             phaseId?: string;
             agentId?: string;
+            sessionId?: string;
             turnId?: string;
             decisionId?: string;
             sourceMessageId?: string;
@@ -27879,6 +28444,7 @@ export interface OperatorMethodOutputMap {
             contractId?: string;
             phaseId?: string;
             agentId?: string;
+            sessionId?: string;
             turnId?: string;
             decisionId?: string;
             sourceMessageId?: string;
@@ -27898,58 +28464,42 @@ export interface OperatorMethodOutputMap {
             readonly [key: string]: unknown;
         });
         clearedTaskIds?: readonly string[];
-        snapshot: ({
-            ok: boolean;
+        reclaimedTaskIds?: readonly string[];
+        tasks?: readonly (({
+            taskId: string;
             projectId: string;
             knowledgeSpaceId: string;
-            workPlanId: string;
-            tasks: readonly (({
-                taskId: string;
-                projectId: string;
-                knowledgeSpaceId: string;
-                title: string;
-                notes?: string;
-                owner?: string;
-                status: string;
-                priority?: number;
-                order: number;
-                source?: string;
-                tags: readonly string[];
-                parentTaskId?: string;
-                contractId?: string;
-                phaseId?: string;
-                agentId?: string;
-                turnId?: string;
-                decisionId?: string;
-                sourceMessageId?: string;
-                linkedArtifactIds: readonly string[];
-                linkedSourceIds: readonly string[];
-                linkedNodeIds: readonly string[];
-                originSurface?: string;
-                createdAt: number;
-                updatedAt: number;
-                completedAt?: number;
-                metadata?: ({} & {
-                    readonly [key: string]: ({} & {
-                        readonly [key: string]: JsonValue;
-                    }) | boolean | null | number | readonly JsonValue[] | string;
-                });
-            } & {
-                readonly [key: string]: unknown;
-            }))[];
-            counts: {
-                total: number;
-                pending: number;
-                in_progress: number;
-                blocked: number;
-                done: number;
-                failed: number;
-                cancelled: number;
-            };
+            title: string;
+            notes?: string;
+            owner?: string;
+            status: string;
+            priority?: number;
+            order: number;
+            source?: string;
+            tags: readonly string[];
+            parentTaskId?: string;
+            contractId?: string;
+            phaseId?: string;
+            agentId?: string;
+            sessionId?: string;
+            turnId?: string;
+            decisionId?: string;
+            sourceMessageId?: string;
+            linkedArtifactIds: readonly string[];
+            linkedSourceIds: readonly string[];
+            linkedNodeIds: readonly string[];
+            originSurface?: string;
+            createdAt: number;
             updatedAt: number;
+            completedAt?: number;
+            metadata?: ({} & {
+                readonly [key: string]: ({} & {
+                    readonly [key: string]: JsonValue;
+                }) | boolean | null | number | readonly JsonValue[] | string;
+            });
         } & {
             readonly [key: string]: unknown;
-        });
+        }))[];
     } & {
         readonly [key: string]: unknown;
     });
@@ -27959,6 +28509,7 @@ export interface OperatorMethodOutputMap {
         projectId: string;
         knowledgeSpaceId: string;
         workPlanId: string;
+        revision: number;
         task: null | ({
             taskId: string;
             projectId: string;
@@ -27975,6 +28526,7 @@ export interface OperatorMethodOutputMap {
             contractId?: string;
             phaseId?: string;
             agentId?: string;
+            sessionId?: string;
             turnId?: string;
             decisionId?: string;
             sourceMessageId?: string;
@@ -27990,58 +28542,6 @@ export interface OperatorMethodOutputMap {
                     readonly [key: string]: JsonValue;
                 }) | boolean | null | number | readonly JsonValue[] | string;
             });
-        } & {
-            readonly [key: string]: unknown;
-        });
-        snapshot: ({
-            ok: boolean;
-            projectId: string;
-            knowledgeSpaceId: string;
-            workPlanId: string;
-            tasks: readonly (({
-                taskId: string;
-                projectId: string;
-                knowledgeSpaceId: string;
-                title: string;
-                notes?: string;
-                owner?: string;
-                status: string;
-                priority?: number;
-                order: number;
-                source?: string;
-                tags: readonly string[];
-                parentTaskId?: string;
-                contractId?: string;
-                phaseId?: string;
-                agentId?: string;
-                turnId?: string;
-                decisionId?: string;
-                sourceMessageId?: string;
-                linkedArtifactIds: readonly string[];
-                linkedSourceIds: readonly string[];
-                linkedNodeIds: readonly string[];
-                originSurface?: string;
-                createdAt: number;
-                updatedAt: number;
-                completedAt?: number;
-                metadata?: ({} & {
-                    readonly [key: string]: ({} & {
-                        readonly [key: string]: JsonValue;
-                    }) | boolean | null | number | readonly JsonValue[] | string;
-                });
-            } & {
-                readonly [key: string]: unknown;
-            }))[];
-            counts: {
-                total: number;
-                pending: number;
-                in_progress: number;
-                blocked: number;
-                done: number;
-                failed: number;
-                cancelled: number;
-            };
-            updatedAt: number;
         } & {
             readonly [key: string]: unknown;
         });
@@ -28054,6 +28554,18 @@ export interface OperatorMethodOutputMap {
         projectId: string;
         knowledgeSpaceId: string;
         workPlanId: string;
+        changed: boolean;
+        revision: number;
+        updatedAt: number;
+        counts: {
+            total: number;
+            pending: number;
+            in_progress: number;
+            blocked: number;
+            done: number;
+            failed: number;
+            cancelled: number;
+        };
         task?: ({
             taskId: string;
             projectId: string;
@@ -28070,6 +28582,7 @@ export interface OperatorMethodOutputMap {
             contractId?: string;
             phaseId?: string;
             agentId?: string;
+            sessionId?: string;
             turnId?: string;
             decisionId?: string;
             sourceMessageId?: string;
@@ -28104,6 +28617,7 @@ export interface OperatorMethodOutputMap {
             contractId?: string;
             phaseId?: string;
             agentId?: string;
+            sessionId?: string;
             turnId?: string;
             decisionId?: string;
             sourceMessageId?: string;
@@ -28138,6 +28652,7 @@ export interface OperatorMethodOutputMap {
             contractId?: string;
             phaseId?: string;
             agentId?: string;
+            sessionId?: string;
             turnId?: string;
             decisionId?: string;
             sourceMessageId?: string;
@@ -28157,58 +28672,42 @@ export interface OperatorMethodOutputMap {
             readonly [key: string]: unknown;
         });
         clearedTaskIds?: readonly string[];
-        snapshot: ({
-            ok: boolean;
+        reclaimedTaskIds?: readonly string[];
+        tasks?: readonly (({
+            taskId: string;
             projectId: string;
             knowledgeSpaceId: string;
-            workPlanId: string;
-            tasks: readonly (({
-                taskId: string;
-                projectId: string;
-                knowledgeSpaceId: string;
-                title: string;
-                notes?: string;
-                owner?: string;
-                status: string;
-                priority?: number;
-                order: number;
-                source?: string;
-                tags: readonly string[];
-                parentTaskId?: string;
-                contractId?: string;
-                phaseId?: string;
-                agentId?: string;
-                turnId?: string;
-                decisionId?: string;
-                sourceMessageId?: string;
-                linkedArtifactIds: readonly string[];
-                linkedSourceIds: readonly string[];
-                linkedNodeIds: readonly string[];
-                originSurface?: string;
-                createdAt: number;
-                updatedAt: number;
-                completedAt?: number;
-                metadata?: ({} & {
-                    readonly [key: string]: ({} & {
-                        readonly [key: string]: JsonValue;
-                    }) | boolean | null | number | readonly JsonValue[] | string;
-                });
-            } & {
-                readonly [key: string]: unknown;
-            }))[];
-            counts: {
-                total: number;
-                pending: number;
-                in_progress: number;
-                blocked: number;
-                done: number;
-                failed: number;
-                cancelled: number;
-            };
+            title: string;
+            notes?: string;
+            owner?: string;
+            status: string;
+            priority?: number;
+            order: number;
+            source?: string;
+            tags: readonly string[];
+            parentTaskId?: string;
+            contractId?: string;
+            phaseId?: string;
+            agentId?: string;
+            sessionId?: string;
+            turnId?: string;
+            decisionId?: string;
+            sourceMessageId?: string;
+            linkedArtifactIds: readonly string[];
+            linkedSourceIds: readonly string[];
+            linkedNodeIds: readonly string[];
+            originSurface?: string;
+            createdAt: number;
             updatedAt: number;
+            completedAt?: number;
+            metadata?: ({} & {
+                readonly [key: string]: ({} & {
+                    readonly [key: string]: JsonValue;
+                }) | boolean | null | number | readonly JsonValue[] | string;
+            });
         } & {
             readonly [key: string]: unknown;
-        });
+        }))[];
     } & {
         readonly [key: string]: unknown;
     });
@@ -28218,6 +28717,18 @@ export interface OperatorMethodOutputMap {
         projectId: string;
         knowledgeSpaceId: string;
         workPlanId: string;
+        changed: boolean;
+        revision: number;
+        updatedAt: number;
+        counts: {
+            total: number;
+            pending: number;
+            in_progress: number;
+            blocked: number;
+            done: number;
+            failed: number;
+            cancelled: number;
+        };
         task?: ({
             taskId: string;
             projectId: string;
@@ -28234,6 +28745,7 @@ export interface OperatorMethodOutputMap {
             contractId?: string;
             phaseId?: string;
             agentId?: string;
+            sessionId?: string;
             turnId?: string;
             decisionId?: string;
             sourceMessageId?: string;
@@ -28268,6 +28780,7 @@ export interface OperatorMethodOutputMap {
             contractId?: string;
             phaseId?: string;
             agentId?: string;
+            sessionId?: string;
             turnId?: string;
             decisionId?: string;
             sourceMessageId?: string;
@@ -28302,6 +28815,7 @@ export interface OperatorMethodOutputMap {
             contractId?: string;
             phaseId?: string;
             agentId?: string;
+            sessionId?: string;
             turnId?: string;
             decisionId?: string;
             sourceMessageId?: string;
@@ -28321,58 +28835,42 @@ export interface OperatorMethodOutputMap {
             readonly [key: string]: unknown;
         });
         clearedTaskIds?: readonly string[];
-        snapshot: ({
-            ok: boolean;
+        reclaimedTaskIds?: readonly string[];
+        tasks?: readonly (({
+            taskId: string;
             projectId: string;
             knowledgeSpaceId: string;
-            workPlanId: string;
-            tasks: readonly (({
-                taskId: string;
-                projectId: string;
-                knowledgeSpaceId: string;
-                title: string;
-                notes?: string;
-                owner?: string;
-                status: string;
-                priority?: number;
-                order: number;
-                source?: string;
-                tags: readonly string[];
-                parentTaskId?: string;
-                contractId?: string;
-                phaseId?: string;
-                agentId?: string;
-                turnId?: string;
-                decisionId?: string;
-                sourceMessageId?: string;
-                linkedArtifactIds: readonly string[];
-                linkedSourceIds: readonly string[];
-                linkedNodeIds: readonly string[];
-                originSurface?: string;
-                createdAt: number;
-                updatedAt: number;
-                completedAt?: number;
-                metadata?: ({} & {
-                    readonly [key: string]: ({} & {
-                        readonly [key: string]: JsonValue;
-                    }) | boolean | null | number | readonly JsonValue[] | string;
-                });
-            } & {
-                readonly [key: string]: unknown;
-            }))[];
-            counts: {
-                total: number;
-                pending: number;
-                in_progress: number;
-                blocked: number;
-                done: number;
-                failed: number;
-                cancelled: number;
-            };
+            title: string;
+            notes?: string;
+            owner?: string;
+            status: string;
+            priority?: number;
+            order: number;
+            source?: string;
+            tags: readonly string[];
+            parentTaskId?: string;
+            contractId?: string;
+            phaseId?: string;
+            agentId?: string;
+            sessionId?: string;
+            turnId?: string;
+            decisionId?: string;
+            sourceMessageId?: string;
+            linkedArtifactIds: readonly string[];
+            linkedSourceIds: readonly string[];
+            linkedNodeIds: readonly string[];
+            originSurface?: string;
+            createdAt: number;
             updatedAt: number;
+            completedAt?: number;
+            metadata?: ({} & {
+                readonly [key: string]: ({} & {
+                    readonly [key: string]: JsonValue;
+                }) | boolean | null | number | readonly JsonValue[] | string;
+            });
         } & {
             readonly [key: string]: unknown;
-        });
+        }))[];
     } & {
         readonly [key: string]: unknown;
     });
@@ -28382,6 +28880,7 @@ export interface OperatorMethodOutputMap {
         projectId: string;
         knowledgeSpaceId: string;
         workPlanId: string;
+        revision: number;
         tasks: readonly (({
             taskId: string;
             projectId: string;
@@ -28398,6 +28897,7 @@ export interface OperatorMethodOutputMap {
             contractId?: string;
             phaseId?: string;
             agentId?: string;
+            sessionId?: string;
             turnId?: string;
             decisionId?: string;
             sourceMessageId?: string;
@@ -28435,7 +28935,19 @@ export interface OperatorMethodOutputMap {
         projectId: string;
         knowledgeSpaceId: string;
         workPlanId: string;
-        tasks: readonly (({
+        changed: boolean;
+        revision: number;
+        updatedAt: number;
+        counts: {
+            total: number;
+            pending: number;
+            in_progress: number;
+            blocked: number;
+            done: number;
+            failed: number;
+            cancelled: number;
+        };
+        task?: ({
             taskId: string;
             projectId: string;
             knowledgeSpaceId: string;
@@ -28451,6 +28963,114 @@ export interface OperatorMethodOutputMap {
             contractId?: string;
             phaseId?: string;
             agentId?: string;
+            sessionId?: string;
+            turnId?: string;
+            decisionId?: string;
+            sourceMessageId?: string;
+            linkedArtifactIds: readonly string[];
+            linkedSourceIds: readonly string[];
+            linkedNodeIds: readonly string[];
+            originSurface?: string;
+            createdAt: number;
+            updatedAt: number;
+            completedAt?: number;
+            metadata?: ({} & {
+                readonly [key: string]: ({} & {
+                    readonly [key: string]: JsonValue;
+                }) | boolean | null | number | readonly JsonValue[] | string;
+            });
+        } & {
+            readonly [key: string]: unknown;
+        });
+        previousTask?: ({
+            taskId: string;
+            projectId: string;
+            knowledgeSpaceId: string;
+            title: string;
+            notes?: string;
+            owner?: string;
+            status: string;
+            priority?: number;
+            order: number;
+            source?: string;
+            tags: readonly string[];
+            parentTaskId?: string;
+            contractId?: string;
+            phaseId?: string;
+            agentId?: string;
+            sessionId?: string;
+            turnId?: string;
+            decisionId?: string;
+            sourceMessageId?: string;
+            linkedArtifactIds: readonly string[];
+            linkedSourceIds: readonly string[];
+            linkedNodeIds: readonly string[];
+            originSurface?: string;
+            createdAt: number;
+            updatedAt: number;
+            completedAt?: number;
+            metadata?: ({} & {
+                readonly [key: string]: ({} & {
+                    readonly [key: string]: JsonValue;
+                }) | boolean | null | number | readonly JsonValue[] | string;
+            });
+        } & {
+            readonly [key: string]: unknown;
+        });
+        deletedTask?: ({
+            taskId: string;
+            projectId: string;
+            knowledgeSpaceId: string;
+            title: string;
+            notes?: string;
+            owner?: string;
+            status: string;
+            priority?: number;
+            order: number;
+            source?: string;
+            tags: readonly string[];
+            parentTaskId?: string;
+            contractId?: string;
+            phaseId?: string;
+            agentId?: string;
+            sessionId?: string;
+            turnId?: string;
+            decisionId?: string;
+            sourceMessageId?: string;
+            linkedArtifactIds: readonly string[];
+            linkedSourceIds: readonly string[];
+            linkedNodeIds: readonly string[];
+            originSurface?: string;
+            createdAt: number;
+            updatedAt: number;
+            completedAt?: number;
+            metadata?: ({} & {
+                readonly [key: string]: ({} & {
+                    readonly [key: string]: JsonValue;
+                }) | boolean | null | number | readonly JsonValue[] | string;
+            });
+        } & {
+            readonly [key: string]: unknown;
+        });
+        clearedTaskIds?: readonly string[];
+        reclaimedTaskIds?: readonly string[];
+        tasks?: readonly (({
+            taskId: string;
+            projectId: string;
+            knowledgeSpaceId: string;
+            title: string;
+            notes?: string;
+            owner?: string;
+            status: string;
+            priority?: number;
+            order: number;
+            source?: string;
+            tags: readonly string[];
+            parentTaskId?: string;
+            contractId?: string;
+            phaseId?: string;
+            agentId?: string;
+            sessionId?: string;
             turnId?: string;
             decisionId?: string;
             sourceMessageId?: string;
@@ -28469,16 +29089,6 @@ export interface OperatorMethodOutputMap {
         } & {
             readonly [key: string]: unknown;
         }))[];
-        counts: {
-            total: number;
-            pending: number;
-            in_progress: number;
-            blocked: number;
-            done: number;
-            failed: number;
-            cancelled: number;
-        };
-        updatedAt: number;
     } & {
         readonly [key: string]: unknown;
     });
@@ -28742,6 +29352,14 @@ export interface OperatorMethodOutputMap {
             lastOutcome?: string;
             consecutiveFailures?: number;
         })[];
+        lastRemoval?: {
+            subscriptionId: string;
+            principalId: string;
+            endpointOrigin: string;
+            reason: string;
+            evidence: string;
+            removedAt: number;
+        };
     };
     // (undocumented)
     "push.subscriptions.reconcile": {
@@ -29037,6 +29655,51 @@ export interface OperatorMethodOutputMap {
         });
     };
     // (undocumented)
+    "remote.peers.get": {
+        peer: ({
+            id: string;
+            kind: "device" | "node";
+            label: string;
+            requestedId: string;
+            platform?: string;
+            deviceFamily?: string;
+            version?: string;
+            clientMode?: string;
+            capabilities: readonly string[];
+            commands: readonly string[];
+            permissions?: ({} & {
+                readonly [key: string]: boolean;
+            });
+            status: "connected" | "disconnected" | "idle" | "paired" | "revoked";
+            pairedAt: number;
+            verifiedAt?: number;
+            lastSeenAt?: number;
+            lastConnectedAt?: number;
+            lastDisconnectedAt?: number;
+            lastRemoteAddress?: string;
+            activeTokenId?: string;
+            tokens: readonly (({
+                id: string;
+                label: string;
+                scopes: readonly string[];
+                issuedAt: number;
+                lastUsedAt?: number;
+                rotatedAt?: number;
+                revokedAt?: number;
+                fingerprint: string;
+            } & {
+                readonly [key: string]: unknown;
+            }))[];
+            metadata: ({} & {
+                readonly [key: string]: ({} & {
+                    readonly [key: string]: JsonValue;
+                }) | boolean | null | number | readonly JsonValue[] | string;
+            });
+        } & {
+            readonly [key: string]: unknown;
+        });
+    };
+    // (undocumented)
     "remote.peers.invoke": {
         work: ({
             id: string;
@@ -29247,7 +29910,6 @@ export interface OperatorMethodOutputMap {
         daemon: ({
             transportState: string;
             isRunning: boolean;
-            reconnectAttempts: number;
             runningJobCount: number;
             lastError?: string;
         } & {
@@ -29613,6 +30275,7 @@ export interface OperatorMethodOutputMap {
                 };
                 conversation: null | {
                     undoSnapshotId: string;
+                    expiresAfter: string;
                 };
             };
             warnings: readonly string[];
@@ -29666,7 +30329,8 @@ export interface OperatorMethodOutputMap {
             requestId: string;
             sessionId: string;
             turnId: null | string;
-            kind: "preview" | "rewind";
+            kind: "preview" | "rewind" | "undo";
+            undoSnapshotId?: string;
             expiresAt: number;
         };
     };
@@ -29676,7 +30340,8 @@ export interface OperatorMethodOutputMap {
             requestId: string;
             sessionId: string;
             turnId: null | string;
-            kind: "preview" | "rewind";
+            kind: "preview" | "rewind" | "undo";
+            undoSnapshotId?: string;
             expiresAt: number;
         })[];
         host: {
@@ -29706,6 +30371,18 @@ export interface OperatorMethodOutputMap {
             messagesRemaining: number;
         };
         warnings: readonly string[];
+    };
+    // (undocumented)
+    "rewind.undo": {
+        undone: boolean;
+        sessionId: string;
+        undoSnapshotId: string;
+        refusal: null | {
+            code: string;
+            state: string;
+            reason: string;
+            next: readonly string[];
+        };
     };
     // (undocumented)
     "routes.bindings.create": ({
@@ -29861,9 +30538,15 @@ export interface OperatorMethodOutputMap {
         settings: readonly ({
             key: string;
             type: "configuration" | "setting";
-            featureId: string;
             defaultState: string;
             currentState: string;
+            value?: ({} & {
+                readonly [key: string]: JsonValue;
+            }) | boolean | null | number | readonly JsonValue[] | string;
+            defaultValue?: ({} & {
+                readonly [key: string]: JsonValue;
+            }) | boolean | null | number | readonly JsonValue[] | string;
+            insecure: boolean;
             securityRelevant: boolean;
             summary: string;
             insecureWhen: string;
@@ -30291,7 +30974,7 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
-            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
             channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
@@ -30357,7 +31040,7 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
-            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
             channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
@@ -30401,7 +31084,7 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
-            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
             channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
@@ -30442,7 +31125,7 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
-            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
             channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
@@ -30545,7 +31228,7 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
-            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
             channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
@@ -30613,8 +31296,9 @@ export interface OperatorMethodOutputMap {
             terminatedReason?: string;
             restoredFromDisk: boolean;
             originSurface?: string;
-            permissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            permissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
             contractIds: readonly string[];
+            saveError?: string;
         };
         history: readonly ({
             role: "assistant" | "system" | "tool" | "user";
@@ -30645,8 +31329,9 @@ export interface OperatorMethodOutputMap {
             terminatedReason?: string;
             restoredFromDisk: boolean;
             originSurface?: string;
-            permissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            permissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
             contractIds: readonly string[];
+            saveError?: string;
         };
     };
     // (undocumented)
@@ -30671,8 +31356,9 @@ export interface OperatorMethodOutputMap {
             terminatedReason?: string;
             restoredFromDisk: boolean;
             originSurface?: string;
-            permissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            permissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
             contractIds: readonly string[];
+            saveError?: string;
         };
     };
     // (undocumented)
@@ -30697,8 +31383,9 @@ export interface OperatorMethodOutputMap {
             terminatedReason?: string;
             restoredFromDisk: boolean;
             originSurface?: string;
-            permissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            permissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
             contractIds: readonly string[];
+            saveError?: string;
         };
     };
     // (undocumented)
@@ -30723,9 +31410,14 @@ export interface OperatorMethodOutputMap {
             terminatedReason?: string;
             restoredFromDisk: boolean;
             originSurface?: string;
-            permissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            permissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
             contractIds: readonly string[];
+            saveError?: string;
         })[];
+    };
+    // (undocumented)
+    "sessions.hosted.workspaces": {
+        roots: readonly string[];
     };
     // (undocumented)
     "sessions.inputs.cancel": {
@@ -30836,7 +31528,7 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
-            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
             channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
@@ -30937,7 +31629,7 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
-            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
             channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
@@ -30980,7 +31672,7 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
-            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
             channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
@@ -31083,7 +31775,7 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
-            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
             channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
@@ -31132,13 +31824,13 @@ export interface OperatorMethodOutputMap {
     // (undocumented)
     "sessions.permissionMode.get": {
         sessionId: string;
-        mode: "plan" | "safe-jev" | "safe-owner" | "yolo";
+        mode: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
     };
     // (undocumented)
     "sessions.permissionMode.set": {
         sessionId: string;
-        mode: "plan" | "safe-jev" | "safe-owner" | "yolo";
-        previousMode: "plan" | "safe-jev" | "safe-owner" | "yolo";
+        mode: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
+        previousMode: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
     };
     // (undocumented)
     "sessions.queuedMessages.delete": {
@@ -31176,7 +31868,7 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
-            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
             channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
@@ -31219,7 +31911,7 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
-            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
             channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
@@ -31260,7 +31952,7 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
-            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
             channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
@@ -31301,7 +31993,7 @@ export interface OperatorMethodOutputMap {
             lastActivityAt: number;
             messageCount: number;
             retainedMessageCount?: number;
-            channelPermissionMode?: "plan" | "safe-jev" | "safe-owner" | "yolo";
+            channelPermissionMode?: "ask-me" | "jev-decides" | "just-vibes" | "plan" | "yolo";
             channelPermissionModeRevision?: number;
             pendingInputCount: number;
             routeIds: readonly string[];
@@ -31476,6 +32168,8 @@ export interface OperatorMethodOutputMap {
                 }) | boolean | null | number | readonly JsonValue[] | string;
             });
             updatedAt?: number;
+            origin?: "custom" | "global" | "project-local";
+            path?: string;
             body: string;
         };
     };
@@ -31483,6 +32177,7 @@ export interface OperatorMethodOutputMap {
     "skills.delete": {
         name: string;
         deleted: boolean;
+        path?: string;
     };
     // (undocumented)
     "skills.get": {
@@ -31495,6 +32190,8 @@ export interface OperatorMethodOutputMap {
                 }) | boolean | null | number | readonly JsonValue[] | string;
             });
             updatedAt?: number;
+            origin?: "custom" | "global" | "project-local";
+            path?: string;
             body: string;
         };
     };
@@ -31509,6 +32206,8 @@ export interface OperatorMethodOutputMap {
                 }) | boolean | null | number | readonly JsonValue[] | string;
             });
             updatedAt?: number;
+            origin?: "custom" | "global" | "project-local";
+            path?: string;
         })[];
     };
     // (undocumented)
@@ -31522,6 +32221,8 @@ export interface OperatorMethodOutputMap {
                 }) | boolean | null | number | readonly JsonValue[] | string;
             });
             updatedAt?: number;
+            origin?: "custom" | "global" | "project-local";
+            path?: string;
             body: string;
         };
     };
@@ -31583,9 +32284,24 @@ export interface OperatorMethodOutputMap {
         detail: string;
         lastServe?: {
             at: number;
+            action?: "serve" | "stop";
             command: string;
             ok: boolean;
             url?: string;
+            port?: number;
+            previousPublicBaseUrl?: string;
+            enableUrl?: string;
+            detail: string;
+        };
+        activeServe?: {
+            at: number;
+            action?: "serve" | "stop";
+            command: string;
+            ok: boolean;
+            url?: string;
+            port?: number;
+            previousPublicBaseUrl?: string;
+            enableUrl?: string;
             detail: string;
         };
     };
@@ -31593,13 +32309,34 @@ export interface OperatorMethodOutputMap {
     "tailscale.serve.run": {
         receipt: {
             at: number;
+            action?: "serve" | "stop";
             command: string;
             ok: boolean;
             url?: string;
+            port?: number;
+            previousPublicBaseUrl?: string;
+            enableUrl?: string;
             detail: string;
         };
         publicBaseUrlUpdated: boolean;
-        receiptRecorded?: boolean;
+        receiptRecorded: boolean;
+    };
+    // (undocumented)
+    "tailscale.serve.stop": {
+        receipt: {
+            at: number;
+            action?: "serve" | "stop";
+            command: string;
+            ok: boolean;
+            url?: string;
+            port?: number;
+            previousPublicBaseUrl?: string;
+            enableUrl?: string;
+            detail: string;
+        };
+        publicBaseUrlRestored: boolean;
+        publicBaseUrlDetail: string;
+        receiptRecorded: boolean;
     };
     // (undocumented)
     "tasks.cancel": ({
@@ -31890,16 +32627,11 @@ export interface OperatorMethodOutputMap {
         runtime: {
             sessionId: string;
             sessionStatus: string;
-            traceContext?: {
-                traceId: string;
-                rootSpanId: string;
-                exportActive: boolean;
-                endpoint?: string;
+            traceExport: {
+                recording: boolean;
+                endpoints: readonly string[];
+                unreachable: readonly string[];
             };
-            sessionCorrelationId: string;
-            currentTurnCorrelationId?: string;
-            dbAvailable: boolean;
-            dbPath?: string;
             tasks: {
                 total: number;
                 queued: number;
@@ -31991,16 +32723,11 @@ export interface OperatorMethodOutputMap {
         runtime: {
             sessionId: string;
             sessionStatus: string;
-            traceContext?: {
-                traceId: string;
-                rootSpanId: string;
-                exportActive: boolean;
-                endpoint?: string;
+            traceExport: {
+                recording: boolean;
+                endpoints: readonly string[];
+                unreachable: readonly string[];
             };
-            sessionCorrelationId: string;
-            currentTurnCorrelationId?: string;
-            dbAvailable: boolean;
-            dbPath?: string;
             tasks: {
                 total: number;
                 queued: number;
@@ -32217,6 +32944,8 @@ export interface OperatorMethodOutputMap {
         view: "raw" | "safe";
         rawAccessible: boolean;
         resumedFrom?: string;
+        gap?: boolean;
+        truncated?: boolean;
     };
     // (undocumented)
     "telemetry.traces.list": {
@@ -32274,6 +33003,8 @@ export interface OperatorMethodOutputMap {
         failedCheckCount: number;
         lastCheckFailure: null | string;
         pendingVersion: null | string;
+        pendingSince: null | number;
+        pendingBlockedBy: readonly string[];
         rejectedVersion: null | string;
         recoveryRequired?: boolean;
         transactionRecovery?: null | {
@@ -32298,6 +33029,8 @@ export interface OperatorMethodOutputMap {
         failedCheckCount: number;
         lastCheckFailure: null | string;
         pendingVersion: null | string;
+        pendingSince: null | number;
+        pendingBlockedBy: readonly string[];
         rejectedVersion: null | string;
         recoveryRequired?: boolean;
         transactionRecovery?: null | {
@@ -32312,59 +33045,9 @@ export interface OperatorMethodOutputMap {
     };
     // (undocumented)
     "voice.local.install": {
-        operationProvenance?: "classic";
-        semanticAssessment?: "not-evaluated";
-        proof?: {
-            proved: boolean;
-            stage: "compare" | "synthesize" | "transcribe";
-            phrase: string;
-            transcript?: string;
-            wordOverlap?: number;
-            comparison?: "classic-exact-match" | "classic-mismatch" | "no" | "unavailable" | "uncertain" | "yes";
-            operationProvenance?: "classic";
-            semanticAssessment?: "not-evaluated";
-            proofBasis?: "native-word-sequence";
-            error?: string;
-            summary: string;
-        };
-        notes?: readonly string[];
-        provisioned: boolean;
-        platform: null | string;
-        tts: {
-            engine: string;
-            state: "checksum-mismatch" | "download-failed" | "provisioned" | "unsupported-platform";
-            binaryPath?: string;
-            modelPath?: string;
-            reason?: string;
-        };
-        stt: {
-            engine: string;
-            state: "bundle-unavailable" | "checksum-mismatch" | "download-failed" | "provisioned" | "sideload-mismatch" | "unsupported-platform";
-            binaryPath?: string;
-            modelPath?: string;
-            reason?: string;
-        };
-        components: readonly ({
-            id: string;
-            state: "failed" | "installed" | "skipped";
-            bytes?: number;
-            error?: string;
-        })[];
-        configured: {
-            set: readonly ({
-                key: string;
-                value: string;
-            })[];
-            skipped: readonly ({
-                key: string;
-                reason: string;
-            })[];
-            superseded?: readonly ({
-                key: string;
-                previousValue: string;
-                value: string;
-            })[];
-        };
+        state: "running";
+        startedAt: number;
+        joined: boolean;
     };
     // (undocumented)
     "voice.local.status": {
@@ -32397,6 +33080,66 @@ export interface OperatorMethodOutputMap {
                 bytesTotal?: number;
                 bytesDone?: number;
             })[];
+        };
+        lastInstall?: {
+            startedAt: number;
+            finishedAt: number;
+            receipt?: {
+                operationProvenance?: "classic";
+                semanticAssessment?: "not-evaluated";
+                proof?: {
+                    proved: boolean;
+                    stage: "compare" | "synthesize" | "transcribe";
+                    phrase: string;
+                    transcript?: string;
+                    wordOverlap?: number;
+                    comparison?: "classic-exact-match" | "classic-mismatch" | "no" | "unavailable" | "uncertain" | "yes";
+                    operationProvenance?: "classic";
+                    semanticAssessment?: "not-evaluated";
+                    proofBasis?: "native-word-sequence";
+                    error?: string;
+                    summary: string;
+                };
+                notes?: readonly string[];
+                provisioned: boolean;
+                platform: null | string;
+                tts: {
+                    engine: string;
+                    state: "checksum-mismatch" | "download-failed" | "provisioned" | "unsupported-platform";
+                    binaryPath?: string;
+                    modelPath?: string;
+                    reason?: string;
+                };
+                stt: {
+                    engine: string;
+                    state: "bundle-unavailable" | "checksum-mismatch" | "download-failed" | "provisioned" | "sideload-mismatch" | "unsupported-platform";
+                    binaryPath?: string;
+                    modelPath?: string;
+                    reason?: string;
+                };
+                components: readonly ({
+                    id: string;
+                    state: "failed" | "installed" | "skipped";
+                    bytes?: number;
+                    error?: string;
+                })[];
+                configured: {
+                    set: readonly ({
+                        key: string;
+                        value: string;
+                    })[];
+                    skipped: readonly ({
+                        key: string;
+                        reason: string;
+                    })[];
+                    superseded?: readonly ({
+                        key: string;
+                        previousValue: string;
+                        value: string;
+                    })[];
+                };
+            };
+            error?: string;
         };
     };
     // (undocumented)
@@ -32769,24 +33512,8 @@ export interface OperatorMethodOutputMap {
         readonly [key: string]: unknown;
     });
     // (undocumented)
-    "watchers.triggers.migrate": {
-        migrated: true;
-        status: {
-            ownership: "local" | "migration-required" | "other-process" | "unclaimed";
-            migrationRequired: boolean;
-            records: readonly ({
-                id: string;
-                label: string;
-                kind: string;
-                state: string;
-            })[];
-            message: string;
-        };
-    };
-    // (undocumented)
     "watchers.triggers.status": {
-        ownership: "local" | "migration-required" | "other-process" | "unclaimed";
-        migrationRequired: boolean;
+        ownership: "local" | "other-process" | "unclaimed";
         records: readonly ({
             id: string;
             label: string;
@@ -32972,7 +33699,7 @@ export interface OperatorMethodOutputMap {
             evidenceId?: string;
             reportSequence?: number;
             evidenceSequence?: number;
-            reason?: "artifact-access-restricted" | "artifact-budget-exceeded" | "cancelled" | "changed-during-verification" | "evidence-over-capacity" | "host-state" | "review-not-genuine" | "verification-failed";
+            reason?: "artifact-access-restricted" | "artifact-access-revoked" | "artifact-budget-exceeded" | "artifact-not-regular" | "artifact-outside-tree" | "artifact-too-large" | "cancelled" | "changed-during-verification" | "host-state" | "not-applied" | "review-not-genuine" | "verification-failed";
         };
         progress: null | {
             status: "awaiting-owner" | "cancelled" | "checking-plan" | "committing" | "failed" | "fixing" | "judging" | "passed" | "planning" | "queued" | "running" | "shaping";
@@ -33102,7 +33829,7 @@ export interface OperatorMethodOutputMap {
             evidenceId?: string;
             reportSequence?: number;
             evidenceSequence?: number;
-            reason?: "artifact-access-restricted" | "artifact-budget-exceeded" | "cancelled" | "changed-during-verification" | "evidence-over-capacity" | "host-state" | "review-not-genuine" | "verification-failed";
+            reason?: "artifact-access-restricted" | "artifact-access-revoked" | "artifact-budget-exceeded" | "artifact-not-regular" | "artifact-outside-tree" | "artifact-too-large" | "cancelled" | "changed-during-verification" | "host-state" | "not-applied" | "review-not-genuine" | "verification-failed";
         };
         progress: null | {
             status: "awaiting-owner" | "cancelled" | "checking-plan" | "committing" | "failed" | "fixing" | "judging" | "passed" | "planning" | "queued" | "running" | "shaping";
@@ -33232,7 +33959,7 @@ export interface OperatorMethodOutputMap {
             evidenceId?: string;
             reportSequence?: number;
             evidenceSequence?: number;
-            reason?: "artifact-access-restricted" | "artifact-budget-exceeded" | "cancelled" | "changed-during-verification" | "evidence-over-capacity" | "host-state" | "review-not-genuine" | "verification-failed";
+            reason?: "artifact-access-restricted" | "artifact-access-revoked" | "artifact-budget-exceeded" | "artifact-not-regular" | "artifact-outside-tree" | "artifact-too-large" | "cancelled" | "changed-during-verification" | "host-state" | "not-applied" | "review-not-genuine" | "verification-failed";
         };
         progress: null | {
             status: "awaiting-owner" | "cancelled" | "checking-plan" | "committing" | "failed" | "fixing" | "judging" | "passed" | "planning" | "queued" | "running" | "shaping";
@@ -33362,7 +34089,7 @@ export interface OperatorMethodOutputMap {
             evidenceId?: string;
             reportSequence?: number;
             evidenceSequence?: number;
-            reason?: "artifact-access-restricted" | "artifact-budget-exceeded" | "cancelled" | "changed-during-verification" | "evidence-over-capacity" | "host-state" | "review-not-genuine" | "verification-failed";
+            reason?: "artifact-access-restricted" | "artifact-access-revoked" | "artifact-budget-exceeded" | "artifact-not-regular" | "artifact-outside-tree" | "artifact-too-large" | "cancelled" | "changed-during-verification" | "host-state" | "not-applied" | "review-not-genuine" | "verification-failed";
         };
         progress: null | {
             status: "awaiting-owner" | "cancelled" | "checking-plan" | "committing" | "failed" | "fixing" | "judging" | "passed" | "planning" | "queued" | "running" | "shaping";
@@ -35890,10 +36617,14 @@ export interface OperatorMethodOutputMap {
         requestId: string;
         inputId: string;
         sourceRevision: string;
-        state: "cancelled" | "cancelling" | "completed" | "preparing" | "queued" | "recovery-required" | "running";
+        state: "cancelled" | "cancelling" | "completed" | "failed" | "preparing" | "queued" | "recovery-required" | "running";
         sessionId: null | string;
         brokerInputId: null | string;
         correlationId: null | string;
+        failure?: {
+            summary: string;
+            retryable: boolean;
+        };
     } | {
         kind: "not-found";
     };
@@ -35912,10 +36643,14 @@ export interface OperatorMethodOutputMap {
         requestId: string;
         inputId: string;
         sourceRevision: string;
-        state: "cancelled" | "cancelling" | "completed" | "preparing" | "queued" | "recovery-required" | "running";
+        state: "cancelled" | "cancelling" | "completed" | "failed" | "preparing" | "queued" | "recovery-required" | "running";
         sessionId: null | string;
         brokerInputId: null | string;
         correlationId: null | string;
+        failure?: {
+            summary: string;
+            retryable: boolean;
+        };
     } | {
         kind: "not-found";
     };
@@ -35925,10 +36660,14 @@ export interface OperatorMethodOutputMap {
         requestId: string;
         inputId: string;
         sourceRevision: string;
-        state: "cancelled" | "cancelling" | "completed" | "preparing" | "queued" | "recovery-required" | "running";
+        state: "cancelled" | "cancelling" | "completed" | "failed" | "preparing" | "queued" | "recovery-required" | "running";
         sessionId: null | string;
         brokerInputId: null | string;
         correlationId: null | string;
+        failure?: {
+            summary: string;
+            retryable: boolean;
+        };
     } | {
         kind: "not-found";
     };
@@ -35938,10 +36677,14 @@ export interface OperatorMethodOutputMap {
         requestId: string;
         inputId: string;
         sourceRevision: string;
-        state: "cancelled" | "cancelling" | "completed" | "preparing" | "queued" | "recovery-required" | "running";
+        state: "cancelled" | "cancelling" | "completed" | "failed" | "preparing" | "queued" | "recovery-required" | "running";
         sessionId: null | string;
         brokerInputId: null | string;
         correlationId: null | string;
+        failure?: {
+            summary: string;
+            retryable: boolean;
+        };
     } | {
         kind: "not-found";
     };
@@ -36017,8 +36760,6 @@ export interface OperatorMethodOutputMap {
             active: number;
             paused: number;
             kept: number;
-            discard: number;
-            pendingCleanup: number;
             sessionAttached: number;
             taskAttached: number;
             agentOwned: number;
@@ -36028,7 +36769,7 @@ export interface OperatorMethodOutputMap {
         records: readonly ({
             path: string;
             kind: "agent" | "manual" | "orchestrator";
-            state: "active" | "discard" | "kept" | "paused" | "pending-cleanup";
+            state: "active" | "kept" | "paused";
             ownerId?: string;
             sessionId?: string;
             taskId?: string;
@@ -36162,6 +36903,12 @@ export interface OperatorRemoteClientOptions {
 
 // @public
 export interface OperatorRemoteClientStreamOptions extends ContractStreamOptions {
+}
+
+// @public
+export interface OperatorResponseValidationOptions {
+    // (undocumented)
+    readonly signal?: AbortSignal | undefined;
 }
 
 // @public (undocumented)
@@ -36396,77 +37143,6 @@ export interface PartialToolCall {
     // (undocumented)
     readonly name?: string | undefined;
 }
-
-// @public (undocumented)
-export type PatchCurrentModelBody = z.infer<typeof PatchCurrentModelBodySchema>;
-
-// @public (undocumented)
-export const PatchCurrentModelBodySchema: z.ZodObject<{
-    registryKey: z.ZodString;
-    effort: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-}, z.core.$strict>;
-
-// @public (undocumented)
-export type PatchCurrentModelError = z.infer<typeof PatchCurrentModelErrorSchema>;
-
-// @public (undocumented)
-export const PatchCurrentModelErrorSchema: z.ZodObject<{
-    error: z.ZodString;
-    code: z.ZodEnum<{
-        INVALID_REQUEST: "INVALID_REQUEST";
-        MODEL_NOT_FOUND: "MODEL_NOT_FOUND";
-        PROVIDER_NOT_CONFIGURED: "PROVIDER_NOT_CONFIGURED";
-        SET_MODEL_FAILED: "SET_MODEL_FAILED";
-    }>;
-    missingEnvVars: z.ZodOptional<z.ZodArray<z.ZodString>>;
-}, z.core.$strict>;
-
-// @public (undocumented)
-export type PatchCurrentModelResponse = z.infer<typeof PatchCurrentModelResponseSchema>;
-
-// @public (undocumented)
-export const PatchCurrentModelResponseSchema: z.ZodObject<{
-    model: z.ZodNullable<z.ZodObject<{
-        registryKey: z.ZodString;
-        provider: z.ZodString;
-        id: z.ZodString;
-    }, z.core.$strict>>;
-    configured: z.ZodBoolean;
-    configuredVia: z.ZodOptional<z.ZodEnum<{
-        subscription: "subscription";
-        anonymous: "anonymous";
-        env: "env";
-        secrets: "secrets";
-    }>>;
-    routes: z.ZodOptional<z.ZodArray<z.ZodObject<{
-        route: z.ZodEnum<{
-            none: "none";
-            "api-key": "api-key";
-            "service-oauth": "service-oauth";
-            anonymous: "anonymous";
-            "secret-ref": "secret-ref";
-            "subscription-oauth": "subscription-oauth";
-        }>;
-        label: z.ZodString;
-        configured: z.ZodBoolean;
-        usable: z.ZodOptional<z.ZodBoolean>;
-        freshness: z.ZodOptional<z.ZodEnum<{
-            unconfigured: "unconfigured";
-            expired: "expired";
-            expiring: "expiring";
-            healthy: "healthy";
-            pending: "pending";
-        }>>;
-        detail: z.ZodOptional<z.ZodString>;
-        envVars: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        secretKeys: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        serviceNames: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        providerId: z.ZodOptional<z.ZodString>;
-        repairHints: z.ZodOptional<z.ZodArray<z.ZodString>>;
-    }, z.core.$strict>>>;
-    effort: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-    persisted: z.ZodBoolean;
-}, z.core.$strict>;
 
 // @public (undocumented)
 export const PEER_CONTRACT: PeerContractManifest;
@@ -37239,7 +37915,7 @@ export type PlannerEvent = ({
 } & WorkPlanEventBase) | ({
     type: 'WORK_PLAN_SNAPSHOT_INVALIDATED';
     reason: string;
-    snapshot: WorkPlanSnapshotEventRecord;
+    updatedAt: number;
 } & WorkPlanEventBase);
 
 // @public (undocumented)
@@ -37310,37 +37986,6 @@ export type PluginEvent =
 // @public
 export type PluginEventType = PluginEvent['type'];
 
-// @public (undocumented)
-export type ProviderAuthRouteDescriptor = z.infer<typeof ProviderAuthRouteDescriptorSchema>;
-
-// @public (undocumented)
-export const ProviderAuthRouteDescriptorSchema: z.ZodObject<{
-    route: z.ZodEnum<{
-        none: "none";
-        "api-key": "api-key";
-        "service-oauth": "service-oauth";
-        anonymous: "anonymous";
-        "secret-ref": "secret-ref";
-        "subscription-oauth": "subscription-oauth";
-    }>;
-    label: z.ZodString;
-    configured: z.ZodBoolean;
-    usable: z.ZodOptional<z.ZodBoolean>;
-    freshness: z.ZodOptional<z.ZodEnum<{
-        unconfigured: "unconfigured";
-        expired: "expired";
-        expiring: "expiring";
-        healthy: "healthy";
-        pending: "pending";
-    }>>;
-    detail: z.ZodOptional<z.ZodString>;
-    envVars: z.ZodOptional<z.ZodArray<z.ZodString>>;
-    secretKeys: z.ZodOptional<z.ZodArray<z.ZodString>>;
-    serviceNames: z.ZodOptional<z.ZodArray<z.ZodString>>;
-    providerId: z.ZodOptional<z.ZodString>;
-    repairHints: z.ZodOptional<z.ZodArray<z.ZodString>>;
-}, z.core.$strict>;
-
 // @public
 export type ProviderEvent = {
     type: 'PROVIDERS_CHANGED';
@@ -37377,98 +38022,6 @@ export type ProviderEvent = {
 // @public (undocumented)
 export type ProviderEventType = ProviderEvent['type'];
 
-// @public (undocumented)
-export type ProviderModelEntry = z.infer<typeof ProviderModelEntrySchema>;
-
-// @public (undocumented)
-export const ProviderModelEntrySchema: z.ZodObject<{
-    id: z.ZodString;
-    registryKey: z.ZodString;
-    provider: z.ZodString;
-    label: z.ZodOptional<z.ZodString>;
-    contextWindow: z.ZodOptional<z.ZodNumber>;
-    reasoningOptions: z.ZodOptional<z.ZodObject<{
-        levels: z.ZodArray<z.ZodString>;
-        source: z.ZodEnum<{
-            catalog: "catalog";
-            declared: "declared";
-            fallback: "fallback";
-            family: "family";
-        }>;
-        effectiveByRequested: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodNullable<z.ZodString>>>;
-    }, z.core.$strict>>;
-}, z.core.$strict>;
-
-// @public (undocumented)
-export type ProviderModelProvider = z.infer<typeof ProviderModelProviderSchema>;
-
-// @public (undocumented)
-export const ProviderModelProviderSchema: z.ZodObject<{
-    id: z.ZodString;
-    label: z.ZodString;
-    configured: z.ZodBoolean;
-    configuredVia: z.ZodOptional<z.ZodEnum<{
-        subscription: "subscription";
-        anonymous: "anonymous";
-        env: "env";
-        secrets: "secrets";
-    }>>;
-    envVars: z.ZodArray<z.ZodString>;
-    routes: z.ZodOptional<z.ZodArray<z.ZodObject<{
-        route: z.ZodEnum<{
-            none: "none";
-            "api-key": "api-key";
-            "service-oauth": "service-oauth";
-            anonymous: "anonymous";
-            "secret-ref": "secret-ref";
-            "subscription-oauth": "subscription-oauth";
-        }>;
-        label: z.ZodString;
-        configured: z.ZodBoolean;
-        usable: z.ZodOptional<z.ZodBoolean>;
-        freshness: z.ZodOptional<z.ZodEnum<{
-            unconfigured: "unconfigured";
-            expired: "expired";
-            expiring: "expiring";
-            healthy: "healthy";
-            pending: "pending";
-        }>>;
-        detail: z.ZodOptional<z.ZodString>;
-        envVars: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        secretKeys: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        serviceNames: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        providerId: z.ZodOptional<z.ZodString>;
-        repairHints: z.ZodOptional<z.ZodArray<z.ZodString>>;
-    }, z.core.$strict>>>;
-    models: z.ZodArray<z.ZodObject<{
-        id: z.ZodString;
-        registryKey: z.ZodString;
-        provider: z.ZodString;
-        label: z.ZodOptional<z.ZodString>;
-        contextWindow: z.ZodOptional<z.ZodNumber>;
-        reasoningOptions: z.ZodOptional<z.ZodObject<{
-            levels: z.ZodArray<z.ZodString>;
-            source: z.ZodEnum<{
-                catalog: "catalog";
-                declared: "declared";
-                fallback: "fallback";
-                family: "family";
-            }>;
-            effectiveByRequested: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodNullable<z.ZodString>>>;
-        }, z.core.$strict>>;
-    }, z.core.$strict>>;
-}, z.core.$strict>;
-
-// @public (undocumented)
-export type ProviderModelRef = z.infer<typeof ProviderModelRefSchema>;
-
-// @public
-export const ProviderModelRefSchema: z.ZodObject<{
-    registryKey: z.ZodString;
-    provider: z.ZodString;
-    id: z.ZodString;
-}, z.core.$strict>;
-
 // @public
 export const QUALITY_ITEMS: readonly ["placeholder", "tests_weakened", "breaks_existing", "out_of_scope", "hidden_failure", "unsupported_claims"];
 
@@ -37486,6 +38039,7 @@ export interface RawServerSentEventOptions {
     readonly getAuthToken?: AuthTokenResolver | undefined;
     // (undocumented)
     readonly headers?: HeadersInit | undefined;
+    readonly idleTimeoutMs?: number | undefined;
     // (undocumented)
     readonly lastEventId?: string | null | undefined;
     // (undocumented)
@@ -37517,6 +38071,9 @@ export interface ReactNativeGoodVibesRealtime {
 export function readDecisionModelPolicyHeader(headers: Pick<Headers, 'get'>): DecisionModelPolicyState | undefined;
 
 // @public
+export function readEventEnvelope<TEvent extends EventLike = EventLike>(value: unknown, streamText?: StreamTextAssembler): SerializedEventEnvelope<TEvent> | null;
+
+// @public
 export function readFailure(evidence: FailureEvidence, site: string, options?: FailureReadOptions): Promise<FailureConclusions>;
 
 // @public
@@ -37524,6 +38081,12 @@ export function readFailureTransience(error: unknown, site: string, options?: Tr
 
 // @public (undocumented)
 export function readJsonBody(response: Response): Promise<unknown>;
+
+// @public
+export function readNextSteps(value: unknown): readonly string[] | undefined;
+
+// @public
+export function readRefusal(error: unknown): Refusal | undefined;
 
 // @public
 export function readTurnLifecycleFrame(envelopeSessionId: string | undefined, payload: unknown): TurnLifecycleFrame | null;
@@ -37534,6 +38097,53 @@ export interface ReconnectAttemptInfo {
     readonly delayMs: number;
     readonly maxAttempts: number;
     readonly reason: string;
+}
+
+// @public
+export interface Refusal {
+    readonly code: string;
+    readonly next: readonly string[];
+    readonly reason: string;
+    readonly retryable: boolean;
+    // (undocumented)
+    readonly retryAfterMs?: number | undefined;
+    readonly state: string;
+    readonly status?: number | undefined;
+}
+
+// @public
+export function refusal(init: RefusalInit): Refusal;
+
+// @public
+export class RefusalError extends GoodVibesError {
+    // (undocumented)
+    static [Symbol.hasInstance](value: unknown): boolean;
+    constructor(refusal: Refusal, options?: Pick<GoodVibesErrorOptions, 'category' | 'source' | 'cause'>);
+    // (undocumented)
+    readonly refusal: Refusal;
+    // (undocumented)
+    readonly retryable: boolean;
+}
+
+// @public
+export function refusalErrorBody(value: Refusal): StructuredDaemonErrorBody;
+
+// @public (undocumented)
+export interface RefusalInit {
+    // (undocumented)
+    readonly code: string;
+    // (undocumented)
+    readonly next?: readonly string[] | undefined;
+    // (undocumented)
+    readonly reason: string;
+    // (undocumented)
+    readonly retryable?: boolean | undefined;
+    // (undocumented)
+    readonly retryAfterMs?: number | undefined;
+    // (undocumented)
+    readonly state: string;
+    // (undocumented)
+    readonly status?: number | undefined;
 }
 
 // @public (undocumented)
@@ -37549,15 +38159,8 @@ export interface RegexAdmissionOptions extends JudgmentReadingOptions {
     readonly maxPatternChars?: number | undefined;
     // (undocumented)
     readonly operation: string;
-    // (undocumented)
-    readonly reading?: RegexReadingCapability | undefined;
     readonly timeoutMs?: number | undefined;
 }
-
-// @public (undocumented)
-export const regexBacktracking: Battery_2<    {
-readonly backtracking: YesNoItem_2;
-}>;
 
 // @public (undocumented)
 export interface RegexMatch {
@@ -37573,12 +38176,10 @@ export interface RegexMatch {
     readonly lastIndex: number;
 }
 
-// @public
+// @public @deprecated (undocumented)
 export interface RegexReadingCapability {
     // (undocumented)
     readonly assertCurrent: () => void;
-    // (undocumented)
-    readonly read: (source: string, flags: string, maxInputChars: number, signal: AbortSignal) => Promise<YesNoReading>;
     // (undocumented)
     readonly signal: AbortSignal;
 }
@@ -37696,12 +38297,6 @@ export function resolveHttpRetryPolicy(defaultPolicy?: HttpRetryPolicy, override
 
 // @public
 export function restoreJudgmentPort(owner: JudgmentPort, previous: JudgmentPort | undefined): void;
-
-// @public
-export function retainJsonSchemaSource<T>(source: T): {
-    readonly snapshot: T;
-    readonly assertCurrent: () => void;
-};
 
 // @public
 export const RETRYABLE_STATUS_CODES: readonly number[];
@@ -37933,9 +38528,11 @@ export type RuntimeDomainEventType<TDomain extends RuntimeEventTypedDomain> = ke
 
 // @public (undocumented)
 export interface RuntimeEventConnectorOptions {
+    readonly createSocket?: ((url: string, token: string | null) => WebSocket) | undefined;
+    readonly maxQueuedBytes?: number | undefined;
+    readonly maxQueuedMessages?: number | undefined;
     // (undocumented)
     readonly observer?: TransportObserver | undefined;
-    // @deprecated (undocumented)
     readonly onBackpressure?: ((info: BackpressureInfo) => void) | undefined;
     readonly onConnectionStateChange?: ((state: ConnectionState) => void) | undefined;
     readonly onEmitter?: ((emitLocal: (data: string) => void) => void) | undefined;
@@ -38055,12 +38652,6 @@ export type SecurityEvent =
     tokenId: string;
     clientIp: string;
 }
-/** Emitted when a companion token is rotated. */
-| {
-    type: 'COMPANION_TOKEN_ROTATED';
-    newTokenId: string;
-    clientIp: string;
-}
 /** Emitted when a companion token is revoked. */
 | {
     type: 'COMPANION_TOKEN_REVOKED';
@@ -38077,7 +38668,7 @@ export function sendWebSocketMessage(socket: {
     readonly bufferedAmount?: number;
     getBufferedAmount?(): number;
     readonly readyState?: number;
-}, text: string, signal?: AbortSignal): Promise<void>;
+}, message: string | Iterable<string>, signal?: AbortSignal): Promise<void>;
 
 // @public (undocumented)
 export interface SerializedEventEnvelope<TEvent extends EventLike = EventLike> {
@@ -38103,7 +38694,7 @@ export const SerializedEventEnvelopeSchema: z.ZodObject<{
     sessionId: z.ZodOptional<z.ZodString>;
     source: z.ZodOptional<z.ZodString>;
     payload: z.ZodUnknown;
-}, z.core.$strict>;
+}, z.core.$strip>;
 
 // @public (undocumented)
 export type SerializedEventEnvelopeShape = z.infer<typeof SerializedEventEnvelopeSchema>;
@@ -38127,10 +38718,10 @@ interface ServerSentEventHandlers {
         readonly attempt: number;
         readonly delayMs: number;
     }) => void;
-    // (undocumented)
     readonly onTerminate?: (input: {
         readonly error: unknown;
         readonly reconnectAttempts: number;
+        readonly final?: boolean | undefined;
     }) => void;
 }
 export { ServerSentEventHandlers as RawServerSentEventHandlers }
@@ -38156,29 +38747,11 @@ export type SessionEvent =
     profileId: string;
     workingDir: string;
 }
-/** An existing session is being loaded from disk. */
-| {
-    type: 'SESSION_LOADING';
-    sessionId: string;
-    path: string;
-}
 /** A previously saved session is being resumed. */
 | {
     type: 'SESSION_RESUMED';
     sessionId: string;
     turnCount: number;
-}
-/** Session state is being repaired after a detected inconsistency. */
-| {
-    type: 'SESSION_REPAIRING';
-    sessionId: string;
-    reason: string;
-}
-/** Context messages are being reconciled with stored state. */
-| {
-    type: 'SESSION_RECONCILING';
-    sessionId: string;
-    messageCount: number;
 }
 /** Session is fully loaded and ready for input. */
 | {
@@ -38225,6 +38798,12 @@ export class SessionManager {
 // @public
 export function settleCategory(fixed: DaemonErrorCategory | undefined, status: number | undefined, fromProvider: boolean, failure: FailureConclusions | undefined): DaemonErrorCategory;
 
+// @public
+export interface SharedRegexTester extends AsyncDisposable {
+    // (undocumented)
+    test(source: string, input: string, signal?: AbortSignal): Promise<boolean>;
+}
+
 // @public (undocumented)
 export type SharedSessionConversationRouteOutput = {
     messageId: string;
@@ -38240,6 +38819,12 @@ export const SPAN_STATUS_ERROR: 2;
 
 // @public
 export function splitClientArgs<TInput, TOptions>(args: readonly unknown[]): readonly [TInput | undefined, TOptions | undefined];
+
+// @public
+export const SSE_HEARTBEAT_INTERVAL_MS = 15000;
+
+// @public
+export function sseIdleDeadlineMs(heartbeatIntervalMs?: number): number;
 
 // @public (undocumented)
 export const STALL_ROUTES: readonly ["split", "fresh", "owner"];
@@ -38263,17 +38848,25 @@ export interface StreamReconnectPolicy extends BackoffPolicy {
     readonly enabled?: boolean | undefined;
 }
 
+// @public
+export interface StreamTextAssembler {
+    clear(): void;
+    // (undocumented)
+    complete<TPayload>(payload: TPayload): TPayload;
+}
+
+// @public
+export function structuralFailureConclusions(evidence: FailureEvidence): FailureConclusions;
+
 // @public (undocumented)
 export interface StructuredDaemonErrorBody {
     // (undocumented)
     readonly category?: DaemonErrorCategory | undefined;
     // (undocumented)
     readonly code?: string | undefined;
-    // (undocumented)
     readonly error: string;
-    readonly errorRef?: string | undefined;
-    // (undocumented)
     readonly hint?: string | undefined;
+    readonly next?: readonly string[] | undefined;
     // (undocumented)
     readonly operation?: string | undefined;
     // (undocumented)
@@ -38292,6 +38885,7 @@ export interface StructuredDaemonErrorBody {
     readonly retryAfterMs?: number | undefined;
     // (undocumented)
     readonly source?: DaemonErrorSource | undefined;
+    readonly state?: string | undefined;
     // (undocumented)
     readonly status?: number | undefined;
 }
@@ -38364,14 +38958,6 @@ export type TaskEvent =
     taskId: string;
     agentId?: string;
     reason: string;
-}
-/** Task has made measurable progress. */
-| {
-    type: 'TASK_PROGRESS';
-    taskId: string;
-    agentId?: string;
-    progress: number;
-    message?: string;
 }
 /** Task completed successfully. */
 | {
@@ -38555,7 +39141,14 @@ export interface ToolResultSummary {
 }
 
 // @public
-export type TransienceBasis = 'explicit' | 'retry-after' | 'status' | 'errno' | 'error-type' | 'reading' | 'classic' | 'no-wording';
+export function toRefusal(error: unknown, fallback: {
+    readonly state: string;
+    readonly next: readonly string[];
+    readonly code?: string | undefined;
+}): Refusal;
+
+// @public
+export type TransienceBasis = 'explicit' | 'retry-after' | 'status' | 'errno' | 'error-type' | 'cancelled' | 'reading' | 'classic' | 'no-wording';
 
 // @public
 export function transienceFromReading(failure: FailureConclusions): FailureTransience;
@@ -38626,19 +39219,6 @@ export type TransportEvent =
     type: 'TRANSPORT_SYNCING';
     transportId: string;
 }
-/** Transport is operating with reduced reliability or throughput. */
-| {
-    type: 'TRANSPORT_DEGRADED';
-    transportId: string;
-    reason: string;
-}
-/** Transport is attempting to reconnect after a failure. */
-| {
-    type: 'TRANSPORT_RECONNECTING';
-    transportId: string;
-    attempt: number;
-    maxAttempts: number;
-}
 /** Transport connection has been closed. */
 | {
     type: 'TRANSPORT_DISCONNECTED';
@@ -38684,9 +39264,10 @@ export type TransportEvent =
     reason?: string;
 }
 /**
-* Declared, not yet emitted: the realtime connector's outbound queue is unbounded
-* (messages are retained in order across reconnects and never dropped), so nothing
-* publishes this event and `onBackpressure` is never called.
+* The WebSocket connector's outbound queue refused a message: it was full (count or
+* bytes) while the socket was down or not yet authenticated, or the message alone was
+* over the byte limit. Emitted on the first drop since the queue last drained and on
+* every tenth after it, alongside `onBackpressure`.
 */
 | {
     type: 'TRANSPORT_BACKPRESSURE';
@@ -38714,9 +39295,7 @@ export type TransportEvent =
 /**
 * A realtime transport reconnect attempt is scheduled.
 *
-* Provides richer reconnect metadata than `TRANSPORT_RECONNECTING` (which only
-* carries `attempt` and `maxAttempts`). Subscribe to this for detailed backoff
-* visualisation in diagnostic UIs.
+* Carries the attempt, the backoff delay and the reason, for diagnostic UIs.
 */
 | {
     type: 'TRANSPORT_RECONNECT_ATTEMPT';
@@ -38850,14 +39429,31 @@ export type TurnEvent =
     scope?: 'provider';
     terminal?: false;
 }
-/** An incremental content chunk arrived from the provider. */
+/**
+* An incremental content chunk arrived from the provider. `content` is the
+* chunk and `accumulated` the response's text so far. With `provisional`,
+* the text is a draft: an answer the completion check sends back is replaced
+* by the next request's stream (which starts again from empty), so a reader
+* shows it as in progress until TURN_COMPLETED.
+*/
 | {
     type: 'STREAM_DELTA';
     turnId: string;
     content: string;
     accumulated: string;
+    provisional?: boolean;
     reasoning?: string;
     toolCalls?: PartialToolCall[];
+}
+/**
+* The completion check sent back the draft streamed since the last
+* STREAM_START: a reader removes that text (and stops speaking it); the next
+* request streams the replacement from empty. `reason` is the check's reason.
+*/
+| {
+    type: 'DRAFT_WITHDRAWN';
+    turnId: string;
+    reason: string;
 }
 /**
 * A provider stream iteration has ended.
@@ -38888,6 +39484,9 @@ export type TurnEvent =
     maxAttempts: number;
     delayMs: number;
     reason: string;
+    status?: number;
+    rateLimited?: boolean;
+    retryAfterMs?: number;
 }
 /** An LLM request is about to be dispatched to the provider. */
 | {
@@ -38943,11 +39542,6 @@ export type TurnEvent =
     type: 'TOOLS_DONE';
     turnId: string;
 }
-/** Post-processing hooks (formatters and the like) have completed. */
-| {
-    type: 'POST_HOOKS_DONE';
-    turnId: string;
-}
 /**
 * Turn completed successfully with a final response.
 *
@@ -38975,12 +39569,17 @@ export type TurnEvent =
     status?: number | undefined;
     code?: string | undefined;
 }
-/** Turn was cancelled by the user or system. */
+/**
+* Turn was cancelled by the user or system. `requestedAt` (epoch ms) is when
+* the cancel was asked for, so the time the turn took to stop is the
+* envelope's `ts` minus it.
+*/
 | {
     type: 'TURN_CANCEL';
     turnId: string;
     reason?: string;
     stopReason: Extract<TurnStopReason, 'cancelled'>;
+    requestedAt?: number | undefined;
 };
 
 // @public
@@ -39040,7 +39639,7 @@ export const TypedSerializedEventEnvelopeSchema: z.ZodObject<{
     payload: z.ZodObject<{
         type: z.ZodString;
     }, z.core.$catchall<z.ZodUnknown>>;
-}, z.core.$strict>;
+}, z.core.$strip>;
 
 // @public (undocumented)
 export type TypedSerializedEventEnvelopeShape = z.infer<typeof TypedSerializedEventEnvelopeSchema>;
@@ -39065,6 +39664,9 @@ export type UnitSpawnPurpose = (typeof UNIT_SPAWN_PURPOSES)[number];
 
 // @public
 export function validateKnownEvent(event: unknown): ContractResult;
+
+// @public
+export function validateOperatorResponse(method: OperatorMethodContract, body: unknown, options?: OperatorResponseValidationOptions): Promise<void>;
 
 // @public
 export const WATCHER_SOURCE_KINDS: readonly ["poll", "webhook", "tail", "file", "api", "stream"];
@@ -39149,26 +39751,9 @@ export interface WorkPlanEventBase {
     readonly knowledgeSpaceId: string;
     // (undocumented)
     readonly projectId: string;
+    readonly revision: number;
     // (undocumented)
     readonly workPlanId: string;
-}
-
-// @public (undocumented)
-export interface WorkPlanSnapshotEventRecord extends WorkPlanEventBase {
-    // (undocumented)
-    readonly counts: {
-        readonly total: number;
-        readonly pending: number;
-        readonly in_progress: number;
-        readonly blocked: number;
-        readonly done: number;
-        readonly failed: number;
-        readonly cancelled: number;
-    };
-    // (undocumented)
-    readonly tasks: readonly WorkPlanTaskEventRecord[];
-    // (undocumented)
-    readonly updatedAt: number;
 }
 
 // @public (undocumented)
@@ -39317,7 +39902,7 @@ export type YesNoVerdict = (typeof YES_NO_VERDICTS)[number];
 
 // Warnings were encountered during analysis:
 //
-// platform/src/events/turn.ts:157:134 - (ae-forgotten-export) The symbol "TurnCompletedMetadata" needs to be exported by the entry point index.d.ts
+// platform/src/events/turn.ts:175:134 - (ae-forgotten-export) The symbol "TurnCompletedMetadata" needs to be exported by the entry point index.d.ts
 
 // (No @packageDocumentation comment for this package)
 

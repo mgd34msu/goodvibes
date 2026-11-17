@@ -13,6 +13,9 @@ import {
   HOME_ASSISTANT_WEBHOOK_PATH,
 } from './homeassistant.js';
 
+/** On a public ntfy server the topic name is the only secret, so an empty topic gets an unguessable one. */
+const NTFY_GENERATED_TOPIC_DETAIL = 'Leave empty to have an unguessable name generated and saved when ntfy starts; on the public ntfy server the name is the only secret.';
+
 export function getBuiltinSetupSchema(surface: ChannelSurface): ChannelSetupSchema {
   switch (surface) {
     case 'tui':
@@ -147,9 +150,9 @@ export function getBuiltinSetupSchema(surface: ChannelSurface): ChannelSetupSche
           setupField('enabled', 'Enabled', 'boolean', false, { configKey: 'surfaces.ntfy.enabled', defaultValue: false }),
           setupField('baseUrl', 'Base URL', 'url', false, { configKey: 'surfaces.ntfy.baseUrl', placeholder: 'https://ntfy.sh' }),
           setupField('topic', 'Default delivery topic', 'string', false, { configKey: 'surfaces.ntfy.topic' }),
-          setupField('chatTopic', 'Chat topic', 'string', false, { configKey: 'surfaces.ntfy.chatTopic', defaultValue: 'goodvibes-chat' }),
-          setupField('agentTopic', 'Agent topic', 'string', false, { configKey: 'surfaces.ntfy.agentTopic', defaultValue: 'goodvibes-agent' }),
-          setupField('remoteTopic', 'Remote topic', 'string', false, { configKey: 'surfaces.ntfy.remoteTopic', defaultValue: 'goodvibes-ntfy' }),
+          setupField('chatTopic', 'Chat topic', 'string', false, { configKey: 'surfaces.ntfy.chatTopic', detail: NTFY_GENERATED_TOPIC_DETAIL }),
+          setupField('agentTopic', 'Agent topic', 'string', false, { configKey: 'surfaces.ntfy.agentTopic', detail: NTFY_GENERATED_TOPIC_DETAIL }),
+          setupField('remoteTopic', 'Remote topic', 'string', false, { configKey: 'surfaces.ntfy.remoteTopic', detail: NTFY_GENERATED_TOPIC_DETAIL }),
           setupField('token', 'Access token', 'secret', false, { configKey: 'surfaces.ntfy.token', secretTargetId: 'primary' }),
         ],
         secretTargets: [

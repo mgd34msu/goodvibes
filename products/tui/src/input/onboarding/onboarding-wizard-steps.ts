@@ -1,5 +1,4 @@
 import { normalizePermissionMode } from '@goodvibes-jev/engine/platform/platform/gate';
-import { GOODVIBES_NTFY_AGENT_TOPIC, GOODVIBES_NTFY_CHAT_TOPIC, GOODVIBES_NTFY_REMOTE_TOPIC } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { NETWORK_MODE_OPTIONS, REASONING_OPTIONS, HITL_MODE_OPTIONS, GUIDANCE_MODE_OPTIONS, PERMISSION_MODE_OPTIONS, SECRET_POLICY_OPTIONS } from './onboarding-wizard-constants.ts';
 import { shouldShowCloudflareStep } from './onboarding-wizard-cloudflare.ts';
 import { buildCloudflareStep } from './onboarding-wizard-cloudflare-step.ts';
@@ -7,6 +6,7 @@ import {
   EXTERNAL_SURFACE_SPECS,
   getExternalSurfaceAutoStartDefaultValue,
   getExternalSurfaceAutoStartFieldId,
+  getNtfyProtocolTopicLines,
   isExternalSurfaceSelectedByDefault,
   type ExternalSurfaceSpec,
 } from './onboarding-wizard-external-surfaces.ts';
@@ -412,12 +412,18 @@ function buildExternalSurfaceStep(
         defaultValue: setupField.defaultValue(controller.runtimeSnapshot),
       };
     });
+    // What the step will save for each topic: the entered value, else the saved one.
+    const ntfyFieldValue = (configKey: string): string => {
+      const field = surface.fields.find((candidate) => candidate.configKey === configKey);
+      return field ? controller.getStringFieldValue(field.id, field.defaultValue(controller.runtimeSnapshot)) : '';
+    };
     const ntfyTopicSummary = surface.id === 'ntfy'
-      ? [
-          `Chat topic: ${controller.getStringFieldValue('external-services.ntfy.chat-topic', GOODVIBES_NTFY_CHAT_TOPIC)}`,
-          `Agent topic: ${controller.getStringFieldValue('external-services.ntfy.agent-topic', GOODVIBES_NTFY_AGENT_TOPIC)}`,
-          `Daemon-only remote topic: ${controller.getStringFieldValue('external-services.ntfy.remote-topic', GOODVIBES_NTFY_REMOTE_TOPIC)}`,
-        ]
+      ? getNtfyProtocolTopicLines({
+          chatTopic: ntfyFieldValue('surfaces.ntfy.chatTopic'),
+          agentTopic: ntfyFieldValue('surfaces.ntfy.agentTopic'),
+          remoteTopic: ntfyFieldValue('surfaces.ntfy.remoteTopic'),
+          baseUrl: ntfyFieldValue('surfaces.ntfy.baseUrl'),
+        })
       : [];
     const title = `${surface.label.replace(/ surface$/i, '')} setup`;
     const setupSummary = setupCount === 0

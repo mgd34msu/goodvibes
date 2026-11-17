@@ -23,10 +23,9 @@
 // ---------------------------------------------------------------------------
 
 import {
-  GOODVIBES_NTFY_AGENT_TOPIC,
-  GOODVIBES_NTFY_CHAT_TOPIC,
-  GOODVIBES_NTFY_REMOTE_TOPIC,
+  NTFY_TOPIC_SETTINGS,
   resolveGoodVibesNtfyTopics,
+  type GoodVibesNtfyTopicConfig,
 } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { getBuiltinSetupSchema } from '@goodvibes-jev/engine/platform/platform/channels';
 import type {
@@ -82,6 +81,12 @@ function mapPlatformKind(kind: ChannelSetupFieldKind): 'text' | 'masked' | 'radi
 }
 
 // ---- the TUI-only presentation overlay -----------------------------------
+
+// An inbound ntfy topic left empty gets an unguessable name when ntfy starts;
+// on the public server the name is the only secret, so none is suggested.
+const NTFY_GENERATED_TOPIC_PLACEHOLDER = 'empty: a name is generated';
+const NTFY_GENERATED_TOPIC_HINT = 'Leave it empty to have an unguessable name generated and saved when ntfy starts.';
+const NTFY_GENERATED_TOPIC_SUMMARY = 'generated when ntfy starts (goodvibes surfaces show ntfy lists it)';
 
 interface SurfaceFieldOverlay {
   /** Join key to the platform schema (and the config path). */
@@ -157,9 +162,9 @@ const SURFACE_OVERLAYS: readonly SurfaceOverlay[] = [
     hint: 'Configure ntfy chat, agent, remote-session, and notification delivery topics.',
     fields: [
       { configKey: 'surfaces.ntfy.baseUrl', label: 'ntfy base URL', hint: 'Base URL of the ntfy server.', placeholder: 'https://ntfy.sh' },
-      { configKey: 'surfaces.ntfy.chatTopic', label: 'ntfy chat topic', hint: 'Messages sent here attach to the active terminal TUI session and reply back to ntfy.', placeholder: GOODVIBES_NTFY_CHAT_TOPIC },
-      { configKey: 'surfaces.ntfy.agentTopic', label: 'ntfy agent topic', hint: 'Messages sent here start agent work attached to the active TUI session.', placeholder: GOODVIBES_NTFY_AGENT_TOPIC },
-      { configKey: 'surfaces.ntfy.remoteTopic', label: 'ntfy daemon-only remote topic', hint: 'Messages sent here start an ntfy remote session in the daemon and do not appear in the TUI.', placeholder: GOODVIBES_NTFY_REMOTE_TOPIC },
+      { configKey: 'surfaces.ntfy.chatTopic', label: 'ntfy chat topic', hint: `Messages sent here attach to the active terminal TUI session and reply back to ntfy. ${NTFY_GENERATED_TOPIC_HINT}`, placeholder: NTFY_GENERATED_TOPIC_PLACEHOLDER },
+      { configKey: 'surfaces.ntfy.agentTopic', label: 'ntfy agent topic', hint: `Messages sent here start agent work attached to the active TUI session. ${NTFY_GENERATED_TOPIC_HINT}`, placeholder: NTFY_GENERATED_TOPIC_PLACEHOLDER },
+      { configKey: 'surfaces.ntfy.remoteTopic', label: 'ntfy daemon-only remote topic', hint: `Messages sent here start an ntfy remote session in the daemon and do not appear in the TUI. ${NTFY_GENERATED_TOPIC_HINT}`, placeholder: NTFY_GENERATED_TOPIC_PLACEHOLDER },
       { configKey: 'surfaces.ntfy.topic', label: 'ntfy default delivery topic', hint: 'Optional outbound notification topic. It does not control chat, agent, or daemon-only remote routing.', placeholder: 'goodvibes' },
       { configKey: 'surfaces.ntfy.token', label: 'ntfy token', hint: 'Optional token for authenticated ntfy servers.', placeholder: 'empty for anonymous ntfy' },
       { configKey: 'surfaces.ntfy.defaultPriority', label: 'ntfy default priority', hint: 'Default ntfy priority from 1 to 5.', placeholder: '3', defaultNumber: 3, min: 1, max: 5, tuiOnly: { kind: 'text', valueType: 'number' } },
@@ -433,15 +438,21 @@ export function isExternalSurfaceSelectedByDefault(
   });
 }
 
-export function getNtfyProtocolTopicLines(snapshot: OnboardingSnapshotState | null): readonly string[] {
-  const topics = resolveGoodVibesNtfyTopics({
-    chatTopic: snapshot?.config.surfaces.ntfy.chatTopic,
-    agentTopic: snapshot?.config.surfaces.ntfy.agentTopic,
-    remoteTopic: snapshot?.config.surfaces.ntfy.remoteTopic,
-  });
+/**
+ * The inbound topics the ntfy step will save, as the summary shows them: the
+ * name entered, a refusal for a shipped name on the public server, or that an
+ * empty topic is generated when ntfy starts.
+ */
+export function getNtfyProtocolTopicLines(config: GoodVibesNtfyTopicConfig): readonly string[] {
+  const topics = resolveGoodVibesNtfyTopics(config);
+  const line = (label: string, role: keyof typeof NTFY_TOPIC_SETTINGS): string => {
+    const refused = topics.refused.find((entry) => entry.setting === NTFY_TOPIC_SETTINGS[role]);
+    if (refused) return `${label}: ${refused.topic} is refused on the public ntfy server; clear it to have an unguessable name generated`;
+    return `${label}: ${topics[role] || NTFY_GENERATED_TOPIC_SUMMARY}`;
+  };
   return [
-    `Chat topic: ${topics.chatTopic}`,
-    `Agent topic: ${topics.agentTopic}`,
-    `Daemon-only remote topic: ${topics.remoteTopic}`,
+    line('Chat topic', 'chatTopic'),
+    line('Agent topic', 'agentTopic'),
+    line('Daemon-only remote topic', 'remoteTopic'),
   ];
 }

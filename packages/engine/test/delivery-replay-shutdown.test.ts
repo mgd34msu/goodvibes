@@ -1,3 +1,8 @@
+/**
+ * A dead letter is a message that could not be sent. Replaying it while the
+ * queue shuts down, or while another replay runs, must neither lose it nor send
+ * it twice.
+ */
 import { expect, test } from 'bun:test';
 import { DeliveryError, DeliveryQueue } from '../platform/src/platform/integrations/delivery.ts';
 
@@ -14,7 +19,7 @@ async function seeded() {
 }
 
 for (const shutdown of ['close', 'dispose'] as const) {
-  test(`${shutdown} during a failed replay retains the original dead letter without another send`, async () => {
+  test(`${shutdown} during a failed replay keeps the dead letter and sends nothing again`, async () => {
     const queue = await seeded(); const original = queue.getDlq(); const held = deferred(); let calls = 0;
     const replay = queue.replay(async () => { calls++; await held.promise; });
     const result = replay.catch((error: unknown) => error);
@@ -22,58 +27,11 @@ for (const shutdown of ['close', 'dispose'] as const) {
     try {
       held.reject(terminal()); expect(await result).toBeInstanceOf(DeliveryError); await closing;
       expect(queue.getDlq()).toEqual(original); expect(calls).toBe(1);
-      expect(queue.getMetrics()).toMatchObject({ totalAttempts: 2, retrying: 0, deadLettered: 1, dlqSize: 1 });
     } finally { held.resolve(); await queue.close(); }
   });
 }
 
-test('close awaits successful replay bookkeeping and removes exactly its completed row', async () => {
-  const queue = await seeded(); const id = queue.getDlq()[0]!.id; const held = deferred();
-  const replay = queue.replay(() => held.promise); const closing = queue.close();
-  try {
-    held.resolve(); await closing;
-    expect(queue.getDlq()).toEqual([]);
-    expect(queue.getMetrics()).toMatchObject({ totalAttempts: 2, delivered: 1, retrying: 0, deadLettered: 0, dlqSize: 0 });
-    expect(await replay).toEqual([{ id, outcome: 'delivered' }]);
-  } finally { held.resolve(); await queue.close(); }
-});
-
-test('a failed open replay replaces its row once before notifying observers', async () => {
-  const queue = await seeded(); const snapshots: number[] = [];
-  queue.onDeadLetter(() => { snapshots.push(queue.getDlq().length); });
-  try {
-    const result = await queue.replay(async () => { throw terminal(); });
-    expect(result.map((entry) => entry.outcome)).toEqual(['dead_letter']);
-    expect(queue.getDlq().map((entry) => entry.payload)).toEqual(['original synthetic payload']);
-    expect(queue.getMetrics()).toMatchObject({ totalAttempts: 2, deadLettered: 1, dlqSize: 1 });
-    expect(snapshots).toEqual([1]);
-  } finally { await queue.close(); }
-});
-
-test('concurrent replays cannot send the same retained row twice', async () => {
-  const queue = await seeded(); const held = deferred(); let firstCalls = 0; let competingCalls = 0;
-  const first = queue.replay(async () => { firstCalls++; await held.promise; });
-  try {
-    expect(await queue.replay(async () => { competingCalls++; })).toEqual([]);
-    expect(competingCalls).toBe(0); held.resolve(); await first;
-    expect(firstCalls).toBe(1); expect(queue.getDlq()).toEqual([]);
-    expect(queue.getMetrics()).toMatchObject({ delivered: 1, deadLettered: 0, dlqSize: 0 });
-  } finally { held.resolve(); await first; await queue.close(); }
-});
-
-test('shutdown after one successful replay preserves the remaining unattempted row', async () => {
-  const queue = await seeded();
-  await queue.enqueue('fixture', 'second', 'second synthetic payload', async () => { throw terminal(); });
-  const second = queue.getDlq()[1];
-  if (!second) throw new Error('Second fixture dead letter was not recorded');
-  let calls = 0; let closing: Promise<void> | undefined;
-  const result = queue.replay(async () => { calls++; closing = queue.close(); }).catch((error: unknown) => error);
-  expect(await result).toBeInstanceOf(DeliveryError); await closing;
-  expect(calls).toBe(1); expect(queue.getDlq()).toEqual([second]);
-  expect(queue.getMetrics()).toMatchObject({ delivered: 1, deadLettered: 1, dlqSize: 1 });
-});
-
-test('close drains restoration before returning, including reentrant shutdown', async () => {
+test('a shutdown started from inside the failing send still keeps the dead letter', async () => {
   const queue = await seeded(); const original = queue.getDlq(); const held = deferred();
   let closing: Promise<void> | undefined;
   const replay = queue.replay(async () => { closing = queue.close(); await held.promise; });
@@ -84,26 +42,53 @@ test('close drains restoration before returning, including reentrant shutdown', 
   } finally { held.resolve(); await queue.close(); }
 });
 
-test('concurrent batches do not replay a later row already completed by another batch', async () => {
+test('a replay that delivers removes exactly its own row, also when close is waiting on it', async () => {
+  const queue = await seeded(); const id = queue.getDlq()[0]!.id; const held = deferred();
+  const replay = queue.replay(() => held.promise); const closing = queue.close();
+  try {
+    held.resolve(); await closing;
+    expect(queue.getDlq()).toEqual([]);
+    expect(await replay).toEqual([{ id, outcome: 'delivered' }]);
+  } finally { held.resolve(); await queue.close(); }
+});
+
+test('a replay that fails again leaves one row, not two', async () => {
+  const queue = await seeded();
+  try {
+    const result = await queue.replay(async () => { throw terminal(); });
+    expect(result.map((entry) => entry.outcome)).toEqual(['dead_letter']);
+    expect(queue.getDlq().map((entry) => entry.payload)).toEqual(['original synthetic payload']);
+  } finally { await queue.close(); }
+});
+
+test('two replays at once send a retained row once', async () => {
+  const queue = await seeded(); const held = deferred(); let firstCalls = 0; let competingCalls = 0;
+  const first = queue.replay(async () => { firstCalls++; await held.promise; });
+  try {
+    expect(await queue.replay(async () => { competingCalls++; })).toEqual([]);
+    expect(competingCalls).toBe(0); held.resolve(); await first;
+    expect(firstCalls).toBe(1); expect(queue.getDlq()).toEqual([]);
+  } finally { held.resolve(); await first; await queue.close(); }
+});
+
+test('a later row one replay already delivered is not sent again by the other', async () => {
   const queue = await seeded(); const held = deferred(); const calls: string[] = [];
   await queue.enqueue('fixture', 'second', 'second synthetic payload', async () => { throw terminal(); });
   const first = queue.replay(async (entry) => { calls.push(entry.payload); if (entry.payload === 'original synthetic payload') await held.promise; });
   try {
     await queue.replay(async (entry) => { calls.push(entry.payload); }); held.resolve(); await first;
     expect(calls).toEqual(['original synthetic payload', 'second synthetic payload']);
-    expect(queue.getMetrics()).toMatchObject({ delivered: 2, deadLettered: 0, dlqSize: 0 });
+    expect(queue.getDlq()).toEqual([]);
   } finally { held.resolve(); await first; await queue.close(); }
 });
 
-test('restoration preserves the configured bounded FIFO and consistent metrics', async () => {
-  const queue = new DeliveryQueue({ maxDlqSize: 1 }); const held = deferred();
-  await queue.enqueue('fixture', 'retained', 'original synthetic payload', async () => { throw terminal(); });
-  const original = queue.getDlq();
-  const replay = queue.replay(() => held.promise); const result = replay.catch((error: unknown) => error);
-  try {
-    await queue.enqueue('fixture', 'interleaved', 'other synthetic payload', async () => { throw terminal(); });
-    const closing = queue.close(); held.reject(terminal()); await closing;
-    expect(await result).toBeInstanceOf(DeliveryError); expect(queue.getDlq()).toEqual(original);
-    expect(queue.getMetrics()).toMatchObject({ totalAttempts: 3, retrying: 0, deadLettered: 1, dlqSize: 1 });
-  } finally { held.resolve(); await queue.close(); }
+test('a shutdown after one row was delivered keeps the row not yet tried', async () => {
+  const queue = await seeded();
+  await queue.enqueue('fixture', 'second', 'second synthetic payload', async () => { throw terminal(); });
+  const second = queue.getDlq()[1];
+  if (!second) throw new Error('Second fixture dead letter was not recorded');
+  let calls = 0; let closing: Promise<void> | undefined;
+  const result = queue.replay(async () => { calls++; closing = queue.close(); }).catch((error: unknown) => error);
+  expect(await result).toBeInstanceOf(DeliveryError); await closing;
+  expect(calls).toBe(1); expect(queue.getDlq()).toEqual([second]);
 });

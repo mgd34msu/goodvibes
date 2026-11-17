@@ -138,6 +138,8 @@ export type CreateBootstrapCommandContextOptions = {
   announceSessionRecoveryFailed?: (sessionId: string, reason: string) => void;
   surface?: import('@/runtime/index.ts').SessionSurface;
   hydrateSessionUsage?: () => void;
+  contractOperator?: import('@goodvibes-jev/engine/platform/platform/contract').ContractOperatorService;
+  workstreamDrafts?: import('@goodvibes-jev/engine/platform/platform/orchestration').WorkstreamDraftService;
 };
 
 export function createBootstrapCommandContext(options: CreateBootstrapCommandContextOptions): CommandContext {

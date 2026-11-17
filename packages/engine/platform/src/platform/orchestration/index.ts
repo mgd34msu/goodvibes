@@ -88,8 +88,8 @@ export {
 } from './scheduler.js';
 export type { DependencyStatus, PhaseClaim } from './scheduler.js';
 
-export { createWorkstreamServices } from './workstream-services.js';
-export type { WorkstreamCommandService, WorkstreamServices, WorkstreamServicesDeps } from './workstream-services.js';
+export { createWorkstreamDraftService, createWorkstreamServices } from './workstream-services.js';
+export type { WorkstreamCommandService, WorkstreamDraftService, WorkstreamDraftServiceDeps, WorkstreamServices, WorkstreamServicesDeps } from './workstream-services.js';
 export type { WorkstreamDraft, WorkstreamDraftProvenance } from './workstream-draft-types.js';
 export {
   editItemBrief,

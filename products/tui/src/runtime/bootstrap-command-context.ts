@@ -135,6 +135,7 @@ export type CreateBootstrapCommandContextOptions = {
   componentHealthMonitor: import('@/runtime/index.ts').ComponentHealthMonitor;
   hydrateSessionUsage?: () => void;
   contractOperator?: import('@goodvibes-jev/engine/platform/platform/contract').ContractOperatorService;
+  workstreamDrafts?: import('@goodvibes-jev/engine/platform/platform/orchestration').WorkstreamDraftService;
   codeIndexStore?: import('@goodvibes-jev/engine/platform/platform/state').CodeIndexStore;
   codeIndexReindexScheduler?: import('@goodvibes-jev/engine/platform/platform/state').CodeIndexReindexScheduler;
   isPassiveCodeInjectionFlagEnabled?: () => boolean;

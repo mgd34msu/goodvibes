@@ -1,3 +1,4 @@
+import { createWorkstreamDraftService } from '@goodvibes-jev/engine/platform/platform/orchestration';
 import { configuredSystemMessageTarget } from '@goodvibes-jev/engine/terminal-shell/system-message-router';
 import { projectBootstrapShellCommandOptions } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
 import { join } from 'node:path';
@@ -190,6 +191,17 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
       hydrateSessionUsage,
     }),
     requestPermission: (request) => permissionPromptRef.requestPermission(request),
+    contractOperator: services.contractOperator,
+    workstreamDrafts: createWorkstreamDraftService({
+      agentManager: services.agentManager,
+      configManager,
+      adaptivePlanner: services.adaptivePlanner,
+      projectRoot: services.workingDirectory,
+      contractRunner: services.contractRunner,
+      sessionId: () => runtime.sessionId,
+      remoteSupervisor: services.remoteSupervisor,
+      runtimeStore,
+    }),
     voiceSetup: services.voiceSetup,
     memoryGovernor: services.memoryGovernor,
     mediaProviderRegistry: services.mediaProviders,

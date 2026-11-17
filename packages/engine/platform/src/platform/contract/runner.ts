@@ -47,7 +47,7 @@ import type { DecompositionRunner } from '../core/plan-decomposition.js';
 import type { OrchestrationEngine } from '../orchestration/engine.js';
 import type { FleetCapacityFn } from '../orchestration/elastic-pool.js';
 import type { ContractPreSpawn, ContractUnitOutcome, ContractUnitSettlement } from '../orchestration/phase-runner.js';
-import { emptyWorkItemUsage, type PriceProvenanceFn, type WorkItem } from '../orchestration/types.js';
+import { emptyWorkItemUsage, type BudgetCeiling, type PriceProvenanceFn, type WorkItem } from '../orchestration/types.js';
 import { emitAgentCancelled, emitAgentCompleted, emitAgentFailed } from '../runtime/emitters/index.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import type { AgentManager, AgentRecord } from '../tools/agent/index.js';
@@ -81,6 +81,7 @@ import {
   CURRENT_CONTRACT_SCHEMA_VERSION,
   isOpaqueContractId,
   isTerminalContractStatus,
+  isTerminalUnitStatus,
   newContractId,
   type Contract,
   type ContractFailureKind,
@@ -208,6 +209,12 @@ async function boundedWait(work: Promise<void>, limitMs: number): Promise<void> 
   }
 }
 
+/** What `retryUnit` did: `restarted` (a fresh agent), `committed` (a failed commit recorded), or `refused` with the reason. */
+export interface UnitRetryOutcome {
+  readonly outcome: 'restarted' | 'committed' | 'refused';
+  readonly reason: string;
+}
+
 export interface ContractRunner {
   /** Source-less legacy entry points/records must not activate approval fallback in a native owner. */
   readonly nativeMode?: boolean;
@@ -265,6 +272,20 @@ export interface ContractRunner {
    * Optional for custom runners; the factory always supplies it.
    */
   remove?(contractId: string): ContractRemoval;
+  /**
+   * Runs one unit again: a working unit gets a fresh agent, and a passed unit
+   * whose commit failed has it recorded again. Refused, with the reason and
+   * what to do instead, for a unit that has not started, is being fixed, or
+   * ended with its contract. Optional for custom runners; the factory always supplies it.
+   */
+  retryUnit?(contractId: string, unitId: string): Promise<UnitRetryOutcome>;
+  /**
+   * Replaces a running contract's token and cost ceiling. Each running group's
+   * remaining allowance moves by the same amount, and units waiting on the old
+   * ceiling start. False when the contract is not running here. Optional for
+   * custom runners; the factory always supplies it.
+   */
+  raiseBudget?(contractId: string, ceiling: BudgetCeiling): boolean;
   /**
    * Resolves once the project work plan holds the contracts' latest statuses, or after a bounded wait. A host that
    * is about to exit awaits it after `dispose`, which cannot: `dispose` is synchronous. Optional for custom runners;
@@ -1667,6 +1688,46 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     remove: (contractId) => {
       if (runs.has(contractId) || settling.has(contractId) || settlements.has(contractId)) return 'not-ended';
       return deps.store.remove(contractId);
+    },
+    retryUnit: async (contractId, unitId) => {
+      const refused = (reason: string): UnitRetryOutcome => ({ outcome: 'refused', reason });
+      const run = runs.get(contractId);
+      if (run === undefined || run.terminal) return refused(`contract ${contractId} is not running here; an ended contract is run again by starting a new one with the request`);
+      const unit = run.unit(unitId);
+      if (unit === undefined) return refused(`contract ${contractId} has no unit ${unitId}; its units are ${run.contract.units.map((candidate) => candidate.id).join(', ') || 'not planned yet'}`);
+      if (run.contract.sessionMode === true) return refused(`unit ${unit.id} is worked by the session itself; continue in that session`);
+      if (unit.status === 'passed' || unit.status === 'held-merge') {
+        const itemId = unit.attemptUnits === undefined ? unit.id : unit.attemptSelection?.pickedId;
+        const commit = itemId === undefined || run.engine === null ? null : await run.engine.retryItemCommit(itemId);
+        if (commit === null) return refused(`unit ${unit.id} passed and its work is recorded; there is nothing to retry`);
+        if (commit.status === 'failed') return refused(`unit ${unit.id}'s commit failed again: ${commit.reason ?? 'no reason given'}; its changes are still in the working tree`);
+        return { outcome: 'committed', reason: commit.status === 'committed' ? `unit ${unit.id}'s changes were committed (${commit.hash ?? 'no hash'})` : `unit ${unit.id} had nothing left to commit` };
+      }
+      if (isTerminalUnitStatus(unit.status)) return refused(`unit ${unit.id} is ${unit.status}; the contract ended with it, so start a new contract for the remaining work`);
+      if (unit.status === 'pending' || unit.status === 'blocked') return refused(`unit ${unit.id} has not started yet (${unit.status}); it starts once what it waits on is done`);
+      if (unit.status === 'fixing') return refused(`a fix is being planned for unit ${unit.id}; retry it after the fix plan is in place`);
+      groups.requeueUnit(run, unit, 'run again at the owner\'s request', 'fresh-unit');
+      return { outcome: 'restarted', reason: `unit ${unit.id} starts again with a fresh agent` };
+    },
+    raiseBudget: (contractId, ceiling) => {
+      const run = runs.get(contractId);
+      if (run === undefined || run.terminal) return false;
+      const previous = run.contract.budget;
+      // Each running group was given what remained of the old ceiling; it gets the difference on top.
+      const moved = (now: number | undefined, before: number | undefined, next: number | undefined): number | undefined =>
+        next === undefined ? undefined : now === undefined || before === undefined ? next : Math.max(0, now + (next - before));
+      for (const workstream of run.engine?.listWorkstreams() ?? []) {
+        const maxTokens = moved(workstream.budget?.maxTokens, previous?.maxTokens, ceiling.maxTokens);
+        const maxCostUsd = moved(workstream.budget?.maxCostUsd, previous?.maxCostUsd, ceiling.maxCostUsd);
+        const next: BudgetCeiling | undefined = maxTokens === undefined && maxCostUsd === undefined ? undefined
+          : { ...(maxTokens === undefined ? {} : { maxTokens }), ...(maxCostUsd === undefined ? {} : { maxCostUsd }) };
+        run.engine!.updateBudget(workstream.id, next);
+      }
+      Object.assign(run.contract, { budget: { ...ceiling } });
+      run.decide('owner-replied', run.id, `budget set to ${[ceiling.maxCostUsd === undefined ? '' : `$${ceiling.maxCostUsd}`, ceiling.maxTokens === undefined ? '' : `${ceiling.maxTokens} tokens`].filter(Boolean).join(' and ') || 'no ceiling'} by the owner`);
+      if (run.contract.statusLine?.includes('its budget is used up') === true) run.contract.statusLine = undefined;
+      deps.store.put(run.contract);
+      return true;
     },
     cancel: (contractId, reason) => {
       const run = runs.get(contractId);

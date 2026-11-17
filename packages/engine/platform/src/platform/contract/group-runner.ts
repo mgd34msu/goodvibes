@@ -350,9 +350,12 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
         unitSpawned(run, event.itemId, event.agentId);
         return;
       case 'item-blocked-budget': {
-        // Nothing raises a contract's budget while it runs, so a unit blocked on it would wait forever.
+        // The contract waits for the owner: raising the budget (runner.raiseBudget,
+        // contracts.budget, /workstream budget) lets the unit start; cancelling ends it.
         const unit = unitOfItem(run, event.itemId);
-        deps.failContract(run, 'budget', `the contract's budget is used up (${event.reason}), so unit ${unit?.id ?? event.itemId} cannot start; the work done so far is kept`);
+        if (unit?.status === 'pending') run.moveUnit(unit, 'blocked');
+        run.contract.statusLine = `Contract ${run.id} is waiting: its budget is used up (${event.reason}), so unit ${unit?.id ?? event.itemId} cannot start. Raise the budget (/workstream budget ${run.id} <dollars>) or cancel the contract; the work done so far is kept.`;
+        run.decide('queued', unit?.id ?? run.id, `waiting for a budget raise: ${event.reason}`);
         return;
       }
       case 'item-blocked-dependency': {

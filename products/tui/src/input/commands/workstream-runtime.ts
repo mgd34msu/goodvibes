@@ -1,39 +1,20 @@
 import { routeNativeConversationInput } from '../../runtime/native-conversation-ingress.ts';
-import { isTerminalContractStatus, type ContractOperatorService, type ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
+import { renderContractStatus, runWorkstreamCommand, WORKSTREAM_SHARED_USAGE } from '@goodvibes-jev/engine/terminal-shell';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { directOwnerWorkstreamInput, type CommandContext, type CommandRegistry } from '../command-registry.ts';
 
-const USAGE = 'start <request> | list | status <id> | cancel <id> | reply <id> <escalation-id> <answer>';
+const USAGE = `start <request> | ${WORKSTREAM_SHARED_USAGE}`;
 
-/** IDs may be abbreviated only when they identify exactly one recorded contract. */
-function resolveContract(service: ContractOperatorService, reference: string, sessionId: string): ContractView | null {
-  const records = service.list({ sessionId, includeTerminal: true });
-  const exact = records.find(record => record.id === reference);
-  if (exact) return exact;
-  const matches = records.filter(record => record.id.startsWith(reference));
-  return matches.length === 1 ? matches[0]! : null;
-}
+export { renderContractStatus };
 
-export function renderContractStatus(contract: ContractView): string {
-  const lines = [`${contract.id}: ${contract.status}`, contract.ask];
-  if (contract.statusLine) lines.push(contract.statusLine);
-  if (contract.commit) lines.push(`Changes ${contract.commit.status}: ${contract.commit.note}`);
-  for (const group of contract.groups) lines.push(`Group ${group.id}: ${group.status}`);
-  for (const unit of contract.units) {
-    lines.push(`Unit ${unit.id}: ${unit.status}`);
-    for (const criterion of unit.criteria) lines.push(`  ${criterion.id}: ${criterion.text}`);
-  }
-  for (const escalation of contract.escalations) {
-    if (escalation.resolvedAt === undefined) lines.push(`Owner question ${escalation.id}: ${escalation.question}`);
-  }
-  return lines.join('\n');
-}
-
-/** New starts use native intake; historical contract controls retain their recorded IDs. */
+/**
+ * `start` uses native intake; every other verb (contracts, unit retry, budget,
+ * and the plan-review flow over drafts) is the shared terminal-shell command.
+ */
 export function registerWorkstreamRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'workstream',
-    description: 'Start, inspect, stop, or answer a workstream',
+    description: 'Start, plan, inspect, stop, retry, re-budget or answer a workstream',
     usage: USAGE,
     argsHint: USAGE,
     handler: async (args, ctx: CommandContext) => {
@@ -50,41 +31,14 @@ export function registerWorkstreamRuntimeCommands(registry: CommandRegistry): vo
         ctx.renderRequest();
         return;
       }
-      const service = ctx.session.contractOperator;
-      if (!service) { ctx.print('Workstreams are not available in this session.'); return; }
-      const sessionId = ctx.session.runtime.sessionId;
       try {
-        if (action === 'list') {
-          const records = service.list({ sessionId, includeTerminal: true });
-          ctx.print(records.length ? records.map(record => `${record.id}: ${record.status} — ${record.ask}`).join('\n') : 'No workstreams in this session.');
-          return;
-        }
-        if (action !== 'status' && action !== 'cancel' && action !== 'reply') {
-          ctx.print(`Usage: /workstream ${USAGE}`);
-          return;
-        }
-        const reference = args[1];
-        const contract = reference ? resolveContract(service, reference, sessionId) : null;
-        if (!contract) { ctx.print('Choose one exact or unambiguous workstream ID from /workstream list.'); return; }
-        if (action === 'status') { ctx.print(renderContractStatus(contract)); return; }
-        if (action === 'cancel') {
-          const stopped = service.cancel(contract.id, 'Stopped by the user from /workstream');
-          ctx.print(stopped ? `Stopped workstream ${contract.id}.` : `Workstream ${contract.id} has already ended.`);
-        } else {
-          const escalationId = args[2];
-          const answer = args.slice(3).join(' ').trim();
-          if (!escalationId || !answer) { ctx.print('Usage: /workstream reply <id> <escalation-id> <answer>'); return; }
-          const asked = contract.escalations.find(entry => entry.id === escalationId && entry.resolvedAt === undefined);
-          if (isTerminalContractStatus(contract.status) || asked === undefined) {
-            ctx.print('That owner question is no longer open. Inspect /workstream status before answering.');
-            return;
-          }
-          const reply = await service.reply(contract.id, escalationId, answer);
-          // A failed-turn question is answered retry or cancel; "amended" would say the requirement changed.
-          ctx.print(`Owner reply: ${asked.failurePause === true ? (reply.action === 'stopped' ? 'cancelled' : 'retrying') : reply.action}.`);
-          const current = service.get(contract.id);
-          if (current) ctx.print(renderContractStatus(current));
-        }
+        const handled = await runWorkstreamCommand(action, args.slice(1), {
+          print: (text) => ctx.print(text),
+          sessionId: ctx.session.runtime.sessionId,
+          contracts: ctx.session.contractOperator,
+          drafts: ctx.session.workstreamDrafts,
+        });
+        if (!handled) ctx.print(`Usage: /workstream ${USAGE}`);
         ctx.renderRequest();
       } catch (error) {
         ctx.print(`Workstream action failed: ${summarizeError(error)}`);

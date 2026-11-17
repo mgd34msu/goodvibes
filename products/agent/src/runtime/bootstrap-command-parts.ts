@@ -137,6 +137,8 @@ export interface BootstrapCommandSectionOptions {
   readonly announceSessionRecoveryFailed?: (sessionId: string, reason: string) => void;
   readonly surface?: import('@/runtime/index.ts').SessionSurface;
   readonly hydrateSessionUsage?: () => void;
+  readonly contractOperator?: import('@goodvibes-jev/engine/platform/platform/contract').ContractOperatorService;
+  readonly workstreamDrafts?: import('@goodvibes-jev/engine/platform/platform/orchestration').WorkstreamDraftService;
   readonly agentManager?: ShellAgentManagerService;
   readonly modeManager?: ShellModeManagerService;
   readonly automationManager?: ShellAutomationManagerRuntimeService;
@@ -242,10 +244,14 @@ export function createBootstrapCommandSessionSection(
     | 'announceSessionRecoveryFailed'
     | 'surface'
     | 'hydrateSessionUsage'
+    | 'contractOperator'
+    | 'workstreamDrafts'
   >,
 ): BootstrapCommandSessionSection {
   return {
     ...projectCommandSessionSection(options),
+    contractOperator: options.contractOperator,
+    workstreamDrafts: options.workstreamDrafts,
     writeLastSessionPointer: options.writeLastSessionPointer,
     announceSessionResumed: options.announceSessionResumed,
     announceSessionRecoveryFailed: options.announceSessionRecoveryFailed,

@@ -439,6 +439,18 @@ export const CONTRACTS_CANCEL_OUTPUT_SCHEMA = objectSchema({ cancelled: BOOLEAN_
 export const CONTRACTS_REMOVE_INPUT_SCHEMA = objectSchema({ contractId: STRING_SCHEMA }, ['contractId']);
 export const CONTRACTS_REMOVE_OUTPUT_SCHEMA = objectSchema({ removed: BOOLEAN_SCHEMA }, ['removed']);
 
+export const CONTRACTS_RETRY_UNIT_INPUT_SCHEMA = objectSchema({ contractId: STRING_SCHEMA, unitId: STRING_SCHEMA }, ['contractId', 'unitId']);
+/** UnitRetryOutcome (contract/runner.ts). */
+export const CONTRACTS_RETRY_UNIT_OUTPUT_SCHEMA = objectSchema({
+  outcome: enumSchema(['restarted', 'committed', 'refused']),
+  reason: STRING_SCHEMA,
+}, ['outcome', 'reason']);
+
+export const CONTRACTS_BUDGET_INPUT_SCHEMA = objectSchema({ contractId: STRING_SCHEMA, maxCostUsd: NUMBER_SCHEMA, maxTokens: NUMBER_SCHEMA }, ['contractId']);
+export const CONTRACTS_BUDGET_OUTPUT_SCHEMA = objectSchema({
+  budget: objectSchema({ maxTokens: NUMBER_SCHEMA, maxCostUsd: NUMBER_SCHEMA }, []),
+}, ['budget']);
+
 export const CONTRACTS_REPLY_INPUT_SCHEMA = objectSchema({
   contractId: STRING_SCHEMA,
   escalationId: STRING_SCHEMA,

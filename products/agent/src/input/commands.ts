@@ -1,5 +1,6 @@
 import { registerTriggerCommands } from './commands/trigger-supervisor.ts';
 import { registerWorkPlanRuntimeCommands } from './commands/workplan-runtime.ts';
+import { registerWorkstreamRuntimeCommands } from './commands/workstream-runtime.ts';
 import type { CommandRegistry } from './command-registry.ts';
 import type { CommandContext } from './command-registry.ts';
 import { sessionCommand } from './commands/session.ts';
@@ -74,6 +75,7 @@ export function registerBuiltinCommands(registry: CommandRegistry): void {
   registerTriggerCommands(registry);
   registerAgentWorkspaceRuntimeCommands(registry);
   registerWorkPlanRuntimeCommands(registry);
+  registerWorkstreamRuntimeCommands(registry);
   registerLegacyWorkLedgerImportCommands(registry);
   registerBriefRuntimeCommands(registry);
   registerSupportBundleRuntimeCommands(registry);

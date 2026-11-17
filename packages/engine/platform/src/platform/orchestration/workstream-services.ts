@@ -107,7 +107,7 @@ export interface WorkstreamCommandService {
   moveItem(id: string, itemRef: string, toPosition: number): WorkstreamDraft | { error: string } | undefined;
   approveDraft(id: string): WorkstreamDraft | undefined;
   removeDraft(id: string): boolean;
-  /** Start an approved draft's contract (a multi-item draft through runner.startFromPlan, a single-item draft through runner.start), then drop the draft. Returns the contract's id and its owner agent's id; null when the draft is missing or not approved. */
+  /** Start an approved draft's contract (a multi-item draft, or one item with attempts or files, through runner.startFromPlan; any other single-item draft through runner.start), then drop the draft. Returns the contract's id and its owner agent's id; null when the draft is missing or not approved. */
   launchDraft(id: string): Promise<{ contractId: string; ownerAgentId: string } | null>;
 }
 
@@ -115,6 +115,18 @@ export interface WorkstreamServices {
   readonly orchestrationEngine: OrchestrationEngine;
   readonly workstreamCommands: WorkstreamCommandService;
 }
+
+/**
+ * The draft half of the facade on its own: propose, show, edit, approve and
+ * launch, with no orchestration engine of its own (a launched draft is a
+ * contract on the caller's runner). What the terminal apps' `/workstream`
+ * command drives.
+ */
+export type WorkstreamDraftService = Omit<WorkstreamCommandService, 'engine'>;
+
+export type WorkstreamDraftServiceDeps = Omit<WorkstreamServicesDeps, 'runtimeBus' | 'agentManager'> & {
+  readonly agentManager: Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel'>;
+};
 
 /** The decision site the task's risk reading is logged under. */
 const TASK_RISK_SITE = 'orchestration.workstream.task-risk';
@@ -253,8 +265,7 @@ function draftedPlanFromSpec(goal: string, spec: CreateWorkstreamInput): Drafted
   };
 }
 
-function createWorkstreamCommandService(
-  engine: OrchestrationEngine,
+function createDraftFacade(
   adaptivePlanner: AdaptivePlanner,
   configManager: Pick<ConfigManager, 'get' | 'getCategory'>,
   agentManager: Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel'>,
@@ -262,7 +273,7 @@ function createWorkstreamCommandService(
   contractRunner: Pick<ContractRunner, 'start' | 'startFromPlan'>,
   sessionId: string | (() => string),
   plannerSources: PlannerInputSources,
-): WorkstreamCommandService {
+): WorkstreamDraftService {
   const drafts = new Map<string, WorkstreamDraft>();
   const launching = new Map<string, Promise<{ contractId: string; ownerAgentId: string } | null>>();
 
@@ -402,18 +413,15 @@ function createWorkstreamCommandService(
       ...(spec.isolation !== undefined ? { isolation: spec.isolation } : {}),
       ...(spec.budget !== undefined ? { budget: spec.budget } : {}),
     };
-    if (spec.items.length > 1) {
-      return contractRunner.startFromPlan({ ...launch, ask: draft.task, draft: draftedPlanFromSpec(draft.task, spec) }, options);
-    }
     const only = spec.items[0];
-    if (only !== undefined && ((only.attempts ?? 1) > 1 || (only.files?.length ?? 0) > 0)) {
-      logger.warn('A single-item workstream draft launches as a plain ask; its best-of-N attempts and file list are not carried', { draftId: draft.id });
+    // A single item that names attempts or files is a drafted plan of one unit, so both are carried.
+    if (spec.items.length > 1 || (only !== undefined && ((only.attempts ?? 1) > 1 || (only.files?.length ?? 0) > 0))) {
+      return contractRunner.startFromPlan({ ...launch, ask: draft.task, draft: draftedPlanFromSpec(draft.task, spec) }, options);
     }
     return contractRunner.start({ ...launch, ask: only?.task ?? draft.task }, options);
   }
 
   return {
-    engine,
     async proposeDraft(task: string, isolation?: WorkstreamIsolation): Promise<WorkstreamDraft> {
       const result = await decompose(task);
       const spec = buildSpec(task, result.proposal);
@@ -531,8 +539,13 @@ export function createWorkstreamServices(deps: WorkstreamServicesDeps): Workstre
   // restart. Never throws, persistence.ts guards every read/parse and
   // quarantines an unrecognized snapshot rather than propagating.
   orchestrationEngine.resumeAllFromDisk();
-  const workstreamCommands = createWorkstreamCommandService(
-    orchestrationEngine,
+  const workstreamCommands: WorkstreamCommandService = { engine: orchestrationEngine, ...createWorkstreamDraftService(deps) };
+  return { orchestrationEngine, workstreamCommands };
+}
+
+/** The draft facade alone (see {@link WorkstreamDraftService}); drafts persist under the project's `.goodvibes/orchestration/drafts/`. */
+export function createWorkstreamDraftService(deps: WorkstreamDraftServiceDeps): WorkstreamDraftService {
+  return createDraftFacade(
     deps.adaptivePlanner,
     deps.configManager,
     deps.agentManager,
@@ -541,5 +554,4 @@ export function createWorkstreamServices(deps: WorkstreamServicesDeps): Workstre
     deps.sessionId,
     { remoteSupervisor: deps.remoteSupervisor, runtimeStore: deps.runtimeStore },
   );
-  return { orchestrationEngine, workstreamCommands };
 }

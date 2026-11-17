@@ -797,6 +797,13 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     item.blockedReason = undefined;
     item.visits.clear();
     attempts.onItemReopened(item);
+    // Dependents skipped because this blocker hard-failed wait on it again; the
+    // next tick's orphan pass marks any still blocked by another failed item.
+    for (const dependent of workstream.items) {
+      if (!dependent.orphaned) continue;
+      dependent.orphaned = undefined;
+      if (dependent.blockedReason?.startsWith('orphaned:')) dependent.blockedReason = undefined;
+    }
     emit({ type: 'item-retried', workstreamId: workstream.id, itemId, reason: 'reset to re-run after failure' });
     tick(workstream.id);
     return true;

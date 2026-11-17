@@ -223,7 +223,7 @@ as well.
 The daemon's operator methods `contracts.list`, `contracts.get`,
 `contracts.start`, `contracts.cancel` and `contracts.reply` (REST
 `/api/contracts...`) and `contracts.summaries`, `contracts.status`,
-`contracts.dispatch` and `contracts.remove` (invoke) act through one service across the daemon's runner and each hosted floor's
+`contracts.dispatch`, `contracts.remove`, `contracts.retryUnit` and `contracts.budget` (invoke) act through one service across the daemon's runner and each hosted floor's
 runner. All of them apply one session-ownership rule: a caller sees and acts
 on a contract only when its session is not owned by another principal; a
 contract of another principal's session reads as `CONTRACT_NOT_FOUND`
@@ -231,6 +231,11 @@ contract of another principal's session reads as `CONTRACT_NOT_FOUND`
 `SESSION_NOT_OWNED` (403). `contracts.remove` deletes an ended contract's
 record (`CONTRACT_NOT_ENDED`, 409, while it runs; `CONTRACT_NATIVE`, 409, for
 native work, whose record its native execution keeps).
+`contracts.retryUnit` runs one unit of a running contract again: a working
+unit gets a fresh agent, a passed unit whose commit failed has its changes
+committed again, and anything else is refused with the reason. A contract whose
+budget is used up waits rather than failing (its status line says so);
+`contracts.budget` sets a new ceiling and the waiting unit starts.
 `contracts.dispatch` starts the work in a hosted session made for it, so its
 questions arrive as that session's replies, and ends the session when the
 contract settles; a daemon that hosts no sessions refuses it with

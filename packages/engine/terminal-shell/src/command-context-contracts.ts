@@ -84,6 +84,10 @@ export interface TerminalCommandSessionServices {
   readonly sessionLineageTracker?: import('@goodvibes-jev/engine/platform/platform/core').SessionLineageTracker;
   readonly changeTracker?: import('@goodvibes-jev/engine/platform/platform/sessions').SessionChangeTracker;
   readonly hydrateSessionUsage?: () => void;
+  /** The contract operator `/workstream` lists, inspects, stops, answers, retries and re-budgets contracts through. */
+  readonly contractOperator?: import('@goodvibes-jev/engine/platform/platform/contract').ContractOperatorService;
+  /** Workstream drafts: propose a plan, review and edit it, approve and launch it as a contract (`/workstream propose`). */
+  readonly workstreamDrafts?: import('@goodvibes-jev/engine/platform/platform/orchestration').WorkstreamDraftService;
 }
 
 export interface TerminalCommandProviderServices {

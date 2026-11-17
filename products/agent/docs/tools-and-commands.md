@@ -26,6 +26,7 @@ High-signal TUI routes:
 | --- | --- |
 | `/agent` | Open the fullscreen operator workspace. |
 | `/work [daemon-project-id]` | Inspect native work, intent, attention, evidence and history on the authenticated connected host; read only. |
+| `/workstream` | Plan work as a draft (`propose <goal>`), review and edit it (`show`, `edit`, `drop`, `move`, `retask`), then `approve` and `launch` it as a contract; `list`, `status`, `cancel` or `reply` to running workstreams, `retry <id> <unit>` to give one unit a fresh agent, and `budget <id> <dollars>` to let a workstream waiting on its budget continue. |
 | `/help` and `/commands` | Discover registered slash commands. |
 | `/health`, `/compat`, `/auth` | Inspect runtime, connected-host, compatibility, and auth posture. |
 | `/model`, `/provider`, `/effort` | Inspect or change provider/model/reasoning routes. |

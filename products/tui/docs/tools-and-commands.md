@@ -276,7 +276,7 @@ Representative slash-command families, with a one-line summary of each:
 | `/search` | Provider-backed web search with ranked results and source labels |
 | `/imagine` | Generate an image from a prompt through a configured provider that makes images, or collect a job still running |
 | `/codebase` | Build, inspect, and search the repo source-tree code index |
-| `/workstream` | Author and oversee multi-phase agent workstreams (orchestration engine) |
+| `/workstream` | Start work, or propose a plan, review and edit it, then approve and launch it; inspect, stop, retry a unit, raise the budget, or answer a running workstream |
 | `/checkpoint` | Create a manual workspace checkpoint for forensic retention |
 | `/editor` | Edit the current composer draft in your `$EDITOR`, then resume with the result |
 

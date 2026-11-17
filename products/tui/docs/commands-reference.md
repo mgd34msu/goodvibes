@@ -615,7 +615,7 @@ GoodVibes ships **163** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/workstream` | None | `start <request> \| list \| status <id> \| cancel <id> \| reply <id> <escalation-id> <answer>` | Start, inspect, stop, or answer a workstream |
+| `/workstream` | None | `start <request> \| list \| status <id> \| cancel <id> \| reply <id> <question-id> <answer> \| retry <id> <unit> \| budget <id> <dollars> \| propose <goal> \| drafts \| show <draft> \| retask <draft> <goal> \| edit <draft> <item> <brief> \| drop <draft> <item> \| move <draft> <item> <position> \| approve <draft> \| launch <draft> \| discard <draft>` | Start, plan, inspect, stop, retry, re-budget or answer a workstream. `propose` plans the goal as a draft that runs nothing until you approve and launch it; `retry` gives one unit a fresh agent (or commits a passed unit's changes again); `budget` raises a running contract's cost ceiling so a unit waiting on it starts |
 
 ## Worktrees
 

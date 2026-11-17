@@ -201,6 +201,46 @@ export function createContractsRemoveHandler(service: ContractOperatorService): 
   };
 }
 
+export function createContractsRetryUnitHandler(service: ContractOperatorService): GatewayMethodHandler {
+  return async (invocation) => {
+    const params = readInvocationParams(invocation);
+    const contractId = requireString(params, 'contractId');
+    const unitId = requireString(params, 'unitId');
+    try {
+      return await service.retryUnit(contractId, unitId, callerOf(invocation));
+    } catch (error) {
+      return toGatewayVerbError(error);
+    }
+  };
+}
+
+/** A non-negative number, or undefined when absent. */
+function optionalAmount(params: Record<string, unknown>, field: string): number | undefined {
+  const value = params[field];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new GatewayVerbError(`Invalid ${field}: expected a number of 0 or more`, 'INVALID_ARGUMENT', 400, field);
+  }
+  return value;
+}
+
+export function createContractsBudgetHandler(service: ContractOperatorService): GatewayMethodHandler {
+  return (invocation) => {
+    const params = readInvocationParams(invocation);
+    const contractId = requireString(params, 'contractId');
+    const maxCostUsd = optionalAmount(params, 'maxCostUsd');
+    const maxTokens = optionalAmount(params, 'maxTokens');
+    try {
+      return service.raiseBudget(contractId, {
+        ...(maxCostUsd === undefined ? {} : { maxCostUsd }),
+        ...(maxTokens === undefined ? {} : { maxTokens }),
+      }, callerOf(invocation));
+    } catch (error) {
+      return toGatewayVerbError(error);
+    }
+  };
+}
+
 /** Every method this module owns. */
 export const CONTRACT_METHOD_IDS: readonly string[] = [
   'contracts.list',
@@ -212,6 +252,8 @@ export const CONTRACT_METHOD_IDS: readonly string[] = [
   'contracts.cancel',
   'contracts.reply',
   'contracts.remove',
+  'contracts.retryUnit',
+  'contracts.budget',
 ];
 
 /**
@@ -232,4 +274,6 @@ export function registerContractGatewayMethods(catalog: GatewayMethodCatalog, se
   attach('contracts.cancel', createContractsCancelHandler(service));
   attach('contracts.reply', createContractsReplyHandler(service));
   attach('contracts.remove', createContractsRemoveHandler(service));
+  attach('contracts.retryUnit', createContractsRetryUnitHandler(service));
+  attach('contracts.budget', createContractsBudgetHandler(service));
 }

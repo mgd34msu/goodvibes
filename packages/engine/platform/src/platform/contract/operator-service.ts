@@ -23,14 +23,15 @@ import { realpathSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { OwnerReplyRefusedError, type OwnerReplyOutcome } from './escalation.js';
 import type { ContractExternalWorkAdapter } from './external.js';
-import type { ContractRunner } from './runner.js';
+import type { ContractRunner, UnitRetryOutcome } from './runner.js';
+import type { BudgetCeiling } from '../orchestration/types.js';
 import { isTerminalContractStatus, type ContractOrigin, type ContractView, type NativeContractSource, type StartContractInput } from './types.js';
 
 /** The session a contract started over the operator surface without a session belongs to. */
 export const OPERATOR_SESSION_ID = 'operator';
 
 /** The runner surface the service reads and acts through. */
-export type OperatorContractRunner = Pick<ContractRunner, 'start' | 'startIdempotent' | 'get' | 'list' | 'cancel' | 'reply' | 'remove'>;
+export type OperatorContractRunner = Pick<ContractRunner, 'start' | 'startIdempotent' | 'get' | 'list' | 'cancel' | 'reply' | 'remove' | 'retryUnit' | 'raiseBudget'>;
 
 /** A live hosted session's floor runner and the workspace its turns work in. */
 export interface HostedSessionContracts {
@@ -134,6 +135,14 @@ export interface ContractOperatorService {
    * and for native work (CONTRACT_NATIVE), whose record its native execution owns.
    */
   remove(contractId: string, caller?: OperatorCaller): { readonly removed: true };
+  /**
+   * Runs one unit of a running contract again (a fresh agent, or a passed
+   * unit's failed commit recorded again). A refusal is an outcome with the
+   * reason, not an error; an ended or unknown contract is an error.
+   */
+  retryUnit(contractId: string, unitId: string, caller?: OperatorCaller): Promise<UnitRetryOutcome>;
+  /** Replaces a running contract's budget ceiling; units waiting on the old one start. */
+  raiseBudget(contractId: string, ceiling: BudgetCeiling, caller?: OperatorCaller): { readonly budget: BudgetCeiling };
   /**
    * Joins the hosted-session runners in, or takes them out with null. The
    * hosted-session engine is composed after the runtime services that build
@@ -505,6 +514,26 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
       if (outcome === 'not-found') throw new ContractOperatorError(`No contract ${contractId} on this daemon.`, 'CONTRACT_NOT_FOUND', 404);
       if (outcome === 'native') throw new ContractOperatorError(`Contract ${contractId} is native work: its record belongs to the native work execution and is kept with it.`, 'CONTRACT_NATIVE', 409);
       throw new ContractOperatorError(`Contract ${contractId} is ${contract.status} and has not ended; cancel it first, then remove it once it has stopped.`, 'CONTRACT_NOT_ENDED', 409);
+    },
+    async retryUnit(contractId, unitId, caller) {
+      const { runner, contract } = holder(contractId, caller);
+      if (runner === nativeRunner) throw new ContractOperatorError(`Contract ${contractId} is native work: its units are run by the native work execution.`, 'CONTRACT_NATIVE', 409);
+      if (isTerminalContractStatus(contract.status)) throw new ContractOperatorError(`Contract ${contractId} has ended (${contract.status}); start a new contract for the remaining work.`, 'CONTRACT_ENDED', 409);
+      const retry = (runner as OperatorContractRunner).retryUnit;
+      if (retry === undefined) throw new ContractOperatorError(`The runner holding contract ${contractId} cannot run a unit again.`, 'CONTRACT_NOT_RUNNING', 409);
+      return retry.call(runner, contractId, unitId);
+    },
+    raiseBudget(contractId, ceiling, caller) {
+      const valid = (value: number | undefined): boolean => value === undefined || (Number.isFinite(value) && value >= 0);
+      if ((ceiling.maxCostUsd === undefined && ceiling.maxTokens === undefined) || !valid(ceiling.maxCostUsd) || !valid(ceiling.maxTokens)) {
+        throw new ContractOperatorError('Give maxCostUsd, maxTokens or both, each a number of 0 or more.', 'INVALID_ARGUMENT', 400, 'maxCostUsd');
+      }
+      const { runner, contract } = holder(contractId, caller);
+      if (runner === nativeRunner) throw new ContractOperatorError(`Contract ${contractId} is native work: its budget belongs to the native work execution.`, 'CONTRACT_NATIVE', 409);
+      if (isTerminalContractStatus(contract.status)) throw new ContractOperatorError(`Contract ${contractId} has ended (${contract.status}); its budget can no longer change.`, 'CONTRACT_ENDED', 409);
+      const raise = (runner as OperatorContractRunner).raiseBudget;
+      if (raise === undefined || !raise.call(runner, contractId, ceiling)) throw notRunning(contractId, contract.status);
+      return { budget: { ...ceiling } };
     },
     attachHosted(hosted) {
       hostedRunners = hosted;

@@ -137,6 +137,7 @@ export interface BootstrapCommandSectionOptions {
   readonly changeTracker?: import('@goodvibes-jev/engine/platform/platform/sessions').SessionChangeTracker;
   readonly hydrateSessionUsage?: () => void;
   readonly contractOperator?: import('@goodvibes-jev/engine/platform/platform/contract').ContractOperatorService;
+  readonly workstreamDrafts?: import('@goodvibes-jev/engine/platform/platform/orchestration').WorkstreamDraftService;
   readonly codeIndexStore?: CodeIndexStore;
   readonly codeIndexReindexScheduler?: import('@goodvibes-jev/engine/platform/platform/state').CodeIndexReindexScheduler;
   readonly isPassiveCodeInjectionFlagEnabled?: () => boolean;
@@ -246,6 +247,7 @@ export function createBootstrapCommandSessionSection(
     | 'changeTracker'
     | 'hydrateSessionUsage'
     | 'contractOperator'
+    | 'workstreamDrafts'
     | 'codeIndexStore'
     | 'codeIndexReindexScheduler'
     | 'isPassiveCodeInjectionFlagEnabled'
@@ -256,6 +258,7 @@ export function createBootstrapCommandSessionSection(
     ...projectCommandSessionSection(options),
     contractRunner: options.contractRunner,
     contractOperator: options.contractOperator,
+    workstreamDrafts: options.workstreamDrafts,
     codeIndexStore: options.codeIndexStore,
     codeIndexReindexScheduler: options.codeIndexReindexScheduler,
     isPassiveCodeInjectionFlagEnabled: options.isPassiveCodeInjectionFlagEnabled,

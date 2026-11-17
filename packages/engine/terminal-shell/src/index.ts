@@ -325,3 +325,11 @@ export {
   treeTextCol,
   writeTreeStatusMarker,
 } from './conversation-tree.js';
+export {
+  WORKSTREAM_SHARED_USAGE,
+  renderContractStatus,
+  renderWorkstreamDraft,
+  resolveWorkstreamContract,
+  runWorkstreamCommand,
+  type WorkstreamCommandDeps,
+} from './workstream-command.js';

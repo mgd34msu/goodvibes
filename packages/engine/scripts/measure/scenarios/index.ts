@@ -33,6 +33,8 @@ export const SCENARIOS: readonly ScenarioEntry[] = [
   { name: 'find-content-repeat', load: find, budgeted: ['readdirs', 'stats'] },
   { name: 'find-content-repeat-ripgrep', load: find, budgeted: ['readdirs', 'stats'] },
   { name: 'find-content-after-edit', load: find, budgeted: ['readdirs', 'stats'] },
+  { name: 'find-files-first', load: find, budgeted: ['readdirs', 'stats'] },
+  { name: 'find-files-repeat', load: find, budgeted: ['readdirs', 'stats'] },
   { name: 'session-heartbeat', load: stores },
   { name: 'session-append-message', load: stores },
   { name: 'knowledge-list-200', load: stores },

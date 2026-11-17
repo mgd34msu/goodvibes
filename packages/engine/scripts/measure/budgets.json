@@ -1,8 +1,8 @@
 {
   "about": "Speed budgets checked by `bun run measure:check` (packages/engine/scripts/measure/run.ts --check). Counts may not grow; bytes written may grow 10%; wall time is compared only as a ratio inside one run. To change a budget on purpose, run `bun run measure -- --write-budgets packages/engine/scripts/measure/budgets.json` (add --only <names> to rewrite only those scenarios) and commit the diff with the reason.",
   "recorded": {
-    "commit": "8bf8d8d82",
-    "measuredAt": "2026-11-17T19:27:57.671Z",
+    "commit": "94890c59f",
+    "measuredAt": "2026-11-17T19:42:41.005Z",
     "bun": "1.3.14"
   },
   "scenarios": {
@@ -106,7 +106,7 @@
         "fsyncs": 0,
         "sqliteStatements": 0,
         "readdirs": 1,
-        "stats": 3942
+        "stats": 3923
       },
       "bytes": {
         "bytesWritten": 0
@@ -121,7 +121,7 @@
         "fsyncs": 0,
         "sqliteStatements": 0,
         "readdirs": 151,
-        "stats": 6162
+        "stats": 3913
       },
       "bytes": {
         "bytesWritten": 0
@@ -152,6 +152,36 @@
         "sqliteStatements": 0,
         "readdirs": 0,
         "stats": 323
+      },
+      "bytes": {
+        "bytesWritten": 0
+      }
+    },
+    "find-files-first": {
+      "counts": {
+        "decisionRequests": 0,
+        "providerRequests": 0,
+        "fileReads": 0,
+        "fileWrites": 0,
+        "fsyncs": 0,
+        "sqliteStatements": 0,
+        "readdirs": 151,
+        "stats": 315
+      },
+      "bytes": {
+        "bytesWritten": 0
+      }
+    },
+    "find-files-repeat": {
+      "counts": {
+        "decisionRequests": 0,
+        "providerRequests": 0,
+        "fileReads": 0,
+        "fileWrites": 0,
+        "fsyncs": 0,
+        "sqliteStatements": 0,
+        "readdirs": 0,
+        "stats": 313
       },
       "bytes": {
         "bytesWritten": 0

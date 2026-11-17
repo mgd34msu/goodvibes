@@ -2,7 +2,7 @@ import type { Tool, ToolExecuteOptions, ToolResult } from '../../types/tools.js'
 import { runResolvedCommand, type ValidatorRunner } from '../shared/validators.js';
 import { capturedReplScript } from './captured-script.js';
 import { resolveEvalTimeoutMs } from './captured.js';
-import { REPL_TOOL_SCHEMA, type ReplToolInput } from './schema.js';
+import { REPL_HISTORY_PAGE, REPL_TOOL_SCHEMA, type ReplToolInput } from './schema.js';
 
 /**
  * The `repl` tool of an ordinary session. It is registered only where the
@@ -55,8 +55,8 @@ export function createReplTool(runner: ValidatorRunner, options: ReplToolOptions
       const input = args as unknown as ReplToolInput;
 
       if (input.mode === 'history') {
-        const offset = input.offset ?? 0;
-        const limit = input.limit ?? history.length;
+        const limit = input.limit ?? REPL_HISTORY_PAGE;
+        const offset = input.offset ?? Math.max(0, history.length - limit);
         const page = history.slice(offset, offset + limit);
         return { success: true, output: JSON.stringify({
           count: history.length,

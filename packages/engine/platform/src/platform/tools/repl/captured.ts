@@ -16,7 +16,7 @@ import type { Tool, ToolResult } from '../../types/tools.js';
 import { guardExecCommand } from '../exec/ast-guard.js';
 import { probeCapturedExecAvailability, runCapturedCommand, type CapturedExecAuthority } from '../exec/captured-exec.js';
 import { createCapturedExecBunRuntimeAdmission } from '../exec/captured-bun-runtime-input.js';
-import { REPL_TOOL_SCHEMA } from './schema.js';
+import { REPL_HISTORY_PAGE, REPL_TOOL_SCHEMA } from './schema.js';
 import { capturedReplScript } from './captured-script.js';
 
 const tools = new WeakMap<Tool, ContractInputAuthority>();
@@ -155,7 +155,8 @@ export function createCapturedReplTool(
               history.entries.splice(index, 1);
             }
           }
-          const offset = args.offset ?? 0, limit = args.limit ?? history.entries.length;
+          const limit = args.limit ?? REPL_HISTORY_PAGE;
+          const offset = args.offset ?? (typeof limit === 'number' ? Math.max(0, history.entries.length - limit) : 0);
           if (typeof offset !== 'number' || !Number.isSafeInteger(offset) || offset < 0 || typeof limit !== 'number' || !Number.isSafeInteger(limit) || limit < 0) return { success: false, error: 'History offset and limit must be nonnegative integers.' };
           const entries = history.entries.slice(offset, offset + limit);
           const previousChecks = new Set(entries.map(entry => entry.check));

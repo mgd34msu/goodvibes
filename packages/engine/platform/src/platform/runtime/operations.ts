@@ -116,6 +116,7 @@ export type {
   DistributedRuntimeSnapshotStore,
 } from './remote/index.js';
 export * from './crash-capture.js';
+export { publishDaemonRuntimeRecord, type PublishedDaemonRuntimeRecord } from './detached-daemon-runtime.js';
 export * from './session-maintenance.js';
 export * from './session-persistence.js';
 export * from './session-surface.js';

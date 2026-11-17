@@ -38,12 +38,19 @@ interface LearningCurationDocument {
   pairs: Record<string, Verdict<boolean>>;
   survivors: Record<string, Verdict<string>>;
   grades: Record<string, Verdict<StoredLearningGrade>>;
+  /**
+   * Candidates promoted to a record this process's libraries may not show (a
+   * memory created on an adopted daemon), by promotion reference; the value is
+   * the made record's id. Kept while the candidate's source record exists.
+   */
+  promotions: Record<string, Verdict<string>>;
 }
 
-type Section = 'proposals' | 'pairs' | 'survivors' | 'grades';
+type Section = 'proposals' | 'pairs' | 'survivors' | 'grades' | 'promotions';
+const SECTIONS = ['proposals', 'pairs', 'survivors', 'grades', 'promotions'] as const satisfies readonly Section[];
 
 function emptyDocument(): LearningCurationDocument {
-  return { version: 1, lastPassAt: null, proposals: {}, pairs: {}, survivors: {}, grades: {} };
+  return { version: 1, lastPassAt: null, proposals: {}, pairs: {}, survivors: {}, grades: {}, promotions: {} };
 }
 
 /**
@@ -82,7 +89,8 @@ function validate(parsed: unknown): LearningCurationDocument {
     return value as Record<string, Verdict<never>>;
   };
   const lastPassAt = typeof record.lastPassAt === 'number' && Number.isFinite(record.lastPassAt) ? record.lastPassAt : null;
-  return { version: 1, lastPassAt, proposals: section('proposals'), pairs: section('pairs'), survivors: section('survivors'), grades: section('grades') };
+  return { version: 1, lastPassAt, proposals: section('proposals'), pairs: section('pairs'), survivors: section('survivors'), grades: section('grades'),
+    promotions: section('promotions') };
 }
 
 type PendingSection = Map<string, Verdict<unknown> | null>;
@@ -99,7 +107,7 @@ export class LearningCurationStore {
   /** The file stamp the held document was read at or last written as. */
   #stamp: string;
   /** What this process changed since its last save (null: removed), laid over a fresher file on reload and save. */
-  #pending: Record<Section, PendingSection> = { proposals: new Map(), pairs: new Map(), survivors: new Map(), grades: new Map() };
+  #pending: Record<Section, PendingSection> = { proposals: new Map(), pairs: new Map(), survivors: new Map(), grades: new Map(), promotions: new Map() };
   #pendingPassAt: number | undefined;
 
   private constructor(private readonly path: string | undefined, document: LearningCurationDocument, stamp: string) {
@@ -148,7 +156,7 @@ export class LearningCurationStore {
   }
 
   #overlay(document: LearningCurationDocument): LearningCurationDocument {
-    for (const section of ['proposals', 'pairs', 'survivors', 'grades'] as const) {
+    for (const section of SECTIONS) {
       const entries: Record<string, Verdict<unknown>> = document[section];
       for (const [key, verdict] of this.#pending[section]) {
         if (verdict === null) delete entries[key];
@@ -187,10 +195,13 @@ export class LearningCurationStore {
   setSurvivor(key: string, hash: string, id: string): void { this.#set('survivors', key, hash, id); }
   grade(key: string, hash: string): StoredLearningGrade | undefined { return this.#get('grades', key, hash) as StoredLearningGrade | undefined; }
   setGrade(key: string, hash: string, value: StoredLearningGrade): void { this.#set('grades', key, hash, value); }
+  /** Whether the candidate behind this promotion reference was promoted (see `promotions`). */
+  promoted(reference: string): boolean { return this.#get('promotions', reference, '') !== undefined; }
+  setPromotion(reference: string, recordId: string): void { this.#set('promotions', reference, '', recordId); }
 
   /** Drops verdicts for keys the pass no longer saw, so the document stays the size of what exists. */
   retainOnly(live: Readonly<Record<Section, ReadonlySet<string>>>): void {
-    for (const section of ['proposals', 'pairs', 'survivors', 'grades'] as const) {
+    for (const section of SECTIONS) {
       const entries: Record<string, Verdict<unknown>> = this.#document[section];
       for (const key of Object.keys(entries)) if (!live[section].has(key)) { delete entries[key]; this.#pending[section].set(key, null); }
     }

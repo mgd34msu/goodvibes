@@ -12,7 +12,7 @@ import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent
 import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/routine-registry';
 import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
 import { runSkillDraftProposer, assertSkillDraftRunResultCurrent, type SkillDraftRunResult } from '../agent/skill-draft-runner.ts';
-import { buildLearningCandidates, assertLearningCandidateCollection, runLearningCurationPass } from '@goodvibes-jev/engine/terminal-shell/agent-turn/learning-curator-proposals';
+import { buildLearningCandidates, assertLearningCandidateCollection, recordLearningPromotion, runLearningCurationPass } from '@goodvibes-jev/engine/terminal-shell/agent-turn/learning-curator-proposals';
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { LearningCandidate } from '@goodvibes-jev/engine/terminal-shell/agent-turn/learning-curator-types';
 import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
@@ -166,6 +166,9 @@ async function promoteMemory(
     const record = await spine.add(input, { signal: options.signal, assertCurrent: () => { options.assertCurrent?.(); assertOwnership(); } });
     onDurable?.();
     markNotePromotion(paths, candidate, 'memory', record.id);
+    // The memory lives in the daemon's store, which the next curator read here may not show:
+    // the curation store keeps the promotion so the candidate is not offered or made again.
+    if (paths) recordLearningPromotion(paths, candidate.id, record.id);
     return reviewRoute(record.id);
   }
   let transition: ReturnType<LearningCandidateCollection['prepareTransition']> | undefined;

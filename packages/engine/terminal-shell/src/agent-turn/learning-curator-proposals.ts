@@ -13,7 +13,8 @@ import { maxParallelToolCalls } from '@goodvibes-jev/engine/platform/platform/co
 import type { LearningCandidate, LearningCandidateDraft, LearningProposalTarget, VibeCandidateKind, LocalLearningCandidateDomain } from './learning-curator-types.js';
 import { candidateBase, isMemoryPromptEligible, isReviewed, MIN_PROMPT_MEMORY_CONFIDENCE, learningPromotionReference, recordedPromotionReferences, localRegistryModelRoute, localRegistryRoute, missingRequirementCount } from './learning-curator-common.js';
 import { CONSOLIDATION_DOMAINS, consolidationCandidateForGroup, consolidationGroups, duplicatePairKey, liveGroupMembers, shortlistDuplicatePairs, survivorGroupKey } from './learning-curator-consolidation.js';
-import { learningContentHash, type StoredLearningGrade, type StoredLearningProposal } from './learning-curation-store.js';
+import { LearningCurationStore, learningContentHash, type StoredLearningGrade, type StoredLearningProposal } from './learning-curation-store.js';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 function captureCandidate(): LearningCandidateDraft {
   return {
     id: 'capture:reviewed-lesson',
@@ -454,7 +455,13 @@ function comparePriority(left: { readonly priority: number | null }, right: { re
 
 interface Draft { readonly candidate: LearningCandidateDraft; readonly record: unknown; readonly gradeKey: string; readonly gradeHash: string }
 interface PromptRecord { readonly domain: LocalLearningCandidateDomain; readonly record: LearningRecord; readonly gradeKey: string; readonly gradeHash: string }
-interface AssembledCandidates { readonly drafts: readonly Draft[]; readonly promptRecords: readonly PromptRecord[]; readonly unassessed: number }
+interface AssembledCandidates {
+  readonly drafts: readonly Draft[];
+  readonly promptRecords: readonly PromptRecord[];
+  readonly unassessed: number;
+  /** The promotion reference of every proposal candidate the records produce, promoted or not. */
+  readonly proposed: ReadonlySet<string>;
+}
 
 function draft(candidate: LearningCandidateDraft, record: unknown, recordHash: string): Draft {
   return { candidate, record, gradeKey: `candidate:${candidate.id}`, gradeHash: learningContentHash({ status: candidate.status, recordHash, fields: candidate.proposalFields ?? null }) };
@@ -536,10 +543,13 @@ function assembleLearningCandidates(source: LearningCuratorSource): AssembledCan
   for (const candidate of vibeHealthCandidates(source)) drafts.push(draft(candidate, { health: source.source.vibe }, learningContentHash(source.source.vibe ?? null)));
   if (drafts.length === 0) drafts.push(draft(captureCandidate(), { noUrgentCandidates: true }, 'capture'));
   const promotedReferences = new Set(Object.values(source.libraries).flatMap(records => records.flatMap(record => recordedPromotionReferences(record.record))));
+  const proposed = new Set(drafts.flatMap(({ candidate }) => candidate.proposalTarget ? [learningPromotionReference(candidate.id)] : []));
+  // A promotion whose record this process's libraries do not show (a memory made on an adopted daemon) is in the curation store.
   // Notes promoted before the note kept its own record carry the workspace action's marker on the made record.
   const kept = drafts.filter(({ candidate }) => !candidate.proposalTarget || (!promotedReferences.has(learningPromotionReference(candidate.id))
+    && !source.curation.promoted(learningPromotionReference(candidate.id))
     && !(candidate.domain === 'note' && candidate.recordId && promotedReferences.has(`agent-harness-note-promotion:${candidate.recordId}`))));
-  return { drafts: kept, promptRecords, unassessed };
+  return { drafts: kept, promptRecords, unassessed, proposed };
 }
 
 function survivorHash(group: readonly LearningRecord[]): string {
@@ -660,7 +670,7 @@ async function settledOrAborted(earlier: Promise<unknown>, signal: AbortSignal |
 
 async function runCurationPassOnce(context: LearningCuratorNativeContext, source: LearningCuratorSource): Promise<LearningCurationPassResult> {
   const store = source.curation;
-  const live = { proposals: new Set<string>(), pairs: new Set<string>(), survivors: new Set<string>(), grades: new Set<string>() };
+  const live = { proposals: new Set<string>(), pairs: new Set<string>(), survivors: new Set<string>(), grades: new Set<string>(), promotions: new Set<string>() };
   let readings = 0, reused = 0, unsettled = 0;
   /** One reading; an unsettled one is counted and skipped, anything else (an abort, a lost admission) ends the pass. */
   const settle = async <T>(read: () => Promise<T>): Promise<T | undefined> => {
@@ -759,6 +769,8 @@ async function runCurationPassOnce(context: LearningCuratorNativeContext, source
       });
     }
     await inParallel(gradePhase);
+    // A promotion is kept while the record it came from still proposes it.
+    for (const reference of assembled.proposed) live.promotions.add(reference);
     store.retainOnly(live);
     const at = Date.now();
     store.markPass(at);
@@ -770,4 +782,16 @@ async function runCurationPassOnce(context: LearningCuratorNativeContext, source
     // Verdicts read before a stop are kept, so the next pass does not pay for them again.
     store.save();
   }
+}
+
+/**
+ * Record that a candidate was promoted to `recordId`, for a promotion whose
+ * record this process's libraries do not show (a memory created on an adopted
+ * daemon's store), so the next curator read and promotion pass do not offer or
+ * make it again. One small locked write of the curation document.
+ */
+export function recordLearningPromotion(paths: Pick<ShellPathService, 'resolveUserPath'>, candidateId: string, recordId: string): void {
+  const store = LearningCurationStore.forPaths(paths);
+  store.setPromotion(learningPromotionReference(candidateId), recordId);
+  store.save();
 }

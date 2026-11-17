@@ -52,6 +52,8 @@ export interface CiWatchServiceDeps {
   /** Trusted composition lookup; saved watch fields alone cannot create ownership. */
   readonly revokeOwner?: ((watch: CiWatchSubscription) => Promise<void>) | undefined;
   readonly recoverOwner?: ((watch: CiWatchSubscription) => ExternalOperationSource | undefined | Promise<ExternalOperationSource | undefined>) | undefined;
+  /** Cancels native continuations whose settings or workspace scope changed since issue; returns each one's id and reason. */
+  readonly reconcileOwners?: (() => Promise<readonly { readonly continuationId: string; readonly reason: string }[]>) | undefined;
   readonly autonomousRepair?: ((request: CiRepairRequest) => Promise<FixSessionStartOutcome | string | undefined>) | undefined;
   readonly source: CiStatusSource;
   /**
@@ -312,6 +314,48 @@ export class CiWatchService {
     if (!watch.continuationId) return;
     if (this.deps.revokeOwner) await this.deps.revokeOwner(watchIdentity(watch));
     else await nativeCiWatchOwner(await this.deps.recoverOwner?.(watchIdentity(watch)))?.revoke();
+  }
+
+  /**
+   * Stop auto-repair on watches whose native continuation no longer holds (the
+   * settings or workspace scope it was issued under changed): each watch's
+   * channel is told why, and the watch keeps reporting CI without repairing.
+   * The owner is asked only while some watch carries a continuation; it compares
+   * its records only when the settings or scope moved.
+   */
+  async reconcileOwners(): Promise<number> {
+    if (!this.deps.reconcileOwners) return 0;
+    const subs = await this.all();
+    if (!subs.some((watch) => watch.continuationId)) return 0;
+    const stopped = await this.deps.reconcileOwners();
+    if (stopped.length === 0) return 0;
+    const reasons = new Map(stopped.map((entry) => [entry.continuationId, entry.reason]));
+    const told: Array<{ readonly watch: CiWatchSubscription; readonly reason: string }> = [];
+    for (const [index, watch] of subs.entries()) {
+      const reason = watch.continuationId ? reasons.get(watch.continuationId) : undefined;
+      if (reason === undefined) continue;
+      const runtime = this.runtimes.get(watch.id);
+      if (runtime) runtime.owner = undefined;
+      const { continuationId: _cancelled, ...rest } = watch;
+      subs[index] = Object.freeze({ ...rest, updatedAt: this.now() });
+      told.push({ watch, reason });
+    }
+    if (told.length === 0) return 0;
+    await this.save(subs);
+    for (const { watch, reason } of told) {
+      if (!this.deps.notifier) break;
+      const target = `${watch.repo}${watch.prNumber !== undefined ? ` #${watch.prNumber}` : watch.ref ? ` @ ${watch.ref}` : ''}`;
+      try {
+        await this.deps.notifier(watch.deliveryChannel, `CI auto-repair stopped, ${watch.repo}`, [
+          `Auto-repair for ${target} stopped: ${reason}.`,
+          'This watch still reports CI results, but a failure will not start a repair.',
+          'To have failures repaired again, create the watch again from the work.',
+        ].join('\n'));
+      } catch (error) {
+        logger.warn('[ci-watch] auto-repair stop notification failed', { repo: watch.repo, watchId: watch.id, error: summarizeError(error) });
+      }
+    }
+    return told.length;
   }
 
   async deleteWatch(id: string): Promise<boolean> {

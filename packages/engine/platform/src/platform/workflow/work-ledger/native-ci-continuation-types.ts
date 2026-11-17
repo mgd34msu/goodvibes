@@ -21,7 +21,9 @@ const watchSchema = z.strictObject({ id, repo: id, ref: id.optional(), prNumber:
 const schedulingWatchSchema = watchSchema.extend({ lastOverall: z.enum(['passed', 'failed', 'pending', 'unknown']).optional() });
 const failureSchema = z.strictObject({ repo: id, ref: z.string().optional(), prNumber: z.number().int().positive().optional(), failingJobs: z.array(z.string()), logs: z.string(),
   jobs: z.array(z.strictObject({ headSha: z.string().optional(), runId: z.string().optional(), jobId: z.string().optional(), name: z.string(), status: z.enum(['queued', 'in_progress', 'completed']), conclusion: z.string().nullable(), continueOnError: z.boolean().optional(), url: z.string().optional() })).optional() });
-const common = { id, grant: z.strictObject({ id, binding: hash }), watch: watchSchema.nullable(), state: z.enum(['issued', 'claimed', 'cancelled']), failureRevision: hash.nullable(), successor: target.nullable() };
+const common = { id, grant: z.strictObject({ id, binding: hash }), watch: watchSchema.nullable(), state: z.enum(['issued', 'claimed', 'cancelled']), failureRevision: hash.nullable(), successor: target.nullable(),
+  /** Why a continuation was cancelled when the owner did not cancel it (the settings or workspace scope it was issued under changed). */
+  cancelledReason: z.string().min(1).max(1024).optional() };
 const records = { 1: z.strictObject({ ...common, version: z.literal(1), issue: legacyIssue }), 2: z.strictObject({ ...common, version: z.literal(2), issue: currentIssue }) };
 export type NativeCiContinuationIssue = z.infer<typeof legacyIssue> | z.infer<typeof currentIssue>;
 export type NativeCiContinuationRecord = Readonly<z.infer<typeof records[1]> | z.infer<typeof records[2]>>;
@@ -165,4 +167,6 @@ export interface NativeCiContinuationStorage {
   current(id: string, originalKey?: DurableContractKey, original?: NativeCiContinuationOriginal): NativeCiContinuationTransaction;
   transaction<T>(id: string, originalKey: DurableContractKey, decide: (current: NativeCiContinuationTransaction) => { readonly next: NativeCiContinuationRecord | null; readonly value: T }, assertCurrent: () => void, original?: NativeCiContinuationOriginal): Promise<T>;
   claim(id: string, failureRevision: string, assertCurrent: (current: NativeCiContinuationTransaction) => void, original?: NativeCiContinuationOriginal): Promise<NativeCiContinuationRecord>;
+  /** Every continuation of this project that is not cancelled. */
+  listOpen?(): readonly NativeCiContinuationRecord[];
 }

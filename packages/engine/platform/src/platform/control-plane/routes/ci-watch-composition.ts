@@ -26,6 +26,7 @@ export type CiWatchCompositionDeps = Pick<
   | 'ciAutonomousHost'
   | 'ciNativeContinuationOwner'
   | 'ciNativeContinuationRevocation'
+  | 'ciNativeContinuationReconcile'
   | 'onCiAutoWatch'
   | 'workingDirectory'
   | 'watcherRegistry'
@@ -42,6 +43,7 @@ export function composeCiWatchGatewayVerbs(catalog: GatewayMethodCatalog, deps: 
   const ciWatchService = new CiWatchService({
     recoverOwner: deps.ciNativeContinuationOwner,
     revokeOwner: deps.ciNativeContinuationRevocation,
+    reconcileOwners: deps.ciNativeContinuationReconcile,
     source: createGhCliCiSource(),
     store: new CiWatchStore(controlPlaneStorePath(deps.shellPaths, deps.surfaceRoot, 'ci-watches.json')),
     ...(deps.channelDeliveryRouter

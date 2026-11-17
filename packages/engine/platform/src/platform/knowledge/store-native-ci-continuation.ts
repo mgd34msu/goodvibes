@@ -47,6 +47,8 @@ export function createNativeCiContinuationStorage(sqlite: SQLiteStore, projectId
   }
   return {
     current: (id, key, original) => sqlite.readPersisted(db => current(db, id, key, original)),
+    listOpen: () => sqlite.readPersisted(db => (db.exec('SELECT continuation_id FROM native_ci_continuations WHERE project_id = ?', [projectId])[0]?.values ?? [])
+      .map(stored => row(db, String(stored[0]))).filter((record): record is NativeCiContinuationRecord => record !== null && record.state !== 'cancelled')),
     async transaction(id, key, decide, assertCurrent, original) {
       const result = await sqlite.transactPersisted(db => {
         const before = current(db, id, key, original);

@@ -244,6 +244,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       registerDispose: (dispose) => { disposalScope.registry.add('mail reply subject sources', dispose); } });
     let ciNativeContinuationRevocation: NonNullable<Parameters<typeof attachWsOnlyGatewayVerbHandlers>[1]['ciNativeContinuationRevocation']> | undefined;
     let ciNativeContinuationOwner: NonNullable<Parameters<typeof attachWsOnlyGatewayVerbHandlers>[1]['ciNativeContinuationOwner']> | undefined;
+    let ciNativeContinuationReconcile: NonNullable<Parameters<typeof attachWsOnlyGatewayVerbHandlers>[1]['ciNativeContinuationReconcile']> | undefined;
     let ciAutoWatchObserver: ((tool: string, args: Record<string, unknown>, success: boolean) => void) | undefined;
     attachWsOnlyGatewayVerbHandlers(gatewayMethods, {
       triggerSupervisor: triggerManager,
@@ -284,6 +285,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       watcherRegistry: graph.watcherRegistry, userPermissionRuleStore: graph.userPermissionRuleStore, shellPaths, configManager, runtimeStore: options.runtimeStore,
       ciNativeContinuationRevocation: watch => { if (!ciNativeContinuationRevocation) return Promise.reject(new Error('Native CI revocation is unavailable')); return ciNativeContinuationRevocation(watch); },
       ciNativeContinuationOwner: watch => ciNativeContinuationOwner?.(watch) ?? Promise.resolve(undefined),
+      ciNativeContinuationReconcile: () => ciNativeContinuationReconcile?.() ?? Promise.resolve([]),
       ciAutonomousHost: () => autonomousHost, onCiAutoWatch: observer => { ciAutoWatchObserver = observer; },
       channelDeliveryRouter: graph.channelDeliveryRouter, providerRegistry, automationManager, sessionLister: sessionBroker, sessionIntake: sessionBroker,
       workingDirectory, memoryRegistry: graph.memoryRegistry, pairingTokens, sessionLiveTurnControls: graph.sessionLiveTurnControls,
@@ -376,6 +378,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     });
     ciNativeContinuationRevocation = async watch => (await nativeWork.acquire()).revokeCiWatch(watch);
     ciNativeContinuationOwner = async watch => (await nativeWork.acquire()).recoverCiWatchOwner(watch);
+    ciNativeContinuationReconcile = async () => (await nativeWork.acquire()).reconcileCiContinuations();
     nativeFleetOwnership = nativeWork.fleetOwnership;
     fenceNativeWork = async () => { await Promise.all([nativeImport.close(), nativeSubmission.close(), nativeIntake.close(), nativeWork.close()]); };
     disposalScope.registry.add('native work execution', nativeWork.close);

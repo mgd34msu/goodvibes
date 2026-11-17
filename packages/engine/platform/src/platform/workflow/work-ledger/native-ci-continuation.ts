@@ -19,6 +19,8 @@ export type NativeCiGrantOwner = Pick<PairingTokenManager, 'readNativeContinuati
 /** Each continuation compares its own policy revision when it is used; a settings change is not a process-wide abort. */
 export interface NativeCiContinuationPolicy { capture(version?: 1 | 2): string; current(version?: 1 | 2): string; scopes(): readonly string[]; }
 interface SourceOwner { readonly record: NativeWorkExecutionRecord; readonly authority: NativePairedExecutionAuthority; readonly assertCurrent: () => void; }
+/** A continuation cancelled because what it was issued under changed; its watch's channel is told. */
+export interface NativeCiStoppedContinuation { readonly continuationId: string; readonly reason: string; }
 
 export function createNativeCiContinuationHost(deps: {
   readonly projectId: string; readonly projectRoot: string; readonly storage: NativeWorkExecutionStorage;
@@ -39,6 +41,45 @@ export function createNativeCiContinuationHost(deps: {
     if (closed || deps.signal.aborted || !deps.storage.continuations || !deps.grants || !deps.policy) throw new Error('Native CI continuation ownership is unavailable');
     return { storage: deps.storage.continuations, grants: deps.grants, policy: deps.policy };
   };
+  /**
+   * The policy, scope ceiling and workspace scope the open continuations were last
+   * compared against. Comparing is one string build per call; the open records are
+   * read and compared only when one of them moved.
+   */
+  let reconciledFacts: string | undefined;
+  /** Why `record` can no longer be used, or undefined while what it was issued under still holds. */
+  function stoppedBecause(record: NativeCiContinuationRecord, policy: NativeCiContinuationPolicy, scope: ReturnType<NativeExecutionScopeOwner['currentScope']>): string | undefined {
+    if (policy.current(record.version) !== record.issue.policyRevision) return 'the settings it was issued under changed';
+    if (!record.issue.authorityScopes.every(granted => policy.scopes().includes(granted))) return 'the gateway access it was issued under was narrowed';
+    if (scope.root !== deps.projectRoot || scope.scopeId !== record.issue.scopeId || scope.scopeRevision !== record.issue.scopeRevision) return 'the workspace scope it was issued for changed';
+    return undefined;
+  }
+  /**
+   * After a settings or scope change, cancel every open continuation that no
+   * longer holds, with the reason, so auto-repair stops when the change happens
+   * rather than when CI next fails. Returns what was stopped, for the watches' channels.
+   */
+  async function reconcile(): Promise<readonly NativeCiStoppedContinuation[]> {
+    if (closed || deps.signal.aborted || !deps.storage.continuations?.listOpen || !deps.grants || !deps.policy) return [];
+    const { storage, grants, policy } = available();
+    const scope = deps.scopes.currentScope(deps.projectRoot);
+    const facts = JSON.stringify([policy.current(2), [...policy.scopes()].sort(), scope.root, scope.scopeId, scope.scopeRevision]);
+    if (facts === reconciledFacts) return [];
+    const stopped: NativeCiStoppedContinuation[] = [];
+    for (const record of storage.listOpen!()) {
+      const reason = stoppedBecause(record, policy, scope);
+      if (!reason) continue;
+      controllers.get(record.id)?.abort(); controllers.delete(record.id);
+      // A consumed or already revoked grant has nothing left to revoke; the record is cancelled either way.
+      try { grants.revokeNativeContinuation(record.grant); } catch { /* nothing left to revoke */ }
+      await storage.transaction(record.id, record.issue.originalKey, current => ({
+        next: current.record && current.record.state !== 'cancelled' ? { ...current.record, state: 'cancelled', cancelledReason: reason } : null, value: undefined,
+      }), () => { deps.signal.throwIfAborted(); });
+      stopped.push({ continuationId: record.id, reason });
+    }
+    reconciledFacts = facts;
+    return stopped;
+  }
   function controller(id: string): AbortController {
     let value = controllers.get(id); if (!value) { value = new AbortController(); controllers.set(id, value); } return value;
   }
@@ -233,6 +274,7 @@ export function createNativeCiContinuationHost(deps: {
     return { sessionId: result.admission.ownerAgentId };
   }
   return {
+    reconcile,
     reserve(contract: ContractView, originalOperation: ExternalOperationSource): ExternalOperationSource {
       const { storage, policy } = available(); originalOperation.assertCurrent(); originalOperation.signal?.throwIfAborted();
       const owner = deps.sourceOwner(contract); owner.assertCurrent();

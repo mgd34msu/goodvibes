@@ -294,6 +294,8 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
    */
   readonly ciNativeContinuationRevocation?: ((watch: import('../../ci-watch/types.js').CiWatchSubscription) => Promise<void>) | undefined;
   readonly ciNativeContinuationOwner?: ((watch: import('../../ci-watch/types.js').CiWatchSubscription) => Promise<import('../../permissions/external-request.js').ExternalOperationSource | undefined>) | undefined;
+  /** Cancels native CI continuations whose settings or scope changed; the CI watch poll asks before each pass while a watch carries one. */
+  readonly ciNativeContinuationReconcile?: (() => Promise<readonly { readonly continuationId: string; readonly reason: string }[]>) | undefined;
   readonly ciAutonomousHost?: (() => import('../../permissions/external-request.js').ExternalPermissionHost | undefined) | undefined;
   readonly onCiAutoWatch?: ((observer: (toolName: string, args: Record<string, unknown>, success: boolean) => void) => void) | undefined;
   /**

@@ -92,6 +92,8 @@ export interface NativeWorkExecutionHost {
   readonly nativeOwner: NativeContractCompositionOwner;
   recoverCiWatchOwner(watch: CiWatchSubscription): ExternalOperationSource | undefined;
   revokeCiWatch(watch: CiWatchSubscription): Promise<void>;
+  /** Cancels open CI continuations whose settings or scope changed since issue, with the reason; returns them for their watches. */
+  reconcileCiContinuations(): Promise<readonly import('./native-ci-continuation.js').NativeCiStoppedContinuation[]>;
   attachRunner(runner: NativeRunner): void;
   start(target: NativeWorkExecutionTarget, authority: NativePairedExecutionAuthority, options?: { readonly signal?: AbortSignal; readonly taskEvidence?: string }): Promise<DurableStartedContract>;
   status(key: DurableContractKey, authority: NativePairedExecutionAuthority): NativeWorkExecutionStatus;
@@ -587,6 +589,7 @@ export function createNativeWorkExecutionHost(deps: {
   const host: NativeWorkExecutionHost = {
     recoverCiWatchOwner: watch => continuations.recover(watch),
     revokeCiWatch: watch => continuations.revokeWatch(watch),
+    reconcileCiContinuations: () => continuations.reconcile(),
     nativeOwner: { admission: { withCurrent }, decisions: { reserveCiContinuation: (contract, operation) => continuations.reserve(contract, operation), authorityOf(contract) {
       const key = contract.durableAdmission?.key; if (!key) throw new NativeWorkExecutionError('invalid');
       const owner = active.get(key.attemptId); const current = deps.storage.current(key, owner?.record);

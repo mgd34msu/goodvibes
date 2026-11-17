@@ -47,7 +47,7 @@ export interface CiPollingHost {
 }
 
 /** The slice of the CI-watch service one poll pass needs. */
-export type CiWatchPollTarget = Pick<CiWatchService, 'listWatches' | 'checkWatch'>;
+export type CiWatchPollTarget = Pick<CiWatchService, 'listWatches' | 'checkWatch'> & Partial<Pick<CiWatchService, 'reconcileOwners'>>;
 
 /**
  * One poll pass: check every registered watch, sequentially, never throwing,
@@ -56,6 +56,9 @@ export type CiWatchPollTarget = Pick<CiWatchService, 'listWatches' | 'checkWatch
  * tests drive passes directly without timers.
  */
 export async function runCiWatchPollPass(service: CiWatchPollTarget): Promise<string> {
+  // Auto-repair whose settings or workspace scope changed stops now, with its channel told, not at the next failure.
+  try { await service.reconcileOwners?.(); }
+  catch (error) { logger.warn('[ci-watch] auto-repair ownership could not be reconciled', { error: summarizeError(error) }); }
   const watches = await service.listWatches();
   if (watches.length === 0) return 'no watches registered';
   let checked = 0;

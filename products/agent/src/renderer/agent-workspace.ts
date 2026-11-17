@@ -710,7 +710,12 @@ export function renderAgentWorkspace(workspace: AgentWorkspace, width: number, h
   // Context longer than its share scrolls in every area (PgUp/PgDn, or
   // Ctrl+PgUp/PgDn while a result holds the plain keys) instead of being cut.
   let shownContextRows = contextRows;
-  if (category.id === 'work' || contextRows.length > metrics.contextRows) {
+  if (workspace.workContextScrollFor !== category.id) {
+    workspace.workContextScroll = 0;
+    workspace.workContextScrollFor = category.id;
+  }
+  if (category.id !== 'work' && contextRows.length <= metrics.contextRows) workspace.workContextScroll = 0;
+  else {
     const count = Math.max(1, metrics.contextRows - 1);
     workspace.workContextScroll = Math.min(workspace.workContextScroll, Math.max(0, contextRows.length - count));
     shownContextRows = [

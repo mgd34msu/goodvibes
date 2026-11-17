@@ -68,7 +68,9 @@ export class AgentWorkspace {
   public actionSearchQuery = '';
   /** Scroll offset into the action-result block, and the result it belongs to. */
   public resultScroll = 0;
+  /** Scroll offset into the selected area's context, and the area it belongs to. */
   public workContextScroll = 0;
+  public workContextScrollFor: string | null = null;
   public resultScrollFor: AgentWorkspaceActionResult | null = null;
   /** The selected note, memory, skill, routine and persona, held by id. */
   public readonly localSelection: AgentWorkspaceLocalSelection = createAgentWorkspaceLocalSelection();

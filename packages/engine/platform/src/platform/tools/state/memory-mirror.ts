@@ -10,9 +10,9 @@
  * memory class is read afterwards, off the call's path, and the row is
  * refiled when the reading settles. An unsure, late or unavailable reading
  * leaves the row pending for review; it never loses the memory or delays it.
+ *
+ * Only memory records are read and written here; no file is.
  */
-import { readdir, readFile, rename } from 'node:fs/promises';
-import { join } from 'node:path';
 import { assertJudgmentInput, JudgmentInputError } from '../../gate/judgment-input.js';
 import { isClassicOperation } from '../../runtime/decision-policy.js';
 import { judge } from '../../runtime/judge.js';
@@ -103,43 +103,6 @@ export async function saveMemoryRecord(store: StateMemoryStore, key: string, val
   }
   if (!classic) classifyLater(store, saved.id, key, value);
   return saved;
-}
-
-/**
- * Brings memories an earlier build kept as `<key>.json` files in `dir` into the
- * store: a file whose key has no row is saved as one, and every file read is
- * renamed to `<key>.json.imported` so it is kept and never read again. A value
- * that cannot be saved (the store refuses it, or it holds a credential) keeps
- * its file for the next start. Returns the keys brought in.
- */
-export async function importMemoryFiles(store: StateMemoryStore, dir: string, signal?: AbortSignal): Promise<string[]> {
-  let names: string[];
-  try {
-    names = (await readdir(dir)).filter((name) => /^[a-zA-Z0-9_-]+\.json$/.test(name));
-  } catch {
-    return [];
-  }
-  if (names.length === 0) return [];
-  const present = await listMemoryRecords(store, signal);
-  const imported: string[] = [];
-  for (const name of names) {
-    signal?.throwIfAborted();
-    const key = name.slice(0, -'.json'.length);
-    const path = join(dir, name);
-    try {
-      if (!present.has(key)) {
-        const value = await readFile(path, 'utf-8');
-        if (memoryValueRefusal(key, value)) continue;
-        await saveMemoryRecord(store, key, value, signal);
-        imported.push(key);
-      }
-      await rename(path, `${path}.imported`);
-    } catch (error) {
-      if (signal?.aborted) throw error;
-      logger.warn('state tool: a memory file from an earlier build was not brought into the memory store; it is kept', { key, error: summarizeError(error) });
-    }
-  }
-  return imported;
 }
 
 /**

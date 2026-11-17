@@ -731,7 +731,7 @@ export function registerAllTools(
       modeManager,
       setPrintLevel: (level) => printLevelConfig.setDynamic('behavior.hitlMode', level),
       ...(deps.runtimeBus ? { telemetryDB: toolCallTelemetryFor(deps.runtimeBus) } : {}),
-      ...(stateMemory ? { memory: stateMemory, memoryFilesDir: join(workingDirectory, '.goodvibes', 'memory') } : {}),
+      ...(stateMemory ? { memory: stateMemory } : {}),
       ...(deps.workspaceSwap ? { swapManager: deps.workspaceSwap } : {}),
       contextAccounting: contextAccountingHolder,
     }),

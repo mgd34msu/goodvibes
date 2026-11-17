@@ -13,7 +13,6 @@ import type { StateInput } from './schema.js';
 import { toRecord } from '../../utils/record-coerce.js';
 import { summarizeError } from '../../utils/error-display.js';
 import {
-  importMemoryFiles,
   listMemoryRecords,
   memoryRecordsForKey,
   memoryValueRefusal,
@@ -105,12 +104,6 @@ export interface StateToolOptions {
    */
   readonly memory?: StateMemoryStore | undefined;
   /**
-   * Where an earlier build kept memories as `<key>.json` files. On the first
-   * `mode=memory` call of this tool they are saved into the memory store and
-   * the files renamed; costs one directory read per process.
-   */
-  readonly memoryFilesDir?: string | undefined;
-  /**
    * The live session's token and context state (the holder the
    * context_accounting tool reads). `mode=budget` reports its token usage and
    * turns, `mode=context` its context window; unbound, they say so.
@@ -134,18 +127,6 @@ export function createStateTool(
   options: StateToolOptions,
 ): Tool {
   const memory = options.memory;
-  // Started by the first memory call; a failed attempt (the store was unreachable) is tried again by the next.
-  let memoryFilesImported: Promise<string[]> | undefined;
-  const importedMemoryFiles = (store: StateMemoryStore, signal: AbortSignal | undefined): Promise<string[]> => {
-    if (!options.memoryFilesDir) return Promise.resolve([]);
-    const dir = options.memoryFilesDir;
-    memoryFilesImported ??= importMemoryFiles(store, dir, signal).catch((error: unknown) => {
-      memoryFilesImported = undefined;
-      logger.debug('state tool: memory files from an earlier build not read yet', { error: summarizeError(error) });
-      return [];
-    });
-    return memoryFilesImported;
-  };
   const hookDispatcher = options.hookDispatcher;
   const hookGate = options.hookGate;
   const modeManager = options.modeManager;
@@ -233,7 +214,6 @@ export function createStateTool(
         case 'context': return runContext(kvState, projectIndex, options.contextAccounting?.getSource() ?? null);
         case 'memory':
           if (!memory) return unavailableMode('memory', 'this session has no project memory store', availableModes);
-          await importedMemoryFiles(memory, signal);
           return await runMemory(input, memory, { signal, assertCurrent: current });
         case 'telemetry': return await runTelemetry();
         case 'hooks':

@@ -50,7 +50,7 @@ import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platfo
  * runs.
  */
 export interface AgentToolRegistryDeps {
-  /** Explicit trusted local service capability; absent keeps research report writes held. */
+  /** The code-only owner for first-party local reads (the shipped Agent binds `services.localReadSourceOwner`). Search results are public URLs and need no owner. */
   readonly researchSourceOwner?: ProtectedSourceOwner;
   /** Native report-only opt-in, isolated from the general private-source owner. */
   readonly researchReportSourceOwner?: ProtectedSourceOwner;

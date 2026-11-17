@@ -82,6 +82,15 @@ const WATCHER_METHOD_IDS = new Set<string>([
   'watchers.delete',
 ]);
 
+/** Where the owner does the refused act himself in the Agent app, named for what was refused. */
+function ownerActRoute(methodId: string): string {
+  if (methodId === 'inbox.answer') return 'he answers it with /questions (/questions answer <id> <choice>) or in the web UI.';
+  if (methodId === 'approvals.approve' || methodId === 'approvals.deny') {
+    return 'he answers it at the approval prompt, with /approval approve|deny <id> --yes or /questions, or in the web UI.';
+  }
+  return 'he grants or withdraws access himself, from his own app\'s settings or the web UI.';
+}
+
 function isRecord(value: unknown): value is JsonRecord {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -368,7 +377,7 @@ export function createAgentOperatorMethodTool(
       if (operatorMethodIsOwnerOnly(method.id) && !method.id.startsWith('payments.')) {
         return {
           success: false,
-          error: `operator method '${method.id}' (${method.title ?? method.id}) is the owner's own act: answering what was put to him, or granting or withdrawing access, so a call the model makes is refused whatever approved it. Nothing was sent. Tell the owner what is waiting; he does it from his own app (an approval prompt, /approval, the web UI).`,
+          error: `operator method '${method.id}' (${method.title ?? method.id}) is the owner's own act: answering what was put to him, or granting or withdrawing access, so a call the model makes is refused whatever approved it. Nothing was sent. Tell the owner what is waiting; ${ownerActRoute(method.id)}`,
         };
       }
       if (operatorMethodIsOwnerOnly(method.id)) {

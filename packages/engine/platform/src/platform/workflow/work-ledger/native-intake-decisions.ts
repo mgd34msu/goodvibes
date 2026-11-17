@@ -277,7 +277,7 @@ export async function decideNativeIntake(request: NativeIntakeDecisionInput): Pr
   }
   owned.assertCurrent();
   const finalSite = input.decisionSite ?? NATIVE_INTAKE_DECISION_SITE;
-  if (finalSite !== NATIVE_INTAKE_DECISION_SITE && !/^work-ledger\.native-intake\.admission:(?:[a-f0-9]{64}|v2:[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}:(?:publish-work|ordinary-turn):g[a-z0-9]{1,11}:p[0-3]:(?:none|[a-f0-9]{64}))$/.test(finalSite)) throw new JudgmentError('invalid-request', 'Invalid native intake decision attribution');
+  if (finalSite !== NATIVE_INTAKE_DECISION_SITE && !/^work-ledger\.native-intake\.admission:(?:[a-f0-9]{64}|v2:[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}:(?:publish-work|ordinary-turn):g[a-z0-9]{1,11}:p[0-3]:(?:none|[a-f0-9]{64}))$/.test(finalSite)) throw new JudgmentError('invalid-request', 'Invalid native intake decision attribution');
   const session = readSession(input, [...owned.records], finalSite);
   const requirements = input.requirements === undefined ? undefined : validateNativeRequirementProposal(input.text, input.sourceRevision, input.requirements.proposal);
   const hostState = snapshotJudgmentInput(input.state ?? null) as EntryType;

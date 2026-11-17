@@ -13,8 +13,7 @@ import type { NativeWorkSettlementReceipt } from './native-settlement-types.js';
 import type { CheckSettings } from '../../contract/check.js';
 import type { ReadAccessFilter } from '../../tools/shared/read-access.js';
 /** Native work -> durable runner bridge. No product payload can provide its authority owners. */
-import { randomBytes } from 'node:crypto';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import type { DecisionLog, EntryType, JudgmentPort } from '@goodvibes-jev/judgment';
 import { decideAutonomous } from '../../gate/autonomous-decision.js';
@@ -248,12 +247,12 @@ export function createNativeWorkExecutionHost(deps: {
     // The existing durable payload commitment binds the complete actual request;
     // live source/owner/target comparisons do not need additional hashes.
     const key = { workId: target.workId, criteriaId: 'criteria-v2:' + work.id, criteriaRevision: String(target.criteriaRevision), attemptId: target.attemptId };
-    const source = captureNativeContractSource({ sourceId: work.source?.sourceId ?? opaqueUuid(), sourceRevision: work.source?.sourceRevision ?? opaqueUuid(), inputRevision: opaqueUuid(),
+    const source = captureNativeContractSource({ sourceId: work.source?.sourceId ?? randomUUID(), sourceRevision: work.source?.sourceRevision ?? randomUUID(), inputRevision: randomUUID(),
       criteriaId: key.criteriaId, criteriaRevision: key.criteriaRevision, goal: work.goal, criteria: work.criteria,
       ...(work.source?.version === 2 && work.source.continuation ? { continuation: work.source.continuation } : {}) });
     if (sourceActionId !== undefined && !/^[0-9a-f]{64}$/.test(sourceActionId)) throw new NativeWorkExecutionError('invalid');
-    const binding = { sourceId: source.sourceId, inputRevision: source.inputRevision, actionId: sourceActionId ?? randomBytes(32).toString('hex'), actionRevision: opaqueUuid(),
-      authorityId: opaqueUuid(), authorityRevision: 'owner-commitment-pending', scopeId: opaqueUuid(), scopeRevision: opaqueUuid() };
+    const binding = { sourceId: source.sourceId, inputRevision: source.inputRevision, actionId: sourceActionId ?? randomBytes(32).toString('hex'), actionRevision: randomUUID(),
+      authorityId: randomUUID(), authorityRevision: 'owner-commitment-pending', scopeId: randomUUID(), scopeRevision: randomUUID() };
     return bindNativeExecutionRequest({ key, binding, input: { ask: work.title, nativeSource: source, projectRoot, sessionId: deps.sessionId, origin: 'external', isolation: 'auto',
       ...(model === undefined ? {} : { selectedModel: model }), ...(taskEvidence ? { taskEvidence } : {}) } }, deps.projectId, ownerFacts(expected, expectedScope), expected.scopes);
   }

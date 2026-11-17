@@ -1,5 +1,4 @@
-import { createHash } from 'node:crypto';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
+import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { LedgerWork, WorkReportedState } from './types.js';
 
@@ -287,9 +286,9 @@ function prepare(input: LegacyMigrationInput, signal: AbortSignal | undefined, v
     const body = { version, hostId, projectId, expectedLedgerRevision: input.expectedLedgerRevision,
       sources: [...sources.values()].sort((a, b) => String(a.source.id) < String(b.source.id) ? -1 : String(a.source.id) > String(b.source.id) ? 1 : 0),
       entities: [...entities.values()], links, executionAuthority: 'none' as const, persistence: 'not-imported' as const };
-    if (version === 3 && originalRevision !== undefined && !/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/.test(originalRevision)) fail('invalid-source', 'Invalid preparation revision.');
+    if (version === 3 && originalRevision !== undefined && !/^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$/.test(originalRevision)) fail('invalid-source', 'Invalid preparation revision.');
     const manifest: LegacyMigrationManifest = freeze(version === 3
-      ? { ...body, version: 3 as const, revision: originalRevision ?? opaqueUuid() }
+      ? { ...body, version: 3 as const, revision: originalRevision ?? randomUUID() }
       : { ...body, version: version as 1 | 2, digest: historicalManifestCommitment(body) });
     const manifestBytes = Buffer.byteLength(JSON.stringify(manifest));
     if (manifestBytes > LEGACY_IMPORT_MAX_BYTES - 1024) fail('limit', `The prepared import of ${sources.size} sources is ${Math.ceil(manifestBytes / 1024)} KiB, over the ${(LEGACY_IMPORT_MAX_BYTES - 1024) / 1024} KiB a single import carries; nothing was truncated. Prepare fewer sources at a time and import each set`);

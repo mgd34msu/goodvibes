@@ -14,7 +14,7 @@ const target = z.strictObject({ workId: id, workRevision: revision, criteriaRevi
 const owner = { projectId: id, originalKey: key, originalPayloadRevision: hash, principalId: id, authorityRevision: id, authorityScopes: z.array(id).min(1), scopeId: id, scopeRevision: id };
 const legacyIssue = z.strictObject({ ...owner, ledgerSourceRevision: hash, policyRevision: hash, seedRevision: hash });
 const ledgerSource = z.union([workLedgerExplicitSourceSchema, workLedgerOpaqueExplicitSourceSchema, workLedgerNativeExplicitSourceSchema, workLedgerExtractedSourceSchema.omit({ continuation: true })]);
-const opaqueAttempt = z.string().regex(/^attempt-ci-[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
+const opaqueAttempt = z.string().regex(/^attempt-ci-[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$/);
 const currentIssue = z.strictObject({ ...owner, ledgerSource, policyRevision: z.string().min(1).max(4096), successorAttemptId: opaqueAttempt, successorSourceBinding: hash });
 const watchSchema = z.strictObject({ id, repo: id, ref: id.optional(), prNumber: z.number().int().positive().optional(), deliveryChannel: id,
   triggerFixSession: z.boolean(), createdAt: z.number().finite(), updatedAt: z.number().finite(), continuationId: id.optional() });

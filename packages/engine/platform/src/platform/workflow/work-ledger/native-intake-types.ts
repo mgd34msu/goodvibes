@@ -1,9 +1,9 @@
 /** Host-owned conversation input and durable intake progress, never execution authority. */
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { canonicalJson, type EntryType } from '@goodvibes-jev/judgment';
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import { array, enum as enumSchema, literal, number, strictObject, string } from 'zod/v4';
-import { captureJevDecisionContext, validateJevDecision, opaqueUuid, type JevDecision, type JevDecisionContext, type JevDecisionBinding } from '@goodvibes-jev/judgment/decisions';
+import { captureJevDecisionContext, validateJevDecision, type JevDecision, type JevDecisionContext, type JevDecisionBinding } from '@goodvibes-jev/judgment/decisions';
 import { captureNativeConversationContinuation, canonicalNativeConversationContinuation, nativeConversationContinuationSchema, type NativeConversationContinuation } from './native-continuation-context.js';
 import type { WorkLedgerStorage, WorkLedgerSubmission } from './types.js';
 import { nativeClassicConversationAdmissionSchema, type NativeClassicConversationAdmission } from './native-intake-policy.js';
@@ -111,7 +111,7 @@ export function nativeConversationDecisionBinding(capture: NativeConversationCap
 /** Native issuance, not a caller-selected version flag or raw public IDs. */
 export function createNativeConversationCapture(value: Omit<NativeConversationCapture, 'version' | 'sourceId' | 'sourceRevision' | 'bindingRefs'>): NativeConversationCapture {
   plain(value);
-  const source = { ...value, version: 2 as const, sourceId: opaqueUuid(), bindingRefs: { authorityId: opaqueUuid(), authorityRevision: opaqueUuid(), scopeId: opaqueUuid(), scopeRevision: opaqueUuid() } };
+  const source = { ...value, version: 2 as const, sourceId: randomUUID(), bindingRefs: { authorityId: randomUUID(), authorityRevision: randomUUID(), scopeId: randomUUID(), scopeRevision: randomUUID() } };
   const issued = { ...source, sourceRevision: nativeConversationSourceRevision(source) }; privateAdd(issuedSources, issued);
   return parseNativeConversationCapture(issued);
 }
@@ -175,7 +175,8 @@ const captureFields = {
   association: strictObject({ workId: id, attemptId: id, ledgerRevision: revision.min(1) }).nullable(),
   settled: literal(true).optional(),
 };
-const opaque = string().regex(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
+// New ids are plain UUIDs; sources saved with the earlier a-to-p spelling still read.
+const opaque = string().regex(/^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$/);
 const captureSchemas = {
   1: strictObject({ ...captureFields, version: literal(1) }),
   2: strictObject({ ...captureFields, version: literal(2), sourceId: opaque, bindingRefs: strictObject({ authorityId: opaque, authorityRevision: opaque, scopeId: opaque, scopeRevision: opaque }) }),

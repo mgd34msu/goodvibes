@@ -1,8 +1,7 @@
 /** Native CI continuation ownership, separate from CI evidence and persisted watch scheduling. */
 import { ciRepairPrompt } from '../../ci-watch/repair-prompt.js';
 import { isDeepStrictEqual } from 'node:util';
-import { randomBytes } from 'node:crypto';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
+import { randomBytes, randomUUID } from 'node:crypto';
 import type { PairingTokenManager } from '../../pairing/pairing-token-store.js';
 import type { ExternalOperationSource } from '../../permissions/external-request.js';
 import { captureAutonomousSource, retainAutonomousSource } from '../../permissions/autonomous.js';
@@ -245,7 +244,7 @@ export function createNativeCiContinuationHost(deps: {
       if (!pairing || !owner.authority.issueContinuation || !owner.record.receipt || !ledgerSource) throw new Error('Native CI source has no transferable paired owner');
       const issue = captureNativeCiIssue(2, { projectId: deps.projectId, originalKey: owner.record.request.key, originalPayloadRevision: durablePayloadRevision(owner.record.request), ledgerSource: nativeCiLedgerSourceMetadata(ledgerSource),
         principalId: pairing.principalId, authorityRevision: pairing.authorityRevision, authorityScopes: [...pairing.scopes],
-        scopeId: scope.scopeId, scopeRevision: scope.scopeRevision, policyRevision: policy.capture(2), successorAttemptId: 'attempt-ci-' + opaqueUuid(), successorSourceBinding: randomBytes(32).toString('hex') });
+        scopeId: scope.scopeId, scopeRevision: scope.scopeRevision, policyRevision: policy.capture(2), successorAttemptId: 'attempt-ci-' + randomUUID(), successorSourceBinding: randomBytes(32).toString('hex') });
       const validate = () => { owner.assertCurrent(); originalOperation.assertCurrent(); originalOperation.signal?.throwIfAborted();
         if (policy.current(2) !== issue.policyRevision || !isDeepStrictEqual(deps.scopes.currentScope(deps.projectRoot), scope)) throw new Error('Native CI issuance scope changed'); };
       validate();

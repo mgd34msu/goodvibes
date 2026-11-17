@@ -1,7 +1,6 @@
 /** Explicit original-source submission. This service never starts an executor. */
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { realpathSync } from 'node:fs';
 import type { NativeExecutionScopeOwner, NativePairedExecutionAuthority, NativePairedExecutionSnapshot } from './native-execution.js';
 import type { WorkLedgerAuthority, WorkLedgerEvent, WorkLedgerService } from './types.js';
@@ -119,7 +118,7 @@ export function createNativeWorkSubmissionHost(deps: {
         signal.throwIfAborted(); if (!isAuthorized()) throw new NativeWorkSubmissionError('forbidden');
         if (existing) return replay(existing);
         const source = { version: 4 as const, inputId: captured.inputId, sessionId: deps.sessionId,
-          sourceId: opaqueUuid(), sourceRevision: opaqueUuid() };
+          sourceId: randomUUID(), sourceRevision: randomUUID() };
         const result = await deps.service.execute({ type: 'submit_native', requestId: captured.requestId, expectedRevision: captured.expectedRevision,
           title: captured.goal.trim(), goal: captured.goal, criteria: captured.criteria, source }, actor, { signal, isAuthorized });
         if (result.kind === 'indeterminate') throw new NativeWorkSubmissionError('indeterminate');

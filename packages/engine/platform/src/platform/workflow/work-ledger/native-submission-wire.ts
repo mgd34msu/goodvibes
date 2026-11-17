@@ -32,8 +32,8 @@ export const nativeWorkSubmissionReceiptSchema = strictObject({
   expectedRevision: strictObject({ work: revision, criteria: revision, attempt: revision }),
   source: union([
     strictObject({ version: literal(1), sourceId: id, sourceRevision: id, sessionId: id }),
-    strictObject({ version: literal(3), sourceId: string().regex(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/), sourceRevision: string().regex(/^[a-f0-9]{64}$/), sessionId: id }),
-    strictObject({ version: literal(4), sourceId: string().regex(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/), sourceRevision: string().regex(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/), sessionId: id }),
+    strictObject({ version: literal(3), sourceId: string().regex(/^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$/), sourceRevision: string().regex(/^[a-f0-9]{64}$/), sessionId: id }),
+    strictObject({ version: literal(4), sourceId: string().regex(/^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$/), sourceRevision: string().regex(/^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$/), sessionId: id }),
   ]),
   goal: text, criteria,
 });

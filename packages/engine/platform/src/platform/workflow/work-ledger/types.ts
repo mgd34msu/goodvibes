@@ -48,13 +48,13 @@ export const workLedgerExplicitSourceSchema = strictObject({
 /** Fresh explicit input identity. Historical v1 IDs and conversational v2
  * extraction receipts keep their existing formats and meanings. */
 export const workLedgerOpaqueExplicitSourceSchema = workLedgerExplicitSourceSchema.extend({
-  version: literal(3), sourceId: string().regex(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/), sourceRevision: string().regex(/^[a-f0-9]{64}$/),
+  version: literal(3), sourceId: string().regex(/^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$/), sourceRevision: string().regex(/^[a-f0-9]{64}$/),
 });
 /** Native-issued source identity and revision. The original event and client
  * receipt retain the full ordered input; ordinary revisions need no digest. */
 export const workLedgerNativeExplicitSourceSchema = workLedgerExplicitSourceSchema.extend({
-  version: literal(4), sourceId: string().regex(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/),
-  sourceRevision: string().regex(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/),
+  version: literal(4), sourceId: string().regex(/^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$/),
+  sourceRevision: string().regex(/^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$/),
 });
 export const workLedgerExtractedSourceSchema = strictObject({
   version: literal(2), sourceId: id, sourceRevision: id, inputId: id, sessionId: id,

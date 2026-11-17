@@ -95,9 +95,9 @@ const NON_CARD_INPUT_TYPES: ReadonlySet<string> = new Set([
  * What a snapshot does with one control's value:
  * - `reported`: the value is shown.
  * - `card-field`: a payment field; the value is never reported.
- * - `no-decision-model`: a digit-entry control nobody could read for card
- *   meaning because no decision model is available; the value is withheld and
- *   the element says so.
+ * - `no-decision-model`: a control code could not settle and nobody could read
+ *   for card meaning because no decision model is available; the value is
+ *   withheld and the element says so.
  */
 export type CardFieldDecision = 'reported' | 'card-field' | 'no-decision-model';
 

@@ -312,3 +312,14 @@ export function resetDecisionModelEpisode(): void {
 export function requireDecisionFeature(feature: string): void {
   if (isClassicOperation()) throw new DecisionModelsDisabledError(feature);
 }
+
+/**
+ * Ends a running decision phase once its operation has moved to no decision
+ * model (a sibling call found the set model failing under Hybrid), so no
+ * further request is made and `decisionOrClassic` runs the phase's no-model
+ * path. Only for code inside a phase that `decisionOrClassic` runs: the error
+ * is that function's signal and never reaches a user.
+ */
+export function endDecisionPhaseWithoutModel(phase: string): void {
+  if (isClassicOperation()) throw new DecisionModelsDisabledError(phase);
+}

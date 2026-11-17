@@ -4,7 +4,7 @@ import { currentExecutionMode, withInvocationExecutionMode } from '../gate/execu
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { judgmentPort, DecisionModelsDisabledError, createSharedRegexTester, type SharedRegexTester } from '@goodvibes-jev/engine/errors';
-import { isClassicOperation, requireDecisionFeature } from '../runtime/decision-policy.js';
+import { endDecisionPhaseWithoutModel, isClassicOperation } from '../runtime/decision-policy.js';
 import {
   ToolInputProjectionError, assertProjectionCurrent, assertProjectionSignal, captureProjectionArgs, captureProjectionStructure,
   combineProjectionSignals, projectionContext, projectionFunction, projectionProperty, projectionSignal,
@@ -831,11 +831,12 @@ export class ToolRegistry {
       async ask(request) {
         const prior = request.beforeAttempt;
         assertProjectionSignal(record.preparationSignal);
-        requireDecisionFeature('semantic tool argument repair; supply exact schema parameters');
+        // An operation that moved to no decision model ends repair's reading phase: the no-model repair path finishes the call.
+        endDecisionPhaseWithoutModel('tool argument repair');
         // The call is verified once its preparation ends; here only its signal stops a request for a cancelled call.
         const result = await port().ask({ ...request, beforeAttempt() {
           assertSynchronousJudgmentGuard(() => prior?.()); assertProjectionSignal(record.preparationSignal);
-          requireDecisionFeature('semantic tool argument repair; supply exact schema parameters');
+          endDecisionPhaseWithoutModel('tool argument repair');
         } });
         if (inner && !result.decisionId) throw new JudgmentError('unrecorded', 'argument repair has no recorded provenance');
         if (result.decisionId) ids.push(result.decisionId);

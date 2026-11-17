@@ -6,7 +6,7 @@ import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
 import { paramFill, paramFillCandidate, paramFillContext } from './batteries/param-fill.js';
 import { booleanValue, booleanValueView } from './batteries/boolean-value.js';
-import { decisionOrClassic, isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { decisionOrClassic, endDecisionPhaseWithoutModel, isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 
 const PARAM_FILL_SITE = 'tools.auto-repair.param-fill';
 const BOOLEAN_VALUE_SITE = 'tools.auto-repair.boolean-value';
@@ -163,10 +163,12 @@ async function repairOwnedToolCall(
   }
 
   const warnings: string[] = [];
+  // Without a decision model the format repairs above stand, and the values only a reading could settle
+  // are left as sent: the call goes on to schema validation, whose error names what to supply.
   const classic = () => {
     assertRepairActive(signal);
     if (booleanStrings.length || required.some(key => !(key in fixed) && properties[key]?.['type'] === 'string')) {
-      warnings.push('Without a decision model, only local format repairs are available. Supply exact boolean values and required parameters; unresolved values are left unchanged.');
+      warnings.push('No decision model is in use, so only format repairs were made: boolean words and missing required parameters were left as sent. Supply exact boolean values and required parameters.');
     }
   };
   // Only the pure interpretation phase can fall back. No tool executes here.
@@ -458,10 +460,12 @@ function assertRepairActive(signal?: AbortSignal): void {
 /**
  * Interrupt the ask, before the battery can attach readings or apply an
  * answer. The existing wait helper drains late rejections and removes this
- * caller's listener; it never cancels another caller's reading.
+ * caller's listener; it never cancels another caller's reading. An operation
+ * that moved to no decision model ends the repair's reading phase, so the
+ * no-model repair path finishes the call (even with a caller-supplied port).
  */
 function repairPort(site: string, signal?: AbortSignal, scopedPort?: JudgmentPort): JudgmentPort {
-  const current = () => { assertRepairActive(signal); requireDecisionFeature('semantic tool argument repair; supply exact schema parameters'); };
+  const current = () => { assertRepairActive(signal); endDecisionPhaseWithoutModel('tool argument repair'); };
   current();
   const port = scopedPort ?? judgmentPort(site);
   const recorder = port.recorder;

@@ -5,9 +5,7 @@ import type {
   KnowledgeSourceRecord,
 } from '../types.js';
 import { getKnowledgeSpaceId, isKnowledgeIssueFamilyName, knowledgeSpaceMetadata, normalizeKnowledgeSpaceId } from '../spaces.js';
-
-export const MAX_SEMANTIC_SOURCE_CHARS = 28_000;
-export const MAX_ANSWER_EVIDENCE_CHARS = 24_000;
+import { tokenize } from '../shared.js';
 
 const STOPWORDS = new Set([
   'a',
@@ -90,21 +88,9 @@ export function uniqueStrings(values: readonly (string | undefined | null)[]): s
   return out;
 }
 
+/** The knowledge search terms of `value` (any script), without English stop words. */
 export function tokenizeSemanticQuery(value: string): string[] {
-  return uniqueStrings(value
-    .toLowerCase()
-    .split(/[^a-z0-9_.:-]+/)
-    .filter((token) => token.length >= 2 && !STOPWORDS.has(token)));
-}
-
-export function scoreSemanticText(value: string | undefined, tokens: readonly string[]): number {
-  const lower = (value ?? '').toLowerCase();
-  if (!lower || tokens.length === 0) return 0;
-  let score = 0;
-  for (const token of tokens) {
-    if (lower.includes(token)) score += token.length >= 5 ? 12 : 6;
-  }
-  return score;
+  return uniqueStrings(tokenize(value).filter((token) => !STOPWORDS.has(token)));
 }
 
 export function sourceSemanticText(source: KnowledgeSourceRecord, extraction?: KnowledgeExtractionRecord | null): string {

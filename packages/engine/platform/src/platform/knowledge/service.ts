@@ -110,7 +110,8 @@ import { extractKnowledgeArtifact } from './extractors.js';
 import {
   DEFAULT_PACKET_BUDGET,
   DEFAULT_PACKET_LIMIT,
-  tokenize,
+  knowledgeQueryTerms,
+  matchesKnowledgeQuery,
 } from './shared.js';
 import { isGeneratedKnowledgeSource } from './generated-projections.js';
 import {
@@ -364,28 +365,27 @@ export class KnowledgeService {
     const selection = await prepareKnowledgeScopeSelection(this.store, input, options);
     const limit = Math.max(1, request.limit ?? 100);
     const offset = Math.max(0, request.offset ?? 0);
-    const queryTokens = tokenize(request.query ?? '');
+    const queryTerms = knowledgeQueryTerms(request.query);
     const items = selection.sources.filter((source) => {
       if (!selection.source(source)) return false;
       if (request.status && source.status !== request.status) return false;
       if (request.connectorId && source.connectorId !== request.connectorId) return false;
       if (request.sourceType && source.sourceType !== request.sourceType) return false;
       if (request.tag && !source.tags.includes(request.tag)) return false;
-      if (queryTokens.length === 0) return true;
+      if (queryTerms === undefined) return true;
       const extraction = this.store.getExtractionBySourceId(source.id);
-      const haystack = [
-        source.title ?? '',
-        source.summary ?? '',
-        source.description ?? '',
-        source.sourceUri ?? '',
-        source.canonicalUri ?? '',
-        source.folderPath ?? '',
-        source.tags.join(' '),
-        extraction?.summary ?? '',
-        extraction?.excerpt ?? '',
-        extraction?.sections.join(' ') ?? '',
-      ].join(' ').toLowerCase();
-      return queryTokens.every((token) => haystack.includes(token));
+      return matchesKnowledgeQuery(queryTerms, [
+        source.title,
+        source.summary,
+        source.description,
+        source.sourceUri,
+        source.canonicalUri,
+        source.folderPath,
+        ...source.tags,
+        extraction?.summary,
+        extraction?.excerpt,
+        ...(extraction?.sections ?? []),
+      ]);
     });
     selection.assertCurrent();
     if (request.after !== undefined) return { total: items.length, ...pageAfterKey(items, request.after, limit) };

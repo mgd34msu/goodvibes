@@ -1,7 +1,7 @@
 import { createKnowledgeNodeOperatorMutation } from './store-node-authority.js';
 import type { KnowledgeStore } from './store.js';
 import type { KnowledgeIssueRecord, KnowledgeNodeRecord } from './types.js';
-import { tokenize } from './shared.js';
+import { knowledgeQueryTerms, matchesKnowledgeQuery } from './shared.js';
 import type { KnowledgeScopeSelection } from './scope-selection.js';
 
 export interface KnowledgeNodeQueryInput {
@@ -32,7 +32,7 @@ export function queryKnowledgeNodes(
 ): { total: number; items: KnowledgeNodeRecord[] } {
   const limit = Math.max(1, input.limit ?? 100);
   const offset = Math.max(0, input.offset ?? 0);
-  const queryTokens = tokenize(input.query ?? '');
+  const queryTerms = knowledgeQueryTerms(input.query);
   // Honest default: forgotten/superseded ('stale') nodes are not served unless a
   // caller explicitly asks (status filter or includeStale), closes the GraphQL
   // serve-surface drift where `forget` hid a node from search but GraphQL still
@@ -43,9 +43,9 @@ export function queryKnowledgeNodes(
     if (input.kind && node.kind !== input.kind) return false;
     if (!includeStale && node.status === 'stale') return false;
     if (input.status && node.status !== input.status) return false;
-    if (queryTokens.length === 0) return true;
-    const haystack = [node.title, node.summary ?? '', node.aliases.join(' '), JSON.stringify(node.metadata)].join(' ').toLowerCase();
-    return queryTokens.every((token) => haystack.includes(token));
+    if (queryTerms === undefined) return true;
+    const subject = node.subject ?? (typeof node.metadata['subject'] === 'string' ? node.metadata['subject'] : undefined);
+    return matchesKnowledgeQuery(queryTerms, [node.title, node.summary, node.slug, subject, ...node.aliases]);
   });
   selection.assertCurrent();
   return { total: items.length, items: items.slice(offset, offset + limit) };
@@ -57,15 +57,13 @@ export function queryKnowledgeIssues(
 ): { total: number; items: KnowledgeIssueRecord[] } {
   const limit = Math.max(1, input.limit ?? 100);
   const offset = Math.max(0, input.offset ?? 0);
-  const queryTokens = tokenize(input.query ?? '');
+  const queryTerms = knowledgeQueryTerms(input.query);
   const items = selection.issues.filter((issue) => {
     if (!selection.issue(issue)) return false;
     if (input.severity && issue.severity !== input.severity) return false;
     if (input.status && issue.status !== input.status) return false;
     if (input.code && issue.code !== input.code) return false;
-    if (queryTokens.length === 0) return true;
-    const haystack = [issue.message, issue.code, JSON.stringify(issue.metadata)].join(' ').toLowerCase();
-    return queryTokens.every((token) => haystack.includes(token));
+    return matchesKnowledgeQuery(queryTerms, [issue.message, issue.code]);
   });
   selection.assertCurrent();
   return { total: items.length, items: items.slice(offset, offset + limit) };

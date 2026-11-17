@@ -39,12 +39,37 @@ export interface KnowledgeInjectionProvenance {
   readonly links: readonly ProvenanceLink[];
 }
 
+const NON_TERM = /[^\p{L}\p{M}\p{N}_./:-]+/u;
+// Scripts written without spaces between words: one character is a term.
+const UNSPACED_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
+
+/** One folding for terms and the text they are matched against, so composed and
+ * decomposed accents and full-width forms compare equal. */
+export function foldKnowledgeText(value: string): string {
+  return value.normalize('NFKC').toLowerCase();
+}
+
+/** Search terms in any script: letters, marks and digits (plus `_./:-` inside
+ * identifiers and paths), at least two characters, or one in an unspaced script. */
 export function tokenize(value: string): string[] {
-  return value
-    .toLowerCase()
-    .split(/[^a-z0-9_./:-]+/)
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length >= 2);
+  return foldKnowledgeText(value)
+    .split(NON_TERM)
+    .filter((entry) => entry.length >= 2 || (entry.length === 1 && UNSPACED_SCRIPT.test(entry)));
+}
+
+/** The terms of a listing's `query` filter: undefined when no query was given;
+ * an empty list when the query holds no usable term, which matches nothing. */
+export function knowledgeQueryTerms(query: string | undefined): readonly string[] | undefined {
+  if (query === undefined || query.trim() === '') return undefined;
+  return tokenize(query);
+}
+
+/** Whether every query term occurs in one of the named fields. */
+export function matchesKnowledgeQuery(terms: readonly string[] | undefined, fields: readonly (string | undefined)[]): boolean {
+  if (terms === undefined) return true;
+  if (terms.length === 0) return false;
+  const haystack = foldKnowledgeText(fields.filter((field): field is string => Boolean(field)).join('\n'));
+  return terms.every((term) => haystack.includes(term));
 }
 
 export function slugify(value: string): string {

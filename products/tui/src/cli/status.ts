@@ -13,7 +13,7 @@ import { serviceSettingsIssues, type CliServicePosture } from './service-posture
 import type { InstallSelfCheckFinding } from '../runtime/install-self-check.ts';
 import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers/provider-model';
 import { describeConfiguredEffort } from '../providers/reasoning-effort-surface.ts';
-import { describeCrashLog, summarizeCrashLog, surfaceCrashLogPath, type CrashLogSummary } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { describeCrashLog, summarizeCrashLog, surfaceCrashLogPath, type CrashLogSummary } from '@goodvibes-jev/engine/platform/platform/runtime/crash-capture';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 
 /** The marker that decides first-run state: the user's marker when its file exists. */

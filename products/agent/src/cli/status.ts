@@ -14,7 +14,7 @@ import { formatAgentRecordSource } from '@goodvibes-jev/engine/terminal-shell/ag
 import { formatAgentKnowledgeFailureKind } from '@goodvibes-jev/engine/terminal-shell/agent-turn/knowledge-format';
 import { readApprovalPostureFromConfig, type ApprovalPosture } from '../permissions/approval-posture.ts';
 import { appendTemporalLabel } from './temporal-label.ts';
-import { describeCrashLog, summarizeCrashLog, surfaceCrashLogPath, type CrashLogSummary } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { describeCrashLog, summarizeCrashLog, surfaceCrashLogPath, type CrashLogSummary } from '@goodvibes-jev/engine/platform/platform/runtime/crash-capture';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 
 /**

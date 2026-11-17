@@ -163,7 +163,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
       }
       case 'status': {
         const [{ runStatusCommand }, { surfaceCrashLogPath }] = await Promise.all([
-          import('../daemon/status-command.js'), import('@goodvibes-jev/engine/platform/platform/runtime/operations'),
+          import('../daemon/status-command.js'), import('@goodvibes-jev/engine/platform/platform/runtime/crash-capture'),
         ]);
         return result(await runStatusCommand({ ...remote, flags: remoteFlags,
           crashLogPath: surfaceCrashLogPath(homeDirectory, GOODVIBES_DAEMON_SURFACE_ROOT) }));

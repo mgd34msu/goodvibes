@@ -1037,6 +1037,11 @@
       "types": "./platform/dist/platform/runtime/install-kind.d.ts",
       "import": "./platform/dist/platform/runtime/install-kind.js"
     },
+    "./platform/platform/runtime/crash-capture": {
+      "bun": "./platform/src/platform/runtime/crash-capture.ts",
+      "types": "./platform/dist/platform/runtime/crash-capture.d.ts",
+      "import": "./platform/dist/platform/runtime/crash-capture.js"
+    },
     "./platform/platform/config/secret-bearing-config-keys": {
       "bun": "./platform/src/platform/config/secret-bearing-config-keys.ts",
       "types": "./platform/dist/platform/config/secret-bearing-config-keys.d.ts",

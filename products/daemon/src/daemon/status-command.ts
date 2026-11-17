@@ -30,7 +30,7 @@
  * line saying it failed; only an unreachable daemon is a failed command.
  */
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { describeCrashLog, summarizeCrashLog, type CrashLogSummary } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { describeCrashLog, summarizeCrashLog, type CrashLogSummary } from '@goodvibes-jev/engine/platform/platform/runtime/crash-capture';
 import { resolveRemoteDaemonTarget } from '@goodvibes-jev/engine/terminal-shell/cluster-remote-daemon-target';
 import type { DaemonFailureCode, DaemonFetch, DaemonVerbOutcome, RemoteDaemonTarget } from '@goodvibes-jev/engine/terminal-shell';
 import { callDaemonMethod, callDaemonRoute } from '@goodvibes-jev/engine/terminal-shell/raw-reply-route';

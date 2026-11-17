@@ -3497,6 +3497,11 @@
       "types": "./terminal-shell/dist/plugin-trust-command.d.ts",
       "import": "./terminal-shell/dist/plugin-trust-command.js"
     },
+    "./terminal-shell/plugin-bundles-command": {
+      "bun": "./terminal-shell/src/plugin-bundles-command.ts",
+      "types": "./terminal-shell/dist/plugin-bundles-command.d.ts",
+      "import": "./terminal-shell/dist/plugin-bundles-command.js"
+    },
     "./terminal-shell/security-command": {
       "bun": "./terminal-shell/src/security-command.ts",
       "types": "./terminal-shell/dist/security-command.d.ts",

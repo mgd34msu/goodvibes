@@ -74,6 +74,7 @@ export function renderGoodVibesHelp(binary = 'goodvibes-agent'): string {
     '  channel-profiles           Manage per-channel model/provider/permission-mode defaults',
     '  workspaces                 Manage which workspaces get automatic checkpoints',
     '  browser                    Drive a real browser from the shell (status|provision|open <url>|read <url>)',
+    '  plugin bundles ...         Browse/install/uninstall/list SHA-256-pinned capability bundles',
     "  relay                      Show the connected host's relay registration and pairing (status|pair)",
     "  fleet                      Review and resolve the connected host's best-of-N attempt groups",
     '  auth                       Inspect Agent auth posture and connection token state',
@@ -454,6 +455,22 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'Drive a real browser from the shell, through the same tool the model calls. `status` reports whether the driver and browser are present and, when they are not, exactly what is missing and what to do; `provision` performs the one-act setup with every step visible; `open` and `read` prove the whole path on a real page without needing a model, a provider, or an API key.',
     examples: ['browser status', 'browser provision', 'browser open https://example.com', 'browser read https://example.com'],
   },
+  plugin: {
+    usage: [
+      'plugin bundles browse <index-url-or-file>',
+      'plugin bundles install <ref> --sha256 <pin> [--ref <git-ref>] [--yes]',
+      'plugin bundles uninstall <id>',
+      'plugin bundles list',
+    ],
+    summary:
+      'Browse a governed marketplace index, install a SHA-256-pinned capability bundle, remove one, or list the installed ones. An install is never unpinned: a missing or mismatched --sha256 is refused, not overridable. Without --yes, install prints the activation plan (granted, withheld and quarantined capabilities) and changes nothing; with --yes it installs that plan and writes the receipt the plugin loader enforces. /plugin trust <name> <tier> sets what an installed plugin may register.',
+    examples: [
+      'plugin bundles browse ./marketplace-index.json',
+      'plugin bundles install ./bundle.json --sha256 <64-hex>',
+      'plugin bundles install ./bundle.json --sha256 <64-hex> --yes',
+      'plugin bundles list',
+    ],
+  },
   relay: {
     usage: ['relay status', 'relay pair'],
     summary:
@@ -574,6 +591,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
 };
 
 const HELP_ALIASES: Record<string, string> = {
+  plugins: 'plugin',
   exec: 'run',
   e: 'run',
   onboarding: 'setup',

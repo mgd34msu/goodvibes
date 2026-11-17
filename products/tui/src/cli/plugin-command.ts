@@ -6,7 +6,7 @@ import { validateManifestV2 } from '@/runtime/index.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { formatRefusal, RefusalError } from '@goodvibes-jev/engine/errors';
 import type { CliCommandOutput, CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
-import { handlePluginBundlesCommand } from './plugin-bundles-command.ts';
+import { handlePluginBundlesCommand } from '@goodvibes-jev/engine/terminal-shell/plugin-bundles-command';
 import { pluginTrustConfirmation, runPluginTrustSubcommand, type PluginTrustControls } from '@goodvibes-jev/engine/terminal-shell/plugin-trust-command';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 
@@ -236,10 +236,14 @@ export async function handlePluginCommand(runtime: CliCommandRuntime): Promise<C
     return renderValidation(validatePluginDirectory(target), json);
   }
   if (sub === 'bundles') {
-    return handlePluginBundlesCommand(runtime, runtime.cli.commandArgs.slice(1));
+    return handlePluginBundlesCommand(runtime, runtime.cli.commandArgs.slice(1), {
+      binary: 'goodvibes',
+      confirmed: runtime.cli.flags.yes,
+      rollbackHint: (receipt) => `/marketplace rollback ${receipt.kind} ${receipt.entry.id} ${receipt.scope}`,
+    });
   }
   if (sub === 'trust' || sub === 'verify' || sub === 'capabilities') {
     return handlePluginTrustCli(runtime, runtime.cli.commandArgs);
   }
-  return { output: 'Usage: goodvibes plugin [init <name> [directory]|validate <path>|bundles browse|install|list|trust <name> <tier>|verify <name>|capabilities <name>]', exitCode: 2 };
+  return { output: 'Usage: goodvibes plugin [init <name> [directory]|validate <path>|bundles browse|install|uninstall|list|trust <name> <tier>|verify <name>|capabilities <name>]', exitCode: 2 };
 }

@@ -49,6 +49,7 @@ import { handleOwnerProfileCommand } from './owner-profile-command.ts';
 import { handleChannelProfilesCommand } from './channel-profiles-command.ts';
 import { handleWorkspacesCommand } from './workspaces-command.ts';
 import { handleBrowserCommand } from './browser-command.ts';
+import { handlePluginBundlesCommand } from '@goodvibes-jev/engine/terminal-shell/plugin-bundles-command';
 import { handleRelayCommand } from './relay-command.ts';
 import { handleFleetCommand } from './fleet-command.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
@@ -274,6 +275,14 @@ export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Pro
       }
       case 'browser': {
         const result = await handleBrowserCommand(runtime);
+        console.log(result.output);
+        return { handled: true, exitCode: result.exitCode };
+      }
+      case 'plugin': {
+        const [sub, ...rest] = runtime.cli.commandArgs;
+        const result = sub === 'bundles'
+          ? await handlePluginBundlesCommand(runtime, rest, { binary: runtime.cli.binary, confirmed: rest.includes('--yes') })
+          : { output: `Usage: ${runtime.cli.binary} plugin bundles browse <index-url-or-file>|install <ref> --sha256 <pin> [--ref <git-ref>] [--yes]|uninstall <id>|list`, exitCode: 2 };
         console.log(result.output);
         return { handled: true, exitCode: result.exitCode };
       }

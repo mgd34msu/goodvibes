@@ -54,7 +54,7 @@ goodvibes --resume user-sess-1234
 
 ### `--yes`, `-y`
 
-Most CLI commands act immediately and never ask for confirmation, so this flag has no effect on them. It has an effect on two lines. On `plugin bundles install`, without it the command only verifies the bundle and prints the activation plan, and with it the bundle is installed: its files are unpacked into the same install directory `/marketplace` uses (`.goodvibes/plugins`, `skills`, `hooks/packs` or `policies/packs`), with an install receipt that records the pin and the granted and withheld capabilities. `/marketplace rollback`, `history` and `uninstall` work on it like any installed entry.
+Most CLI commands act immediately and never ask for confirmation, so this flag has no effect on them. It has an effect on two lines. On `plugin bundles install`, without it the command only verifies the bundle and prints the activation plan, and with it the bundle is installed: its files are unpacked into the same install directory `/marketplace` uses (`.goodvibes/plugins`, `skills`, `hooks/packs` or `policies/packs`), with an install receipt that records the pin and the granted and withheld capabilities. `/marketplace rollback`, `history` and `uninstall` work on it like any installed entry, and `goodvibes plugin bundles uninstall <id>` removes it from the command line (`goodvibes-agent plugin bundles` takes the same words).
 
 ```sh
 goodvibes plugin bundles install <ref> --sha256 <pin>          # preview only

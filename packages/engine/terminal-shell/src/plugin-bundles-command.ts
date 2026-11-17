@@ -1,4 +1,5 @@
-import { commandJsonOrText as formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
+import { commandJsonOrText as formatJsonOrText } from './cli-output.js';
+import type { CliCommandOutput } from './cli-types.js';
 import { readFileSync } from 'node:fs';
 import {
   parseMarketplaceIndex,
@@ -8,26 +9,42 @@ import {
   planBundleActivation,
   installVerifiedBundle,
   listInstalledEcosystemEntries,
+  uninstallEcosystemCatalogEntry,
   BundlePinRefusal,
   type PinnedBundleSource,
   type PinnedMarketplaceIndexEntry,
   type BundleActivationPlan,
   type EcosystemInstallReceipt,
 } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { CliCommandOutput, CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 
 // ---------------------------------------------------------------------------
-// `goodvibes plugin bundles browse|install|list`, the capability-bundle
-// marketplace surface. Extends the existing plugin-command.ts family with the
-// platform's SHA-256-pinned bundle distribution (platform/runtime/ecosystem):
-// parseMarketplaceIndex, fetchAndVerifyBundle, planBundleActivation. There is
-// deliberately NO flag that bypasses a pin mismatch, `install` either
-// verifies or refuses; `--yes` only confirms an ALREADY-verified activation
-// plan, it never substitutes for the pin. A confirmed install unpacks the
-// verified archive into the same install directories, receipts, backups and
-// rollback `/marketplace` uses; the receipt carries the pin and the grant.
+// `<binary> plugin bundles browse|install|uninstall|list`, the capability-bundle
+// marketplace surface of both terminal apps, over the platform's SHA-256-pinned
+// bundle distribution (platform/runtime/ecosystem): parseMarketplaceIndex,
+// fetchAndVerifyBundle, planBundleActivation. There is deliberately NO flag
+// that bypasses a pin mismatch, `install` either verifies or refuses; `--yes`
+// only confirms an ALREADY-verified activation plan, it never substitutes for
+// the pin. A confirmed install unpacks the verified archive into the same
+// install directories, receipts, backups and rollback the catalog uses; the
+// receipt carries the pin and the grant the plugin loader enforces.
 // ---------------------------------------------------------------------------
+
+/** What the command reads from the process it runs in. */
+export interface PluginBundlesRuntime {
+  readonly cli: { readonly flags: { readonly outputFormat?: string | undefined } };
+  readonly workingDirectory: string;
+  readonly homeDirectory: string;
+}
+
+export interface PluginBundlesOptions {
+  /** The program name usage lines and undo hints print (`goodvibes`, `goodvibes-agent`). */
+  readonly binary: string;
+  /** The owner confirmed the activation plan (`--yes`). */
+  readonly confirmed: boolean;
+  /** A product's own way back to the previous install, printed beside uninstall. */
+  readonly rollbackHint?: ((receipt: EcosystemInstallReceipt) => string) | undefined;
+}
 
 /** A source is a git remote when a ref is given, an http(s) URL, or a file path. */
 function inferSourceKind(ref: string, gitRef: string | undefined): PinnedBundleSource['kind'] {
@@ -35,7 +52,7 @@ function inferSourceKind(ref: string, gitRef: string | undefined): PinnedBundleS
   return ref.startsWith('http://') || ref.startsWith('https://') ? 'url' : 'file';
 }
 
-function ecosystemPaths(runtime: CliCommandRuntime): { cwd: string; homeDir: string } {
+function ecosystemPaths(runtime: PluginBundlesRuntime): { cwd: string; homeDir: string } {
   return { cwd: runtime.workingDirectory, homeDir: runtime.homeDirectory };
 }
 
@@ -60,8 +77,8 @@ function summarizeCapabilities(summary: PinnedMarketplaceIndexEntry['capabilitie
   return parts.join(' ');
 }
 
-async function handleBrowse(runtime: CliCommandRuntime, ref: string | undefined): Promise<CliCommandOutput> {
-  if (!ref) return { output: 'Usage: goodvibes plugin bundles browse <index-url-or-file>', exitCode: 2 };
+async function handleBrowse(runtime: PluginBundlesRuntime, options: PluginBundlesOptions, ref: string | undefined): Promise<CliCommandOutput> {
+  if (!ref) return { output: `Usage: ${options.binary} plugin bundles browse <index-url-or-file>`, exitCode: 2 };
   let raw: string;
   try {
     raw = await readIndexBytes(ref);
@@ -129,10 +146,16 @@ function renderPlan(plan: BundleActivationPlan, committed: boolean): string {
   return lines.join('\n');
 }
 
-async function handleInstall(runtime: CliCommandRuntime, ref: string | undefined, sha256: string | undefined, gitRef: string | undefined): Promise<CliCommandOutput> {
+async function handleInstall(
+  runtime: PluginBundlesRuntime,
+  options: PluginBundlesOptions,
+  ref: string | undefined,
+  sha256: string | undefined,
+  gitRef: string | undefined,
+): Promise<CliCommandOutput> {
   if (!ref || !sha256) {
     return {
-      output: 'Usage: goodvibes plugin bundles install <ref> --sha256 <pin> [--ref <git-ref>]  (the pin is required; there is no unpinned install path)',
+      output: `Usage: ${options.binary} plugin bundles install <ref> --sha256 <pin> [--ref <git-ref>] [--yes]  (the pin is required; there is no unpinned install path)`,
       exitCode: 2,
     };
   }
@@ -172,7 +195,7 @@ async function handleInstall(runtime: CliCommandRuntime, ref: string | undefined
   // --yes installs the plan as shown, quarantine included: the withheld
   // capabilities stay withheld in the receipt, so a script or agent that
   // passed --yes gets the same install a person at a terminal would.
-  const committed = runtime.cli.flags.yes;
+  const committed = options.confirmed;
   if (!committed) return { output: formatJsonOrText(runtime, { ok: true, committed, plan }, renderPlan(plan, false)), exitCode: 0 };
   const { manifest } = plan;
   const installed = installVerifiedBundle({
@@ -192,18 +215,20 @@ async function handleInstall(runtime: CliCommandRuntime, ref: string | undefined
     },
   }, ecosystemPaths(runtime));
   if (!installed.ok) return { output: formatJsonOrText(runtime, { ok: false, error: installed.error }, installed.error), exitCode: 1 };
-  const text = `${renderPlan(plan, true)}\n  installed at: ${installed.receipt.targetPath}\n  undo: /marketplace rollback ${manifest.kind} ${manifest.id} ${installed.receipt.scope} (or uninstall)`;
+  const uninstall = `${options.binary} plugin bundles uninstall ${manifest.id}`;
+  const undo = options.rollbackHint ? `${uninstall} (or ${options.rollbackHint(installed.receipt)})` : uninstall;
+  const text = `${renderPlan(plan, true)}\n  installed at: ${installed.receipt.targetPath}\n  undo: ${undo}`;
   return { output: formatJsonOrText(runtime, { ok: true, committed, plan, receipt: installed.receipt }, text), exitCode: 0 };
 }
 
-function installedBundles(runtime: CliCommandRuntime): EcosystemInstallReceipt[] {
+function installedBundles(runtime: PluginBundlesRuntime): EcosystemInstallReceipt[] {
   const paths = ecosystemPaths(runtime);
   return (['plugin', 'skill', 'hook-pack', 'policy-pack'] as const)
     .flatMap((kind) => listInstalledEcosystemEntries(kind, paths))
     .filter((receipt) => receipt.bundle !== undefined);
 }
 
-function handleList(runtime: CliCommandRuntime): CliCommandOutput {
+function handleList(runtime: PluginBundlesRuntime): CliCommandOutput {
   const receipts = installedBundles(runtime);
   if (receipts.length === 0) {
     return { output: formatJsonOrText(runtime, receipts, 'No capability bundles installed.'), exitCode: 0 };
@@ -221,9 +246,27 @@ function handleList(runtime: CliCommandRuntime): CliCommandOutput {
   return { output: formatJsonOrText(runtime, receipts, lines.join('\n')), exitCode: 0 };
 }
 
-export async function handlePluginBundlesCommand(runtime: CliCommandRuntime, args: readonly string[]): Promise<CliCommandOutput> {
+/** Removes an installed bundle, found by its id among the bundle receipts (kind and scope come from the receipt). */
+function handleUninstall(runtime: PluginBundlesRuntime, options: PluginBundlesOptions, id: string | undefined): CliCommandOutput {
+  if (!id) return { output: `Usage: ${options.binary} plugin bundles uninstall <id>`, exitCode: 2 };
+  const matches = installedBundles(runtime).filter((receipt) => receipt.entry.id === id);
+  if (matches.length === 0) {
+    return { output: formatJsonOrText(runtime, { ok: false, error: 'not_installed', id }, `No capability bundle '${id}' is installed. ${options.binary} plugin bundles list shows the installed ones.`), exitCode: 1 };
+  }
+  if (matches.length > 1) {
+    const found = matches.map((receipt) => `${receipt.kind} (${receipt.scope})`).join(', ');
+    return { output: formatJsonOrText(runtime, { ok: false, error: 'ambiguous', id, matches: matches.map((receipt) => ({ kind: receipt.kind, scope: receipt.scope })) }, `More than one bundle is installed as '${id}': ${found}. Remove the one you mean from its install directory.`), exitCode: 1 };
+  }
+  const receipt = matches[0]!;
+  const removed = uninstallEcosystemCatalogEntry(receipt.kind, receipt.entry.id, { ...ecosystemPaths(runtime), scope: receipt.scope });
+  if (!removed.ok) return { output: formatJsonOrText(runtime, { ok: false, error: removed.error }, removed.error), exitCode: 1 };
+  return { output: formatJsonOrText(runtime, { ok: true, id, kind: receipt.kind, scope: receipt.scope, removedPath: removed.removedPath }, `Uninstalled capability bundle ${id} (${receipt.kind}, ${receipt.scope}) from ${removed.removedPath}.`), exitCode: 0 };
+}
+
+/** `<binary> plugin bundles ...`: `args` are the words after `bundles`. */
+export async function handlePluginBundlesCommand(runtime: PluginBundlesRuntime, args: readonly string[], options: PluginBundlesOptions): Promise<CliCommandOutput> {
   const [sub, ...rest] = args;
-  if (sub === 'browse') return handleBrowse(runtime, rest[0]);
+  if (sub === 'browse') return handleBrowse(runtime, options, rest[0]);
   if (sub === 'install') {
     const valueFlags = new Set<number>();
     const flag = (name: string): string | undefined => {
@@ -235,8 +278,12 @@ export async function handlePluginBundlesCommand(runtime: CliCommandRuntime, arg
     const sha256 = flag('--sha256');
     const gitRef = flag('--ref');
     const ref = rest.find((token, i) => !valueFlags.has(i) && !token.startsWith('-'));
-    return handleInstall(runtime, ref, sha256, gitRef);
+    return handleInstall(runtime, options, ref, sha256, gitRef);
   }
+  if (sub === 'uninstall' || sub === 'remove') return handleUninstall(runtime, options, rest.find((token) => !token.startsWith('-')));
   if (sub === 'list') return handleList(runtime);
-  return { output: 'Usage: goodvibes plugin bundles browse <index-url-or-file>|install <ref> --sha256 <pin> [--ref <git-ref>]|list', exitCode: 2 };
+  return {
+    output: `Usage: ${options.binary} plugin bundles browse <index-url-or-file>|install <ref> --sha256 <pin> [--ref <git-ref>] [--yes]|uninstall <id>|list`,
+    exitCode: 2,
+  };
 }

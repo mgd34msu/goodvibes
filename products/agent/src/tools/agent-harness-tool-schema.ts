@@ -152,6 +152,11 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
     type: 'number',
     description: 'Wait timeout in ms (0 = check once, capped at 600000); for a background start, 0 = no automatic deadline; also the local model smoke probe timeout.',
   },
+  lifetime: {
+    type: 'string',
+    enum: ['task', 'detached'],
+    description: 'Background start: task (default) ends with the Agent and at timeoutMs; detached keeps running after the Agent exits, logs to a file, and is listed and stoppable from later sessions.',
+  },
   pty: {
     type: 'boolean',
     description: 'Request PTY mode; reports unsupported unless the process capability report lists a PTY contract (process action:"capabilities").',

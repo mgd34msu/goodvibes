@@ -172,6 +172,13 @@ export interface SpawnOptions {
    */
   kill_on_close?: boolean | undefined;
   /**
+   * Start the child in its own session and process group although this runtime
+   * does not own its lifetime (`kill_on_close: false`), so closing the terminal
+   * or this runtime sends it nothing. An explicit stop still ends the whole group.
+   * POSIX only; ignored on Windows.
+   */
+  own_session?: boolean | undefined;
+  /**
    * Credential-bearing env-var scrub applied to the inherited base environment
    * before spawning. Defaults to enabled with an empty allowlist, so a
    * background process is protected even when a caller does not thread config.
@@ -395,6 +402,8 @@ export class ProcessManager {
     // Only runtime-owned commands receive an isolated POSIX session/group.
     // Never send a group signal for a borrowed lifetime or the caller's group.
     const ownsGroup = killOnClose && process.platform !== 'win32';
+    // A separately owned job in its own group: never signalled at close, stopped as a group when asked.
+    const ownSession = !ownsGroup && opts?.own_session === true && process.platform !== 'win32';
 
     const cleanEnv = Object.fromEntries(
       Object.entries(process.env).filter(([, v]) => v !== undefined),
@@ -434,7 +443,7 @@ export class ProcessManager {
       const spawnOptions = {
         ...(cwd !== undefined ? { cwd } : {}),
         env: mergedEnv,
-        detached: ownsGroup,
+        detached: ownsGroup || ownSession,
         // Closed by default. An unattended command that stops to ask for a
         // password gets EOF and fails instead of blocking forever.
         stdin: opts?.stdin ?? 'ignore',
@@ -538,7 +547,7 @@ export class ProcessManager {
         owner.stopRequested = true;
         clearTimeout(timeoutHandle);
         stopping = (async () => {
-          if (ownsGroup) {
+          if (ownsGroup || ownSession) {
             await stopOwnedGroup();
           } else if (proc.exitCode === null) {
             killTrackedProcess(proc, 'SIGTERM', id);

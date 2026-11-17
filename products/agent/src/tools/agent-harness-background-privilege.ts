@@ -1,57 +1,48 @@
-import { captureJudgmentPort, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { gateJudgmentRegistry } from '@goodvibes-jev/engine/platform/platform/gate';
 import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { redactSensitiveData } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { Battery, YesNoItem } from '@goodvibes-jev/judgment';
-import { captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
+import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 
-/** Reserved literal programs are local policy. Mentions inside arguments or
- * wrappers require interpretation of the complete screened command. The
- * interpretation only resolves this additional background-prompt restriction;
- * recorded execution admission remains independently mandatory. */
+/** Why a command's privilege needs are not known: Jev was not asked, or its reading did not settle. */
+export type PrivilegeAssessment = 'not-evaluated' | 'uncertain';
+
+/**
+ * Whether a background start would need a privilege prompt. A command whose
+ * program is sudo/su/doas/pkexec does, one that never names them does not;
+ * both are code. Only a command that mentions one in its arguments is read,
+ * once, by Jev (the command masked locally first). When that reading is not
+ * taken or does not settle, `privileged` is null with the reason, and the
+ * caller answers with its `blocked` shape; nothing is thrown.
+ */
 export async function withBackgroundPrivilegeCheck<T>(command: string, options: CatalogRankingOptions,
-  consume: (privileged: boolean | null, assertCurrent: () => void) => Promise<T>): Promise<T> {
-  return withConfiguredDecisionModelPolicy(async () => {
-    const optionsCurrent = captureCatalogMethods(options, ['signal', 'assertCurrent', 'sourceOwner', 'retainCurrent']);
-    const signal = options.signal, caller = options.assertCurrent;
-    const assertNativeCurrent = () => {
-      optionsCurrent(); signal?.throwIfAborted(); decisionModelPolicyState();
-      const result: unknown = caller?.();
-      if (result !== undefined) { drainOwned(result); throw new ToolInputProjectionError('held'); }
-      optionsCurrent(); signal?.throwIfAborted();
-    };
-    assertNativeCurrent();
-    const program = /^\s*(\S+)/.exec(command)?.[1]?.split('/').at(-1);
-    if (program && ['sudo', 'su', 'doas', 'pkexec'].includes(program)) return consume(true, assertNativeCurrent);
-    if (!/\b(?:sudo|su|doas|pkexec)\b/.test(command)) return consume(false, assertNativeCurrent);
-    // Unknown privilege requirements retain the foreground/owner restriction.
-    // This is not a semantic yes, and cannot authorize a background spawn.
-    if (isClassicOperation()) return consume(null, assertNativeCurrent);
-    return withModelReadingSource({ command }, options, async (captured, source) => {
-      const observed = await decisionOrClassic<{ privileged: boolean | null; assertCurrent: () => void }>(async () => {
-        const name = 'engine.gate.sandbox-needs', site = 'agent.background-process.privilege';
-        const decision = gateJudgmentRegistry.get(name);
-        if (!decision || !('run' in decision) || typeof decision.run !== 'function') throw new ToolInputProjectionError('unavailable');
-        const runMethod = decision.run;
-        const authority = captureJudgmentPort(site, source);
-        const assertCurrent = () => {
-          source.assertCurrent?.(); authority.assertCurrent();
-          if (gateJudgmentRegistry.get(name) !== decision || decision.run !== runMethod) throw new ToolInputProjectionError('held');
-        };
-        assertCurrent();
-        const run = await (decision as Battery<{ needsPrivilege: YesNoItem }>).run(authority.port, captured,
-          { site, only: ['needsPrivilege'], signal: authority.signal, beforeAttempt: assertCurrent });
-        assertCurrent();
-        const reading = run.readings.needsPrivilege;
-        if (reading.outcome !== 'act' || reading.verdict === 'uncertain') throw new ToolInputProjectionError('held');
-        run.recordAction(reading.verdict === 'yes' ? 'Keep the background privilege-prompt restriction.' : 'The command mention does not require background privilege.');
-        return { privileged: reading.verdict === 'yes', assertCurrent };
-      }, () => ({ privileged: null, assertCurrent: () => { assertNativeCurrent(); source.assertCurrent?.(); } }));
-      observed.assertCurrent();
-      // Consume exactly once, outside the availability fallback phase.
-      return consume(observed.privileged, observed.assertCurrent);
-    });
+  consume: (privileged: boolean | null, assertCurrent: () => void, assessment?: PrivilegeAssessment) => Promise<T>): Promise<T> {
+  const assertCurrent = (): void => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
+  assertCurrent();
+  const program = /^\s*(\S+)/.exec(command)?.[1]?.split('/').at(-1);
+  if (program && ['sudo', 'su', 'doas', 'pkexec'].includes(program)) return consume(true, assertCurrent);
+  if (!/\b(?:sudo|su|doas|pkexec)\b/.test(command)) return consume(false, assertCurrent);
+  if (isClassicOperation()) return consume(null, assertCurrent, 'not-evaluated');
+  const privileged = await withConfiguredDecisionModelPolicy(() => decisionOrClassic<boolean | 'uncertain' | null>(async () => {
+    const decision = gateJudgmentRegistry.get('engine.gate.sandbox-needs');
+    if (!decision || !('run' in decision) || typeof decision.run !== 'function') return null;
+    const site = 'agent.background-process.privilege';
+    const authority = captureJudgmentPort(site, { signal: options.signal });
+    try {
+      const run = await (decision as Battery<{ needsPrivilege: YesNoItem }>).run(authority.port, { command: redactSensitiveData(command) },
+        { site, only: ['needsPrivilege'], signal: authority.signal });
+      const reading = run.readings.needsPrivilege;
+      if (reading.outcome !== 'act' || reading.verdict === 'uncertain') return 'uncertain';
+      run.recordAction(reading.verdict === 'yes' ? 'Keep the background privilege-prompt restriction.' : 'The command mention does not require background privilege.');
+      return reading.verdict === 'yes';
+    } finally { authority.consumeObservation(); }
+  }, () => null)).catch((error: unknown) => {
+    if (options.signal?.aborted) throw error;
+    return null;
   });
+  assertCurrent();
+  if (privileged === 'uncertain') return consume(null, assertCurrent, 'uncertain');
+  if (privileged === null) return consume(null, assertCurrent, 'not-evaluated');
+  return consume(privileged, assertCurrent);
 }

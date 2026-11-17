@@ -3,13 +3,14 @@ import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platfor
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { realpathSync } from 'node:fs';
 import { relative } from 'node:path';
+import { homedir } from 'node:os';
 import { mapLimit } from '@goodvibes-jev/judgment';
-import { redactSensitiveDataAsync, resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
+import { redactSensitiveData, resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
-import { captureCatalogData, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { processClassificationOptions, spawnClassifiedBackgroundProcess } from './agent-harness-process-launch.ts';
-import type { ProcessClassificationOptions } from './agent-harness-process-classification.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { processClassificationOptions, spawnBackgroundProcess, type ProcessClassificationOptions } from './agent-harness-process-launch.ts';
+import { detachedProcessLogPath, findDetachedProcess, forgetDetachedProcess, listDetachedProcesses, readDetachedProcessLog, recordDetachedProcess, stopDetachedProcess,
+  type DetachedProcessRecord } from './agent-harness-detached-processes.ts';
 import { operatorContractMethods, type OperatorContractMethodEntry } from '../agent/operator-contract-routes.ts';
 import type { BackgroundProcess, ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
@@ -144,11 +145,11 @@ function processSubstrateReport(context?: CommandContext): Record<string, unknow
   };
 }
 
-function tailText(value: string, max: number): string {
-  if (value.length <= max) return value;
-  return value.slice(Math.max(0, value.length - max)).trimStart();
-}
-
+/**
+ * The last `max` characters of a stream, starting at a line boundary, masked
+ * locally. Only the tail is masked: its cost follows the preview, not the
+ * output the process has printed. Counts are of the raw stream.
+ */
 function outputTail(value: string, max: number): {
   readonly text: string;
   readonly chars: number;
@@ -156,10 +157,16 @@ function outputTail(value: string, max: number): {
   readonly truncated: boolean;
   readonly omittedChars: number;
 } {
-  const text = tailText(value, max);
-  const omittedChars = Math.max(0, value.length - text.length);
+  let tail = value;
+  if (value.length > max) {
+    tail = value.slice(value.length - max);
+    // Start at a line boundary so a credential cut in half is not shown half masked.
+    const newline = tail.indexOf('\n');
+    tail = newline >= 0 && newline < tail.length - 1 ? tail.slice(newline + 1) : tail.trimStart();
+  }
+  const omittedChars = Math.max(0, value.length - tail.length);
   return {
-    text,
+    text: redactSensitiveData(tail),
     chars: value.length,
     bytes: Buffer.byteLength(value),
     truncated: omittedChars > 0,
@@ -191,31 +198,25 @@ async function describeProcessEntry(
   entry: BackgroundProcess,
   options: CatalogRankingOptions & { readonly includeParameters?: boolean; readonly lookup?: Record<string, unknown> } = {},
 ): Promise<Record<string, unknown>> {
-  const assertSource = retainProcessSources(context, manager, captureCatalogData([processCatalogEntry(entry)]), options, entry.id);
-  const assertCurrent = () => { options.assertCurrent?.(); assertSource(); };
-  assertCurrent();
+  options.signal?.throwIfAborted();
+  const detached = context.workspace.shellPaths ? findDetachedProcess(context.workspace.shellPaths, entry.id) : undefined;
   const output = manager.getOutput(entry.id) ?? { stdout: '', stderr: '' };
-  // Read complete captured strings before preview limits. Secret-bearing
-  // spans stay local; only canonical protected projections reach Jev.
-  const [command, protectedStdout, protectedStderr] = await Promise.all([entry.cmd, output.stdout, output.stderr]
-    .map(text => redactSensitiveDataAsync(text, { signal: options.signal, assertCurrent })));
-  assertCurrent();
+  const command = redactSensitiveData(entry.cmd);
   const maxOutputChars = options.includeParameters ? MAX_LOG_PREVIEW_CHARS : MAX_COMPACT_LOG_PREVIEW_CHARS;
-  const stdout = outputTail(protectedStdout!, maxOutputChars);
-  const stderr = outputTail(protectedStderr!, maxOutputChars);
+  const stdout = outputTail(output.stdout, maxOutputChars);
+  const stderr = outputTail(output.stderr, maxOutputChars);
   const includeOutput = options.includeParameters === true || Boolean(stdout.text || stderr.text);
   return {
     processId: entry.id,
-    processSessionId: entry.id,
-    sessionId: entry.id,
-    session_id: entry.id,
+    lifetime: detached ? 'detached' : 'task',
+    ...(detached ? { log: detachedLogView(detached, maxOutputChars) } : {}),
     pid: entry.pid,
     status: processStatus(entry),
     done: entry.done,
     exitCode: entry.exitCode,
     ...(entry.timedOut === true ? { timedOut: true } : {}),
     ...(entry.signal ? { signal: entry.signal } : {}),
-    command: options.includeParameters ? command : previewHarnessText(command!, 120),
+    command: options.includeParameters ? command : previewHarnessText(command, 120),
     startedAt: new Date(entry.startTime).toISOString(),
     ageMs: processAgeMs(entry),
     routes: {
@@ -241,7 +242,7 @@ async function describeProcessEntry(
         omittedStderrChars: stderr.omittedChars,
         maxOutputChars,
         fullOutputIncluded: !stdout.truncated && !stderr.truncated,
-        policy: 'Complete captured output is screened and redacted before preview limits; counts describe the protected output.',
+        policy: 'The tail shown is masked for credentials; counts describe the whole captured output.',
       },
     } : {}),
     ...(options.lookup ? { lookup: options.lookup } : {}),
@@ -269,35 +270,54 @@ function processCatalogEntry(entry: BackgroundProcess) {
     startedAt: new Date(entry.startTime).toISOString(), exitCode: entry.exitCode, timedOut: entry.timedOut, signal: entry.signal };
 }
 
-function retainProcessSources(context: CommandContext, manager: ProcessManager, entries: readonly ReturnType<typeof processCatalogEntry>[], options: CatalogRankingOptions, exactId?: string) {
-  // A process finishing while a reading is in flight is the answer changing, not the source being
-  // replaced, so only the identity of each tracked process is held fixed.
-  const identity = (rows: readonly ReturnType<typeof processCatalogEntry>[]) => JSON.stringify(rows.map((row) => [row.id, row.pid, row.cmd, row.startedAt]));
-  const revision = identity(entries);
-  const list = manager.list, getStatus = manager.getStatus, getOutput = manager.getOutput;
-  const assertSourcesCurrent = () => {
-    options.signal?.throwIfAborted();
-    if (managerFrom(context) !== manager || manager.list !== list || manager.getStatus !== getStatus || manager.getOutput !== getOutput) throw new ToolInputProjectionError('stale');
-    const exact = exactId === undefined ? undefined : manager.getStatus(exactId);
-    const current = exactId === undefined ? trackedProcesses(manager) : exact ? [exact] : [];
-    if (identity(captureCatalogData(current.map(processCatalogEntry))) !== revision) throw new ToolInputProjectionError('stale');
-  };
-  options.retainCurrent?.(assertSourcesCurrent, exactId === undefined ? 'agent.harness.background-processes.sources' : `agent.harness.background-processes.source:${exactId}`);
-  return assertSourcesCurrent;
-}
-
-async function matchingProcesses(context: CommandContext, manager: ProcessManager, input: string, options: CatalogRankingOptions) {
-  options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const entries = captureCatalogData(trackedProcesses(manager).map(processCatalogEntry));
-  const assertSourcesCurrent = retainProcessSources(context, manager, entries, options);
-  const assertCurrent = () => { options.assertCurrent?.(); assertSourcesCurrent(); };
-  assertCurrent();
+/** One look at the tracked processes; a listing is correct for the moment it was taken. */
+async function matchingProcesses(manager: ProcessManager, input: string, options: CatalogRankingOptions) {
+  options.signal?.throwIfAborted();
+  const entries = trackedProcesses(manager).map(processCatalogEntry);
+  const assertCurrent = (): void => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
   if (!input) return { all: entries, matches: entries.map((entry) => ({ entry, judgment: undefined })), judgments: [], assertCurrent };
   const ranked = await rankHarnessCatalog(entries, input, (entry) => ({ id: entry.id,
-    description: `${entry.id}\n${entry.pid}\n${entry.cmd}\n${entry.status}`, evidence: entry }),
-    'agent.harness.background-processes', { ...options, requirePreservedSource: true, assertCurrent });
-  assertCurrent();
+    description: `${entry.id}\n${entry.pid}\n${redactSensitiveData(entry.cmd)}\n${entry.status}` }),
+    'agent.harness.background-processes', options);
   return { ...ranked, all: entries, assertCurrent };
+}
+
+/** A detached process's log tail, read from its file. */
+function detachedLogView(record: DetachedProcessRecord, maxChars: number): Record<string, unknown> {
+  const log = readDetachedProcessLog(record, maxChars);
+  return { tail: log.text, bytes: log.bytes, truncated: log.truncated, path: homeRelative(record.logPath) };
+}
+
+/** A path under the user's home is shown from `~`, not as an absolute path naming the account. */
+function homeRelative(path: string): string {
+  const home = homedir();
+  return path.startsWith(`${home}/`) ? `~/${path.slice(home.length + 1)}` : path;
+}
+
+/** A detached process from an earlier session: the Agent did not start it in this runtime, so only its record and log are known. */
+function describeDetachedRecord(record: DetachedProcessRecord, includeParameters: boolean): Record<string, unknown> {
+  return {
+    processId: record.processId,
+    lifetime: 'detached',
+    status: 'running',
+    pid: record.pid,
+    command: includeParameters ? record.command : previewHarnessText(record.command, 120),
+    cwd: record.cwd,
+    startedAt: record.startedAt,
+    log: detachedLogView(record, includeParameters ? MAX_LOG_PREVIEW_CHARS : MAX_COMPACT_LOG_PREVIEW_CHARS),
+    routes: {
+      log: routeFor(record.processId, 'run_background_process', 'log'),
+      stop: routeFor(record.processId, 'run_background_process', 'stop'),
+    },
+    note: 'Started detached in an earlier session; it keeps running until it is stopped.',
+  };
+}
+
+/** Detached processes recorded by earlier sessions that this runtime does not track. */
+function earlierDetached(context: CommandContext, manager: ProcessManager): readonly DetachedProcessRecord[] {
+  const shellPaths = context.workspace.shellPaths;
+  if (!shellPaths) return [];
+  return listDetachedProcesses(shellPaths).filter(record => !manager.getStatus(record.processId));
 }
 
 function processToolParity(context: CommandContext | undefined, interactive: InteractiveRuntimeParity | null): readonly Record<string, unknown>[] {
@@ -327,7 +347,7 @@ function processToolParity(context: CommandContext | undefined, interactive: Int
       capability: 'process(poll)',
       status: 'supported',
       userOutcome: 'Poll one tracked process status without waiting.',
-      modelRoute: 'process action:"poll" sessionId:"..."',
+      modelRoute: 'process action:"poll" processId:"..."',
     },
     {
       capability: 'process(wait)',
@@ -339,13 +359,13 @@ function processToolParity(context: CommandContext | undefined, interactive: Int
       capability: 'process(log)',
       status: 'supported',
       userOutcome: 'Read redacted stdout/stderr tails with explicit truncation metadata.',
-      modelRoute: 'process action:"log" sessionId:"..."',
+      modelRoute: 'process action:"log" processId:"..."',
     },
     {
       capability: 'process(kill)',
       status: 'supported',
       userOutcome: 'Stop and remove one tracked process from the shared ProcessManager.',
-      modelRoute: 'process action:"kill" sessionId:"..."',
+      modelRoute: 'process action:"kill" processId:"..."',
     },
     {
       capability: 'process(write)',
@@ -364,7 +384,7 @@ function processToolParity(context: CommandContext | undefined, interactive: Int
       userOutcome: ptyStatus === 'contract-discovered'
         ? 'A PTY-like contract is discoverable; Agent still requires an explicit session API before generic PTY spawn is enabled.'
         : 'Interactive CLIs need a published PTY/session API before Agent can make them safe and visible.',
-      modelRoute: 'terminal command:"..." background:true pty:true',
+      // No route is offered: terminal pty:true answers unsupported until a PTY contract exists.
     },
     {
       capability: 'sudo',
@@ -384,9 +404,13 @@ async function capabilities(context?: CommandContext, options: CatalogRankingOpt
   const stdinWrite = localProcessManager.stdinWrite as Record<string, unknown>;
   return {
     start: 'terminal command:"..." background:true',
+    lifetimes: {
+      task: 'Default. Ended when the Agent closes, and at timeoutMs when one is given.',
+      detached: 'lifetime:"detached": keeps running after the Agent exits; output goes to a log file; listed, logged and stoppable from later sessions.',
+    },
     inspect: 'execution action:"processes" or action:"process"',
-    wait: 'process action:"wait" processId|sessionId:"..."',
-    stop: 'process action:"kill" processId|sessionId:"..."',
+    wait: 'process action:"wait" processId:"..."',
+    stop: 'process action:"kill" processId:"..."',
     aliases: {
       actions: {
         poll: 'status',
@@ -395,7 +419,7 @@ async function capabilities(context?: CommandContext, options: CatalogRankingOpt
         write: 'writeInput on a running tracked native stdin pipe',
       },
       ids: ['processId', 'processSessionId', 'sessionId', 'session_id'],
-      userOutcome: 'The harness accepts the process-tool words users expect while returning stable processId/sessionId aliases.',
+      userOutcome: 'Any of these names is accepted as input; answers carry the id once, as processId.',
     },
     parity: processToolParity(context, snapshot?.parityStatus ?? null),
     substrate: {
@@ -461,14 +485,16 @@ export async function backgroundProcessSummary(context: CommandContext, args: Ag
     };
   }
   const query = readString(args.query || args.target);
-  const selected = await matchingProcesses(context, manager, query, options);
+  const selected = await matchingProcesses(manager, query, options);
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const entries = selected.matches;
+  const detached = earlierDetached(context, manager);
   const all = selected.all;
   const limit = readLimit(args.limit, 100);
   const processes = await mapLimit<(typeof entries)[number], Record<string, unknown>>(entries.slice(0, limit), 4, async ({ entry, judgment }) => {
     const current = manager.getStatus(entry.id);
-    if (!current) throw new ToolInputProjectionError('stale');
+    // A process that ended and was pruned between the look and this row is shown as it was seen.
+    if (!current) return { ...entry, ...(judgment ? { judgment } : {}) };
     return { ...await describeProcessEntry(context, manager, current, { ...options, includeParameters: args.includeParameters === true }), ...(judgment ? { judgment } : {}) };
   });
   const processCapabilities = await capabilities(context, { ...options, assertCurrent: selected.assertCurrent });
@@ -483,6 +509,7 @@ export async function backgroundProcessSummary(context: CommandContext, args: Ag
       liveTail: 'workspace action:"open" surfaceId:"live-tail"',
     },
     processes,
+    ...(detached.length > 0 ? { detachedFromEarlierSessions: detached.map(record => describeDetachedRecord(record, args.includeParameters === true)) } : {}),
     judgments: selected.judgments,
     returned: processes.length,
     total: all.length,
@@ -509,7 +536,6 @@ export async function describeBackgroundProcess(context: CommandContext, args: A
   }
   const exact = manager.getStatus(lookup.input);
   if (exact) {
-    retainProcessSources(context, manager, captureCatalogData([processCatalogEntry(exact)]), options, exact.id)();
     return {
       status: 'found',
       process: await describeProcessEntry(context, manager, exact, {
@@ -519,13 +545,15 @@ export async function describeBackgroundProcess(context: CommandContext, args: A
       }),
     };
   }
+  const earlier = context.workspace.shellPaths ? findDetachedProcess(context.workspace.shellPaths, lookup.input) : undefined;
+  if (earlier) return { status: 'found', process: { ...describeDetachedRecord(earlier, true), lookup: { ...lookup, resolvedBy: 'id' } } };
   const selected = lookup.source === 'target' || lookup.source === 'query'
-    ? await matchingProcesses(context, manager, lookup.input, options) : { matches: [], judgments: [] };
+    ? await matchingProcesses(manager, lookup.input, options) : { matches: [], judgments: [] };
   const matches = selected.matches;
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   if (matches.length === 1 && matches[0]!.judgment?.reading.verdict === 'yes' && matches[0]!.judgment?.reading.outcome === 'act') {
     const current = manager.getStatus(matches[0]!.entry.id);
-    if (!current) throw new ToolInputProjectionError('stale');
+    if (!current) return { status: 'missing_lookup', usage: `Process ${matches[0]!.entry.id} ended and its record was pruned. Use execution action:"processes" to inspect tracked process ids.` };
     return {
       status: 'found',
       process: { ...await describeProcessEntry(context, manager, current, {
@@ -539,9 +567,8 @@ export async function describeBackgroundProcess(context: CommandContext, args: A
     return {
       status: 'ambiguous',
       input: lookup.input,
-      candidates: await Promise.all(matches.slice(0, 8).map(async ({ entry, judgment }) => ({ processId: entry.id, processSessionId: entry.id,
-        sessionId: entry.id, session_id: entry.id, pid: entry.pid, status: entry.status,
-        command: previewHarnessText(await redactSensitiveDataAsync(entry.cmd, options), 96), judgment }))),
+      candidates: matches.slice(0, 8).map(({ entry, judgment }) => ({ processId: entry.id, pid: entry.pid, status: entry.status,
+        command: previewHarnessText(redactSensitiveData(entry.cmd), 96), judgment })),
     };
   }
   return {
@@ -573,7 +600,7 @@ function readProcessId(args: AgentHarnessBackgroundProcessArgs): string {
 function readCwd(context: CommandContext, args: AgentHarnessBackgroundProcessArgs): string | undefined {
   const raw = readString(args.cwd) || readField(args, 'cwd');
   const shellPaths = context.workspace.shellPaths;
-  if (!shellPaths?.workingDirectory) throw new ToolInputProjectionError('held');
+  if (!shellPaths?.workingDirectory) throw new Error('Background process start needs the workspace working directory, and this Agent context has none. Start the Agent inside the project directory, then start the process again.');
   return realpathSync(resolveAndValidatePath(raw || '.', shellPaths.workingDirectory));
 }
 
@@ -624,22 +651,19 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
     const processId = readProcessId(args), data = readData(args);
     if (!processId) throw new Error('Background process input requires processId.');
     if (!data) throw new Error('Background process input requires nonempty data.');
-    const getStatus = manager.getStatus, writeInput = manager.writeInput;
-    const entry = getStatus.call(manager, processId);
-    if (!entry || entry.done) throw new ToolInputProjectionError('held');
-    const { id, pid, cmd, startTime } = entry;
+    const entry = manager.getStatus(processId);
+    if (!entry) return { status: 'not_found', processId, reason: `No tracked process matched "${processId}"; nothing was written. Use process action:"list" to see the tracked ids.` };
+    if (entry.done) {
+      return { status: 'not_running', processId, exitCode: entry.exitCode, ...(entry.signal ? { signal: entry.signal } : {}),
+        reason: `The process has ended (${entry.signal ? `signal ${entry.signal}` : `exit code ${entry.exitCode}`}); nothing was written.`,
+        next: [`process action:"log" processId:"${processId}"`, 'process action:"start" to run it again'] };
+    }
     const assertCurrent = () => {
       assertEffect();
-      if (manager.getStatus !== getStatus || manager.writeInput !== writeInput
-        || getStatus.call(manager, processId) !== entry || entry.id !== id || id !== processId
-        || entry.pid !== pid || entry.cmd !== cmd || entry.startTime !== startTime || entry.done) {
-        throw new ToolInputProjectionError('held');
-      }
+      if (entry.done) throw new Error(`Process ${processId} ended while its input was being written; check process action:"log" processId:"${processId}".`);
     };
-    assertCurrent();
-    const bytesWritten = await writeInput.call(manager, processId, data, { signal: options.signal, assertCurrent });
-    assertCurrent();
-    return { status: 'written', processId, processSessionId: processId, sessionId: processId, session_id: processId,
+    const bytesWritten = await manager.writeInput(processId, data, { signal: options.signal, assertCurrent });
+    return { status: 'written', processId,
       bytesWritten, policy: 'Input was written and flushed to the captured native stdin pipe. Bytes already handed to the child cannot be recalled.' };
   }
   if (action === 'capabilities' || action === 'doctor' || action === 'parity') {
@@ -652,47 +676,49 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
   }
   if (action === 'start' || action === 'spawn' || action === 'run') {
     assertEffect();
-    args = snapshotJudgmentInput(args) as AgentHarnessBackgroundProcessArgs;
-    const current = processClassificationOptions(context), supplied = options;
     const command = readCommand(args);
     if (!command) throw new Error('Background process start requires command.');
-    return withBackgroundPrivilegeCheck(command, options, async (privileged, assertPrivilegeCurrent) => {
+    return withBackgroundPrivilegeCheck(command, options, async (privileged, assertPrivilegeCurrent, assessment) => {
       if (privileged !== false) {
         return {
           status: 'blocked',
           capability: 'sudo',
           reason: privileged === null
-            ? 'Privilege requirements were not assessed in Classic. Use foreground execution with owner approval for this command.'
+            ? assessment === 'uncertain'
+              ? 'Whether this command needs a privilege prompt could not be settled. Use foreground execution with owner approval for this command.'
+              : 'Privilege requirements were not assessed (no decision model). Use foreground execution with owner approval for this command.'
             : 'Background sudo prompts are not exposed by Agent because they can hang or hide privilege escalation.',
-          ...(privileged === null ? { provenance: 'classic', privilegeAssessment: 'not-evaluated' } : {}),
+          ...(privileged === null ? { privilegeAssessment: assessment ?? 'not-evaluated', ...(assessment === 'not-evaluated' ? { provenance: 'classic' } : {}) } : {}),
           guidance: (await capabilities(context, options)).sudo,
         };
       }
       const cwd = readCwd(context, args);
-      const root = context.workspace.shellPaths?.workingDirectory;
-      if (!root) throw new Error('Background process start needs the workspace working directory, and this Agent context has none. Start the Agent inside the project directory, then start the process again.');
-      const physicalRoot = realpathSync(root);
-      const launchOptions = { ...supplied, assertCurrent: () => {
-        assertPrivilegeCurrent(); assertEffect(); current.assertCurrent?.();
-        if (realpathSync(root) !== physicalRoot || readCwd(context, args) !== cwd) throw new ToolInputProjectionError('held');
-      } };
+      const shellPaths = context.workspace.shellPaths;
+      if (!shellPaths?.workingDirectory) throw new Error('Background process start needs the workspace working directory, and this Agent context has none. Start the Agent inside the project directory, then start the process again.');
       const timeoutMs = clampTimeout(args.timeoutMs ?? readField(args, 'timeoutMs'), DEFAULT_BACKGROUND_TIMEOUT_MS);
-      const { processClass, killOnTimeout, result, note } = await spawnClassifiedBackgroundProcess(manager, args, command, cwd, timeoutMs, launchOptions);
+      const detachedRequested = (readString(args.lifetime) || readField(args, 'lifetime')) === 'detached';
+      const logPath = detachedRequested ? detachedProcessLogPath(shellPaths) : undefined;
+      assertPrivilegeCurrent();
+      const { lifetime, killOnTimeout, result } = await spawnBackgroundProcess(manager, args, command, cwd, timeoutMs,
+        { signal: options.signal, assertCurrent: () => { assertPrivilegeCurrent(); assertEffect(); } }, logPath);
+      const cwdLabel = workspaceRelativeLabel(context, cwd);
+      if (lifetime === 'detached' && result.process_id && result.pid && logPath) {
+        recordDetachedProcess(shellPaths, { processId: result.process_id, pid: result.pid, command, cwd: cwdLabel, startedAt: new Date().toISOString(), logPath });
+      }
       return {
         status: 'started',
-        processClass,
+        lifetime,
         killOnTimeout,
-        ...(note ? { classificationNote: note } : {}),
+        lifetimeBehavior: lifetime === 'detached'
+          ? `Keeps running after the Agent exits; output goes to ${homeRelative(logPath ?? '')}. Later sessions list it under process action:"list" and can stop it with process action:"kill".`
+          : 'Ended when the Agent closes.',
         timeoutBehavior: timeoutMs === 0 ? 'No automatic deadline; stop it explicitly with process action:"kill".' : killOnTimeout
           ? `SIGTERM then SIGKILL after ${timeoutMs}ms.`
           : `Left running past ${timeoutMs}ms; stop it explicitly with process action:"kill".`,
         processId: result.process_id,
-        processSessionId: result.process_id,
-        sessionId: result.process_id,
-        session_id: result.process_id,
         pid: result.pid,
-        command: await redactSensitiveDataAsync(command, launchOptions),
-        cwd: workspaceRelativeLabel(context, cwd),
+        command: redactSensitiveData(command),
+        cwd: cwdLabel,
         timeoutMs,
         routes: {
           inspect: result.process_id ? routeFor(result.process_id, 'background_process') : null,
@@ -712,16 +738,18 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
     assertEffect();
     const processId = readProcessId(args);
     if (!processId) throw new Error('Background process stop requires processId.');
-    const getStatus = manager.getStatus, entry = getStatus.call(manager, processId), stop = manager.stop;
-    assertEffect();
-    if (manager.stop !== stop || manager.getStatus !== getStatus || getStatus.call(manager, processId) !== entry) throw new ToolInputProjectionError('held');
-    const stopped = stop.call(manager, processId);
+    const earlier = !manager.getStatus(processId) && context.workspace.shellPaths ? findDetachedProcess(context.workspace.shellPaths, processId) : undefined;
+    if (earlier && context.workspace.shellPaths) {
+      const signalled = stopDetachedProcess(context.workspace.shellPaths, earlier);
+      return { status: signalled ? 'stopped' : 'not_found', processId, lifetime: 'detached',
+        policy: signalled ? 'SIGTERM was sent to the detached process group started in an earlier session, and its record removed.' : 'The detached process had already ended; its record was removed.' };
+    }
+    const stopped = manager.stop(processId);
+    // A detached process stopped in the session that started it leaves no record behind.
+    if (stopped && context.workspace.shellPaths) forgetDetachedProcess(context.workspace.shellPaths, processId);
     return {
       status: stopped ? 'stopped' : 'not_found',
       processId,
-      processSessionId: processId,
-      sessionId: processId,
-      session_id: processId,
       policy: stopped
         ? 'The process was signaled and removed from the shared ProcessManager.'
         : 'No tracked process matched that id.',
@@ -739,9 +767,6 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
     return {
       status: entry?.done ? 'completed' : entry ? 'still_running' : 'not_found',
       processId,
-      processSessionId: processId,
-      sessionId: processId,
-      session_id: processId,
       timeoutMs,
       ...(entry ? { process: await describeProcessEntry(context, manager, entry, { ...waiting, includeParameters: true }) } : {}),
       policy: `Wait observes the tracked process and does not send input or signals. timeoutMs 0 returns the current status without waiting${capped ? `; the requested wait was capped at ${timeoutMs}ms, wait again to keep watching` : ''}.`,

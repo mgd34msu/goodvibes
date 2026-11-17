@@ -13,6 +13,7 @@ interface AgentTerminalToolArgs {
   readonly background?: unknown;
   readonly cwd?: unknown;
   readonly timeoutMs?: unknown;
+  readonly lifetime?: unknown;
   readonly processClass?: unknown;
   readonly killOnTimeout?: unknown;
   readonly pty?: unknown;
@@ -30,6 +31,7 @@ interface AgentProcessToolArgs {
   readonly command?: unknown;
   readonly cwd?: unknown;
   readonly timeoutMs?: unknown;
+  readonly lifetime?: unknown;
   readonly processClass?: unknown;
   readonly killOnTimeout?: unknown;
   readonly pty?: unknown;
@@ -53,7 +55,7 @@ function error(message: string): { readonly success: false; readonly error: stri
   return { success: false, error: message };
 }
 
-const NOT_DONE_STATUSES = new Set(['unavailable', 'unsupported', 'blocked', 'not_found']);
+const NOT_DONE_STATUSES = new Set(['unavailable', 'unsupported', 'blocked', 'not_found', 'not_running']);
 
 /**
  * A launch, stop or wait that did nothing is a failure, not a success with a
@@ -94,20 +96,17 @@ export function createAgentTerminalTool(commandContext: CommandContext, registry
   return {
     definition: {
       name: 'terminal',
-      description: 'Start visible tracked background shell commands. A timeout terminates ordinary commands; a long_lived process (an interactive application or a server) keeps running past it unless killOnTimeout is set true.',
+      description: 'Start visible tracked background shell commands. By default (lifetime "task") the process ends when the Agent closes and at timeoutMs; lifetime "detached" keeps it running after the Agent exits (a dev server, an editor), with its output in a log file and a record later sessions can list and stop.',
       parameters: {
         type: 'object',
         properties: {
           command: { type: 'string', description: 'Shell command to start via the shared ProcessManager.' },
           background: { type: 'boolean', description: 'Must be true. Foreground shell uses exec.' },
           cwd: { type: 'string', description: 'Workspace-relative or absolute working directory.' },
-          timeoutMs: { type: 'number', description: 'How long to allow before the timeout contract applies; 0 or omitted means no deadline, at most 2147483647. Whether it terminates the process depends on processClass and killOnTimeout.' },
-          processClass: {
-            type: 'string',
-            enum: ['command', 'long_lived'],
-            description: 'command: an ordinary job, terminated when timeoutMs expires. long_lived: an interactive application or a server whose lifetime is the user\'s, it keeps running past timeoutMs and must be stopped explicitly. When omitted with no deadline or with killOnTimeout given, nothing is read and the process starts at once. When omitted with a deadline, Jev reads the complete command; if that reading does not settle the process still starts and the deadline leaves it running. When Jev is not reading commands (Classic operation) an omitted class is command, so a timeout kills it unless killOnTimeout:false is given.',
-          },
-          killOnTimeout: { type: 'boolean', description: 'Overrides processClass: true terminates this process when timeoutMs expires, false leaves it running. Set true deliberately before a timeout may destroy something the user is using.' },
+          timeoutMs: { type: 'number', description: 'Deadline in ms; 0 or omitted means none, at most 2147483647. A task process is ended at the deadline, a detached one is left running (killOnTimeout overrides either).' },
+          lifetime: { type: 'string', enum: ['task', 'detached'], description: 'task (default): ended when the Agent closes and at timeoutMs. detached: keeps running after the Agent exits; output goes to a log file; later sessions list it, read its log and stop it.' },
+          processClass: { type: 'string', enum: ['command', 'long_lived'], description: 'Older spelling: long_lived means the deadline leaves the process running (same as killOnTimeout:false).' },
+          killOnTimeout: { type: 'boolean', description: 'Whether timeoutMs ends the process: true ends it, false leaves it running. Default: true for task, false for detached.' },
           pty: { type: 'boolean', description: 'Request PTY mode; returns unsupported until the platform publishes a typed PTY contract.' },
           confirm: { type: 'boolean', description: 'Optional historical provenance; does not grant process authority.' },
           explicitUserRequest: { type: 'string', description: 'Optional human request provenance; does not grant process authority.' },
@@ -148,14 +147,15 @@ export function createAgentProcessTool(commandContext: CommandContext, registry?
           },
           processAction: { type: 'string', description: 'Alias for action.' },
           processId: { type: 'string', description: 'Tracked background process id.' },
-          processSessionId: { type: 'string', description: 'Process session id alias.' },
-          sessionId: { type: 'string', description: 'Process session id alias.' },
-          session_id: { type: 'string', description: 'Process session id alias.' },
+          processSessionId: { type: 'string', description: 'Accepted as processId.' },
+          sessionId: { type: 'string', description: 'Accepted as processId (not a chat session id).' },
+          session_id: { type: 'string', description: 'Accepted as processId.' },
           command: { type: 'string', description: 'Shell command for action:start.' },
           cwd: { type: 'string', description: 'Working directory for action:start.' },
           timeoutMs: { type: 'number', description: 'Milliseconds. For wait: default 30000, 0 returns the current status without waiting, more than 600000 is capped (wait again to keep watching). For start: 0 or omitted means no deadline. At most 2147483647.' },
-          processClass: { type: 'string', enum: ['command', 'long_lived'], description: 'Explicit lifetime class for action:start. When omitted, it is read only if timeoutMs is set and killOnTimeout is not; an unsettled reading leaves the process running past the deadline. In Classic operation (Jev not reading commands) an omitted class is command and a timeout kills it.' },
-          killOnTimeout: { type: 'boolean', description: 'Explicit timeout termination override for action:start.' },
+          lifetime: { type: 'string', enum: ['task', 'detached'], description: 'For action:start. task (default): ended when the Agent closes and at timeoutMs. detached: keeps running after the Agent exits, output in a log file, listed and stoppable from later sessions.' },
+          processClass: { type: 'string', enum: ['command', 'long_lived'], description: 'Older spelling for action:start: long_lived means the deadline leaves the process running.' },
+          killOnTimeout: { type: 'boolean', description: 'For action:start: whether timeoutMs ends the process. Default: true for task, false for detached.' },
           pty: { type: 'boolean', description: 'Request PTY mode; reports unsupported until a typed contract exists.' },
           data: { type: 'string', description: 'Input data for action:write to a running tracked native stdin pipe.' },
           query: { type: 'string', description: 'Search text for list or process lookup.' },

@@ -1,39 +1,44 @@
 import { ToolInputProjectionError, type ProcessManager, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { AgentHarnessBackgroundProcessArgs } from './agent-harness-background-processes-types.ts';
-import type { ProcessClassificationOptions } from './agent-harness-process-classification.ts';
-import { resolveKillOnTimeout, withBackgroundProcessClass } from './agent-harness-process-timeout-policy.ts';
+import { resolveProcessLifetime } from './agent-harness-process-timeout-policy.ts';
 
-/** Capture the calling composition, not authority supplied in model arguments. */
-export function processClassificationOptions(context: CommandContext, registry?: ToolRegistry, signal?: AbortSignal, assertExecution?: () => void): ProcessClassificationOptions {
-  const sourceOwner = agentResearchSourceOwner(registry);
-  const workspace = context.workspace, manager = workspace.processManager, spawn = manager?.spawn;
-  const shellPaths = workspace.shellPaths, workingDirectory = shellPaths?.workingDirectory;
-  const session = context.session?.runtime, sessionId = session?.sessionId;
-  return { signal, sourceOwner, assertCurrent() {
+export interface ProcessClassificationOptions {
+  readonly signal?: AbortSignal | undefined;
+  readonly assertCurrent?: (() => void) | undefined;
+}
+
+/** The calling composition's cancellation and admission, not authority supplied in model arguments. */
+export function processClassificationOptions(context: CommandContext, _registry?: ToolRegistry, signal?: AbortSignal, assertExecution?: () => void): ProcessClassificationOptions {
+  const workspace = context.workspace, manager = workspace.processManager;
+  return { signal, assertCurrent() {
     signal?.throwIfAborted(); assertExecution?.();
-    if (agentResearchSourceOwner(registry) !== sourceOwner || context.workspace !== workspace
-      || workspace.processManager !== manager || manager?.spawn !== spawn || workspace.shellPaths !== shellPaths
-      || shellPaths?.workingDirectory !== workingDirectory || context.session?.runtime !== session
-      || context.session?.runtime?.sessionId !== sessionId) throw new ToolInputProjectionError('held');
+    if (context.workspace !== workspace || workspace.processManager !== manager) throw new ToolInputProjectionError('stale');
   } };
 }
 
-export async function spawnClassifiedBackgroundProcess(
+/**
+ * Start a background process with the lifetime the caller stated. No reading
+ * is taken: `task` is owned by this runtime (ended with it, and at a deadline),
+ * `detached` runs in its own session with its output in `logPath`.
+ */
+export async function spawnBackgroundProcess(
   manager: ProcessManager, args: AgentHarnessBackgroundProcessArgs, command: string, cwd: string | undefined,
-  timeoutMs: number, options: ProcessClassificationOptions,
+  timeoutMs: number, options: ProcessClassificationOptions, logPath?: string,
 ) {
-  const spawn = manager.spawn;
-  return withBackgroundProcessClass(args, command, timeoutMs, options, async (processClass, assertCurrent, note) => {
-    const killOnTimeout = resolveKillOnTimeout(args, processClass);
-    assertCurrent();
-    if (manager.spawn !== spawn) throw new ToolInputProjectionError('held');
-    const result = await spawn.call(manager, command, cwd, undefined, {
-      timeout_ms: timeoutMs, sigterm_grace_ms: 5_000, kill_on_timeout: killOnTimeout,
-      stdin: 'pipe',
-      signal: options.signal, assertCurrent,
+  const { lifetime, killOnTimeout } = resolveProcessLifetime(args);
+  const detached = lifetime === 'detached';
+  if (detached && !logPath) throw new Error('A detached process needs a log file; none was given.');
+  options.signal?.throwIfAborted(); options.assertCurrent?.();
+  // A detached process must not write into the Agent's pipes: they close when the Agent exits.
+  const result = detached
+    ? await manager.spawn(`exec >>"$GOODVIBES_PROCESS_LOG" 2>&1 </dev/null\n${command}`, cwd, { GOODVIBES_PROCESS_LOG: logPath! }, {
+      timeout_ms: timeoutMs, sigterm_grace_ms: 5_000, kill_on_timeout: killOnTimeout, kill_on_close: false, own_session: true,
+      signal: options.signal, assertCurrent: options.assertCurrent,
+    })
+    : await manager.spawn(command, cwd, undefined, {
+      timeout_ms: timeoutMs, sigterm_grace_ms: 5_000, kill_on_timeout: killOnTimeout, kill_on_close: true,
+      stdin: 'pipe', signal: options.signal, assertCurrent: options.assertCurrent,
     });
-    return { processClass, killOnTimeout, result, ...(note ? { note } : {}) };
-  });
+  return { lifetime, killOnTimeout, result };
 }

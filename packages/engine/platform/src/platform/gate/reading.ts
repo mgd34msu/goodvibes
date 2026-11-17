@@ -1,4 +1,5 @@
-import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { isClassicOperation } from '../runtime/decision-policy.js';
+import { toolCategoryOf } from '../types/tools.js';
 import { readExternalRequestEvidence, type ExternalRequestEvidence } from '../permissions/external-request-evidence.js';
 /**
  * The gate's Jev reading of one tool call: the risk-family and side-effect
@@ -8,6 +9,11 @@ import { readExternalRequestEvidence, type ExternalRequestEvidence } from '../pe
  *
  * Code reads an uncertain fact as true: a reading that does not reach a
  * confident no counts as yes. Doubt raises the stakes; it never lowers them.
+ *
+ * With no decision model in use, code decides what it can (the tool's declared
+ * category, whether the arguments carry a shell command) and takes every other
+ * fact as uncertain, so the reading is marked `unassessed` and its stakes only
+ * rise; no request is made.
  */
 import { snapshotJudgmentInput } from './judgment-input.js';
 import { executePolicyCheck } from './execute-policy-check.js';
@@ -59,6 +65,11 @@ export interface GateReading extends GateFacts {
     readonly catastrophic?: YesNoReading['verdict'] | undefined;
     readonly cardDetails: YesNoReading['verdict'];
   };
+  /**
+   * No decision model read this call: code settled what it could and took
+   * every other fact as true (listed in `uncertain`). Absent on a model reading.
+   */
+  readonly unassessed?: true | undefined;
   /** Records what the gate did with this reading in the decision log. */
   recordAction(action: string): void;
 }
@@ -142,9 +153,63 @@ function callReadingState(toolName: string, args: Record<string, unknown>, worki
   return Object.freeze({ ...readingState(toolName, args, workingDirectory), ...(external ? { externalRequest: readingArguments(external) } : {}) });
 }
 
-/** Reads the independent gate batteries about one captured call in a shared request. */
+/** The side-effect kind of each engine tool category, where the category settles it. */
+const KIND_FOR_CATEGORY: Readonly<Record<PermissionCategory, SideEffectKind>> = {
+  read: 'read', write: 'write', execute: 'shell', delegate: 'delegation',
+};
+
+/**
+ * A call's side-effect kind as code knows it without a decision model: a call
+ * carrying a shell command is a shell call; an engine tool's declared category
+ * names its kind (`fetch` reaches the network, `mcp` hands the call to a server
+ * whose effects code does not know); any other tool is `other`, not confident.
+ */
+function codeSideEffectKind(toolName: string, args: Record<string, unknown>): { readonly kind: SideEffectKind; readonly confident: boolean } {
+  if (shellCommandsIn(args).length > 0) return { kind: 'shell', confident: true };
+  if (toolName === 'fetch') return { kind: 'network', confident: true };
+  if (toolName === 'mcp') return { kind: 'other', confident: false };
+  const category = toolCategoryOf({ name: toolName });
+  return category === undefined ? { kind: 'other', confident: false } : { kind: KIND_FOR_CATEGORY[category], confident: true };
+}
+
+const ASKED_FACTS: readonly GateFactName[] = ['mutates', 'outward', 'secrets', 'irreversible', 'beyondProject', 'weakensSecurity'];
+
+/**
+ * The reading without a decision model. An engine read tool with no shell
+ * command changes nothing and sends nothing; every fact code cannot settle is
+ * taken as true, so the call's stakes rise and the active preset asks the
+ * owner where it would for an uncertain model reading.
+ */
+function unassessedReading(input: ReadToolCallInput): GateReading {
+  const { toolName, args, askKind = false, askObfuscated = false } = input;
+  const kind = codeSideEffectKind(toolName, args);
+  const plainRead = kind.confident && kind.kind === 'read';
+  const facts: GateFacts = {
+    mutates: !plainRead, outward: !plainRead, secrets: true, irreversible: !plainRead,
+    beyondProject: true, weakensSecurity: !plainRead, obfuscated: askObfuscated, catastrophicUncertain: askObfuscated,
+  };
+  const uncertain = [...ASKED_FACTS, ...(askObfuscated ? (['obfuscated'] as const) : [])].filter((name) => facts[name]);
+  return {
+    judgmentDecisionIds: Object.freeze([]),
+    ...facts,
+    family: 'generic',
+    familyConfident: false,
+    stakes: stakesFromFacts(facts),
+    uncertain,
+    ...(askKind ? { kind: kind.kind } : {}),
+    boundary: { catastrophic: askObfuscated ? 'uncertain' : undefined, cardDetails: 'uncertain' },
+    unassessed: true,
+    recordAction() { /* nothing was read, so there is no decision to annotate */ },
+  };
+}
+
+/**
+ * Reads the independent gate batteries about one captured call in a shared
+ * request; with no decision model in use, returns the unassessed reading code
+ * composes, without a request.
+ */
 export async function readToolCall(input: ReadToolCallInput, site: string = GATE_SITE): Promise<GateReading> {
-  requireDecisionFeature('semantic tool-call risk assessment; without a decision model, this uses native permission rules and owner approvals');
+  if (isClassicOperation()) { input.signal?.throwIfAborted(); return unassessedReading(input); }
   const { toolName, args, workingDirectory, signal: abortSignal, askKind = false, askObfuscated = false, port: scopedPort } = input;
   const state = callReadingState(toolName, args, workingDirectory, input.externalRequestEvidence);
   const shell = askObfuscated === true;
@@ -215,12 +280,20 @@ export function classificationFromReading(reading: Pick<GateReading, 'family' | 
   return 'read';
 }
 
+/** The evaluator classification code gives a call without a decision model: its kind, with the worst case where the kind leaves it open. */
+const CLASSIFICATION_FOR_KIND: Readonly<Record<SideEffectKind, CommandClassification>> = {
+  read: 'read', write: 'write', shell: 'destructive', network: 'network', delegation: 'escalation', browser: 'network', other: 'escalation',
+};
+
 /**
  * Reads a call through the gate's batteries and returns its evaluator
  * classification, for policy simulation and preflight, which evaluate a call
- * outside the gate. A JudgmentError propagates.
+ * outside the gate. A JudgmentError propagates. With no decision model in use,
+ * code classifies the call by its kind (a shell command as destructive, an
+ * undeclared tool as escalation), without a request.
  */
 export async function readCallClassification(toolName: string, args: Record<string, unknown>, site: string = GATE_SITE): Promise<CommandClassification> {
+  if (isClassicOperation()) return CLASSIFICATION_FOR_KIND[codeSideEffectKind(toolName, args).kind];
   return classificationFromReading(await readToolCall({ toolName, args, askObfuscated: shellCommandsIn(args).length > 0 }, site));
 }
 
@@ -239,9 +312,13 @@ export function categoryForSideEffectKind(kind: SideEffectKind): PermissionCateg
   return CATEGORY_FOR_KIND[kind];
 }
 
-/** Reads only the side-effect kind of a call (the execution ledger's route kind). */
+/**
+ * Reads only the side-effect kind of a call (the execution ledger's route
+ * kind). With no decision model in use, code gives the kind it knows
+ * (codeSideEffectKind), `confident: false` where it does not, without a request.
+ */
 export async function readSideEffectKind(toolName: string, args: Record<string, unknown>, site: string, signal?: AbortSignal): Promise<{ readonly kind: SideEffectKind; readonly confident: boolean }> {
-  requireDecisionFeature('semantic side-effect classification');
+  if (isClassicOperation()) { signal?.throwIfAborted(); return codeSideEffectKind(toolName, args); }
   const state = readingState(toolName, args);
   const run = await sideEffect.run(judgmentPort(site), state, { site, only: ['kind'], ...(signal === undefined ? {} : { signal }) });
   return { kind: run.readings.kind.choice, confident: run.readings.kind.outcome === 'act' };
@@ -257,15 +334,17 @@ export function shellCommandsIn(args: Record<string, unknown>): string[] {
  * wholesale, freshly assessed in the supplied context. A previous reading of
  * identical command text is not authority or evidence for this call. The
  * ordinary execution gate still owns its own complete admission checks.
+ * With no decision model in use the command is not assessed: the verdict is
+ * `uncertain` and `unassessed` is set, so nothing is cleared as safe unread.
  */
 export async function readCatastrophic(
   command: string,
   site = 'engine.gate.exec-time',
   signal?: AbortSignal,
   options: CatastrophicReadingOptions = {},
-): Promise<{ readonly verdict: YesNoReading['verdict']; readonly readByGate: boolean }> {
-  requireDecisionFeature('semantic catastrophic-command assessment; without a decision model, this retains native permission and approval handling');
+): Promise<{ readonly verdict: YesNoReading['verdict']; readonly readByGate: boolean; readonly unassessed?: true }> {
   signal?.throwIfAborted();
+  if (isClassicOperation()) return { verdict: 'uncertain', readByGate: false, unassessed: true };
   const { workingDirectory, externalRequestEvidence, port } = options;
   const state = callReadingState('exec', { command }, workingDirectory, externalRequestEvidence);
   const run = await executePolicyCheck(() => boundaryReading.run(port ?? judgmentPort(site), state, {

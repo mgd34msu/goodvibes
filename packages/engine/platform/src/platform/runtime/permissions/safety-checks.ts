@@ -72,14 +72,17 @@ export async function runSafetyChecks(args: Record<string, unknown>, options: Sa
     return { blocked: true, reason: 'SAFETY_DENY_PATH_ESCAPE', detail: 'a path argument contains a NUL byte, so the path named is not the path that would be opened', steps };
   }
   for (const command of execShellCommands(args)) {
-    const { verdict } = await readCatastrophic(command, 'engine.gate.safety-check', signal, context);
+    const { verdict, unassessed } = await readCatastrophic(command, 'engine.gate.safety-check', signal, context);
     const blocked = verdict !== 'no';
-    steps.push({ layer: 'safety', check: 'catastrophic', matched: blocked, detail: `Jev reading: ${verdict}` });
+    steps.push({ layer: 'safety', check: 'catastrophic', matched: blocked,
+      detail: unassessed ? 'not assessed: no decision model is in use' : `Jev reading: ${verdict}` });
     if (blocked) {
       return {
         blocked: true,
         reason: 'SAFETY_DENY_DESTRUCTIVE_PREFIX',
-        detail: verdict === 'yes' ? 'read as destroying the machine or the user\'s data wholesale' : 'could not be read as safe',
+        detail: verdict === 'yes' ? 'read as destroying the machine or the user\'s data wholesale'
+          : unassessed ? 'not assessed: no decision model is in use, so the command could not be read as safe; run it through a session where you approve it'
+          : 'could not be read as safe',
         steps,
       };
     }

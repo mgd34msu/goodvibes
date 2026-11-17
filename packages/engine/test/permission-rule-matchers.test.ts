@@ -11,6 +11,7 @@ import { evaluateArgShapeRule, evaluateArgShapeRuleAsync } from '../platform/src
 import { evaluateNetworkScopeRule } from '../platform/src/platform/runtime/permissions/rules/network-scope.ts';
 import { evaluatePathScopeRule } from '../platform/src/platform/runtime/permissions/rules/path-scope.ts';
 import { runSafetyChecks } from '../platform/src/platform/runtime/permissions/safety-checks.ts';
+import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import { buildDurableRuleForDecision } from '../platform/src/platform/permissions/approval-rules.ts';
 import type {
   ArgShapeRule, NetworkScopeRule, PathScopeRule, PrefixRule,
@@ -51,6 +52,18 @@ describe('prefix rules read the command the exec tool runs', () => {
   test('the safety check reads a base64 command', async () => {
     const result = await runSafetyChecks({ commands: [{ cmd_base64: b64('rm -rf /*') }] });
     expect(result.blocked).toBe(true);
+  });
+
+  test('with no decision model in use, the safety check clears no command it could not read', async () => {
+    const retire = configureDecisionModelPolicy(() => 'No Decision Model');
+    try {
+      for (const args of [{ command: 'ls' }, { commands: [{ cmd_base64: b64('rm -rf /*') }] }]) {
+        const result = await runSafetyChecks(args);
+        expect(result.blocked).toBe(true);
+        expect(result.reason).toBe('SAFETY_DENY_DESTRUCTIVE_PREFIX');
+      }
+      expect((await runSafetyChecks({ path: 'src/a.ts' })).blocked).toBe(false);
+    } finally { retire(); }
   });
 });
 

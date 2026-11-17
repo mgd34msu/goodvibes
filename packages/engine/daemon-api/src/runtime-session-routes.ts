@@ -76,6 +76,8 @@ type SharedSessionMessageInput = {
   readonly title?: string | undefined;
   readonly routeId?: string | undefined;
   readonly body: string;
+  /** The caller's `messageId`: the replay key, so a repeat after a lost response is answered with the first receipt. */
+  readonly providerMessageId?: string | undefined;
   readonly metadata?: Record<string, unknown> | undefined;
   readonly routing?: SharedSessionRoutingIntent | undefined;
 };
@@ -612,9 +614,7 @@ async function handlePostSharedSessionMessage(context: DaemonRuntimeRouteContext
   // kind='message', companion main-chat send. Delegates to dedicated handler to avoid
   // inline duplication of session-resolution with submitMessage().
   if (kind === 'message') {
-    const clientMessageId = readClientMessageId(body.messageId);
-    if (clientMessageId instanceof Response) return clientMessageId;
-    return handleCompanionMessageKind(context, sessionId, req, input, clientMessageId);
+    return handleCompanionMessageKind(context, sessionId, req, input, input.providerMessageId);
   }
 
   const submission = await callOrSessionClosed(() => context.sessionBroker.submitMessage(input));
@@ -838,6 +838,10 @@ function buildSharedSessionMessageInput(
   if (routing instanceof Response) return routing;
   const surfaceKind = readMessageSurfaceKind(body.surfaceKind);
   if (surfaceKind instanceof Response) return surfaceKind;
+  // A caller-chosen id makes a resend after a lost response safe: the session
+  // broker answers a repeat with the receipt of the input it already holds.
+  const clientMessageId = readClientMessageId(body.messageId);
+  if (clientMessageId instanceof Response) return clientMessageId;
   return {
     sessionId,
     surfaceKind,
@@ -849,6 +853,7 @@ function buildSharedSessionMessageInput(
     ...(typeof body.title === 'string' ? { title: body.title } : {}),
     ...(typeof body.routeId === 'string' ? { routeId: body.routeId } : {}),
     body: message,
+    ...(clientMessageId ? { providerMessageId: clientMessageId } : {}),
     ...(typeof body.metadata === 'object' && body.metadata !== null ? { metadata: body.metadata as Record<string, unknown> } : {}),
     ...(routing ? { routing } : {}),
   };

@@ -1,19 +1,19 @@
-import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { createActionIntent, type ActionIntent } from './createActionIntent';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime, type ClientLifetime } from '../lib/client-lifetime';
 import { hasStoredTokenSync, client as platformClient } from '../lib/goodvibes';
-import { serializeError } from '../lib/errors';
+import { formatError, serializeError } from '../lib/errors';
 import { asRecord } from '../lib/object';
 import { queryKeys } from '../lib/queries';
 
 export type SessionAction = 'close' | 'reopen' | 'delete';
-type Phase = 'idle' | 'confirming' | 'pending' | 'unknown';
-interface Snapshot { phase: Phase; action?: SessionAction; refreshing: boolean; notice?: string }
-const intents = createActionIntent<Snapshot>(() => ({ phase: 'idle', refreshing: false }));
-type Intent = ActionIntent<Snapshot>;
-const { intentFor, update } = intents;
-function setAbort(intent: Intent, abort: AbortController | undefined): void { intent.abort = abort; }
+/**
+ * `no-answer`: the request got no answer. Close, reopen and delete are safe to
+ * repeat (a second one is answered definitely: already closed, already open,
+ * or not found), so Retry sends the same action again.
+ */
+type Phase = 'idle' | 'confirming' | 'pending' | 'no-answer';
+
 // Target-route absence, not a generic router/auth 404. The native transport's
 // generic NOT_FOUND code can shadow the daemon body code. Current GET/close
 // responses use the exact uncoded message; DELETE also carries its typed code.
@@ -24,8 +24,20 @@ function isTargetMissing(error: unknown): boolean {
   return (value.status ?? transport.status) === 404
     && (body.code === 'SESSION_NOT_FOUND' || body.error === 'Unknown shared session' || body.message === 'Unknown shared session');
 }
-const UNKNOWN = 'Session action outcome is unknown. Refresh session state before deciding whether to try again. The request will not be retried automatically.';
-function unknown(intent: Intent): void { update(intent, { phase: 'unknown', refreshing: false, notice: UNKNOWN }); }
+
+/** An HTTP answer from the daemon (any status but a network failure, a timeout or a gateway error). */
+function answeredByDaemon(error: unknown): boolean {
+  const value = serializeError(error);
+  const transport = asRecord(value.transport);
+  const status = typeof value.status === 'number' ? value.status : typeof transport.status === 'number' ? transport.status : 0;
+  return status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
+const RESPONSE_DEADLINE_MS = 30_000;
+const VERB: Record<SessionAction, string> = { close: 'close', reopen: 'reopen', delete: 'delete' };
+
+/** Session actions already in flight, per account revision and session: reopening the pane does not send a second one. */
+const inFlight = new Set<string>();
 
 /** The list is authoritative only when every record can be identified. A bad
  * response must never become an empty list and falsely prove deletion. */
@@ -55,108 +67,76 @@ export async function readSessionList(lifetime: ClientLifetime, signal: AbortSig
 
 export function useSessionLifecycle(id: string, onClose: () => void) {
   const client = useQueryClient();
-  // A still-mounted stale record cannot acquire a replacement account. WorkView
-  // remounts on identity change; observing the live revision only disables this
-  // old pane if a caller has not remounted it yet.
+  // A pane belongs to the account it opened under; WorkView remounts on identity change.
   const [lifetime] = useState(getClientLifetime);
-  useSyncExternalStore(subscribeClientLifetime, getClientLifetime, getClientLifetime);
-  const intent = useMemo(() => intentFor(client, lifetime, id), [client, lifetime, id]);
-  const selection = useMemo(() => ({ intent }), [intent]);
-  const owner = useRef<typeof selection | undefined>(undefined);
-  const store = useMemo(() => intents.store(intent), [intent]);
-  const state = useSyncExternalStore(store.subscribe, store.read, store.read);
+  const flightKey = `${lifetime.revision}:${id}`;
+  const [phase, setPhase] = useState<Phase>(() => inFlight.has(flightKey) ? 'pending' : 'idle');
+  const [action, setAction] = useState<SessionAction | undefined>(undefined);
+  const [notice, setNotice] = useState<string | undefined>(undefined);
+  const mounted = useRef(true);
+  const abortRef = useRef<AbortController | undefined>(undefined);
   const current = () => isClientLifetimeCurrent(lifetime) && hasStoredTokenSync();
-  const owned = () => owner.current === selection && current();
 
-  useLayoutEffect(() => {
-    owner.current = selection;
-    const release = () => {
-      owner.current = undefined;
-      if (intent.snapshot.phase === 'confirming') update(intent, { phase: 'idle', action: undefined });
-      // Aborting after dispatch says nothing about the daemon's outcome. Retain
-      // the ambiguity before releasing transport, even if it ignores abort.
-      if (intent.snapshot.phase === 'pending') unknown(intent);
-      if (intent.snapshot.refreshing) update(intent, { refreshing: false });
-      intent.abort?.abort();
-    };
-    const unsubscribe = subscribeClientLifetime(release);
-    return () => { unsubscribe(); release(); };
-  }, [selection, intent]);
+  useEffect(() => {
+    mounted.current = true;
+    // A new account must not adopt this one's answer; leaving the pane lets a sent action finish.
+    const unsubscribe = subscribeClientLifetime(() => abortRef.current?.abort());
+    return () => { mounted.current = false; unsubscribe(); };
+  }, [lifetime, id]);
 
-  async function run(action?: SessionAction): Promise<void> {
-    if (!owned() || intent.snapshot.refreshing || intent.snapshot.phase === 'pending') return;
-    if (action && intent.snapshot.phase !== 'confirming') return;
+  const show = (next: Phase, text?: string) => {
+    if (!mounted.current || !current()) return;
+    setPhase(next);
+    setNotice(text);
+    if (next === 'idle') setAction(undefined);
+  };
+
+  async function run(chosen: SessionAction): Promise<void> {
+    if (!current() || inFlight.has(flightKey)) return;
+    inFlight.add(flightKey);
     const abort = new AbortController();
-    setAbort(intent, abort);
-    update(intent, action ? { phase: 'pending', action, notice: undefined } : { refreshing: true });
-    const check = () => { if (!owned()) abort.abort(); abort.signal.throwIfAborted(); };
-    let rejectAbort!: () => void;
-    const interrupted = new Promise<never>((_resolve, reject) => {
-      rejectAbort = () => reject(new DOMException('Session action interrupted', 'AbortError'));
-      abort.signal.addEventListener('abort', rejectAbort, { once: true });
-    });
-    const timer = setTimeout(() => abort.abort(), 30_000);
-    const wait = async <T,>(request: Promise<T>): Promise<T> => {
-      const result = await Promise.race([request, interrupted]); check(); return result;
-    };
+    abortRef.current = abort;
+    setAction(chosen);
+    show('pending');
+    const timer = setTimeout(() => abort.abort(), RESPONSE_DEADLINE_MS);
+    let gone = false;
     try {
-      check();
-      if (action === 'close' || action === 'reopen') {
-        await wait(platformClient.operator.sessions[action](id, abort.signal));
-      } else if (action === 'delete') {
-        try { await wait(platformClient.operator.sessions.close(id, abort.signal)); }
-        catch (error) { check(); if (!isTargetMissing(error)) throw error; }
-        check();
-        try { await wait(platformClient.operator.sessions.delete(id, abort.signal)); }
-        catch (error) { check(); if (!isTargetMissing(error)) throw error; }
+      if (chosen === 'close' || chosen === 'reopen') {
+        await platformClient.operator.sessions[chosen](id, abort.signal);
+      } else {
+        // An active session is closed first; a session that is already gone counts as deleted.
+        try { await platformClient.operator.sessions.close(id, abort.signal); }
+        catch (error) { if (!isTargetMissing(error)) throw error; }
+        try { await platformClient.operator.sessions.delete(id, abort.signal); }
+        catch (error) { if (!isTargetMissing(error)) throw error; }
+        gone = true;
       }
-      check();
-      const listKey = queryKeys.sessionList(lifetime.revision);
-      // Stop pre-action snapshots from overwriting this authoritative read.
-      await wait(client.cancelQueries({ queryKey: listKey, exact: true }));
-      let result = await wait(readSessionList(lifetime, abort.signal));
-      let record = result.sessions.find(record => record.id === id);
-      // sessions.list is capped (currently 50). Absence there is not proof of
-      // deletion; only this target's explicit SESSION_NOT_FOUND proves it gone.
-      if (!record) {
-        try {
-          const detail = await wait(platformClient.operator.sessions.get(id, abort.signal));
-          if (asRecord(asRecord(detail).session).id !== id) throw new Error('The daemon returned an unreadable session.');
-          record = detail.session;
-          result = { ...result, sessions: [...result.sessions, record] };
-        } catch (error) { check(); if (!isTargetMissing(error)) throw error; }
-      }
-      if (action === 'delete' && record) throw new Error('The session record still exists.');
-      check();
-      // Supersede a realtime read that may have begun during reconciliation.
-      await wait(client.cancelQueries({ queryKey: listKey, exact: true }));
-      check();
-      update(intent, { phase: 'idle', action: undefined, refreshing: false, notice: undefined });
-      client.setQueryData(listKey, result);
-      if (!record && owned()) onClose();
-    } catch {
-      if (intent.abort === abort && current()) {
-        if (action) unknown(intent);
-        else update(intent, { refreshing: false, notice: `${UNKNOWN} Could not refresh session state.` });
-      }
+      show('idle');
+    } catch (error) {
+      if (!abort.signal.aborted && answeredByDaemon(error)) show('idle', `The daemon refused to ${VERB[chosen]} this session: ${formatError(error)}`);
+      else show('no-answer', `No answer from the daemon (${abort.signal.aborted ? `nothing within ${RESPONSE_DEADLINE_MS / 1000}s` : formatError(error)}). Retry sends it again; a repeat is answered with the session's current state.`);
     } finally {
       clearTimeout(timer);
-      abort.signal.removeEventListener('abort', rejectAbort);
-      if (intent.abort === abort) setAbort(intent, undefined);
+      inFlight.delete(flightKey);
+      if (abortRef.current === abort) abortRef.current = undefined;
+      if (current()) void client.invalidateQueries({ queryKey: queryKeys.sessions });
     }
+    if (gone && mounted.current && current()) onClose();
   }
 
-  function ask(action: SessionAction): void {
-    if (!owned() || intent.snapshot.refreshing || intent.snapshot.phase !== 'idle') return;
-    update(intent, { phase: 'confirming', action });
-    if (action === 'reopen') void run(action);
+  function ask(chosen: SessionAction): void {
+    if (!current() || phase === 'pending' || phase === 'confirming') return;
+    if (chosen === 'reopen') { void run(chosen); return; }
+    setAction(chosen);
+    setNotice(undefined);
+    setPhase('confirming');
   }
   function dismiss(): void {
-    if (owned() && intent.snapshot.phase === 'confirming') update(intent, { phase: 'idle', action: undefined });
+    if (phase === 'confirming') { setPhase('idle'); setAction(undefined); }
   }
-  const confirm = () => { if (intent.snapshot.action) void run(intent.snapshot.action); };
-  const refresh = () => { if (intent.snapshot.phase === 'unknown') void run(); };
-  return { ...state, ask, dismiss, confirm, refresh,
-    disabled: state.phase !== 'idle' || state.refreshing || !current(),
+  const confirm = () => { if (phase === 'confirming' && action) void run(action); };
+  const retry = () => { if (phase === 'no-answer' && action) void run(action); };
+  return { phase, action, notice, ask, dismiss, confirm, retry,
+    disabled: phase === 'pending' || phase === 'confirming' || !current(),
   };
 }

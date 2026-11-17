@@ -40,7 +40,7 @@ export function LegacySteerComposer(props: SteerComposerProps) {
 
 function ScopedLegacySteerComposer({ sessionId, canSteer, closed, streamPaused = false, lifetime }: SteerComposerProps & { lifetime: ClientLifetime }) {
   const [text, setText] = useState('');
-  const { dispatches, send, refreshFailed, missingReceipt } = useSessionDispatches(lifetime, sessionId, streamPaused);
+  const { dispatches, send, retry, refreshFailed, missingReceipt } = useSessionDispatches(lifetime, sessionId, streamPaused);
   const mode: DispatchMode = canSteer ? 'steer' : 'followUp';
 
   function submit(event: SyntheticEvent<HTMLFormElement>) {
@@ -135,12 +135,15 @@ function ScopedLegacySteerComposer({ sessionId, canSteer, closed, streamPaused =
             <li key={dispatch.id} className={`steer-dispatch steer-dispatch--${dispatch.state}`}>
               <StatusDot tone={dispatch.state === 'failed' || dispatch.state === 'rejected' ? 'bad'
                 : dispatch.state === 'completed' || dispatch.state === 'delivered' ? 'ok'
-                  : dispatch.state === 'cancelled' || dispatch.state === 'unknown' ? 'idle' : 'live'} />
+                  : dispatch.state === 'cancelled' || dispatch.state === 'unsent' ? 'idle' : 'live'} />
               <span className="steer-dispatch__text">{dispatch.text}</span>
               <span className="steer-dispatch__state">
                 {dispatch.mode === 'steer' ? 'steer' : 'follow-up'} · {dispatch.state}
               </span>
               {dispatch.error && <span className="steer-dispatch__error">{dispatch.error}</span>}
+              {dispatch.state === 'unsent' && (
+                <Button size="sm" variant="ghost" onClick={() => retry(dispatch.id)}>Retry</Button>
+              )}
             </li>
           ))}
         </ul>

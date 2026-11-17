@@ -294,8 +294,8 @@ export function SessionDetail({ record, agents, tab, onTabChange, streamPaused, 
         onCancel={lifecycle.dismiss}
       />
       {lifecycle.notice && <p className="dv-notice dv-notice--bad" role="alert">
-        {lifecycle.notice}{' '}
-        <Button size="sm" variant="ghost" disabled={lifecycle.refreshing} onClick={lifecycle.refresh}>Refresh session state</Button>
+        {lifecycle.notice}
+        {lifecycle.phase === 'no-answer' && <>{' '}<Button size="sm" variant="ghost" onClick={lifecycle.retry}>Retry</Button></>}
       </p>}
       {record.lastError && <p className="dv-notice dv-notice--bad" role="alert">Last error: {record.lastError}</p>}
 

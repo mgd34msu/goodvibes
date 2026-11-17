@@ -102,7 +102,10 @@ export function HostedSessionWorkDetail({ sessionId, attachment, record, fallbac
         onConfirm={lifecycle.confirm}
         onCancel={lifecycle.dismiss}
       />
-      {lifecycle.notice && <p className="dv-notice dv-notice--bad" role="alert">{lifecycle.notice}</p>}
+      {lifecycle.notice && <p className="dv-notice dv-notice--bad" role="alert">
+        {lifecycle.notice}
+        {lifecycle.phase === 'no-answer' && <>{' '}<Button size="sm" variant="ghost" onClick={lifecycle.retry}>Retry</Button></>}
+      </p>}
       {attachment.streamError && <p className="dv-notice dv-notice--bad" role="status">{attachment.streamError}</p>}
       {attachment.attaching && <SkeletonRows count={4} label="Attaching" />}
       {!attachment.attaching && (Boolean(attachment.attachError) || !session) && (

@@ -29,8 +29,8 @@ export function ContractDetail({ id, lifetime, live, onClose, onOpenProcess }: {
   const { dismiss } = cancellation;
   useEffect(() => { if (!cancellable) dismiss(); }, [cancellable, dismiss]);
   // A manual refresh reads the whole tree, whatever the revision says.
-  const refresh = () => cancellation.phase === 'idle' || cancellation.phase === 'confirming'
-    ? reload() : cancellation.refresh();
+  const refresh = () => reload();
+  const cancelProblem = cancellation.phase === 'no-answer' || cancellation.phase === 'refused';
   return (
     <>
       <ConfirmDialog
@@ -52,13 +52,13 @@ export function ContractDetail({ id, lifetime, live, onClose, onOpenProcess }: {
           </Button>}
           {onOpenProcess && <Button size="sm" variant="ghost" onClick={onOpenProcess}>Process details</Button>}
           <Button size="sm" variant="ghost" onClick={() => void refresh()}
-            disabled={query.isFetching || cancellation.refreshing || cancellation.phase === 'pending'}>Refresh contract</Button>
+            disabled={query.isFetching}>Refresh contract</Button>
         </>}
       >
-        {cancellation.notice && <p className={`dv-notice${cancellation.phase === 'unknown' ? ' dv-notice--bad' : ''}`}
-          role={cancellation.phase === 'unknown' ? 'alert' : 'status'}>{cancellation.notice}</p>}
-        {cancellation.needsRefresh && cancellation.phase !== 'unknown' && <p className="dv-notice dv-notice--bad" role="alert">
-          Could not refresh the current contract and process state. Refresh before trying again.
+        {cancellation.notice && <p className={`dv-notice${cancelProblem ? ' dv-notice--bad' : ''}`}
+          role={cancelProblem ? 'alert' : 'status'}>
+          {cancellation.notice}
+          {cancellation.phase === 'no-answer' && <>{' '}<Button size="sm" variant="ghost" onClick={cancellation.retry}>Retry cancel</Button></>}
         </p>}
         {query.isPending && <SkeletonRows count={4} label="Loading contract" />}
         {query.isError && (

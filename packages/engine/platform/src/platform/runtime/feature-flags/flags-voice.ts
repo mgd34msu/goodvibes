@@ -1,13 +1,12 @@
 /**
  * Voice capability registry entries, spread into FEATURE_FLAGS by flags.ts.
  *
- * Split into its own module because flags.ts sits at the 800-line source cap
- * and a capability declaration is not something to compress to fit, the
- * description is what a settings surface renders, so it has to say what the
- * feature does and why its default is what it is.
+ * Split into its own module because a capability declaration is not something
+ * to compress to fit, the description is what a settings surface renders, so it
+ * has to say what the feature does and why its default is what it is.
  *
- * Every entry here still needs its binding in feature-settings.ts and its
- * config association in flag-config-map.ts; the lockstep tests enforce both.
+ * Each entry carries its own settings binding and tuning keys, like every
+ * FEATURE_FLAGS entry; FEATURE_SETTINGS is derived from them.
  */
 import type { FeatureFlag } from './types.js';
 
@@ -42,5 +41,38 @@ export const VOICE_FEATURE_FLAGS: FeatureFlag[] = [
     // limited is per-ROW, not per-surface
     // (voice.wake.vadThreshold has no pinned VAD model; a browser tab has no
     // filesystem), and each of those rows says so itself.
+    settings: { key: 'voice.wake.enabled', kind: 'boolean' },
+    // Every voice.wake.* row except the enablement key itself, so a surface
+    // renders the wake word's detection tuning, capture, feedback, retention,
+    // supervision and per-surface delivery as ONE configurable unit.
+    tuningKeys: [
+      'voice.wake.models',
+      'voice.wake.threshold',
+      'voice.wake.patienceFrames',
+      'voice.wake.cooldownMs',
+      'voice.wake.vadThreshold',
+      'voice.wake.noiseSuppression',
+      'voice.wake.inputDevice',
+      'voice.wake.captureCommand',
+      'voice.wake.surfaces.tui',
+      'voice.wake.surfaces.agent',
+      'voice.wake.surfaces.webui',
+      'voice.wake.surfaces.app',
+      'voice.wake.activationSound',
+      'voice.wake.activationSoundPath',
+      'voice.wake.indicator',
+      'voice.wake.preRollMs',
+      'voice.wake.captureMaxSeconds',
+      'voice.wake.silenceStopMs',
+      'voice.wake.silenceFloorRms',
+      'voice.wake.speechRetriggerMs',
+      'voice.wake.autoSubmit',
+      'voice.wake.retainAudio',
+      'voice.wake.customModelDir',
+      'voice.wake.maxRestarts',
+      'voice.wake.restartBackoffMs',
+      'voice.wake.crashWindowSeconds',
+      'voice.wake.browserBackend',
+    ],
   },
 ];

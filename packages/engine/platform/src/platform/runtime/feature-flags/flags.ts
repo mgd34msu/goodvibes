@@ -2,8 +2,9 @@
  * Internal registry of platform capabilities and their default dispositions.
  *
  * Every entry here is a first-class feature configured through its own domain
- * settings (see feature-settings.ts for the id -> settings-key bindings that
- * surfaces consume). Each defaultState is an owner-ruled default, recorded in
+ * settings: `settings` is the key that turns it on, `tuningKeys` the keys that
+ * tune it, and feature-settings.ts derives FEATURE_SETTINGS (what surfaces
+ * consume) from them. Each defaultState is an owner-ruled default, recorded in
  * the 2026-07-11 rulings worksheet; a disabled entry is a chosen default on a
  * configurable feature, never unreachable capability.
  *
@@ -13,22 +14,39 @@
  *
  * Ids follow the kebab-case naming convention used throughout the runtime.
  */
+import type { ConfigKey } from '../../config/schema-types.js';
 import type { FeatureFlag } from './types.js';
 import { VOICE_FEATURE_FLAGS } from './flags-voice.js';
+import { CHANNEL_SURFACE_FEATURE_FLAGS } from './flags-surfaces.js';
 
-/**
- * The canonical list of platform capabilities across all implementation tiers.
- *
- * Add new entries here AND bind them in feature-settings.ts; the manager
- * initialises from this array at startup and the lockstep tests keep the
- * registry, the settings bindings, and the config association map aligned.
- */
 /** Gate ids other code checks by name: each is spelled once, here, and imported. */
 export const CONTROL_PLANE_FEATURE_FLAG = 'control-plane-gateway';
 export const ROUTE_BINDING_FEATURE_FLAG = 'route-binding';
 export const DELIVERY_ENGINE_FEATURE_FLAG = 'delivery-engine';
 export const SERVICE_MANAGEMENT_FEATURE_FLAG = 'service-management';
 
+const PERMISSION_TOOL_KEYS: readonly ConfigKey[] = [
+  'permissions.tools.read',
+  'permissions.tools.write',
+  'permissions.tools.edit',
+  'permissions.tools.exec',
+  'permissions.tools.find',
+  'permissions.tools.fetch',
+  'permissions.tools.analyze',
+  'permissions.tools.inspect',
+  'permissions.tools.agent',
+  'permissions.tools.state',
+  'permissions.tools.workflow',
+  'permissions.tools.registry',
+  'permissions.tools.delegate',
+  'permissions.tools.mcp',
+];
+
+/**
+ * The canonical list of platform capabilities across all implementation tiers,
+ * one entry per feature with everything about it: adding a feature is adding
+ * an entry. The manager initialises from this array at startup.
+ */
 export const FEATURE_FLAGS: FeatureFlag[] = [
   // ── Tier 2 ───────────────────────────────────────────────────────────────
   {
@@ -39,6 +57,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'disabled',
     tier: 2,
     runtimeToggleable: false,
+    settings: { key: 'permissions.engine', kind: 'enum', enabledValues: ['policy-engine'] },
+    tuningKeys: ['permissions.mode', ...PERMISSION_TOOL_KEYS],
   },
 
   {
@@ -53,6 +73,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 2,
     runtimeToggleable: false,
+    settings: { key: 'permissions.simulation', kind: 'boolean' },
   },
 
   // ── Tier 3 ───────────────────────────────────────────────────────────────
@@ -68,6 +89,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 3,
     runtimeToggleable: true,
+    settings: { key: 'behavior.hitlMode', kind: 'enum', enabledValues: ['quiet', 'balanced', 'operator'] },
+    tuningKeys: ['behavior.hitlMode'],
   },
 
   {
@@ -78,6 +101,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 3,
     runtimeToggleable: false,
+    settings: { key: 'runtime.unifiedTasks', kind: 'boolean' },
   },
 
   {
@@ -88,6 +112,28 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'disabled',
     tier: 3,
     runtimeToggleable: true,
+    settings: { key: 'watchers.triggers.enabled', kind: 'boolean' },
+    tuningKeys: [
+      'watchers.triggers.enabled',
+      'watchers.triggers.backoffLadderMs',
+      'watchers.triggers.breakerStrikes',
+      'watchers.triggers.defaultCheckIntervalMs',
+      'watchers.triggers.probeTimeoutMs',
+      'watchers.triggers.maxConcurrentChecks',
+      'watchers.triggers.observationRingSize',
+      'watchers.triggers.runHistoryLimit',
+      'watchers.triggers.runHistoryTtlHours',
+      'watchers.triggers.eventLogLimit',
+      'watchers.triggers.eventLogTtlHours',
+      'watchers.triggers.sweepIntervalMs',
+      'watchers.triggers.supervisionTickMs',
+      'watchers.triggers.streamQueueLimit',
+      'watchers.triggers.streamBatchLines',
+      'watchers.triggers.streamBatchIntervalMs',
+      'watchers.triggers.onExitMaxDurationMs',
+      'watchers.triggers.onExitStdin',
+      'watchers.triggers.outputTailBytes',
+    ],
   },
 
   // ── Tier 4 ───────────────────────────────────────────────────────────────
@@ -99,6 +145,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 4,
     runtimeToggleable: true,
+    settings: { key: 'runtime.pluginLifecycle', kind: 'boolean' },
   },
   {
     id: 'mcp-lifecycle',
@@ -111,6 +158,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 4,
     runtimeToggleable: true,
+    settings: { key: 'runtime.mcpLifecycle', kind: 'boolean' },
   },
   {
     id: 'otel-foundation',
@@ -120,6 +168,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'disabled',
     tier: 4,
     runtimeToggleable: false,
+    settings: { key: 'telemetry.otelMode', kind: 'enum', enabledValues: ['in-process', 'remote-export'] },
   },
 
   // ── Tier 5 ───────────────────────────────────────────────────────────────
@@ -131,6 +180,12 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'disabled',
     tier: 5,
     runtimeToggleable: true,
+    settings: { key: 'telemetry.otelMode', kind: 'enum', enabledValues: ['remote-export'] },
+    tuningKeys: [
+      'telemetry.decisionOtlpEnabled',
+      'telemetry.decisionOtlpEndpoint',
+      'telemetry.decisionOtlpSignal',
+    ],
   },
 
   // ── Tier 7 ───────────────────────────────────────────────────────────────
@@ -146,6 +201,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 7,
     runtimeToggleable: true,
+    settings: { key: 'behavior.toolResultReconciliation', kind: 'enum', enabledValues: ['reconcile'] },
   },
 
   // ── Tier 7 (continued) ──────────────────────────────────────────────────
@@ -159,6 +215,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'disabled',
     tier: 7,
     runtimeToggleable: false,
+    settings: { key: 'policy.requireSignedBundles', kind: 'boolean' },
   },
   {
     id: 'session-compaction',
@@ -170,6 +227,12 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 6,
     runtimeToggleable: true,
+    settings: { key: 'behavior.compactionStrategy', kind: 'enum', enabledValues: ['structured', 'distiller'] },
+    tuningKeys: [
+      'behavior.autoCompactThreshold',
+      'behavior.compactionStrategy',
+      'behavior.staleContextWarnings',
+    ],
   },
 
   {
@@ -191,6 +254,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'disabled',
     tier: 6,
     runtimeToggleable: true,
+    settings: { key: 'behavior.compactionStrategy', kind: 'enum', enabledValues: ['distiller'] },
+    tuningKeys: ['behavior.compactionStrategy'],
   },
 
   {
@@ -206,6 +271,11 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 8,
     runtimeToggleable: true,
+    // Sanitization mode and localhost approval tune the fetch pipeline; host
+    // blocking of private IPs and metadata endpoints is absolute, so the
+    // capability itself has no off switch.
+    settings: { key: 'fetch.sanitizeMode', kind: 'constant' },
+    tuningKeys: ['fetch.sanitizeMode', 'fetch.trustedHosts', 'fetch.blockedHosts', 'fetch.allowLocalhost'],
   },
 
   {
@@ -218,6 +288,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'disabled',
     tier: 8,
     runtimeToggleable: true,
+    settings: { key: 'runtime.toolBudget.enforced', kind: 'boolean' },
+    tuningKeys: ['runtime.toolBudget.maxMs', 'runtime.toolBudget.maxTokens', 'runtime.toolBudget.maxCostUsd'],
   },
 
   {
@@ -231,6 +303,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'disabled',
     tier: 8,
     runtimeToggleable: false,
+    settings: { key: 'tools.overflowSpillBackend', kind: 'enum', enabledValues: ['ledger', 'diagnostics'] },
+    tuningKeys: ['tools.overflowSpillBackend'],
   },
 
   {
@@ -244,6 +318,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 8,
     runtimeToggleable: true,
+    settings: { key: 'permissions.divergenceDashboard', kind: 'boolean' },
+    tuningKeys: ['permissions.divergenceThreshold', 'permissions.maxDivergenceRecords'],
   },
 
   {
@@ -260,6 +336,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 8,
     runtimeToggleable: true,
+    settings: { key: 'permissions.commandParser', kind: 'enum', enabledValues: ['ast'] },
   },
 
   {
@@ -274,6 +351,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 9,
     runtimeToggleable: true,
+    settings: { key: 'provider.localContextIngestion', kind: 'boolean' },
   },
 
   {
@@ -290,6 +368,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 9,
     runtimeToggleable: true,
+    settings: { key: 'agents.contextWindowGuard', kind: 'boolean' },
+    tuningKeys: ['agents.contextCompactThreshold'],
   },
 
   {
@@ -309,6 +389,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 9,
     runtimeToggleable: true,
+    settings: { key: 'agents.passiveInjection.knowledge', kind: 'boolean' },
+    tuningKeys: ['agents.passiveInjection.budgetTokens', 'agents.passiveInjection.relevanceFloor'],
   },
 
   {
@@ -331,6 +413,12 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'disabled',
     tier: 9,
     runtimeToggleable: true,
+    settings: { key: 'agents.passiveInjection.code', kind: 'boolean' },
+    tuningKeys: [
+      'agents.passiveInjection.codeLimit',
+      'agents.passiveInjection.budgetTokens',
+      'agents.passiveInjection.relevanceFloor',
+    ],
   },
 
   {
@@ -344,6 +432,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'disabled',
     tier: 8,
     runtimeToggleable: true,
+    settings: { key: 'tools.outputSchemaFingerprints', kind: 'boolean' },
   },
   // ── Policy-as-Code ───────────────────────────────────────────────────────────
   {
@@ -358,6 +447,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'disabled',
     tier: 5,
     runtimeToggleable: true,
+    settings: { key: 'policy.registryEnabled', kind: 'boolean' },
+    tuningKeys: ['policy.bundleSource', 'policy.bundlePath'],
   },
 
   // Adaptive Execution Planner.
@@ -373,6 +464,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'disabled',
     tier: 5,
     runtimeToggleable: true,
+    settings: { key: 'planner.adaptive', kind: 'boolean' },
   },
   // Provider Optimizer.
   {
@@ -388,6 +480,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'disabled',
     tier: 5,
     runtimeToggleable: true,
+    settings: { key: 'provider.optimizerMode', kind: 'enum', enabledValues: ['manual', 'auto', 'pinned'] },
+    tuningKeys: ['provider.optimizerMode', 'provider.optimizerPinnedModel'],
   },
 
   // ── Integration Delivery SLO ────────────────────────────────────────────
@@ -405,6 +499,14 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 6,
     runtimeToggleable: true,
+    settings: { key: 'integrations.delivery.sloEnforced', kind: 'boolean' },
+    tuningKeys: [
+      'integrations.delivery.maxRetries',
+      'integrations.delivery.initialDelayMs',
+      'integrations.delivery.maxDelayMs',
+      'integrations.delivery.maxDlqSize',
+      'integrations.delivery.sloEnforced',
+    ],
   },
   // ── Adaptive Notification Suppression ──────────────────────────────────────
   {
@@ -418,6 +520,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 3,
     runtimeToggleable: true,
+    settings: { key: 'notifications.adaptiveSuppression', kind: 'boolean' },
+    tuningKeys: ['notifications.burstThreshold'],
   },
 
   // ── Token Scope and Rotation Audit ────────────────────────────────────────
@@ -435,6 +539,12 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 7,
     runtimeToggleable: true,
+    settings: { key: 'security.tokenAudit.enabled', kind: 'boolean' },
+    tuningKeys: [
+      'security.tokenAudit.rotationCadenceDays',
+      'security.tokenAudit.rotationWarningDays',
+      'security.tokenAudit.managed',
+    ],
   },
 
   // Tool Contract Verification.
@@ -450,6 +560,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 8,
     runtimeToggleable: true,
+    settings: { key: 'tools.contractVerification', kind: 'boolean' },
   },
 
   // ── Automation and Omnichannel Foundation ───────────────────────────────
@@ -464,6 +575,16 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
+    settings: { key: 'automation.enabled', kind: 'boolean' },
+    tuningKeys: [
+      'automation.enabled',
+      'automation.maxConcurrentRuns',
+      'automation.runHistoryLimit',
+      'automation.defaultTimeoutMs',
+      'automation.catchUpWindowMinutes',
+      'automation.failureCooldownMs',
+      'automation.deleteAfterRun',
+    ],
   },
   {
     // NOTE: control-plane-gateway was the first tier-10 capability to default ON (One-Platform).
@@ -496,6 +617,25 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
+    settings: { key: 'controlPlane.gateway', kind: 'boolean' },
+    tuningKeys: [
+      'controlPlane.enabled',
+      'controlPlane.hostMode',
+      'controlPlane.host',
+      'controlPlane.port',
+      'controlPlane.publicBaseUrl',
+      'controlPlane.streamMode',
+      'controlPlane.trustProxy',
+      'controlPlane.openaiCompatible.enabled',
+      'controlPlane.openaiCompatible.pathPrefix',
+      'controlPlane.webui.serve',
+      'controlPlane.webui.bundleDir',
+      'controlPlane.cors.enabled',
+      'controlPlane.cors.allowedOrigins',
+      'controlPlane.tls.mode',
+      'controlPlane.tls.certFile',
+      'controlPlane.tls.keyFile',
+    ],
   },
   {
     id: ROUTE_BINDING_FEATURE_FLAG,
@@ -506,6 +646,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
+    settings: { key: 'integrations.routeBinding', kind: 'boolean' },
   },
   {
     id: DELIVERY_ENGINE_FEATURE_FLAG,
@@ -516,178 +657,10 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
+    settings: { key: 'integrations.deliveryTracking', kind: 'boolean' },
   },
-  {
-    id: 'slack-surface',
-    name: 'Slack Surface',
-    description:
-      'Enables the Slack client adapter for interactive command ingress, threaded replies, and '
-      + 'notification delivery. Inbound messages are gated by the per-surface owner allowlist '
-      + '(seeded from the first identified sender; unknown senders are ignored).',
-    defaultState: 'enabled',
-    tier: 10,
-    runtimeToggleable: true,
-  },
-  {
-    id: 'discord-surface',
-    name: 'Discord Surface',
-    description:
-      'Enables the Discord client adapter for interaction handling, message replies, and '
-      + 'notification delivery. Inbound messages are gated by the per-surface owner allowlist '
-      + '(seeded from the first identified sender; unknown senders are ignored).',
-    defaultState: 'enabled',
-    tier: 10,
-    runtimeToggleable: true,
-  },
-  {
-    id: 'ntfy-surface',
-    name: 'ntfy Surface',
-    description:
-      'Enables the ntfy notification surface for push-style delivery and deep links back into the '
-      + 'control-plane UI. Inbound messages are gated by the per-surface owner allowlist when the '
-      + 'sender carries an identity (unknown senders are ignored).',
-    defaultState: 'enabled',
-    tier: 10,
-    runtimeToggleable: true,
-  },
-  {
-    id: 'webhook-surface',
-    name: 'Webhook Surface',
-    description:
-      'Enables the generic webhook surface for machine-to-machine ingress and egress. '
-      + 'Ingress requires the configured webhook verification; sender-identified messages are '
-      + 'additionally gated by the per-surface owner allowlist.',
-    defaultState: 'enabled',
-    tier: 10,
-    runtimeToggleable: true,
-  },
-  {
-    id: 'homeassistant-surface',
-    name: 'Home Assistant Surface',
-    description:
-      'Enables the Home Assistant surface for daemon/device integration, Home Assistant '
-      + 'event delivery, service-call tools, and Home Assistant-originated prompts. Inbound '
-      + 'prompts are gated by the per-surface owner allowlist when the sender carries an '
-      + 'identity (unknown senders are ignored).',
-    defaultState: 'enabled',
-    tier: 10,
-    runtimeToggleable: true,
-  },
-  // Every remaining channel adapter carries its own surface gate entry, bound
-  // (constant kind) to its surfaces.<x>.enabled domain key, the honest
-  // user-facing switch. The capability is always present; activation needs
-  // the enabled key + credentials. Ids match the surface strings the channel
-  // plugin registry registers (see channels/builtin/plugins.ts).
-  {
-    id: 'telegram-surface',
-    name: 'Telegram Surface',
-    description:
-      'Enables the Telegram client adapter for command ingress, threaded replies, and '
-      + 'notification delivery. Activation needs surfaces.telegram.enabled plus bot '
-      + 'credentials; inbound messages are gated by the per-surface owner allowlist.',
-    defaultState: 'enabled',
-    tier: 10,
-    runtimeToggleable: true,
-  },
-  {
-    id: 'whatsapp-surface',
-    name: 'WhatsApp Surface',
-    description:
-      'Enables the WhatsApp client adapter for command ingress, interactive actions, and '
-      + 'notification delivery. Activation needs surfaces.whatsapp.enabled plus API '
-      + 'credentials; inbound messages are gated by the per-surface owner allowlist.',
-    defaultState: 'enabled',
-    tier: 10,
-    runtimeToggleable: true,
-  },
-  {
-    id: 'signal-surface',
-    name: 'Signal Surface',
-    description:
-      'Enables the Signal client adapter for command ingress and notification delivery. '
-      + 'Activation needs surfaces.signal.enabled plus a linked signal-cli endpoint; inbound '
-      + 'messages are gated by the per-surface owner allowlist.',
-    defaultState: 'enabled',
-    tier: 10,
-    runtimeToggleable: true,
-  },
-  {
-    id: 'msteams-surface',
-    name: 'Microsoft Teams Surface',
-    description:
-      'Enables the Microsoft Teams client adapter for command ingress, threaded replies, and '
-      + 'notification delivery. Activation needs surfaces.msteams.enabled plus bot '
-      + 'credentials; inbound messages are gated by the per-surface owner allowlist.',
-    defaultState: 'enabled',
-    tier: 10,
-    runtimeToggleable: true,
-  },
-  {
-    id: 'matrix-surface',
-    name: 'Matrix Surface',
-    description:
-      'Enables the Matrix client adapter for command ingress, threaded replies, and '
-      + 'notification delivery. Activation needs surfaces.matrix.enabled plus homeserver '
-      + 'credentials; inbound messages are gated by the per-surface owner allowlist.',
-    defaultState: 'enabled',
-    tier: 10,
-    runtimeToggleable: true,
-  },
-  {
-    id: 'mattermost-surface',
-    name: 'Mattermost Surface',
-    description:
-      'Enables the Mattermost client adapter for command ingress, threaded replies, and '
-      + 'notification delivery. Activation needs surfaces.mattermost.enabled plus server '
-      + 'credentials; inbound messages are gated by the per-surface owner allowlist.',
-    defaultState: 'enabled',
-    tier: 10,
-    runtimeToggleable: true,
-  },
-  {
-    id: 'imessage-surface',
-    name: 'iMessage Surface',
-    description:
-      'Enables the iMessage client adapter for command ingress and notification delivery. '
-      + 'Activation needs surfaces.imessage.enabled plus a bridge endpoint; inbound messages '
-      + 'are gated by the per-surface owner allowlist.',
-    defaultState: 'enabled',
-    tier: 10,
-    runtimeToggleable: true,
-  },
-  {
-    id: 'bluebubbles-surface',
-    name: 'BlueBubbles Surface',
-    description:
-      'Enables the BlueBubbles client adapter for iMessage command ingress and notification '
-      + 'delivery via a BlueBubbles server. Activation needs surfaces.bluebubbles.enabled '
-      + 'plus server credentials; inbound messages are gated by the per-surface owner allowlist.',
-    defaultState: 'enabled',
-    tier: 10,
-    runtimeToggleable: true,
-  },
-  {
-    id: 'google-chat-surface',
-    name: 'Google Chat Surface',
-    description:
-      'Enables the Google Chat client adapter for command ingress, threaded replies, and '
-      + 'notification delivery. Activation needs surfaces.googleChat.enabled plus app '
-      + 'credentials; inbound messages are gated by the per-surface owner allowlist.',
-    defaultState: 'enabled',
-    tier: 10,
-    runtimeToggleable: true,
-  },
-  {
-    id: 'telephony-surface',
-    name: 'Telephony Surface',
-    description:
-      'Enables the telephony adapter for delivery-oriented voice/SMS notification egress and '
-      + 'webhook ingress. Activation needs surfaces.telephony.enabled plus provider '
-      + 'credentials; inbound events are gated by the per-surface owner allowlist.',
-    defaultState: 'enabled',
-    tier: 10,
-    runtimeToggleable: true,
-  },
+  // The channel adapters live in flags-surfaces.ts.
+  ...CHANNEL_SURFACE_FEATURE_FLAGS,
   {
     id: 'web-surface',
     name: 'Web Surface',
@@ -699,6 +672,15 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
+    settings: { key: 'web.enabled', kind: 'boolean' },
+    tuningKeys: [
+      'web.enabled',
+      'web.hostMode',
+      'web.host',
+      'web.port',
+      'web.publicBaseUrl',
+      'web.staticAssetsDir',
+    ],
   },
   {
     id: 'watcher-framework',
@@ -710,6 +692,13 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
+    settings: { key: 'watchers.enabled', kind: 'boolean' },
+    tuningKeys: [
+      'watchers.enabled',
+      'watchers.pollIntervalMs',
+      'watchers.heartbeatIntervalMs',
+      'watchers.recoveryWindowMinutes',
+    ],
   },
   {
     id: SERVICE_MANAGEMENT_FEATURE_FLAG,
@@ -722,6 +711,15 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
+    settings: { key: 'service.enabled', kind: 'boolean' },
+    tuningKeys: [
+      'service.enabled',
+      'service.autostart',
+      'service.restartOnFailure',
+      'service.platform',
+      'service.serviceName',
+      'service.logPath',
+    ],
   },
   {
     id: 'daemon-auto-update',
@@ -734,6 +732,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 10,
     runtimeToggleable: true,
+    settings: { key: 'update.auto', kind: 'boolean' },
+    tuningKeys: ['update.auto', 'update.intervalMinutes', 'update.releasesUrl'],
   },
 
   // ── Execution Isolation ────────────────────────────────────────────────────
@@ -754,6 +754,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 11,
     runtimeToggleable: true,
+    settings: { key: 'sandbox.enabled', kind: 'boolean' },
+    tuningKeys: ['sandbox.enabled', 'sandbox.mcpIsolation'],
   },
   {
     id: 'sandbox-model-judgment',
@@ -774,6 +776,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 11,
     runtimeToggleable: true,
+    settings: { key: 'sandbox.judgment', kind: 'enum', enabledValues: ['annotate', 'auto-approve'] },
+    tuningKeys: ['sandbox.judgment'],
   },
   // ── Reachability ───────────────────────────────────────────────────────────
   {
@@ -792,6 +796,14 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 11,
     runtimeToggleable: true,
+    settings: { key: 'relay.enabled', kind: 'boolean' },
+    tuningKeys: [
+      'relay.enabled',
+      'relay.url',
+      'relay.rendezvousId',
+      'relay.label',
+      'relay.requireStepUpForMutations',
+    ],
   },
   // ── Paired devices ─────────────────────────────────────────────────────────
   {
@@ -813,9 +825,24 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultState: 'enabled',
     tier: 11,
     runtimeToggleable: true,
+    settings: { key: 'device.capabilities.mode', kind: 'enum', enabledValues: ['ask-every-time', 'honor-grants'] },
+    tuningKeys: [
+      'device.capabilities.mode',
+      'device.capabilities.allowAlwaysOffer',
+      'device.capabilities.requestTimeoutSeconds',
+      'device.location.precision',
+      'device.clipboard.readMode',
+      'device.capture.retentionHours',
+      'device.capture.maxArtifacts',
+      'device.capture.sweepIntervalMinutes',
+      'device.grants.expiryDays',
+      'device.grants.maxPerNode',
+      'device.grants.auditRetentionDays',
+      'device.nodes.maxPaired',
+    ],
   },
 
-  // Voice capabilities live in flags-voice.js; flags.ts is at its line cap.
+  // Voice capabilities live in flags-voice.ts.
   ...VOICE_FEATURE_FLAGS,
 ];
 

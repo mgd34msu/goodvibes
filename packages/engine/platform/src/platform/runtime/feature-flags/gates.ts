@@ -1,6 +1,6 @@
 import type { FeatureFlagManager } from './manager.js';
 import { assertFeatureGateIdRegistered, getFeatureSettingsBinding } from './feature-settings.js';
-import { FEATURE_FLAG_MAP } from './flags.js';
+import { FEATURE_FLAGS, FEATURE_FLAG_MAP } from './flags.js';
 import type { FeatureInoperability } from './types.js';
 
 export type FeatureFlagReader = Pick<FeatureFlagManager, 'isEnabled'> | null | undefined;
@@ -50,35 +50,22 @@ export function requireFeatureGate(
   throw new Error(`the ${flagId} feature is turned off${hint}; cannot ${operation}`);
 }
 
+const SURFACE_GATE_SUFFIX = '-surface';
+
 /**
- * Every channel adapter's surface -> gate-id map. COMPLETE by contract: each
- * entry is backed by a registered `<surface>-surface` flag whose constant
- * binding names the surfaces.<x>.enabled domain key, so consumers can adopt
- * gating without hard-disabling a working route (the recorded TUI divergence:
- * an unmapped adapter read as OFF with no settings recourse). Completeness is
- * pinned by test against the channel plugin registry's surface ids.
+ * Every surface -> gate-id pair, read off the registry: a `<surface>-surface`
+ * flag is that surface's gate, so a new channel adapter's flag is its gate
+ * with no second table to keep in step (an unmapped adapter would read as OFF
+ * with no settings recourse).
  */
-const SURFACE_GATE_IDS: Readonly<Record<string, string>> = {
-  web: 'web-surface',
-  slack: 'slack-surface',
-  discord: 'discord-surface',
-  ntfy: 'ntfy-surface',
-  webhook: 'webhook-surface',
-  homeassistant: 'homeassistant-surface',
-  telegram: 'telegram-surface',
-  whatsapp: 'whatsapp-surface',
-  signal: 'signal-surface',
-  msteams: 'msteams-surface',
-  matrix: 'matrix-surface',
-  mattermost: 'mattermost-surface',
-  imessage: 'imessage-surface',
-  bluebubbles: 'bluebubbles-surface',
-  'google-chat': 'google-chat-surface',
-  telephony: 'telephony-surface',
-};
+const SURFACE_GATE_IDS: ReadonlyMap<string, string> = new Map(
+  FEATURE_FLAGS
+    .filter((flag) => flag.id.endsWith(SURFACE_GATE_SUFFIX))
+    .map((flag) => [flag.id.slice(0, -SURFACE_GATE_SUFFIX.length), flag.id]),
+);
 
 export function surfaceFeatureGateId(surface: string): string | null {
-  return SURFACE_GATE_IDS[surface] ?? null;
+  return SURFACE_GATE_IDS.get(surface) ?? null;
 }
 
 export function isSurfaceFeatureGateEnabled(

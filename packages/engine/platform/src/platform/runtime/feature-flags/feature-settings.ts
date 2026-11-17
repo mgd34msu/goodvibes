@@ -18,95 +18,29 @@
  *             (several features can share one key, e.g. telemetry.otelMode
  *             drives both the in-process instrumentation and remote export).
  * - constant: the capability has no separate off switch; its own domain keys
- *             (listed in its settings association) govern runtime activation
- *             directly.
+ *             (its tuning keys) govern runtime activation directly.
+ *
+ * Each binding is declared on its FEATURE_FLAGS entry (`settings`), with the
+ * keys that tune the feature (`tuningKeys`); everything here is derived.
  */
 import type { ConfigKey } from '../../config/schema-types.js';
 import type { ConfigManager } from '../../config/manager.js';
 import { logger } from '../../utils/logger.js';
 import { FEATURE_FLAGS, FEATURE_FLAG_MAP } from './flags.js';
-import { getFeatureFlagConfig } from './flag-config-map.js';
 import type { FeatureFlagManager } from './manager.js';
-import type { FlagState } from './types.js';
+import type { FeatureEnablement, FeatureEnablementKind, FlagState } from './types.js';
 
-export type FeatureEnablementKind = 'boolean' | 'enum' | 'constant';
+export type { FeatureEnablementKind } from './types.js';
 
-export interface FeatureSettingsBinding {
+/** A feature's enablement binding, as declared on its FEATURE_FLAGS entry. */
+export interface FeatureSettingsBinding extends FeatureEnablement {
   readonly featureId: string;
-  /** The scalar settings key that decides (or, for constant, represents) enablement. */
-  readonly key: ConfigKey;
-  readonly kind: FeatureEnablementKind;
-  /** For kind 'enum': the key values for which the feature is active. */
-  readonly enabledValues?: readonly string[];
 }
 
-/** Every capability's enablement binding, one entry per registry id. */
-export const FEATURE_SETTINGS_BINDINGS: readonly FeatureSettingsBinding[] = [
-  { featureId: 'permissions-policy-engine', key: 'permissions.engine', kind: 'enum', enabledValues: ['policy-engine'] },
-  { featureId: 'permissions-simulation', key: 'permissions.simulation', kind: 'boolean' },
-  { featureId: 'permission-divergence-dashboard', key: 'permissions.divergenceDashboard', kind: 'boolean' },
-  { featureId: 'shell-ast-normalization', key: 'permissions.commandParser', kind: 'enum', enabledValues: ['ast'] },
-  { featureId: 'policy-signing', key: 'policy.requireSignedBundles', kind: 'boolean' },
-  { featureId: 'policy-as-code', key: 'policy.registryEnabled', kind: 'boolean' },
-  { featureId: 'hitl-ux-modes', key: 'behavior.hitlMode', kind: 'enum', enabledValues: ['quiet', 'balanced', 'operator'] },
-  { featureId: 'tool-result-reconciliation', key: 'behavior.toolResultReconciliation', kind: 'enum', enabledValues: ['reconcile'] },
-  { featureId: 'session-compaction', key: 'behavior.compactionStrategy', kind: 'enum', enabledValues: ['structured', 'distiller'] },
-  { featureId: 'compaction-distiller-strategy', key: 'behavior.compactionStrategy', kind: 'enum', enabledValues: ['distiller'] },
-  { featureId: 'unified-runtime-task', key: 'runtime.unifiedTasks', kind: 'boolean' },
-  { featureId: 'plugin-lifecycle', key: 'runtime.pluginLifecycle', kind: 'boolean' },
-  { featureId: 'mcp-lifecycle', key: 'runtime.mcpLifecycle', kind: 'boolean' },
-  { featureId: 'runtime-tools-budget-enforcement', key: 'runtime.toolBudget.enforced', kind: 'boolean' },
-  { featureId: 'overflow-spill-backends', key: 'tools.overflowSpillBackend', kind: 'enum', enabledValues: ['ledger', 'diagnostics'] },
-  { featureId: 'tool-contract-verification', key: 'tools.contractVerification', kind: 'boolean' },
-  { featureId: 'output-schema-fingerprint', key: 'tools.outputSchemaFingerprints', kind: 'boolean' },
-  { featureId: 'otel-foundation', key: 'telemetry.otelMode', kind: 'enum', enabledValues: ['in-process', 'remote-export'] },
-  { featureId: 'otel-remote-export', key: 'telemetry.otelMode', kind: 'enum', enabledValues: ['remote-export'] },
-  { featureId: 'local-provider-context-ingestion', key: 'provider.localContextIngestion', kind: 'boolean' },
-  { featureId: 'agent-context-window-awareness', key: 'agents.contextWindowGuard', kind: 'boolean' },
-  { featureId: 'agent-passive-knowledge-injection', key: 'agents.passiveInjection.knowledge', kind: 'boolean' },
-  { featureId: 'agent-passive-code-injection', key: 'agents.passiveInjection.code', kind: 'boolean' },
-  { featureId: 'provider-optimizer', key: 'provider.optimizerMode', kind: 'enum', enabledValues: ['manual', 'auto', 'pinned'] },
-  { featureId: 'adaptive-execution-planner', key: 'planner.adaptive', kind: 'boolean' },
-  // Sanitization mode and localhost approval tune the fetch pipeline; host
-  // blocking of private IPs and metadata endpoints is absolute, so the
-  // capability itself has no off switch.
-  { featureId: 'fetch-sanitization', key: 'fetch.sanitizeMode', kind: 'constant' },
-  { featureId: 'wake-word-detection', key: 'voice.wake.enabled', kind: 'boolean' },
-  { featureId: 'token-scope-rotation-audit', key: 'security.tokenAudit.enabled', kind: 'boolean' },
-  { featureId: 'adaptive-notification-suppression', key: 'notifications.adaptiveSuppression', kind: 'boolean' },
-  { featureId: 'integration-delivery-slo', key: 'integrations.delivery.sloEnforced', kind: 'boolean' },
-  { featureId: 'route-binding', key: 'integrations.routeBinding', kind: 'boolean' },
-  { featureId: 'delivery-engine', key: 'integrations.deliveryTracking', kind: 'boolean' },
-  { featureId: 'automation-domain', key: 'automation.enabled', kind: 'boolean' },
-  { featureId: 'control-plane-gateway', key: 'controlPlane.gateway', kind: 'boolean' },
-  // Channel adapters activate through their own enabled key + credentials;
-  // the capability is always present, so the gate is constant and the
-  // surface's enabled key is the honest user-facing switch.
-  { featureId: 'slack-surface', key: 'surfaces.slack.enabled', kind: 'constant' },
-  { featureId: 'discord-surface', key: 'surfaces.discord.enabled', kind: 'constant' },
-  { featureId: 'ntfy-surface', key: 'surfaces.ntfy.enabled', kind: 'constant' },
-  { featureId: 'webhook-surface', key: 'surfaces.webhook.enabled', kind: 'constant' },
-  { featureId: 'homeassistant-surface', key: 'surfaces.homeassistant.enabled', kind: 'constant' },
-  { featureId: 'telegram-surface', key: 'surfaces.telegram.enabled', kind: 'constant' },
-  { featureId: 'whatsapp-surface', key: 'surfaces.whatsapp.enabled', kind: 'constant' },
-  { featureId: 'signal-surface', key: 'surfaces.signal.enabled', kind: 'constant' },
-  { featureId: 'msteams-surface', key: 'surfaces.msteams.enabled', kind: 'constant' },
-  { featureId: 'matrix-surface', key: 'surfaces.matrix.enabled', kind: 'constant' },
-  { featureId: 'mattermost-surface', key: 'surfaces.mattermost.enabled', kind: 'constant' },
-  { featureId: 'imessage-surface', key: 'surfaces.imessage.enabled', kind: 'constant' },
-  { featureId: 'bluebubbles-surface', key: 'surfaces.bluebubbles.enabled', kind: 'constant' },
-  { featureId: 'google-chat-surface', key: 'surfaces.googleChat.enabled', kind: 'constant' },
-  { featureId: 'telephony-surface', key: 'surfaces.telephony.enabled', kind: 'constant' },
-  { featureId: 'web-surface', key: 'web.enabled', kind: 'boolean' },
-  { featureId: 'watcher-framework', key: 'watchers.enabled', kind: 'boolean' },
-  { featureId: 'watcher-triggers', key: 'watchers.triggers.enabled', kind: 'boolean' },
-  { featureId: 'service-management', key: 'service.enabled', kind: 'boolean' },
-  { featureId: 'daemon-auto-update', key: 'update.auto', kind: 'boolean' },
-  { featureId: 'exec-sandbox', key: 'sandbox.enabled', kind: 'boolean' },
-  { featureId: 'sandbox-model-judgment', key: 'sandbox.judgment', kind: 'enum', enabledValues: ['annotate', 'auto-approve'] },
-  { featureId: 'relay-connect', key: 'relay.enabled', kind: 'boolean' },
-  { featureId: 'paired-device-capabilities', key: 'device.capabilities.mode', kind: 'enum', enabledValues: ['ask-every-time', 'honor-grants'] },
-];
+/** Every capability's enablement binding, one entry per registry id, read off FEATURE_FLAGS. */
+export const FEATURE_SETTINGS_BINDINGS: readonly FeatureSettingsBinding[] = FEATURE_FLAGS.map(
+  (flag) => ({ featureId: flag.id, ...flag.settings }),
+);
 
 const BINDINGS_BY_ID: ReadonlyMap<string, FeatureSettingsBinding> = new Map(
   FEATURE_SETTINGS_BINDINGS.map((b) => [b.featureId, b]),
@@ -128,8 +62,8 @@ export function assertFeatureGateIdRegistered(flagId: string, context: string): 
   throw new Error(
     `[feature-settings] unknown feature gate id "${flagId}" referenced by ${context}: ` +
     `it is not in FEATURE_SETTINGS, so no setting could ever enable it and the gated ` +
-    `capability would ship dead. Register the flag in flags.ts with a binding in ` +
-    `FEATURE_SETTINGS_BINDINGS, or remove the reference.`,
+    `capability would ship dead. Register the flag in flags.ts with its settings ` +
+    `binding, or remove the reference.`,
   );
 }
 
@@ -248,9 +182,8 @@ function buildFeatureSetting(binding: FeatureSettingsBinding): FeatureSetting {
   if (!flag) {
     throw new Error(`[feature-settings] binding references unknown feature "${binding.featureId}"`);
   }
-  const association = getFeatureFlagConfig(binding.featureId);
   const settings: ConfigKey[] = [binding.key];
-  for (const key of association.configKeys) {
+  for (const key of flag.tuningKeys ?? []) {
     if (!settings.includes(key)) settings.push(key);
   }
   return {

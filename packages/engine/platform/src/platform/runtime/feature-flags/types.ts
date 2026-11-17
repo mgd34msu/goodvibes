@@ -5,6 +5,7 @@
  * that turn it on and off. Forcing a feature off and saying why is a locked
  * managed setting's job, not a separate flag state.
  */
+import type { ConfigKey } from '../../config/schema-types.js';
 
 /**
  * The two states of a feature flag.
@@ -52,6 +53,26 @@ export interface FeatureInoperability {
 }
 
 /**
+ * How a feature is turned on and off through its domain settings key.
+ *
+ * - boolean : the key's boolean value is the feature's enablement.
+ * - enum    : the feature is active while the key's value is in enabledValues
+ *             (several features can share one key, e.g. telemetry.otelMode
+ *             drives both the in-process instrumentation and remote export).
+ * - constant: the capability has no separate off switch; its own domain keys
+ *             (its tuning keys) govern runtime activation directly.
+ */
+export type FeatureEnablementKind = 'boolean' | 'enum' | 'constant';
+
+export interface FeatureEnablement {
+  /** The scalar settings key that decides (or, for constant, represents) enablement. */
+  readonly key: ConfigKey;
+  readonly kind: FeatureEnablementKind;
+  /** For kind 'enum': the key values for which the feature is active. */
+  readonly enabledValues?: readonly string[];
+}
+
+/**
  * Static declaration of a feature gate.
  *
  * Registered once at startup in `flags.ts`; state transitions are tracked
@@ -88,6 +109,16 @@ export interface FeatureFlag {
    * change that wires the capability up, never before.
    */
   notOperable?: FeatureInoperability | undefined;
+
+  /** The domain settings key that turns this feature on, and how its value is read. */
+  settings: FeatureEnablement;
+
+  /**
+   * The config keys that tune this feature, rendered with its enablement key as
+   * one unit; absent when it has none. Typed ConfigKey, so a key that is not a
+   * real config key fails typecheck.
+   */
+  tuningKeys?: readonly ConfigKey[] | undefined;
 }
 
 /**

@@ -35,7 +35,7 @@ export interface SessionPersistenceAndRecoveryDeps {
   readonly render: () => void;
   readonly unsubs: Array<() => void>;
   readonly uiServicesTurns: {
-    on(event: 'TURN_COMPLETED' | 'STREAM_START' | 'STREAM_DELTA' | 'TURN_SUBMITTED' | 'TOOLS_DONE', handler: (event?: { readonly turnId?: string }) => void): () => void;
+    on(event: 'TURN_COMPLETED' | 'STREAM_START' | 'STREAM_DELTA' | 'TURN_SUBMITTED' | 'TOOL_BATCH_READY' | 'TOOLS_DONE', handler: (event?: { readonly turnId?: string }) => void): () => void;
   };
   /**
    * True for a turn the connected host ran (shell/remote-conversation-wiring.ts).

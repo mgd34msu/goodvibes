@@ -334,7 +334,8 @@ async function handleSet(
     ctx.print(result.error ?? `Could not update ${configKey}.`);
     return;
   }
-  ctx.print(`Email config updated\n  key:   ${configKey}\n  value: ${String(cm.get(configKey))}`);
+  // The value the write reports the connected host holding now, not this process's local copy.
+  ctx.print(`Email config updated\n  key:   ${configKey}\n  value: ${String(result.value)}`);
 }
 
 async function handleSend(

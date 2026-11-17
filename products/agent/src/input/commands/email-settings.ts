@@ -110,6 +110,11 @@ export interface PersistMailboxFieldResult {
   readonly configKey?: string;
   /** Set only for the password: the stored goodvibes:// reference, never the value. */
   readonly secretRef?: string;
+  /**
+   * Set for every other field: the value the owning runtime reports holding
+   * after the write (the connected host's read-back), else the validated value sent.
+   */
+  readonly value?: unknown;
 }
 
 /**
@@ -124,7 +129,7 @@ export async function persistMailboxField(
   secretsManager: MailboxSecretsManagerLike,
   field: MailboxField,
   rawValue: string,
-  writeValue: (key: string, value: unknown) => Promise<unknown> | unknown,
+  writeValue: (key: string, value: unknown) => Promise<{ readonly value: unknown } | void> | { readonly value: unknown } | void,
 ): Promise<PersistMailboxFieldResult> {
   const configKey = MAILBOX_FIELDS[field];
   if (field === 'password') {
@@ -141,8 +146,8 @@ export async function persistMailboxField(
   }
   const validated = validateMailboxFieldValue(field, rawValue);
   if (!validated.ok) return { ok: false, error: validated.error, configKey };
-  await writeValue(configKey, validated.value);
-  return { ok: true, configKey };
+  const written = await writeValue(configKey, validated.value);
+  return { ok: true, configKey, value: written ? written.value : validated.value };
 }
 
 /** `EmailService` deps over the mailbox settings and the password chain the daemon uses. */

@@ -1,9 +1,12 @@
 /**
- * Contracts and deterministic progress for contract-progress-restart.test.ts
- * and its second process (contract-progress-child.ts). A contract is built in
- * the shape the runner saves; `progressStep` advances it the way a run does.
+ * Contracts and deterministic progress for contract-progress-restart.test.ts,
+ * contract-progress-crash.test.ts and their second process
+ * (contract-progress-child.ts). A contract is built in the shape the runner
+ * saves; `progressStep` advances it the way a run does.
  */
 import { randomUUID } from 'node:crypto';
+import { existsSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { CONTRACT_INPUT_EXCLUSIONS, type ContractInputSnapshot } from '../platform/src/platform/contract/input-snapshot.js';
 import {
   CURRENT_CONTRACT_SCHEMA_VERSION,
@@ -15,6 +18,7 @@ import {
   type UnitCheck,
 } from '../platform/src/platform/contract/index.js';
 import { emptyWorkItemUsage } from '../platform/src/platform/orchestration/types.js';
+import { ContractStore, contractCheckpointDir, serializeContract } from '../platform/src/platform/contract/store.js';
 
 function criterion(overrides: Partial<Criterion> & Pick<Criterion, 'id'>): Criterion {
   return {
@@ -91,4 +95,42 @@ export function progressStep(contract: Contract, step: number): void {
   contract.decisions.push({ id: `d${step}`, at: step, action: step % 3 === 0 ? 'checked' : 'spawned', targetId: current.id, reason: `step ${step}`, decisionIds: [] });
   contract.usage = { ...contract.usage, inputTokens: contract.usage.inputTokens + step, llmCallCount: step };
   contract.statusLine = `step ${step}`;
+}
+
+export function storeAt(root: string): ContractStore {
+  return new ContractStore({ projectRoot: root, sweepIntervalMs: 0 });
+}
+
+/** A contract as a checkpoint holds it, to compare what was saved with what a restart reads. */
+export function saved(contract: Contract): unknown {
+  return (JSON.parse(serializeContract(contract, 0)!) as { contract: unknown }).contract;
+}
+
+/** What a restarted process reads: a new store's load. */
+export function restart(root: string, id: string): Contract {
+  const contract = storeAt(root).load(id);
+  if (contract === null) throw new Error('the contract did not load');
+  return contract;
+}
+
+export function paths(root: string, id: string) {
+  const dir = contractCheckpointDir(root, id);
+  return { dir, log: join(dir, 'progress.log') };
+}
+
+export function quarantined(dir: string): string[] {
+  return existsSync(dir) ? readdirSync(dir).filter(name => name.includes('.corrupt-')) : [];
+}
+
+/** The first line a child process prints on standard output. */
+export async function firstLine(stream: ReadableStream<Uint8Array>): Promise<string> {
+  const reader = stream.getReader(), decoder = new TextDecoder();
+  let text = '';
+  while (!text.includes('\n')) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    text += decoder.decode(value);
+  }
+  reader.releaseLock();
+  return text.slice(0, text.indexOf('\n'));
 }

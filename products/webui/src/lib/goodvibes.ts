@@ -1,4 +1,5 @@
 import { readTriggerOperatorStatus, readTriggerMigrationResult } from '@goodvibes-jev/engine/platform/platform/triggers/browser';
+import { readFeatureRestartStatus, type FeatureRestartStatus } from './feature-restart-status';
 import {
   createBrowserKnowledgePlatform,
   forSession,
@@ -819,6 +820,35 @@ export type CompanionRegenerateResult = OperatorMethodOutput<'companion.chat.mes
  */
 export type CompanionEditResult = OperatorMethodOutput<'companion.chat.messages.edit'>;
 
+/**
+ * One hit of `chat.messages.search` (companion.chat.messages.search): the chat, the
+ * message, a snippet around the match and when it was written. The daemon matches
+ * message text across every chat in one scan, newest first, paged by `nextCursor`.
+ */
+export interface CompanionMessageSearchHit {
+  readonly sessionId: string;
+  readonly sessionTitle: string;
+  readonly messageId: string;
+  readonly role: string;
+  readonly snippet: string;
+  readonly createdAt: number;
+}
+
+export interface CompanionMessageSearchInput {
+  readonly query: string;
+  readonly limit?: number;
+  readonly cursor?: string;
+  readonly includeClosed?: boolean;
+}
+
+export interface CompanionMessageSearchResult {
+  readonly query: string;
+  readonly items: readonly CompanionMessageSearchHit[];
+  readonly total: number;
+  readonly hasMore: boolean;
+  readonly nextCursor?: string;
+}
+
 /** Input for `chat.messages.edit`: the replacement text is required here, where the contract also accepts `body` or attachments alone. */
 export interface CompanionEditInput {
   readonly content: string;
@@ -1035,6 +1065,18 @@ export const client = {
       // outcome reports the value the daemon now holds and the file it came from.
       reset: (key: string): Promise<ConfigSetOutcome> => invokeOperator('config.reset', { key }),
     },
+    // flags.status: restart-gated features whose saved setting the running
+    // daemon has not applied yet (config.get carries saved values only).
+    // ws-only verb, so it goes through the generic invoke endpoint.
+    flags: {
+      status: async (): Promise<FeatureRestartStatus> =>
+        readFeatureRestartStatus(await requestJson('/api/control-plane/methods/flags.status/invoke', { method: 'POST', body: { body: {} } })),
+    },
+    // Restarts the daemon's managed service so saved startup settings apply; the
+    // daemon refuses with its reason when service management is off.
+    services: {
+      restart: () => invokeOperator('services.restart', {}),
+    },
     // payments.cards.*, the ONLY path card material takes off this surface.
     //
     // create() carries the number, expiry, CVV and cardholder name to the
@@ -1181,6 +1223,17 @@ export const client = {
           invokeOperator('email.inbox.list', input ?? {}),
         read: (uid: number) =>
           invokeOperator('email.inbox.read', { uid }),
+        // ws-only verbs, through the control-plane invoke endpoint like checkpoints.*.
+        update: (input: OperatorMethodInput<'email.inbox.update'>) =>
+          invokeGatewayMethod('email.inbox.update', input),
+      },
+      attachment: {
+        get: (input: OperatorMethodInput<'email.attachment.get'>) =>
+          invokeGatewayMethod('email.attachment.get', input),
+      },
+      drafts: {
+        list: (input: OperatorMethodInput<'email.drafts.list'> = {}) =>
+          invokeGatewayMethod('email.drafts.list', input),
       },
       send: (input: EmailSendInput) =>
         invokeOperator('email.send', input),
@@ -1190,9 +1243,9 @@ export const client = {
       },
     },
     // Occasions and plans (occasions.*, docs/occasions.md).
-    // Sixteen verbs, every one a real REST route (table-routed through
+    // Every verb is a real REST route (table-routed through
     // EXTRA_METHOD_ROUTES, same as checkin.*/ci.*/principals.*): occasions.confirm,
-    // occasions.plans.confirm and occasions.remove write to the owner's profile and take
+    // occasions.plans.confirm, the update verbs and the remove verbs write to the owner's profile and take
     // `authority`, callers pass the SAME WEBUI_PROFILE_AUTHORITY/WEBUI_PROFILE_SURFACE
     // owner-profile.ts exports (docs/occasions.md §7: these three verbs "write to the
     // owner's profile ... go through the profile's own write gate", the identical gate
@@ -1372,6 +1425,9 @@ export const client = {
         invokeOperator<'memory.review-queue', MemoryReviewQueueResult>('memory.review-queue', input ?? {}),
       consolidation: {
         receipts: () => invokeOperator('memory.consolidation.receipts', {}),
+        // ws-only, through the control-plane invoke endpoint.
+        decide: (input: OperatorMethodInput<'memory.consolidation.decide'>) =>
+          invokeGatewayMethod('memory.consolidation.decide', input),
       },
     },
     // contracts.get is REST-routed; contracts.summaries/status, fleet.*, checkpoints.*,
@@ -1487,6 +1543,7 @@ export const client = {
     rewind: {
       plan: (input: RewindPlanInput) => invokeGatewayMethod<'rewind.plan', RewindPlanResult>('rewind.plan', input),
       apply: (input: RewindApplyInput) => invokeGatewayMethod<'rewind.apply', RewindApplyResult>('rewind.apply', input),
+      undo: (input: OperatorMethodInput<'rewind.undo'>) => invokeGatewayMethod('rewind.undo', input),
     },
     sessions: {
       list: (signal?: AbortSignal) => invokeOperator('sessions.list', {}, signal),
@@ -1584,6 +1641,7 @@ export const client = {
           invokeGatewayMethod<'sessions.hosted.detach', SessionsHostedDetachResult>('sessions.hosted.detach', { sessionId, clientId }),
         kill: (sessionId: string) =>
           invokeGatewayMethod<'sessions.hosted.kill', SessionsHostedKillResult>('sessions.hosted.kill', { sessionId }),
+        workspaces: () => invokeGatewayMethod('sessions.hosted.workspaces', {}),
       },
     },
     // watchers.stop: the fleet-node stop action for a watcher (fleet is a live-process
@@ -1675,7 +1733,8 @@ export const client = {
   },
   chat: {
     sessions: {
-      create: (input?: OperatorMethodInput<'companion.chat.sessions.create'>) => invokeOperator('companion.chat.sessions.create', input),
+      create: (input?: OperatorMethodInput<'companion.chat.sessions.create'>, signal?: AbortSignal) =>
+        invokeOperator('companion.chat.sessions.create', input, signal),
       get: (sessionId: string) => invokeOperator('companion.chat.sessions.get', { sessionId }),
       list: (input?: OperatorMethodInput<'companion.chat.sessions.list'>) => invokeOperator('companion.chat.sessions.list', input),
       update: (sessionId: string, input: Parameters<typeof scopedPlatform.chat.sessions.update>[1]) =>
@@ -1697,6 +1756,9 @@ export const client = {
       create: (sessionId: string, input: Parameters<typeof scopedPlatform.chat.messages.create>[1]) =>
         invokeOperator('companion.chat.messages.create', { sessionId, ...input }),
       list: (sessionId: string) => invokeOperator('companion.chat.messages.list', { sessionId }),
+      // Message-text search across every chat, answered by the daemon in one request.
+      search: (input: CompanionMessageSearchInput, signal?: AbortSignal) =>
+        invokeOperator<'companion.chat.messages.search', CompanionMessageSearchResult>('companion.chat.messages.search', input, signal),
       steer: (sessionId: string, input: Parameters<typeof scopedPlatform.chat.messages.steer>[1]) =>
         invokeOperator('companion.chat.messages.steer', { sessionId, ...input }),
       // regenerate (companion.chat.messages.retry): re-run an assistant response

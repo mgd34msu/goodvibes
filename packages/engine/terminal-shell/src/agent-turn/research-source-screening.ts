@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { createClassicProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
-import { ConfigManager, isSecretRefInput, normalizeSecretRef, type HostBooleanSetting, type SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { ConfigManager, SecretsManager, daemonConfigPathForHome, isSecretRefInput, normalizeSecretRef, resolveGoodVibesDaemonHome,
+  type HostBooleanSetting, type SecretStorageMode } from '@goodvibes-jev/engine/platform/platform/config';
 import { createProtectedSourceOwner, type ProtectedSourceOwner, type ProtectedSource, type ProtectedResearchReference,
   type SourceScreeningReceipt, type ResearchReferenceScreeningReceipt } from '@goodvibes-jev/engine/platform/platform/security';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -27,19 +28,27 @@ type ConfigOwner = AgentResearchScreeningConfig;
 export type AgentResearchScreeningCredentials = Pick<SecretsManager, 'resolveLocalCredentialSnapshot' | 'getCredentialMutationState' | 'onDidInvalidateCredentials'>;
 type CredentialOwner = AgentResearchScreeningCredentials;
 
+/** The Agent's settings as a process that is not the Agent reads them: the screening consent and the Agent's secret-storage policy. */
+export interface AgentSettingsReader extends AgentResearchScreeningConfig {
+  /** The Agent's `storage.secretPolicy`, which decides which of its credential stores are read. */
+  getSecretPolicy(): SecretStorageMode;
+}
+
 /**
  * The Agent's own settings, read by a process that is not the Agent (the
  * daemon, for a turn it hosts for the Agent): one read-only manager over the
- * Agent's user settings files with the consent registered, loaded again when
+ * Agent's user settings files with the consent registered, and the daemon tier
+ * where the Agent reads it (GOODVIBES_DAEMON_HOME included), loaded again when
  * the Agent's settings file changes. Nothing is written. Each incarnation read
  * costs one `stat` of that file; a load happens only after it changed, and the
  * load moves the incarnation, so an acquisition made under the old file is
  * retired exactly as a settings change retires it in the Agent's own process.
  */
-export function createAgentSettingsReader(homeDirectory: string): AgentResearchScreeningConfig {
+export function createAgentSettingsReader(homeDirectory: string): AgentSettingsReader {
   const manager = new ConfigManager({
     homeDir: homeDirectory,
     surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
+    daemonTierPath: daemonConfigPathForHome(resolveGoodVibesDaemonHome(homeDirectory)),
     readOnly: true,
     hostSettings: [AGENT_HOSTED_RESEARCH_SCREENING_SETTING],
   });
@@ -64,6 +73,49 @@ export function createAgentSettingsReader(homeDirectory: string): AgentResearchS
     getConfigurationIncarnation: () => fresh().getConfigurationIncarnation(),
     onDidChangeIncarnation: (listener) => manager.onDidChangeIncarnation(listener),
     onDidInvalidate: (listener) => manager.onDidInvalidate(listener),
+    getSecretPolicy: () => {
+      try {
+        return (fresh().get('storage.secretPolicy') as SecretStorageMode | undefined) ?? 'preferred_secure';
+      } catch {
+        return 'preferred_secure';
+      }
+    },
+  };
+}
+
+/**
+ * The Agent's own credential stores, read by a process that is not the Agent
+ * (the daemon, for a turn it hosts for the Agent), in the Agent's order: the
+ * daemon tier where the Agent reads it, then the Agent's user store
+ * `~/.goodvibes/agent/secrets.*`, under the Agent's own `storage.secretPolicy`.
+ * The daemon's own store is a different surface's, so a screening key the
+ * owner saved in the Agent would not be found there.
+ *
+ * Read only: nothing is written, so the mutation generation stays put and no
+ * invalidation fires here; a key changed by another process is seen on the next
+ * acquisition, as in the Agent's own process. No settings object is given to
+ * the stores, so the daemon's process-wide password-manager settings are left
+ * as they are. The project tier is left out: the Agent reads only its launch
+ * directory's, and only for a key the owner confirmed there; here the project
+ * paths are the user store itself, so they add nothing. One store object per
+ * policy, made on first use; each read costs what the Agent's own read costs.
+ */
+export function createAgentCredentialReader(homeDirectory: string, settings: Pick<AgentSettingsReader, 'getSecretPolicy'>): AgentResearchScreeningCredentials {
+  const stores = new Map<SecretStorageMode, SecretsManager>();
+  const daemonHome = resolveGoodVibesDaemonHome(homeDirectory);
+  const current = (): SecretsManager => {
+    const policy = settings.getSecretPolicy();
+    let store = stores.get(policy);
+    if (!store) {
+      store = new SecretsManager({ projectRoot: homeDirectory, globalHome: homeDirectory, surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT, daemonHome, policy });
+      stores.set(policy, store);
+    }
+    return store;
+  };
+  return {
+    resolveLocalCredentialSnapshot: (key) => current().resolveLocalCredentialSnapshot(key),
+    getCredentialMutationState: () => current().getCredentialMutationState(),
+    onDidInvalidateCredentials: (listener) => current().onDidInvalidateCredentials(listener),
   };
 }
 interface Acquisition { readonly owner: ProtectedSourceOwner; assertCurrent(): void; close(): Promise<void>; }

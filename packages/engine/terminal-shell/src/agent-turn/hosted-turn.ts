@@ -48,7 +48,7 @@ import { registerAgentKnowledgeIngestTool } from './knowledge-ingest-tool.js';
 import { registerAgentResearchReportTool } from './research-report-tool.js';
 import { registerAgentModelCompareTool } from './model-compare-tool.js';
 import type { AgentModelCompareToolDeps } from './model-compare-types.js';
-import { createAgentResearchSourceOwner, createAgentSettingsReader } from './research-source-screening.js';
+import { createAgentCredentialReader, createAgentResearchSourceOwner, createAgentSettingsReader } from './research-source-screening.js';
 import { createClassicProtectedSourceOwner, type ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import { randomUUID } from 'node:crypto';
 import { registerAgentOperatorActionTool } from './operator-action-tool.js';
@@ -272,18 +272,24 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
   );
   const section = hostedAgentSection();
   // The research screening owners, as the Agent process has them: hosted screening
-  // under the Agent's own consent setting (read from its settings file) or Classic,
-  // and code-only screening for first-party local reads. Made on first use, kept for the daemon's life.
+  // under the Agent's own consent setting (read from its settings file) with the
+  // screening keys from the Agent's own credential stores, or Classic, and
+  // code-only screening for first-party local reads. Made on first use, kept for the daemon's life.
   const screeningLifetime = new AbortController();
   let researchOwners: { readonly report: ProtectedSourceOwner; readonly shared: ProtectedSourceOwner } | null = null;
-  const researchOwnersFor = (): { readonly report: ProtectedSourceOwner; readonly shared: ProtectedSourceOwner } => researchOwners ??= {
-    report: createAgentResearchSourceOwner(createAgentSettingsReader(deps.homeDirectory), deps.secretsManager, screeningLifetime.signal),
-    shared: createClassicProtectedSourceOwner(Object.freeze({
-      ownerId: `agent-local-reads-${randomUUID()}`,
-      revision: randomUUID(),
-      signal: screeningLifetime.signal,
-      assertCurrent: () => screeningLifetime.signal.throwIfAborted(),
-    })),
+  const researchOwnersFor = (): { readonly report: ProtectedSourceOwner; readonly shared: ProtectedSourceOwner } => {
+    if (researchOwners) return researchOwners;
+    const agentSettings = createAgentSettingsReader(deps.homeDirectory);
+    researchOwners = {
+      report: createAgentResearchSourceOwner(agentSettings, createAgentCredentialReader(deps.homeDirectory, agentSettings), screeningLifetime.signal),
+      shared: createClassicProtectedSourceOwner(Object.freeze({
+        ownerId: `agent-local-reads-${randomUUID()}`,
+        revision: randomUUID(),
+        signal: screeningLifetime.signal,
+        assertCurrent: () => screeningLifetime.signal.throwIfAborted(),
+      })),
+    };
+    return researchOwners;
   };
   // One in-process host per daemon request path: the daemon is the operator tools' connected host.
   let inProcess: { readonly requests: HostedDaemonRequestPath; readonly host: AgentInProcessHost } | null = null;

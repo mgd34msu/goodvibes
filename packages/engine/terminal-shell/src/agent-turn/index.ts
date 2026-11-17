@@ -112,10 +112,12 @@ export * from './protected-research-report.js';
 export {
   AGENT_HOSTED_RESEARCH_SCREENING_KEY,
   AGENT_HOSTED_RESEARCH_SCREENING_SETTING,
+  createAgentCredentialReader,
   createAgentResearchSourceOwner,
   createAgentSettingsReader,
   type AgentResearchScreeningConfig,
   type AgentResearchScreeningCredentials,
+  type AgentSettingsReader,
 } from './research-source-screening.js';
 export * from './research-report-tool.js';
 export * from './model-compare-tool.js';

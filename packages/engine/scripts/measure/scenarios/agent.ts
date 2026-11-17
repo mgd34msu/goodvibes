@@ -41,7 +41,7 @@ async function openAgent(env: MeasureEnv): Promise<AgentFloor> {
   const { createPreparedAgentRuntimeServices } = await load<{ createPreparedAgentRuntimeServices(options: Record<string, unknown>): Promise<AgentServices> }>('test/helpers/prepared-runtime-services.ts');
   const { researchScreeningFixture, cleanupResearchScreeningFixtures } = await load<{ researchScreeningFixture(options?: Record<string, unknown>): { owner: unknown }; cleanupResearchScreeningFixtures(): Promise<void> }>('test/helpers/research-screening.ts');
   const { taskRoutePort } = await load<{ taskRoutePort(fixtures: Record<string, unknown>): { port: JudgmentPort } }>('test/helpers/task-route-readings.ts');
-  const { bindAgentResearchSourceOwner } = await load<{ bindAgentResearchSourceOwner(registry: ToolRegistry, owner: unknown): void }>('agent/protected-research-report.ts');
+  const { bindAgentResearchSourceOwner } = await import('@goodvibes-jev/engine/terminal-shell/agent-turn') as { bindAgentResearchSourceOwner(registry: ToolRegistry, owner: unknown): void };
   const { CommandRegistry } = await load<{ CommandRegistry: new () => unknown }>('input/command-registry.ts');
   const { registerAgentTools } = await load<{ registerAgentTools(deps: Record<string, unknown>): void }>('runtime/bootstrap-agent-tools.ts');
   const { createRuntimeStore } = await load<{ createRuntimeStore(): unknown }>('runtime/store/index.ts');

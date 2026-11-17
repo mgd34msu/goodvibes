@@ -53,9 +53,9 @@ export interface AgentModelCompareCatalogModel {
 }
 
 export interface AgentModelCompareModelCatalog {
-  readonly listModels: (query?: { readonly selectableOnly?: boolean }) => readonly AgentModelCompareCatalogModel[] | Promise<readonly AgentModelCompareCatalogModel[]>;
-  readonly getCurrentModel?: () => AgentModelCompareCatalogModel | Promise<AgentModelCompareCatalogModel>;
-  readonly recordModelUsage?: (registryKey: string, ownership?: Pick<ToolExecuteOptions, 'signal' | 'assertCurrent'>) => Promise<unknown>;
+  readonly listModels: (query?: { readonly selectableOnly?: boolean | undefined }) => readonly AgentModelCompareCatalogModel[] | Promise<readonly AgentModelCompareCatalogModel[]>;
+  readonly getCurrentModel?: (() => AgentModelCompareCatalogModel | Promise<AgentModelCompareCatalogModel>) | undefined;
+  readonly recordModelUsage?: ((registryKey: string, ownership?: Pick<ToolExecuteOptions, 'signal' | 'assertCurrent'>) => Promise<unknown>) | undefined;
 }
 
 export interface AgentModelCompareProviderRegistry {
@@ -70,8 +70,8 @@ export interface AgentModelCompareToolDeps {
   readonly providerRegistry: AgentModelCompareProviderRegistry;
   readonly artifactStore?: AgentModelCompareArtifactStore | undefined;
   /** Random source for the blind-label order; tests fix it. Defaults to Math.random. */
-  readonly random?: () => number;
-  readonly applyModelRoute?: (registryKey: string, options?: ToolExecuteOptions, ownership?: Pick<ToolExecuteOptions, 'signal' | 'assertCurrent'>) => AgentModelCompareRouteUpdateResult | Promise<AgentModelCompareRouteUpdateResult>;
+  readonly random?: (() => number) | undefined;
+  readonly applyModelRoute?: ((registryKey: string, options?: ToolExecuteOptions, ownership?: Pick<ToolExecuteOptions, 'signal' | 'assertCurrent'>) => AgentModelCompareRouteUpdateResult | Promise<AgentModelCompareRouteUpdateResult>) | undefined;
 }
 
 export interface ResolvedCompareModel {
@@ -127,7 +127,7 @@ export interface LoadedComparisonJudgment {
     readonly providerId: string;
     readonly modelId: string;
     readonly displayName: string;
-  };
+  } | undefined;
 }
 
 export interface LoadedComparisonHandoff {

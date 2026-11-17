@@ -38,8 +38,9 @@ import { resolve } from 'node:path';
 import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';
 import { buildDurableRuleForDecision, buildRememberOptions, compileRules, sessionApprovalKey, type CompiledRules, type RememberTier } from './approval-rules.js';
 import { stableStringify } from '../providers/registry-helpers.js';
-import { callRecipients, changesMcpTrust, classifyCall, classifyPaths, declaredRecoverable, declaredValues, ownerOnlyReason, recognizeOwnerOnly, type CallClass, type CallFacts, type CallRuleFact, type OwnerOnlyKind } from '../gate/classify.js';
+import { callCommands, callRecipients, changesMcpTrust, classifyCall, classifyPaths, declaredRecoverable, declaredValues, ownerOnlyReason, recognizeOwnerOnly, type CallClass, type CallFacts, type CallRuleFact, type OwnerOnlyKind } from '../gate/classify.js';
 import { OWNER_ADDRESS_CONFIG_KEYS, splitRecipients } from '../security/owner-identity.js';
+import { undeclaredSendRecipients } from '../gate/send-recipients.js';
 import { toolDecisionOf } from './denial.js';
 import { processHeldForOwner, type HeldForOwnerCall, type HeldForOwnerLedger } from './held-for-owner.js';
 import { processJevDecisions, type JevDecisionLedger, type JevDecisionRuleEffect } from './jev-decisions.js';
@@ -1058,7 +1059,7 @@ export class PermissionManager {
     const effectSurface = capturedAuthority.surface;
     const effectWriteDenied = mode !== 'yolo' && permissions.tools?.write === 'deny';
     const owner = { frame: capturedAuthority, assertCurrent };
-    const ownerFacts = this.ownerOnlyFacts(toolName, args, definition, admissionEvidence);
+    const ownerFacts = this.ownerOnlyFacts(toolName, args, definition, category, admissionEvidence);
     const ownerOnly = recognizeOwnerOnly(toolName, args, definition, ownerFacts);
     const rule = await this.ruleFactOf({
       toolName, args, category, mode, tools: permissions.tools, ownerOnly, subjects: callSubjects(args, definition),
@@ -1721,7 +1722,7 @@ export class PermissionManager {
     await this.fireHook('Pre:permission:request', 'Pre', 'permission', 'request', { callId, toolName, category, analysis }, hookOwner);
     assertCurrent();
     this.policyRuntimeState.recordPermissionRequest({ callId, tool: toolName, category, analysis });
-    const ownerFacts = this.ownerOnlyFacts(toolName, args, definition);
+    const ownerFacts = this.ownerOnlyFacts(toolName, args, definition, category);
     const ownerOnly = recognizeOwnerOnly(toolName, args, definition, ownerFacts);
     const rule = await this.ruleFactOf({
       toolName, args, category, mode, tools: config.permissions?.tools, ownerOnly, subjects: callSubjects(args, definition),
@@ -1767,7 +1768,7 @@ export class PermissionManager {
     const mode = this.getMode();
     const category = this.getCategory(toolName, captured, definition);
     const config = this.configReader.getSnapshot();
-    const ownerOnly = recognizeOwnerOnly(toolName, captured, definition, this.ownerOnlyFacts(toolName, captured, definition));
+    const ownerOnly = recognizeOwnerOnly(toolName, captured, definition, this.ownerOnlyFacts(toolName, captured, definition, category));
     const rule = await this.ruleFactOf({
       toolName, args: captured, category, mode, tools: config.permissions?.tools, ownerOnly, subjects: callSubjects(captured, definition),
       policyEnabled: this.featureFlags?.isEnabled('permissions-policy-engine') === true, options: signal ? { signal } : {},
@@ -1784,12 +1785,19 @@ export class PermissionManager {
    * The facts the owner-only list reads from this process's settings and the
    * owner's answers: whether the call is a settings write that loosens its key,
    * and whether it sends to a recipient that is neither one of his configured
-   * destinations nor one he allowed this session. Cost per call: nothing for a
-   * tool that declares no recipients; a few settings reads for one that does.
+   * destinations nor one he allowed this session. The recipients are the ones
+   * the tool declares (callRecipients) and the ones code reads from a call no
+   * declaration covers: a shell command that mails or posts a message, a
+   * `fetch` to a messaging service, an MCP or plugin tool's recipient
+   * arguments (gate/send-recipients.ts). Cost per call: one parse of each
+   * command a call runs, a walk of an undeclared tool's arguments, and a few
+   * settings reads only when a recipient was found.
    */
   private ownerOnlyFacts(toolName: string, args: Record<string, unknown>, definition: ToolDefinition | undefined,
-    evidence?: ToolOwnedAdmissionEvidence): { readonly loosensSetting: boolean; readonly newRecipient: boolean; readonly recipients: readonly string[] } {
-    const recipients = callRecipients(args, definition);
+    category: PermissionCategory, evidence?: ToolOwnedAdmissionEvidence): { readonly loosensSetting: boolean; readonly newRecipient: boolean; readonly recipients: readonly string[] } {
+    const declared = callRecipients(args, definition);
+    const read = undeclaredSendRecipients(toolName, args, definition, callCommands(toolName, args, definition), category === 'read');
+    const recipients = declared === undefined || read === undefined ? undefined : [...declared, ...read];
     const known = recipients === undefined || recipients.length === 0 ? undefined : this.knownRecipients();
     return {
       loosensSetting: settingsWriteLoosens(toolName, args, evidence, key => this.configReader.getSetting?.(key)),

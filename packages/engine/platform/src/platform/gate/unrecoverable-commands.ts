@@ -110,46 +110,61 @@ function gitDestroys(args: readonly string[]): string | undefined {
   }
 }
 
-/** What one program run with these arguments destroys, or undefined. */
-function programDestroys(name: string, args: readonly string[], depth: number): string | undefined {
+/** What one program run with these arguments destroys, or undefined. Wrappers, shells and `find -exec` are read by the walker. */
+function programDestroys(name: string, args: readonly string[]): string | undefined {
   if (REMOVERS.has(name)) return `${name} deletes what it names, and nothing keeps a copy`;
   if (name.startsWith('mkfs')) return `${name} formats a device, erasing it`;
   if (name === 'dd' && args.some((word) => word.startsWith('of='))) return 'dd writes over its output file or device';
   if (name === 'truncate') return 'truncate cuts a file\'s contents away';
   if (name === 'find' && args.some((word) => word === '-delete')) return 'find -delete deletes every file it matches';
-  if (name === 'find') {
-    const exec = args.findIndex((word) => word === '-exec' || word === '-execdir' || word === '-ok' || word === '-okdir');
-    if (exec >= 0 && args[exec + 1] !== undefined) return programDestroys(baseName(args[exec + 1]!), args.slice(exec + 2), depth);
-  }
   if (name === 'git') return gitDestroys(args);
   if (name === 'docker' || name === 'podman') {
     if (args[0] === 'volume' && (args[1] === 'rm' || args[1] === 'prune')) return `${name} volume ${args[1]} deletes stored volume data`;
     if (args[0] === 'system' && args[1] === 'prune' && args.includes('--volumes')) return `${name} system prune --volumes deletes stored volume data`;
   }
   if (DATABASE_CLIENTS.has(name) && args.some((word) => DATABASE_DESTRUCTION.test(word))) return `${name} drops or truncates stored data`;
+  return undefined;
+}
+
+/**
+ * Reads one program run by the walker: `visit` answers for the program
+ * itself; then the command `find -exec` runs, and the command string a shell
+ * or `eval` is handed, are read as commands of their own.
+ */
+type ProgramVisitor<T> = (name: string, args: readonly string[]) => T | undefined;
+/** What the walker answers for a command nested deeper than it reads (`bash -c "bash -c ..."` past the limit). */
+type TooDeep<T> = (name: string) => T | undefined;
+
+function walkProgram<T>(name: string, args: readonly string[], depth: number, visit: ProgramVisitor<T>, tooDeep: TooDeep<T>): T | undefined {
+  const found = visit(name, args);
+  if (found !== undefined) return found;
+  if (name === 'find') {
+    const exec = args.findIndex((word) => word === '-exec' || word === '-execdir' || word === '-ok' || word === '-okdir');
+    if (exec >= 0 && args[exec + 1] !== undefined) return walkProgram(baseName(args[exec + 1]!), args.slice(exec + 2), depth, visit, tooDeep);
+  }
   if (SHELLS.has(name) || name === 'eval') {
     const flag = args.findIndex((word) => /^-[a-z]*c[a-z]*$/.test(word));
     const script = name === 'eval' ? args.join(' ') : flag >= 0 ? args[flag + 1] : undefined;
     if (script !== undefined && script.trim().length > 0) {
-      return depth < MAX_DEPTH ? destructionIn(script, depth + 1) : `${name} runs a command nested too deeply to read`;
+      return depth < MAX_DEPTH ? walkCommand(script, depth + 1, visit, tooDeep) : tooDeep(name);
     }
   }
   return undefined;
 }
 
-/** What one parsed command node destroys, reading through wrappers. */
-function nodeDestroys(node: CommandNode, depth: number): string | undefined {
+/** One parsed command node: what `$(...)` inside it runs, then its program, read through wrappers. */
+function walkNode<T>(node: CommandNode, depth: number, visit: ProgramVisitor<T>, tooDeep: TooDeep<T>): T | undefined {
   const { words, nested } = wordsOf(node);
   for (const inner of nested) {
-    const found = depth < MAX_DEPTH ? destructionIn(inner, depth + 1) : undefined;
-    if (found) return found;
+    const found = depth < MAX_DEPTH ? walkCommand(inner, depth + 1, visit, tooDeep) : undefined;
+    if (found !== undefined) return found;
   }
   let index = 0;
   while (index < words.length) {
     while (index < words.length && isAssignment(words[index]!)) index++;
     const name = baseName(words[index] ?? '');
     if (!name) return undefined;
-    if (!WRAPPERS.has(name)) return programDestroys(name, words.slice(index + 1), depth);
+    if (!WRAPPERS.has(name)) return walkProgram(name, words.slice(index + 1), depth, visit, tooDeep);
     // Past the wrapper's own options, their values (and `timeout`'s duration) to the program it runs.
     const valued = WRAPPER_VALUE_FLAGS[name];
     index++;
@@ -163,13 +178,28 @@ function nodeDestroys(node: CommandNode, depth: number): string | undefined {
   return undefined;
 }
 
-function destructionIn(command: string, depth: number): string | undefined {
+function walkCommand<T>(command: string, depth: number, visit: ProgramVisitor<T>, tooDeep: TooDeep<T>): T | undefined {
   let nodes: CommandNode[];
   try { nodes = collectCommandNodes(parseCommandAST(command)); }
   catch { return undefined; }
   for (const node of nodes) {
-    const found = nodeDestroys(node, depth);
-    if (found) return found;
+    const found = walkNode(node, depth, visit, tooDeep);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/**
+ * The first answer `visit` gives for a program the commands run, read the way
+ * the deletion rules read them: through `sudo`, `env`, `xargs`, `timeout` and
+ * the other wrappers, into `sh -c` / `eval` command strings, `$(...)` and
+ * `find -exec`. `tooDeep` answers for a shell command string nested past the
+ * depth the walker reads. One parse of each command string.
+ */
+export function firstProgramAnswer<T>(commands: readonly string[], visit: ProgramVisitor<T>, tooDeep: TooDeep<T>): T | undefined {
+  for (const command of commands) {
+    const found = walkCommand(command, 0, visit, tooDeep);
+    if (found !== undefined) return found;
   }
   return undefined;
 }
@@ -180,11 +210,7 @@ function destructionIn(command: string, depth: number): string | undefined {
  * is one these rules recognise.
  */
 export function unrecoverableDeletionIn(commands: readonly string[]): string | undefined {
-  for (const command of commands) {
-    const found = destructionIn(command, 0);
-    if (found) return found;
-  }
-  return undefined;
+  return firstProgramAnswer(commands, programDestroys, (name) => `${name} runs a command nested too deeply to read`);
 }
 
 /** An exec file operation that deletes, or overwrites its destination, is a deletion too. */

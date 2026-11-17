@@ -128,7 +128,9 @@ describe('remembered rules stay in their project', () => {
       const store = new UserPermissionRuleStore(join(dir, 'rules.json'));
       await store.init();
       const [projectA, projectB] = [join(dir, 'project-a'), join(dir, 'cloned-b')];
-      const grant = buildDurableRuleForDecision({ toolName: 'exec', args: commit, tier: 'command-class', effect: 'allow' })!;
+      // The owner's remembered answer to a forced push, a deletion only he decides: the grant that must never leak to another project.
+      const forcePush = execArgs('git push --force origin');
+      const grant = buildDurableRuleForDecision({ toolName: 'exec', args: forcePush, tier: 'command-class', effect: 'allow', ownerOnly: 'unrecoverable-delete' })!;
       await store.remember({ rule: grant, tier: 'command-class', tool: 'exec', createdAt: 1, project: projectIdentity(projectA) });
       const everywhere = buildDurableRuleForDecision({ toolName: 'exec', args: execArgs('npm run build'), tier: 'command-class', effect: 'allow' })!;
       await store.add({ rule: everywhere, tier: 'command-class', tool: 'exec', createdAt: 2 });
@@ -137,7 +139,6 @@ describe('remembered rules stay in their project', () => {
         createPermissionConfigReader(new ConfigManager({ surfaceRoot: 'agent', workingDir: project, homeDir: join(dir, 'home'), configDir: join(dir, 'config') })),
         new PolicyRuntimeState(), null, null, store);
       const [inA, inB] = [managerIn(projectA), managerIn(projectB)];
-      const forcePush = execArgs('git push --force origin');
       expect(await inA.checkDetailed('exec', forcePush)).toMatchObject({ approved: true, sourceLayer: 'user_rule' });
       expect(asks).toBe(0);
       const inProjectB = await inB.checkDetailed('exec', forcePush);

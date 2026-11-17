@@ -64,7 +64,10 @@ export type OwnerOnlyKind =
   /**
    * Sending as the owner to a recipient that is neither one of his configured
    * destinations nor one he allowed: the tool declares where its recipients
-   * sit (`subjects.recipients`, `ownerDecisions.recipients`).
+   * sit (`subjects.recipients`, `ownerDecisions.recipients`), or code reads
+   * them from a call no declaration covers (gate/send-recipients.ts: a shell
+   * command that mails or posts to a messaging service, a `fetch` to one, an
+   * MCP or plugin tool's `to`/`cc`/`bcc`/`recipients`/`attendees` arguments).
    */
   | 'new-recipient'
   /** Sending content derived from untrusted text read this turn. */

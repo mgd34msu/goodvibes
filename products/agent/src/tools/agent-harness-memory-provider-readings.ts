@@ -2,8 +2,8 @@ import { decisionOrClassic, isClassicOperation, selectClassicCatalog, withConfig
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
-import { routingRegistry, atRestCredential, memoryCredentialState, memoryLiveStatus, memoryProviderSelect, memoryReceiptMember, memoryRouteRole, memorySchemaCertified } from '@goodvibes-jev/engine/platform/platform/routing';
-import { findCredentialCandidates } from '@goodvibes-jev/engine/platform/platform/utils';
+import { routingRegistry, memoryCredentialState, memoryLiveStatus, memoryProviderSelect, memoryReceiptMember, memoryRouteRole, memorySchemaCertified } from '@goodvibes-jev/engine/platform/platform/routing';
+import { maskCredentialCandidates } from '@goodvibes-jev/engine/platform/platform/utils';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { modelReadingServicePath, withModelReadingSource } from './agent-harness-model-reading-source.ts';
@@ -123,41 +123,15 @@ export async function readMemorySchemaCertified(source: unknown, options: Catalo
   }, () => null);
 }
 
-/** More candidate spans than this are masked as a whole, without one decision per span. */
-export const MAX_MEMORY_CREDENTIAL_SPANS = 100;
-
-/** The complete source stays protected. Classic never uses a semantic exemption to disclose a candidate credential. */
+/**
+ * Provider metadata with every credential-shaped span masked that its
+ * characters do not prove harmless (maskCredentialCandidates): the same local
+ * rule the journals use. No span is sent anywhere to be judged.
+ */
 export async function readMemoryPublicText(source: string, options: CatalogRankingOptions): Promise<string> {
   return withConfiguredDecisionModelPolicy(() => withModelReadingSource({ text: source }, retainMemoryReadingOptions(options), async (captured, current) => {
-    const candidates = findCredentialCandidates(captured.text);
-    if (candidates.length === 0) return captured.text;
-    const mask = () => {
-      assertMemoryCurrent(current); let output = '', offset = 0;
-      for (const candidate of candidates) { output += captured.text.slice(offset, candidate.start) + candidate.marker; offset = candidate.end; }
-      return output + captured.text.slice(offset);
-    };
-    // A text made of thousands of key-shaped tokens would cost one sequential model call
-    // per span. Past the cap nothing is judged and every candidate is masked.
-    if (candidates.length > MAX_MEMORY_CREDENTIAL_SPANS) return mask();
-    return decisionOrClassic(async () => {
-      const site = atRestCredential.name;
-      const authority = captureMemoryAuthority(atRestCredential, current);
-      try {
-        let output = '', offset = 0;
-        for (const candidate of candidates) {
-          const run = await atRestCredential.run(authority.port, { span: candidate.value, context: captured.text }, { site, signal: authority.signal, beforeAttempt: authority.assertCurrent });
-          authority.assertCurrent();
-          const clear = run.readings.credential.verdict === 'no';
-          run.recordAction(clear ? 'keep public external-memory metadata span' : 'mask external-memory metadata span');
-          output += captured.text.slice(offset, candidate.start) + (clear ? candidate.value : candidate.marker); offset = candidate.end;
-        }
-        authority.assertCurrent(); return output + captured.text.slice(offset);
-      } finally {
-        const observation = authority.consumeObservation();
-        const retained = () => { current.signal?.throwIfAborted(); authority.signal.throwIfAborted(); if (!isClassicOperation()) observation.assertCurrent(); };
-        current.retainCurrent?.(retained, site); retained();
-      }
-    }, mask, () => { assertMemoryCurrent(current); return true; });
+    assertMemoryCurrent(current);
+    return maskCredentialCandidates(captured.text);
   }));
 }
 

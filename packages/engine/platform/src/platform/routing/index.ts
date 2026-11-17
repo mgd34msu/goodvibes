@@ -124,7 +124,7 @@ export { localServingStatus, localResourcePressure, localServingSchemaStatus } f
 
 export { remotePublisherOutcomeKind, remotePublisherSchemaStatus } from './batteries/remote-publisher.js';
 
-export { atRestCredential, memoryRouteRole, memoryCredentialState, memoryLiveStatus, memoryReceiptMember, memorySchemaCertified, memoryProviderSelect } from './batteries/memory-provider.js';
+export { memoryRouteRole, memoryCredentialState, memoryLiveStatus, memoryReceiptMember, memorySchemaCertified, memoryProviderSelect } from './batteries/memory-provider.js';
 
 export { localBenchmarkPrompt } from './batteries/local-benchmark-prompt.js';
 

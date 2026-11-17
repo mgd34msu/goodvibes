@@ -71,14 +71,13 @@ registry.register(localServingStatus);
 registry.register(localResourcePressure);
 registry.register(localServingSchemaStatus);
 
-import { atRestCredential, memoryRouteRole, memoryCredentialState, memoryLiveStatus, memoryReceiptMember, memorySchemaCertified, memoryProviderSelect } from './batteries/memory-provider.js';
+import { memoryRouteRole, memoryCredentialState, memoryLiveStatus, memoryReceiptMember, memorySchemaCertified, memoryProviderSelect } from './batteries/memory-provider.js';
 registry.register(memoryRouteRole);
 registry.register(memoryCredentialState);
 registry.register(memoryLiveStatus);
 registry.register(memoryReceiptMember);
 registry.register(memorySchemaCertified);
 registry.register(memoryProviderSelect);
-registry.register(atRestCredential);
 
 import { localBenchmarkPrompt } from './batteries/local-benchmark-prompt.js';
 registry.register(localBenchmarkPrompt);

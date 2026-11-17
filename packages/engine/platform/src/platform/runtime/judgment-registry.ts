@@ -74,10 +74,6 @@ registry.register(retryWait);
 
 // Runtime: observed fleet agents.
 
-// Runtime: credentials at rest.
-import { atRestCredential } from './batteries/at-rest-credential.js';
-registry.register(atRestCredential);
-
 // Structured compaction source membership.
 import { conversationSubstance, toolResultRelevance, resolvedProblemEvidence, compactionEvidenceDependency } from './compaction/batteries/section-selection.js';
 registry.register(conversationSubstance);

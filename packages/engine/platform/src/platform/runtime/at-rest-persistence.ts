@@ -39,7 +39,7 @@
  */
 import { lstatSync, unlinkSync, readdirSync, type BigIntStats } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { findCredentialCandidates, redactIssuerCredentials } from '../utils/redaction.js';
+import { isReadableCredentialCandidate, maskCredentialCandidates, redactIssuerCredentials } from '../utils/redaction.js';
 import { captureExistingDirectory } from '../utils/atomic-json-store.js';
 
 /** Resolved at-rest policy the journal + ledger writers consult. */
@@ -102,49 +102,8 @@ export function resolveAtRestPolicy(get?: (key: string) => unknown): AtRestPolic
 // Candidate spans: decided in code, never sent anywhere
 // ---------------------------------------------------------------------------
 
-/** Words a placeholder is made of; an all-caps value built from them grants nothing. */
-const PLACEHOLDER_WORD = /(?:^|_)(?:YOUR|MY|THE|API|ACCESS|AUTH|BEARER|TOKEN|KEY|SECRET|PASSWORD|HERE|PLACEHOLDER|REPLACE|ME|EXAMPLE|DUMMY|FAKE|TEST|CHANGE|INSERT|XXX+)(?=_|$)/;
-
-/** A plain word: letters only, at most one leading capital, with a vowel. */
-function isPlainWord(part: string): boolean {
-  return /^[A-Za-z]?[a-z]{0,19}$/.test(part) && part.length > 0 && /[aeiouy]/i.test(part);
-}
-
-/**
- * Whether a candidate span is provably not a credential, from its characters
- * alone. A span this cannot clear is masked: a masked word in the owner's own
- * log is the only cost, and the value never leaves the machine to be judged.
- *
- * Readable:
- *   - a plain word after "Bearer" in prose ("the bearer of bad news");
- *   - an all-caps placeholder such as YOUR_TOKEN_HERE;
- *   - filler made of one or two repeated characters (`sk-xxxxxxxx…`);
- *   - an `sk-`/`key-` name built from two or more plain words, with short
- *     numeric parts allowed (`key-rotation-policy-for-tenants`,
- *     `key-value-store-migration-2024`, `sk-spinner-double-bounce-animation`).
- * A random token has mixed case, digits inside words, or one long run, and
- * stays masked.
- */
-export function isReadableCredentialCandidate(value: string): boolean {
-  const prefixed = /^(sk|key)-/i.exec(value);
-  const body = prefixed ? value.slice(prefixed[0].length) : value;
-  if (body.length === 0) return false;
-  const significant = body.replace(/[-_.]/g, '');
-  if (significant.length > 0 && new Set(significant.toLowerCase()).size <= 2) return true;
-  if (/^[A-Z][A-Z_]{1,39}$/.test(body) && PLACEHOLDER_WORD.test(body)) return true;
-  if (!prefixed) {
-    // The word after "Bearer": a hex-only run of 8 or more could be a token.
-    return isPlainWord(body) && !(body.length >= 8 && /^[a-f]+$/i.test(body));
-  }
-  const parts = body.split(/[-_]/);
-  let words = 0;
-  for (const part of parts) {
-    if (/^[0-9]{1,4}$/.test(part)) continue;
-    if (!/^[a-z]{1,20}$/.test(part) || !isPlainWord(part)) return false;
-    words += 1;
-  }
-  return words >= 2;
-}
+// The candidate rule lives with the shapes it reads (utils/redaction.ts).
+export { isReadableCredentialCandidate };
 
 /**
  * Mask issuer-reserved formats and every credential candidate span that
@@ -157,16 +116,7 @@ export function redactAtRestLine(line: string): string {
   let text: string;
   // A fixed error: an upstream rejection may carry the very text being protected.
   try { text = redactIssuerCredentials(line); } catch { throw new Error('At-rest redaction is unavailable while the owner profile is changing; the line was not written'); }
-  const candidates = findCredentialCandidates(text);
-  if (candidates.length === 0) return text;
-  let out = '';
-  let cursor = 0;
-  for (const candidate of candidates) {
-    if (isReadableCredentialCandidate(candidate.value)) continue;
-    out += text.slice(cursor, candidate.start) + candidate.marker;
-    cursor = candidate.end;
-  }
-  return out + text.slice(cursor);
+  return maskCredentialCandidates(text);
 }
 
 /**

@@ -42,10 +42,10 @@ export function containsIssuerCredential(text: string): boolean {
  * Shapes that a credential often has but that ordinary text also has: an
  * `sk-` token of 20 or more characters, a `key-` token of 16 or more, and the
  * word after `Bearer`. `key-rotation-policy-for-tenants` and "the bearer of bad
- * news" fit them too. The at-rest writers use them only to FIND candidate
- * spans; whether a span is a credential is the `engine.runtime.at-rest-credential`
- * reading (runtime/at-rest-persistence.ts). The Bearer shape matches the token
- * alone, so a marker replaces the token and keeps the word `Bearer`.
+ * news" fit them too. They only FIND candidate spans; whether a span is kept
+ * is decided from its characters alone ({@link isReadableCredentialCandidate}),
+ * and no span is sent anywhere to be judged. The Bearer shape matches the
+ * token alone, so a marker replaces the token and keeps the word `Bearer`.
  */
 const CREDENTIAL_CANDIDATE_SHAPES: ReadonlyArray<{ pattern: RegExp; marker: string }> = [
   { pattern: /\bsk-[A-Za-z0-9_-]{20,}/g, marker: '[REDACTED_API_KEY]' },
@@ -80,6 +80,68 @@ export function findCredentialCandidates(text: string): CredentialCandidate[] {
     if (last === undefined || candidate.start >= last.end) spans.push(candidate);
   }
   return spans;
+}
+
+/** Words a placeholder is made of; an all-caps value built from them grants nothing. */
+const PLACEHOLDER_WORD = /(?:^|_)(?:YOUR|MY|THE|API|ACCESS|AUTH|BEARER|TOKEN|KEY|SECRET|PASSWORD|HERE|PLACEHOLDER|REPLACE|ME|EXAMPLE|DUMMY|FAKE|TEST|CHANGE|INSERT|XXX+)(?=_|$)/;
+
+/** A plain word: letters only, at most one leading capital, with a vowel. */
+function isPlainWord(part: string): boolean {
+  return /^[A-Za-z]?[a-z]{0,19}$/.test(part) && part.length > 0 && /[aeiouy]/i.test(part);
+}
+
+/**
+ * Whether a candidate span is provably not a credential, from its characters
+ * alone. A span this cannot clear is masked: a masked word in a log is the
+ * only cost, and the value never leaves the machine to be judged.
+ *
+ * Readable:
+ *   - a plain word after "Bearer" in prose ("the bearer of bad news");
+ *   - an all-caps placeholder such as YOUR_TOKEN_HERE;
+ *   - filler made of one or two repeated characters (`sk-xxxxxxxx…`);
+ *   - an `sk-`/`key-` name built from two or more plain words, with short
+ *     numeric parts allowed (`key-rotation-policy-for-tenants`,
+ *     `key-value-store-migration-2024`, `sk-spinner-double-bounce-animation`).
+ * A random token has mixed case, digits inside words, or one long run, and
+ * stays masked.
+ */
+export function isReadableCredentialCandidate(value: string): boolean {
+  const prefixed = /^(sk|key)-/i.exec(value);
+  const body = prefixed ? value.slice(prefixed[0].length) : value;
+  if (body.length === 0) return false;
+  const significant = body.replace(/[-_.]/g, '');
+  if (significant.length > 0 && new Set(significant.toLowerCase()).size <= 2) return true;
+  if (/^[A-Z][A-Z_]{1,39}$/.test(body) && PLACEHOLDER_WORD.test(body)) return true;
+  if (!prefixed) {
+    // The word after "Bearer": a hex-only run of 8 or more could be a token.
+    return isPlainWord(body) && !(body.length >= 8 && /^[a-f]+$/i.test(body));
+  }
+  const parts = body.split(/[-_]/);
+  let words = 0;
+  for (const part of parts) {
+    if (/^[0-9]{1,4}$/.test(part)) continue;
+    if (!/^[a-z]{1,20}$/.test(part) || !isPlainWord(part)) return false;
+    words += 1;
+  }
+  return words >= 2;
+}
+
+/**
+ * Mask every credential candidate span ({@link findCredentialCandidates})
+ * that {@link isReadableCredentialCandidate} cannot clear. One local pass: no
+ * request, no state kept between calls.
+ */
+export function maskCredentialCandidates(text: string): string {
+  const candidates = findCredentialCandidates(text);
+  if (candidates.length === 0) return text;
+  let out = '';
+  let cursor = 0;
+  for (const candidate of candidates) {
+    if (isReadableCredentialCandidate(candidate.value)) continue;
+    out += text.slice(cursor, candidate.start) + candidate.marker;
+    cursor = candidate.end;
+  }
+  return out + text.slice(cursor);
 }
 
 /**

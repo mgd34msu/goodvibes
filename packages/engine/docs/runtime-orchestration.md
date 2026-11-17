@@ -50,7 +50,9 @@ Important pieces:
   awaited. Its rules hold for every caller. A request whose failure is
   retryable by its own status, code or Retry-After is retried after 5, 10, 20,
   40 and 60 seconds; a server asking for more than five minutes, or a spent
-  account, is reported instead. Interim text is read beside its tool calls,
+  account, is reported instead; so is a failure after text was already shown.
+  The loop is the only layer that retries a turn's request: the provider is
+  asked not to retry it again. Interim text is read beside its tool calls,
   never ahead of them. Five consecutive rounds in which every call failed
   warn the model; ten end the turn after one closing reply without tools, and
   so do eight runs of the same call with the same arguments and result. A

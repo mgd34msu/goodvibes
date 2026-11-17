@@ -626,7 +626,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       });
     }
     const chatStartedAt = Date.now();
-    let chatRetries = 0;
+    const chatRetries = request.attempt;
     const nativeProviderSource = contractSession?.hooks.actionSource?.(contractSession.record);
     const capturedProviderSource = nativeProviderSource ? captureAutonomousSource(nativeProviderSource) : undefined;
     const selectedDiffContext = nativeTurn ? readNativeConversationTurnSelectedDiffContext() : capturedProviderSource?.selectedDiffContext;
@@ -671,6 +671,8 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         ...turnReasoning(),
         signal,
         onDelta,
+        // The turn loop owns retrying this request (with its retry event); the provider does not retry it again.
+        maxRetries: 0,
         ...(decisionRoute || codeAuthorityForAttempt || capturedProviderSource || nativeTurn ? { beforeAttempt: async () => {
           decisionRoute?.assertCurrent();
           if (codeAuthorityForAttempt) await revalidateProviderAttempt(codeAuthorityForAttempt);
@@ -679,24 +681,6 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
           if (nativeTurn) await revalidateNativeConversationTurnScope();
           assertActiveTurn();
         } } : {}),
-        onRetry: (attempt, maxAttempts, delayMs, error) => {
-          chatRetries = attempt;
-          // The retried request streams its text again from the start.
-          streamedText = '';
-          if (streamBlockOpen) context.conversation.updateStreamingBlock('');
-          if (context.runtimeBus) {
-            emitStreamRetry(context.runtimeBus, context.emitterContext(context.turnId), {
-              turnId: context.turnId,
-              provider: model.provider,
-              attempt,
-              maxAttempts,
-              delayMs,
-              reason: error.message,
-              // The provider's own facts, so a reader records a rate limit without reading the sentence.
-              ...streamRetryFacts(error),
-            });
-          }
-        },
       });
       assertActiveTurn();
       hostInstructions.delivered();

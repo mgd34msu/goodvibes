@@ -110,9 +110,14 @@ Successful calls cannot loop forever either. When one call has run 8 times in
 the turn's last 20 calls with the same arguments and the same result each
 time, the turn stops the same way, one final reply and then failed, with the
 `repeated_call` reason for a sub-agent and a message naming the tool. This is
-decided from the turn's own call history; no model is asked. From 3 identical
-calls a reading of whether they are stuck may add a request to the model to
-review its history or take a different action.
+decided from the turn's own call history; no model is asked. "The same result"
+compares what the call returned (success, output, error), never the per-call
+ids. From 3 identical calls whose runs all returned the same thing, a reading of
+whether they are stuck may add a request to the model to review its history or
+take a different action. Runs that returned different things (a poll, a test run
+after an edit) are progress and are not read. The reading runs beside the next
+request, never ahead of it, sees only that call's runs and is dropped after ten
+seconds.
 
 ---
 

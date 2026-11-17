@@ -185,7 +185,7 @@ async function executeToolCalls(
   // is the caller's cancellation path.
   const results: ToolResult[] = [];
   // Admission runs per call, side by side; an ask to the owner waits in the host's own queue of cards.
-  const definitions = new Map((toolRegistry.list?.() ?? []).map(tool => [tool.definition.name, tool.definition]));
+  const tools = new Map((toolRegistry.list?.() ?? []).map(tool => [tool.definition.name, tool]));
 
   // The call objects are this run's own clones and the registry is the run's own:
   // the two facts that matter per call are the abort signal and the arguments
@@ -272,7 +272,7 @@ async function executeToolCalls(
   const limit = maxParallelToolCalls(context.configManager);
   const groups = planToolBatch(toolCalls, call => call.argumentError !== undefined
     ? { kind: 'read', paths: [] }
-    : toolCallLane(definitions.get(call.name), call.arguments as Record<string, unknown>, context.workingDirectory));
+    : toolCallLane(tools.get(call.name)?.definition, call.arguments as Record<string, unknown>, context.workingDirectory, tools.get(call.name)));
   for (const group of groups) {
     if (group.length === 1) {
       await runCall(toolCalls[group[0]!]!, group[0]!, turnSignal);
@@ -920,6 +920,8 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
             // The agent's cancellation reaches the in-flight request, so a cancel aborts it mid-stream.
             ...(runSignal ? { signal: runSignal } : {}),
             onDelta,
+            // The turn loop owns retrying this request; the provider does not retry it again.
+            maxRetries: 0,
           });
           terminal.assertCurrent();
           activeConversation.hostInstructions.delivered();

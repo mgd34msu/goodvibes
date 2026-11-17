@@ -50,6 +50,8 @@ const REPEAT_REVIEW_THRESHOLD = 3;
 const REPEAT_REFUSE_THRESHOLD = 5;
 /** Calls kept for the repeat rules. */
 const REPEAT_HISTORY_WINDOW = 20;
+/** How long a reading of repeated calls may take; past it no warning is given and the exact-repeat stop still holds. */
+export const REPEAT_READING_DEADLINE_MS = 10_000;
 
 /** Where the turn's visible output goes, as it happens. */
 export interface TurnSink {
@@ -87,6 +89,12 @@ export interface TurnModelResponse {
 export interface TurnRequest {
   /** 1 for the first request of the turn. */
   readonly round: number;
+  /**
+   * 0 for the first attempt of this round, then the retry number. The loop is
+   * the one owner of retrying a failed request, so a caller passes
+   * `maxRetries: 0` to its provider and reads its retry count here.
+   */
+  readonly attempt: number;
   /** False for the closing request after a limit or stop rule: the model is asked to answer, and any call it makes is not run. */
   readonly tools: boolean;
   readonly signal: AbortSignal;
@@ -110,7 +118,15 @@ export interface TurnCallObservation {
   readonly signature: string;
   readonly requested: ToolCall;
   readonly executed: { readonly name: string; readonly arguments: string };
-  readonly result: unknown;
+  /** What the call returned, without its per-call ids: two runs that returned the same thing compare equal. */
+  readonly result: TurnCallOutcome | null;
+}
+
+/** The part of a tool result the repeat rules compare and read. */
+export interface TurnCallOutcome {
+  readonly success: boolean;
+  readonly output?: string | undefined;
+  readonly error?: string | undefined;
 }
 
 /** How one caller reaches its model, conversation and tools. */
@@ -146,7 +162,13 @@ export interface TurnContext {
   runTools?(response: TurnModelResponse, options: { readonly round: number; readonly signal: AbortSignal }): Promise<ToolResult[]>;
   /** Reads interim text beside its tools; resolves with a correction for the next request, or null. */
   checkProgress?(text: string, signal: AbortSignal): Promise<string | null>;
-  /** Whether repeated calls look stuck; undefined when no reading settled. Absent: only the exact-repeat stop applies. */
+  /**
+   * Whether repeated calls look stuck; undefined when no reading settled.
+   * Asked only when every run of the repeated call returned the same thing,
+   * with only that call's runs, beside the next request (never ahead of it)
+   * and within `REPEAT_READING_DEADLINE_MS`. Absent: only the exact-repeat
+   * stop applies.
+   */
   judgeRepeat?(history: readonly TurnCallObservation[], signature: string, signal: AbortSignal): Promise<{ readonly stuck: boolean } | undefined>;
   /** A held draft (a contract unit's answer the contract keeps open) takes another round instead of a check; true when held. */
   holdDraft?(draft: string, signal: AbortSignal): Promise<boolean>;
@@ -207,17 +229,20 @@ export class TurnEnded extends Error {
   }
 }
 
-async function requestWithRetry(ctx: TurnContext, request: TurnRequest): Promise<TurnModelResponse> {
+async function requestWithRetry(ctx: TurnContext, request: Omit<TurnRequest, 'attempt'>): Promise<TurnModelResponse> {
   const delays = ctx.retryDelaysMs ?? [];
   for (let attempt = 0; ; attempt++) {
+    let shown = false;
     try {
-      return await ctx.request(request);
+      return await ctx.request({ ...request, attempt, onDelta: (text) => { shown = true; request.onDelta(text); } });
     } catch (error) {
       if (ctx.signal.aborted) throw new TurnCancelled();
       if (error instanceof TurnEnded) throw error;
       const failure = classifyFailure(error);
       const wait = delays[attempt];
       if (!failure?.retryable || wait === undefined) throw error;
+      // Text already shown cannot be taken back; a second attempt would show the answer again after it.
+      if (shown) throw error;
       if ((failure.retryAfterMs ?? 0) > MAX_RETRY_AFTER_MS) throw error;
       // A spent account is reported under a rate limit by some providers; waiting never clears it.
       if (failure.category === 'rate_limit' && await isBillingOrCreditError(error, 'core.turn-loop.rate-limit-retry')) throw error;
@@ -244,11 +269,21 @@ function callSignature(call: ToolCall): string {
   return `${call.name}::${JSON.stringify(call.arguments)}`;
 }
 
+/** What a call returned, without the ids every call gets afresh (call id, decision id, host evidence). */
+function callOutcome(result: ToolResult | undefined): TurnCallOutcome | null {
+  if (!result) return null;
+  return { success: result.success, ...(result.output !== undefined ? { output: result.output } : {}), ...(result.error !== undefined ? { error: result.error } : {}) };
+}
+
+function outcomeKey(entry: TurnCallObservation): string {
+  return JSON.stringify(entry.result);
+}
+
 /** The same call with the same result `threshold` times in the kept history. */
 function identicalRepeat(history: readonly TurnCallObservation[], threshold: number): { readonly toolName: string; readonly count: number } | undefined {
   const counts = new Map<string, number>();
   for (const entry of history) {
-    const key = entry.signature + '\u0000' + (JSON.stringify(entry.result) ?? 'undefined');
+    const key = entry.signature + '\u0000' + outcomeKey(entry);
     const count = (counts.get(key) ?? 0) + 1;
     if (count >= threshold) return { toolName: entry.signature.slice(0, entry.signature.indexOf('::')), count };
     counts.set(key, count);
@@ -264,6 +299,7 @@ export async function runTurn(ctx: TurnContext, policy: TurnPolicy): Promise<Tur
   const usage = { inputTokens: 0, outputTokens: 0 };
   const breaker = new ConsecutiveErrorBreaker();
   const history: TurnCallObservation[] = [];
+  const repeatReading = { pending: false };
   const outcome = (status: TurnOutcome['status'], text: string, extra: Partial<Pick<TurnOutcome, 'verified' | 'note' | 'stop'>> = {}): TurnOutcome =>
     ({ status, text, rounds, usage: { ...usage }, rejectedDrafts, ...extra });
   const ask = async (tools: boolean): Promise<TurnModelResponse> => {
@@ -389,7 +425,7 @@ export async function runTurn(ctx: TurnContext, policy: TurnPolicy): Promise<Tur
       sink.toolResults?.(calls, results);
       if (ctx.signal.aborted) return outcome('cancelled', '');
 
-      const stop = await applyStopRules(ctx, sink, breaker, history, calls, results);
+      const stop = applyStopRules(ctx, sink, breaker, history, repeatReading, calls, results);
       if (stop) {
         const closing = await closingReply();
         if (closing === undefined) return outcome('cancelled', '');
@@ -413,15 +449,16 @@ export async function runTurn(ctx: TurnContext, policy: TurnPolicy): Promise<Tur
  * which every call failed, and calls repeated with the same result. A warning
  * reaches the model on its next request and the person as a notice; a stop
  * tells the model it has one closing reply and returns why the turn ends.
+ * Nothing here waits: a reading of repeated calls runs beside the next request.
  */
-async function applyStopRules(ctx: TurnContext, sink: TurnSink, breaker: ConsecutiveErrorBreaker, history: TurnCallObservation[],
-  calls: readonly ToolCall[], results: readonly ToolResult[]): Promise<{ readonly note: string; readonly stop: NonNullable<TurnOutcome['stop']> } | undefined> {
+function applyStopRules(ctx: TurnContext, sink: TurnSink, breaker: ConsecutiveErrorBreaker, history: TurnCallObservation[],
+  repeatReading: { pending: boolean }, calls: readonly ToolCall[], results: readonly ToolResult[]): { readonly note: string; readonly stop: NonNullable<TurnOutcome['stop']> } | undefined {
   const tell = (text: string): void => ctx.hostInstructions?.set('breaker', text, { once: true, append: true });
   const finalReply = 'You have one final reply. Tools are no longer available and any tool call in it will not run. ';
 
   const byId = new Map(results.map((result) => [result.callId, result] as const));
   for (const call of calls) {
-    history.push({ signature: callSignature(call), requested: call, executed: { name: call.name, arguments: JSON.stringify(call.arguments) }, result: byId.get(call.id) ?? null });
+    history.push({ signature: callSignature(call), requested: call, executed: { name: call.name, arguments: JSON.stringify(call.arguments) }, result: callOutcome(byId.get(call.id)) });
   }
   while (history.length > REPEAT_HISTORY_WINDOW) history.shift();
 
@@ -451,7 +488,8 @@ async function applyStopRules(ctx: TurnContext, sink: TurnSink, breaker: Consecu
     return { note: `${repeat.toolName} ran ${repeat.count} times with the same arguments and the same result`, stop: { rule: 'repeated-call', toolName: repeat.toolName, count: repeat.count } };
   }
 
-  if (!ctx.judgeRepeat) return undefined;
+  const judgeRepeat = ctx.judgeRepeat;
+  if (!judgeRepeat || repeatReading.pending) return undefined;
   const counts = new Map<string, number>();
   for (const entry of history) counts.set(entry.signature, (counts.get(entry.signature) ?? 0) + 1);
   const repeated = calls.map(callSignature).filter((signature) => (counts.get(signature) ?? 0) >= 2);
@@ -459,12 +497,23 @@ async function applyStopRules(ctx: TurnContext, sink: TurnSink, breaker: Consecu
   const worst = repeated.reduce((best, signature) => (counts.get(signature)! > counts.get(best)! ? signature : best));
   const count = counts.get(worst)!;
   if (count < REPEAT_REVIEW_THRESHOLD) return undefined;
-  const reading = await ctx.judgeRepeat(history, worst, ctx.signal);
-  if (!reading?.stuck) return undefined;
+  const runs = history.filter((entry) => entry.signature === worst);
+  // Runs that returned different things show the work moving (a poll, a test run after an edit): no reading is needed.
+  const firstKey = outcomeKey(runs[0]!);
+  if (runs.some((entry) => outcomeKey(entry) !== firstKey)) return undefined;
   const toolName = worst.slice(0, worst.indexOf('::'));
-  tell(count >= REPEAT_REFUSE_THRESHOLD
-    ? `You are repeating the same tool call. ${toolName} has been called ${count} times with identical arguments and no meaningful progress in the results. Do NOT call ${toolName} with these arguments again. Identify what you were trying to accomplish and take a different action.`
-    : `You have already executed this exact call (${toolName}) ${count} times with identical arguments. The results from your previous calls are already in your conversation history. Review them and proceed to the next step.`);
+  const deadline = AbortSignal.timeout(REPEAT_READING_DEADLINE_MS);
+  const signal = AbortSignal.any([ctx.signal, deadline]);
+  repeatReading.pending = true;
+  void judgeRepeat(runs, worst, signal)
+    .then((reading) => {
+      if (!reading?.stuck || ctx.signal.aborted || deadline.aborted) return;
+      tell(count >= REPEAT_REFUSE_THRESHOLD
+        ? `You are repeating the same tool call. ${toolName} has been called ${count} times with identical arguments and no meaningful progress in the results. Do NOT call ${toolName} with these arguments again. Identify what you were trying to accomplish and take a different action.`
+        : `You have already executed this exact call (${toolName}) ${count} times with identical arguments. The results from your previous calls are already in your conversation history. Review them and proceed to the next step.`);
+    })
+    .catch(() => { /* An unsure, late or failed reading gives no warning; the exact-repeat stop still holds. */ })
+    .finally(() => { repeatReading.pending = false; });
   return undefined;
 }
 

@@ -22,7 +22,7 @@ export function renderDaemonStartupPairing(
       return 'Device pairing link unavailable: the configured WebUI bundle has no readable app shell.';
     }
   }
-  const { origin } = resolvePairingWebOrigin(config, undefined, bound);
+  const { origin, alternateOrigin } = resolvePairingWebOrigin(config, undefined, bound);
   try {
     const parsed = new URL(origin);
     if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || parsed.username || parsed.password
@@ -35,7 +35,7 @@ export function renderDaemonStartupPairing(
   // the settings port; a daemon bound elsewhere is named by its port.
   const declaredPort = resolveRuntimeEndpointBinding(config, 'controlPlane').port;
   const reprint = bound.port === declaredPort ? 'goodvibes-daemon pair' : `goodvibes-daemon pair --port ${bound.port}`;
-  return [...renderPairingBanner({ version, origin, token,
+  return [...renderPairingBanner({ version, origin, alternateOrigin, token,
     offers: availablePairingOffers({ relayEnabled: config.get('relay.enabled') === true, stepUpAvailable: true }),
   }).lines, `(print this again: ${reprint})`, ...localOnlyNotice(config, origin)].join('\n');
 }

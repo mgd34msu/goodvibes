@@ -239,6 +239,7 @@ async function runLocalReprint(input: RunPairCommandInput): Promise<DaemonComman
   const banner = renderPairingBanner({
     version: input.version,
     origin: origin.origin,
+    alternateOrigin: origin.alternateOrigin,
     token,
     offers,
     includeQr: !flags.json,
@@ -252,6 +253,7 @@ async function runLocalReprint(input: RunPairCommandInput): Promise<DaemonComman
         data: {
           origin: origin.origin,
           deepLink: banner.deepLink,
+          ...(banner.alternateDeepLink === undefined ? {} : { alternateDeepLink: banner.alternateDeepLink }),
           offers,
           capabilities: banner.capabilities,
           ...(banner.notice === undefined ? {} : { notice: banner.notice }),
@@ -367,9 +369,14 @@ async function runRemoteMint(input: RunPairCommandInput, target: RemoteDaemonTar
   }
 
   const origin = originFromDeepLink(data.deepLink);
+  // This machine's own daemon resolves its origin from the same settings and
+  // host facts as this process, so the routable fallback is known here; a
+  // remote daemon's is not, and is never guessed.
+  const localOrigin = local ? resolvePairingWebOrigin(input.configManager) : undefined;
   const banner = renderPairingBanner({
     version: local ? input.version : `remote build at ${target.baseUrl}`,
     origin,
+    alternateOrigin: localOrigin?.origin === origin ? localOrigin.alternateOrigin : undefined,
     token: data.token.token,
     offers: offerKinds,
     includeQr: !flags.json,
@@ -388,6 +395,7 @@ async function runRemoteMint(input: RunPairCommandInput, target: RemoteDaemonTar
           token: data.token.token,
           origin,
           deepLink: banner.deepLink,
+          ...(banner.alternateDeepLink === undefined ? {} : { alternateDeepLink: banner.alternateDeepLink }),
           offers: offerKinds,
           capabilities: banner.capabilities,
           ...(banner.notice === undefined ? {} : { notice: banner.notice }),

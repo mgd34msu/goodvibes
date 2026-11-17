@@ -139,6 +139,15 @@ function webBinding(configManager: Pick<ConfigManager, 'get'>): BoundListener {
 }
 
 /**
+ * True when the control-plane origin (the listener serving the bundled web UI)
+ * is resolved through the stable-host ladder, so a one-shot command that prints
+ * it knows to await `refreshStableHostInputs` first.
+ */
+export function controlPlaneOriginUsesStableHost(configManager: Pick<ConfigManager, 'get'>): boolean {
+  return isWildcardBindHost(declaredControlPlaneBinding(configManager).host);
+}
+
+/**
  * True when the pairing origin is resolved through the stable-host ladder (no
  * explicit public URL, wildcard bind), so a long-lived surface knows to warm
  * the host probes before it shows a link.

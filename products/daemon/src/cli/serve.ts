@@ -8,7 +8,7 @@ import { describeDerivedBindMismatch, readControlPlaneBinding } from '@goodvibes
 import { resolveHostBinding } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { getModelIdFromProviderModel, getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
 import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
-import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { getOrCreateCompanionToken, pairingOriginUsesStableHost, refreshStableHostInputs } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { RuntimeEventBus, runtimeEventBusOptionsFrom } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { publishDaemonRuntimeRecord, type PublishedDaemonRuntimeRecord } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { isKnownConfigKey } from '../config/config-key-guard.js';
@@ -109,6 +109,12 @@ export function runConfiguredDaemonCli(
         }
         // A set-but-empty override (an env template left blank) is not a token.
         const token = env.GOODVIBES_DAEMON_TOKEN?.trim() ? env.GOODVIBES_DAEMON_TOKEN : companion.token;
+        // The Tailscale and `.local` rungs of the pairing origin are slow facts
+        // gathered asynchronously. Start them now, overlapping host startup, so
+        // the saved public URL, the boot banner and every pairing link this
+        // daemon builds offer the stable name from the first one. Bounded and
+        // never rejects; the cache then refreshes itself in the background.
+        const stableHostFacts = pairingOriginUsesStableHost(config) ? refreshStableHostInputs() : undefined;
         host = createHost({
           runtime: {
             ...runtime, configManager: config, homeDirectory, daemonHomeDirectory, workingDir: workingDirectory,
@@ -137,6 +143,11 @@ export function runConfiguredDaemonCli(
         if (closed) return undefined;
         requireRunning();
         const actual = { host: daemon.boundHost, port: daemon.boundPort, scheme: daemon.boundScheme };
+        if (stableHostFacts) {
+          await stableHostFacts;
+          if (closed) return undefined;
+          requireRunning();
+        }
         try { persistDaemonStartupPublicUrl(active, actual); }
         catch { stderr('[goodvibes-daemon] warning: the startup public URL could not be persisted.'); }
         stdout(renderDaemonBoundEndpoint(version, actual));

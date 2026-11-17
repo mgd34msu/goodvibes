@@ -28,6 +28,12 @@ export interface PairingBannerInput {
   readonly version: string;
   /** The web-app origin the deep link opens. */
   readonly origin: string;
+  /**
+   * The same origin on the routable address, when `origin` is a name
+   * (Tailscale or `.local`): printed as a second link for a device that
+   * cannot resolve or reach that name.
+   */
+  readonly alternateOrigin?: string | undefined;
   /** The token the link carries, the daemon's existing shared companion token. */
   readonly token: string;
   readonly offers: readonly PairingHandoffOfferKind[];
@@ -39,6 +45,8 @@ export interface PairingBanner {
   readonly lines: readonly string[];
   /** The exact `<origin>/#pair=<token>` URL the QR encodes. */
   readonly deepLink: string;
+  /** The same link on the routable address, present when an alternate origin was given. */
+  readonly alternateDeepLink: string | undefined;
   /** The capability list, already worded, for a caller rendering its own shape. */
   readonly capabilities: readonly string[];
   /** The one honest posture line, when the posture carries one. */
@@ -56,6 +64,10 @@ export function renderPairingBanner(input: PairingBannerInput): PairingBanner {
     token: input.token,
     offers: input.offers,
   });
+  const alternateOrigin = input.alternateOrigin?.trim();
+  const alternateDeepLink = alternateOrigin && alternateOrigin !== input.origin
+    ? buildPairingHandoffLink({ webOrigin: alternateOrigin, token: input.token, offers: input.offers })
+    : undefined;
   // The banner renders the SAME platform posture the pairing verb carries: the
   // labeled capability list, and the one honest LAN line only when the posture
   // holds it.
@@ -66,6 +78,7 @@ export function renderPairingBanner(input: PairingBannerInput): PairingBanner {
 
   return {
     deepLink,
+    alternateDeepLink,
     capabilities,
     notice,
     lines: [
@@ -75,6 +88,7 @@ export function renderPairingBanner(input: PairingBannerInput): PairingBanner {
       '',
       `  ${deepLink}`,
       '',
+      ...(alternateDeepLink ? ['If the link does not open on the device, use the address instead:', `  ${alternateDeepLink}`, ''] : []),
       ...(input.offers.length > 0 ? ['Offers (each declinable in the web app):', ...formatPairingOffers(input.offers), ''] : []),
       ...(capabilities.length > 0 ? ['This device will get:', ...capabilities, ''] : []),
       ...(notice ? [notice, ''] : []),

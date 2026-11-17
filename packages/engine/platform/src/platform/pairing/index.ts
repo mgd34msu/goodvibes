@@ -110,5 +110,5 @@ export {
 } from './offer-copy.js';
 export type { PairingOfferCopy } from './offer-copy.js';
 
-export { controlPlaneScheme, ensurePublicBaseUrl, formatHttpOrigin, isHttpOnLan, pairingOriginUsesStableHost, resolveControlPlaneOrigin, resolvePairingWebOrigin } from './web-origin.js';
+export { controlPlaneOriginUsesStableHost, controlPlaneScheme, ensurePublicBaseUrl, formatHttpOrigin, isHttpOnLan, pairingOriginUsesStableHost, resolveControlPlaneOrigin, resolvePairingWebOrigin } from './web-origin.js';
 export type { ControlPlaneOrigin, PairingWebOrigin } from './web-origin.js';

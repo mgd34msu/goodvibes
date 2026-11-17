@@ -176,13 +176,17 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         return result(await runSessionsCommand({ ...remote, flags: { ...remoteFlags, all: cli.flags.all }, args: cli.commandArgs }));
       }
       case 'pair': {
-        const [{ runPairCommand }, { readOperatorTokenFile }, { readLegacySharedRevoked }, { controlPlaneStorePath }, { createShellPathService }] = await Promise.all([
+        const [{ runPairCommand }, { readOperatorTokenFile }, { readLegacySharedRevoked, pairingOriginUsesStableHost, refreshStableHostInputs }, { controlPlaneStorePath }, { createShellPathService }] = await Promise.all([
           import('../daemon/pair-command.js'),
           import('@goodvibes-jev/engine/platform/platform/workspace'),
           import('@goodvibes-jev/engine/platform/platform/pairing'),
           import('@goodvibes-jev/engine/platform/platform/control-plane'),
           import('@goodvibes-jev/engine/platform/platform/runtime/shell'),
         ]);
+        // The Tailscale and `.local` rungs are slow facts gathered asynchronously;
+        // without them this one-shot command would print the DHCP address while
+        // the running daemon offers the stable name.
+        if (pairingOriginUsesStableHost(config)) await refreshStableHostInputs();
         return result(await runPairCommand({ ...remote,
           version: VERSION, readToken: readOperatorTokenFile, operatorToken: env.GOODVIBES_DAEMON_TOKEN?.trim() ? env.GOODVIBES_DAEMON_TOKEN : undefined,
           sharedTokenRevoked: () => readLegacySharedRevoked(controlPlaneStorePath(createShellPathService({ workingDirectory, homeDirectory }),
@@ -196,7 +200,15 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
           input: options.mcpStdio?.input ?? process.stdin, output: options.mcpStdio?.output ?? process.stdout });
       }
       case 'webui': {
-        const { runWebuiCommand } = await import('../daemon/webui-command.js');
+        const [{ runWebuiCommand }, { controlPlaneOriginUsesStableHost, refreshStableHostInputs }] = await Promise.all([
+          import('../daemon/webui-command.js'), import('@goodvibes-jev/engine/platform/platform/pairing'),
+        ]);
+        // `enable` and `status` print (and `enable` may save) the origin through
+        // the stable-name ladder; gather its slow facts first so the Tailscale
+        // and `.local` names are offered as the running daemon offers them.
+        const args = cli.commandArgs;
+        if (!args.includes('disable') && !args.includes('--loopback')
+          && (args.includes('--lan') || controlPlaneOriginUsesStableHost(config))) await refreshStableHostInputs();
         return result(runWebuiCommand(cli.commandArgs, { configManager: config, baseDirectory: workingDirectory }));
       }
       case 'cluster': {

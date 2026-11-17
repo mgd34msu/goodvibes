@@ -26,6 +26,7 @@ import type {
   JoinGroupResult,
   JoinKeyResult,
   NodesResult,
+  SettingDecisionResult,
 } from '@goodvibes-jev/engine/platform/platform/cluster';
 import {
   callDaemonVerb,
@@ -54,7 +55,7 @@ import {
 } from './cluster-render.js';
 
 export const CLUSTER_SUBCOMMANDS = [
-  'status', 'create', 'join', 'key', 'nodes', 'forget', 'rotate', 'leave', 'rename', 'groups',
+  'status', 'create', 'join', 'key', 'nodes', 'forget', 'rotate', 'leave', 'rename', 'groups', 'publish', 'accept',
 ] as const;
 export type ClusterSubcommand = (typeof CLUSTER_SUBCOMMANDS)[number];
 
@@ -153,6 +154,9 @@ export function parseClusterCommand(argv: readonly string[]): ParsedClusterComma
   }
   if (subcommand === 'forget' && positional === null) {
     errors.push('forget needs the machine to remove, run `cluster nodes` to see them');
+  }
+  if ((subcommand === 'publish' || subcommand === 'accept') && positional === null) {
+    errors.push(`${subcommand} needs the shared setting it is about, run \`cluster status\` to see which differ here`);
   }
   if (subcommand === 'rename' && positional === null && values.get('--name') === undefined) {
     errors.push('rename needs the new name, `cluster rename "the workshop"`');
@@ -277,6 +281,8 @@ export function describeIrreversibleClusterCommand(parsed: ParsedClusterCommand)
     case 'leave': return 'this removes this machine from its group';
     case 'forget': return `this removes ${parsed.positional ?? 'that machine'} from the group and replaces the group key immediately`;
     case 'rotate': return parsed.now ? 'this stops accepting the old group key immediately, so any machine that has not picked up the new one is cut off' : null;
+    case 'publish': return `this replaces ${parsed.positional ?? 'that setting'} on every machine in the group with this machine's value`;
+    case 'accept': return `this replaces this machine's value of ${parsed.positional ?? 'that setting'} with the group's`;
     default: return null;
   }
 }
@@ -387,6 +393,17 @@ export async function runClusterCommand(input: RunClusterCommandInput): Promise<
           'this name is visible to anything on this network, and every machine in the',
           'group will pick it up shortly.'], parsed.json)
         : refused(result, parsed.json);
+    }
+    case 'publish':
+    case 'accept': {
+      const result = await call<SettingDecisionResult>(`/api/cluster/${parsed.subcommand}`, 'POST', { path: parsed.positional });
+      if (!result.ok) return refused(result, parsed.json);
+      const said = result.data.decision === 'accepted'
+        ? `this machine now runs the group's value of ${result.data.path}`
+        : result.data.decision === 'held'
+          ? `this machine's value of ${result.data.path} is held and sent to the group once this machine has the group's settings`
+          : `this machine's value of ${result.data.path} was sent to every machine in the group`;
+      return success(result.data, [said], parsed.json);
     }
     case 'forget': {
       const result = await call<ForgetNodeResult>('/api/cluster/forget', 'POST', { nodeId: parsed.positional });

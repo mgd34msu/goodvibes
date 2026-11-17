@@ -20,7 +20,7 @@ import {
   normalizeJoinKey,
 } from './group-crypto.js';
 import type { ClusterGroupRuntime, DiscoveredGroup, SurfaceHolding } from './group-runtime.js';
-import type { ConfigReplicationStatus } from './config-replication.js';
+import { ConfigLocalDifferenceError, type ConfigReplicationStatus } from './config-replication.js';
 import type { ClusterElectionTiming } from './types.js';
 import {
   admitMember,
@@ -759,6 +759,49 @@ export function renameGroupTo(
   });
 }
 
+/** What `cluster publish` or `cluster accept` did with one shared setting. */
+export interface SettingDecisionResult {
+  readonly path: string;
+  /** `held` when this machine does not hold the group's settings yet: the value is sent once it does. */
+  readonly decision: 'published' | 'held' | 'accepted';
+}
+
+/**
+ * The owner's answer to a local difference (`cluster status` lists them):
+ * `publish` sends this machine's value of the shared setting to the group,
+ * `accept` takes the group's value here.
+ */
+export async function decideLocalSetting(
+  context: GroupOperationsContext,
+  path: string,
+  decision: 'publish' | 'accept',
+): Promise<GroupOperationResult<SettingDecisionResult>> {
+  if (!context.runtime.groupState || !context.runtime.keyMaterial) {
+    return failed('this machine is not in a group', 'there is no group setting to send to or take from; `cluster create` or `cluster join` first');
+  }
+  if (!context.settings.enabled) {
+    return failed(
+      'sharing inbound work with your other machines is switched off on this machine, so nothing reaches or comes from the group',
+      'turn it on first: `config set cluster.enabled true`, then restart the daemon',
+    );
+  }
+  try {
+    if (decision === 'accept') {
+      await context.runtime.acceptGroupConfigValue(path);
+      return { ok: true, data: { path, decision: 'accepted' } };
+    }
+    return { ok: true, data: { path, decision: await context.runtime.publishConfigValue(path) } };
+  } catch (error) {
+    if (error instanceof ConfigLocalDifferenceError) {
+      return failed(error.message, 'run `cluster status` to see which shared settings differ on this machine');
+    }
+    if (error instanceof ClusterMembershipOperationError) {
+      return failed(error.message, 'wait for the current group operation to finish, then try again', { failure: error.kind });
+    }
+    throw error;
+  }
+}
+
 /** Groups seen advertising themselves on this network that this machine is not in. */
 export function groupsOnTheNetwork(context: GroupOperationsContext): GroupOperationResult<readonly DiscoveredGroup[]> {
   return { ok: true, data: context.runtime.groupsOnTheNetwork() };
@@ -843,6 +886,10 @@ export interface ClusterGroupVerbSurface {
   rotate(input: { immediate?: boolean }): Promise<GroupOperationResult<RotateKeyResult>>;
   leave(): Promise<GroupOperationResult<LeaveGroupResult>>;
   rename(name: string): Promise<GroupOperationResult<RenameGroupResult>>;
+  /** Send this machine's value of a shared setting to the group. */
+  publish(path: string): Promise<GroupOperationResult<SettingDecisionResult>>;
+  /** Take the group's value of a shared setting here. */
+  accept(path: string): Promise<GroupOperationResult<SettingDecisionResult>>;
 }
 
 /**
@@ -867,5 +914,7 @@ export function createClusterGroupVerbs(context: GroupOperationsContext): Cluste
     rotate: (input) => rotateGroupKey(context, input),
     leave: () => leaveGroup(context),
     rename: (name) => renameGroupTo(context, name),
+    publish: (path) => decideLocalSetting(context, path, 'publish'),
+    accept: (path) => decideLocalSetting(context, path, 'accept'),
   };
 }

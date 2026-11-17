@@ -667,7 +667,7 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
     name: 'cluster',
     aliases: [],
     summary: 'Share inbound channel work with your other machines.',
-    usage: 'goodvibes-daemon cluster status|create|join|key|nodes|forget|rotate|leave|rename|groups',
+    usage: 'goodvibes-daemon cluster status|create|join|key|nodes|forget|rotate|leave|rename|groups|publish|accept',
     detail: [
       'Manage the group of machines on this network that share inbound channel work.',
       '',
@@ -681,6 +681,9 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
       '  rotate [--now]    change the shared key',
       '  rename <name>     rename the group',
       '  leave             leave the group',
+      '  publish <setting> send this machine\'s value of a shared setting to the group',
+      '  accept <setting>  take the group\'s value of a shared setting here',
+      '                    (status lists the shared settings that differ here)',
       '',
       'Talks to a running daemon over the same --host/--port/--token convention',
       '`status` uses; --json gives a scriptable answer.',
@@ -701,7 +704,7 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
       { tokens: ['--help', '-h'], takesValue: false, summary: 'Print help and exit 0.' },
     ],
     passthrough: true,
-    subcommands: ['status', 'create', 'join', 'key', 'nodes', 'forget', 'rotate', 'leave', 'rename', 'groups'],
+    subcommands: ['status', 'create', 'join', 'key', 'nodes', 'forget', 'rotate', 'leave', 'rename', 'groups', 'publish', 'accept'],
   },
   {
     name: 'webui',

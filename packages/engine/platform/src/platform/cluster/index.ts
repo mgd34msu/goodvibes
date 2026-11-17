@@ -191,9 +191,12 @@ export {
 } from './config-replica.js';
 export {
   CONFIG_MESSAGE_TYPES,
+  ConfigLocalDifferenceError,
   ConfigReplicationService,
+  type ConfigLocalDifference,
   type ConfigReplicationHost,
   type ConfigReplicationStatus,
+  type HeldConfigChange,
   type ReplicatedConfigStore,
   type ReplicatedSecretStore,
 } from './config-replication.js';
@@ -208,6 +211,7 @@ export {
   ADMISSION_TIMEOUT_MS,
   createClusterGroupVerbs,
   createGroup,
+  decideLocalSetting,
   forgetNode,
   groupNodes,
   groupsOnTheNetwork,
@@ -233,6 +237,7 @@ export {
   type RemovedNodeReport,
   type RenameGroupResult,
   type RotateKeyResult,
+  type SettingDecisionResult,
 } from './group-operations.js';
 export {
   DEFAULT_CLUSTER_GROUP_SETTINGS,

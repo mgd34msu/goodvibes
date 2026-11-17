@@ -143,6 +143,42 @@ export interface ConfigReplicationHost {
   send(type: string, body: Record<string, unknown>): Promise<void>;
   /** Persist the replica document alongside the roster. */
   persist(document: ConfigReplicaDocument): void;
+  /**
+   * Persist the changes made here that are held until this copy holds the
+   * group's settings, so a restart before then does not lose them. Optional:
+   * without it they are kept in memory only.
+   */
+  persistHeld?(groupId: string, held: readonly HeldConfigChange[]): void;
+}
+
+/** A change made on this machine, held until this copy holds the group's settings. */
+export interface HeldConfigChange {
+  readonly path: string;
+  readonly kind: 'set' | 'secret' | 'delete';
+  readonly secret: boolean;
+  readonly applyLocal: boolean;
+}
+
+/** Held changes read back from disk; anything malformed or outside the replication policy is dropped. */
+export function readHeldConfigChanges(value: unknown): HeldConfigChange[] {
+  if (!Array.isArray(value)) return [];
+  const held: HeldConfigChange[] = [];
+  for (const item of value as readonly unknown[]) {
+    if (typeof item !== 'object' || item === null) continue;
+    const record = item as Record<string, unknown>;
+    const path = record['path'], kind = record['kind'];
+    if (typeof path !== 'string' || !isReplicatedConfigPath(path)) continue;
+    if (kind !== 'set' && kind !== 'secret' && kind !== 'delete') continue;
+    held.push({ path, kind, secret: record['secret'] === true, applyLocal: record['applyLocal'] === true });
+  }
+  return held;
+}
+
+/** A shared setting whose value here differs from the one another member wrote last, kept until the owner decides. */
+export interface ConfigLocalDifference {
+  readonly path: string;
+  /** The member whose value the group holds. */
+  readonly origin: string;
 }
 
 /** What `cluster status` reports about replication. Never a value. */
@@ -165,6 +201,14 @@ export interface ConfigReplicationStatus {
   readonly changesNotApplied: number;
   /** Changes made here that are held until this copy holds the group's settings, then published. */
   readonly localChangesHeld: number;
+  /**
+   * Shared settings whose value on this machine differs from the one another
+   * member wrote last, and which nothing here announced (an edit made while the
+   * daemon was stopped, or by a writer that does not announce). They are not
+   * overwritten: `cluster publish <path>` sends this machine's value to the
+   * group, `cluster accept <path>` takes the group's. Paths only, never a value.
+   */
+  readonly localDifferences: readonly ConfigLocalDifference[];
 }
 
 /** How often a machine that holds a credential marker without its value asks again. */
@@ -172,7 +216,7 @@ const SECRET_REREQUEST_MS = 60_000;
 /** One content exchange with a given member at most this often, however often it gossips. */
 const EXCHANGE_MIN_INTERVAL_MS = 10_000;
 
-interface HeldChange { readonly kind: 'set' | 'secret' | 'delete'; readonly secret: boolean; readonly applyLocal: boolean }
+type HeldChange = Omit<HeldConfigChange, 'path'>;
 
 export class ConfigReplicationService {
   private document: ConfigReplicaDocument;
@@ -194,18 +238,29 @@ export class ConfigReplicationService {
   private readonly pendingSets = new Map<string, PendingReplicaEffect>();
   private readonly pendingDeletes = new Map<string, PendingReplicaEffect>();
   private readonly secretMutations = new Map<string, Promise<void>>();
+  /** Per path, the member whose value differs from this machine's, and that entry's revision. */
+  private readonly localDifferences = new Map<string, { readonly origin: string; readonly revision: number }>();
+  /**
+   * Per path, the replica revision this machine's value was last seen to match
+   * (or that it published). A group entry above it is a group change not yet
+   * applied here; a local value that moved away from it is an edit made here.
+   */
+  private readonly lastAgreed = new Map<string, number>();
 
   constructor(private readonly host: ConfigReplicationHost, groupId: string) {
     this.document = createConfigReplicaDocument(groupId);
   }
 
   /** Adopt a document read back from disk, or from a group this node just joined. */
-  adopt(document: ConfigReplicaDocument): void {
+  adopt(document: ConfigReplicaDocument, held: readonly HeldConfigChange[] = []): void {
     this.snapshots.clear();
     this.pendingSets.clear(); this.pendingDeletes.clear(); this.held.clear();
     this.resyncUntil = null; this.missingSecrets.clear(); this.heldSecrets.clear(); this.divergentPeers.clear(); this.lastExchange.clear();
+    this.localDifferences.clear(); this.lastAgreed.clear();
     this.synced = false;
     this.document = this.publicDocument(document);
+    // Changes held before a restart are held again, for the same group only.
+    for (const change of held) this.held.set(change.path, { kind: change.kind, secret: change.secret, applyLocal: change.applyLocal });
   }
 
   retireSnapshotTransfers(): void { this.snapshots.clear(); }
@@ -245,6 +300,7 @@ export class ConfigReplicationService {
       credentialsMissing: this.missingSecrets.size,
       changesNotApplied: this.pendingSets.size + this.pendingDeletes.size,
       localChangesHeld: this.held.size,
+      localDifferences: [...this.localDifferences].map(([path, difference]) => ({ path, origin: difference.origin })),
     };
   }
 
@@ -286,10 +342,13 @@ export class ConfigReplicationService {
    *
    * A reconcile rather than a change hook, so it catches an edit made through
    * any path at all, including one made while this process was not running.
-   * It never publishes over another machine's change: a local value that
-   * differs from a setting another member wrote last is a group change not yet
-   * applied here (or an edit nobody announced), and the group's value is
-   * applied. Setting it again here is what changes it for the group.
+   * It never publishes over another machine's change, and never silently
+   * overwrites this machine's: a local value that differs from a setting
+   * another member wrote last is applied from the group only when this machine
+   * is known to have matched an older revision of it (a group change not yet
+   * applied here). Otherwise it is an edit made here that nothing announced,
+   * and it is kept and reported as a local difference until the owner
+   * publishes it or accepts the group's value.
    */
   async reconcileLocalConfig(): Promise<void> {
     const check = this.host.captureAuthority();
@@ -308,11 +367,23 @@ export class ConfigReplicationService {
       const value = config.get(path);
       if (!isReplicableValue(value)) continue;
       const entry = findReplicaEntry(next, path);
-      if (entry && JSON.stringify(entry.value) === JSON.stringify(value)) continue;
+      if (entry && JSON.stringify(entry.value) === JSON.stringify(value)) {
+        this.lastAgreed.set(path, entry.revision);
+        this.localDifferences.delete(path);
+        continue;
+      }
       if (entry && entry.origin !== this.host.nodeId) {
-        this.pendingSets.set(path, { revision: entry.revision, origin: entry.origin, secret: false, assertCurrent: check });
-        this.host.logger.warn('cluster: this machine\'s value for a shared setting differed from the group\'s and is being replaced with it; set it again here to change it for the whole group', { path, origin: entry.origin });
-        reapply = true;
+        const agreed = this.lastAgreed.get(path);
+        if (agreed !== undefined && agreed < entry.revision) {
+          // This machine held an older revision; the group moved on and its change was not applied here yet.
+          this.pendingSets.set(path, { revision: entry.revision, origin: entry.origin, secret: false, assertCurrent: check });
+          reapply = true;
+          continue;
+        }
+        if (this.localDifferences.get(path)?.revision !== entry.revision) {
+          this.localDifferences.set(path, { origin: entry.origin, revision: entry.revision });
+          this.host.logger.warn('cluster: this machine\'s value for a shared setting differs from the group\'s and was kept; run `cluster publish <path>` to send it to the group, or `cluster accept <path>` to take the group\'s', { path, origin: entry.origin });
+        }
         continue;
       }
       next = putReplicaEntry(next, { path, value, origin: this.host.nodeId, at: this.host.now() });
@@ -320,9 +391,45 @@ export class ConfigReplicationService {
     }
     if (changed.length > 0) {
       this.commit(next, check);
+      for (const path of changed) this.agreeWithReplica(path);
       await this.broadcastDelta(next, changed, check);
     }
     if (reapply) await this.applyPendingEffects();
+  }
+
+  /** This machine's value is the replica's for `path` now. */
+  private agreeWithReplica(path: string): void {
+    const entry = findReplicaEntry(this.document, path);
+    if (entry) this.lastAgreed.set(path, entry.revision);
+    this.localDifferences.delete(path);
+  }
+
+  /**
+   * The owner's answer to a local difference: send this machine's value to the
+   * group. Refused for a path that is not shared or holds a credential (those
+   * have their own commands).
+   */
+  async publishLocalValue(path: string): Promise<'published' | 'held'> {
+    if (!isReplicatedConfigPath(path) || isSecretBearingConfigKey(path)) throw new ConfigLocalDifferenceError(path, 'is not a shared setting this command publishes');
+    // Before this copy holds the group's settings the change is held, then sent.
+    const held = !this.inStep;
+    await this.announceLocalChange(path);
+    return held ? 'held' : 'published';
+  }
+
+  /** The owner's other answer: take the group's value for `path` here. */
+  async acceptGroupValue(path: string): Promise<void> {
+    if (!isReplicatedConfigPath(path) || isSecretBearingConfigKey(path)) throw new ConfigLocalDifferenceError(path, 'is not a shared setting this command can take from the group');
+    const config = this.host.config();
+    const entry = findReplicaEntry(this.document, path);
+    if (!config) throw new ConfigLocalDifferenceError(path, 'cannot be changed here: this machine has no settings store for the group');
+    if (!entry || entry.secret) throw new ConfigLocalDifferenceError(path, 'has no value in the group\'s settings to take');
+    const check = this.host.captureAuthority();
+    check();
+    if (JSON.stringify(config.get(path)) !== JSON.stringify(entry.value)) config.set(path, entry.value);
+    this.pendingSets.delete(path);
+    this.agreeWithReplica(path);
+    this.logApplied(path, entry.origin, false);
   }
 
   /**
@@ -350,6 +457,7 @@ export class ConfigReplicationService {
     if (!this.inStep) { this.hold(path, { kind: 'set', secret: false, applyLocal: false }); return; }
     const next = putReplicaEntry(this.document, { path, value, origin: this.host.nodeId, at: this.host.now() });
     this.commit(next, check);
+    this.agreeWithReplica(path);
     await this.broadcastDelta(next, [path], check);
   }
 
@@ -381,7 +489,21 @@ export class ConfigReplicationService {
 
   private hold(path: string, change: HeldChange): void {
     this.held.set(path, change);
+    this.persistHeld();
     this.host.logger.info('cluster: a shared setting changed here is held until this machine has the group\'s settings, then sent', { path });
+  }
+
+  /** Saves the held changes so a restart before this copy is in step does not lose them. */
+  private persistHeld(): void {
+    if (!this.host.persistHeld || !this.document.groupId) return;
+    try {
+      this.host.persistHeld(this.document.groupId, [...this.held].map(([path, change]) => ({ path, ...change })));
+    } catch (error) {
+      this.host.logger.warn('cluster: changes held for the group could not be saved; they are kept in memory and sent once this machine has the group\'s settings', {
+        held: this.held.size,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /** Publish what was held, once this copy holds the group's settings. Each goes out at a revision above everything merged. */
@@ -398,10 +520,12 @@ export class ConfigReplicationService {
       } catch (error) {
         // Keep it, and the ones after it, for the next pass.
         for (const [rest, restChange] of held.slice(index)) if (!this.held.has(rest)) this.held.set(rest, restChange);
+        this.persistHeld();
         this.host.logger.debug('cluster: a held setting change could not be sent yet', { path, error: error instanceof Error ? error.message : String(error) });
         return;
       }
     }
+    this.persistHeld();
   }
 
   private async publishDelete(path: string, secret: boolean, check: () => void, applyLocal: boolean): Promise<void> {
@@ -764,6 +888,7 @@ export class ConfigReplicationService {
       try { effect.assertCurrent(); } catch { retire(); continue; }
       try {
         if (JSON.stringify(config.get(path)) !== JSON.stringify(entry.value)) { config.set(path, entry.value); this.logApplied(path, entry.origin, false); }
+        this.agreeWithReplica(path);
         retire();
       } catch {
         this.host.logger.warn('cluster: a replicated setting was not applied and is awaiting retry', { path, origin: effect.origin });
@@ -886,5 +1011,13 @@ export class ConfigReplicationService {
     const check = this.host.captureAuthority();
     if (this.document.entries.length > 0 || this.document.tombstones.length > 0) await this.sendSnapshot(check);
     await this.requestSnapshot(from);
+  }
+}
+
+/** A `cluster publish` or `cluster accept` that cannot act on the path it was given. */
+export class ConfigLocalDifferenceError extends Error {
+  constructor(readonly path: string, problem: string) {
+    super(`${path} ${problem}`);
+    this.name = 'ConfigLocalDifferenceError';
   }
 }

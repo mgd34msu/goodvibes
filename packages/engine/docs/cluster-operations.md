@@ -62,10 +62,26 @@ missed message or a healed network split ends with the same settings on both
 sides; `cluster status` says "settings are being exchanged" until it does. A
 machine that has just joined (or restarted) holds changes made on it until it
 has the group's settings, then sends them, so it never overwrites the group with
-what it had before. A local value that differs from a setting another machine
-changed last is replaced with the group's value and logged; set it again to
-change it for the whole group. One member, the same one on every machine,
-answers a request for the full settings and a join.
+what it had before; the held changes are saved beside the shared settings, so a
+restart before then does not lose them. A group change this machine had not
+applied yet (it held an older revision of that setting) is applied. A local
+value that differs from a setting another machine changed last, and that
+nothing here announced (an edit made while the daemon was stopped, or by a
+writer that does not announce), is kept, logged once, and listed by `cluster
+status` under the shared settings that differ here with the machine whose value
+the group holds. `cluster publish <setting>` sends this machine's value to the
+group; `cluster accept <setting>` takes the group's value here. One member, the
+same one on every machine, answers a request for the full settings and a join.
+
+`cluster status` also prints the election timing in force: the heartbeat, the
+master timeout and the boot probe. A master timeout below two heartbeats runs
+as two heartbeats, and a boot probe above the master timeout runs as the master
+timeout; each such setting is listed with its stored and effective value, the
+daemon logs it once at start, and `/status` carries the effective values. A
+node counts an old-build peer toward compatibility ranking only while that peer
+has been heard within the longer of the master timeout and a candidate's
+lifetime, so a machine switched off for good stops holding the group in that
+mode without a restart.
 
 Once a machine holds the group's settings, credentials stored on it that the
 group has no record of are seeded once. Absent values do not become deletion requests, and

@@ -43,6 +43,8 @@ import type { ClusterLogger } from './types.js';
 export const GROUP_STATE_FILENAME = 'group-state.json';
 /** The replicated settings file, alongside the roster. Public to the group, like it. */
 export const GROUP_REPLICA_FILENAME = 'group-config.json';
+/** Shared-setting changes made here and held until this machine holds the group's settings. */
+export const GROUP_HELD_CONFIG_FILENAME = 'group-config-held.json';
 /**
  * The single secrets-store key holding every piece of group key material.
  *
@@ -534,6 +536,28 @@ export function loadGroupState(
     }
   }
   return createGroupStateDocument(groupId, DEFAULT_GROUP_DISPLAY_NAME);
+}
+
+/**
+ * Read the changes this machine held for `groupId` before it stopped: the raw
+ * list for the caller's policy filter, or an empty list when there is none, it
+ * belongs to another group, or it cannot be read (logged).
+ */
+export function loadHeldConfigChanges(stateDirectory: string, groupId: string, logger?: ClusterLogger): unknown {
+  const filePath = join(stateDirectory, GROUP_HELD_CONFIG_FILENAME);
+  try {
+    const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as { readonly groupId?: unknown; readonly held?: unknown } | null;
+    return parsed && parsed.groupId === groupId ? parsed.held : [];
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException | null)?.code;
+    if (code !== 'ENOENT') {
+      logger?.warn('cluster: the held setting changes could not be read; changes made here before the restart and not yet sent are lost', {
+        filePath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return [];
+  }
 }
 
 /**

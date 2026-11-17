@@ -28,6 +28,8 @@ export const CLUSTER_SUBCOMMAND_ARG_HINTS: Record<string, string> = {
   leave: '',
   rename: '"<new name>"',
   groups: '',
+  publish: '<shared setting>',
+  accept: '<shared setting>',
 };
 
 export function registerClusterRuntimeCommands(registry: CommandRegistry): void {
@@ -47,7 +49,10 @@ export function registerClusterRuntimeCommands(registry: CommandRegistry): void 
       return {
         title: `Run cluster ${parsed.subcommand}${parsed.positional ? ` ${parsed.positional}` : ''}${parsed.now ? ' --now' : ''}?`,
         detail: `${sentence}. It cannot be undone.`,
-        confirmLabel: parsed.subcommand === 'rotate' ? 'Rotate' : parsed.subcommand === 'forget' ? 'Forget' : 'Leave',
+        confirmLabel: parsed.subcommand === 'rotate' ? 'Rotate'
+          : parsed.subcommand === 'forget' ? 'Forget'
+            : parsed.subcommand === 'publish' ? 'Publish'
+              : parsed.subcommand === 'accept' ? 'Accept' : 'Leave',
       };
     },
     async handler(args, ctx) {

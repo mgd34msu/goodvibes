@@ -21,6 +21,7 @@ import type {
   JoinGroupResult,
   JoinKeyResult,
   NodesResult,
+  SettingDecisionResult,
 } from '../../cluster/group-operations.js';
 import type { DiscoveredGroup } from '../../cluster/group-runtime.js';
 
@@ -36,6 +37,10 @@ export interface ClusterGroupVerbs {
   rotate(input: { immediate?: boolean }): Promise<GroupOperationResult<RotateKeyResult>>;
   leave(): Promise<GroupOperationResult<{ groupId: string; groupName: string }>>;
   rename(name: string): Promise<GroupOperationResult<{ groupId: string; groupName: string }>>;
+  /** Send this machine's value of a shared setting that differs from the group's (`cluster status` lists them). */
+  publish(path: string): Promise<GroupOperationResult<SettingDecisionResult>>;
+  /** Take the group's value of such a setting here. */
+  accept(path: string): Promise<GroupOperationResult<SettingDecisionResult>>;
 }
 
 /** The router services this dispatcher needs. */
@@ -190,6 +195,20 @@ export async function dispatchClusterGroupRoutes(
     }
     case '/api/cluster/leave':
       return respond(await verbs.leave());
+    case '/api/cluster/publish':
+    case '/api/cluster/accept': {
+      const body = await context.parseJsonBody(request);
+      if (body instanceof Response) return body;
+      const settingPath = readString(body, 'path');
+      const verb = path === '/api/cluster/publish' ? 'publish' : 'accept';
+      if (!settingPath) {
+        return Response.json(
+          { ok: false, error: 'no setting was named', fix: `run \`cluster status\` to see which shared settings differ, then \`cluster ${verb} <path>\`` },
+          { status: 400 },
+        );
+      }
+      return respond(verb === 'publish' ? await verbs.publish(settingPath) : await verbs.accept(settingPath));
+    }
     default:
       return null;
   }

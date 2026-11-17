@@ -60,12 +60,14 @@ import {
   readKeyRecord,
   rotateGroupKeyMaterial,
   loadReplicaDocument,
+  loadHeldConfigChanges,
   saveGroupKeyMaterial,
   clearGroupKeyMaterial,
   readGroupKeyMaterial,
   GROUP_MATERIAL_SECRET_KEY,
   GROUP_STATE_FILENAME,
   GROUP_REPLICA_FILENAME,
+  GROUP_HELD_CONFIG_FILENAME,
   sweepKeyHistory,
   type ClusterSecretStore,
   type GroupKeyMaterial,
@@ -74,8 +76,11 @@ import {
 import { GroupWireRouter } from './group-transport.js';
 import {
   CONFIG_MESSAGE_TYPES,
+  ConfigLocalDifferenceError,
   ConfigReplicationService,
+  readHeldConfigChanges,
   type ConfigReplicationStatus,
+  type HeldConfigChange,
   type ReplicatedConfigStore,
   type ReplicatedSecretStore,
 } from './config-replication.js';
@@ -226,7 +231,7 @@ export class ClusterGroupRuntime {
 
   constructor(private readonly options: ClusterGroupRuntimeOptions) {
     this.incoming = new ClusterIngressWork(options.logger, () => options.clock.monotonicNow());
-    this.stateOwner = new GroupStateOwner(options.stateDirectory, [GROUP_STATE_FILENAME, GROUP_REPLICA_FILENAME]);
+    this.stateOwner = new GroupStateOwner(options.stateDirectory, [GROUP_STATE_FILENAME, GROUP_REPLICA_FILENAME, GROUP_HELD_CONFIG_FILENAME]);
     this.periodic = new ClusterPeriodicTasks(options.clock, options.logger);
     // Built here, not in start(), because the composition root needs
     // `electionTransport()` while it is still WIRING, the coordinator is
@@ -281,6 +286,7 @@ export class ClusterGroupRuntime {
       secrets: () => this.replicatedSecrets(),
       send: (type, body) => this.sendGroupMessage(type, body, null, true),
       persist: (document) => this.persistReplica(document),
+      persistHeld: (groupId, held) => this.persistHeldConfig(groupId, held),
     }, '');
     this.admissions = new GroupAdmissionService({
       nodeId: options.nodeId,
@@ -487,7 +493,8 @@ export class ClusterGroupRuntime {
     // A previous membership's replica is not current-group authority. Keep its
     // original file intact; only a real current-group write replaces that slot.
     if (material && this.replication) this.replication.adopt(savedReplica?.groupId === material.groupId
-      ? savedReplica : createConfigReplicaDocument(material.groupId));
+      ? savedReplica : createConfigReplicaDocument(material.groupId),
+      readHeldConfigChanges(loadHeldConfigChanges(this.options.stateDirectory, material.groupId, this.options.logger)));
     if (this.networkStarted && !this.runtimeStopping && this.membershipOperations.available && !this.membershipTransition) { this.incoming.open(); this.configChanges.resume(); }
   }
 
@@ -524,7 +531,8 @@ export class ClusterGroupRuntime {
     void task.then(() => { this.groupWork.delete(task); }, error => {
       this.groupWork.delete(task);
       if (!(error instanceof ClusterMembershipOperationError) && !(error instanceof GroupConfigChangeRetiredError)
-        && !(error instanceof ConfigReplicationPrivacyError) && !(error instanceof GroupKeyNotSavedError)) {
+        && !(error instanceof ConfigReplicationPrivacyError) && !(error instanceof GroupKeyNotSavedError)
+        && !(error instanceof ConfigLocalDifferenceError)) {
         this.options.logger.warn('cluster: owned group work failed', { error: summarizeError(error) });
       }
     });
@@ -672,6 +680,20 @@ export class ClusterGroupRuntime {
     await this.runGroupWork(() => this.replication?.announceLocalChange(path));
   }
 
+  /** Send this machine's value of a shared setting to the group (the owner's answer to a local difference). */
+  async publishConfigValue(path: string): Promise<'published' | 'held'> {
+    let outcome: 'published' | 'held' = 'published';
+    await this.runGroupWork(async () => {
+      if (this.replication) outcome = await this.replication.publishLocalValue(path);
+    });
+    return outcome;
+  }
+
+  /** Take the group's value of a shared setting here (the owner's other answer to a local difference). */
+  async acceptGroupConfigValue(path: string): Promise<void> {
+    await this.runGroupWork(() => this.replication?.acceptGroupValue(path));
+  }
+
   /** Tell the group about a credential an operator just set on this machine. */
   async announceSecretChange(configPath: string): Promise<void> {
     await this.runGroupWork(() => this.replication?.announceLocalSecret(configPath));
@@ -727,6 +749,11 @@ export class ClusterGroupRuntime {
    */
   private replicatedSecrets(): ReplicatedSecretStore | null {
     return this.configChanges.secretStore();
+  }
+
+  private persistHeldConfig(groupId: string, held: readonly HeldConfigChange[]): void {
+    if (this.runtimeStopping || !this.membershipOperations.available || groupId !== this.material?.groupId) throw new ClusterMembershipOperationError('abandoned');
+    this.stateOwner.write(GROUP_HELD_CONFIG_FILENAME, `${JSON.stringify({ version: 1, groupId, held }, null, 2)}\n`, false);
   }
 
   private persistReplica(document: ConfigReplicaDocument): void {

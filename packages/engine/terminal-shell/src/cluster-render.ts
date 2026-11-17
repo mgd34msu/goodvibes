@@ -125,6 +125,15 @@ export function renderStatus(report: GroupStatusReport, now: number): string[] {
     if (replication.localChangesHeld > 0) {
       lines.push(`                 ${replication.localChangesHeld} change(s) made here are held until this machine has the group's settings, then sent`);
     }
+    // Absent from a daemon built before local differences were reported.
+    const differences = replication.localDifferences ?? [];
+    if (differences.length > 0) {
+      lines.push(`                 ${differences.length} shared setting(s) differ here from the group's and were kept:`);
+      for (const difference of differences) {
+        lines.push(`                   ${difference.path} (the group holds ${printableName(difference.origin)}'s value)`);
+      }
+      lines.push('                 `cluster publish <setting>` sends this machine\'s value to the group; `cluster accept <setting>` takes the group\'s');
+    }
   }
   if (report.electionTiming) {
     const timing = report.electionTiming;

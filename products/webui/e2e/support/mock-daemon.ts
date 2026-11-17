@@ -957,7 +957,7 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
   // sessions.permissionMode.get/set + sessions.contextUsage.get in-memory state, a
   // fresh session-owned copy per installMockDaemon call. Mode updates never
   // mutate the daemon configuration fixture.
-  let permissionMode: OperatorMethodOutput<'sessions.permissionMode.get'>['mode'] = options.initialPermissionMode ?? 'safe-owner';
+  let permissionMode: OperatorMethodOutput<'sessions.permissionMode.get'>['mode'] = options.initialPermissionMode ?? 'ask-me';
   const contextUsageState = { estimatedContextTokens: 4200, contextWindow: 200000 };
 
   function sessionNotLocal(route: Route, sessionId: string) {
@@ -1115,7 +1115,7 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
   // Channel profiles (channels.profiles.*, platform 1.6.1's initiative family): one seeded
   // surface-wide binding so a spec has real selected-detail content to prove against.
   let channelProfileList: MockChannelBinding[] = [
-    { id: 'cp_e2e_1', surfaceKind: 'slack', model: 'claude-sonnet', permissionMode: 'safe-owner' as const, updatedAt: 1_700_000_000_000 },
+    { id: 'cp_e2e_1', surfaceKind: 'slack', model: 'claude-sonnet', permissionMode: 'ask-me' as const, updatedAt: 1_700_000_000_000 },
   ];
   let channelProfileIdCounter = 0;
 

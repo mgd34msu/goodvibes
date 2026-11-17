@@ -864,6 +864,7 @@ export function occasionsStateResponse(): OperatorMethodOutput<'occasions.state'
     openItems: 1,
     interviews: 1,
     mirrors: 0,
+    attributions: 1,
     reconciledOpenItems: 0,
     lastSweep: {
       sweptAt: 1_753_700_000_000,

@@ -6,7 +6,6 @@
  * empty adapter default or judgment call here. Accepting a preview for local
  * storage/display does not authorize sending it to a hosted reader.
  */
-import { types } from 'node:util';
 import type { GatewayMethodCatalog } from '../control-plane/method-catalog.js';
 import { HandlerError, registerCatalogHandler } from '../control-plane/host-handlers.js';
 import { InboxCursorStore } from './cursor-store.js';
@@ -16,6 +15,7 @@ import type { ImapUidCheckpoint, InboundProviderAdapter } from './provider-adapt
 import type { TriageReceiptScope } from './triage/types.js';
 import type { IntakeLogger } from './context.js';
 import { composeInboxReads, type InboxReadSource } from './composite.js';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 
 export const INBOX_LIST_METHOD_ID = 'channels.inbox.list';
 
@@ -231,11 +231,7 @@ export function createOwnedInboxSource(
       } catch { throw scopeUnavailable(); }
       const assertCurrent = (): void => {
         if (closed || released) throw stopped();
-        try {
-          const result: unknown = lease?.assertCurrent?.();
-          if (types.isPromise(result)) void result.catch(() => {});
-          if (result !== undefined) throw new Error('Read fence must be synchronous');
-        } catch { throw scopeUnavailable(); }
+        try { assertSynchronousJudgmentGuard(() => lease?.assertCurrent?.()); } catch { throw scopeUnavailable(); }
       };
       assertCurrent();
       return { providerIds, sources: { store, poller }, release: retire, assertCurrent,

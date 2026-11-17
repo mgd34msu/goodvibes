@@ -38,7 +38,7 @@ async function readDecisionPlanningGoal(input: { readonly text: string }, option
       signal?.throwIfAborted(); original.assertCurrent(); policy.assertCurrent();
       if (planningGoal.run !== run) throw new TypeError('Planning reading policy changed.');
       if (options.signal !== signal || options.assertCurrent !== callerCurrent) throw new TypeError('Planning source owner changed.');
-      const result = callerCurrent?.(); if (result !== undefined) throw new TypeError('Invalid planning source guard.');
+      assertSynchronousJudgmentGuard(() => callerCurrent?.(), () => new TypeError('Invalid planning source guard.'));
     },
   });
   const result = await run(authority.port, original.snapshot, {

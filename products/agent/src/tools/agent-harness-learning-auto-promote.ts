@@ -1,6 +1,5 @@
 import { learningPromotionReference } from './agent-harness-learning-curator-common.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { types as nodeTypes } from 'node:util';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { planMemoryRecord } from '@goodvibes-jev/engine/platform/platform/knowledge';
@@ -15,6 +14,7 @@ import type { LearningCandidate } from './agent-harness-learning-curator-types.t
 import { captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureModelReadingSnapshotGuard, modelReadingServicePath } from './agent-harness-model-reading-source.ts';
 import type { LearningCandidateCollection, LearningCuratorNativeContext } from './agent-harness-learning-curator-source.ts';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 
 
 // ---------------------------------------------------------------------------
@@ -271,11 +271,7 @@ async function runAutoPromoterOnce(
   if (typeof caller !== 'function') throw new ToolInputProjectionError('unavailable');
   const assertCaller = () => {
     assertOptions(); assertSignal(); signal?.throwIfAborted();
-    const result: unknown = caller();
-    if (result !== undefined) {
-      if (nodeTypes.isPromise(result)) Promise.prototype.then.call(result, undefined, () => {});
-      throw new ToolInputProjectionError('stale');
-    }
+    assertSynchronousJudgmentGuard(caller, () => new ToolInputProjectionError('stale'));
     assertOptions(); assertSignal(); signal?.throwIfAborted();
   };
   assertCaller();

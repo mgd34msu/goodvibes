@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 
 interface ReceiptScope {
   readonly methodId: string;
@@ -24,7 +25,7 @@ export async function executeOperatorMethodWithReceipt(registry: ToolRegistry, c
     signal?.throwIfAborted();
     if (restrictions?.signal !== signal || restrictions?.assertCurrent !== callerCurrent
       || !isDeepStrictEqual(captureStrictJudgmentJson(input), captured)) throw new Error('Private operator request source changed.');
-    if (callerCurrent?.() !== undefined) throw new Error('Private operator currentness must be synchronous.');
+    assertSynchronousJudgmentGuard(() => callerCurrent?.(), () => new Error('Private operator currentness must be synchronous.'));
   };
   let receipt: { readonly body: unknown } | undefined;
   const result = await scopes.run({ methodId, input: captured, receive(body: unknown) {

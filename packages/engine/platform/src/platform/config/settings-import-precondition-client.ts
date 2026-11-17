@@ -1,5 +1,4 @@
 import type { SettingsImportPreconditionRequest, SettingsImportPreconditionFacts, SettingsImportPreconditionReceipt } from '@goodvibes-jev/engine/daemon-api';
-import { types as nodeTypes } from 'node:util';
 import type { Refusal } from '@goodvibes-jev/engine/errors';
 import { SettingsRefusalError, refusalText } from './settings-refusal.js';
 import {
@@ -13,6 +12,7 @@ import { isDaemonOwnedConfigKey } from './config-ownership.js';
 import { isSecretBearingConfigKey } from './secret-bearing-config-keys.js';
 import { isSecretRefInput } from './secret-refs.js';
 import type { DaemonConfigEndpoint, DaemonConfigRouterDeps } from './daemon-config-route.js';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 
 export type { SettingsImportPreconditionRequest, SettingsImportPreconditionReceipt };
 /** What an import apply reports; `failure` and `receiptUnreadable` as for one change (settings-precondition-client.ts). */
@@ -44,11 +44,7 @@ function invalidRequest(detail: string): Error {
     reason: `The settings import is not one this client sends: ${detail}`, next: ['Import a list of distinct daemon-owned settings, each with a key and a value'], retryable: false });
 }
 function assertSynchronous(check: (() => void) | undefined): void {
-  if (!check) return;
-  const result: unknown = Reflect.apply(check, undefined, []);
-  if (result === undefined) return;
-  if (nodeTypes.isPromise(result)) Reflect.apply(Promise.prototype.then, result, [undefined, () => {}]);
-  throw stale();
+  assertSynchronousJudgmentGuard(check, stale);
 }
 const DESTINATION_FIELDS = ['path', 'operation', 'tier'] as const;
 function destination(value: unknown): value is Record<string, unknown> {

@@ -95,6 +95,7 @@ import { types as nodeTypes } from 'node:util';
 import { basename, dirname, isAbsolute, join, parse, sep } from 'node:path';
 import type { BigIntStats, Stats } from 'node:fs';
 import { logger } from './logger.js';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 
 /**
  * Hard ceiling on `.corrupt-*` files kept per store directory, oldest reaped
@@ -386,9 +387,9 @@ export function captureExistingDirectory(directory: string, options: { readonly 
  * alias walker or directory-creation protocol is maintained by each store. */
 export function prepareAtomicPublicationDirectory(directory: string, options: Pick<AtomicWriteOptions, 'mkdirp' | 'assertCurrent' | 'onEffect'> = {}): ReturnType<typeof captureExistingDirectory> {
   const guard = options.assertCurrent?.bind(options), notify = options.onEffect?.bind(options);
-  const check = (value: unknown) => { if (value !== undefined) { if (nodeTypes.isPromise(value)) Reflect.apply(Promise.prototype.then, value, [undefined, () => {}]); throw new Error('Atomic publication callbacks must complete synchronously.'); } };
+  const synchronous = (callback: () => unknown) => assertSynchronousJudgmentGuard(callback, () => new Error('Atomic publication callbacks must complete synchronously.'));
   const absolute = isAbsolute(directory) ? directory : `${process.cwd()}${sep}${directory}`;
-  return Object.freeze(prepareAtomicDirectory(absolute, () => check(guard?.()), notify ? () => check(notify(false)) : undefined, options.mkdirp !== false));
+  return Object.freeze(prepareAtomicDirectory(absolute, () => synchronous(() => guard?.()), notify ? () => synchronous(() => notify(false)) : undefined, options.mkdirp !== false));
 }
 
 /** Parent directories this process already created or found, so a write does not ask again. */
@@ -396,10 +397,8 @@ const knownAtomicParents = new Set<string>();
 /** Store files whose dead writers' temp files this process already reaped. */
 const reapedAtomicTargets = new Set<string>();
 
-function completeSynchronously(value: unknown, message: string): void {
-  if (value === undefined) return;
-  if (nodeTypes.isPromise(value)) Reflect.apply(Promise.prototype.then, value, [undefined, () => {}]);
-  throw new Error(message);
+function completeSynchronously(callback: () => unknown, message: string): void {
+  assertSynchronousJudgmentGuard(callback, () => new Error(message));
 }
 
 function directoryIdentity(path: string): string {
@@ -448,8 +447,8 @@ export function writeFileAtomic(filePath: string, contents: string | Uint8Array,
   const durable = options.durable === true, mkdirp = options.mkdirp !== false;
   const absolute = isAbsolute(filePath) ? filePath : `${process.cwd()}${sep}${filePath}`;
   const leaf = basename(absolute), dir = dirname(absolute);
-  const check = () => completeSynchronously(guard?.(), 'Atomic file operation currentness is unavailable.');
-  const notify = (published: boolean) => completeSynchronously(onEffect?.(published), 'Atomic file effect notification must complete synchronously');
+  const check = () => completeSynchronously(() => guard?.(), 'Atomic file operation currentness is unavailable.');
+  const notify = (published: boolean) => completeSynchronously(() => onEffect?.(published), 'Atomic file effect notification must complete synchronously');
   // tmpPath is set only once this write created the file, so a failure never removes another writer's file.
   let tmpPath: string | undefined, fd: number | undefined, published = false;
   try {
@@ -686,8 +685,7 @@ const sameQuarantineFile = (a: BigIntStats, b: BigIntStats) => a.dev === b.dev &
 const absoluteQuarantinePath = (path: string) => isAbsolute(path) ? path : `${process.cwd()}${sep}${path}`;
 function quarantineUnavailable(): never { throw new Error('Original store or recovery ownership is unavailable; existing files were preserved.'); }
 function invokeQuarantineCallback(callback: (() => void) | undefined): void {
-  const result: unknown = callback?.();
-  if (result !== undefined) { if (nodeTypes.isPromise(result)) nativeQuarantineApply(nativeQuarantineThen, result, [undefined, () => {}]); quarantineUnavailable(); }
+  assertSynchronousJudgmentGuard(callback, quarantineUnavailable);
 }
 function originalQuarantineSource(source: QuarantineSource): NativeQuarantineSource {
   const original = nativeQuarantineApply(nativeSourceGet, sourceStates, [source]) as NativeQuarantineSource | undefined;

@@ -219,7 +219,7 @@ export function createNativeConversationStorage(sqlite: SQLiteStore, projectId: 
           const current = read(db, projectId, lookup, original);
           if (!current) throw new NativeConversationStorageError('not-found');
           if (current.state === 'cancelled') throw new NativeConversationStorageError('cancelled');
-          synchronous(assertCurrent(current));
+          assertSynchronousJudgmentGuard(() => assertCurrent(current), () => new NativeConversationStorageError('invalid'));
         },
         beforeCommit(db, currentLedger: WorkLedgerState, nextLedger: WorkLedgerState) {
           const current = read(db, projectId, lookup, original);
@@ -237,7 +237,7 @@ export function createNativeConversationStorage(sqlite: SQLiteStore, projectId: 
             || next.proposalsSpent !== current.proposalsSpent || !isDeepStrictEqual(next.proposal, current.proposal) || !decisionsKept
             || !isDeepStrictEqual(next.association, { workId: event.workId, attemptId: event.attemptId, ledgerRevision: event.sequence })) throw new NativeConversationStorageError('invalid');
           assertPublication(next, event as WorkLedgerSubmission);
-          synchronous(assertCurrent(current));
+          assertSynchronousJudgmentGuard(() => assertCurrent(current), () => new NativeConversationStorageError('invalid'));
           write(db, projectId, lookup, current, next, true, beforeWrite, beforeSettledWrite);
         },
       });

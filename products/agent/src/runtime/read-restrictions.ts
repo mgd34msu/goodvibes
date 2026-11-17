@@ -1,6 +1,5 @@
 import { types as nodeTypes } from 'node:util';
-
-const observePromiseRejection = Promise.prototype.then;
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 
 function retired(): never { throw new Error('Native read restrictions changed.'); }
 
@@ -46,11 +45,7 @@ export function captureNativeReadRestrictions(options: {
   if (current && nodeTypes.isProxy(current)) retired();
   return () => {
     bindings(); signal?.throwIfAborted();
-    const result: unknown = current?.();
-    if (result !== undefined) {
-      if (nodeTypes.isPromise(result)) Reflect.apply(observePromiseRejection, result, [undefined, () => {}]);
-      throw new Error('Native read currentness must be synchronous.');
-    }
+    assertSynchronousJudgmentGuard(() => current?.(), () => new Error('Native read currentness must be synchronous.'));
     bindings(); signal?.throwIfAborted();
   };
 }

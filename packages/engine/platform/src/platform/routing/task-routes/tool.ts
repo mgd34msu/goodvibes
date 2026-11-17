@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /**
  * The `route` tool: the agent's route adapter, backed by the Jev task route
  * planner. The definition, the action aliases and the status output are the
@@ -110,11 +110,9 @@ export function createTaskRouteTool(deps: TaskRouteDeps = {}, options: TaskRoute
       const callerCurrent = options.assertCurrent, invocationCurrent = opts?.assertCurrent;
       const assertCurrent = () => {
         signal?.throwIfAborted();
-        const first: unknown = callerCurrent?.(), second: unknown = invocationCurrent?.(args);
-        if (first !== undefined || second !== undefined) {
-          void Promise.resolve(first).catch(() => {}); drainOwned(second);
-          throw new ToolInputProjectionError('held');
-        }
+        const held = () => new ToolInputProjectionError('held');
+        assertSynchronousJudgmentGuard(() => callerCurrent?.(), held);
+        assertSynchronousJudgmentGuard(() => invocationCurrent?.(args), held);
       };
       const plan = await planTaskRoute(args, deps, { ...options, signal, assertCurrent });
       return output(plan);

@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /** Fixed provider meanings. No message-derived heuristics or arbitrary flags. */
 export const TAGS = Object.freeze({
   'GoodVibes/Spam': Object.freeze({ imap: 'GoodVibes_Spam', slack: 'no_entry_sign', discord: '🚫' }),
@@ -37,7 +38,7 @@ export function supersededLabels(meanings: Iterable<TriageProviderTag>): readonl
 }
 
 export interface TaggerGuard { readonly signal: AbortSignal; assertCurrent(): void }
-export function current(guard: TaggerGuard): void { guard.signal.throwIfAborted(); if (guard.assertCurrent() !== undefined) throw new Error('Invalid triage lifetime proof'); }
+export function current(guard: TaggerGuard): void { guard.signal.throwIfAborted(); assertSynchronousJudgmentGuard(() => guard.assertCurrent(), () => new Error('Invalid triage lifetime proof')); }
 export type TaggerHttp = typeof fetch;
 /** Redirects cannot move credentials/effects. Guard every actual request and body await. */
 export async function request(fetcher: TaggerHttp, url: string, init: RequestInit, guard: TaggerGuard): Promise<Response> {

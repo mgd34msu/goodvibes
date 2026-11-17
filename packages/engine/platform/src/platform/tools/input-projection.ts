@@ -8,6 +8,7 @@ import type { ConfigManager, PreparedConfigMutation } from '../config/manager.js
 import type { ConfigWriteRoute } from '../config/daemon-config-route.js';
 import { assertPreparedConfigWriteRoute } from '../config/settings-precondition-client.js';
 import { assertRemoteSettingsImportPrecondition, type RemoteSettingsImportPrecondition } from '../config/settings-import-precondition-client.js';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 
 export type ToolInputProjectionProblem = 'held' | 'capacity' | 'unconfigured' | 'invalid' | 'unavailable' | 'stale' | 'cancelled' | 'released' | 'binding-changed';
 
@@ -359,12 +360,7 @@ export function assertProjectionCurrent(guard: ((args: Record<string, unknown>) 
 export function assertProjectionCurrent(guard: ((args?: Record<string, unknown>) => void) | ((args: Record<string, unknown>) => void) | undefined,
   args?: Record<string, unknown>): void {
   if (!guard) return;
-  const result: unknown = Reflect.apply(guard, undefined, args === undefined ? [] : [args]);
-  if (result === undefined) return;
-  // Do not await or invoke a borrowed thenable. Drain a genuine promise's
-  // rejection while refusing its unfinished check before any effect.
-  if (nodeTypes.isPromise(result)) Reflect.apply(Promise.prototype.then, result, [undefined, () => {}]);
-  throw new ToolInputProjectionError('invalid');
+  assertSynchronousJudgmentGuard((): unknown => Reflect.apply(guard, undefined, args === undefined ? [] : [args]), () => new ToolInputProjectionError('invalid'));
 }
 
 const applyIntrinsic = Reflect.apply;

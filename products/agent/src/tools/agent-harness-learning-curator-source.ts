@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import { types as nodeTypes } from 'node:util';
 import { prepareLearningNativeTransition, type LearningTransitionIntent, type LearningSourceTransition } from './agent-harness-learning-curator-transitions.ts';
 import { AgentNoteRegistry } from '../agent/note-registry.ts';
 import { AgentPersonaRegistry } from '../agent/persona-registry.ts';
@@ -16,6 +15,7 @@ import { captureCatalogData, captureCatalogMethods, captureCatalogSnapshotGuard,
 import { modelReadingServicePath, captureModelReadingSnapshotGuard } from './agent-harness-model-reading-source.ts';
 import { discoverVibeFiles } from '../agent/vibe-file.ts';
 import type { LocalLearningCandidateDomain, LearningCandidate } from './agent-harness-learning-curator-types.ts';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 
 /** A work-plan task as the curator reads it: the row's fields under the record id the readings use. */
 export interface LearningWorkItem {
@@ -63,18 +63,14 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
   const callerFields = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent', 'requirePreservedSource']);
   const signal = options.signal, callerCurrent = options.assertCurrent, retainCurrent = options.retainCurrent;
   const signalMethods = signal ? captureCatalogMethods(signal, ['throwIfAborted']) : () => {};
-  const synchronous = (value: unknown) => {
-    if (value === undefined) return;
-    if (nodeTypes.isPromise(value)) Promise.prototype.then.call(value, undefined, () => {});
-    throw new ToolInputProjectionError('held');
-  };
+  const synchronous = (check: () => unknown) => assertSynchronousJudgmentGuard(check, () => new ToolInputProjectionError('held'));
   let calling = false;
   const assertCaller = () => {
     if (calling) throw new ToolInputProjectionError('held');
     callerFields(); signalMethods(); signal?.throwIfAborted();
     if (callerCurrent) {
       calling = true;
-      try { const result: unknown = callerCurrent(); synchronous(result); } finally { calling = false; }
+      try { synchronous(callerCurrent); } finally { calling = false; }
     }
     callerFields(); signalMethods(); signal?.throwIfAborted();
   };
@@ -321,7 +317,7 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
     });
   };
   if (retainCurrent) {
-    callerFields(); const result: unknown = retainCurrent(assertEvidence, 'agent.learning.curator.native-source'); synchronous(result); assertCaller();
+    callerFields(); synchronous(() => retainCurrent(assertEvidence, 'agent.learning.curator.native-source')); assertCaller();
   }
   const libraries: Readonly<Record<LocalLearningCandidateDomain, readonly LearningRecord[]>> = {
     memory: source.memoryRecords.map((record, index) => ({ item: summarizeMemoryItem(record), record: readingSource.memoryRecords[index] })),
@@ -338,7 +334,7 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
   const retainReadingCurrent = (guard: () => void, key?: string) => {
     assertCurrent();
     retained.add(guard);
-    if (retainCurrent) { const result: unknown = retainCurrent(guard, key); synchronous(result); }
+    if (retainCurrent) synchronous(() => retainCurrent(guard, key));
     assertCurrent();
   };
   const scoped = Object.freeze({ ...options, assertCurrent, retainCurrent: retainReadingCurrent, requirePreservedSource: true });

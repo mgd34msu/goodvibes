@@ -1,5 +1,6 @@
 import { types as nodeTypes } from 'node:util';
 import type { ResearchReferenceOperation } from './types.js';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 const invalid = (): never => { throw new Error('Protected source owner is unavailable or the handle is not current'); };
 const apply = Reflect.apply;
 const signalAborted = Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'aborted')!.get!;
@@ -24,10 +25,6 @@ export function captureScreeningOperation(value: ResearchReferenceOperation | un
 /** Synchronous caller restriction shared by semantic and Classic source owners. */
 export function assertScreeningOperation(operation: ResearchReferenceOperation | undefined): void {
   if (operation?.signal) apply(throwIfAborted, operation.signal, []);
-  const result: unknown = operation?.assertCurrent?.();
-  if (result !== undefined) {
-    if (nodeTypes.isPromise(result)) void Promise.prototype.then.call(result, undefined, () => {});
-    return invalid();
-  }
+  assertSynchronousJudgmentGuard(() => operation?.assertCurrent?.(), invalid);
   if (operation?.signal) apply(throwIfAborted, operation.signal, []);
 }

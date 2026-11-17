@@ -7,6 +7,7 @@ import { resolveScopedDirectory } from '../runtime/surface-root.js';
 import type { FeatureFlagReader } from '../runtime/feature-flags/index.js';
 import { isFeatureGateEnabled, requireFeatureGate } from '../runtime/feature-flags/index.js';
 import { currentProcessSignals, resolveDaemonExecInvocation } from './daemon-exec-invocation.js';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 
 export type ManagedServicePlatform = 'systemd' | 'launchd' | 'windows' | 'manual';
 
@@ -455,11 +456,7 @@ export class PlatformServiceManager {
   }
 
   private assertCurrent(): void {
-    const result: unknown = this.currentRestriction?.();
-    if (result !== undefined) {
-      if (result instanceof Promise) void result.catch(() => {});
-      throw new Error('Service current restriction must complete synchronously without returning a value');
-    }
+    assertSynchronousJudgmentGuard(() => this.currentRestriction?.(), () => new Error('Service current restriction must complete synchronously without returning a value'));
   }
 
   private isEnabled(): boolean {

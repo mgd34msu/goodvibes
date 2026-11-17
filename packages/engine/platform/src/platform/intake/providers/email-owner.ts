@@ -10,6 +10,7 @@ import type { OwnedInboxReadLease } from '../registration.js';
 import { digestSender, normalizeWhitespace, stripMarkup } from '../text-normalization.js';
 import { POLL_CADENCE_MS, type RouteResolver, type ImapUidCheckpoint, type ImapUidTerminalDisposition, type InboundChannelItem, type InboundProviderAdapter, type ProviderPollOptions, type ProviderPollResult } from '../provider-adapter.js';
 import { resolveAccountInboxIdentity, type AccountInboxIdentity } from './account-identity.js';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 
 export interface EmailInboxAccount {
   readonly host: string;
@@ -100,11 +101,7 @@ function messageTime(date: string | undefined, readAt: number): number {
   return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= readAt + 24 * 60 * 60 * 1000 ? parsed : readAt;
 }
 function sync(assert: () => void): void {
-  const result: unknown = assert();
-  if (result !== undefined) {
-    if (types.isPromise(result)) void result.catch(() => {});
-    throw new Error('Email inbox requires synchronous currentness');
-  }
+  assertSynchronousJudgmentGuard(assert, () => new Error('Email inbox requires synchronous currentness'));
 }
 function unavailable(configured?: boolean, error = 'Email inbox account or complete source is unavailable'): ProviderPollResult {
   return { items: [], state: 'unavailable', error, ...(configured === undefined ? {} : { configured }) };

@@ -1,3 +1,4 @@
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /** Restrictive lifecycle checks for one memory operation, never permission. */
 export interface MemoryOperationOptions {
   readonly signal?: AbortSignal | undefined;
@@ -16,11 +17,7 @@ export function captureMemoryOperation(options: MemoryOperationOptions = {}): Me
     signal,
     assertCurrent: () => {
       signal?.throwIfAborted();
-      const result: unknown = current?.();
-      if (result !== undefined) {
-        if (result instanceof Promise) void result.catch(() => {});
-        throw new TypeError('Memory operation currentness checks must be synchronous');
-      }
+      assertSynchronousJudgmentGuard(() => current?.(), () => new TypeError('Memory operation currentness checks must be synchronous'));
       signal?.throwIfAborted();
     },
   });

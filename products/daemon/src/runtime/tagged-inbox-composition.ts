@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /** Root-held credential and permission owners for explicit provider tag handles. */
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { daemonSecretKeyFor } from '@goodvibes-jev/engine/platform/platform/config';
@@ -107,11 +107,10 @@ export async function attachDaemonInboxTagging<T extends InboxSurfaceRegistratio
   const ready = source.ready.then(() => {
     if (closing) throw new Error('Triage source retired before ready');
     request.assertCurrent();
-    const returned: unknown = onReady(Object.freeze({ applyTags: tagging.applyTags.bind(tagging), close: tagging.close.bind(tagging) }));
-    if (returned !== undefined) {
-      if (returned && typeof returned === 'object' && 'then' in returned) drainOwned(returned);
-      throw new Error('Triage onReady must synchronously receive ownership');
-    }
+    assertSynchronousJudgmentGuard(
+      () => onReady(Object.freeze({ applyTags: tagging.applyTags.bind(tagging), close: tagging.close.bind(tagging) })),
+      () => new Error('Triage onReady must synchronously receive ownership'),
+    );
   }).catch(async error => { await close(); throw error; });
   void ready.catch(() => {});
   return { ...source, ready, close, unregister() { void close().catch(() => {}); } };

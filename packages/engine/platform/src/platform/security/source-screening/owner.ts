@@ -13,6 +13,7 @@ import { SOURCE_SCREENING_LIMITS as LIMITS, type ProtectedSource, type Protected
   type HostedProtectedSourceOwnerOptions,
   type SourceScreeningReceipt, type SourceScreeningResult, type ProtectedResearchReference,
   type ResearchReferenceScreeningReceipt, type ResearchReferenceScreeningResult, type ResearchReferenceOperation } from './types.js';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 
 type Handle = ProtectedSource | ProtectedResearchReference;
 type Receipt = SourceScreeningReceipt | ResearchReferenceScreeningReceipt;
@@ -131,14 +132,7 @@ export function createProtectedSourceOwner(options: ProtectedSourceOwnerOptions)
   const proxied = proxyConfigured();
   const active = () => {
     if (signal.aborted) return invalid();
-    let result: unknown;
-    try { result = assertAuthority(); } catch { return invalid(); }
-    if (result !== undefined) {
-      // Refuse async authority without exposing an unhandled rejection or
-      // inspecting hostile thenable/error properties.
-      if (nodeTypes.isPromise(result)) void Promise.prototype.then.call(result, undefined, () => {});
-      return invalid();
-    }
+    try { assertSynchronousJudgmentGuard(assertAuthority); } catch { return invalid(); }
     if (signal.aborted) return invalid();
   };
   active();

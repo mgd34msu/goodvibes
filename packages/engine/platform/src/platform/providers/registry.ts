@@ -301,6 +301,8 @@ export class ProviderRegistry {
 
   private getModelRegistry(): ModelDefinition[] {
     if (this._cachedModelRegistry !== null) return this._cachedModelRegistry;
+    // One read of the overrides file for the whole list, not one stat per model.
+    const applyOverrides = this.contextWindowOverrideStore().snapshot();
     this._cachedModelRegistry = buildModelRegistry({
       customModels: this.customModels,
       runtimeModels: this.runtimeModels,
@@ -309,7 +311,7 @@ export class ProviderRegistry {
       catalogModels: this.getCatalogBuiltins(),
       discoveredModels: this.discoveredModels,
       suppressedCatalogRegistryKeys: this.getSuppressedCatalogModelRegistryKeys(),
-    }).map((model) => this.contextWindowOverrideStore().apply(this.catalogWindows.apply(model)));
+    }).map((model) => applyOverrides(this.catalogWindows.apply(model)));
     return this._cachedModelRegistry;
   }
 

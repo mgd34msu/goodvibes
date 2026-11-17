@@ -55,25 +55,43 @@ export interface AgentWorkspaceEmailConnectPrefill {
   readonly hasStoredPassword: boolean;
 }
 
-/** The stored inbox settings, read from config. Null when the email section cannot be read. */
+function prefillFrom(get: (key: string) => unknown): AgentWorkspaceEmailConnectPrefill {
+  const { settings, passwordStored } = readMailboxStatus(get);
+  return {
+    imapHost: settings.imapHost ?? '',
+    imapPort: settings.imapPort,
+    smtpHost: settings.smtpHost ?? '',
+    smtpPort: settings.smtpPort,
+    smtpSecure: settings.smtpSecure,
+    username: settings.username ?? '',
+    fromAddress: settings.fromAddress ?? '',
+    hasStoredPassword: passwordStored,
+  };
+}
+
+/** The stored inbox settings, read from this process's config. Null when the email section cannot be read. */
 export function readAgentWorkspaceEmailConnectPrefill(context: CommandContext | null): AgentWorkspaceEmailConnectPrefill | null {
   if (!context) return null;
   try {
     const cm = context.platform.configManager as unknown as { get: (key: string) => unknown };
-    const { settings, passwordStored } = readMailboxStatus((key) => cm.get(key));
-    return {
-      imapHost: settings.imapHost ?? '',
-      imapPort: settings.imapPort,
-      smtpHost: settings.smtpHost ?? '',
-      smtpPort: settings.smtpPort,
-      smtpSecure: settings.smtpSecure,
-      username: settings.username ?? '',
-      fromAddress: settings.fromAddress ?? '',
-      hasStoredPassword: passwordStored,
-    };
+    return prefillFrom((key) => cm.get(key));
   } catch {
     return null;
   }
+}
+
+/**
+ * With a connected host, the inbox settings are the host's (`surfaces.email.*`
+ * is daemon-owned): one effective-config snapshot answers the prefill and
+ * whether a password is stored, the same view `/email` reads. Null when no host
+ * client is installed, so the caller reads this process's config at once.
+ */
+export function loadHostEmailConnectPrefill(context: CommandContext | null): Promise<AgentWorkspaceEmailConnectPrefill | null> | null {
+  if (!context || !agentDaemonConfigClient()) return null;
+  const configManager = context.platform.configManager;
+  const homeDir = configManager.getHomeDirectory();
+  return openEffectiveConfigView(configManager, homeDir ? { homeDir } : {})
+    .then((view) => prefillFrom((key) => view.get(key)), () => null);
 }
 
 /** Fields, in wizard-step order, prefilled from the stored settings when there are any. */
@@ -195,7 +213,10 @@ export async function submitAgentWorkspaceEmailConnectWizardEditor(
       get: (key: string) => unknown;
       setDynamic: (key: string, value: unknown) => void;
     };
-    if (keepStoredPassword && !readMailboxStatus((key) => cm.get(key)).passwordStored) {
+    // One snapshot of the effective settings (the connected host's, when one is
+    // installed) answers both "is a password stored" and the connection test.
+    const view = await openEffectiveConfigView(configManager, homeDir ? { homeDir } : {});
+    if (keepStoredPassword && !readMailboxStatus((key) => view.get(key)).passwordStored) {
       host.localEditor = { ...editor, message: 'Nothing was saved: a password is required because none is stored yet.' };
       host.status = 'Inbox password required; nothing was saved.';
       return;
@@ -207,7 +228,6 @@ export async function submitAgentWorkspaceEmailConnectWizardEditor(
     if (!hostHoldsPassword) {
       // 2. Test with the typed values held in memory: the candidate password is
       // served from memory under the mailbox password's name, nothing touches the store.
-      const view = await openEffectiveConfigView(configManager, homeDir ? { homeDir } : {});
       const readCandidate = (key: string): unknown => (candidate.has(key) ? candidate.get(key) : view.get(key));
       const candidateSecrets = {
         get: (key: string): Promise<string | null> => (key === MAILBOX_PASSWORD_SECRET_KEY && !keepStoredPassword

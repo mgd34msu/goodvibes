@@ -29,7 +29,7 @@ import { buildAgentWorkspaceRuntimeSnapshot } from './agent-workspace-snapshot.t
 import { checkAgentWorkspaceHostSetup } from './agent-workspace-setup-host-status.ts';
 import { syncAgentWorkspaceLiveCounters } from './agent-workspace-live-counters.ts';
 import { trySubmitDirectHostActionEditor } from './agent-workspace-direct-editor-submission.ts';
-import { readAgentWorkspaceEmailConnectPrefill, type AgentWorkspaceEmailConnectPrefill } from './agent-workspace-email-connect-editor.ts';
+import { loadHostEmailConnectPrefill, readAgentWorkspaceEmailConnectPrefill, type AgentWorkspaceEmailConnectPrefill } from './agent-workspace-email-connect-editor.ts';
 import { submitAgentWorkspaceLocalDeleteEditor, submitAgentWorkspaceMemoryDeleteEditor, type AgentWorkspaceDeleteSubmissionHost } from './agent-workspace-delete-submission.ts';
 import type { AgentWorkspaceAction, AgentWorkspaceActionResult, AgentWorkspaceActionSearchResult, AgentWorkspaceCategory, AgentWorkspaceCategoryGroup, AgentWorkspaceCommandDispatcher, AgentWorkspaceEditorField, AgentWorkspaceFocusPane, AgentWorkspaceLocalEditor, AgentWorkspaceLocalEditorKind, AgentWorkspaceLocalLibraryItem, AgentWorkspaceLocalOperation, AgentWorkspacePromptDispatcher, AgentWorkspaceRuntimeSnapshot } from './agent-workspace-types.ts';
 import { ONBOARDING_COMPLETE_SYNTHETIC_ACTION, shouldShowOnboardingFinishFooter } from './agent-workspace-onboarding-finish.ts';
@@ -394,6 +394,10 @@ export class AgentWorkspace {
 
   emailConnectPrefill(): AgentWorkspaceEmailConnectPrefill | null {
     return readAgentWorkspaceEmailConnectPrefill(this.context);
+  }
+
+  loadEmailConnectPrefillFromHost(): Promise<AgentWorkspaceEmailConnectPrefill | null> | null {
+    return loadHostEmailConnectPrefill(this.context);
   }
 
   dispatchWorkspacePrompt(prompt: string): void {

@@ -74,6 +74,46 @@ interface AgentWorkspaceActivationHost {
   closeToComposer(): void;
   /** The stored inbox settings, read when the inbox form opens. */
   emailConnectPrefill?(): AgentWorkspaceEmailConnectPrefill | null;
+  /** The connected host's inbox settings, or null when no host holds them (then emailConnectPrefill answers). */
+  loadEmailConnectPrefillFromHost?(): Promise<AgentWorkspaceEmailConnectPrefill | null> | null;
+}
+
+function openActionEditor(
+  workspace: AgentWorkspaceActivationHost,
+  action: AgentWorkspaceCategory['actions'][number],
+  editorKind: NonNullable<AgentWorkspaceCategory['actions'][number]['editorKind']>,
+  emailConnectPrefill: AgentWorkspaceEmailConnectPrefill | null,
+  requestRender?: () => void,
+): void {
+  const editor = createAgentWorkspaceEditor(editorKind, {
+    runtimeStarterTemplates: workspace.runtimeSnapshot?.runtimeStarterTemplates ?? [],
+    selectedRoutine: workspace.selectedLocalLibraryItem('routine'),
+    recentReviewerHandoffArtifacts: workspace.runtimeSnapshot?.recentReviewerHandoffArtifacts ?? [],
+    reviewPacketDefaults: workspace.runtimeSnapshot?.reviewPacketDefaults ?? null,
+    emailConnectStatus: workspace.runtimeSnapshot?.emailConnectStatus ?? null,
+    emailConnectPrefill,
+    calendarOAuthConfigStatus: workspace.runtimeSnapshot?.calendarOAuthConfigStatus ?? null,
+  });
+  if (!editor) {
+    workspace.status = `Editor unavailable: ${editorKind}.`;
+    workspace.lastActionResult = {
+      kind: 'error',
+      title: 'Editor unavailable',
+      detail: `No Agent workspace editor exists for ${editorKind}.`,
+      safety: action.safety,
+    };
+    return;
+  }
+  workspace.localEditor = editor;
+  workspace.status = `Editing ${editor.title}.`;
+  workspace.lastActionResult = {
+    kind: 'guidance',
+    title: editor.title,
+    detail: editor.message,
+    safety: action.safety,
+  };
+  // A form with nothing to fill in (a read) runs on the Enter that opened it.
+  if (editor.fields.length === 0) workspace.submitEditorFieldOrForm(requestRender);
 }
 
 export function activateAgentWorkspaceSelection(
@@ -112,35 +152,23 @@ export function activateAgentWorkspaceSelection(
     return;
   }
   if (action.kind === 'editor' && action.editorKind) {
-    const editor = createAgentWorkspaceEditor(action.editorKind, {
-      runtimeStarterTemplates: workspace.runtimeSnapshot?.runtimeStarterTemplates ?? [],
-      selectedRoutine: workspace.selectedLocalLibraryItem('routine'),
-      recentReviewerHandoffArtifacts: workspace.runtimeSnapshot?.recentReviewerHandoffArtifacts ?? [],
-      reviewPacketDefaults: workspace.runtimeSnapshot?.reviewPacketDefaults ?? null,
-      emailConnectStatus: workspace.runtimeSnapshot?.emailConnectStatus ?? null,
-      emailConnectPrefill: action.editorKind === 'email-connect-wizard' ? workspace.emailConnectPrefill?.() ?? null : null,
-      calendarOAuthConfigStatus: workspace.runtimeSnapshot?.calendarOAuthConfigStatus ?? null,
-    });
-    if (!editor) {
-      workspace.status = `Editor unavailable: ${action.editorKind}.`;
-      workspace.lastActionResult = {
-        kind: 'error',
-        title: 'Editor unavailable',
-        detail: `No Agent workspace editor exists for ${action.editorKind}.`,
-        safety: action.safety,
-      };
-      return;
+    if (action.editorKind === 'email-connect-wizard') {
+      // The connected host owns the inbox settings: the form opens with its values once it answers.
+      const fromHost = workspace.loadEmailConnectPrefillFromHost?.();
+      if (fromHost) {
+        const editorKind = action.editorKind;
+        workspace.status = 'Reading the stored inbox settings from the connected host...';
+        void fromHost.then((prefill) => {
+          // Opened only if the person is still on this row with no other form open.
+          if (workspace.localEditor || workspace.selectedAction?.id !== action.id) return;
+          openActionEditor(workspace, action, editorKind, prefill, requestRender);
+          requestRender?.();
+        });
+        return;
+      }
     }
-    workspace.localEditor = editor;
-    workspace.status = `Editing ${editor.title}.`;
-    workspace.lastActionResult = {
-      kind: 'guidance',
-      title: editor.title,
-      detail: editor.message,
-      safety: action.safety,
-    };
-    // A form with nothing to fill in (a read) runs on the Enter that opened it.
-    if (editor.fields.length === 0) workspace.submitEditorFieldOrForm(requestRender);
+    openActionEditor(workspace, action, action.editorKind,
+      action.editorKind === 'email-connect-wizard' ? workspace.emailConnectPrefill?.() ?? null : null, requestRender);
     return;
   }
   if (action.kind === 'local-selection' && action.localKind) {

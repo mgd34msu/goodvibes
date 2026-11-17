@@ -139,6 +139,7 @@ export {
   projectPlanningCanonicalUri,
   resolveProjectPlanningSpace,
   summarizeWorkPlanCounts,
+  summarizeWorkPlanEdit,
 } from './project-planning/index.js';
 export type {
   ProjectWorkPlanOptions,

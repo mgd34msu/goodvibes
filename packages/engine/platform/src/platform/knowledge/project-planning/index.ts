@@ -7,6 +7,7 @@ export {
   isWorkPlanTaskStatus,
   nextWorkPlanTaskStatus,
   summarizeWorkPlanCounts,
+  summarizeWorkPlanEdit,
 } from './work-plan.js';
 export type {
   ProjectWorkPlanOptions,

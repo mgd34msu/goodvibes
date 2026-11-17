@@ -4,10 +4,10 @@ import { summarizeError } from '../../utils/error-display.js';
 import {
   WORK_PLAN_TASK_STATUSES,
   isWorkPlanTaskStatus,
-  summarizeWorkPlanCounts,
+  summarizeWorkPlanEdit,
   type ProjectWorkPlan,
 } from '../../knowledge/project-planning/work-plan.js';
-import type { ProjectWorkPlanCounts, ProjectWorkPlanTask } from '../../knowledge/project-planning/types.js';
+import type { ProjectWorkPlanMutationResult, ProjectWorkPlanTask } from '../../knowledge/project-planning/types.js';
 import { WORK_PLAN_TOOL_SCHEMA, type WorkPlanToolInput } from './schema.js';
 
 /** The slice of the project work plan the tool uses. */
@@ -40,8 +40,8 @@ function itemView(task: ProjectWorkPlanTask) {
  * stands, counted in the edit's own transaction; `list` is how the model reads
  * the plan.
  */
-function changed(counts: ProjectWorkPlanCounts, result: Record<string, unknown>): string {
-  return JSON.stringify({ ...result, plan: summarizeWorkPlanCounts(counts) });
+function changed(edit: Pick<ProjectWorkPlanMutationResult, 'counts' | 'reclaimedTaskIds'>, result: Record<string, unknown>): string {
+  return JSON.stringify({ ...result, plan: summarizeWorkPlanEdit(edit) });
 }
 
 /**
@@ -87,7 +87,7 @@ export function createWorkPlanTool(store: WorkPlanToolStore, options: WorkPlanTo
               ...(text(input.notes) ? { notes: text(input.notes) } : {}),
               ...(sessionId ? { sessionId } : {}),
             });
-            return { success: true, output: changed(result.counts, itemView(result.task)) };
+            return { success: true, output: changed(result, itemView(result.task)) };
           }
           case 'update': {
             const id = text(input.id);
@@ -99,25 +99,25 @@ export function createWorkPlanTool(store: WorkPlanToolStore, options: WorkPlanTo
               ...(owner !== undefined ? { owner } : {}),
               ...(notes !== undefined ? { notes } : {}),
             });
-            return { success: true, output: changed(result.counts, itemView(result.task)) };
+            return { success: true, output: changed(result, itemView(result.task)) };
           }
           case 'set_status': {
             const id = text(input.id);
             if (!id) return { success: false, error: 'set_status requires "id".' };
             if (!isWorkPlanTaskStatus(input.status)) return { success: false, error: `set_status requires "status", one of: ${WORK_PLAN_TASK_STATUSES.join(', ')}.` };
             const result = await store.setStatus(id, input.status);
-            return { success: true, output: changed(result.counts, itemView(result.task)) };
+            return { success: true, output: changed(result, itemView(result.task)) };
           }
           case 'remove': {
             const id = text(input.id);
             if (!id) return { success: false, error: 'remove requires "id".' };
             const result = await store.remove(id);
-            return { success: true, output: changed(result.counts, { removed: result.deletedTask.taskId, title: result.deletedTask.title }) };
+            return { success: true, output: changed(result, { removed: result.deletedTask.taskId, title: result.deletedTask.title }) };
           }
           case 'clear_completed': {
             const result = await store.clearCompleted();
             const cleared = result.clearedTaskIds?.length ?? 0;
-            return { success: true, output: cleared > 0 ? changed(result.counts, { cleared }) : JSON.stringify({ cleared }) };
+            return { success: true, output: cleared > 0 ? changed(result, { cleared }) : JSON.stringify({ cleared }) };
           }
           default:
             return { success: false, error: `Unknown action "${String((args as { action?: unknown }).action)}". Use list, add, update, set_status, remove or clear_completed.` };

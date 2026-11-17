@@ -4,9 +4,9 @@ import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
 import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from './agent-local-state-admission.ts';
 import {
   WORK_PLAN_TASK_STATUSES as WORK_PLAN_STATUSES,
-  summarizeWorkPlanCounts,
+  summarizeWorkPlanEdit,
   type ProjectWorkPlan,
-  type ProjectWorkPlanCounts,
+  type ProjectWorkPlanMutationResult,
   type ProjectWorkPlanTask as WorkPlanItem,
   type ProjectWorkPlanTaskStatus as WorkPlanItemStatus,
   type WorkPlanTaskPatch,
@@ -69,8 +69,8 @@ function output(text: string): { readonly success: true; readonly output: string
 }
 
 /** The changed item's lines plus one line on where the plan stands, counted in the edit's own transaction. */
-function changedOutput(counts: ProjectWorkPlanCounts, lines: readonly string[]): { readonly success: true; readonly output: string } {
-  return output([...lines, `  plan ${summarizeWorkPlanCounts(counts)}`].join('\n'));
+function changedOutput(edit: Pick<ProjectWorkPlanMutationResult, 'counts' | 'reclaimedTaskIds'>, lines: readonly string[]): { readonly success: true; readonly output: string } {
+  return output([...lines, `  plan ${summarizeWorkPlanEdit(edit)}`].join('\n'));
 }
 
 function requireId(args: AgentWorkPlanToolArgs): string {
@@ -227,42 +227,42 @@ export function createAgentWorkPlanTool(store: AgentWorkPlanStore): Tool {
       // The registry-issued write authority is checked once, before the one transaction that writes.
       agentLocalStateWrite(rawArgs, options);
       if (args.action === 'create') {
-        const { task, counts } = await store.add(requireTitle(args), {
+        const edit = await store.add(requireTitle(args), {
           status: readOptionalStatus(args.status) ?? 'pending',
           owner: readString(args.owner) || 'agent',
           source: readString(args.source) || 'main-conversation',
           notes: readString(args.notes) || undefined,
         });
-        return changedOutput(counts, [
+        return changedOutput(edit, [
           'Created Agent todo',
-          `  id ${task.taskId}`,
-          `  title ${task.title}`,
+          `  id ${edit.task.taskId}`,
+          `  title ${edit.task.title}`,
         ]);
       }
       if (args.action === 'update') {
         const patch = updatePatch(args);
         if (Object.keys(patch).length === 0) return failure('Nothing to update: give at least one of title, status, owner, source or notes.');
-        const { task, counts } = await store.update(requireId(args), patch);
-        return changedOutput(counts, [
+        const edit = await store.update(requireId(args), patch);
+        return changedOutput(edit, [
           'Updated Agent todo',
-          `  id ${task.taskId}`,
-          `  title ${task.title}`,
+          `  id ${edit.task.taskId}`,
+          `  title ${edit.task.title}`,
         ]);
       }
       if (args.action === 'set_status') {
         const status = readOptionalStatus(args.status);
         if (!status) throw new Error('status is required.');
-        const { task, counts } = await store.setStatus(requireId(args), status);
-        return changedOutput(counts, [
+        const edit = await store.setStatus(requireId(args), status);
+        return changedOutput(edit, [
           'Set Agent todo status',
-          `  id ${task.taskId}`,
-          `  status ${formatStatus(task.status)}`,
-          `  title ${task.title}`,
+          `  id ${edit.task.taskId}`,
+          `  status ${formatStatus(edit.task.status)}`,
+          `  title ${edit.task.title}`,
         ]);
       }
       if (args.action === 'remove') {
-        const { deletedTask, counts } = await store.remove(requireId(args));
-        return changedOutput(counts, [
+        const { deletedTask, ...edit } = await store.remove(requireId(args));
+        return changedOutput(edit, [
           'Removed Agent todo',
           `  id ${deletedTask.taskId}`,
           `  title ${deletedTask.title}`,
@@ -274,7 +274,7 @@ export function createAgentWorkPlanTool(store: AgentWorkPlanStore): Tool {
         `Cleared ${count} done or cancelled Agent todos`,
         `  count ${count}`,
       ];
-      return count > 0 ? changedOutput(result.counts, cleared) : output(cleared.join('\n'));
+      return count > 0 ? changedOutput(result, cleared) : output(cleared.join('\n'));
     },
   };
 }

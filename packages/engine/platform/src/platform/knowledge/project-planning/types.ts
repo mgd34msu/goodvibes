@@ -184,6 +184,12 @@ export interface ProjectWorkPlanMutationResult {
   readonly previousTask?: ProjectWorkPlanTask | undefined;
   readonly deletedTask?: ProjectWorkPlanTask | undefined;
   readonly clearedTaskIds?: readonly string[] | undefined;
+  /**
+   * Finished (done or cancelled) tasks this edit removed because they were past
+   * the plan's bounds: untouched for 30 days, or beyond the 200 most recent.
+   * Only an edit that finishes a task removes any.
+   */
+  readonly reclaimedTaskIds?: readonly string[] | undefined;
   /** Reorder: the tasks whose position changed, as written. */
   readonly tasks?: readonly ProjectWorkPlanTask[] | undefined;
 }

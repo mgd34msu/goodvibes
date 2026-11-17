@@ -80,9 +80,11 @@ The command surface (aliases `/wp`, `/todo`, `/workplan`):
 | `/work-plan remove <id>` | Remove an item |
 | `/work-plan clear-done` | Clear completed (done/cancelled) items |
 
-The work plan is the project's task list in the knowledge database: each item is its own row, the same rows the model keeps with the `work_plan` tool, a spawned worker keeps with its own `work_plan`, contracts link their units to, and the daemon serves through the `projectPlanning.workPlan.*` methods. An edit writes only the item it changes, in one transaction, so two GoodVibes programs editing the same project's plan never overwrite each other, and each edit prints one line on where the plan stands. An item can be named by its id or by a unique start of it. Plan files written by earlier builds under `~/.goodvibes/tui/work-plans/` are not read; their items do not appear in the plan.
+The work plan is the project's task list, kept in one file for all your GoodVibes programs: `~/.goodvibes/work-plans.sqlite`. The terminal app, the Agent and the daemon all open it, so a project has one plan whichever of them edits it, alone or together, attached to a daemon or not; the web UI shows the same plan through the daemon. Each item is its own row, the same rows the model keeps with the `work_plan` tool, a spawned worker keeps with its own `work_plan`, contracts link their units to, and the daemon serves through the `projectPlanning.workPlan.*` methods. An edit writes only the item it changes, in one transaction, so two GoodVibes programs editing the same project's plan never overwrite each other, and each edit prints one line on where the plan stands. An item can be named by its id or by a unique start of it. A plan an earlier build kept in this program's knowledge database is moved into the shared file the first time the plan is opened. Plan files written by older builds under `~/.goodvibes/tui/work-plans/` are not read; their items do not appear in the plan.
 
-Finished items stay until you clear them with `/work-plan clear-done` (or `c` in the modal); failed and blocked items are never cleared by it.
+Finished (done or cancelled) items are removed automatically once they have been untouched for 30 days, or when they fall outside the 200 most recently touched finished items. The removal happens as part of the edit that finishes an item, and that edit's line says how many it removed. Pending, in-progress, blocked and failed items are never removed this way. `/work-plan clear-done` (or `c` in the modal) clears all finished items at once; failed and blocked items are never cleared by it.
+
+The open Work Plan modal follows the plan: an edit made here, in the Agent, by the daemon or in the web UI shows up without pressing `r`.
 
 The modal's keys:
 
@@ -95,8 +97,8 @@ The modal's keys:
 | `e` | Close the modal and put `/work-plan edit <id> <current title>` in the composer; change it and press Enter |
 | `d` | Remove the selected item |
 | `c` | Clear completed (done/cancelled) items |
-| `r` | Refresh from disk |
-| `x` | Close the modal and export to a Markdown file next to the JSON store (`<store-file>.md`), the same rendering `/work-plan show` prints; the path is printed |
+| `r` | Read the plan again |
+| `x` | Close the modal and export to a Markdown file under `~/.goodvibes/tui/work-plans/`, the same rendering `/work-plan show` prints; the path is printed |
 | `i` / `w` | On an item with a linked agent or contract, open the Agents modal on it |
 
 `a` and `e` leave a draft already in the composer untouched; the usage line is printed instead. Each row starts with its status: `[ ]` pending, `[>]` in progress, `[!]` blocked, `[x]` done, `[✕]` failed, `[-]` cancelled. Linked ids (`agent:`, `contract:`, `task:`, `session:`) are shown on the row.

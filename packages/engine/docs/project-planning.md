@@ -63,27 +63,56 @@ rather than `done`, it has no `failed` or `cancelled`, and it adds `deferred`
 for work postponed by a planning decision.
 
 Operator methods are exposed under `projectPlanning.workPlan.*` and daemon
-routes under `/api/projects/planning/work-plan`. Clients should use those
-routes instead of reading TUI-local files. TUI-local work-plan storage can be
-used as a migration/fallback cache, but the platform store is the shared product
-model.
+routes under `/api/projects/planning/work-plan`. A remote client (the web UI,
+the companion app) uses those routes.
 
-Each task is stored as its own row in the project's knowledge database, in a
-table of its own: changing one task writes that one row, whatever the size of
-the plan, and tasks never appear in knowledge search, listings, enrichment or
-answers. Every committed edit moves the plan's `revision` up by one. An edit
-returns what it changed and the revision, not the plan: create, update and
-status return `task` (and `previousTask`), delete returns `deletedTask`,
-clear-completed returns `clearedTaskIds`, reorder returns `tasks` (only the
-tasks whose position changed); every result has `changed`, `revision` and
-`updatedAt`. An edit that changes nothing returns `changed: false` and writes
-and announces nothing. `projectPlanning.workPlan.task.get` returns one task and
-the revision. A client that shows the whole plan reads
-`projectPlanning.workPlan.snapshot`, which carries the same `revision`.
+### One plan per project, whichever program edits it
 
-A plan saved by an earlier version as one stored record is read as it is, and
-its first edit writes its tasks as rows and removes the old record, in the same
-transaction.
+The plan's tasks are stored one row each in one SQLite file per user,
+`~/.goodvibes/work-plans.sqlite`, next to the project identity registry that
+names the projects (`~/.goodvibes/project-identities/`). The terminal app, the
+Agent and the daemon all open that file, so a project has one plan whether one
+of them runs alone or several run together, and whether or not a terminal app
+is attached to a daemon. A daemon on another machine keeps the plan of the
+projects on that machine in that machine's file. The file runs in WAL mode (a
+reader never waits for a writer), waits up to 5 s for another program's write,
+and every edit is one immediate transaction, so two programs editing the same
+plan never overwrite each other.
+
+Changing one task writes that one row, whatever the size of the plan, and
+tasks never appear in knowledge search, listings, enrichment or answers. Every
+committed edit moves the plan's `revision` up by one. An edit returns what it
+changed and the revision, not the plan: create, update and status return
+`task` (and `previousTask`), delete returns `deletedTask`, clear-completed
+returns `clearedTaskIds`, reorder returns `tasks` (only the tasks whose
+position changed); every result has `changed`, `revision`, `updatedAt` and the
+plan's `counts`. An edit that changes nothing returns `changed: false` and
+writes and announces nothing. `projectPlanning.workPlan.task.get` returns one
+task and the revision. A client that shows the whole plan reads
+`projectPlanning.workPlan.snapshot`, which carries the same `revision`, and
+reads it again only when a work-plan event (or its own edit) carries a
+different revision.
+
+### Finished tasks are removed automatically
+
+Done and cancelled tasks are removed once they are past either bound: untouched
+for 30 days, or older than the 200 most recently touched finished tasks of the
+plan. The removal runs inside the edit that finishes a task (a status change
+to `done` or `cancelled`, or a task created finished), as one statement over an
+index of the plan's finished tasks; no other edit, read or start-up pays for
+it. That edit's result lists the removed task ids in `reclaimedTaskIds`, and a
+`WORK_PLAN_TASK_DELETED` event is sent for each. Pending, in-progress, blocked
+and failed tasks are never removed this way. `clearCompleted` removes finished
+tasks at once.
+
+### Plans kept by earlier versions
+
+Earlier versions kept a program's plan in that program's own knowledge
+database (task rows, or one stored record). The first time a program opens a
+plan, it moves its own earlier copy into the shared file, once: in one
+transaction, a task the file already holds is kept when it was changed later,
+and the copy's other tasks go after the plan's own. The copy is then removed
+from the knowledge database.
 
 Task changes emit planner-domain events so clients can refresh snapshots or
 apply deltas instead of polling. Every event carries the plan's `revision`. One

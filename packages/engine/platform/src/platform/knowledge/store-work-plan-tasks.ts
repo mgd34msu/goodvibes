@@ -44,6 +44,19 @@ export function createProjectWorkPlanTaskTable(db: Pick<SqlDatabase, 'run'>): vo
   for (const sql of projectWorkPlanTaskIndexSql) db.run(sql);
 }
 
+/**
+ * Finished tasks (done or cancelled) are removed automatically once they are
+ * past either bound: untouched for 30 days, or older than the 200 most recently
+ * touched finished tasks of the plan. Pending, in-progress, blocked and failed
+ * tasks are never removed this way.
+ */
+export const WORK_PLAN_FINISHED_TASK_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+export const WORK_PLAN_FINISHED_TASK_CAP = 200;
+export const WORK_PLAN_FINISHED_STATUSES = ['done', 'cancelled'] as const;
+
+/** Finished tasks of one plan by last write: what the bounds walk. */
+export const projectWorkPlanFinishedIndexSql = 'CREATE INDEX IF NOT EXISTS idx_project_work_plan_tasks_finished ON project_work_plan_tasks(space_id, work_plan_id, status, updated_at)';
+
 /** A stored task as written by the planning service; it was admitted at that write. */
 export interface StoredWorkPlanTask {
   readonly taskId: string;
@@ -64,6 +77,8 @@ export interface WorkPlanTaskWrite {
   readonly status: string;
   readonly order: number;
   readonly task: object;
+  /** Kept when a task moves between files; a new row otherwise gets a fresh one. */
+  readonly recordId?: string | undefined;
 }
 
 /**
@@ -89,6 +104,8 @@ export interface WorkPlanTaskCommit<T> {
   readonly put: readonly WorkPlanTaskWrite[];
   readonly remove: readonly string[];
   readonly at: number;
+  /** This commit finishes a task: finished tasks past the bounds are removed in it. */
+  readonly reclaimFinished?: boolean | undefined;
 }
 
 export interface WorkPlanTaskCommitResult<T> {
@@ -98,6 +115,8 @@ export interface WorkPlanTaskCommitResult<T> {
   readonly head: WorkPlanHead;
   /** Live tasks by status after a commit that wrote, read in its transaction. */
   readonly statusCounts?: Record<string, number> | undefined;
+  /** Finished tasks the commit removed because they were past the bounds. */
+  readonly reclaimed?: readonly StoredWorkPlanTask[] | undefined;
 }
 
 type Db = Pick<SqlDatabase, 'exec'>;
@@ -204,7 +223,7 @@ export function writeWorkPlanCommit(
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(space_id, work_plan_id, task_id) DO UPDATE SET revision = excluded.revision, updated_at = excluded.updated_at,
         status = excluded.status, sort_order = excluded.sort_order, task_json = excluded.task_json`,
-    [spaceId, workPlanId, write.taskId, newRecordId(), revision, at, write.status, write.order, JSON.stringify(write.task)]);
+    [spaceId, workPlanId, write.taskId, write.recordId ?? newRecordId(), revision, at, write.status, write.order, JSON.stringify(write.task)]);
   }
   const tombstone = put.length === 0 ? remove.at(-1) : undefined;
   for (const taskId of remove) {
@@ -222,6 +241,32 @@ export function writeWorkPlanCommit(
 
 function newRecordId(): string {
   return `project-work-plan-task-${randomUUID()}`;
+}
+
+/**
+ * Remove the plan's finished tasks that are past the bounds, in the commit that
+ * finished a task: one statement over the finished-task index. Rows written by
+ * this commit (revision `revision`) are never removed, so the plan's revision
+ * cannot go back.
+ */
+export function reclaimFinishedWorkPlanTasks(
+  db: Db,
+  spaceId: string,
+  workPlanId: string,
+  revision: number,
+  at: number,
+): StoredWorkPlanTask[] {
+  const finished = WORK_PLAN_FINISHED_STATUSES.map(() => '?').join(', ');
+  return storedTasks(db.exec(`DELETE FROM project_work_plan_tasks
+    WHERE space_id = ? AND work_plan_id = ? AND status IN (${finished}) AND revision < ?
+      AND (updated_at < ? OR task_id NOT IN (
+        SELECT task_id FROM project_work_plan_tasks
+        WHERE space_id = ? AND work_plan_id = ? AND status IN (${finished})
+        ORDER BY updated_at DESC, task_id LIMIT ?))
+    RETURNING ${TASK_COLUMNS}`, [
+    spaceId, workPlanId, ...WORK_PLAN_FINISHED_STATUSES, revision, at - WORK_PLAN_FINISHED_TASK_TTL_MS,
+    spaceId, workPlanId, ...WORK_PLAN_FINISHED_STATUSES, WORK_PLAN_FINISHED_TASK_CAP,
+  ]));
 }
 
 /** Plans with at least one live task, and their live tasks, in one space. */

@@ -804,10 +804,11 @@ daemon routes and operator method ids.
 
 Project Planning keeps the project's work plan, the durable task checklist that
 agent tools, the web SDK and `/workstream` read and write, together with project
-decision records. The work plan's tasks are stored one row each in a table of
-their own beside the knowledge records, so they never appear in search,
-listings, enrichment or answers. The other planning artifacts are stored as
-knowledge sources in project spaces:
+decision records. The work plan's tasks are stored one row each in the user's
+shared plan file (`~/.goodvibes/work-plans.sqlite`), which the terminal app,
+the Agent and the daemon all open, so they never appear in search, listings,
+enrichment or answers. The other planning artifacts are stored as knowledge
+sources in project spaces:
 
 - `decision`: durable project decisions with context, rejected alternatives,
   reasoning, consequences, and status

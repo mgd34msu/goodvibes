@@ -192,6 +192,7 @@ export const PROJECT_WORK_PLAN_MUTATION_OUTPUT_SCHEMA = objectSchema({
   previousTask: PROJECT_WORK_PLAN_TASK_SCHEMA,
   deletedTask: PROJECT_WORK_PLAN_TASK_SCHEMA,
   clearedTaskIds: STRING_LIST_SCHEMA,
+  reclaimedTaskIds: STRING_LIST_SCHEMA,
   tasks: arraySchema(PROJECT_WORK_PLAN_TASK_SCHEMA),
 }, ['ok', 'projectId', 'knowledgeSpaceId', 'workPlanId', 'changed', 'revision', 'updatedAt', 'counts'], { additionalProperties: true });
 

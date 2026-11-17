@@ -376,6 +376,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     waitForStartup: () => knowledgeService.whenReady(),
     runtimeBus,
   });
+  scope.registry.add('work plan file', () => projectPlanningService.dispose());
   // The project work plan: the planning service's task rows for this project.
   const workPlanStore = new ProjectWorkPlan({
     service: projectPlanningService,

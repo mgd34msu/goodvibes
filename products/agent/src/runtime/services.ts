@@ -1455,7 +1455,9 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
       runtimeBus: options.runtimeBus,
     },
   );
-  // The Agent's todo list, its workers' work_plan and /workplan all keep these rows.
+  disposalScope.registry.add('work plan file', () => projectPlanningService.dispose());
+  // The Agent's todo list, its workers' work_plan and /workplan all keep these rows
+  // in the user's shared plan file, the same plan the terminal app and the daemon keep.
   const workPlanStore = new ProjectWorkPlan({
     service: projectPlanningService,
     projectId: projectPlanningProjectId,

@@ -1,5 +1,5 @@
 import type { CommandRegistry } from '../command-registry.ts';
-import { summarizeWorkPlanCounts, type ProjectWorkPlan, type ProjectWorkPlanCounts, type ProjectWorkPlanTaskStatus } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { summarizeWorkPlanCounts, summarizeWorkPlanEdit, type ProjectWorkPlan, type ProjectWorkPlanMutationResult, type ProjectWorkPlanTaskStatus } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { openModalCommand } from './runtime-services.ts';
 import { RefusalError, readRefusal, refusal, toRefusal } from '@goodvibes-jev/engine/errors';
 
@@ -41,9 +41,9 @@ async function formatList(store: ProjectWorkPlan): Promise<string> {
   ].join('\n');
 }
 
-/** The plan line an edit prints: counted in the edit's own transaction. */
-function planLine(counts: ProjectWorkPlanCounts): string {
-  return ` Plan: ${summarizeWorkPlanCounts(counts)}.`;
+/** The plan line an edit prints: counted in the edit's own transaction, with any finished items it removed. */
+function planLine(result: Pick<ProjectWorkPlanMutationResult, 'counts' | 'reclaimedTaskIds'>): string {
+  return ` Plan: ${summarizeWorkPlanEdit(result)}.`;
 }
 
 /**
@@ -138,9 +138,9 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
             source: parsed.source ?? 'manual',
             ...(parsed.notes ? { notes: parsed.notes } : {}),
           };
-          const { task, counts } = await store.add(parsed.title, addOptions);
+          const added = await store.add(parsed.title, addOptions);
           openWorkPlanModal(ctx);
-          ctx.print(`Added work plan item ${task.taskId}.${planLine(counts)}`);
+          ctx.print(`Added work plan item ${added.task.taskId}.${planLine(added)}`);
           return;
         }
         if (subcommand === 'edit' || subcommand === 'update') {
@@ -176,14 +176,14 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
           if (!id) {
             throw usage(`Usage: /work-plan ${subcommand} <id>`);
           }
-          const { deletedTask, counts } = await store.remove(id);
-          ctx.print(`Removed work plan item ${deletedTask.taskId}: ${deletedTask.title}.${planLine(counts)}`);
+          const removed = await store.remove(id);
+          ctx.print(`Removed work plan item ${removed.deletedTask.taskId}: ${removed.deletedTask.title}.${planLine(removed)}`);
           return;
         }
         if (subcommand === 'clear-done' || subcommand === 'clear-completed') {
           const result = await store.clearCompleted();
           const count = result.clearedTaskIds?.length ?? 0;
-          ctx.print(`Cleared ${count} completed/cancelled work plan item${count === 1 ? '' : 's'}.${count > 0 ? planLine(result.counts) : ''}`);
+          ctx.print(`Cleared ${count} completed/cancelled work plan item${count === 1 ? '' : 's'}.${count > 0 ? planLine(result) : ''}`);
           return;
         }
         if (subcommand === 'cycle' || subcommand === 'toggle') {
@@ -191,8 +191,8 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
           if (!id) {
             throw usage(`Usage: /work-plan ${subcommand} <id>`);
           }
-          const { task, counts } = await store.cycle(id);
-          ctx.print(`Updated ${task.taskId}: ${task.status}.${planLine(counts)}`);
+          const cycled = await store.cycle(id);
+          ctx.print(`Updated ${cycled.task.taskId}: ${cycled.task.status}.${planLine(cycled)}`);
           return;
         }
         const status = STATUS_COMMANDS[subcommand];
@@ -201,8 +201,8 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
           if (!id) {
             throw usage(`Usage: /work-plan ${subcommand} <id>`);
           }
-          const { task, counts } = await store.setStatus(id, status);
-          ctx.print(`Updated ${task.taskId}: ${task.status}.${planLine(counts)}`);
+          const updated = await store.setStatus(id, status);
+          ctx.print(`Updated ${updated.task.taskId}: ${updated.task.status}.${planLine(updated)}`);
           return;
         }
         throw usage(`Unknown work-plan subcommand: ${subcommand}`);

@@ -37,7 +37,9 @@ const STATUS_ORDER: readonly WorkPlanItemStatus[] = ['pending', 'in_progress', '
 export type WorkPlanItemLike = Pick<ProjectWorkPlanTask, 'taskId' | 'title' | 'status' | 'owner' | 'source' | 'notes' | 'agentId' | 'contractId' | 'sessionId' | 'updatedAt'>;
 
 export interface WorkPlanModalDeps {
-  readonly workPlanStore: Pick<ProjectWorkPlan, 'projectRoot'> & { snapshot(): Promise<{ readonly tasks: readonly WorkPlanItemLike[] }> };
+  readonly workPlanStore: Pick<ProjectWorkPlan, 'projectRoot' | 'revision' | 'subscribe'> & {
+    snapshot(): Promise<{ readonly tasks: readonly WorkPlanItemLike[]; readonly revision: number }>;
+  };
 }
 
 function compactDate(value: number): string { return new Date(value).toISOString().replace('T', ' ').slice(0, 16); }
@@ -84,6 +86,9 @@ class WorkPlanModalSurface implements ConfigModalSurface {
   private requestRender: (() => void) | null = null;
   /** Each load is numbered; only the newest one's answer is shown. */
   private loadSequence = 0;
+  /** The plan revision the shown rows were read at; null before the first read. */
+  private shownRevision: number | null = null;
+  private unsubscribe: (() => void) | null = null;
 
   constructor(private readonly deps: WorkPlanModalDeps) {}
 
@@ -114,9 +119,28 @@ class WorkPlanModalSurface implements ConfigModalSurface {
     { key: 'r', id: 'refresh', label: 'refresh' },
   ];
 
-  onOpen(requestRender: () => void): void { this.requestRender = requestRender; this.refresh(); }
+  onOpen(requestRender: () => void): void {
+    this.requestRender = requestRender;
+    // An edit here or in another program (the Agent, the daemon, the web UI) re-reads the plan when its revision moved.
+    this.unsubscribe?.();
+    this.unsubscribe = this.deps.workPlanStore.subscribe(() => this.refreshIfMoved());
+    this.refresh();
+  }
 
-  onClose(): void { this.requestRender = null; this.loadSequence++; }
+  onClose(): void {
+    this.requestRender = null;
+    this.loadSequence++;
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+  }
+
+  /** One integer compare (the plan's revision, one indexed read); the rows are read again only when it moved. */
+  private refreshIfMoved(): void {
+    if (this.loading || this.shownRevision === null || !this.requestRender) return;
+    let current: number;
+    try { current = this.deps.workPlanStore.revision(); } catch { return; }
+    if (current !== this.shownRevision) this.refresh();
+  }
 
   /** Reads the plan's rows (one snapshot read) and redraws when they arrive. */
   private refresh(): void {
@@ -125,6 +149,7 @@ class WorkPlanModalSurface implements ConfigModalSurface {
     this.deps.workPlanStore.snapshot().then((plan) => {
       if (sequence !== this.loadSequence) return;
       this.items = [...plan.tasks];
+      this.shownRevision = plan.revision;
       this.loadError = null;
     }, (error: unknown) => {
       if (sequence !== this.loadSequence) return;
@@ -139,6 +164,7 @@ class WorkPlanModalSurface implements ConfigModalSurface {
   private itemFrom(id: string): WorkPlanItemLike | undefined { return this.items.find((i) => i.taskId === id); }
 
   buildView(): ConfigModalView {
+    this.refreshIfMoved();
     const counts = new Map<WorkPlanItemStatus, number>();
     for (const status of STATUS_ORDER) counts.set(status, 0);
     for (const item of this.items) counts.set(item.status, (counts.get(item.status) ?? 0) + 1);

@@ -3,8 +3,12 @@ export class WorkPlanTaskExistsError extends Error {
   constructor(taskId: string) { super(`Work plan task already exists: ${taskId}`); this.name = 'WorkPlanTaskExistsError'; }
 }
 import { snapshotJudgmentInput } from '../../gate/judgment-input.js';
-import type { ConfigManager } from '../../config/manager.js';
+import { retainConfiguredWorkspace, type ConfigManager } from '../../config/manager.js';
 import { randomUUID } from 'node:crypto';
+import { dirname, isAbsolute, join } from 'node:path';
+import { logger } from '../../utils/logger.js';
+import { summarizeError } from '../../utils/error-display.js';
+import { acquireWorkPlanRows, WORK_PLAN_ROWS_FILE, workPlanRowsPath, type WorkPlanRows } from './work-plan-rows.js';
 import { knowledgeSpaceMetadata, normalizeProjectId } from '../spaces.js';
 import type { KnowledgeSourceRecord, KnowledgeSourceUpsertInput } from '../types.js';
 import type { KnowledgeSourceSnapshot } from '../store-source-generation.js';
@@ -85,6 +89,12 @@ export interface ProjectPlanningServiceOptions {
   readonly waitForStartup?: (() => Promise<void>) | undefined;
   readonly defaultProjectId?: string | undefined;
   readonly runtimeBus?: RuntimeEventBus | null | undefined;
+  /**
+   * The work-plan file (work-plan-rows.ts). Composition passes the user's shared
+   * one, so every program keeps one plan per project; absent, a file beside the
+   * knowledge store (in memory for an in-memory store).
+   */
+  readonly workPlanRowsPath?: string | undefined;
 }
 
 /**
@@ -113,21 +123,36 @@ export class ProjectPlanningService {
   private runtimeBusEpoch = 0;
   /** Set once the store opened and composition startup finished; a synchronous read needs both. */
   private opened = false;
+  private readonly planFile: { readonly rows: WorkPlanRows; release(): void };
+  /** Plans whose earlier copy in this program's knowledge store was moved into the plan file, or that had none. */
+  private readonly movedPlans = new Set<string>();
+  /** Plans this program read or edited, with the revision it last saw; compared when another program commits. */
+  private readonly seenPlans = new Map<string, { readonly space: WorkPlanSpace; readonly workPlanId: string; revision: number }>();
+  private readonly planListeners = new Map<string, Set<() => void>>();
+  private stopWatching: (() => void) | null = null;
 
   /**
    * Native composition. The default project is the configured workspace's:
    * established once, here, from the store createConfiguredPlanningStore built
-   * for this workspace. Nothing after composition re-proves it.
+   * for this workspace. Nothing after composition re-proves it. The work plan
+   * is kept in the user's shared plan file, so the terminal app, the Agent and
+   * the daemon keep one plan per project.
    */
   static forConfiguredWorkspace(
     store: KnowledgeStore,
     configManager: ConfigManager,
     workingDirectory: string,
-    options: Omit<ProjectPlanningServiceOptions, 'defaultProjectId'> = {},
+    options: Omit<ProjectPlanningServiceOptions, 'defaultProjectId' | 'workPlanRowsPath'> = {},
   ): { readonly service: ProjectPlanningService; readonly projectId: string } {
     if ('defaultProjectId' in options) throw new TypeError('Native planning composition cannot select a default project ID');
     const { projectId } = configuredPlanningStoreIdentity(store, configManager, workingDirectory);
-    const service = new ProjectPlanningService(store, { defaultProjectId: projectId, waitForStartup: options.waitForStartup, runtimeBus: options.runtimeBus });
+    const workspace = retainConfiguredWorkspace(configManager);
+    const service = new ProjectPlanningService(store, {
+      defaultProjectId: projectId,
+      waitForStartup: options.waitForStartup,
+      runtimeBus: options.runtimeBus,
+      workPlanRowsPath: workPlanRowsPath(configManager.getHomeDirectory(), workspace.configDirectory),
+    });
     return { projectId, service };
   }
 
@@ -138,6 +163,27 @@ export class ProjectPlanningService {
     this.defaultProjectId = normalizeProjectId(options.defaultProjectId ?? 'default');
     this.runtimeBus = options.runtimeBus ?? null;
     this.waitForStartup = options.waitForStartup;
+    const storePath = store.storagePath;
+    this.planFile = acquireWorkPlanRows(options.workPlanRowsPath
+      ?? (isAbsolute(storePath) ? join(dirname(storePath), WORK_PLAN_ROWS_FILE) : ':memory:'));
+  }
+
+  /** The file that holds the work plan. */
+  get workPlanFile(): string {
+    return this.planFile.rows.path;
+  }
+
+  private get rows(): WorkPlanRows {
+    return this.planFile.rows;
+  }
+
+  /** Lets go of the plan file and stops watching it; the knowledge store is closed by its owner. */
+  dispose(): void {
+    this.stopWatching?.();
+    this.stopWatching = null;
+    this.planListeners.clear();
+    this.seenPlans.clear();
+    this.planFile.release();
   }
 
   private async initialize(): Promise<void> {
@@ -155,14 +201,124 @@ export class ProjectPlanningService {
   attachRuntimeBus(runtimeBus: RuntimeEventBus | null | undefined): void {
     this.runtimeBusEpoch += 1;
     this.runtimeBus = runtimeBus ?? null;
+    if (this.runtimeBus && this.seenPlans.size > 0) this.watchPlanFile();
+  }
+
+  /**
+   * Calls `listener` when the plan's revision may have moved: after an edit made
+   * through this program, and when another program committed to the plan file
+   * and the plan's revision is not the one this program last saw. The listener
+   * compares the revision it holds (one indexed statement) and re-reads only when
+   * it moved.
+   */
+  subscribeWorkPlan(input: ProjectPlanningSpaceInput & { readonly workPlanId?: string | undefined }, listener: () => void): () => void {
+    const space = this.resolveSpace(input);
+    const workPlanId = normalizeWorkPlanId(input.workPlanId);
+    const key = planKey(space.knowledgeSpaceId, workPlanId);
+    let listeners = this.planListeners.get(key);
+    if (!listeners) { listeners = new Set(); this.planListeners.set(key, listeners); }
+    listeners.add(listener);
+    if (!this.seenPlans.has(key)) this.seenPlans.set(key, { space, workPlanId, revision: -1 });
+    this.watchPlanFile();
+    return () => {
+      const current = this.planListeners.get(key);
+      current?.delete(listener);
+      if (current?.size === 0) this.planListeners.delete(key);
+    };
+  }
+
+  /** Start noticing other programs' commits once something here would act on them: a bus to announce them on, or a listener. */
+  private watchPlanFile(): void {
+    if (this.stopWatching) return;
+    this.stopWatching = this.rows.onExternalCommit(() => this.noticeExternalCommit());
+  }
+
+  /** Another program committed to the plan file: one revision read per plan this program holds, and a notice for each that moved. */
+  private noticeExternalCommit(): void {
+    for (const [key, seen] of this.seenPlans) {
+      let head: { readonly revision: number; readonly updatedAt: number | null };
+      try { head = this.rows.read(seen.space.knowledgeSpaceId, seen.workPlanId, (view) => view.head); }
+      catch (error) { logger.warn('The work plan could not be read after another program changed it', { error: summarizeError(error) }); continue; }
+      if (head.revision === seen.revision) continue;
+      seen.revision = head.revision;
+      this.emitWorkPlanSnapshotInvalidated(workPlanEvent(seen.space, seen.workPlanId, head.revision), 'changed-elsewhere', head.updatedAt ?? Date.now());
+      this.notifyPlan(key);
+    }
+  }
+
+  private notifyPlan(key: string): void {
+    for (const listener of [...(this.planListeners.get(key) ?? [])]) {
+      try { listener(); } catch (error) { logger.warn('A work plan listener failed', { error: summarizeError(error) }); }
+    }
+  }
+
+  /** Remember the revision this program last saw of a plan, so another program's commit is compared against it. */
+  private seePlan(space: WorkPlanSpace, workPlanId: string, revision: number): void {
+    const key = planKey(space.knowledgeSpaceId, workPlanId);
+    const seen = this.seenPlans.get(key);
+    if (seen) seen.revision = revision;
+    else this.seenPlans.set(key, { space, workPlanId, revision });
+    if (this.runtimeBus) this.watchPlanFile();
+  }
+
+  /**
+   * The first time this program opens a plan, the copy it kept in its own
+   * knowledge database before the plan had the shared file (task rows, or a
+   * plan stored as one knowledge source) is moved in, once, by whichever program
+   * gets there first: in one transaction on the plan file, a task the file
+   * already holds is kept when it was written later, and the copy's other tasks
+   * go after the plan's own. The copy is then removed from the knowledge
+   * database. Every later open is one set lookup; the first open in a program
+   * whose copy was already moved is one primary-key read. Needs the knowledge
+   * store open.
+   */
+  private movePlanIn(space: WorkPlanSpace, workPlanId: string): void {
+    const key = planKey(space.knowledgeSpaceId, workPlanId);
+    if (this.movedPlans.has(key)) return;
+    const source = this.store.storagePath;
+    if (this.rows.moved(source, space.knowledgeSpaceId, workPlanId)) { this.movedPlans.add(key); return; }
+    const earlier = this.store.readWorkPlanNow(space.knowledgeSpaceId, workPlanId, (view) => {
+      const recordIds = new Map(view.tasks().map((row) => [row.taskId, row.recordId] as const));
+      return workPlanEditView(space, workPlanId, view).tasks().map((task) => ({ task, recordId: recordIds.get(task.taskId) }));
+    });
+    const at = Date.now();
+    const moved = this.rows.moveIn(source, space.knowledgeSpaceId, workPlanId, (view) => {
+      const ownMax = view.maxOrder();
+      const offset = ownMax === null ? 0 : ownMax + 1;
+      const put: WorkPlanTaskWrite[] = [];
+      for (const { task, recordId } of earlier) {
+        const stored = view.task(task.taskId)?.task as ProjectWorkPlanTask | undefined;
+        if (stored && stored.updatedAt >= task.updatedAt) continue;
+        put.push({ ...workPlanTaskWrite({ ...task, order: stored ? stored.order : task.order + offset }), ...(!stored && recordId ? { recordId } : {}) });
+      }
+      return { value: undefined, put, remove: [], at };
+    });
+    this.movedPlans.add(key);
+    if (!moved || earlier.length === 0) return;
+    logger.info('Work plan moved into the shared plan file', { from: source, to: this.rows.path, tasks: earlier.length });
+    const ids = earlier.map(({ task }) => task.taskId);
+    void this.store.commitWorkPlan(space.knowledgeSpaceId, workPlanId, () => ({ value: undefined, put: [], remove: ids, at }))
+      .catch((error: unknown) => logger.warn('The earlier copy of the work plan could not be removed from the knowledge database; it is no longer read', { error: summarizeError(error) }));
+  }
+
+  /** A plan read or edited without waiting: the plan file directly once its earlier copy was moved. */
+  private planReadyNow(space: WorkPlanSpace, workPlanId: string): void {
+    const key = planKey(space.knowledgeSpaceId, workPlanId);
+    if (this.movedPlans.has(key)) return;
+    if (this.rows.moved(this.store.storagePath, space.knowledgeSpaceId, workPlanId)) { this.movedPlans.add(key); return; }
+    this.assertOpened();
+    this.movePlanIn(space, workPlanId);
   }
 
   async status(input: ProjectPlanningSpaceInput = {}): Promise<ProjectPlanningStatus> {
     await this.initialize();
     const space = this.resolveSpace(input);
+    this.movePlanIn(space, 'current');
     const sources = this.sourcesForSpace(space.knowledgeSpaceId);
-    // Plans written since tasks have rows, plus any plan still stored as one source.
-    const rows = await this.store.countWorkPlanTasks(space.knowledgeSpaceId);
+    // Plans in the plan file, plus any copy in this program's knowledge database not yet moved in.
+    const shared = this.rows.count(space.knowledgeSpaceId);
+    const local = await this.store.countWorkPlanTasks(space.knowledgeSpaceId);
+    const rows = { workPlans: shared.workPlans + local.workPlans, tasks: shared.tasks + local.tasks };
     const legacyPlans = sources.filter((source) => artifactKind(source) === 'work-plan');
     return {
       ok: true,
@@ -281,10 +437,10 @@ export class ProjectPlanningService {
   }
 
   async getWorkPlanSnapshot(input: ProjectWorkPlanTaskListInput = {}): Promise<ProjectWorkPlanSnapshot> {
-    await this.initialize();
     const space = this.resolveSpace(input);
     const workPlanId = normalizeWorkPlanId(input.workPlanId);
-    return this.store.readWorkPlan(space.knowledgeSpaceId, workPlanId, (view) => {
+    await this.planReady(space, workPlanId);
+    const snapshot = this.rows.read(space.knowledgeSpaceId, workPlanId, (view) => {
       const plan = workPlanEditView(space, workPlanId, view);
       return snapshotFromTasks(space, workPlanId, plan, {
         status: input.status,
@@ -294,38 +450,64 @@ export class ProjectPlanningService {
         limit: input.limit,
       });
     });
+    this.seePlan(space, workPlanId, snapshot.revision);
+    return snapshot;
   }
 
   /**
    * The snapshot without waiting, for a caller that cannot await (a modal frame,
-   * a synchronous capture). Throws `WorkPlanNotReadyError` before the store opened.
+   * a synchronous capture). Reads the plan file directly; only the first read of
+   * a plan whose earlier copy was never moved in throws `WorkPlanNotReadyError`
+   * while the knowledge store is still opening.
    */
   getWorkPlanSnapshotNow(input: ProjectWorkPlanTaskListInput = {}): ProjectWorkPlanSnapshot {
-    this.assertOpened();
     const space = this.resolveSpace(input);
     const workPlanId = normalizeWorkPlanId(input.workPlanId);
-    return this.store.readWorkPlanNow(space.knowledgeSpaceId, workPlanId, (view) => snapshotFromTasks(space, workPlanId, workPlanEditView(space, workPlanId, view), {
+    this.planReadyNow(space, workPlanId);
+    const snapshot = this.rows.read(space.knowledgeSpaceId, workPlanId, (view) => snapshotFromTasks(space, workPlanId, workPlanEditView(space, workPlanId, view), {
       status: input.status,
       parentTaskId: input.parentTaskId,
       contractId: input.contractId,
       owner: input.owner,
       limit: input.limit,
     }));
+    this.seePlan(space, workPlanId, snapshot.revision);
+    return snapshot;
   }
 
-  /** The plan's revision without waiting: one indexed statement. */
+  /** The plan's revision without waiting: one indexed statement on the plan file. */
   getWorkPlanRevisionNow(input: ProjectPlanningSpaceInput & { readonly workPlanId?: string | undefined } = {}): number {
-    this.assertOpened();
     const space = this.resolveSpace(input);
-    return this.store.readWorkPlanNow(space.knowledgeSpaceId, normalizeWorkPlanId(input.workPlanId), (view) => view.head.revision);
+    const workPlanId = normalizeWorkPlanId(input.workPlanId);
+    this.planReadyNow(space, workPlanId);
+    return this.rows.read(space.knowledgeSpaceId, workPlanId, (view) => view.head.revision);
+  }
+
+  /** The work-ledger import's view of the plan file: the record ids of a project's tasks. */
+  listWorkPlanTaskImportIds(projectId: string): readonly string[] {
+    return this.rows.recordIds(this.resolveSpace({ projectId }).knowledgeSpaceId);
+  }
+
+  /** The work-ledger import's view of one task in the plan file, by record id. */
+  readWorkPlanTaskImportRecord(recordId: string): { readonly source: Record<string, unknown> | null; readonly generation: string | null } {
+    return this.rows.importRecord(recordId);
+  }
+
+  /** Opens the knowledge store when the plan's earlier copy still has to be moved in; otherwise reads nothing. */
+  private async planReady(space: WorkPlanSpace, workPlanId: string): Promise<void> {
+    const key = planKey(space.knowledgeSpaceId, workPlanId);
+    if (this.movedPlans.has(key)) return;
+    if (this.rows.moved(this.store.storagePath, space.knowledgeSpaceId, workPlanId)) { this.movedPlans.add(key); return; }
+    await this.initialize();
+    this.movePlanIn(space, workPlanId);
   }
 
   /** One task and the plan's revision: one row read (a prefix match, when asked for, is one key range). */
   async getWorkPlanTask(input: ProjectWorkPlanTaskGetInput, match: WorkPlanTaskMatch = {}): Promise<ProjectWorkPlanTaskResult> {
-    await this.initialize();
     const space = this.resolveSpace(input);
     const workPlanId = normalizeWorkPlanId(input.workPlanId);
-    return this.store.readWorkPlan<ProjectWorkPlanTaskResult>(space.knowledgeSpaceId, workPlanId, (view) => {
+    await this.planReady(space, workPlanId);
+    return this.rows.read<ProjectWorkPlanTaskResult>(space.knowledgeSpaceId, workPlanId, (view) => {
       const plan = workPlanEditView(space, workPlanId, view);
       return {
         ok: true,
@@ -340,7 +522,6 @@ export class ProjectPlanningService {
 
   async createWorkPlanTask(input: ProjectWorkPlanTaskCreateInput): Promise<ProjectWorkPlanMutationResult> {
     input = snapshotJudgmentInput(input) as ProjectWorkPlanTaskCreateInput;
-    await this.initialize();
     const space = this.resolveSpace(input);
     const workPlanId = normalizeWorkPlanId(input.workPlanId);
     const commit = await this.commitWorkPlan(space, workPlanId, (plan, at) => {
@@ -383,7 +564,6 @@ export class ProjectPlanningService {
     makePatch: (previous: ProjectWorkPlanTask) => ProjectWorkPlanTaskUpdateInput['patch'],
     match: WorkPlanTaskMatch,
   ): Promise<ProjectWorkPlanMutationResult> {
-    await this.initialize();
     const space = this.resolveSpace(input);
     const workPlanId = normalizeWorkPlanId(input.workPlanId);
     const commit = await this.commitWorkPlan(space, workPlanId, (plan, at) => {
@@ -447,7 +627,6 @@ export class ProjectPlanningService {
   /** Writes and announces only the tasks whose position changed. */
   async reorderWorkPlanTasks(input: ProjectWorkPlanTaskReorderInput): Promise<ProjectWorkPlanMutationResult> {
     input = snapshotJudgmentInput(input) as ProjectWorkPlanTaskReorderInput;
-    await this.initialize();
     const space = this.resolveSpace(input);
     const workPlanId = normalizeWorkPlanId(input.workPlanId);
     const commit = await this.commitWorkPlan(space, workPlanId, (plan, at) => {
@@ -475,7 +654,6 @@ export class ProjectPlanningService {
 
   async deleteWorkPlanTask(input: ProjectWorkPlanTaskDeleteInput, match: WorkPlanTaskMatch = {}): Promise<ProjectWorkPlanMutationResult> {
     input = snapshotJudgmentInput(input) as ProjectWorkPlanTaskDeleteInput;
-    await this.initialize();
     const space = this.resolveSpace(input);
     const workPlanId = normalizeWorkPlanId(input.workPlanId);
     const commit = await this.commitWorkPlan(space, workPlanId, (plan) => {
@@ -492,7 +670,6 @@ export class ProjectPlanningService {
 
   async clearCompletedWorkPlanTasks(input: ProjectWorkPlanClearCompletedInput = {}): Promise<ProjectWorkPlanMutationResult> {
     input = snapshotJudgmentInput(input) as ProjectWorkPlanClearCompletedInput;
-    await this.initialize();
     const space = this.resolveSpace(input);
     const workPlanId = normalizeWorkPlanId(input.workPlanId);
     const statuses: ProjectWorkPlanTaskStatus[] = [...new Set<ProjectWorkPlanTaskStatus>(input.statuses?.length ? input.statuses.map(normalizeWorkPlanStatus) : ['done'])];
@@ -510,20 +687,19 @@ export class ProjectPlanningService {
   }
 
   /**
-   * One edit of a plan: `decide` runs inside the store's immediate transaction
-   * against the rows as stored (no other writer can commit in between, in this
-   * process or another), so an edit is never built on a stale read and needs no
-   * retry. Only the tasks it returns are written. The first edit that writes to
-   * a plan still stored as one knowledge source also writes that plan's other
-   * tasks as rows, once; the store then deletes the source.
+   * One edit of a plan: `decide` runs inside the plan file's immediate
+   * transaction against the rows as stored (no other writer can commit in
+   * between, in this program or another), so an edit is never built on a stale
+   * read and needs no retry. Only the tasks it returns are written.
    */
   private async commitWorkPlan<T>(
     space: WorkPlanSpace,
     workPlanId: string,
     decide: (plan: WorkPlanEditView, at: number) => { readonly value: T; readonly put: readonly ProjectWorkPlanTask[]; readonly remove: readonly string[] },
   ): Promise<WorkPlanCommit<T>> {
+    await this.planReady(space, workPlanId);
     let unchanged: { revision: number; updatedAt: number; counts: ProjectWorkPlanCounts } = { revision: 0, updatedAt: 0, counts: countWorkPlanTasks([]) };
-    const result = await this.store.commitWorkPlan(space.knowledgeSpaceId, workPlanId, (view) => {
+    const result = this.rows.commit(space.knowledgeSpaceId, workPlanId, (view) => {
       const plan = workPlanEditView(space, workPlanId, view);
       const at = Date.now();
       const edit = decide(plan, at);
@@ -531,17 +707,31 @@ export class ProjectPlanningService {
         unchanged = { revision: plan.revision, updatedAt: plan.updatedAt, counts: plan.counts() };
         return { value: edit.value, put: [], remove: [], at };
       }
-      let put = edit.put;
-      if (plan.legacyTasks.length > 0) {
-        const named = new Set([...edit.put.map((task) => task.taskId), ...edit.remove]);
-        const current = new Map(plan.tasks().map((task) => [task.taskId, task]));
-        put = [...put, ...plan.legacyTasks.filter((task) => !named.has(task.taskId) && current.get(task.taskId) === task)];
-      }
-      return { value: edit.value, put: put.map(workPlanTaskWrite), remove: edit.remove, at };
+      // An edit that finishes a task also removes the finished tasks past the
+      // bounds, in the same transaction; no other edit pays for it.
+      const reclaimFinished = edit.put.some((task) => isFinishedStatus(task.status) && !isFinishedStatus(plan.task(task.taskId)?.status));
+      return { value: edit.value, put: edit.put.map(workPlanTaskWrite), remove: edit.remove, at, reclaimFinished };
     });
-    return result.changed
-      ? { value: result.value, changed: true, revision: result.head.revision, updatedAt: result.head.updatedAt ?? Date.now(), counts: countsFromStatuses(result.statusCounts ?? {}) }
-      : { value: result.value, changed: false, ...unchanged };
+    if (!result.changed) {
+      this.seePlan(space, workPlanId, unchanged.revision);
+      return { value: result.value, changed: false, ...unchanged };
+    }
+    const revision = result.head.revision;
+    const reclaimed = (result.reclaimed ?? []).map((row) => row.task as unknown as ProjectWorkPlanTask);
+    if (reclaimed.length > 0) {
+      const event = workPlanEvent(space, workPlanId, revision);
+      for (const task of reclaimed) this.emitWorkPlanTaskDeleted(event, task);
+    }
+    this.seePlan(space, workPlanId, revision);
+    queueMicrotask(() => this.notifyPlan(planKey(space.knowledgeSpaceId, workPlanId)));
+    return {
+      value: result.value,
+      changed: true,
+      revision,
+      updatedAt: result.head.updatedAt ?? Date.now(),
+      counts: countsFromStatuses(result.statusCounts ?? {}),
+      reclaimedTaskIds: reclaimed.map((task) => task.taskId),
+    };
   }
 
   private resolveSpace(input: ProjectPlanningSpaceInput = {}) {
@@ -663,6 +853,17 @@ interface WorkPlanCommit<T> {
   readonly revision: number;
   readonly updatedAt: number;
   readonly counts: ProjectWorkPlanCounts;
+  /** Finished tasks the edit removed because they were past the bounds. */
+  readonly reclaimedTaskIds?: readonly string[] | undefined;
+}
+
+function planKey(spaceId: string, workPlanId: string): string {
+  return `${spaceId}\u0000${workPlanId}`;
+}
+
+/** Done and cancelled: what the automatic removal of finished tasks may remove. */
+function isFinishedStatus(status: ProjectWorkPlanTaskStatus | undefined): boolean {
+  return status === 'done' || status === 'cancelled';
 }
 
 /** A plan as one read or one commit sees it; tasks come from their rows, and from a plan still stored as one source. */
@@ -748,6 +949,7 @@ function mutationResult(space: WorkPlanSpace, workPlanId: string, commit: WorkPl
     revision: commit.revision,
     updatedAt: commit.updatedAt,
     counts: commit.counts,
+    ...(commit.reclaimedTaskIds?.length ? { reclaimedTaskIds: commit.reclaimedTaskIds } : {}),
   };
 }
 

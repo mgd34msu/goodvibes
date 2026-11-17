@@ -299,7 +299,12 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     const nativeImport = registerWorkLedgerImportGatewayMethods(gatewayMethods, {
       hostId: workLedgerOwner.importHostId, projectId: projectPlanningProjectId, projectRoot: workingDirectory,
       storeId: knowledgeStore.storagePath, service: workLedgerOwner.service, authority: workLedgerOwner.authority,
-      readSource: id => knowledgeStore.getLegacyImportRecord(id), workPlanTaskImportIds: projectId => knowledgeStore.listWorkPlanTaskImportIds(projectId),
+      // Work-plan tasks live in the shared plan file; a copy not yet moved there is still read from the knowledge store.
+      readSource: (id) => {
+        const record = knowledgeStore.getLegacyImportRecord(id);
+        return record.source ? record : workPlanStore.service.readWorkPlanTaskImportRecord(id);
+      },
+      workPlanTaskImportIds: projectId => [...workPlanStore.service.listWorkPlanTaskImportIds(projectId), ...knowledgeStore.listWorkPlanTaskImportIds(projectId)],
       scopes: nativeScopes,
       port: judgment.port, decisionLog: judgment.decisionLog,
     });

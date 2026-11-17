@@ -4,7 +4,9 @@
  * `work_plan` and `agent_work_plan` tools, a spawned worker's `work_plan`, the
  * /work-plan and /workplan commands and the Work Plan modal) reads and edits the
  * plan through this binding, so there is one store, one revision and one event
- * family (`WORK_PLAN_*`, emitted by the service) for the plan.
+ * family (`WORK_PLAN_*`, emitted by the service) for the plan. The rows live in
+ * the user's shared plan file (work-plan-rows.ts), so the terminal app, the
+ * Agent and the daemon keep the same plan for a project.
  *
  * An edit is one immediate transaction on the rows it changes and answers with
  * the changed task and the plan's counts read in that transaction; a task may be
@@ -55,6 +57,18 @@ export function nextWorkPlanTaskStatus(status: ProjectWorkPlanTaskStatus): Proje
 export function summarizeWorkPlanCounts(counts: ProjectWorkPlanCounts): string {
   const parts = WORK_PLAN_TASK_STATUSES.filter((status) => counts[status] > 0).map((status) => `${counts[status]} ${status.replace(/_/g, ' ')}`);
   return `${counts.total} item${counts.total === 1 ? '' : 's'}${parts.length ? `: ${parts.join(', ')}` : ''}`;
+}
+
+/**
+ * The plan line an edit answers with: the counts read in the edit's own
+ * transaction, and the finished items the edit removed automatically, if any
+ * ("12 items: 3 pending, 9 done; removed 2 finished items untouched for 30 days or beyond the 200 most recent").
+ */
+export function summarizeWorkPlanEdit(result: Pick<ProjectWorkPlanMutationResult, 'counts' | 'reclaimedTaskIds'>): string {
+  const reclaimed = result.reclaimedTaskIds?.length ?? 0;
+  const summary = summarizeWorkPlanCounts(result.counts);
+  return reclaimed === 0 ? summary
+    : `${summary}; removed ${reclaimed} finished item${reclaimed === 1 ? '' : 's'} untouched for 30 days or beyond the 200 most recent`;
 }
 
 /** What a caller may set when adding a task. */
@@ -113,6 +127,21 @@ export class ProjectWorkPlan implements RevisionSource {
   /** The plan's revision: one indexed statement. Moves on every committed edit, by any process. */
   revision(): number {
     return this.service.getWorkPlanRevisionNow({ projectId: this.projectId });
+  }
+
+  /**
+   * Calls `listener` when the plan may have changed: after an edit through this
+   * program, or when another program (the terminal app, the Agent, the daemon)
+   * committed to the plan. A surface compares `revision()` with the one it shows
+   * and reads the plan again only when it moved. Answers the unsubscribe.
+   */
+  subscribe(listener: () => void): () => void {
+    return this.service.subscribeWorkPlan({ projectId: this.projectId }, listener);
+  }
+
+  /** The file that holds this plan (shared by every GoodVibes program of this user). */
+  get file(): string {
+    return this.service.workPlanFile;
   }
 
   snapshot(filter: Omit<ProjectWorkPlanTaskListInput, 'projectId' | 'knowledgeSpaceId' | 'workPlanId'> = {}): Promise<ProjectWorkPlanSnapshot> {

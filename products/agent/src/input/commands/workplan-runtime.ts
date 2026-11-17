@@ -1,4 +1,4 @@
-import { summarizeWorkPlanCounts, type ProjectWorkPlanTaskStatus as WorkPlanItemStatus } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { summarizeWorkPlanEdit, type ProjectWorkPlanTaskStatus as WorkPlanItemStatus } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { createAgentWorkPlanTool } from '../../tools/agent-work-plan-tool.ts';
 import { isDirectOwnerCommandContext, type CommandRegistry } from '../command-registry.ts';
 
@@ -63,14 +63,14 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
       }
       // Each edit is one transaction on the plan's rows; its answer carries the plan's counts.
       if (input.action === 'create') {
-        const { task, counts } = await store.add(input.title, { owner: input.owner, source: input.source, notes: input.notes });
-        ctx.print(`Created local todo ${clean(task.taskId)}: ${clean(task.title)}. Plan: ${summarizeWorkPlanCounts(counts)}. No native work was submitted or executed.`);
+        const edit = await store.add(input.title, { owner: input.owner, source: input.source, notes: input.notes });
+        ctx.print(`Created local todo ${clean(edit.task.taskId)}: ${clean(edit.task.title)}. Plan: ${summarizeWorkPlanEdit(edit)}. No native work was submitted or executed.`);
       } else if (input.action === 'set_status') {
-        const { task, counts } = await store.setStatus(input.id, input.status);
-        ctx.print(`Local todo ${clean(task.taskId)} is ${clean(task.status)}. Plan: ${summarizeWorkPlanCounts(counts)}. Local done is not native verified completion.`);
+        const edit = await store.setStatus(input.id, input.status);
+        ctx.print(`Local todo ${clean(edit.task.taskId)} is ${clean(edit.task.status)}. Plan: ${summarizeWorkPlanEdit(edit)}. Local done is not native verified completion.`);
       } else if (input.action === 'remove') {
-        const { deletedTask, counts } = await store.remove(input.id);
-        ctx.print(`Removed local todo ${clean(deletedTask.taskId)}. Plan: ${summarizeWorkPlanCounts(counts)}.`);
+        const removed = await store.remove(input.id);
+        ctx.print(`Removed local todo ${clean(removed.deletedTask.taskId)}. Plan: ${summarizeWorkPlanEdit(removed)}.`);
       } else {
         const result = await store.clearCompleted();
         ctx.print(`Cleared ${result.clearedTaskIds?.length ?? 0} completed/cancelled local todos.`);

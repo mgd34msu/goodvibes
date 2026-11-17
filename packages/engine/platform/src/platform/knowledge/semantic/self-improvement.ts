@@ -1,5 +1,7 @@
 import { bindWebGapRepairInvocation, assertWebGapRepairResultCurrent } from './web-gap-repair/ownership.js';
 import { yieldToEventLoop } from '../cooperative.js';
+import { logger } from '../../utils/logger.js';
+import { summarizeError } from '../../utils/error-display.js';
 import { getKnowledgeSpaceId, normalizeKnowledgeSpaceId } from '../spaces.js';
 import type { KnowledgeStore } from '../store.js';
 import type { KnowledgeObjectProfilePolicy } from '../extensions.js';
@@ -181,6 +183,8 @@ export async function runKnowledgeSemanticSelfImprovement(
     // A preceding repair in this run can have started this gap's retry window.
     if (storedGapState(context.store, spaceId, gap).kind !== 'ready') { state.skippedGaps += 1; continue; }
     state.processedGaps += 1;
+    // The task a repair is running for, so a cancel that throws out of the repair still settles it.
+    let repairingTaskId: string | undefined;
     try {
       // The run's remaining time bounds every judgment reading, so a hung model
       // port ends this gap at the run deadline instead of stalling the run.
@@ -261,6 +265,7 @@ export async function runKnowledgeSemanticSelfImprovement(
         continue;
       }
       classification.assertCurrent?.();
+      repairingTaskId = task.id;
       const repair = await repairCandidateGap({
         context,
         input,
@@ -273,14 +278,20 @@ export async function runKnowledgeSemanticSelfImprovement(
         maxRunMs: plan.maxRunMs,
         shouldStop,
       });
+      repairingTaskId = undefined;
       applyRepairOutcome(state, repair);
-      // A caller's cancellation authorizes no further writes; a governor pause
-      // is this run's own stop, so it settles what it left behind.
-      if (!input.signal?.aborted && context.shouldStop?.()) await settleStoppedTask(context.store, task.id, 'background knowledge work is paused for memory pressure');
+      // A cancel or a governor pause stops this run; it settles what it left
+      // behind, so the task never reads as running when nothing runs it.
+      if (input.signal?.aborted) await settleCancelledTask(context.store, task.id);
+      else if (context.shouldStop?.()) await settleStoppedTask(context.store, task.id, 'background knowledge work is paused for memory pressure');
     } catch (error) {
+      if (input.signal?.aborted) {
+        if (repairingTaskId !== undefined) await settleCancelledTask(context.store, repairingTaskId);
+        throw error;
+      }
       // One gap whose saved identity, graph or model reading is held must not
       // stop every later gap; they are processed in the same order each run.
-      if (input.signal?.aborted || !isSelfImproveHold(error)) throw error;
+      if (!isSelfImproveHold(error)) throw error;
       const reason = error instanceof Error ? error.message : String(error);
       // A hold writes nothing, so the gap keeps its state and is read again next run.
       state.errors.push({ gapId: gap.id, error: reason });
@@ -321,16 +332,26 @@ export function isSelfImproveHold(error: unknown): boolean {
 }
 
 /**
- * A repair that returned early because the run was paused leaves its task in
- * whatever step it reached; nothing is working on it any more, so it must not
- * keep reading as in progress. Stops caused by another writer changing the
- * task or gap, or by the caller cancelling, are left as they are (the next
- * run's stale-task recovery settles those).
+ * A repair that returned early because the run was paused or cancelled leaves
+ * its task in whatever step it reached; nothing is working on it any more, so
+ * it must not keep reading as in progress. A task another writer already
+ * settled (an owner's cancel, a repair that closed it) is left as it is.
  */
 async function settleStoppedTask(store: KnowledgeStore, taskId: string, why: string): Promise<void> {
   const current = store.getRefinementTask(taskId);
   if (!current || !(ACTIVE_REFINEMENT_STATES.has(current.state) || current.state === 'verified')) return;
   await updateRefinementTask(store, current, 'blocked', `Repair stopped because ${why}; it can be retried.`, { stopped: why, retryable: true });
+}
+
+/**
+ * One write per cancelled run, best effort: a store that is already closing
+ * keeps the task as it was, and the next run's stale-task recovery settles it.
+ */
+async function settleCancelledTask(store: KnowledgeStore, taskId: string): Promise<void> {
+  try { await settleStoppedTask(store, taskId, 'the run was cancelled'); }
+  catch (error) {
+    logger.warn('Knowledge refinement: a cancelled run could not settle its task; the next run settles it', { taskId, error: summarizeError(error) });
+  }
 }
 
 function createSelfImproveRunPlan(

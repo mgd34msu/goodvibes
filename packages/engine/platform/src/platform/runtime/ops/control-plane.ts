@@ -15,6 +15,7 @@ import type { RuntimeEventBus } from '../events/index.js';
 import type { RuntimeStore } from '../store/index.js';
 import type { TaskLifecycleState } from '../store/domains/tasks.js';
 import type { AgentLifecycleState } from '../store/domains/agents.js';
+import { isTerminalLifecycleState } from '../store/helpers/reducers/shared.js';
 import { canRetry, canTransition, describeTaskMoves } from '../tasks/lifecycle.js';
 import {
   emitOpsTaskCancelled,
@@ -92,25 +93,10 @@ export class OpsTargetNotFoundError extends GoodVibesError {
 // OpsControlPlane
 // ---------------------------------------------------------------------------
 
-/**
- * Terminal agent lifecycle states, agents in these states cannot be cancelled.
- */
-const TERMINAL_AGENT_STATES: ReadonlySet<AgentLifecycleState> = new Set([
-  'completed',
-  'failed',
-  'cancelled',
-]);
-
-/**
- * Agent states from which cancellation is permitted.
- */
-const CANCELLABLE_AGENT_STATES: ReadonlySet<AgentLifecycleState> = new Set([
-  'spawning',
-  'running',
-  'awaiting_message',
-  'awaiting_tool',
-  'finalizing',
-]);
+/** Any agent the store does not hold as ended may be cancelled; the store's reducers own which states are terminal. */
+function isCancellableAgentState(status: AgentLifecycleState): boolean {
+  return !isTerminalLifecycleState(status);
+}
 
 export class OpsControlPlane {
   private readonly _taskManager: TaskManager;
@@ -321,7 +307,7 @@ export class OpsControlPlane {
       throw new OpsTargetNotFoundError(agentId, 'agent');
     }
 
-    if (!CANCELLABLE_AGENT_STATES.has(agent.status)) {
+    if (!isCancellableAgentState(agent.status)) {
       const err = new OpsIllegalActionError(agentId, 'cancel', agent.status);
       emitOpsAgentCancelled(this._bus, this._makeCtx(undefined, agentId), {
         agentId,
@@ -396,7 +382,7 @@ export class OpsControlPlane {
   public canCancelAgent(agentId: string): boolean {
     const state = this._store.getState();
     const agent = state.agents.agents.get(agentId);
-    return agent != null && CANCELLABLE_AGENT_STATES.has(agent.status);
+    return agent != null && isCancellableAgentState(agent.status);
   }
 
   // ── Private helpers ───────────────────────────────────────────────────────

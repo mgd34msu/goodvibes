@@ -1,13 +1,12 @@
 import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import type { CommandContext } from '../input/command-registry.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { buildLearningCandidates, candidateSearchText } from './agent-harness-learning-curator-proposals.ts';
-import { localRegistryRoute, MIN_PROMPT_MEMORY_CONFIDENCE, missingRequirementCount, routeValue } from './agent-harness-learning-curator-common.ts';
-import type { LearningCandidateCollection } from './agent-harness-learning-curator-source.ts';
-import type { AgentHarnessLearningCuratorArgs, LearningCandidate, LearningCandidateResolution, LearningConsolidationBatchPlan, LearningPromptPlan } from './agent-harness-learning-curator-types.ts';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-export type { LearningCandidate, LearningCandidateResolution, LearningConsolidationDiff, LearningConsolidationFields, LearningConsolidationPlan } from './agent-harness-learning-curator-types.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from './catalog-ranking.js';
+import { previewHarnessText } from './preview-text.js';
+import { buildLearningCandidates, candidateSearchText } from './learning-curator-proposals.js';
+import { localRegistryRoute, MIN_PROMPT_MEMORY_CONFIDENCE, missingRequirementCount, routeValue } from './learning-curator-common.js';
+import type { LearningCandidateCollection, LearningCuratorNativeContext } from './learning-curator-source.js';
+import type { AgentHarnessLearningCuratorArgs, LearningCandidate, LearningCandidateResolution, LearningConsolidationBatchPlan, LearningPromptPlan } from './learning-curator-types.js';
+import { clampReadLimit } from './read-helpers.js';
+export type { LearningCandidate, LearningCandidateResolution, LearningConsolidationDiff, LearningConsolidationFields, LearningConsolidationPlan } from './learning-curator-types.js';
 
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -278,11 +277,11 @@ async function matchingLearningCandidates(collection: LearningCandidateCollectio
   collection.assertCurrent(); return result;
 }
 
-export async function learningCuratorSummary(context: CommandContext, args: AgentHarnessLearningCuratorArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
+export async function learningCuratorSummary(context: LearningCuratorNativeContext, args: AgentHarnessLearningCuratorArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
   return withConfiguredDecisionModelPolicy(() => ownedLearningCuratorSummary(context, args, options));
 }
 
-async function ownedLearningCuratorSummary(context: CommandContext, args: AgentHarnessLearningCuratorArgs, options: CatalogRankingOptions): Promise<Record<string, unknown>> {
+async function ownedLearningCuratorSummary(context: LearningCuratorNativeContext, args: AgentHarnessLearningCuratorArgs, options: CatalogRankingOptions): Promise<Record<string, unknown>> {
   const includeParameters = args.includeParameters === true;
   const query = readString(args.query);
   const limit = readLimit(args.limit, 100);
@@ -324,11 +323,11 @@ export type LearningConsolidationCandidateResolution =
   | { readonly status: 'ambiguous'; readonly input: string; readonly candidates: readonly Pick<LearningCandidate, 'id' | 'label' | 'status' | 'priority'>[] }
   | { readonly status: 'missing_lookup'; readonly usage: string };
 
-export async function resolveLearningConsolidationCandidate(context: CommandContext, input: string, options: CatalogRankingOptions = {}): Promise<LearningConsolidationCandidateResolution> {
+export async function resolveLearningConsolidationCandidate(context: LearningCuratorNativeContext, input: string, options: CatalogRankingOptions = {}): Promise<LearningConsolidationCandidateResolution> {
   return withConfiguredDecisionModelPolicy(() => ownedResolveLearningConsolidationCandidate(context, input, options));
 }
 
-async function ownedResolveLearningConsolidationCandidate(context: CommandContext, input: string, options: CatalogRankingOptions): Promise<LearningConsolidationCandidateResolution> {
+async function ownedResolveLearningConsolidationCandidate(context: LearningCuratorNativeContext, input: string, options: CatalogRankingOptions): Promise<LearningConsolidationCandidateResolution> {
   options.signal?.throwIfAborted();
   const lookup = input.trim();
   if (!lookup) {
@@ -372,11 +371,11 @@ async function ownedResolveLearningConsolidationCandidate(context: CommandContex
   };
 }
 
-export async function describeLearningCandidate(context: CommandContext, args: AgentHarnessLearningCuratorArgs, options: CatalogRankingOptions = {}): Promise<LearningCandidateResolution> {
+export async function describeLearningCandidate(context: LearningCuratorNativeContext, args: AgentHarnessLearningCuratorArgs, options: CatalogRankingOptions = {}): Promise<LearningCandidateResolution> {
   return withConfiguredDecisionModelPolicy(() => ownedDescribeLearningCandidate(context, args, options));
 }
 
-async function ownedDescribeLearningCandidate(context: CommandContext, args: AgentHarnessLearningCuratorArgs, options: CatalogRankingOptions): Promise<LearningCandidateResolution> {
+async function ownedDescribeLearningCandidate(context: LearningCuratorNativeContext, args: AgentHarnessLearningCuratorArgs, options: CatalogRankingOptions): Promise<LearningCandidateResolution> {
   options.signal?.throwIfAborted();
   const candidateId = readString(args.candidateId);
   const target = readString(args.target);

@@ -1,6 +1,6 @@
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { rankHarnessCatalog, captureCatalogData, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { rankHarnessCatalog, captureCatalogData, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { fullToolDefinition } from './tool-definition-compaction.ts';
 import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn';

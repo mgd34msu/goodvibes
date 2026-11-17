@@ -3,7 +3,7 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { capturePersonalOpsData, capturePersonalOpsSnapshot, assertPersonalOpsDataCurrent } from './agent-harness-personal-ops-source.ts';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { readRemotePublisherOutcomeKind, readRemotePublisherSchemaStatus } from './agent-harness-remote-publisher-readings.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';

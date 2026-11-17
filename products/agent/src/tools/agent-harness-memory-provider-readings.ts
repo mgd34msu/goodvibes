@@ -4,7 +4,7 @@ import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes-jev/en
 import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
 import { routingRegistry, memoryProviderSelect } from '@goodvibes-jev/engine/platform/platform/routing';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { modelReadingServicePath, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { capturePersonalOpsSnapshot, personalOpsJson } from './agent-harness-personal-ops-source.ts';
 

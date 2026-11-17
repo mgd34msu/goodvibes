@@ -1,4 +1,4 @@
-import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 type ProjectCatalogContext = { readonly workspace: Pick<CommandContext['workspace'], 'shellPaths'> };

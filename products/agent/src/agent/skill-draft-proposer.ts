@@ -1,6 +1,6 @@
-import { learningPromotionReference } from '../tools/agent-harness-learning-curator-common.ts';
+import { learningPromotionReference } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { assertNoSecretLikeText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import type { LearningCandidate } from '../tools/agent-harness-learning-curator-types.ts';
+import type { LearningCandidate } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { AgentSkillCreateInput } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 /**

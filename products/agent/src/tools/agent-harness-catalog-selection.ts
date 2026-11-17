@@ -2,7 +2,7 @@ import { LIMITS, type JsonValue } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
 import { registrySelect, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogData, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { isClassicOperation, rankClassicCatalog } from '@goodvibes-jev/engine/platform/platform/runtime';
 
 const ALLOWED_OPTIONS: readonly string[] = ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent', 'requirePreservedSource', 'semantic'];

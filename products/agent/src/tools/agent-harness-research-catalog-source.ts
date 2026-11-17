@@ -6,7 +6,7 @@ import { SOURCE_SCREENING_LIMITS } from '@goodvibes-jev/engine/platform/platform
 import { researchRunStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { researchSourceStorePath, type AgentResearchSourceRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
-import { captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { modelReadingServicePath, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 const parseNativeJson = JSON.parse;
 

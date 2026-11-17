@@ -1,4 +1,4 @@
-import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { Ranked } from '@goodvibes-jev/judgment';
 import { laneById, liveRecordById, operationSummary, recordOperationSummary, workflowById, workflowExecutionPlan, workflowMissingFields } from './agent-harness-personal-ops-runner.ts';
 import type { PersonalOpsConnectorSignal, PersonalOpsConnectorTool, PersonalOpsIntakeCandidate, PersonalOpsLane, PersonalOpsLiveRecord, PersonalOpsWorkflowStatus } from './agent-harness-personal-ops-types.ts';

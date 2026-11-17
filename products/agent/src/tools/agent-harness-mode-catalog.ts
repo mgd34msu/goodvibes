@@ -1,6 +1,6 @@
 import { AGENT_HARNESS_MODES } from './agent-harness-tool-schema.ts';
 import { catalogEnvelope, readLimit } from './agent-harness-tool-utils.ts';
-import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { RELEASE_PACKAGE_ROOT } from './agent-harness-release-readiness.ts';

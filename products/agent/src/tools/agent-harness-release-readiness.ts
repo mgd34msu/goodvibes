@@ -1,4 +1,4 @@
-import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { withNativeCatalog, rankResearchRecords } from './agent-harness-research-catalog-source.ts';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { existsSync, readFileSync } from 'node:fs';

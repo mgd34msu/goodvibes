@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { readDocument, writeDocument, logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { ShellPathService } from '@/runtime/index.ts';
-import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import type { LearningProposalTarget, LearningScores } from './agent-harness-learning-curator-types.ts';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
+import type { LearningProposalTarget, LearningScores } from './learning-curator-types.js';
 
 /**
  * What the learning curation pass already settled, so the curator's overview,
@@ -23,7 +23,7 @@ export interface StoredLearningGrade {
 export interface StoredLearningProposal {
   readonly target: LearningProposalTarget | null;
   /** Memory class read for a memory proposal. */
-  readonly cls?: string;
+  readonly cls?: string | undefined;
 }
 
 interface Verdict<T> { readonly hash: string; readonly value: T }

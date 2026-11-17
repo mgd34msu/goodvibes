@@ -1,6 +1,6 @@
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { redactSensitiveData } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CommandContext } from '../input/command-registry.ts';

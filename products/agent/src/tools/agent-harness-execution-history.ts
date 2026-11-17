@@ -1,7 +1,7 @@
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { CommandContext } from '../input/command-registry.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { AgentExecutionRecord, AgentExecutionRouteKind, AgentExecutionStatus } from '../runtime/execution-ledger.ts';
 import { fileRecoveryCatalogStatus } from './agent-harness-file-recovery.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';

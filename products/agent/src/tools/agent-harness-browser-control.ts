@@ -3,7 +3,7 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { readInteractiveRuntime, type InteractiveRuntimeSnapshot } from './agent-harness-interactive-runtime-records.ts';
 import { isAgentMcpCallRouteInstalled } from './agent-mcp-call-route.ts';
 import type { ToolCapability, ToolDefinition } from '@goodvibes-jev/engine/platform/platform/types';
-import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 
 type BrowserControlStatus = 'ready' | 'attention' | 'setup-needed';

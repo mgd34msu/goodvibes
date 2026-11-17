@@ -3,7 +3,7 @@ import { runPersonalOpsStyleDraft, STYLE_DRAFT_RECORD_ID } from './agent-harness
 import { buildAgentWorkspaceRoutineCounters } from '../input/agent-workspace-snapshot.ts';
 import { buildAgentWorkspaceChannels } from '../input/agent-workspace-channels.ts';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { captureCatalogData, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData, rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';

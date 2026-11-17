@@ -1,7 +1,7 @@
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { findOperatorContractMethod, operatorContractMethods as contractMethodIndex } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { CommandContext } from '../input/command-registry.ts';
-import { captureCatalogData, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { modelReadingServicePath } from './agent-harness-model-reading-source.ts';
 import { mcpSchemaRoute } from './agent-harness-personal-ops-routes.ts';

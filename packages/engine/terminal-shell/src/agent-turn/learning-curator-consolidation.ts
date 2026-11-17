@@ -1,7 +1,7 @@
-import type { AgentWorkspaceLocalLibraryItem } from '../input/agent-workspace-types.ts';
-import type { LearningCandidateDraft, LearningConsolidationDiff, LearningConsolidationPlan, LocalLearningCandidateDomain } from './agent-harness-learning-curator-types.ts';
-import { localRegistryRoute, routeValue } from './agent-harness-learning-curator-common.ts';
-import type { LearningRecord } from './agent-harness-learning-curator-source.ts';
+import type { AgentWorkspaceLocalLibraryItem } from './local-library-items.js';
+import type { LearningCandidateDraft, LearningConsolidationDiff, LearningConsolidationPlan, LocalLearningCandidateDomain } from './learning-curator-types.js';
+import { localRegistryRoute, routeValue } from './learning-curator-common.js';
+import type { LearningRecord } from './learning-curator-source.js';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 
 function uniqueText(values: readonly string[]): readonly string[] {

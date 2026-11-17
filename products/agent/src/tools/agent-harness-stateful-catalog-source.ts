@@ -5,7 +5,7 @@ import { dirname } from 'node:path';
 import { retainCliConfig } from '@goodvibes-jev/engine/terminal-shell';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
-import { captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { captureCatalogReadRequest } from './agent-harness-catalog-selection.ts';
 
 /**

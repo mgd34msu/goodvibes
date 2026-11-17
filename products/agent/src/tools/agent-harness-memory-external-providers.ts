@@ -1,5 +1,5 @@
 import type { CommandContext } from '../input/command-registry.ts';
-import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { mcpServerRecords, mcpToolRecords, qualifiedToolName } from './agent-harness-personal-ops-discovery.ts';
 import type { McpToolRecord } from './agent-harness-personal-ops-types.ts';
 

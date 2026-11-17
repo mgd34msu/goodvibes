@@ -2,7 +2,7 @@ import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { gateJudgmentRegistry, prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
 import { SOURCE_SCREENING_LIMITS, type ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { captureCatalogData } from './catalog-data.js';
 import type { Ranked, Rerank } from '@goodvibes-jev/judgment';
 import { isClassicOperation, rankClassicCatalog } from '@goodvibes-jev/engine/platform/platform/runtime';
 
@@ -14,16 +14,15 @@ export interface CatalogRankingOptions {
   /** Retain only acquired backend identities, never a released source receipt. */
   readonly retainCurrent?: ((guard: () => void, key?: string) => void) | undefined;
   /** Accepted for existing callers; catalog rows are written in code and are not screened. */
-  readonly requirePreservedSource?: boolean;
+  readonly requirePreservedSource?: boolean | undefined;
   /**
    * The caller needs a reading of meaning (planning a route for a prose task),
    * not a lookup: the best literal matches are read in one request even when
    * code found some. Without it a lookup with any literal match costs nothing.
    */
-  readonly semantic?: boolean;
+  readonly semantic?: boolean | undefined;
 }
 
-export { captureCatalogData, captureCatalogSnapshot, captureCatalogSnapshotGuard, inspectCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 type CatalogDescription = { readonly id: string; readonly description: string; readonly evidence?: unknown };
 type CatalogRow = { readonly id: string; readonly description: string };
@@ -49,12 +48,12 @@ function catalogRow({ id, description }: CatalogDescription): CatalogRow {
 
 export interface HarnessCatalogRanking<T> {
   /** 'classic': the matches are literal word matches found by code; no reading was taken. */
-  readonly provenance?: 'classic';
+  readonly provenance?: 'classic' | undefined;
   readonly matches: readonly { readonly entry: T; readonly judgment: Ranked | undefined; readonly id?: string; readonly score?: number; readonly provenance?: 'classic' }[];
   /** Settled readings only (and the one code decision for an exact id or a sole full match). */
   readonly judgments: readonly Ranked[];
   /** Candidates whose reading did not settle; they are left out of `matches`, never fatal. */
-  readonly unsettled?: number;
+  readonly unsettled?: number | undefined;
 }
 
 /** Most candidates one reading is shown. */

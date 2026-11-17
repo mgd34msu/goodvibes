@@ -1,5 +1,5 @@
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogData, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 const ALLOWED_OPTIONS: readonly string[] = ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent', 'requirePreservedSource', 'semantic'];
 

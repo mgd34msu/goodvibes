@@ -1,6 +1,6 @@
 import { types as nodeTypes } from 'node:util';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogSnapshot, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { captureCatalogPath } from './agent-harness-research-catalog-source.ts';
 import { modelReadingServicePath, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';

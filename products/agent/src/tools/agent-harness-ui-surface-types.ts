@@ -1,6 +1,6 @@
 import type { CommandContext } from '../input/command-registry.ts';
 import type { EffectResult } from './agent-harness-tool-utils.ts';
-import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export type UiSurfaceKind = 'overlay' | 'modal' | 'workspace' | 'picker';
 

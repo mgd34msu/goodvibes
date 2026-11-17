@@ -3,11 +3,11 @@ import { learningProposalQuality } from '@goodvibes-jev/engine/platform/platform
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
 import { learningCuratorScore, learningDuplicateAlignment, learningProposalTarget, learningSurvivorSelection, learningSurvivorEquivalence, memoryClass, assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { type CatalogRankingOptions } from './catalog-ranking.js';
 import { type NamedDecision } from '@goodvibes-jev/judgment';
-import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
-import { personalOpsEntry, personalOpsJson } from './agent-harness-personal-ops-source.ts';
-import type { LearningProposalTarget, LearningScores } from './agent-harness-learning-curator-types.ts';
+import { withModelReadingSource } from './model-reading.js';
+import { personalOpsEntry, personalOpsJson } from './personal-ops-data.js';
+import type { LearningProposalTarget, LearningScores } from './learning-curator-types.js';
 
 export interface LearningGrade { readonly scores: LearningScores; readonly priority: number; readonly confidence: number }
 

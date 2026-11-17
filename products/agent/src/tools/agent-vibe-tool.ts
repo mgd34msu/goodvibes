@@ -1,7 +1,7 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { resolve } from 'node:path';
-import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentPersonaRegistry, personaStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {

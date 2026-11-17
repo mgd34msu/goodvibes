@@ -17,7 +17,7 @@ import { captureHarnessLocalEffect } from './agent-harness-local-effect.ts';
 import type { SetupSmokeNativeEvidence } from './agent-setup-smoke-reference.ts';
 import { DEFAULT_AGENT_SETUP_WIZARD_CLEAR_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_INSPECT_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_MARK_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_REVIEW_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_RERUN_SMOKE_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_SAVE_SMOKE_ROUTE } from '../agent/setup-wizard.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogSnapshot, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import type { AgentHarnessSetupArgs, SetupResolution } from './agent-harness-setup-posture-types.ts';
 import { buildSetupPlan, SETUP_PLAN_ROW_IDS } from './agent-harness-setup-plan.ts';

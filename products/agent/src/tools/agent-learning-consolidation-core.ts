@@ -14,8 +14,8 @@ import {
   resolveLearningConsolidationCandidate,
   type LearningCandidate,
   type LearningConsolidationFields,
-} from './agent-harness-learning-curator.ts';
-import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { readString } from './tool-args.ts';

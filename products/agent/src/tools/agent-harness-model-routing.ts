@@ -11,7 +11,7 @@ import { localHardwareProfile, modelReadinessScore } from './agent-harness-model
 import { contextWindowFor, loadModels, listProviderIds, modelBenchmarkCompositeScore, modelBenchmarkQualityTier, modelAvailable, modelConfigured, modelCapabilities, modelCurrent, modelDisplayName, modelModelId, modelProviderId, modelReasoning, modelRegistryKey, modelTier, readConfig, readProviderApi } from './agent-harness-model-catalog.ts';
 import type { AgentHarnessModelRoutingArgs, LocalModelServerEndpoint, ModelCandidate, ModelProviderHealthSignal, ModelRouteLookupSource, ModelRouteResolution, RouteCandidate } from './agent-harness-model-routing-types.ts';
 import type { ModelReadingOptions } from './agent-harness-model-reading-source.ts';
-import { rankHarnessCatalog } from './agent-harness-catalog-ranking.ts';
+import { rankHarnessCatalog } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { mapWithConcurrency, readLimit, readString } from './agent-harness-model-routing-utils.ts';
 export type { AgentHarnessModelRoutingArgs } from './agent-harness-model-routing-types.ts';
 export { localModelCookbook } from './agent-harness-local-model-cookbook.ts';

@@ -1,4 +1,4 @@
-import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 /** No query is the whole list; a query goes to the one catalog selector (code first, at most one reading). */
 export async function browserDeviceCatalogMatches<T>(entries: readonly T[], query: string,

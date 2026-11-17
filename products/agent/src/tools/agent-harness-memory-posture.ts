@@ -11,7 +11,7 @@ import { buildAgentWorkspaceMemorySnapshot, type buildAgentWorkspaceRuntimeSnaps
 import { buildAgentWorkspaceSessionMemoryCount } from '../input/agent-workspace-snapshot-builders.ts';
 import { readConfigString } from '../input/agent-workspace-snapshot-config.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { modelReadingServicePath } from './agent-harness-model-reading-source.ts';
 import { capturePersonalOpsSnapshot, protectPersonalOpsData } from './agent-harness-personal-ops-source.ts';
 import { assertMemoryCurrent, retainMemoryReadingOptions, selectMemoryProvider } from './agent-harness-memory-provider-readings.ts';

@@ -1,4 +1,4 @@
-import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { serviceExpectedOutcome, type ServiceMethodId } from './agent-service-lifecycle.ts';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import { resolveConnectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn';

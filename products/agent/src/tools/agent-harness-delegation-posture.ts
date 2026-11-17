@@ -1,6 +1,6 @@
 import type { CommandContext } from '../input/command-registry.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogData, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData, rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 

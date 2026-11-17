@@ -3,7 +3,7 @@ import type { CliServicePosture } from '../cli/service-posture.ts';
 import type { OnboardingStep1CapabilityItem } from '../runtime/onboarding/index.ts';
 import { previewAgentWorkspaceTuiSettingsImport } from '../input/agent-workspace-settings.ts';
 import { browserControlPosture } from './agent-harness-browser-control.ts';
-import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { localModelCookbook } from './agent-harness-model-routing.ts';
 import { sudoExecutionPosture } from './agent-harness-sudo-posture.ts';
 import { agentHarnessVibeHealth } from './agent-harness-vibe-health.ts';

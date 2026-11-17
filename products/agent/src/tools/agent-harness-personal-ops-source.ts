@@ -2,35 +2,13 @@ import { isDeepStrictEqual } from 'node:util';
 import { redactStructuredDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureOwnedJson } from '@goodvibes-jev/engine/platform/platform/gate';
-import { inspectCatalogData, captureCatalogData, captureCatalogSnapshotGuard, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { inspectCatalogData, captureCatalogSnapshotGuard, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { captureModelReadingSnapshotGuard } from './agent-harness-model-reading-source.ts';
-import type { EntryType, JsonValue } from '@goodvibes-jev/judgment/decisions';
 import { personalOpsNativeFields, personalOpsResultFields } from './agent-personal-ops-native-fields.ts';
+import { capturePersonalOpsData } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
-/** Hidden producer data is still semantic source; serialization cannot omit it. */
-export function capturePersonalOpsData(value: unknown): unknown {
-  const captured = captureCatalogData(value);
-  let nodes = 0, characters = 0;
-  const visit = (entry: unknown): unknown => {
-    if (++nodes > 20_000) throw new ToolInputProjectionError('invalid');
-    if (typeof entry === 'string') { characters += entry.length; if (characters > 1_000_000) throw new ToolInputProjectionError('invalid'); }
-    if (!entry || typeof entry !== 'object') return entry;
-    const names = Object.getOwnPropertyNames(entry);
-    if (Array.isArray(entry)) {
-      // A captured array carries its indices and `length`, nothing else.
-      if (names.length !== entry.length + 1) throw new ToolInputProjectionError('invalid');
-      return entry.map(visit);
-    }
-    const record = entry as Record<string, unknown>;
-    const result: Record<string, unknown> = Object.create(null);
-    for (const key of names) {
-      characters += key.length; if (characters > 1_000_000) throw new ToolInputProjectionError('invalid');
-      Object.defineProperty(result, key, { value: visit(record[key]), enumerable: true });
-    }
-    return result;
-  };
-  return visit(captured);
-}
+// The capture and JSON grammar are the shared Agent turn's (personal-ops-data.ts); the learning readings use the same ones.
+export { capturePersonalOpsData, personalOpsEntry, personalOpsJson } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export function assertPersonalOpsDataCurrent(value: unknown, captured: unknown): void {
   if (!isDeepStrictEqual(capturePersonalOpsData(value), captured)) throw new ToolInputProjectionError('held');
@@ -151,30 +129,6 @@ export function capturePersonalOpsSnapshot(value: unknown): {
     if (!equal) throw new ToolInputProjectionError('held');
   };
   return Object.freeze({ captured, assertCurrent });
-}
-
-/** JSON normalization follows serialization grammar after the plain-data capture. */
-export function personalOpsJson(value: unknown): JsonValue {
-  const captured = capturePersonalOpsData(value);
-  const visit = (entry: unknown): JsonValue => {
-    if (entry === undefined || entry === null) return null;
-    if (typeof entry === 'string' || typeof entry === 'boolean' || typeof entry === 'number') return entry;
-    if (Array.isArray(entry)) return entry.map(visit);
-    if (typeof entry !== 'object') throw new ToolInputProjectionError('invalid');
-    const result: Record<string, JsonValue> = Object.create(null);
-    for (const [key, child] of Object.entries(entry)) {
-      if (child === undefined) continue;
-      Object.defineProperty(result, key, { value: visit(child), enumerable: true });
-    }
-    return result;
-  };
-  return visit(captured);
-}
-
-/** Entry grammar excludes bare numeric and boolean roots. */
-export function personalOpsEntry(value: unknown): EntryType {
-  const entry = personalOpsJson(value);
-  return typeof entry === 'boolean' || typeof entry === 'number' ? { value: entry } : entry;
 }
 
 /** Frozen declarations are proven unchanged once instead of at every redaction boundary. */

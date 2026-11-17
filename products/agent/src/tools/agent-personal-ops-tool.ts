@@ -3,7 +3,7 @@ import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import { facadeHarness } from './agent-harness-facade.ts';
-import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { forwardHarnessCatalogCall, protectHarnessCatalogTool } from './agent-harness-catalog-ingress.ts';
 import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 

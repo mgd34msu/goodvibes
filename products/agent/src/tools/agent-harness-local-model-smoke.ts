@@ -5,7 +5,7 @@ import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-t
 import { readLimit, readRecord, readString } from './agent-harness-model-routing-utils.ts';
 import { readLocalServerEndpointCandidates, describeLocalServerEndpoint, isPrivateOrLocalUrl, localEndpointSmokeRoute, localModelServerDefaults, parseUrlCandidate, recordLocalModelSmoke } from './agent-harness-local-model-endpoints.ts';
 import type { LocalModelLastSmoke } from './agent-harness-model-routing-types.ts';
-import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools';
 
 function localModelSmokeTargetFromEndpoint(endpoint: LocalModelServerEndpoint): LocalModelSmokeTarget {

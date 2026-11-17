@@ -1,82 +1,9 @@
-import { memoryRecordTemporalStatus, type MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
-import type { AgentNoteRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import type { AgentPersonaRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { formatAgentRecordOrigin } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { evaluateAgentRoutineReadiness, type AgentRoutineRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentResearchRunRegistry, researchRunLogTail } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { RoutineScheduleReceiptStore } from '../agent/routine-schedule-receipts.ts';
-import { evaluateAgentSkillBundleReadiness, evaluateAgentSkillReadiness, formatAgentSkillRequirement, type AgentSkillBundleRecord, type AgentSkillRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+// The record summaries are the shared Agent turn's (local-library-items.ts); the curator reads the same ones.
+export { summarizeMemoryItem, summarizeNoteItem, summarizePersonaItem, summarizeRoutineItem, summarizeSkillBundleItem, summarizeSkillItem } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { listAgentRuntimeProfiles, listAgentRuntimeProfileTemplates } from '../agent/runtime-profile.ts';
-import type { AgentWorkspaceLocalLibraryItem, AgentWorkspaceResearchRunSummary, AgentWorkspaceRoutineScheduleReceiptSummary, AgentWorkspaceRuntimeProfileItem, AgentWorkspaceRuntimeStarterTemplateItem } from './agent-workspace-types.ts';
-
-export function summarizePersonaItem(persona: AgentPersonaRecord, activePersonaId: string | null): AgentWorkspaceLocalLibraryItem {
-  return {
-    id: persona.id,
-    name: persona.name,
-    description: persona.description,
-    reviewState: persona.reviewState,
-    source: formatAgentRecordOrigin(persona.source, persona.provenance),
-    tags: persona.tags,
-    triggers: persona.triggers,
-    active: persona.id === activePersonaId,
-  };
-}
-
-export function summarizeSkillItem(skill: AgentSkillRecord): AgentWorkspaceLocalLibraryItem {
-  const readiness = evaluateAgentSkillReadiness(skill);
-  return {
-    id: skill.id,
-    name: skill.name,
-    description: skill.description,
-    reviewState: skill.reviewState,
-    source: formatAgentRecordOrigin(skill.source, skill.provenance),
-    tags: skill.tags,
-    triggers: skill.triggers,
-    enabled: skill.enabled,
-    requirementCount: skill.requirements.length,
-    missingRequirementCount: readiness.missing.length,
-    missingRequirements: readiness.missing.map(formatAgentSkillRequirement),
-  };
-}
-
-export function summarizeSkillBundleItem(bundle: AgentSkillBundleRecord, skills: readonly AgentSkillRecord[]): AgentWorkspaceLocalLibraryItem {
-  const readiness = evaluateAgentSkillBundleReadiness(bundle, skills);
-  const missing = [
-    ...readiness.missingRequirements.map(formatAgentSkillRequirement),
-    ...readiness.missingSkillIds.map((skillId) => `skill:${skillId}`),
-  ];
-  return {
-    id: bundle.id,
-    name: bundle.name,
-    description: `${bundle.description} Skills: ${bundle.skillIds.join(', ')}`,
-    reviewState: bundle.reviewState,
-    source: formatAgentRecordOrigin(bundle.source, bundle.provenance),
-    tags: bundle.skillIds,
-    triggers: [],
-    enabled: bundle.enabled,
-    requirementCount: readiness.includedSkills.reduce((total, skill) => total + skill.requirements.length, 0) + readiness.missingSkillIds.length,
-    missingRequirementCount: missing.length,
-    missingRequirements: missing,
-  };
-}
-
-export function summarizeRoutineItem(routine: AgentRoutineRecord): AgentWorkspaceLocalLibraryItem {
-  const readiness = evaluateAgentRoutineReadiness(routine);
-  return {
-    id: routine.id,
-    name: routine.name,
-    description: routine.description,
-    reviewState: routine.reviewState,
-    source: formatAgentRecordOrigin(routine.source, routine.provenance),
-    tags: routine.tags,
-    triggers: routine.triggers,
-    enabled: routine.enabled,
-    requirementCount: routine.requirements.length,
-    missingRequirementCount: readiness.missing.length,
-    missingRequirements: readiness.missing.map(formatAgentSkillRequirement),
-    startCount: routine.startCount,
-  };
-}
+import type { AgentWorkspaceResearchRunSummary, AgentWorkspaceRoutineScheduleReceiptSummary, AgentWorkspaceRuntimeProfileItem, AgentWorkspaceRuntimeStarterTemplateItem } from './agent-workspace-types.ts';
 
 export function summarizeRoutineScheduleReceipt(
   receipt: ReturnType<RoutineScheduleReceiptStore['snapshot']>['receipts'][number],
@@ -109,42 +36,6 @@ export function summarizeResearchRunItem(
     updatedAt: run.updatedAt,
     ...(run.note ? { note: run.note } : {}),
     ...(run.reportArtifactId ? { reportArtifactId: run.reportArtifactId } : {}),
-  };
-}
-
-export function summarizeMemoryItem(record: MemoryRecord): AgentWorkspaceLocalLibraryItem {
-  const detail = record.detail?.trim();
-  return {
-    id: record.id,
-    name: record.summary,
-    description: detail && detail.length > 0 ? detail : `${record.scope}/${record.cls}`,
-    reviewState: record.reviewState,
-    source: 'Agent memory',
-    tags: record.tags,
-    triggers: [],
-    scope: record.scope,
-    cls: record.cls,
-    confidence: record.confidence,
-    // Visible expiry: a record outside its [validFrom, validUntil) window is
-    // still stored (not deleted) but not prompt-injected, see
-    // memoryRecordTemporalStatus / describeMemoryPromptEligibility.
-    temporalStatus: memoryRecordTemporalStatus(record),
-  };
-}
-
-export function summarizeNoteItem(note: AgentNoteRecord): AgentWorkspaceLocalLibraryItem {
-  const preview = note.body.replace(/\s+/g, ' ').trim();
-  const description = note.sourceUrl
-    ? `${preview.slice(0, 160)}${preview.length > 160 ? '...' : ''} Origin URL ${note.sourceUrl}`
-    : preview;
-  return {
-    id: note.id,
-    name: note.title,
-    description,
-    reviewState: note.reviewState,
-    source: formatAgentRecordOrigin(note.source, note.provenance),
-    tags: note.tags,
-    triggers: [],
   };
 }
 

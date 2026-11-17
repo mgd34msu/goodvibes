@@ -14,17 +14,17 @@ export type VibeCandidateKind = 'blocked' | 'truncated';
 
 export interface SessionInfoLike {
   readonly name: string;
-  readonly title?: string;
-  readonly model?: string;
-  readonly provider?: string;
-  readonly timestamp?: number;
-  readonly messageCount?: number;
-  readonly filePath?: string;
+  readonly title?: string | undefined;
+  readonly model?: string | undefined;
+  readonly provider?: string | undefined;
+  readonly timestamp?: number | undefined;
+  readonly messageCount?: number | undefined;
+  readonly filePath?: string | undefined;
 }
 
 export interface SessionManagerLike {
-  readonly list?: () => readonly SessionInfoLike[];
-  readonly load?: (name: string) => { readonly meta?: { readonly title?: string }; readonly messages?: readonly unknown[] };
+  readonly list?: (() => readonly SessionInfoLike[]) | undefined;
+  readonly load?: ((name: string) => { readonly meta?: { readonly title?: string }; readonly messages?: readonly unknown[] }) | undefined;
 }
 
 export interface AgentHarnessLearningCuratorArgs {
@@ -50,10 +50,10 @@ export interface LearningConsolidationDiff {
 }
 
 export interface LearningConsolidationFields {
-  readonly detail?: string;
-  readonly description?: string;
-  readonly tags?: readonly string[];
-  readonly triggers?: readonly string[];
+  readonly detail?: string | undefined;
+  readonly description?: string | undefined;
+  readonly tags?: readonly string[] | undefined;
+  readonly triggers?: readonly string[] | undefined;
 }
 
 export interface LearningConsolidationPlan {
@@ -61,7 +61,7 @@ export interface LearningConsolidationPlan {
   readonly duplicateIds: readonly string[];
   readonly sharedKey: string;
   /** Duplicates that were already staged as stale; they stay in the plan so they can be deleted, and are never staged again. */
-  readonly staleDuplicateIds?: readonly string[];
+  readonly staleDuplicateIds?: readonly string[] | undefined;
   readonly diffs: readonly LearningConsolidationDiff[];
   readonly staleRoutes: readonly string[];
   readonly deleteRoutes: readonly string[];
@@ -69,9 +69,9 @@ export interface LearningConsolidationPlan {
 }
 
 export interface LearningCandidate {
-  readonly operationProvenance?: 'classic';
-  readonly semanticAssessment?: 'not-evaluated';
-  readonly judgmentDecisionIds?: readonly string[];
+  readonly operationProvenance?: 'classic' | undefined;
+  readonly semanticAssessment?: 'not-evaluated' | undefined;
+  readonly judgmentDecisionIds?: readonly string[] | undefined;
   readonly id: string;
   readonly label: string;
   readonly domain: LearningCandidateDomain;
@@ -81,22 +81,22 @@ export interface LearningCandidate {
   readonly reason: string;
   readonly next: string;
   readonly scores: LearningScores | null;
-  readonly reviewState?: string;
-  readonly enabled?: boolean;
-  readonly active?: boolean;
-  readonly confidence?: number;
-  readonly proposalTarget?: LearningProposalTarget;
-  readonly proposalFields?: Readonly<Record<string, string>>;
-  readonly missingRequirements?: readonly string[];
+  readonly reviewState?: string | undefined;
+  readonly enabled?: boolean | undefined;
+  readonly active?: boolean | undefined;
+  readonly confidence?: number | undefined;
+  readonly proposalTarget?: LearningProposalTarget | undefined;
+  readonly proposalFields?: Readonly<Record<string, string>> | undefined;
+  readonly missingRequirements?: readonly string[] | undefined;
   readonly inspectRoute: string;
   readonly modelRoute: string;
-  readonly reviewRoute?: string;
-  readonly staleRoute?: string;
-  readonly createRoute?: string;
-  readonly deleteRoute?: string;
-  readonly cleanupRoutes?: readonly string[];
-  readonly rollbackRoutes?: readonly string[];
-  readonly consolidation?: LearningConsolidationPlan;
+  readonly reviewRoute?: string | undefined;
+  readonly staleRoute?: string | undefined;
+  readonly createRoute?: string | undefined;
+  readonly deleteRoute?: string | undefined;
+  readonly cleanupRoutes?: readonly string[] | undefined;
+  readonly rollbackRoutes?: readonly string[] | undefined;
+  readonly consolidation?: LearningConsolidationPlan | undefined;
 }
 
 export interface LearningConsolidationBatchCandidate {
@@ -105,17 +105,17 @@ export interface LearningConsolidationBatchCandidate {
   readonly domain: LearningCandidateDomain;
   readonly survivorId: string;
   readonly duplicateCount: number;
-  readonly duplicateIds?: readonly string[];
+  readonly duplicateIds?: readonly string[] | undefined;
   readonly diffFields: readonly string[];
   readonly detailRoute: string;
   readonly previewRoute: string;
   readonly stalePhaseRoute: string;
   readonly deletePhaseRoute: string;
-  readonly staleRoute?: string;
-  readonly deleteRoute?: string;
-  readonly staleRoutes?: readonly string[];
-  readonly deleteRoutes?: readonly string[];
-  readonly rollbackRoutes?: readonly string[];
+  readonly staleRoute?: string | undefined;
+  readonly deleteRoute?: string | undefined;
+  readonly staleRoutes?: readonly string[] | undefined;
+  readonly deleteRoutes?: readonly string[] | undefined;
+  readonly rollbackRoutes?: readonly string[] | undefined;
 }
 
 export interface LearningConsolidationBatchPlan {

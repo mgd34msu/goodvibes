@@ -1,6 +1,6 @@
 import { withResearchCatalog, rankResearchRecords, researchRouteString as routeString, researchSourcePriority } from './agent-harness-research-catalog-source.ts';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
-import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import {

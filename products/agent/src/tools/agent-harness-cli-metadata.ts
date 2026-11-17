@@ -7,7 +7,7 @@ import {
   parseGoodVibesCli,
 } from '../cli/parser.ts';
 import { describeCliCommandPolicy } from './agent-harness-metadata.ts';
-import { captureCatalogData, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData, rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { shellSplit } from '@goodvibes-jev/engine/platform/platform/utils';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 

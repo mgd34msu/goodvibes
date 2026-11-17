@@ -1,6 +1,6 @@
 import { captureModelArtifactClockSource } from './agent-harness-model-reading-source.ts';
 import { captureCatalogPath, withCapturedResearchCatalog, rankResearchRecords, researchCheckpointRoute, researchRouteString as routeString, researchSourcePriority } from './agent-harness-research-catalog-source.ts';
-import { captureCatalogSnapshot } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogSnapshot } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { observeImportFile, assertImportFileCurrent } from '@goodvibes-jev/engine/platform/platform/config';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -18,7 +18,7 @@ import {
   type AgentResearchSourceRecord,
 } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { browserControlPosture, type BrowserControlPosture } from './agent-harness-browser-control.ts';
-import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import { isCertifiedResearchLiveRecord, researchLiveReadModelSnapshot } from './agent-harness-research-live-read-models.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';

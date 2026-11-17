@@ -1,5 +1,5 @@
 import { isHarnessSettingsQuery } from './agent-harness-settings-catalog.ts';
-import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { createHarnessCatalogInputProjector, forwardHarnessCatalogCall, protectHarnessCatalogTool } from './agent-harness-catalog-ingress.ts';
 import { createPreferredSettingsProjector, executeAdmittedPreferredSettings, settingsThrownFailure } from './agent-settings-admission.ts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';

@@ -1,5 +1,5 @@
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
-import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { browserDeviceCatalogMatches } from './agent-harness-browser-device-readings.ts';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { captureCatalogNativeFacts, withModelReadingSource } from './agent-harness-model-reading-source.ts';

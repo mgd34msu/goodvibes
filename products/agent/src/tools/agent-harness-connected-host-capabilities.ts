@@ -1,4 +1,4 @@
-import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 /**
  * agent-harness-connected-host-capabilities.ts, the connected-host capability

@@ -1,17 +1,18 @@
 import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
 import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
-import type { AgentNoteRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { type AgentResearchRunRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { acquireLearningCuratorSource, type LearningRecord, type LearningCuratorSource, type LearningCandidateCollection, type LearningCuratorNativeContext, type LearningSessionRecord, type LearningWorkItem as WorkPlanItem } from './agent-harness-learning-curator-source.ts';
-import { readLearningDuplicatePair, readLearningGrade, readLearningProposalTarget, readLearningMemoryClass, readLearningSurvivor } from './agent-harness-learning-curator-readings.ts';
-import { captureCatalogData, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { AgentNoteRecord } from './note-registry.js';
+import { type AgentResearchRunRecord } from './research-run-registry.js';
+import { previewHarnessText } from './preview-text.js';
+import { acquireLearningCuratorSource, type LearningRecord, type LearningCuratorSource, type LearningCandidateCollection, type LearningCuratorNativeContext, type LearningSessionRecord, type LearningWorkItem as WorkPlanItem } from './learning-curator-source.js';
+import { readLearningDuplicatePair, readLearningGrade, readLearningProposalTarget, readLearningMemoryClass, readLearningSurvivor } from './learning-curator-readings.js';
+import { captureCatalogData } from './catalog-data.js';
+import type { CatalogRankingOptions } from './catalog-ranking.js';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { LearningCandidate, LearningCandidateDraft, LearningProposalTarget, VibeCandidateKind, LocalLearningCandidateDomain } from './agent-harness-learning-curator-types.ts';
-import { candidateBase, isMemoryPromptEligible, isReviewed, MIN_PROMPT_MEMORY_CONFIDENCE, learningPromotionReference, recordedPromotionReferences, localRegistryModelRoute, localRegistryRoute, missingRequirementCount } from './agent-harness-learning-curator-common.ts';
-import { CONSOLIDATION_DOMAINS, consolidationCandidateForGroup, consolidationGroups, duplicatePairKey, liveGroupMembers, shortlistDuplicatePairs, survivorGroupKey } from './agent-harness-learning-curator-consolidation.ts';
-import { learningContentHash, type StoredLearningGrade, type StoredLearningProposal } from './agent-harness-learning-curation-store.ts';
+import type { LearningCandidate, LearningCandidateDraft, LearningProposalTarget, VibeCandidateKind, LocalLearningCandidateDomain } from './learning-curator-types.js';
+import { candidateBase, isMemoryPromptEligible, isReviewed, MIN_PROMPT_MEMORY_CONFIDENCE, learningPromotionReference, recordedPromotionReferences, localRegistryModelRoute, localRegistryRoute, missingRequirementCount } from './learning-curator-common.js';
+import { CONSOLIDATION_DOMAINS, consolidationCandidateForGroup, consolidationGroups, duplicatePairKey, liveGroupMembers, shortlistDuplicatePairs, survivorGroupKey } from './learning-curator-consolidation.js';
+import { learningContentHash, type StoredLearningGrade, type StoredLearningProposal } from './learning-curation-store.js';
 function captureCandidate(): LearningCandidateDraft {
   return {
     id: 'capture:reviewed-lesson',

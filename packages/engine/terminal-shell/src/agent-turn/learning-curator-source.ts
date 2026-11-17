@@ -1,21 +1,23 @@
 import type { MemoryAddOptions } from '@goodvibes-jev/engine/platform/platform/state';
-import type { AgentPersonaCreateInput, AgentPersonaUpdateInput } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import type { AgentSkillCreateInput, AgentSkillUpdateInput } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import type { AgentRoutineCreateInput, AgentRoutineUpdateInput } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentNoteRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentResearchRunRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { summarizeMemoryItem, summarizeNoteItem, summarizePersonaItem, summarizeSkillItem, summarizeSkillBundleItem, summarizeRoutineItem } from '../input/agent-workspace-local-library-snapshot.ts';
-import type { AgentWorkspaceLocalLibraryItem } from '../input/agent-workspace-types.ts';
-import type { CommandContext } from '../input/command-registry.ts';
-import type { MemoryApi, ProjectWorkPlanTask } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { AgentPersonaCreateInput, AgentPersonaUpdateInput } from './persona-registry.js';
+import type { AgentSkillCreateInput, AgentSkillUpdateInput } from './skill-registry.js';
+import type { AgentRoutineCreateInput, AgentRoutineUpdateInput } from './routine-registry.js';
+import { AgentNoteRegistry } from './note-registry.js';
+import { AgentPersonaRegistry } from './persona-registry.js';
+import { AgentSkillRegistry } from './skill-registry.js';
+import { AgentRoutineRegistry } from './routine-registry.js';
+import { AgentResearchRunRegistry } from './research-run-registry.js';
+import { summarizeMemoryItem, summarizeNoteItem, summarizePersonaItem, summarizeSkillItem, summarizeSkillBundleItem, summarizeRoutineItem } from './local-library-items.js';
+import type { AgentWorkspaceLocalLibraryItem } from './local-library-items.js';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import type { MemoryApi, ProjectWorkPlan, ProjectWorkPlanTask } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogData, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { discoverVibeFiles } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import type { LocalLearningCandidateDomain, LearningCandidate } from './agent-harness-learning-curator-types.ts';
-import { LearningCurationStore } from './agent-harness-learning-curation-store.ts';
+import { captureCatalogData } from './catalog-data.js';
+import type { CatalogRankingOptions } from './catalog-ranking.js';
+import { discoverVibeFiles } from './vibe-file.js';
+import type { LocalLearningCandidateDomain, LearningCandidate } from './learning-curator-types.js';
+import { LearningCurationStore } from './learning-curation-store.js';
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 
 /** A work-plan task as the curator reads it: the row's fields under the record id the readings use. */
@@ -74,13 +76,18 @@ export interface LearningRecord {
   readonly record: unknown;
 }
 
+/**
+ * What the curator reads from the turn it runs in: the Agent's command context
+ * in its own process, or a session the daemon hosts for the Agent (shell
+ * paths and memory only; no work plan or saved-session list there).
+ */
 export interface LearningCuratorNativeContext {
-  readonly workspace?: Pick<CommandContext['workspace'], 'shellPaths'> & { readonly workPlan?: Pick<NonNullable<CommandContext['workspace']['workPlan']>, 'snapshotNow'> };
-  readonly clients?: { readonly agentKnowledgeApi?: { readonly memory?: Pick<MemoryApi, 'getAll'> } };
+  readonly workspace?: { readonly shellPaths: ShellPathService; readonly workPlan?: Pick<ProjectWorkPlan, 'snapshotNow'> | undefined } | undefined;
+  readonly clients?: { readonly agentKnowledgeApi?: { readonly memory?: Pick<MemoryApi, 'getAll'> | undefined } | undefined } | undefined;
   readonly session?: {
-    readonly sessionManager?: Pick<NonNullable<CommandContext['session']['sessionManager']>, 'list' | 'load'>;
-    readonly runtime?: Pick<CommandContext['session']['runtime'], 'sessionId'>;
-  };
+    readonly sessionManager?: Pick<SessionManager, 'list' | 'load'> | undefined;
+    readonly runtime?: { readonly sessionId: string } | undefined;
+  } | undefined;
 }
 
 type SessionListEntry = ReturnType<NonNullable<NonNullable<LearningCuratorNativeContext['session']>['sessionManager']>['list']>[number];

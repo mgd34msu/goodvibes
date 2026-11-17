@@ -3,7 +3,7 @@ import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/g
 import { remotePublisherOutcomeKind, remotePublisherSchemaStatus } from '@goodvibes-jev/engine/platform/platform/routing';
 import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { personalOpsEntry } from './agent-harness-personal-ops-source.ts';
 

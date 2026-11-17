@@ -1,7 +1,7 @@
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { operatorContractMethods as contractMethodIndex, operatorMethodIsReadOnly, type OperatorContractMethodEntry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { CATALOG_QUERIES } from './agent-harness-catalog-filters.ts';
 import { catalogEnvelope, catalogFilters } from './agent-harness-tool-utils.ts';
 import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn';

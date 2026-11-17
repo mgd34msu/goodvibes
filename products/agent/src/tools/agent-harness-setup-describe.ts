@@ -1,5 +1,5 @@
 import { captureCatalogReadRequest, selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
-import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { rankStatefulCatalog } from './agent-harness-stateful-catalog-source.ts';
 import type { OnboardingStep1CapabilityItem } from '../runtime/onboarding/index.ts';
 import type { AgentSetupWizard } from '../agent/setup-wizard.ts';

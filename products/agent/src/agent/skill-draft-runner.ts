@@ -1,9 +1,9 @@
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { readJsonStore, runStoreFileUpdateSync, writeJsonStore, type JsonStoreSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { CatalogRankingOptions } from '../tools/agent-harness-catalog-ranking.ts';
-import { type LearningCandidateCollection, type LearningCuratorNativeContext } from '../tools/agent-harness-learning-curator-source.ts';
-import { buildLearningCandidates, assertLearningCandidateCollection } from '../tools/agent-harness-learning-curator-proposals.ts';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { type LearningCandidateCollection, type LearningCuratorNativeContext } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { buildLearningCandidates, assertLearningCandidateCollection } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentSkillRegistry, skillStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { proposeSkillDrafts } from './skill-draft-proposer.ts';
 

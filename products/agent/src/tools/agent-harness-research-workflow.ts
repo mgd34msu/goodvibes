@@ -13,7 +13,7 @@ import {
   type AgentResearchSourceRecord,
 } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { browserControlPosture, type BrowserControlPosture } from './agent-harness-browser-control.ts';
-import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import {
   isCertifiedResearchLiveRecord,

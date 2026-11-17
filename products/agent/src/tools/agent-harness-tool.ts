@@ -1,4 +1,4 @@
-import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { captureAgentToolDefinition } from './tool-definition-compaction.ts';
 import { resolveSetupSmokeNativeEvidence } from './agent-setup-smoke-reference.ts';
 import { captureTranscriptSource } from '../input/commands/transcript-reading.ts';
@@ -20,8 +20,8 @@ import { autonomyQueueSummary, describeAutonomyQueueItem } from './agent-harness
 import { describeHarnessChannel, describeHarnessChannelDeliveries, describeHarnessChannelSetupGuide, describeHarnessChannelTriage, listHarnessChannels } from './agent-harness-channel-metadata.ts';
 import { blockedHarnessCliCommandTokens, describeHarnessCliCommand, listHarnessCliCommands, totalHarnessCliCommands } from './agent-harness-cli-metadata.ts';
 import { describeHarnessCommand, searchHarnessCommands } from './agent-harness-command-catalog.ts';
-import { describeLearningCandidate, learningCuratorSummary } from './agent-harness-learning-curator.ts';
-import { runLearningCurationPass } from './agent-harness-learning-curator-proposals.ts';
+import { describeLearningCandidate, learningCuratorSummary } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { runLearningCurationPass } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { runAutoPromoter, assertAutoPromoteResultCurrent, completedPromotionWrites } from './agent-harness-learning-auto-promote.ts';
 import { runSkillDraftProposer, assertSkillDraftRunResultCurrent } from '../agent/skill-draft-runner.ts';
 import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';

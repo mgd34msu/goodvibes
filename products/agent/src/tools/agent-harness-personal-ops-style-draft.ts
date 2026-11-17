@@ -3,7 +3,7 @@ import { composeDraftReply, extractStyleProfile, type StyleReplyMessage, type St
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { assertJudgmentInput, retainStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { PersonalOpsLiveRecord, PersonalOpsWorkflow } from './agent-harness-personal-ops-types.ts';
 
 export const STYLE_DRAFT_RECORD_ID = 'inbox-style-reply-draft';

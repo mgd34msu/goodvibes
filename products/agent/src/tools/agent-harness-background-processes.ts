@@ -8,7 +8,7 @@ import { homedir } from 'node:os';
 import { mapLimit } from '@goodvibes-jev/judgment';
 import { redactSensitiveData, resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
-import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { processClassificationOptions, spawnBackgroundProcess, type ProcessClassificationOptions } from './agent-harness-process-launch.ts';
 import { detachedProcessLogPath, findDetachedProcess, forgetDetachedProcess, listDetachedProcesses, readDetachedProcessLog, recordDetachedProcess, stopDetachedProcess,
   type DetachedProcessRecord } from './agent-harness-detached-processes.ts';

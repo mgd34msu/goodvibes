@@ -5,6 +5,9 @@ import type { AgentWorkspaceVoiceMediaReadiness } from './agent-workspace-voice-
 import type { AgentBehaviorDiscoverySnapshot } from '../agent/behavior-discovery-summary.ts';
 import type { AgentSetupWizard } from '../agent/setup-wizard.ts';
 import type { AgentWorkspaceEditorKind, AgentWorkspaceLocalEditorKind } from './agent-workspace-editor-kinds.ts';
+import type { AgentWorkspaceLocalLibraryItem } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+
+export type { AgentWorkspaceLocalLibraryItem };
 
 export const AGENT_WORKSPACE_MODAL_NAME = 'agentWorkspace';
 
@@ -168,30 +171,6 @@ export interface AgentWorkspaceActionResult {
   readonly safety?: AgentWorkspaceAction['safety'];
   /** Lines to display when kind is 'recap'. */
   readonly lines?: readonly string[];
-}
-
-export interface AgentWorkspaceLocalLibraryItem {
-  readonly id: string;
-  readonly name: string;
-  readonly description: string;
-  readonly reviewState: string;
-  readonly source: string;
-  readonly tags: readonly string[];
-  readonly triggers: readonly string[];
-  readonly scope?: string;
-  readonly cls?: string;
-  readonly confidence?: number;
-  readonly active?: boolean;
-  readonly enabled?: boolean;
-  readonly requirementCount?: number;
-  readonly missingRequirementCount?: number;
-  readonly missingRequirements?: readonly string[];
-  readonly startCount?: number;
-  /** Memory-only: whether this record currently clears the prompt-injection recall floor, per describeMemoryPromptEligibility. */
-  readonly promptEligible?: boolean;
-  /** Memory-only: the honest, per-record reason from describeMemoryPromptEligibility, the same wording source prompt-context-receipts.ts and agent-harness-prompt-context.ts use. */
-  readonly promptEligibilityReason?: string;
-  readonly temporalStatus?: 'active' | 'pending' | 'expired'; // memoryRecordTemporalStatus; pending/expired stay stored, just not prompt-injected
 }
 
 export interface AgentWorkspaceRecentReviewerHandoffArtifact {

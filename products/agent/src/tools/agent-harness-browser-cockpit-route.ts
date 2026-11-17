@@ -1,4 +1,4 @@
-import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { CommandContext } from '../input/command-registry.ts';
 import { resolveRuntimeEndpointBinding } from '../cli/endpoints.ts';
 import { readOnboardingCompletionMarker } from '../runtime/onboarding/index.ts';

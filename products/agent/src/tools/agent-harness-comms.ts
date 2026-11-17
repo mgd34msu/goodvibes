@@ -1,7 +1,7 @@
 import type { CommandContext } from '../input/command-registry.ts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { dirname } from 'node:path';
 import { captureHarnessLocalEffect } from './agent-harness-local-effect.ts';
 import { captureAgentExportPath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';

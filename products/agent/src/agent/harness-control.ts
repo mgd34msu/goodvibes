@@ -14,7 +14,7 @@ import {
   isSecretReferenceValue,
   persistSecretBackedConfigValue,
 } from '../config/secret-config.ts';
-import { rankHarnessCatalog, captureCatalogData, type CatalogRankingOptions } from '../tools/agent-harness-catalog-ranking.ts';
+import { rankHarnessCatalog, captureCatalogData, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { settingDomainForPhrase } from '../config/settings-search-vocabulary.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import {

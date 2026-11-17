@@ -1,4 +1,4 @@
-import { type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { protectPersonalOpsData } from './agent-harness-personal-ops-source.ts';
 import { readRecord } from './agent-harness-model-routing-utils.ts';
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';

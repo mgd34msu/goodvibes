@@ -1,5 +1,5 @@
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { contractMethodsForAutonomy } from './agent-harness-personal-ops-discovery.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { buildAgentWorkspaceRoutineCounters } from '../input/agent-workspace-snapshot.ts';

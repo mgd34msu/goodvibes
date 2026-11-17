@@ -6,7 +6,7 @@ import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platfor
 import { redactSensitiveData } from '@goodvibes-jev/engine/platform/platform/utils';
 import { AgentResearchRunRegistry, researchRunStorePath, type AgentResearchRunRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { summarizeResearchRunItem } from '../input/agent-workspace-local-library-snapshot.ts';
-import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { modelReadingServicePath } from './agent-harness-model-reading-source.ts';
 import { capturePersonalOpsData } from './agent-harness-personal-ops-source.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';

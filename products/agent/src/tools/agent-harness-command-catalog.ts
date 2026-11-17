@@ -1,7 +1,7 @@
 import type { CommandRegistry, SlashCommand } from '../input/command-registry.ts';
 import { parseSlashCommand } from '../input/slash-command-parser.ts';
 import { describeCommandPolicy } from './agent-harness-metadata.ts';
-import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export interface AgentHarnessCommandCatalogArgs {

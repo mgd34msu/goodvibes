@@ -10,7 +10,7 @@ import { requirePlatform, requireShellPaths } from '../input/commands/runtime-se
 import { browserControlPosture, type BrowserControlPosture } from './agent-harness-browser-control.ts';
 import { browserDeviceCatalogMatches } from './agent-harness-browser-device-readings.ts';
 import { captureCatalogNativeFacts, withModelReadingSource } from './agent-harness-model-reading-source.ts';
-import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import { deviceLiveReadModelSnapshot, deviceLiveRecordsFor, SENSOR_DEVICE_CAPABILITY_IDS, type DeviceLiveCapabilityRecord } from './agent-harness-device-live-read-models.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';

@@ -1,4 +1,4 @@
-import { captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { captureCatalogReadRequest, selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { captureStatefulCatalogRequest } from './agent-harness-stateful-catalog-source.ts';
 import { captureModelReadingSnapshotGuard, withModelReadingSource } from './agent-harness-model-reading-source.ts';

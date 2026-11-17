@@ -3,7 +3,7 @@ import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import { randomUUID } from 'node:crypto';
 import type { Ranked } from '@goodvibes-jev/judgment';
-import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';

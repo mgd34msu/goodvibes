@@ -1,4 +1,4 @@
-import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { EffectResult } from './agent-harness-tool-utils.ts';
 import { harnessDisplayPath } from './agent-harness-display-path.ts';
 import type { Ranked } from '@goodvibes-jev/judgment';

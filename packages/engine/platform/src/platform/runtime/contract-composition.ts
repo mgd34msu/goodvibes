@@ -176,13 +176,22 @@ export async function prepareRouteBenchmarks(
   await readRouteBenchmarkSnapshot(benchmarks, models, signal);
 }
 
-/** The contract runner's planner, with a separate stable benchmark snapshot per plan. */
+/**
+ * The contract runner's planner, with a separate stable benchmark snapshot per plan.
+ * `catalogReady` is awaited before each plan: a contract resumed at start-up
+ * routes its next group while the providers from the home's provider files may
+ * still be loading, and a route read then finds none of them (its own model
+ * among them) and fails the contract.
+ */
 export function createBenchmarkRoutePlanner(
   deps: Omit<RoutePlannerDeps, 'benchmarkFor' | 'prepareBenchmarks'>,
   benchmarks: RouteBenchmarks,
+  catalogReady?: () => Promise<void>,
 ): RoutePlanner {
   return {
-    planRoute(request) {
+    async planRoute(request) {
+      await catalogReady?.();
+      request.signal?.throwIfAborted();
       // Routes share tier readings but never the score map: another concurrent
       // plan can prepare a newer generation while this plan is still awaiting.
       let scores: ReadonlyMap<ModelDefinition, number | null> = new Map();
@@ -283,7 +292,7 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
     catalog: options.providerRegistry,
     tiers: options.providerRegistry.modelTiers,
     providerHealth: routeProviderHealth(options.providerRegistry),
-  }, options.providerRegistry.benchmarks);
+  }, options.providerRegistry.benchmarks, () => options.providerRegistry.ready());
   const runner = createContractRunner({
     judgmentLog: options.judgmentLog,
     readOwnerEvidence: options.surfaceRoot || options.ownerConversationMessages

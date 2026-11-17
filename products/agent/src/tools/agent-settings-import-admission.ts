@@ -6,7 +6,7 @@ import { assertCurrentToolInvocation, assertProjectionExecution, commitCurrentTo
 import { assertPreparedConfigWriteRoute, resolvePreparedConfigWriteRoute, type ConfigKey, type PreparedConfigMutationRequest,
   type PreparedConfigMutationFacts, type ConfigWriteRoute, type SecretImportEntry, isSecretBearingConfigKey,
   captureRemoteSettingsImportPrecondition, assertRemoteSettingsImportPrecondition, inspectRemoteSettingsImportPrecondition,
-  assertCompletedRemoteSettingsImportPrecondition, type RemoteSettingsImportPrecondition } from '@goodvibes-jev/engine/platform/platform/config';
+  assertCompletedRemoteSettingsImportPrecondition, describeSettingsReceiptFailure, type RemoteSettingsImportPrecondition } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveWakeEnablementCompanion } from '@goodvibes-jev/engine/platform/platform/voice';
 import { AGENT_WAKE_SURFACE } from '../audio/wake-surface.ts';
 import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn/protected-research-report';
@@ -234,5 +234,5 @@ export function importReceiptResult(
     verifiedInOwningStore: verified, completedPaths: receipt.completedPaths, ...(receipt.uncertainPath ? { uncertainPath: receipt.uncertainPath } : {}) }),
     ...(!verified ? { error: receipt.status === 'committed'
       ? 'The import was committed but could not be confirmed in the owning stores. It was not retried; read the imported settings before relying on them.'
-      : settingsOutcomeError(receipt.status, refused, refusalReason, 'import') } : {}) };
+      : describeSettingsReceiptFailure(receipt, 'import') ?? settingsOutcomeError(receipt.status, refused, refusalReason, 'import') } : {}) };
 }

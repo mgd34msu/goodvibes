@@ -36,8 +36,8 @@ import { logger, summarizeError } from '../../utils/index.js';
 import type { DaemonVerbCaller } from './daemon-verbs.js';
 import {
   applyRemoteSettingsPrecondition, assertRemoteSettingsPrecondition, inspectRemoteSettingsPrecondition,
-  type RemoteSettingsPrecondition, type RemoteSettingsPreconditionFacts,
-  type SettingsPreconditionRequest, type SettingsPreconditionReceipt,
+  type RemoteSettingsPrecondition, type RemoteSettingsPreconditionFacts, type RemoteSettingsReceipt,
+  type SettingsPreconditionRequest,
 } from '../../config/settings-precondition-client.js';
 import { assertRemoteSettingsImportPrecondition, inspectRemoteSettingsImportPrecondition,
   type RemoteSettingsImportPrecondition, type RemoteSettingsImportPreconditionFacts, type SettingsImportPreconditionRequest,
@@ -48,7 +48,8 @@ export interface PreparedDaemonSettingsClient {
   capture(request: SettingsPreconditionRequest): Promise<RemoteSettingsPrecondition>;
   inspect(handle: RemoteSettingsPrecondition): RemoteSettingsPreconditionFacts;
   assertCurrent(handle: RemoteSettingsPrecondition): void;
-  apply(handle: RemoteSettingsPrecondition): Promise<SettingsPreconditionReceipt>;
+  /** The receipt, with the daemon's or transport's refusal (`failure`) and `receiptUnreadable` when the answer explains itself. */
+  apply(handle: RemoteSettingsPrecondition): Promise<RemoteSettingsReceipt>;
 }
 export interface PreparedDaemonSettingsImportClient {
   capture(request: SettingsImportPreconditionRequest, restriction?: RemoteSettingsImportRestriction): Promise<RemoteSettingsImportPrecondition>;

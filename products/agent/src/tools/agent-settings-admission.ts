@@ -9,7 +9,7 @@ import { assertCurrentToolInvocation, assertProjectionExecution, claimCurrentToo
   commitCurrentToolSettingsPlan, currentToolSettingsPresentation, ToolInputProjectionError,
   type ToolInputProjector, type ToolRegistry, type ToolPreparedSettingsMutation } from '@goodvibes-jev/engine/platform/platform/tools';
 import { assertPreparedConfigWriteRoute, resolvePreparedConfigWriteRoute, captureRemoteSettingsPrecondition,
-  assertRemoteSettingsPrecondition, inspectRemoteSettingsPrecondition, applyRemoteSettingsPrecondition, isSecretBearingConfigKey,
+  assertRemoteSettingsPrecondition, inspectRemoteSettingsPrecondition, applyRemoteSettingsPrecondition, isSecretBearingConfigKey, describeSettingsReceiptFailure,
   type ConfigKey, type ConfigWriteRoute, type PreparedConfigMutationFacts,
   type PreparedConfigMutationReceipt, type RemoteSettingsPrecondition } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandContext } from '../input/command-registry.ts';
@@ -250,7 +250,7 @@ export async function executeAdmittedPreferredSettings(args: Record<string, unkn
     ...(receipt.uncertainPath ? { uncertainPath: receipt.uncertainPath } : {}),
     ...(unverified ? { warning: unverified } : {}) }),
     ...(unverified ? { warnings: [unverified] } : {}),
-    ...(receipt.status !== 'committed' ? { error: settingsOutcomeError(receipt.status, refused, refusalReason) } : {}) };
+    ...(receipt.status !== 'committed' ? { error: describeSettingsReceiptFailure(receipt) ?? settingsOutcomeError(receipt.status, refused, refusalReason) } : {}) };
 }
 
 const SETTINGS_COMMITTED_UNVERIFIED = 'The owner reports the change as committed, but it could not be read back from the owning store, so it is not confirmed. Read the setting before telling the user it is set.';

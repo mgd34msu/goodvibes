@@ -8,6 +8,7 @@ import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-key
 import { agentSettingsWriteRefusal } from '../../gate/policy/agent-settings-refusals.js';
 import { configKeyScope, describeConfigOwnership } from '../../config/config-ownership.js';
 import { captureOwnedJson } from '../../gate/judgment-input.js';
+import { describeSettingsReceiptFailure } from '../../config/settings-owner-wire.js';
 import { applyRemoteSettingsPrecondition, assertRemoteSettingsPrecondition, captureRemoteSettingsPrecondition,
   inspectRemoteSettingsPrecondition, resolvePreparedConfigWriteRoute, assertPreparedConfigWriteRoute, type RemoteSettingsPrecondition } from '../../config/settings-precondition-client.js';
 import type { ToolExecuteOptions } from '../../types/tools.js';
@@ -202,7 +203,7 @@ export async function executeAdmittedAgentSettings(args: Record<string, unknown>
     persistedTo: capture.source, appliedBy: capture.remote ? 'daemon' : 'local', owner: configKeyScope(capture.key),
     ownership: describeConfigOwnership(capture.key), verifiedInOwningStore: verified,
     completedPaths: receipt.completedPaths, ...(receipt.uncertainPath ? { uncertainPath: receipt.uncertainPath } : {}) }),
-    ...(receipt.status !== 'committed' ? { error: settingsOutcomeError(receipt.status, refused) } : {}) };
+    ...(receipt.status !== 'committed' ? { error: describeSettingsReceiptFailure(receipt) ?? settingsOutcomeError(receipt.status, refused) } : {}) };
 }
 
 /** What a caller may do next depends on whether anything may have been written. */

@@ -29,6 +29,24 @@ export function settingsOwnerRefusal(init: Parameters<typeof refusal>[0], cause?
   return error;
 }
 
+/**
+ * What an apply receipt's own wire fields say, in one sentence a person or a
+ * model can act on: for a success answer whose receipt could not be read, that
+ * the daemon accepted the write and how to confirm it; otherwise the daemon's
+ * or the transport's refusal (unreachable, not authorised, version mismatch, a
+ * named precondition refusal) with its next step. Undefined when the receipt
+ * carries neither, so the caller words the status itself.
+ */
+export function describeSettingsReceiptFailure(receipt: object, subject: 'change' | 'import' = 'change'): string | undefined {
+  const fields = receipt as { readonly failure?: Refusal; readonly receiptUnreadable?: true };
+  if (fields.receiptUnreadable === true) {
+    const what = subject === 'import' ? 'the imported settings' : 'the setting';
+    const why = fields.failure ? ` (${fields.failure.reason.trim().replace(/\.+$/, '')})` : '';
+    return `The daemon accepted this settings ${subject} (it answered success), but this client could not read its receipt${why}, so which files were written is not confirmed. It was not retried; read ${what} to confirm before reporting it as set${fields.failure?.next.includes(UPDATE_OLDER) ? `, and ${UPDATE_OLDER.charAt(0).toLowerCase()}${UPDATE_OLDER.slice(1)}` : ''}.`;
+  }
+  return fields.failure ? formatRefusal(fields.failure) : undefined;
+}
+
 /** The refusal a settings client threw, when it is one. */
 export function settingsOwnerRefusalOf(error: unknown): Refusal | undefined {
   return error instanceof RefusalError ? error.refusal : undefined;

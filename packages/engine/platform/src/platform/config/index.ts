@@ -425,7 +425,8 @@ export type { AtRestCipher, DaemonCredentialStore } from './daemon-credential-st
 // Prepared remote SETTINGS substrate. No capture/reference conveys admission.
 export { captureRemoteSettingsPrecondition, inspectRemoteSettingsPrecondition, assertRemoteSettingsPrecondition,
   applyRemoteSettingsPrecondition, resolvePreparedConfigWriteRoute, assertPreparedConfigWriteRoute } from './settings-precondition-client.js';
-export type { RemoteSettingsPrecondition, RemoteSettingsPreconditionFacts, SettingsPreconditionRequest, SettingsPreconditionReceipt } from './settings-precondition-client.js';
+export type { RemoteSettingsPrecondition, RemoteSettingsPreconditionFacts, RemoteSettingsReceipt, SettingsPreconditionRequest, SettingsPreconditionReceipt } from './settings-precondition-client.js';
+export { describeSettingsReceiptFailure } from './settings-owner-wire.js';
 export { captureRemoteSettingsImportPrecondition, inspectRemoteSettingsImportPrecondition, assertRemoteSettingsImportPrecondition,
   applyRemoteSettingsImportPrecondition, assertCompletedRemoteSettingsImportPrecondition } from './settings-import-precondition-client.js';
 export type { RemoteSettingsImportPrecondition, RemoteSettingsImportPreconditionFacts, RemoteSettingsImportRestriction,

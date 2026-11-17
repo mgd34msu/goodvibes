@@ -15,7 +15,6 @@ export interface TerminalCommandContextFactories<Options, Shell, Session, Provid
  * Capture the product bindings before any factory runs, then compose once in
  * lifecycle order. The capture is a copy of every option, so a dependency added
  * to the options type reaches the factories with no second list to keep.
- * A key list in the middle position is still accepted and is not needed.
  */
 export function composeTerminalCommandContext<
   Options extends object,
@@ -30,13 +29,8 @@ export function composeTerminalCommandContext<
   Ops,
 >(
   options: Options,
-  keysOrFactories:
-    | readonly (keyof Options)[]
-    | TerminalCommandContextFactories<Options, Shell, Session, Provider, Workspace, Platform, Extensions, Clients, Actions, Ops>,
-  legacyFactories?: TerminalCommandContextFactories<Options, Shell, Session, Provider, Workspace, Platform, Extensions, Clients, Actions, Ops>,
+  factories: TerminalCommandContextFactories<Options, Shell, Session, Provider, Workspace, Platform, Extensions, Clients, Actions, Ops>,
 ) {
-  const factories = Array.isArray(keysOrFactories) ? legacyFactories : keysOrFactories as Exclude<typeof keysOrFactories, readonly unknown[]>;
-  if (!factories) throw new Error('composeTerminalCommandContext needs the section factories.');
   const captured: Options = { ...options };
   const shell = factories.shell(captured);
   const session = factories.session(captured);

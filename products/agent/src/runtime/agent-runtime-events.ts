@@ -4,7 +4,7 @@ import { registerHostRuntimeEvents, type HostRuntimeMessageRouter } from '@goodv
 import type { ConversationFollowUpItem } from '@goodvibes-jev/engine/platform/platform/core';
 import type { AgentManager, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
-import type { createDomainDispatch } from './store/index.ts';
+import type { createDomainDispatch } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 
 export type AgentRuntimeMessageRouter = HostRuntimeMessageRouter;
 

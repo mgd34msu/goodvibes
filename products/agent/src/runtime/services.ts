@@ -64,7 +64,7 @@ import { FileUndoManager } from '@goodvibes-jev/engine/platform/platform/state';
 import { MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import { MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
-import type { DomainDispatch, RuntimeStore } from './store/index.ts';
+import type { DomainDispatch, RuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { DistributedRuntimeManager } from '@/runtime/index.ts';
 import type { RemoteBackendHost } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { RemoteRunnerRegistry, RemoteSupervisor } from '@/runtime/index.ts';

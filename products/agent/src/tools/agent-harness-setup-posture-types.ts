@@ -207,7 +207,8 @@ export interface SetupHandoffCard {
 export interface SetupRepairDecision {
   readonly id: string;
   readonly label: string;
-  readonly status: 'inspect-first' | 'ready' | 'confirmed-repair-available' | 'user-run-bootstrap';
+  /** `owner-action`: only the owner can make this repair (a command the model cannot run), so checking again changes nothing. */
+  readonly status: 'inspect-first' | 'ready' | 'confirmed-repair-available' | 'user-run-bootstrap' | 'owner-action';
   readonly effect: SetupHandoffEffect;
   readonly modelRoute: string;
   readonly userRoute: string;

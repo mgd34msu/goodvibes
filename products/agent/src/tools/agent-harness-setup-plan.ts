@@ -10,7 +10,7 @@ import { sudoExecutionPosture } from './agent-harness-sudo-posture.ts';
 import { agentHarnessVibeHealth } from './agent-harness-vibe-health.ts';
 import { capabilityById, collectSnapshot, servicePostureFailure, setupPlanStatusForCapability, setupProviderSignalIds } from './agent-harness-setup-posture-utils.ts';
 import { browserControlSignals, localModelSetupNextAction, localModelSetupReadiness, localModelSetupSignals, localModelSetupStatus, settingsImportChangeCount, settingsImportSignals } from './agent-harness-setup-model-helpers.ts';
-import { connectedHostAuthNeedsVerificationOnly, connectedHostAuthNextAction, connectedHostAuthPosture, connectedHostAuthSignals, connectedHostAuthStatus, connectedHostBootstrapPlan, connectedHostRepairCards, connectedHostServiceProbe, hostSetupStatus, serviceProbeSignal, setupServiceLifecycleDecision } from './agent-harness-setup-connected-host.ts';
+import { connectedHostAuthModelRoute, connectedHostAuthNextAction, connectedHostAuthPosture, connectedHostAuthSignals, connectedHostAuthStatus, connectedHostBootstrapPlan, connectedHostRepairCards, connectedHostServiceProbe, hostSetupStatus, serviceProbeSignal, setupServiceLifecycleDecision } from './agent-harness-setup-connected-host.ts';
 import { installSmokePlan, installSmokeSignals, setupCompletionMarkerExists } from './agent-harness-setup-smoke.ts';
 import type { SetupPlanItem } from './agent-harness-setup-posture-types.ts';
 
@@ -76,11 +76,7 @@ export async function buildSetupPlan(
       reason: 'Native intake needs a fresh selected-host check of a paired owner with read:work-ledger and write:work-ledger. Provider, workspace and Jev readiness are separate checks.',
       nextAction: connectedHostAuthNextAction(authPosture),
       userRoute: 'Agent Workspace -> Connected Host; /auth review',
-      modelRoute: authPosture.operatorToken.path === 'Agent host-bound pairing store' && !authPosture.operatorToken.usable
-        ? 'agent_harness mode:"run_command" command:"/setup pair"'
-        : connectedHostAuthNeedsVerificationOnly(authPosture)
-        ? 'host action:"status" includeParameters:true'
-        : authPosture.routes.provisionTokenRoute,
+      modelRoute: connectedHostAuthModelRoute(authPosture),
       relatedSetupItemId: 'operator-terminal',
       signals: connectedHostAuthSignals(authPosture),
       authPosture,

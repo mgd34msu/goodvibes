@@ -1,6 +1,6 @@
 import { quoteRouteValue, provisionConnectedHostTokenRoute } from './agent-harness-setup-posture-utils.ts';
 import type { SetupHandoffCard, SetupPlanItem, SetupRepairCard } from './agent-harness-setup-posture-types.ts';
-import { connectedHostAuthNeedsVerificationOnly } from './agent-harness-setup-connected-host.ts';
+import { connectedHostAuthState, OWNER_PAIRING_COMMAND } from './agent-harness-setup-connected-host.ts';
 
 export function setupHandoff(options: SetupHandoffCard): SetupHandoffCard {
   return options;
@@ -87,28 +87,27 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
       return connectedHostReadinessHandoffs(item);
     case 'connected-host-auth': {
       const authPosture = item.authPosture;
-      // Native intake already carries the authority when it is ready and no compatibility bootstrap credential lingers.
-      const tokenReadable = authPosture?.operatorToken.usable === true;
-      const tokenUsable = authPosture ? connectedHostAuthNeedsVerificationOnly(authPosture) : false;
-      if (!tokenReadable && authPosture?.operatorToken.path === 'Agent host-bound pairing store') return [setupHandoff({
+      const state = authPosture ? connectedHostAuthState(authPosture) : 'needs-token';
+      if (state === 'review-pairing-store') return [setupHandoff({
         id: 'inspect-agent-pairing', label: 'Inspect Agent pairing', kind: 'diagnostic', effect: 'read-only',
         userRoute: '/setup pair', modelRoute: 'agent_harness mode:"run_command" command:"/setup pair"',
         nextStep: 'Review the prior host-bound attempt or unsafe store before any credential action.',
         safety: 'Preview only; never remints, revokes or rewrites shared-token storage.',
       })];
       return [
-        tokenUsable
+        state === 'needs-owner-pairing'
           ? setupHandoff({
-            id: 'verify-connected-host-auth',
-            label: 'Verify connected-host auth',
-            kind: 'diagnostic',
-            effect: 'read-only',
-            userRoute: item.userRoute,
-            modelRoute: 'host action:"status" includeParameters:true',
-            nextStep: 'Verify protected route readiness and Agent Knowledge before relying on daemon-backed automation.',
-            safety: 'Read-only diagnostic; token values are never returned.',
+            id: 'owner-pairs-agent',
+            label: 'Owner pairs this Agent',
+            kind: 'user-command',
+            effect: 'user-run',
+            userRoute: OWNER_PAIRING_COMMAND,
+            modelRoute: 'agent_harness mode:"run_command" command:"/setup pair"',
+            nextStep: `Ask the owner to type ${OWNER_PAIRING_COMMAND} in the live Agent terminal and confirm the exact phrase it shows; /setup pair previews it. Then rerun setup status.`,
+            safety: 'Granting persistent administrative access is the owner\'s act; the model can preview it but cannot apply it.',
           })
-          : setupHandoff({
+          : state === 'needs-token'
+          ? setupHandoff({
             id: 'provision-connected-host-token',
             label: 'Provision connected-host token',
             kind: 'confirmed-route',
@@ -118,6 +117,16 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
             nextStep: 'Create or repair the local companion token file, then rerun auth and connected-host status.',
             safety: 'Confirmed local token provisioning; returns only path, peer id, and timestamps, never the raw token.',
             requiresConfirmation: true,
+          })
+          : setupHandoff({
+            id: 'verify-connected-host-auth',
+            label: 'Verify connected-host auth',
+            kind: 'diagnostic',
+            effect: 'read-only',
+            userRoute: item.userRoute,
+            modelRoute: 'host action:"status" includeParameters:true',
+            nextStep: 'Verify protected route readiness and Agent Knowledge before relying on daemon-backed automation.',
+            safety: 'Read-only diagnostic; token values are never returned.',
           }),
         setupHandoff({
           id: 'pairing-posture',

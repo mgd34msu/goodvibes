@@ -68,7 +68,7 @@ export async function connectedBrowserCockpitRoute(context: CommandContext, rawO
     agentOnboarding: agentOnboarding(context, includeDetails),
     webViews: 'The web UI opens on chat, work, library, personal, phone and settings views; Agent workspace categories stay in the terminal Agent Workspace.',
     setupRoutes: {
-      inspectEndpoint: 'host action:"service" endpointId:"web" includeParameters:true',
+      inspectEndpoint: 'host action:"service" endpointId:"web"',
       servicePosture: 'host action:"services" includeParameters:true',
       connectedHostStatus: 'host action:"status" includeParameters:true',
       settings: 'settings action:"list" query:"web" includeHidden:true',

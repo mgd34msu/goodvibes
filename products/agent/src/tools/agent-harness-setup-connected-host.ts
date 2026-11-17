@@ -39,7 +39,7 @@ export function connectedHostServiceProbe(posture: CliServicePosture | null, pro
     label: endpoint.label,
     enabled: endpoint.enabled,
     binding,
-    diagnosticRoute: 'host action:"service" endpointId:"controlPlane" includeParameters:true',
+    diagnosticRoute: 'host action:"service" endpointId:"controlPlane"',
     issues: posture.issues,
   };
 }
@@ -107,41 +107,81 @@ export async function connectedHostAuthPosture(
   };
 }
 
-export function connectedHostAuthStatus(posture: SetupConnectedHostAuthPosture): SetupPlanStatus {
-  if (posture.nativeIntake.status !== 'ready') return 'blocked';
-  if (posture.compatibilityAuth.bootstrapCredentialPresent) return 'check';
-  return 'ready';
+/**
+ * The one reading of connected-host auth. The row's status, next action,
+ * model route, primary handoff and repair reason are all read from it.
+ */
+export type ConnectedHostAuthState =
+  | 'ready'
+  | 'review-bootstrap-credential'
+  | 'needs-owner-pairing'
+  | 'needs-token'
+  | 'review-pairing-store'
+  | 'needs-host';
+
+export function connectedHostAuthState(posture: SetupConnectedHostAuthPosture): ConnectedHostAuthState {
+  if (posture.operatorToken.path === 'Agent host-bound pairing store' && !posture.operatorToken.usable) return 'review-pairing-store';
+  switch (posture.nativeIntake.status) {
+    case 'ready': return posture.compatibilityAuth.bootstrapCredentialPresent ? 'review-bootstrap-credential' : 'ready';
+    case 'unsupported-principal': return 'needs-owner-pairing';
+    case 'missing-credential': return 'needs-token';
+    default: return posture.operatorToken.usable ? 'needs-host' : 'needs-token';
+  }
 }
 
-/**
- * The next step is verification, not token repair: the token file is readable, or native intake is ready and
- * no compatibility bootstrap credential lingers. Every route and reason for this item keys on this one rule.
- */
-export function connectedHostAuthNeedsVerificationOnly(posture: SetupConnectedHostAuthPosture): boolean {
-  return posture.operatorToken.usable
-    || (posture.nativeIntake.status === 'ready' && posture.compatibilityAuth.bootstrapCredentialPresent !== true);
+export function connectedHostAuthStatus(posture: SetupConnectedHostAuthPosture): SetupPlanStatus {
+  const state = connectedHostAuthState(posture);
+  return state === 'ready' ? 'ready' : state === 'review-bootstrap-credential' ? 'check' : 'blocked';
 }
+
+export const OWNER_PAIRING_COMMAND = '/setup pair --apply';
+const PAIRING_PREVIEW_ROUTE = 'agent_harness mode:"run_command" command:"/setup pair"';
+const HOST_STATUS_ROUTE = 'host action:"status" includeParameters:true';
 
 export function connectedHostAuthNextAction(posture: SetupConnectedHostAuthPosture): string {
-  if (posture.operatorToken.path === 'Agent host-bound pairing store' && !posture.operatorToken.usable) {
-    return 'The Agent pairing store needs review. Run goodvibes-agent setup pair to inspect the prior host-bound attempt. Do not provision another shared token or retry migration while its outcome is unknown or the store is unsafe.';
+  switch (connectedHostAuthState(posture)) {
+    case 'review-pairing-store':
+      return 'The Agent pairing store needs review. Run goodvibes-agent setup pair to inspect the prior host-bound attempt. Do not provision another shared token or retry migration while its outcome is unknown or the store is unsafe.';
+    case 'ready':
+      return 'Verify the connection against connected-host status and Agent Knowledge readiness before relying on protected daemon routes.';
+    case 'review-bootstrap-credential':
+      return 'Review auth status and clear or rotate the compatibility bootstrap credential through the owning GoodVibes host if it is no longer needed.';
+    case 'needs-owner-pairing':
+      return `${posture.nativeIntake.detail} Only the owner can grant it: ask the owner to type ${OWNER_PAIRING_COMMAND} in the live Agent terminal (or run goodvibes-agent setup pair --apply) and confirm the exact phrase it shows; /setup pair previews it first. The model and nested commands cannot grant it, and checking host status again does not change it.`;
+    case 'needs-token':
+      return posture.operatorToken.present
+        ? 'Run the confirmed connected-host token provisioning route to repair the local token file, then rerun auth review and connected-host status.'
+        : 'Run the confirmed connected-host token provisioning route, inspect pairing posture for visible handoff routes, then rerun auth review and connected-host status.';
+    case 'needs-host':
+      return posture.nativeIntake.detail;
   }
-  // Native intake is the authority; the shared token file is not required once it is ready, so the status
-  // ('ready') and the next action agree instead of asking for a repair of a file nothing depends on.
-  if (connectedHostAuthStatus(posture) === 'ready') {
-    return 'Verify the connection against connected-host status and Agent Knowledge readiness before relying on protected daemon routes.';
+}
+
+export function connectedHostAuthModelRoute(posture: SetupConnectedHostAuthPosture): string {
+  switch (connectedHostAuthState(posture)) {
+    case 'review-pairing-store':
+    case 'needs-owner-pairing':
+      return PAIRING_PREVIEW_ROUTE;
+    case 'needs-token':
+      return posture.routes.provisionTokenRoute;
+    default:
+      return HOST_STATUS_ROUTE;
   }
-  if (!posture.operatorToken.present) {
-    return 'Run the confirmed connected-host token provisioning route, inspect pairing posture for visible handoff routes, then rerun auth review and connected-host status.';
+}
+
+export function connectedHostAuthRepairReason(posture: SetupConnectedHostAuthPosture): string {
+  switch (connectedHostAuthState(posture)) {
+    case 'review-pairing-store':
+      return 'Host-bound pairing needs read-only review; shared-token provisioning cannot resolve an unknown or unsafe pairing store.';
+    case 'needs-owner-pairing':
+      return 'The host does not verify this credential as the owner; the only repair is the owner running the pairing command, which no model route can do.';
+    case 'needs-token':
+      return 'Connected-host token is missing or unusable; token provisioning is the narrow confirmed repair.';
+    case 'needs-host':
+      return 'The auth check could not reach a verdict from the host; inspect connected-host status for the cause before any credential action.';
+    default:
+      return 'Connected-host auth needs verification, not repair; verify protected daemon route readiness before relying on automation.';
   }
-  if (!posture.operatorToken.usable) {
-    return 'Run the confirmed connected-host token provisioning route to repair the local token file, then rerun auth review and connected-host status.';
-  }
-  if (posture.nativeIntake.status !== 'ready') return posture.nativeIntake.detail + ' Preview explicit Agent pairing with /setup pair; persistent administrative access requires the owner to type /setup pair --apply in the live Agent terminal (or goodvibes-agent setup pair --apply) and confirm the fresh exact phrase. Model and nested commands cannot grant it. Readable credentials and historical receipts are not authority evidence.';
-  if (posture.compatibilityAuth.bootstrapCredentialPresent) {
-    return 'Review auth status and clear or rotate the compatibility bootstrap credential through the owning GoodVibes host if it is no longer needed.';
-  }
-  return 'Verify the token against connected-host status and Agent Knowledge readiness before relying on protected daemon routes.';
 }
 
 export function connectedHostAuthSignals(posture: SetupConnectedHostAuthPosture): readonly string[] {
@@ -454,7 +494,7 @@ export function connectedHostBootstrapPlan(
   const probeIssue = probe.status === 'unreachable';
   return {
     status: hostIssue || probeIssue ? 'recommended' : 'optional',
-    source: 'goodvibes-tui README, package.json, and bin launchers from the connected-host checkout',
+    source: 'docs/installation.md (the release installer) and the installed goodvibes, goodvibes-daemon and goodvibes-agent commands',
     recommendedWhen: hostIssue
       ? 'Use when Agent cannot reach a compatible connected host, so operator service methods cannot be trusted yet.'
       : probeIssue
@@ -462,22 +502,14 @@ export function connectedHostBootstrapPlan(
       : 'Use only when the user is setting up a new GoodVibes host or wants to verify the owning host install.',
     steps: [
       {
-        id: 'verify-bun',
-        label: 'Verify Bun is installed',
-        purpose: 'Only the source-checkout fallback needs Bun; the release installer ships binaries.',
-        commands: ['bun --version'],
-        expected: 'Prints a Bun version.',
-        fallback: 'Install Bun, reopen the terminal so PATH is refreshed, then retry.',
-      },
-      {
         id: 'install-goodvibes-host',
         label: 'Install the owning GoodVibes host',
-        purpose: 'Install the released goodvibes launcher and goodvibes-daemon with the release installer; the programs are not published as Bun packages.',
+        purpose: 'Install the released goodvibes launcher and goodvibes-daemon with the release installer; it ships binaries and needs no Bun, Node or Git.',
         commands: [
           'curl -fsSL https://goodvibes.sh/install.sh | sh',
         ],
-        expected: 'The installer finishes, verifies the release checksums and prints the installed program paths. See docs/installation.md for its options.',
-        fallback: 'If release assets cannot download, use the goodvibes-tui source checkout and run bun install before bun run daemon.',
+        expected: 'The installer finishes, verifies the release checksums and prints the installed program paths.',
+        fallback: 'See docs/installation.md for installer options (version pin, install directory, service registration) and what to do when a download or checksum fails.',
       },
       {
         id: 'verify-goodvibes-binaries',
@@ -488,7 +520,7 @@ export function connectedHostBootstrapPlan(
           'goodvibes-daemon --version',
         ],
         expected: 'Both binaries print versions.',
-        fallback: 'Open a new terminal so PATH is refreshed, or rerun the installer and read its PATH note.',
+        fallback: 'Open a new terminal so PATH is refreshed, or rerun the installer and read its PATH note (docs/installation.md).',
       },
       {
         id: 'start-goodvibes-host',
@@ -499,8 +531,8 @@ export function connectedHostBootstrapPlan(
           'goodvibes service install',
           'goodvibes service start',
         ],
-        expected: 'Service status reports an installed running service, or the interactive GoodVibes TUI starts the daemon/listener surfaces configured by the user.',
-        fallback: 'For a one-shot headless host from source, use GOODVIBES_DAEMON_TOKEN=... GOODVIBES_HTTP_TOKEN=... bun run daemon inside goodvibes-tui.',
+        expected: 'Service status reports an installed running service.',
+        fallback: 'See docs/installation.md for service registration on this platform.',
       },
       {
         id: 'reconnect-agent',
@@ -508,9 +540,8 @@ export function connectedHostBootstrapPlan(
         purpose: 'Verify Agent can reach the default host or an explicitly configured runtime URL.',
         commands: [
           'goodvibes-agent status --json',
-          'goodvibes-agent compat',
         ],
-        expected: 'Agent status reports reachable connected-host and compatible Agent Knowledge routes.',
+        expected: 'Agent status reports a reachable connected host.',
         fallback: 'Use goodvibes-agent --runtime-url http://host:port or GOODVIBES_AGENT_RUNTIME_URL=http://host:port when the host is not on http://127.0.0.1:3421.',
       },
     ],

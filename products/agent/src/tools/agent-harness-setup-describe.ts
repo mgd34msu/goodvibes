@@ -8,7 +8,7 @@ import { previewHarnessText } from './agent-harness-text.ts';
 import { setupHandoffsForItem } from './agent-harness-setup-handoffs.ts';
 import { collectSnapshot, lookupFromArgs, readLimit, safeIso, summarizeLocalBehavior } from './agent-harness-setup-posture-utils.ts';
 import type { AgentHarnessSetupArgs, SetupHandoffCard, SetupPlanItem, SetupRepairCard, SetupRepairDecision, SetupServiceLifecycleDecision } from './agent-harness-setup-posture-types.ts';
-import { connectedHostAuthNeedsVerificationOnly } from './agent-harness-setup-connected-host.ts';
+import { connectedHostAuthRepairReason, connectedHostAuthState } from './agent-harness-setup-connected-host.ts';
 
 export function describeRepairCard(card: SetupRepairCard): Record<string, unknown> {
   return {
@@ -140,13 +140,11 @@ export function primarySetupRepairDecision(item: SetupPlanItem): SetupRepairDeci
   if (item.id === 'connected-host-auth') {
     const handoff = setupHandoffsForItem(item)[0];
     if (handoff) {
+      const ownerPairing = item.authPosture !== undefined && connectedHostAuthState(item.authPosture) === 'needs-owner-pairing';
       return setupRepairDecisionFromHandoff(
         handoff,
-        handoff.requiresConfirmation ? 'confirmed-repair-available' : 'inspect-first',
-        item.authPosture?.operatorToken.path === 'Agent host-bound pairing store' && !item.authPosture.operatorToken.usable
-          ? 'Host-bound pairing needs read-only review; shared-token provisioning cannot resolve an unknown or unsafe pairing store.'
-          : item.authPosture && connectedHostAuthNeedsVerificationOnly(item.authPosture)
-          ? 'Connected-host auth needs verification, not repair; verify protected daemon route readiness before relying on automation.'
+        ownerPairing ? 'owner-action' : handoff.requiresConfirmation ? 'confirmed-repair-available' : 'inspect-first',
+        item.authPosture ? connectedHostAuthRepairReason(item.authPosture)
           : 'Connected-host token is missing or unusable; token provisioning is the narrow confirmed repair.',
       );
     }

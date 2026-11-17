@@ -7,7 +7,7 @@
  * the fetch reports it as that URL's error.
  */
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import type { Candidate } from '@goodvibes-jev/judgment';
+import { JudgmentError, type Candidate } from '@goodvibes-jev/judgment';
 import { pageContent } from '../batteries/page-content.js';
 import { pageSummary, paragraphCandidate } from '../batteries/page-summary.js';
 import { pageBlocks, pageTitle, pageUnits } from './page-blocks.js';
@@ -54,20 +54,31 @@ async function pickSummary(title: string, candidates: readonly Candidate[]): Pro
  * about, then (for HTML) the page's headings as an outline.
  */
 export async function readSummary(body: string, isHtml: boolean): Promise<string> {
-  return decisionOrClassic(() => readDecisionSummary(body, isHtml), () => {
-    const units = isHtml ? pageUnits(body) : body.split(/\n{2,}/).map(text => ({ text: text.trim(), headingLevel: undefined })).filter(unit => unit.text);
-    const first = units.find(unit => unit.headingLevel === undefined)?.text ?? '';
-    const headings = units.filter(unit => unit.headingLevel !== undefined).map(unit => `${'#'.repeat(unit.headingLevel!)} ${unit.text}`);
-    return ['[Classic page excerpt and outline; no semantic summary was generated.]', first,
-      ...(headings.length ? [`Headings:\n${headings.join('\n')}`] : [])].filter(Boolean).join('\n\n');
-  });
+  return decisionOrClassic(() => readDecisionSummary(body, isHtml), () => classicSummary(body, isHtml));
+}
+
+/** The first paragraph and the headings, with a note that no paragraph was chosen by reading. */
+function classicSummary(body: string, isHtml: boolean): string {
+  const units = isHtml ? pageUnits(body) : body.split(/\n{2,}/).map(text => ({ text: text.trim(), headingLevel: undefined })).filter(unit => unit.text);
+  const first = units.find(unit => unit.headingLevel === undefined)?.text ?? '';
+  const headings = units.filter(unit => unit.headingLevel !== undefined).map(unit => `${'#'.repeat(unit.headingLevel!)} ${unit.text}`);
+  return ['[Classic page excerpt and outline; no semantic summary was generated.]', first,
+    ...(headings.length ? [`Headings:\n${headings.join('\n')}`] : [])].filter(Boolean).join('\n\n');
 }
 
 async function readDecisionSummary(body: string, isHtml: boolean): Promise<string> {
   const units = isHtml ? pageUnits(body) : body.split(/\n{2,}/).map((text) => ({ text: text.trim(), headingLevel: undefined })).filter((unit) => unit.text);
   const paragraphs = units.filter((unit) => unit.headingLevel === undefined).map((unit) => unit.text);
   const candidates = paragraphs.map((text, index) => paragraphCandidate(`p${index + 1}`, text));
-  const picked = await pickSummary(isHtml ? pageTitle(body) : '', candidates);
+  let picked: string | undefined;
+  try {
+    picked = await pickSummary(isHtml ? pageTitle(body) : '', candidates);
+  } catch (error) {
+    // Every paragraph is larger than one reading can carry (a CSV, a log, a minified
+    // file): the selector refused before asking, so the excerpt answers instead.
+    if (error instanceof JudgmentError && error.reason === 'candidate-too-large') return classicSummary(body, isHtml);
+    throw error;
+  }
   const summary = picked === undefined ? undefined : paragraphs[Number(picked.slice(1)) - 1];
   const headings = units.filter((unit) => unit.headingLevel !== undefined).map((unit) => `${'#'.repeat(unit.headingLevel!)} ${unit.text}`);
   const parts = [summary ?? NO_SUMMARY_NOTE];

@@ -755,7 +755,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'channels.drafts.list',
     title: 'List Channel Drafts',
-    description: 'Return daemon-mirrored channel drafts for cross-device sync. Webhook values are stored redacted.',
+    description: 'Return channel drafts for cross-device sync, metadata only: each message reads as a redacted marker and webhook values are redacted. The daemon is the store of record; the text is served by channels.drafts.get.',
     category: 'channels',
     scopes: ['read:channels'],
     http: { method: 'GET', path: '/api/channels/drafts' },
@@ -771,7 +771,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'channels.drafts.get',
     title: 'Get Channel Draft',
-    description: 'Return a single daemon-mirrored channel draft by id, or a notFound marker.',
+    description: 'Return one channel draft by id: the owner (admin) receives its text, so a draft written on one device can be finished and sent on another; any other caller receives the redacted record. Webhook values stay redacted. An id that names no draft returns a notFound marker.',
     category: 'channels',
     scopes: ['read:channels'],
     http: { method: 'GET', path: '/api/channels/drafts/{draftId}' },

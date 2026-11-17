@@ -74,20 +74,41 @@ export function deriveOverall(jobs: readonly CiJob[], hasBlockingViolation: bool
   return 'passed';
 }
 
+/** Run conclusions that mean the workflow itself went wrong, whatever its jobs show. */
+const RUN_FAILED_CONCLUSIONS: ReadonlySet<string> = new Set(['failure', 'timed_out', 'startup_failure', 'action_required']);
+/** Run conclusions that mean the run was stopped or replaced, not that anything failed. */
+const RUN_SUPERSEDED_CONCLUSIONS: ReadonlySet<string> = new Set(['cancelled', 'stale']);
+
 /**
  * A per-job `passed` stands only when every workflow run on the commit has
  * completed. A run that ended badly with no failing job listed (a workflow
  * that failed to start, or one waiting on approval) makes the verdict
- * `failed` and says which. Never turns anything green.
+ * `failed` and says which. A run that was cancelled or went stale is ignored
+ * when another run of the same workflow on the commit passed (a push and a
+ * pull request on one commit, with cancel-in-progress); with no such run it
+ * leaves the verdict `unknown` and says which, since nothing failed and
+ * nothing passed. Never turns anything green.
  */
 function settleOnWorkflowRuns(overall: CiOverall, runs: readonly CiWorkflowRun[] | undefined, violations: string[]): CiOverall {
   if (overall !== 'passed' || runs === undefined) return overall;
   if (runs.some((run) => run.status !== 'completed')) return 'pending';
-  const ended = runs.filter((run) => !PASSING_CONCLUSIONS.has(run.conclusion ?? ''));
-  for (const run of ended) {
+  const passedWorkflows = new Set(runs.filter((run) => PASSING_CONCLUSIONS.has(run.conclusion ?? '')).map((run) => run.name));
+  let failed = false;
+  let open = false;
+  for (const run of runs) {
+    const conclusion = run.conclusion ?? '';
+    if (PASSING_CONCLUSIONS.has(conclusion)) continue;
+    if (RUN_SUPERSEDED_CONCLUSIONS.has(conclusion)) {
+      if (passedWorkflows.has(run.name)) continue;
+      open = true;
+      violations.push(`workflow "${run.name}" was ${conclusion === 'stale' ? 'marked stale' : 'cancelled'} and no other run of it on this commit passed, so it has no verdict until it runs again`);
+      continue;
+    }
+    if (RUN_FAILED_CONCLUSIONS.has(conclusion)) failed = true;
+    else open = true;
     violations.push(`workflow "${run.name}" ended "${run.conclusion ?? 'without a conclusion'}" and lists no failing job`);
   }
-  return ended.length > 0 ? 'failed' : 'passed';
+  return failed ? 'failed' : open ? 'unknown' : 'passed';
 }
 
 /** The jobs that did not pass (for notifications and fix-session briefs). */

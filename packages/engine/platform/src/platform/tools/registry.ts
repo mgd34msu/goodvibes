@@ -404,7 +404,7 @@ function preparationData(tool: Tool, name: string, freshness = false): { executo
 
 /** Refuse a definition a provider or the gate cannot use, naming every problem. */
 function assertRegistrableDefinition(definition: ToolDefinition): void {
-  const problems = checkToolSchema(definition, { requireType: false }).filter((violation) => violation.severity === 'error').map((violation) => violation.message);
+  const problems = checkToolSchema(definition).filter((violation) => violation.severity === 'error').map((violation) => violation.message);
   if (definition.category !== undefined && !(PERMISSION_CATEGORIES as readonly string[]).includes(definition.category)) {
     problems.push(`Tool '${definition.name}': category '${String(definition.category)}' is not one of ${PERMISSION_CATEGORIES.join(', ')}.`);
   }
@@ -547,19 +547,6 @@ export class ToolRegistry {
     if (definition.activity) toolActivityByName.set(name, definition.activity);
     this.registrations.set(name, Object.freeze({ tool, projector, project, captureNativeReferences, assertCurrent, signal,
       revision: `tool-input-projection:${++this.registrationRevision}` }));
-  }
-
-  /**
-   * Register a tool and return its code-checked contract result.
-   * @deprecated `register` refuses a malformed definition itself; call it directly.
-   */
-  registerWithContract(
-    tool: Tool,
-    opts?: ContractVerifierOptions,
-    registration?: ToolRegistrationOptions,
-  ): ContractVerificationResult {
-    this.register(tool, registration);
-    return new ToolContractVerifier(opts).verifyStructure(tool);
   }
 
   /**

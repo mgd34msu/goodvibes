@@ -186,24 +186,6 @@ const SECURITY_SETTINGS: readonly SecuritySettingEntry[] = [
     ],
   },
   {
-    key: 'tools.contractVerification',
-    type: 'setting',
-    isInsecure: isOff,
-    securityRelevant: true,
-    summary: 'Validates registered tool contracts, timeout behavior, permission class mapping, and output policy alignment.',
-    insecureWhen:
-      'When off, malformed or under-declared tools can register without platform contract verification.',
-    enablementEffect:
-      'When on (the default), invalid tool contracts fail closed with actionable diagnostics before normal execution.',
-    enablementRequirements: [
-      'Keep tool definitions accurate, including side effects and permission classes.',
-      'Fix contract diagnostics in custom tool plugins before enabling in strict deployments.',
-    ],
-    operationalNotes: [
-      'On by default; turning it off should be limited to isolated tool-development sessions.',
-    ],
-  },
-  {
     key: 'permissions.commandParser',
     type: 'setting',
     isInsecure: (value) => value === 'flat',

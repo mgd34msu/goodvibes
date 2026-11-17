@@ -188,9 +188,9 @@ that asks what the setup is for before acting literally.
 
 ## Contract verification
 
-The `tools.contractVerification` setting is enabled by default, so built-in
-and registered tools are verified at registration time. Hosts can disable the
-flag explicitly, but the safer default is verification on.
+Every tool, built-in, product or plugin, is checked where it is registered:
+a definition a provider or the gate cannot use is refused with each problem
+named. The check always runs; there is no setting to turn it off.
 
 See [Tool safety: tool contract verification](./tool-safety.md#tool-contract-verification)
 for what the verifier checks (schema shape, permission class, timeout/cancellation

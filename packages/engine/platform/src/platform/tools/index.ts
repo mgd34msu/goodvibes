@@ -229,26 +229,6 @@ export { createWebSearchTool } from './web-search/index.js';
 export { createWorkPlanTool } from './work-plan/index.js';
 export type { WorkPlanToolStore } from './work-plan/index.js';
 
-type ToolContractFeatureFlags = Pick<FeatureFlagManager, 'isEnabled'>;
-
-export function registerToolWithContractGate(
-  registry: ToolRegistry,
-  tool: Tool,
-  featureFlags?: ToolContractFeatureFlags | null,
-  registration?: ToolRegistrationOptions,
-): void {
-  const verifyContracts = featureFlags?.isEnabled('tool-contract-verification') ?? true;
-  if (!verifyContracts) {
-    registry.register(tool, registration);
-    return;
-  }
-
-  registry.registerWithContract(tool, {
-    strictIdempotency: false,
-    strictPermissionClass: false,
-  }, registration);
-}
-
 /**
  * The state tool's memory store over a local registry. While a connected host
  * serves memory this registry is not the store prompts read, and it cannot
@@ -527,8 +507,9 @@ export function registerAllTools(
     throw new Error('registerAllTools requires surfaceRoot');
   }
   const projectIndex = deps?.projectIndex ?? new ProjectIndex(workingDirectory);
+  // `register` refuses a definition a provider or the gate cannot use.
   const registerTool = (tool: Tool, registration?: ToolRegistrationOptions): void => {
-    registerToolWithContractGate(registry, tool, deps.featureFlags, registration);
+    registry.register(tool, registration);
   };
 
   registerTool(

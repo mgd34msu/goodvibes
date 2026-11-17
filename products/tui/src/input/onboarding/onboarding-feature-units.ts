@@ -254,11 +254,6 @@ export const FEATURE_ONBOARDING_SECTIONS: readonly FeatureSection[] = [
         hint: 'Append schema fingerprints to find/analyze/inspect tool results for drift detection.',
       },
       {
-        flagId: 'tool-contract-verification',
-        label: 'Tool contract verification',
-        hint: 'Registration-time contract checks for every tool (schema, timeout, permission mapping). Default on; invalid tools fail closed.',
-      },
-      {
         flagId: 'tool-result-reconciliation',
         label: 'Tool result reconciliation',
         hint: 'Inject synthetic error results for dangling tool calls at turn end to prevent silent conversation corruption. Default on.',

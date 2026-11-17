@@ -191,7 +191,6 @@ export interface GoodVibesConfig {
     defaultTokenBudget: number;     // default: 0. No automatic token budget for read operations
     hooksFile: string;              // default: 'hooks.json'. Hook configuration file name
     overflowSpillBackend: 'file' | 'ledger' | 'diagnostics'; // default: 'file'. Where overflow content spills
-    contractVerification: boolean;  // default: true. Registration-time contract checks on every tool
     outputSchemaFingerprints: boolean; // default: false. Append _meta schema fingerprints to find/analyze/inspect results
     /** Commands write/edit validate runs for a project that declares none of its own; '' = none. */
     validators: {

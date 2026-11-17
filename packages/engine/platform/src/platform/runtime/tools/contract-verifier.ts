@@ -115,13 +115,7 @@ export interface ContractVerifierOptions {
  * sound JSON Schema. Does not make network calls or validate against a meta-schema;
  * checks for the most common structural mistakes that cause LLM call failures.
  */
-export function checkToolSchema(def: ToolDefinition, options: {
-  /**
-   * Whether a schema with no `type` is an error. Registration passes false: an
-   * untyped schema is reported by verification, not refused where it enters.
-   */
-  readonly requireType?: boolean | undefined;
-} = {}): ContractViolation[] {
+export function checkToolSchema(def: ToolDefinition): ContractViolation[] {
   const violations: ContractViolation[] = [];
   const params = def.parameters;
 
@@ -137,7 +131,7 @@ export function checkToolSchema(def: ToolDefinition, options: {
 
   // Must have a type field
   if (!('type' in params)) {
-    if (options.requireType !== false) violations.push({
+    violations.push({
       dimension: 'schema',
       severity: 'error',
       message: `Tool '${def.name}': parameters schema missing required 'type' field.`,

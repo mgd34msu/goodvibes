@@ -180,7 +180,8 @@ When the platform drops a malformed tool call due to a parse error, a log entry 
 ## Tool contract verification
 
 Every tool is checked where it enters: `ToolRegistry.register` refuses a
-definition with a malformed parameter schema, a missing name or description,
+definition with a malformed parameter schema (not an object, no `type`, or an
+invalid `type`), a missing name or description,
 or a `category` that is not one of `read`, `write`, `execute`, `delegate`. The
 refusal names each problem.
 

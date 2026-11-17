@@ -548,22 +548,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     ],
   },
 
-  // Tool Contract Verification.
-  {
-    id: 'tool-contract-verification',
-    name: 'Tool Contract Verification',
-    description:
-      'Enables registration-time contract checks for all registered tools. '
-      + 'Validates schema validity, timeout/cancellation semantics, permission class '
-      + 'mapping, output policy alignment, and idempotency declarations. '
-      + 'Invalid tools fail closed with actionable diagnostics. '
-      + 'Exposes /tool verify <name>, /tool verify-all, and /tool contract show <name> commands.',
-    defaultState: 'enabled',
-    tier: 8,
-    runtimeToggleable: true,
-    settings: { key: 'tools.contractVerification', kind: 'boolean' },
-  },
-
   // ── Automation and Omnichannel Foundation ───────────────────────────────
   {
     id: 'automation-domain',

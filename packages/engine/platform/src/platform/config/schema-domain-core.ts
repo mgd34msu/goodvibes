@@ -134,7 +134,6 @@ export const coreConfigDefaults = {
     defaultTokenBudget: 0,
     hooksFile: 'hooks.json',
     overflowSpillBackend: 'file',
-    contractVerification: true,
     outputSchemaFingerprints: false,
     validators: {
       typecheck: '',

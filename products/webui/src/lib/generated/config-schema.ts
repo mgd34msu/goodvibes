@@ -4426,12 +4426,6 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "description": "Reserved for choosing an execution strategy (single/cohort/background/remote) on every conversation turn. No turn reads a strategy yet, so this setting changes nothing today. The planner that /project-plan mode, override, explain and status work with is consulted when /workstream drafts a plan, whatever this setting says."
   },
   {
-    "key": "tools.contractVerification",
-    "type": "boolean",
-    "default": true,
-    "description": "Run registration-time contract checks on every registered tool: schema validity, timeout/cancellation semantics, permission-class mapping, output-policy alignment, and idempotency declarations. Invalid tools fail closed with actionable diagnostics. Turn off to let tools register unchecked."
-  },
-  {
     "key": "tools.outputSchemaFingerprints",
     "type": "boolean",
     "default": false,
@@ -5223,21 +5217,6 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "security.tokenAudit.rotationCadenceDays",
       "security.tokenAudit.rotationWarningDays",
       "security.tokenAudit.managed"
-    ],
-    "restartRequired": false,
-    "defaultEnabled": true
-  },
-  {
-    "id": "tool-contract-verification",
-    "name": "Tool Contract Verification",
-    "description": "Enables registration-time contract checks for all registered tools. Validates schema validity, timeout/cancellation semantics, permission class mapping, output policy alignment, and idempotency declarations. Invalid tools fail closed with actionable diagnostics. Exposes /tool verify <name>, /tool verify-all, and /tool contract show <name> commands.",
-    "domain": "tools",
-    "enablement": {
-      "key": "tools.contractVerification",
-      "kind": "boolean"
-    },
-    "settings": [
-      "tools.contractVerification"
     ],
     "restartRequired": false,
     "defaultEnabled": true

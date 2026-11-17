@@ -64,13 +64,6 @@ export const featureControlSettings: ConfigSetting[] = [
       'Reserved for choosing an execution strategy (single/cohort/background/remote) on every conversation turn. No turn reads a strategy yet, so this setting changes nothing today. The planner that /project-plan mode, override, explain and status work with is consulted when /workstream drafts a plan, whatever this setting says.',
   },
   {
-    key: 'tools.contractVerification',
-    type: 'boolean',
-    default: true,
-    description:
-      'Run registration-time contract checks on every registered tool: schema validity, timeout/cancellation semantics, permission-class mapping, output-policy alignment, and idempotency declarations. Invalid tools fail closed with actionable diagnostics. Turn off to let tools register unchecked.',
-  },
-  {
     key: 'tools.outputSchemaFingerprints',
     type: 'boolean',
     default: false,

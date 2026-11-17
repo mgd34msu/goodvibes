@@ -221,7 +221,6 @@ is what it guards.
 | `runtime.toolBudget.enforced` | A tool call is stopped at its wall-clock limit; one that finishes anyway, or over its token or cost limit, is reported as succeeded with a note naming the limit |
 | `permissions.commandParser` | Per-segment AST parsing of shell commands before execution (it refuses a command that parses to no segment; what a command would destroy, and obfuscation, are the gate's reading) |
 | `security.tokenAudit.enabled` | Advisory auditing of token scopes and rotation |
-| `tools.contractVerification` | Registration-time verification that keeps malformed tools out of the registry |
 
 ### TLS
 

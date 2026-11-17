@@ -124,12 +124,15 @@ const PINNED_SAFETY_GATE: readonly string[] = SAFETY_GATE_CONFIG_PREFIXES.filter
   !prefix.startsWith('judgment.') && prefix !== 'provider.decisionRouter'
   && prefix !== 'permissions.mode' && prefix !== 'permissions.tools.');
 
-/** Network, listener and background-agent keys that widen what the process reaches or accepts. */
+/** Network, listener, sandbox and background-agent keys that widen what the process reaches or accepts. */
 const PINNED_NETWORK: readonly string[] = [
   'network.remoteFetch.allowPrivateHosts', 'network.outboundTls.', 'fetch.trustedHosts', 'fetch.sanitizeMode',
   'controlPlane.host', 'controlPlane.hostMode', 'controlPlane.cors.allowedOrigins',
-  'httpListener.host', 'httpListener.hostMode', 'httpListener.trustProxy',
+  'httpListener.host', 'httpListener.hostMode', 'httpListener.trustProxy', 'httpListener.trustCloudflare',
+  'sandbox.egressAllowlist', 'sandbox.workspaceWritable',
 ];
+/** An enum value that hands a decision the owner would make to code or a model. */
+const becomes = (value: string): ((prev: unknown, next: unknown) => boolean) => (prev, next) => next === value && prev !== value;
 
 const EXACT_LOOSENING = new Map<string, Loosening>();
 const PREFIX_LOOSENING: Array<readonly [string, Loosening]> = [];
@@ -147,6 +150,8 @@ declareLoosening('permissions.tools.', TOOL_PERMISSION);
 for (const key of OPENING_SWITCHES) declareLoosening(key, OPENING);
 declareLoosening('fetch.blockedHosts', BLOCKED_HOSTS);
 declareLoosening('relay.requireStepUpForMutations', STEP_UP);
+declareLoosening('sandbox.judgment', { loosening: 'let a model approve sandbox escalations', loosens: becomes('auto-approve') });
+declareLoosening('permissions.commandParser', { loosening: 'stop parsing shell commands before they run', loosens: becomes('flat') });
 for (const key of [...PINNED_NETWORK, ...PINNED_SAFETY_GATE]) declareLoosening(key, PINNED);
 // Each names a program the host runs or a token variable it hands over when a secret reference resolves.
 declareLoosening('storage.secretProviders.', { loosening: 'change the program or token a password manager runs with', loosens: changes });

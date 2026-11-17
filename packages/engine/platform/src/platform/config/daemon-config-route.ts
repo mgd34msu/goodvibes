@@ -503,6 +503,50 @@ export async function applyConfigWrite(
   };
 }
 
+/** What a set of daemon-owned writes did: taken by the daemon as one update, or no daemon to send them to. */
+export type DaemonConfigWritesOutcome =
+  | { readonly appliedBy: 'daemon'; readonly persistedTo: string; readonly reason: string }
+  | { readonly appliedBy: 'none'; readonly reason: string };
+
+/**
+ * Send several daemon-owned writes to the daemon as one update
+ * (`config.setMany`, POST /config/many). The daemon admits every entry before
+ * it writes any, so a refusal leaves its settings as they were. With no daemon
+ * to send them to (none running, or this process hosts it) nothing is written
+ * and the outcome says `none`: the caller writes them to the daemon's file in
+ * its own single update. Throws {@link DaemonConfigUnreachableError} or
+ * {@link DaemonConfigRejectedError} as {@link applyConfigWrite} does. One
+ * request for the whole set instead of one per key.
+ */
+export async function applyDaemonConfigWrites(
+  entries: readonly { readonly key: string; readonly value: unknown }[],
+  deps: DaemonConfigRouterDeps,
+): Promise<DaemonConfigWritesOutcome> {
+  const first = entries[0];
+  if (!first) return { appliedBy: 'none', reason: 'There was no daemon setting to write.' };
+  const route = await resolveLiveConfigWriteRoute(first.key, deps);
+  if (route.mode === 'local') return { appliedBy: 'none', reason: route.reason };
+  const keys = entries.map((entry) => entry.key).join(', ');
+  const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
+  let response: Response;
+  try {
+    response = await fetchImpl(`${route.endpoint.baseUrl.replace(/\/+$/, '')}/config/many`, {
+      method: 'POST',
+      headers: daemonHeaders(route.endpoint),
+      body: JSON.stringify({ entries: entries.map(({ key, value }) => ({ key, value })) }),
+      signal: AbortSignal.timeout(deps.timeoutMs ?? 10_000),
+    });
+  } catch (error) {
+    throw new DaemonConfigUnreachableError(keys, route.endpoint.baseUrl, describeCause(error));
+  }
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new DaemonConfigRejectedError(keys, response.status, text.slice(0, 400) || response.statusText);
+  }
+  await response.body?.cancel().catch(() => undefined);
+  return { appliedBy: 'daemon', persistedTo: route.endpoint.baseUrl, reason: route.reason };
+}
+
 function writeLocally(
   key: string,
   value: unknown,

@@ -1,7 +1,7 @@
 import { retainCliConfig } from './cli-config-owner.js';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { isDaemonOwnedConfigKey, isSecretBearingConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import { configKeyFacts, isDaemonOwnedConfigKey, isSecretBearingConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
@@ -20,17 +20,20 @@ import {
   inspectBundle as inspect,
 } from './support-bundle-inspection.js';
 /**
- * Settings that decide what runs without asking, what the machine exposes to
- * the network, how it starts, and where its data and secrets live. An import
- * leaves them as they are unless asked for by name.
+ * Where the program keeps its data and secrets, how it starts, and which host
+ * and MCP servers it works with. Changing these loosens nothing, so the key
+ * facts do not rate them, but they are not another person's to choose.
  */
-export function securityRelevantSetting(key: string): boolean {
-  return /^(permissions|sandbox|service|storage|policy|network|mcp)\./.test(key)
-    || key === 'behavior.autoApprove' || key === 'judgment.policy'
-    || /^(controlPlane|httpListener|web)\.(host|hostMode|trustProxy|trustCloudflare)$/.test(key)
-    || /^fetch\.(allowLocalhost|trustedHosts|blockedHosts)$/.test(key)
-    || key.startsWith('daemon.connectedHost.') || key === 'integrations.routeBinding'
-    || /(Path|Dir)$/.test(key);
+const PLACEMENT_SETTING = /^(service|storage|mcp|daemon\.connectedHost)\.|(Path|Dir)$/;
+
+/**
+ * A change an import holds back unless --include-security names it: one the
+ * key's own facts say loosens security (config-key-facts.ts, the one owner of
+ * that rule, read from the current and new value), or one to a placement
+ * setting above.
+ */
+export function securityRelevantSetting(key: string, from: unknown, value: unknown): boolean {
+  return configKeyFacts(key).loosens?.(from, value) === true || PLACEMENT_SETTING.test(key);
 }
 
 /** A value as one short line; credential settings show only whether they are set. */
@@ -97,11 +100,16 @@ export function createSupportBundleCommand<
     readonly packageVersion: () => string;
     readonly onboardingMarkerPath: (paths: ShellPathService, scope: 'user' | 'project') => string;
     /**
-     * The routed write for a daemon-owned setting: the daemon applies it when
-     * one answers, its settings file is written for it to read at start when
-     * none is running, and an unreachable configured host refuses.
+     * The routed write for the daemon-owned settings, as one update the daemon
+     * admits whole (config.setMany): `daemon` when one answered and took them,
+     * `none` when no daemon is running (nothing written; the caller puts them in
+     * the daemon's file in its own single update). An unreachable configured
+     * host, or a refusal, throws and nothing was written.
      */
-    readonly routeDaemonSetting: (runtime: Runtime, key: ConfigKey, value: unknown) => Promise<unknown>;
+    readonly routeDaemonSettings: (
+      runtime: Runtime,
+      entries: readonly { readonly key: ConfigKey; readonly value: unknown }[],
+    ) => Promise<{ readonly appliedBy: 'daemon' | 'none' }>;
   },
   policy: {
     readonly site: string;
@@ -292,7 +300,7 @@ export function createSupportBundleCommand<
         }
         const from = getNestedValue(current, setting.key);
         if (JSON.stringify(from) === JSON.stringify(value)) { unchanged++; continue; }
-        (securityRelevantSetting(setting.key) && !includeSecurity ? heldBack : pending).push({ key: setting.key, value, from });
+        (securityRelevantSetting(setting.key, from, value) && !includeSecurity ? heldBack : pending).push({ key: setting.key, value, from });
       }
       const redactedNote = [
         skippedRedacted ? ` ${skippedRedacted} redacted value${skippedRedacted === 1 ? '' : 's'} skipped.` : '',
@@ -328,8 +336,8 @@ export function createSupportBundleCommand<
             exitCode: 1,
           };
         }
-        const security = pending.filter((entry) => securityRelevantSetting(entry.key));
-        const ordinary = pending.filter((entry) => !securityRelevantSetting(entry.key));
+        const security = pending.filter((entry) => securityRelevantSetting(entry.key, entry.from, entry.value));
+        const ordinary = pending.filter((entry) => !securityRelevantSetting(entry.key, entry.from, entry.value));
         return {
           output: [
             `Refusing to import ${count} changed config value${count === 1 ? '' : 's'} without --yes. Nothing was changed.${redactedNote}`,
@@ -341,44 +349,49 @@ export function createSupportBundleCommand<
           exitCode: 2,
         };
       }
-      // A daemon-owned setting has one writer, the daemon: it goes through the
-      // routed write. Every value is checked before anything is written.
-      const daemonOwned = pending.filter((entry) => isDaemonOwnedConfigKey(entry.key));
-      const local = pending.filter((entry) => !isDaemonOwnedConfigKey(entry.key));
-      for (const entry of daemonOwned) {
+      // Every value is checked before anything is written.
+      for (const entry of pending) {
         try { runtime.configManager.validateDynamic(entry.key, entry.value); } catch (error) {
           return { output: `Bundle not imported: ${entry.key}: ${summarizeError(error)}. Nothing was changed.`, exitCode: 1 };
         }
       }
-      // One update for this surface's settings: every value is admitted before
-      // anything is written, so a bad value leaves the configuration as it was.
-      const result = local.length > 0
-        ? runtime.configManager.setMany(local.map(({ key, value }) => ({ key, value })), { kind: 'owner', surface: `${policy.commandBase(runtime)} import` })
+      // A daemon-owned setting has one writer, the daemon. Its settings go
+      // first, as one update it admits whole; this surface's are written only
+      // once it has taken them, so a refusal leaves everything as it was.
+      const daemonOwned = pending.filter((entry) => isDaemonOwnedConfigKey(entry.key));
+      const local = pending.filter((entry) => !isDaemonOwnedConfigKey(entry.key));
+      let daemonApplied = false;
+      if (daemonOwned.length > 0) {
+        try {
+          daemonApplied = (await bindings.routeDaemonSettings(runtime, daemonOwned.map(({ key, value }) => ({ key, value })))).appliedBy === 'daemon';
+        } catch (error) {
+          return {
+            output: `Bundle not imported: the daemon did not take its ${daemonOwned.length} setting${daemonOwned.length === 1 ? '' : 's'} (${summarizeError(error)}). Nothing was changed.`,
+            exitCode: 1,
+          };
+        }
+      }
+      // With no daemon running, its settings go into its file in the same one
+      // update as this surface's: every value is admitted before anything is written.
+      const writes = daemonApplied ? local : pending;
+      const result = writes.length > 0
+        ? runtime.configManager.setMany(writes.map(({ key, value }) => ({ key, value })), { kind: 'owner', surface: `${policy.commandBase(runtime)} import` },
+          !daemonApplied && daemonOwned.length > 0 ? { daemonNotRunning: true } : {})
         : { ok: true as const, saved: [] as readonly ConfigKey[] };
       if (!result.ok) {
         return {
           output: [
-            `Bundle not imported: ${result.refusal.reason} State: ${result.refusal.state}.`,
+            daemonApplied
+              ? `Bundle partly imported: the daemon took its ${daemonOwned.length} setting${daemonOwned.length === 1 ? '' : 's'}; this surface's were not saved: ${result.refusal.reason} State: ${result.refusal.state}.`
+              : `Bundle not imported: ${result.refusal.reason} State: ${result.refusal.state}.`,
             ...result.refusal.next.map((step) => `  ${step}`),
             ...result.saved.map((key) => `  saved ${key}`),
           ].join('\n'),
           exitCode: 1,
         };
       }
-      const refused: string[] = [];
-      for (const entry of daemonOwned) {
-        try { await bindings.routeDaemonSetting(runtime, entry.key, entry.value); } catch (error) {
-          refused.push(`  ${entry.key}: ${summarizeError(error)}`);
-        }
-      }
-      if (refused.length > 0) {
-        return {
-          output: [`Bundle partly imported: ${count - refused.length} of ${count} config values applied; these daemon settings were not:`, ...refused].join('\n'),
-          exitCode: 1,
-        };
-      }
       return {
-        output: `Bundle imported: ${count} config value${count === 1 ? '' : 's'} applied${daemonOwned.length > 0 ? ` (${daemonOwned.length} by the daemon)` : ''}.${redactedNote}`,
+        output: `Bundle imported: ${count} config value${count === 1 ? '' : 's'} applied${daemonApplied ? ` (${daemonOwned.length} by the daemon)` : ''}.${redactedNote}`,
         exitCode: 0,
       };
     }

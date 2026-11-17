@@ -95,6 +95,7 @@ export {
   DaemonConfigRejectedError,
   DaemonConfigUnreachableError,
   applyConfigWrite,
+  applyDaemonConfigWrites,
   discoverDaemonEndpoint,
   readDaemonConfig,
   reapUnansweringRuntimeRecord,
@@ -105,6 +106,7 @@ export type {
   ConfigWriteOutcome,
   ConfigWriteRoute,
   DaemonConfigEndpoint,
+  DaemonConfigWritesOutcome,
   DaemonConfigRouterDeps,
   LocalConfigWriter,
 } from './daemon-config-route.js';

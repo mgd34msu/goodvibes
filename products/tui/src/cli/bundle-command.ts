@@ -3,7 +3,8 @@ import type { RuntimeServices } from '../runtime/services.ts';
 import { readAuthPaths, withRuntimeServices } from './management-utils.ts';
 import { getOnboardingCheckMarkerPath } from '../runtime/onboarding/index.ts';
 import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
-import { applyRoutedConfigWrite } from '@goodvibes-jev/engine/platform/platform/tools';
+import { resolveRouterDeps } from '@goodvibes-jev/engine/platform/platform/tools';
+import { applyDaemonConfigWrites } from '@goodvibes-jev/engine/platform/platform/config';
 import { createRuntimeSecretsManager, resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import type { CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
@@ -33,8 +34,8 @@ export const handleBundleCommand = createSupportBundleCommand<
     authPosture: readAuthPaths,
     packageVersion: getPackageVersion,
     onboardingMarkerPath: getOnboardingCheckMarkerPath,
-    // The daemon applies its own settings; with none running its file is written for it to read at start.
-    routeDaemonSetting: (runtime, key, value) => applyRoutedConfigWrite(runtime.configManager, key, value),
+    // The daemon applies its own settings as one update; with none running the import writes its file for it to read at start.
+    routeDaemonSettings: (runtime, entries) => applyDaemonConfigWrites(entries, resolveRouterDeps(runtime.configManager)),
   },
   {
     site: 'terminal-shell.support-bundle.export',

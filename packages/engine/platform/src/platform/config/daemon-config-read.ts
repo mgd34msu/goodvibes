@@ -166,8 +166,14 @@ export async function loadDaemonConfigSnapshot(deps: DaemonConfigRouterDeps): Pr
       // An endpoint merely DERIVED from configuration describes where a daemon
       // would listen. Nothing answering there means no daemon is running, so the
       // local daemon store is the honest answer, not an error. A KNOWN daemon
-      // that does not answer is a genuine failure and stays one.
-      if (endpoint.certain !== false) return { endpoint, config: null, error: detail };
+      // that does not answer is a genuine failure and stays one, and so is a
+      // listener that did answer but refused or gave no identity proof (an
+      // older daemon, or one whose token differs): its settings are unknown, the
+      // local store is not them, and its record is not removed. The write path
+      // refuses in the same state.
+      if (endpoint.certain !== false || !(error instanceof DaemonConfigUnreachableError)) {
+        return { endpoint, config: null, error: detail };
+      }
       // A running-daemon record that got this far had a live pid and still did
       // not answer, a recycled pid, or a daemon that died without cleaning up.
       if (endpoint.source !== 'running-daemon record') break;
@@ -309,7 +315,7 @@ function entryFromSnapshot(
       status: 'unavailable',
       store: snapshot.endpoint.baseUrl,
       reason,
-      error: `The daemon at ${snapshot.endpoint.baseUrl} could not be reached (${snapshot.error}), `
+      error: `The daemon at ${snapshot.endpoint.baseUrl} could not be read (${snapshot.error}), `
         + 'so its current value for this key is unknown.',
     };
   }

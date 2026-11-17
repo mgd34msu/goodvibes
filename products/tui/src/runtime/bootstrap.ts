@@ -413,6 +413,12 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     },
   });
 
+  // The home's shared housekeeping is the adopted daemon's; with none adopted
+  // (not installed, stopped, blocked, disabled) this terminal keeps it.
+  const settleHomeHousekeeping = (): void => {
+    services.settleHomeHousekeeping(externalServices.daemonStatus.mode === 'external');
+  };
+
   const inspectExternalServices = () => {
     const daemonStatus = externalServices.daemonStatus;
     const httpListenerStatus = externalServices.httpListenerStatus;
@@ -485,6 +491,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
           externalServices = await externalServicesPromise;
         });
         await daemonHandshake.attach(companionTokenRecord.token);
+        settleHomeHousekeeping();
       }
       const notice = describeDaemonAutostart(
         outcome,
@@ -526,6 +533,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       );
       externalServices = await externalServicesPromise;
       await daemonHandshake.attach(companionTokenRecord.token);
+      settleHomeHousekeeping();
       requestRender();
       return inspectExternalServices();
     }),
@@ -594,6 +602,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       // Installed-but-stopped recovery, before anything reads the status.
       await maybeStartInstalledDaemon();
       await daemonHandshake.attach(companionTokenRecord.token);
+      settleHomeHousekeeping();
       requestRender();
     },
     onError: (error) => {

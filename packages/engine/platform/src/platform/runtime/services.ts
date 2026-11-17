@@ -515,6 +515,8 @@ export interface ComposedRuntimeServices extends RuntimeServices {
   readonly workPlan: ProjectWorkPlan;
   readonly memorySpine: MemorySpineClient;
   readonly stopDurabilityHousekeeping: () => void;
+  /** Starts the wake-word sweep and boot provision when they are not running (a host that found no daemon to do it). */
+  readonly startWakeHousekeeping: () => void;
   readonly stopWakeHousekeeping: () => void;
   readonly voiceSetup: VoiceSetupService;
   readonly acpHost: AcpHostService;

@@ -160,6 +160,14 @@ export interface RuntimeServices {
    */
   readonly clientBuildGuard: ClientBuildGuard;
   /**
+   * Who keeps the home's shared housekeeping (the daily copy of the memory
+   * store, the wake-model sweep and provisioning), told by bootstrap.ts each
+   * time the daemon's status settles: an adopted daemon keeps it, so this
+   * terminal stops its own; with no daemon to adopt (not installed, stopped,
+   * blocked, disabled) this terminal runs it.
+   */
+  readonly settleHomeHousekeeping: (daemonAdopted: boolean) => void;
+  /**
    * This surface offering its live conversation to the daemon, so a rewind
    * driven from anywhere can reach the messages, which only this process
    * holds. Started on adoption; released on disposal.
@@ -287,7 +295,9 @@ export interface RuntimeServices {
   readonly appendOnlyRetentionScheduler: ReturnType<typeof createDurabilityServices>['appendOnlyRetentionScheduler']; // periodic append-only sweep; unref'd timers, stop() on teardown
   /** Stops the recurring crash-residue sweep; idempotent, unref'd timer (hosts that tear a runtime down call it). */
   readonly stopDurabilityHousekeeping: () => void;
-  /** Stops the wake-word recovery sweep and a pending boot provision; a no-op unless `provisionWakeModelsAtBoot` was set. */
+  /** Starts the wake-word recovery sweep and boot provision when they are not running. */
+  readonly startWakeHousekeeping: () => void;
+  /** Stops the wake-word recovery sweep and a pending boot provision; a no-op when they are not running. */
   readonly stopWakeHousekeeping: () => void;
   readonly memoryConsolidationScheduler: MemoryConsolidationScheduler;
   readonly powerManager: PowerManager;

@@ -104,10 +104,13 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const keybindingsManager = new KeybindingsManager({
     configPath: shellPaths.resolveUserPath(GOODVIBES_TUI_SURFACE_ROOT, 'keybindings.json'),
   });
-  // With the daemon enabled (the default) it owns the home's shared housekeeping:
-  // the daily copy of the canonical memory store and the wake-model sweep and
-  // provisioning. This terminal's own stores stay its to keep.
-  const daemonOwnsHomeHousekeeping = resolveDaemonEnabled(configManager);
+  // An adopted daemon owns the home's shared housekeeping: the daily copy of the
+  // canonical memory store and the wake-model sweep and provisioning. Whether one
+  // was adopted is known only once the host services settle (bootstrap.ts calls
+  // settleHomeHousekeeping); with the daemon turned off none will be, so this
+  // terminal starts both at once. This terminal's own stores stay its to keep.
+  const daemonMayOwnHomeHousekeeping = resolveDaemonEnabled(configManager);
+  const provisionWakeModels = options.provisionWakeModelsAtBoot === true;
   let conversationRewindClosing: Promise<void> | undefined;
 
   return composeRuntimeServices({
@@ -166,7 +169,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       modelDiscovery: options.modelDiscovery,
       powerSeam: options.powerSeam,
       currentSessionId: options.currentSessionId,
-      provisionWakeModelsAtBoot: options.provisionWakeModelsAtBoot === true && !daemonOwnsHomeHousekeeping,
+      provisionWakeModelsAtBoot: provisionWakeModels && !daemonMayOwnHomeHousekeeping,
       notificationsMetadataOnly: () => readTuiNotificationsMetadataOnly(configManager),
       tripwireExit: (receipt) => {
         logger.warn('[memory] the terminal app keeps running past a memory tripwire; save your work and restart it when convenient', {
@@ -196,7 +199,6 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       const workspaceTrustManager = base.workspaceTrustManager;
       if (!requestApproval || !workspaceTrustManager) throw new Error('The terminal graph was composed without its approval raiser or trust owner');
       const { agentManager, configManager: config, providerRegistry, sessionBroker, contractRunner, processRegistry, surface } = base;
-      if (daemonOwnsHomeHousekeeping) base.storeSnapshotScheduler.stop();
       // This product serves no verbs itself: each built-in verb on this catalog is
       // answered by the daemon. Plugins, mail, calendar and review surfaces call it.
       forwardGatewayMethodsToDaemon(base.gatewayMethods, verbs);
@@ -288,7 +290,24 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
         ...(daemonConfig.reset ? { reset: (key: string) => daemonConfig.reset!(key) } : {}),
         refused: (key, error) => logger.warn('The daemon refused a setting written from the terminal; the previous value is back', { key, error: summarizeError(error) }),
       }));
-      const close = (): Promise<void> => { void requestConversationRewindStop().catch(() => {}); return base.close(); };
+      // The scheduler's first copy is an hour after start, so it runs until the
+      // daemon's status settles; the wake work waits for it (it starts fetching soon).
+      let housekeepingClosed = false;
+      const settleHomeHousekeeping = (daemonAdopted: boolean): void => {
+        if (housekeepingClosed) return;
+        if (daemonAdopted) {
+          base.storeSnapshotScheduler.stop();
+          base.stopWakeHousekeeping();
+          return;
+        }
+        base.storeSnapshotScheduler.start();
+        if (provisionWakeModels) base.startWakeHousekeeping();
+      };
+      const close = (): Promise<void> => {
+        housekeepingClosed = true;
+        void requestConversationRewindStop().catch(() => {});
+        return base.close();
+      };
       return {
         panelManager: viewPanelAdapter,
         keybindingsManager,
@@ -299,6 +318,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
         daemonVerbs: verbs,
         wireSessionDispatch,
         clientBuildGuard,
+        settleHomeHousekeeping,
         conversationRewindHost,
         devices,
         daemonConfig,

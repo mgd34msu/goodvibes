@@ -788,7 +788,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   }
   admitExpensiveWorkRef.current = (label) => memoryGovernor.admitExpensiveWork(label);
   // Managed local-voice provisioning (single-flight install, no-network status).
-  const { voiceSetup, stopWakeHousekeeping } = wireVoiceSetup({
+  const { voiceSetup, startWakeHousekeeping, stopWakeHousekeeping } = wireVoiceSetup({
     configManager, shellPaths, voiceProviders, admitExpensiveWork,
     provisionWakeModelsAtBoot: seams.provisionWakeModelsAtBoot === true,
   });
@@ -937,6 +937,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     storeSnapshotScheduler,
     appendOnlyRetentionScheduler,
     stopDurabilityHousekeeping,
+    startWakeHousekeeping,
     stopWakeHousekeeping,
     memoryConsolidationScheduler,
     powerManager,

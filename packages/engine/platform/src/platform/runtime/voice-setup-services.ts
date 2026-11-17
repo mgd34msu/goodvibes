@@ -65,10 +65,16 @@ export interface VoiceSetupServicesDeps {
 export interface VoiceSetupServices {
   readonly voiceSetup: VoiceSetupService;
   /**
+   * Start the wake-word recovery sweeper and the boot provision now, when they
+   * are not running: for a host that learns after composition that no other
+   * process on this machine does it (a terminal that found no daemon to adopt).
+   */
+  readonly startWakeHousekeeping: () => void;
+  /**
    * Stop the wake-word recovery sweeper and cancel a pending boot provision.
-   * A no-op when boot provisioning was not opted into. Registered on the
-   * disposal scope (disposal-wiring.ts), an hourly timer nothing stops is a
-   * poller this surface leaked, which is exactly what that scope exists for.
+   * A no-op when nothing was started. Registered on the disposal scope
+   * (disposal-wiring.ts), an hourly timer nothing stops is a poller this
+   * surface leaked, which is exactly what that scope exists for.
    */
   readonly stopWakeHousekeeping: () => void;
 }
@@ -85,17 +91,23 @@ export function wireVoiceSetup(deps: VoiceSetupServicesDeps): VoiceSetupServices
     resetLocalEngineFailureState: () => voiceProviders.get('local')?.resetEngineFailureState?.(),
     admitExpensiveWork: deps.admitExpensiveWork,
   });
-  if (deps.provisionWakeModelsAtBoot !== true) {
-    return { voiceSetup, stopWakeHousekeeping: () => {} };
-  }
   // Sweep the wake tree, then fetch whatever the install could not. The platform owns
   // the policy, never throws, one plain message, reaps before it retries, and
   // routes the attempt through the setup service's single flight so a boot
   // attempt and an explicitly requested provision are one download.
-  const boot = (deps.startBootProvisioning ?? startWakeBootProvisioning)({
-    managedRoot: managedVoiceRoot,
-    ensureProvisioned: () => voiceSetup.wakeEnsureProvisioned({ recoveryHint: WAKE_RECOVERY_COMMAND }),
-    announce: (message) => { logger.info(message); },
-  });
-  return { voiceSetup, stopWakeHousekeeping: () => boot.stop() };
+  let boot: { stop(): void } | null = null;
+  const startWakeHousekeeping = (): void => {
+    if (boot) return;
+    boot = (deps.startBootProvisioning ?? startWakeBootProvisioning)({
+      managedRoot: managedVoiceRoot,
+      ensureProvisioned: () => voiceSetup.wakeEnsureProvisioned({ recoveryHint: WAKE_RECOVERY_COMMAND }),
+      announce: (message) => { logger.info(message); },
+    });
+  };
+  const stopWakeHousekeeping = (): void => {
+    boot?.stop();
+    boot = null;
+  };
+  if (deps.provisionWakeModelsAtBoot === true) startWakeHousekeeping();
+  return { voiceSetup, startWakeHousekeeping, stopWakeHousekeeping };
 }

@@ -1,5 +1,5 @@
 // Proves: An agent places an order with ordinary browser actions (a merchant's saved payment method), around every spending limit.
-// Red when: The browser click path stops asking whether a control places an order or loses its name, or Enter or a submitting type in the order form is not treated as an order.
+// Red when: The browser click path stops asking whether a control places an order or loses its name, Enter or a submitting type in the order form is not treated as an order, or a key pressed on the order control itself is not refused.
 /**
  * An order cannot be placed around the spending limits. A merchant's saved
  * payment method lets one click on "Place order" charge the card, so the
@@ -50,6 +50,7 @@ const CHECKOUT = `<!doctype html><title>Checkout</title><h1>Checkout</h1>
   <button type="submit">Place order</button>
 </form>
 <a href="#" onclick="fetch('/order', { method: 'POST', body: 'buy-now' }); return false;">Buy now</a>
+<button type="button" onclick="fetch('/order', { method: 'POST', body: 'pay-now' })">Pay now</button>
 <button type="button" onclick="fetch('/coupon', { method: 'POST', body: 'SAVE10' })">Apply coupon</button>`;
 
 /** The merchant: serves the page and records every POST by path. */
@@ -157,11 +158,14 @@ test.each(['Place order', 'Buy now'])(
   },
 );
 
-test('Enter in the order form and text typed with submit are refused, and no order reaches the merchant', async () => {
+test('Enter in the order form, text typed with submit and a key on the order control are refused, and no order reaches the merchant', async () => {
   const refs = await openCheckout();
   expectOrderRefusal(await call({ action: 'press', ref: refs.get('Gift note'), key: 'Enter' }));
   expectOrderRefusal(await call({ action: 'type', ref: refs.get('Gift note'), text: 'Happy birthday', submit: true }));
   expectOrderRefusal(await call({ action: 'type', ref: refs.get('Gift note'), text: 'Happy birthday\n', replace: false }));
+  // A key on the order control itself: Enter on the scripted link, Space on a plain button.
+  expectOrderRefusal(await call({ action: 'press', ref: refs.get('Buy now'), key: 'Enter' }));
+  expectOrderRefusal(await call({ action: 'press', ref: refs.get('Pay now'), key: 'Space' }));
   await expectNoOrderReachedTheMerchant(refs);
   expect(ownerAsked).toBe(0);
 });

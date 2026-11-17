@@ -914,7 +914,8 @@ function buildRuntimeGraph(product: ProductComposition, disposalScope: AsyncDisp
   const sessionMemoryStore = new SessionMemoryStore();
   const sessionLineageTracker = new SessionLineageTracker();
   const sessionChangeTracker = new SessionChangeTracker();
-  const planManager = new ExecutionPlanManager(workingDirectory);
+  // This composition keeps no project work plan, so it has no active plan.
+  const planManager = new ExecutionPlanManager(null);
   const adaptivePlanner = new AdaptivePlanner();
   const idempotencyStore = new IdempotencyStore();
   const overflowHandler = new OverflowHandler({

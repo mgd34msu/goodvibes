@@ -10,7 +10,7 @@
  * human approval and (once approved) instantiate.
  *
  * A `PlanProposal` is DATA. It is never instantiated on its own; durable
- * persistence reuses `ExecutionPlanManager` (see
+ * persistence is the project work plan (see
  * `planProposalToExecutionPlanItems` below), which performs no I/O itself and
  * only shapes data for callers that do.
  */
@@ -379,31 +379,19 @@ export function singleItemProposal(task: string): PlanProposal {
 }
 
 // ---------------------------------------------------------------------------
-// Persistence adapter: PlanProposal -> ExecutionPlanManager's PlanItem shape
+// Persistence adapter: PlanProposal -> the plan's PlanItem shape
 // ---------------------------------------------------------------------------
 
 /**
- * Project a `PlanProposal` into the plain items `ExecutionPlanManager` deals
- * in. This is a deliberately lossy projection: `PlanItem` has no room for
+ * Project a `PlanProposal` into plain plan items. This is a deliberately
+ * lossy projection: `PlanItem` has no room for
  * verification/likelyFiles/suggestedArchetype, and those stay on the
- * proposal itself. It exists purely so a
- * caller can hand a proposal's items to `ExecutionPlanManager` without
- * re-deriving the phase/description/dependency shape by hand.
+ * proposal itself.
  *
- * Dependencies are expressed as WORK ITEM TITLES, not ids, because
- * `ExecutionPlanManager.create()` does not resolve dependency references,
- * only `ExecutionPlanManager.replaceItems()` does, by case-insensitive
- * description match. The intended call sequence at instantiation is
- * therefore:
- *
- *   const plan = planManager.create(title, []);
- *   const { items } = planProposalToExecutionPlanItems(proposal);
- *   planManager.replaceItems(plan.id, items);
- *
- * which reuses `replaceItems`' existing dependency resolver end-to-end
- * instead of re-implementing dependency resolution here. This module defines
- * no scheduler of its own, ready-to-run item selection stays
- * `ExecutionPlanManager.getNextItems`'s job.
+ * Dependencies are expressed as WORK ITEM TITLES, not ids: an item is added
+ * to the project work plan by title, and its id exists only once it is added.
+ * This module defines no scheduler of its own; ready-to-run item selection
+ * is `ExecutionPlanManager.getNextItems`'s job.
  */
 export function planProposalToExecutionPlanItems(
   proposal: PlanProposal,

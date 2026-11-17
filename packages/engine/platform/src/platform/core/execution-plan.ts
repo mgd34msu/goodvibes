@@ -1,21 +1,17 @@
 /**
- * Execution Plan Manager, tracks live progress for multi-step agent tasks.
+ * The session's execution plan: a view of the project work plan.
  *
- * Plans are stored as JSON at .goodvibes/plans/<id>.json and rendered as
- * markdown for injection into the model's context. Self-contained, no
- * orchestrator dependency.
+ * There is one plan, the project work plan (`knowledge/project-planning/work-plan.ts`):
+ * the model keeps it with the `work_plan` tool, the person sees and edits it
+ * in the work plan view, and contracts link to it. This class reads that plan
+ * as the plan the turn shows the model (`hostInstructions` key `plan`), the
+ * compaction summary keeps, and the completion check reads; and it writes item
+ * statuses back to it when a contract unit's agents finish
+ * (`contract/plan-sync.ts`). It keeps no file of its own.
  */
 
-import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
-import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
-import { planItemStatus } from './batteries/plan-item-status.js';
-import { existsSync, readdirSync, rmSync } from 'node:fs';
-import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
+import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
-import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
-import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 
 export type PlanItemStatus = 'pending' | 'in_progress' | 'complete' | 'failed' | 'skipped';
 
@@ -28,7 +24,7 @@ export interface PlanItem {
   dependencies?: string[]; // IDs of items that must complete first
 }
 
-export type ExecutionPlanStatus = 'draft' | 'active' | 'complete' | 'failed' | 'dismissed';
+export type ExecutionPlanStatus = 'draft' | 'active' | 'complete' | 'failed';
 
 export interface ExecutionPlan {
   id: string;
@@ -38,53 +34,43 @@ export interface ExecutionPlan {
   sessionId?: string | undefined;
   status: ExecutionPlanStatus;
   items: PlanItem[];
-  specPath?: string; // path to the spec document
-  awaitingPlan?: boolean; // true when /plan created the shell, waiting for model to fill it
-  /** ISO timestamp set when the plan was dismissed/archived (status 'dismissed'). */
-  dismissedAt?: string;
-  /** The status the plan held immediately before it was dismissed, preserved so
-   *  a completed/failed record is not silently rewritten to look like a draft. */
-  dismissedFrom?: Exclude<ExecutionPlanStatus, 'dismissed'>;
+  /** Open items left out of this view to keep what the model is sent bounded. */
+  omitted?: number;
+}
+
+/** A work plan task's status, as the project work plan records it. */
+export type WorkPlanTaskState = 'pending' | 'in_progress' | 'blocked' | 'done' | 'failed' | 'cancelled';
+
+/** The fields of a work plan task the view reads. */
+export interface WorkPlanTaskView {
+  readonly taskId: string;
+  readonly title: string;
+  readonly status: WorkPlanTaskState;
+  readonly owner?: string | undefined;
+  readonly agentId?: string | undefined;
+  /** The session the task was recorded in. */
+  readonly sessionId?: string | undefined;
+  readonly createdAt: number;
+  readonly updatedAt: number;
 }
 
 /**
- * Outcome of {@link ExecutionPlanManager.dismiss}. Dismiss is intentionally
- * refused mid-execution: an in-flight plan must be stopped via the workstream
- * cancel path first, so `dismiss` never silently abandons running agent work.
- *
- *  - `no-active-plan`     , nothing to dismiss; no mutation.
- *  - `requires-cancel`    , the active plan is mid-execution ('active');
- *                            refused. Cancel the workstream first, then dismiss.
- *  - `dismissed`          , a proposal/awaiting-approval or terminal plan was
- *                            archived: retained on disk with status 'dismissed'
- *                            + `dismissedAt`, and the active pointer cleared so a
- *                            later `/plan <goal>` starts fresh.
+ * The slice of the project work plan (`ProjectWorkPlan`) the view reads and
+ * writes: one synchronous read of the plan, and a status change.
  */
-export type DismissPlanOutcome = 'no-active-plan' | 'requires-cancel' | 'dismissed';
-
-export interface DismissPlanResult {
-  readonly outcome: DismissPlanOutcome;
-  /** The archived plan (only when `outcome === 'dismissed'`). */
-  readonly plan?: ExecutionPlan;
-  /** The plan that blocked dismissal (only when `outcome === 'requires-cancel'`). */
-  readonly blockedBy?: ExecutionPlan;
+export interface ExecutionPlanSource {
+  snapshotNow(): { readonly workPlanId: string; readonly tasks: readonly WorkPlanTaskView[]; readonly updatedAt: number };
+  setStatus(idOrPrefix: string, status: WorkPlanTaskState): Promise<unknown>;
 }
 
-export interface ExecutionPlanParseIssue {
-  readonly line: number;
-  readonly text: string;
-  readonly reason: string;
-}
+/**
+ * At most this many open items reach the model per user turn; the rest are
+ * counted, and `work_plan list` shows them all.
+ */
+export const EXECUTION_PLAN_VIEW_LIMIT = 40;
 
-export type ParsedExecutionPlan = Partial<ExecutionPlan> & {
-  parseIssues?: ExecutionPlanParseIssue[] | undefined;
-  /** Revalidate the reading source immediately before consuming parsed items. */
-  assertCurrent?: (() => void) | undefined;
-};
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+const OPEN_PHASE = 'Open items';
+const PLAN_PHASE = 'Work plan';
 
 const STATUS_CHECKBOX: Record<PlanItemStatus, string> = {
   pending: '[ ]',
@@ -102,75 +88,50 @@ const STATUS_LABEL: Record<PlanItemStatus, string> = {
   skipped: 'SKIPPED',
 };
 
-/** A recoverable, value-free refusal; never includes model text or provider errors. */
-export class PlanStatusUnavailableError extends Error {
-  readonly recoverable = true;
-  constructor() { super('Plan status reading is unavailable. The existing plan was retained; retry when the reader is available.'); this.name = 'PlanStatusUnavailableError'; }
+const FROM_WORK_PLAN: Record<WorkPlanTaskState, PlanItemStatus> = {
+  pending: 'pending',
+  in_progress: 'in_progress',
+  blocked: 'pending',
+  done: 'complete',
+  failed: 'failed',
+  cancelled: 'skipped',
+};
+
+const TO_WORK_PLAN: Record<PlanItemStatus, WorkPlanTaskState> = {
+  pending: 'pending',
+  in_progress: 'in_progress',
+  complete: 'done',
+  failed: 'failed',
+  skipped: 'cancelled',
+};
+
+function isOpen(item: WorkPlanTaskView): boolean {
+  return item.status === 'pending' || item.status === 'in_progress' || item.status === 'blocked';
+}
+
+function planItemOf(item: WorkPlanTaskView, phase: string): PlanItem {
+  // An item's agent is its link when it has one, else its owner: the
+  // `work_plan` tool records an assigned agent as the owner.
+  const agentId = item.agentId ?? item.owner;
+  return {
+    id: item.taskId,
+    phase,
+    description: item.status === 'blocked' ? `${item.title} (blocked)` : item.title,
+    status: FROM_WORK_PLAN[item.status],
+    ...(agentId ? { agentId } : {}),
+  };
 }
 
 /**
- * Only a reader that could not answer is the retryable "status unavailable"
- * case. A cancel, a refused input, a retired authority or a programming error
- * keeps its own identity: retrying those cannot succeed, and hiding them
- * behind a retry message would send callers into a loop.
+ * The plan's top-level status as a pure function of its items: complete when
+ * everything finished or was skipped, failed when any item failed, active
+ * while an item is under way, a draft otherwise.
  */
-function planParseFailure(err: unknown, aborted: boolean): unknown {
-  if (aborted
-    || (err instanceof Error && err.name === 'AbortError')
-    || err instanceof PlanStatusUnavailableError
-    || err instanceof JudgmentInputError
-    || err instanceof JudgmentAuthorityRetiredError
-    || err instanceof TypeError || err instanceof RangeError || err instanceof ReferenceError || err instanceof SyntaxError) return err;
-  return new PlanStatusUnavailableError();
-}
-
-/** One of the five state words in any case, with a space or hyphen for the underscore ("In progress"). */
-function canonicalStatus(label: string | undefined): PlanItemStatus | undefined {
-  if (!label) return undefined;
-  const word = label.trim().toUpperCase().replace(/[\s-]+/g, '_');
-  return (Object.keys(STATUS_LABEL) as PlanItemStatus[]).find(status => word === STATUS_LABEL[status]);
-}
-
-function checkboxStatus(checkbox: string): PlanItemStatus {
-  const c = checkbox.trim();
-  if (c === '[x]' || c === '[X]') return 'complete';
-  if (c === '[~]') return 'in_progress';
-  if (c === '[!]') return 'failed';
-  if (c === '[-]') return 'skipped';
-  return 'pending';
-}
-
-/**
- * Find the last occurrence of any dash separator variant in text.
- * Returns { index, sepLen } or { index: -1, sepLen: 0 } if not found.
- * Accepts em-dash (—), en-dash (–), or double-hyphen (--).
- */
-function findLastSeparator(text: string): { index: number; sepLen: number } {
-  const separators = [' \u2014 ', ' \u2013 ', ' -- '];
-  let lastIdx = -1;
-  let lastSepLen = 0;
-  for (const sep of separators) {
-    const idx = text.lastIndexOf(sep);
-    if (idx > lastIdx) {
-      lastIdx = idx;
-      lastSepLen = sep.length;
-    }
-  }
-  return { index: lastIdx, sepLen: lastSepLen };
-}
-
-/**
- * The plan's top-level status as a pure function of its items. A dismissed plan
- * is archived and stays dismissed. A plan that was complete or failed and whose
- * items moved back to unfinished work is active again, never left stale; a
- * draft or active plan with nothing finished or failed keeps its status.
- */
-export function derivePlanStatus(current: ExecutionPlanStatus, items: readonly Pick<PlanItem, 'status'>[]): ExecutionPlanStatus {
-  if (current === 'dismissed') return current;
-  if (items.every((i) => i.status === 'complete' || i.status === 'skipped')) return 'complete';
+export function derivePlanStatus(items: readonly Pick<PlanItem, 'status'>[]): ExecutionPlanStatus {
+  if (items.length > 0 && items.every((i) => i.status === 'complete' || i.status === 'skipped')) return 'complete';
   if (items.some((i) => i.status === 'failed')) return 'failed';
   if (items.some((i) => i.status === 'in_progress')) return 'active';
-  return current === 'complete' || current === 'failed' ? 'active' : current;
+  return 'draft';
 }
 
 function phaseStatus(items: PlanItem[]): string {
@@ -181,227 +142,86 @@ function phaseStatus(items: PlanItem[]): string {
   return 'PENDING';
 }
 
+type PlanRead = ReturnType<ExecutionPlanSource['snapshotNow']>;
+
+function viewOf(plan: PlanRead, items: readonly WorkPlanTaskView[], phase: string, omitted: number): ExecutionPlan {
+  const planItems = items.map((item) => planItemOf(item, phase));
+  const createdAt = Math.min(plan.updatedAt, ...items.map((item) => item.createdAt));
+  return {
+    id: plan.workPlanId,
+    title: 'Work plan',
+    createdAt: new Date(createdAt).toISOString(),
+    updatedAt: new Date(plan.updatedAt).toISOString(),
+    status: derivePlanStatus(planItems),
+    items: planItems,
+    ...(omitted > 0 ? { omitted } : {}),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // ExecutionPlanManager
 // ---------------------------------------------------------------------------
 
 export class ExecutionPlanManager {
-  private readonly projectRoot: string;
-  private readonly plansDir: string;
-  private readonly activeFile: string;
-  private readonly activeDir: string;
-  private lastCreatedAtMs = 0;
-  private incarnation: object = {};
+  private readonly workPlan: ExecutionPlanSource | null;
 
-  /** Mutation intent invalidates in-flight parsing, including same-value/ABA saves. */
-  getIncarnation(): object { return this.incarnation; }
-
-  constructor(projectRoot: string) {
-    this.projectRoot = projectRoot;
-    this.plansDir = join(this.projectRoot, '.goodvibes', 'plans');
-    // `active.json` holds the most recent pointer for callers without a
-    // session; each session also owns a pointer under `active/`, so two
-    // sessions sharing a project never overwrite each other's active plan.
-    // The subdirectory keeps the plans listing (and older readers, which treat
-    // every top-level .json file as a plan) unaffected.
-    this.activeFile = join(this.plansDir, 'active.json');
-    this.activeDir = join(this.plansDir, 'active');
+  /** `null` where the composition has no project work plan: there is then no active plan. */
+  constructor(workPlan: ExecutionPlanSource | null) {
+    this.workPlan = workPlan;
   }
 
-  private sessionPointerFile(sessionId: string): string {
-    return join(this.activeDir, `${encodeURIComponent(sessionId)}.json`);
-  }
-
-  private readPointer(file: string, label: string): { planId: string | null; sessionId?: string | null } | null {
-    return readJsonFileOrQuarantine<{ planId: string | null; sessionId?: string | null }>(file, {
-      label,
-      recovery: 'No plan is marked active; the next plan created or resumed becomes the active one.',
-      validate: (parsed) => {
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          throw new Error('active-plan pointer is not a JSON object');
-        }
-        return parsed as { planId: string | null; sessionId?: string | null };
-      },
-    });
-  }
-
-  // --------------------------------------------------------------------------
-  // Persistence
-  // --------------------------------------------------------------------------
-
-  /** Load plan from disk (.goodvibes/plans/<id>.json). Returns null if not found. */
-  load(planId: string): ExecutionPlan | null {
-    const filePath = join(this.plansDir, `${planId}.json`);
+  /** The plan as stored now; null when there is none or its store is still opening. */
+  private read(): PlanRead | null {
+    if (!this.workPlan) return null;
     try {
-      return readJsonFileOrQuarantine<ExecutionPlan>(filePath, {
-        label: 'core/execution-plan',
-        recovery: 'This plan is gone; the session continues without it and a new plan can be created at any time.',
-        validate: (parsed) => {
-          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-            throw new Error('plan file is not a JSON object');
-          }
-          return parsed as ExecutionPlan;
-        },
-      });
-    } catch (err) {
-      logger.warn('ExecutionPlanManager: failed to load plan', { planId: filePath, error: String(err) });
+      return this.workPlan.snapshotNow();
+    } catch (error) {
+      logger.debug('ExecutionPlanManager: the work plan could not be read yet', { error: summarizeError(error) });
       return null;
     }
-  }
-
-  /** Save plan to disk. Creates directories as needed. */
-  save(plan: ExecutionPlan): void {
-    this.incarnation = {};
-    writeJsonFileAtomic(join(this.plansDir, `${plan.id}.json`), plan);
-  }
-
-  /** Get the active plan for the current session, if any. */
-  getActive(sessionId?: string): ExecutionPlan | null {
-    try {
-      // A session reads only its own pointer; no pointer means no active plan.
-      const pointer = this.readPointer(sessionId ? this.sessionPointerFile(sessionId) : this.activeFile, 'core/execution-plan-pointer');
-      if (!pointer) return null;
-      const { planId, sessionId: activeSessionId } = pointer;
-      if (!planId) return null;
-      if (sessionId && activeSessionId && activeSessionId !== sessionId) return null;
-      if (sessionId && !activeSessionId) return null;
-      const plan = this.load(planId);
-      if (!plan) return null;
-      if (sessionId && plan.sessionId && plan.sessionId !== sessionId) return null;
-      if (sessionId && !plan.sessionId) return null;
-      return plan;
-    } catch (err) {
-      logger.warn('ExecutionPlanManager: failed to read active plan pointer', { error: String(err) });
-      return null;
-    }
-  }
-
-  private setActive(planId: string | null, sessionId?: string | null): void {
-    this.incarnation = {};
-    if (sessionId) {
-      // A dismissed plan leaves no pointer behind: absence is "no active plan".
-      if (planId === null) rmSync(this.sessionPointerFile(sessionId), { force: true });
-      else writeJsonFileAtomic(this.sessionPointerFile(sessionId), { planId, sessionId });
-    }
-    if (planId === null) {
-      // Only rewrite an existing pointer, absence already means "no active plan".
-      // The shared pointer is cleared only when it still belongs to this
-      // session: clearing another session's pointer would hide its plan.
-      if (!existsSync(this.activeFile)) return;
-      if (sessionId) {
-        let shared: { planId: string | null; sessionId?: string | null } | null = null;
-        try { shared = this.readPointer(this.activeFile, 'core/execution-plan-pointer'); } catch { shared = null; }
-        if (shared?.sessionId && shared.sessionId !== sessionId) return;
-      }
-      writeJsonFileAtomic(this.activeFile, { planId: null, sessionId: sessionId ?? null });
-      return;
-    }
-    writeJsonFileAtomic(this.activeFile, { planId, sessionId: sessionId ?? null });
-  }
-
-  // --------------------------------------------------------------------------
-  // CRUD
-  // --------------------------------------------------------------------------
-
-  /** Create a new plan and set it as active. */
-  create(title: string, items: Omit<PlanItem, 'id' | 'status'>[], sessionId?: string): ExecutionPlan {
-    const now = this.nextCreatedAt();
-    const plan: ExecutionPlan = {
-      id: randomUUID(),
-      title,
-      createdAt: now,
-      updatedAt: now,
-      sessionId,
-      status: 'draft',
-      items: items.map((item) => ({
-        ...item,
-        id: randomUUID(),
-        status: 'pending',
-      })),
-    };
-    this.save(plan);
-    this.setActive(plan.id, sessionId ?? null);
-    return plan;
-  }
-
-  /** Update a plan item's status (and optionally assign an agent). */
-  updateItem(
-    planId: string,
-    itemId: string,
-    status: PlanItemStatus,
-    agentId?: string,
-  ): void {
-    const plan = this.load(planId);
-    if (!plan) return;
-
-    const item = plan.items.find((i) => i.id === itemId);
-    if (!item) return;
-
-    item.status = status;
-    if (agentId !== undefined) item.agentId = agentId;
-
-    // A dismissed plan is archived: derivePlanStatus keeps it dismissed.
-    plan.status = derivePlanStatus(plan.status, plan.items);
-
-    plan.updatedAt = new Date().toISOString();
-    this.save(plan);
   }
 
   /**
-   * Dismiss (archive) the active plan for the current session.
-   *
-   * Honest semantics for every plan state:
-   *   - No active plan → no-op (`{ outcome: 'no-active-plan' }`), nothing written.
-   *   - Active/mid-execution ('active') → refused (`{ outcome: 'requires-cancel' }`).
-   *     A running plan must be stopped via the workstream cancel path first;
-   *     dismiss never abandons in-flight agent work by fiat.
-   *   - Proposal/awaiting-approval ('draft') or a terminal record ('complete' /
-   *     'failed') → archived: the plan is RETAINED on disk with status
-   *     'dismissed', a `dismissedAt` timestamp, and `dismissedFrom` recording
-   *     the prior status; the active pointer is cleared so a later
-   *     `/plan <goal>` starts a fresh plan. Nothing is deleted.
+   * The open work this session recorded in the project work plan, or null
+   * when it has none. Without a session id, every open item of the plan.
    */
-  dismiss(sessionId?: string): DismissPlanResult {
-    const active = this.getActive(sessionId);
-    if (!active) return { outcome: 'no-active-plan' };
-
-    if (active.status === 'active') {
-      return { outcome: 'requires-cancel', blockedBy: active };
-    }
-
-    const dismissedFrom = active.status as Exclude<ExecutionPlanStatus, 'dismissed'>;
-    active.dismissedFrom = dismissedFrom;
-    active.status = 'dismissed';
-    active.dismissedAt = new Date().toISOString();
-    active.updatedAt = active.dismissedAt;
-    this.save(active);
-    // Clear the active pointer (archive, not delete) so the plan survives in
-    // list() but no longer counts as the session's active plan.
-    this.setActive(null, active.sessionId ?? sessionId ?? null);
-    return { outcome: 'dismissed', plan: active };
+  getActive(sessionId?: string): ExecutionPlan | null {
+    const plan = this.read();
+    if (!plan) return null;
+    const open = plan.tasks.filter((task) => isOpen(task) && (sessionId === undefined || task.sessionId === sessionId));
+    if (open.length === 0) return null;
+    // Work under way first, then waiting work in plan order.
+    const ordered = [...open.filter((i) => i.status === 'in_progress'), ...open.filter((i) => i.status !== 'in_progress')];
+    const shown = ordered.slice(0, EXECUTION_PLAN_VIEW_LIMIT);
+    return viewOf(plan, shown, OPEN_PHASE, ordered.length - shown.length);
   }
 
-  /** List all plans (reads directory, excludes active.json). */
-  list(): ExecutionPlan[] {
-    if (!existsSync(this.plansDir)) return [];
-    const plans: ExecutionPlan[] = [];
-    for (const file of readdirSync(this.plansDir)) {
-      if (!file.endsWith('.json') || file === 'active.json') continue;
-      const id = file.replace(/\.json$/, '');
-      const plan = this.load(id);
-      if (plan) plans.push(plan);
-    }
-    return plans.sort((a, b) => {
-      const byCreatedAt = a.createdAt.localeCompare(b.createdAt);
-      if (byCreatedAt !== 0) return byCreatedAt;
-      return a.id.localeCompare(b.id);
+  /** The work under way, for the completion check: an item no one started is not this answer's obligation. */
+  getInProgress(sessionId?: string): ExecutionPlan | null {
+    const active = this.getActive(sessionId);
+    if (!active) return null;
+    const items = active.items.filter((i) => i.status === 'in_progress');
+    if (items.length === 0) return null;
+    return { id: active.id, title: active.title, createdAt: active.createdAt, updatedAt: active.updatedAt, status: 'active', items };
+  }
+
+  /**
+   * Write an item's status back to the work plan. The write is the plan's own
+   * transaction; a failure (the item was removed meanwhile) is logged and the
+   * plan is left as it is.
+   */
+  updateItem(planId: string, itemId: string, status: PlanItemStatus): Promise<void> {
+    const plan = this.read();
+    if (!this.workPlan || !plan || plan.workPlanId !== planId || !plan.tasks.some((task) => task.taskId === itemId)) return Promise.resolve();
+    return this.workPlan.setStatus(itemId, TO_WORK_PLAN[status]).then(() => undefined, (error: unknown) => {
+      logger.warn('ExecutionPlanManager: a work plan item was not updated', { planId, itemId, error: summarizeError(error) });
     });
   }
 
-  private nextCreatedAt(): string {
-    const now = Date.now();
-    this.lastCreatedAtMs = now > this.lastCreatedAtMs ? now : this.lastCreatedAtMs + 1;
-    return new Date(this.lastCreatedAtMs).toISOString();
+  /** The whole work plan, finished items included, as the one plan there is; empty when it has no items. */
+  list(): ExecutionPlan[] {
+    const plan = this.read();
+    return !plan || plan.tasks.length === 0 ? [] : [viewOf(plan, plan.tasks, PLAN_PHASE, 0)];
   }
 
   // --------------------------------------------------------------------------
@@ -413,8 +233,8 @@ export class ExecutionPlanManager {
    *
    * Format:
    *   # Plan Title
-   *   ## Phase 1: Setup [COMPLETE]
-   *   - [x] Description, COMPLETE (agent-id)
+   *   ## Open items [IN_PROGRESS]
+   *   - [~] Description -- IN_PROGRESS (agent-id)
    */
   toMarkdown(plan: ExecutionPlan): string {
     const lines: string[] = [`# ${plan.title}`, ''];
@@ -432,23 +252,13 @@ export class ExecutionPlanManager {
 
     for (const phase of phaseOrder) {
       const items = byPhase.get(phase) ?? [];
-      const ps = phaseStatus(items);
-      lines.push(`## ${phase} [${ps}]`);
+      lines.push(`## ${phase} [${phaseStatus(items)}]`);
       for (const item of items) {
-        const cb = STATUS_CHECKBOX[item.status];
-        const label = STATUS_LABEL[item.status];
-        // The separator is parser grammar, not prose: findLastSeparator reads
-        // it back, and a comma cannot serve because descriptions contain
-        // commas. The ASCII double-hyphen is the variant the parser has
-        // always accepted alongside the legacy dash forms.
-        let line = `- ${cb} ${item.description} -- ${label}`;
+        let line = `- ${STATUS_CHECKBOX[item.status]} ${item.description} -- ${STATUS_LABEL[item.status]}`;
         if (item.agentId) line += ` (${item.agentId})`;
         if (item.dependencies && item.dependencies.length > 0) {
           const depDescs = item.dependencies
-            .map((depId) => {
-              const dep = plan.items.find((i) => i.id === depId);
-              return dep ? dep.description : depId;
-            })
+            .map((depId) => plan.items.find((i) => i.id === depId)?.description ?? depId)
             .join(', ');
           line += ` (depends: ${depDescs})`;
         }
@@ -456,186 +266,16 @@ export class ExecutionPlanManager {
       }
       lines.push('');
     }
+    if (plan.omitted) lines.push(`(${plan.omitted} more open item(s) not shown; \`work_plan\` action \`list\` shows all.)`);
 
     return lines.join('\n').trimEnd() + '\n';
-  }
-
-  /**
-   * Parse a markdown execution plan written by the model into structured format.
-   * Robust to minor formatting variations models may produce.
-   */
-  async parseFromMarkdown(markdown: string, options: JudgmentReadingOptions = {}): Promise<ParsedExecutionPlan> {
-    return withConfiguredDecisionModelPolicy(() => this.parseMarkdownUnderPolicy(markdown, options));
-  }
-
-  private async parseMarkdownUnderPolicy(markdown: string, options: JudgmentReadingOptions): Promise<ParsedExecutionPlan> {
-    let authority: JudgmentPortCapture | undefined;
-    const parseIssues: ExecutionPlanParseIssue[] = [];
-    const controller = new AbortController();
-    const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
-    const assertCurrent = () => { signal.throwIfAborted(); options.assertCurrent?.(); if (!isClassicOperation()) authority?.assertCurrent(); };
-    // A plan repeats a handful of labels; each distinct label is read once per
-    // parse (null: it was read by its checkbox because the reader was off).
-    const labelReadings = new Map<string, PlanItemStatus | null>();
-    let screened = false;
-    const classicIssue = (label: string, line: number) => parseIssues.push({ line, text: label,
-      reason: 'Classic used the explicit checkbox; the noncanonical status label was not semantically interpreted.' });
-    const readStatus = async (checkbox: string, label: string | undefined, line: number): Promise<PlanItemStatus> => {
-      assertCurrent();
-      const canonical = canonicalStatus(label);
-      if (canonical !== undefined) return canonical;
-      if (!label) return checkboxStatus(checkbox);
-      const known = labelReadings.get(label);
-      if (known === null) { classicIssue(label, line); return checkboxStatus(checkbox); }
-      if (known !== undefined) return known;
-      return decisionOrClassic(async () => {
-        // Screen the COMPLETE markdown once, before the first projection/transmission,
-        // including unrelated lines and later items; never send a partial safe prefix.
-        if (!screened) { assertJudgmentInput({ markdown }); screened = true; }
-        authority ??= captureJudgmentPort('engine.core.plan-item-status', { signal, assertCurrent: options.assertCurrent });
-        const run = await planItemStatus.run(authority.port, { label }, { site: 'engine.core.plan-item-status', signal: authority.signal });
-        assertCurrent();
-        if (run.readings.status.outcome !== 'act' || !Object.hasOwn(STATUS_LABEL, run.readings.status.choice)) throw new PlanStatusUnavailableError();
-        run.recordAction(`Read plan item state: ${run.readings.status.choice}`);
-        assertCurrent();
-        labelReadings.set(label, run.readings.status.choice);
-        return run.readings.status.choice;
-      }, () => {
-        assertCurrent();
-        labelReadings.set(label, null);
-        classicIssue(label, line);
-        return checkboxStatus(checkbox);
-      });
-    };
-    try {
-      assertCurrent();
-      const lines = markdown.split('\n');
-      const items: PlanItem[] = [];
-      let title = '';
-      let currentPhase = '';
-
-      // Phase heading: ## Phase N: Name [STATUS] or ## Name [STATUS] or ## Name
-      const phaseRe = /^##\s+(.+?)(?:\s+\[([^\]]+)\])?\s*$/;
-      // Checkbox prefix: - [x], - [ ], - [~], - [!], - [-]
-      const checkboxRe = /^-\s+(\[[\sxX~!\-]\])\s+(.+)$/;
-
-      for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-        const line = lines[lineIndex]!;
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-
-        // Title
-        if (trimmed.startsWith('# ') && !trimmed.startsWith('## ') && !title) {
-          title = trimmed.replace(/^#\s+/, '').trim();
-          continue;
-        }
-
-        // Phase heading
-        const phaseMatch = phaseRe.exec(trimmed);
-        if (phaseMatch && trimmed.startsWith('## ')) {
-          currentPhase = phaseMatch[1]?.trim() ?? '';
-          continue;
-        }
-
-        // Item
-        if (trimmed.startsWith('- ') && currentPhase) {
-          const cbMatch = checkboxRe.exec(trimmed);
-          if (cbMatch) {
-            const [, checkbox, rest] = cbMatch;
-
-            // Split from the RIGHT on a dash separator to separate description from metadata.
-            // Accepts em-dash (—), en-dash (–), or double-hyphen (--) for model output variants.
-            // Only the last occurrence splits, so em-dashes in descriptions are preserved.
-            const restStr = rest ?? '';
-            const { index: sepIdx, sepLen } = findLastSeparator(restStr);
-            let description: string;
-            let metaPart: string | undefined;
-
-            if (sepIdx !== -1) {
-              description = restStr.slice(0, sepIdx).trim();
-              metaPart = restStr.slice(sepIdx + sepLen).trim();
-            } else {
-              description = restStr.trim();
-            }
-
-            let statusLabel: string | undefined;
-            let agentId: string | undefined;
-            let rawDeps: string | undefined;
-
-            if (metaPart) {
-              // Extract trailing (depends: ...) first
-              const depsMatch = /\(depends:\s*([^)]+)\)\s*$/.exec(metaPart);
-              if (depsMatch) {
-                rawDeps = depsMatch[1] ?? '';
-                metaPart = metaPart.slice(0, depsMatch.index).trim();
-              }
-
-              // Extract trailing (agent-id)
-              const agentMatch = /\(([^)]+)\)\s*$/.exec(metaPart);
-              if (agentMatch) {
-                const candidate = agentMatch[1]?.trim() ?? '';
-                if (/^depends:/i.test(candidate)) {
-                  rawDeps = rawDeps ?? candidate.replace(/^depends:\s*/i, '');
-                } else {
-                  agentId = candidate;
-                }
-                metaPart = metaPart.slice(0, agentMatch.index).trim();
-              }
-
-              // What remains is the status label
-              if (metaPart) statusLabel = metaPart;
-            }
-
-            const dependencies = rawDeps
-              ? rawDeps.split(',').map((d) => d.trim()).filter(Boolean)
-              : undefined;
-
-            items.push({
-              id: randomUUID(),
-              phase: currentPhase,
-              description,
-              status: await readStatus(checkbox!, statusLabel, lineIndex + 1),
-              ...(agentId ? { agentId } : {}),
-              ...(dependencies && dependencies.length > 0 ? { dependencies } : {}),
-            });
-          } else {
-            const descMatch = /^-\s+(?:\[[\s\w~!-]\]\s+)?(.+)$/.exec(trimmed);
-            if (descMatch) {
-              items.push({
-                id: randomUUID(),
-                phase: currentPhase,
-                description: descMatch[1]?.trim() ?? '',
-                status: 'pending',
-              });
-              parseIssues.push({
-                line: lineIndex + 1,
-                text: trimmed,
-                reason: 'Plan item did not include a recognized checkbox status; parsed as pending.',
-              });
-            }
-          }
-        }
-      }
-
-      assertCurrent();
-      const now = new Date().toISOString();
-      return {
-        ...(title ? { title } : {}),
-        createdAt: now,
-        updatedAt: now,
-        status: 'draft',
-        items,
-        ...(parseIssues.length > 0 ? { parseIssues } : {}),
-        assertCurrent,
-      };
-    } catch (err) { throw planParseFailure(err, signal.aborted); }
   }
 
   // --------------------------------------------------------------------------
   // Query helpers
   // --------------------------------------------------------------------------
 
-  /** Human-readable summary: "Phase 2: Implementation, 1/3 complete" */
+  /** Human-readable summary: "Open items: 1/3 complete" */
   getSummary(plan: ExecutionPlan): string {
     const phaseOrder: string[] = [];
     const byPhase = new Map<string, PlanItem[]>();
@@ -659,64 +299,6 @@ export class ExecutionPlanManager {
     }
 
     return `${plan.title}: all complete`;
-  }
-
-  /**
-   * Replace all items in a plan with new items.
-   * Used when the model provides a detailed plan in response to /plan.
-   * Dependencies expressed as description strings are resolved to item IDs.
-   */
-  replaceItems(planId: string, items: (Omit<PlanItem, 'id' | 'status'> & { status?: PlanItemStatus })[], options: { preserveReportedStatuses?: boolean } = {}): void {
-    const plan = this.load(planId);
-    if (!plan) {
-      logger.debug(`[ExecutionPlanManager] replaceItems: plan not found for id=${planId}`);
-      return;
-    }
-
-    // First pass: create items with UUIDs
-    const newItems: PlanItem[] = items.map((item) => ({
-      ...item,
-      id: randomUUID(),
-      // Only the current model-plan intake opts in; proposals always begin pending.
-      status: options.preserveReportedStatuses ? item.status ?? 'pending' : 'pending',
-    }));
-    // Reset dependencies, will be resolved in second pass
-    for (const item of newItems) {
-      delete item.dependencies;
-    }
-
-    // Build description → id map for dependency resolution
-    const descToId = new Map<string, string>();
-    for (let i = 0; i < newItems.length; i++) {
-      const oldItem = items[i];
-      const newItem = newItems[i];
-      if (oldItem && newItem) descToId.set(oldItem.description.toLowerCase().trim(), newItem.id);
-    }
-
-    // Second pass: resolve description-based dependencies to IDs
-    for (let i = 0; i < newItems.length; i++) {
-      const rawDeps = items[i]?.dependencies;
-      if (rawDeps && rawDeps.length > 0) {
-        const resolvedIds = rawDeps
-          .map((dep) => {
-            // Already a UUID? Keep as-is.
-            if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(dep)) {
-              return dep;
-            }
-            // Look up by description (case-insensitive, trimmed)
-            return descToId.get(dep.toLowerCase().trim()) ?? null;
-          })
-          .filter((id): id is string => id !== null);
-        const target = newItems[i];
-        if (resolvedIds.length > 0 && target) {
-          target.dependencies = resolvedIds;
-        }
-      }
-    }
-
-    plan.items = newItems;
-    plan.updatedAt = new Date().toISOString();
-    this.save(plan);
   }
 
   /** Get next actionable items: dependencies met, status=pending. */

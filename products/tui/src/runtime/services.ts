@@ -545,7 +545,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const sessionMemoryStore = new SessionMemoryStore();
   const sessionLineageTracker = new SessionLineageTracker();
   const sessionChangeTracker = new SessionChangeTracker();
-  const planManager = new ExecutionPlanManager(workingDirectory);
+  const planManager = new ExecutionPlanManager(workPlanStore);
   const adaptivePlanner = new AdaptivePlanner();
   const idempotencyStore = new IdempotencyStore();
   // ONE router, not two. This surface used to build a second ChannelDeliveryRouter

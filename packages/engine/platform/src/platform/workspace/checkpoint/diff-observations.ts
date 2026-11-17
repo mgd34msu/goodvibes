@@ -16,7 +16,7 @@ interface Observation { readonly view: Snapshot; readonly revision: string; read
  * evicted view require refresh; already captured intake owns its durable hunk.
  */
 export class CheckpointDiffObservations {
-  readonly #owner = randomUUID();
+  readonly #owner = randomUUID().replace(/[0-9a-f]/g, nibble => String.fromCharCode(97 + Number.parseInt(nibble, 16)));
   readonly #views = new Map<string, Observation>();
   #revision = 0;
   #characters = 0;

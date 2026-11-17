@@ -264,7 +264,6 @@ export class Orchestrator {
   private readonly toolCallAborts = new ToolCallAbortRegistry();
   /** Monotonic id source for queued-message ids. */
   private queuedMessageSeq = 0;
-  private postTurnPlanOwner: object = {};
   /** Where the most recent user turn's input arrived, so a background-work recovery turn runs under the same authority. */
   private lastUserTurnOrigin: TurnInputOrigin | undefined;
   private nativeConversationProjectId: string | undefined;
@@ -663,7 +662,6 @@ export class Orchestrator {
 
   /** Abort the current in-flight LLM request, if any. */
   public abort(): void {
-    this.postTurnPlanOwner = {};
     this.nativeAdmissionAbort?.abort();
     this.abortController?.abort();
     this.followUpRuntime?.cancel();
@@ -857,7 +855,6 @@ export class Orchestrator {
   private get isTurnOccupied(): boolean { return phaseIsOccupied(this.phase); }
 
   private startThinking(estimatedInputTokens?: number, resume = false): void {
-    this.postTurnPlanOwner = {};
     if (!resume) this.followUpRuntime.cancel(true);
     this.isThinking = true;
     this.completionActivity = null;
@@ -981,7 +978,7 @@ export class Orchestrator {
       // Hooks may run external commands. A later provider error cannot prove
       // replay safe once that extensibility boundary has been entered.
       if (nativeTurn && this.hookDispatcher) markNativeConversationTurnEffectsPossible();
-      const preTurnPlan = resume ? this.coreServices.planManager?.getActive(this.currentSessionId) ?? null : await prepareConversationForTurn(
+      if (!resume) await prepareConversationForTurn(
         this.conversation, providerRegistry, text, content, this.currentSessionId, this.coreServices.planManager ?? null,
         { ...(signal ? { signal } : {}), onMessageAdded: () => { this.turnStartMessageCount = this.conversation.getMessageCount(); } },
       );
@@ -990,7 +987,7 @@ export class Orchestrator {
       this.scrollToEnd(this.getViewportHeight());
       this.streamingInputTokens = estimateFreshTurnInputTokens(this.lastInputTokens, estimateConversationTokens(this.conversation.getMessagesForLLM()), text, content);
       this.contractAnswer = options?.answersContractQuestion;
-      await this.runTurnStream(text, content, turnId, preTurnPlan, configManager, providerRegistry,
+      await this.runTurnStream(text, content, turnId, configManager, providerRegistry,
         (publish) => { terminal.publish = publish; }, () => { terminal.answered = true; }, resume);
 
       if (!terminal.answered) signal?.throwIfAborted();
@@ -1105,23 +1102,14 @@ export class Orchestrator {
     text: string,
     content: ContentPart[] | undefined,
     turnId: string,
-    preTurnPlan: Awaited<ReturnType<typeof prepareConversationForTurn>>,
     configManager: ReturnType<typeof requireConfigManager>,
     providerRegistry: ReturnType<typeof requireProviderRegistry>,
     onTurnTerminal?: (publish: () => void) => void,
     onAnswerCommitted?: () => void,
     continuationEvidence?: string,
   ): Promise<void> {
-    // A successful finalization releases the in-flight controller but does not
-    // retire this plan continuation. New turns, abort/dispose and failures do.
-    const planOwner = this.postTurnPlanOwner;
     const sessionId = this.currentSessionId;
-    const signal = this.abortController?.signal;
     await executeOrchestratorTurnLoop({
-      assertPostTurnCurrent: () => {
-        signal?.throwIfAborted();
-        if (this.disposed || this.currentSessionId !== sessionId || this.postTurnPlanOwner !== planOwner) throw new Error('Plan continuation retired');
-      },
       onTurnTerminal,
       onAnswerCommitted,
       conversation: this.conversation,
@@ -1142,7 +1130,6 @@ export class Orchestrator {
       cacheHitTracker: getCacheHitTracker(this.coreServices, this.ownedCacheHitTracker),
       helperModel: new HelperModel({ configManager, providerRegistry, runtimeBus: this.runtimeBus, sessionId: () => this.currentSessionId }),
       sessionId: this.currentSessionId,
-      preTurnPlan,
       planManager: isNativeConversationTurn() ? null : this.coreServices.planManager ?? null,
       text,
       content,
@@ -1191,7 +1178,8 @@ export class Orchestrator {
       getCompletedWork: () => completedContractEvidence(this.contractRunner, this.currentSessionId, configManager.getWorkingDirectory() ?? undefined),
       getCompletionRequirements: () => {
         const lineage = getSessionLineageTracker(this.coreServices, this.ownedSessionLineageTracker);
-        const plan = isNativeConversationTurn() ? null : this.coreServices.planManager?.getActive(this.currentSessionId);
+        // Only the work under way: an open work-plan item nobody started is not this answer's obligation.
+        const plan = isNativeConversationTurn() ? null : this.coreServices.planManager?.getInProgress(this.currentSessionId);
         return {
           originalTask: lineage.getOriginalTask(), lineage: lineage.getEntries(),
           activePlan: plan ? this.coreServices.planManager!.toMarkdown(plan) : null,
@@ -1344,7 +1332,6 @@ export class Orchestrator {
       this.reconcileUnresolvedToolCalls([], 'exception-before-results');
     }
 
-    if (this._turnFailed) this.postTurnPlanOwner = {};
     // Cancelled turns set the same flag; read it before the reset below, and
     // the abort state before stopThinking() releases the controller.
     const outcome = !this._turnFailed ? 'complete' : this.abortController?.signal.aborted ? 'cancelled' : 'failed';

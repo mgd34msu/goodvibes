@@ -1,10 +1,9 @@
 /**
- * Work-plan and execution-plan sync (docs/design/contract-runner.md section
- * 6.5): the project work plan shows each contract as a task and each of its
- * units as a child task, following their statuses; and when a unit passes,
- * the active execution-plan items its agents were working on are marked
- * complete (when the unit passes, not when its agent completes, since a
- * completed agent's work may still be corrected).
+ * Work-plan sync (docs/design/contract-runner.md section 6.5): the project
+ * work plan shows each contract as a task and each of its units as a child
+ * task, following their statuses; and when a unit passes, the plan items its
+ * agents were working on are marked done (when the unit passes, not when its
+ * agent completes, since a completed agent's work may still be corrected).
  *
  * Work-plan writes are serialized per task id, so a quick run of status
  * changes lands in order; a failed write is logged, never thrown into the
@@ -19,7 +18,7 @@ import { logger } from '../utils/logger.js';
 import type { ContractStatus, ContractView, UnitStatus } from './types.js';
 
 export type WorkPlanService = Pick<ProjectPlanningService, 'createWorkPlanTask' | 'updateWorkPlanTask'>;
-export type ExecutionPlans = Pick<ExecutionPlanManager, 'getActive' | 'updateItem'>;
+export type ExecutionPlans = Pick<ExecutionPlanManager, 'list' | 'updateItem'>;
 
 /** The work-plan source every contract task carries. */
 export const CONTRACT_WORK_PLAN_SOURCE = 'contract';
@@ -70,20 +69,17 @@ function titleOf(text: string): string {
 }
 
 /**
- * Marks complete every active execution-plan item whose agent is one of the
- * unit's agents and that is not already complete or failed.
+ * Marks complete every plan item whose agent is one of the unit's agents and
+ * that is not already complete, failed or cancelled.
  */
 export function completePlanItemsForUnit(agentIds: readonly string[], planManager: ExecutionPlans): void {
-  const plan = planManager.getActive();
+  const plan = planManager.list()[0];
   if (!plan) return;
   const agents = new Set(agentIds);
   for (const item of plan.items) {
-    if (item.agentId === undefined || !agents.has(item.agentId) || item.status === 'complete' || item.status === 'failed') continue;
-    try {
-      planManager.updateItem(plan.id, item.id, 'complete', item.agentId);
-    } catch (error) {
-      logger.warn('contract runner: an execution-plan item was not updated', { planId: plan.id, itemId: item.id, error: summarizeError(error) });
-    }
+    if (item.agentId === undefined || !agents.has(item.agentId) || item.status === 'complete' || item.status === 'failed' || item.status === 'skipped') continue;
+    // The write logs its own failure; the runner never waits on it.
+    void planManager.updateItem(plan.id, item.id, 'complete');
   }
 }
 

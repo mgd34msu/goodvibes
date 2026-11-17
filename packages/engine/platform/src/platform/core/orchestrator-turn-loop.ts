@@ -7,7 +7,6 @@ import { isNativeConversationTurn, markNativeConversationTurnEffectsPossible, re
 import { publishTurnTerminal } from './turn-cancellation.js';
 import { resolveSystemPrompt } from './orchestrator-system-prompt.js';
 import type { ConversationManager } from './conversation.js';
-import type { ExecutionPlan } from './execution-plan.js';
 import { ConsecutiveErrorBreaker } from './circuit-breaker.js';
 import { collectResponseDelegates, ResponseCompletionGuard, waitForResponseDelegates, waitForTaskRecovery } from './response-completion.js';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
@@ -159,7 +158,6 @@ interface HookDispatcherLike {
 type EmitterContext = import('../runtime/emitters/index.js').EmitterContext;
 
 export interface OrchestratorTurnLoopContext {
-  readonly assertPostTurnCurrent?: (() => void) | undefined;
   /** Close the cancellation boundary before publishing a terminal outcome. */
   readonly onTurnTerminal?: ((publish: () => void) => void) | undefined;
   /** The final answer is appended and its completion registered. */
@@ -179,11 +177,7 @@ export interface OrchestratorTurnLoopContext {
   readonly cacheHitTracker: Pick<CacheHitTracker, 'getMetrics'>;
   readonly helperModel: HelperModel;
   readonly sessionId: string;
-  readonly preTurnPlan: ExecutionPlan | null;
-  readonly planManager: Pick<
-    ExecutionPlanManager,
-    'getActive' | 'getSummary' | 'getNextItems' | 'toMarkdown' | 'create' | 'save' | 'getIncarnation' | 'parseFromMarkdown' | 'replaceItems' | 'load' | 'updateItem'
-  > | null;
+  readonly planManager: Pick<ExecutionPlanManager, 'getActive'> | null;
   readonly text: string;
   readonly content?: ContentPart[] | undefined;
   readonly turnId: string;
@@ -1079,10 +1073,8 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       assertCompletionCurrent,
       signal,
       assertCurrent: assertActiveTurn,
-      assertPostTurnCurrent: context.assertPostTurnCurrent,
       conversation: context.conversation,
       agentManager: context.agentManager,
-      planManager: context.planManager,
       configManager: context.configManager,
       providerRegistry: context.providerRegistry,
       runtimeBus: context.runtimeBus,
@@ -1091,9 +1083,6 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       emitterContext: (id) => context.emitterContext(id),
       turnId: context.turnId,
       response: enrichedResponse,
-      preTurnPlan: context.preTurnPlan,
-      requestRender: context.requestRender,
-      sessionId: context.sessionId,
       memoryRecordIds: [...turnMemoryRecordIds],
     });
     if (notVerified !== undefined) {

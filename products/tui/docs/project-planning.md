@@ -53,8 +53,8 @@ Closing, reopening, refreshing or repeatedly pressing former action keys cannot 
 | `/project-plan` or `/project-plan panel` | Open native work and recovery |
 | `/project-plan history` | Inspect saved historical planning records without evaluating or starting an interview |
 | `/project-plan <goal>` | Submit the exact original terminal request through native conversation intake |
-| `/project-plan dismiss` | Archive the active execution plan; refused while it is mid-execution, with `/workstream cancel` guidance. Saved planning records are not changed |
-| `/project-plan list` and `/project-plan show <id>` | Inspect older execution-plan records |
+| `/project-plan list` and `/project-plan show <id>` | Show the project work plan, which is the active plan: its open items reach the model once per request turn, and a contract unit that passes marks its agents' items done |
+| `/project-plan dismiss` | Changes nothing: the active plan is the project work plan. It names `/work-plan clear-done`, `/work-plan cancel <id>` and `/work-plan remove <id>` |
 | `/project-plan mode\|explain\|override\|status\|clear` | Route to the existing adaptive runtime controls |
 
 `/project-plan approve` and `/project-plan answer` are retired. They change nothing, say so, and point at the work plan and `/workstream`; `/project-plan -- approve ...` submits the words as a goal instead.

@@ -83,12 +83,12 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
         const planManager = requirePlanManager(ctx);
         const plans = planManager.list();
         if (plans.length === 0) {
-          ctx.print('No plans found.');
+          ctx.print('The work plan has no items. Add one with /work-plan add <title>.');
           return;
         }
-        ctx.print(`Plans (${plans.length}):\n${plans.map((plan) => {
+        ctx.print(`Plans (${plans.length}; the project work plan is the plan, changed with /work-plan):\n${plans.map((plan) => {
           const marker = plan.status === 'active' ? '▶' : ' ';
-          return `  ${marker} ${plan.id.slice(0, 8)}  [${plan.status.padEnd(8)}]  ${plan.title}`;
+          return `  ${marker} ${plan.id.slice(0, 8)}  [${plan.status.padEnd(8)}]  ${plan.title} (${plan.items.length} item${plan.items.length === 1 ? '' : 's'})`;
         }).join('\n')}`);
         return;
       }
@@ -110,26 +110,14 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
         return;
       }
 
-      // Archives the active execution plan. The current native request and its
-      // retained recovery source are untouched; mid-execution is refused.
+      // The active plan is the project work plan; there is no separate record
+      // to archive, so the command changes nothing and names what does.
       if (subcommand && args[0] === 'dismiss') {
-        const planManager = requirePlanManager(ctx);
-        const dismissal = planManager.dismiss(ctx.session.runtime.sessionId);
-        if (dismissal.outcome === 'requires-cancel') {
-          ctx.print(
-            `Plan "${dismissal.blockedBy?.title ?? 'active plan'}" is mid-execution and was not dismissed. ` +
-            `Run /workstream cancel to stop it first, then /project-plan dismiss.`,
-          );
-          return;
-        }
-        if (dismissal.outcome === 'dismissed') {
-          ctx.print(
-            `Dismissed plan "${dismissal.plan?.title ?? 'active plan'}" ` +
-            '(archived as dismissed; retained in /project-plan list).',
-          );
-        } else {
-          ctx.print('No active plan to dismiss.');
-        }
+        ctx.print([
+          'Nothing was dismissed: the active plan is the project work plan, which has no separate record to archive.',
+          '  Clear finished items: /work-plan clear-done',
+          '  Drop one item: /work-plan cancel <id> or /work-plan remove <id>',
+        ].join('\n'));
         return;
       }
 

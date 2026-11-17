@@ -8,8 +8,7 @@ import type { ContentPart, LLMProvider } from '../providers/interface.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import { logger } from '../utils/logger.js';
 import { appendVerificationRuntimeMessage } from './verification/archive.js';
-import type { ExecutionPlan, PlanItem } from './execution-plan.js';
-import type { ExecutionPlanManager } from './execution-plan.js';
+import type { ExecutionPlan, ExecutionPlanManager } from './execution-plan.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { emitCommunicationConsumed, emitToolReconciled, emitTurnCompleted } from '../runtime/emitters/index.js';
 import { buildSyntheticResult } from './tool-reconciliation.js';
@@ -44,12 +43,13 @@ export async function prepareConversationForTurn(
 ): Promise<ExecutionPlan | null> {
   const nativeTurn = isNativeConversationTurn();
   const preTurnPlan = nativeTurn ? null : planManager?.getActive(sessionId) ?? null;
-  // The active plan reaches the model once per user turn, on its first request; the person sees it as before.
+  // The project work plan's open items reach the model once per user turn, on
+  // its first request. The person already has the work plan view, so no
+  // transcript line repeats the plan on every turn.
   if (preTurnPlan && planManager) {
     const planMd = planManager.toMarkdown(preTurnPlan);
-    const planText = `## Current Execution Plan\n${planMd}\n\nRefer to this plan. Update item statuses as you complete work.`;
+    const planText = `## Current Work Plan\n${planMd}\nRefer to this plan. Keep item statuses current with the \`work_plan\` tool as you work.`;
     conversation.hostInstructions.set('plan', planText, { once: true });
-    conversation.addNotice(planText, { level: 'info', kind: 'system' });
   } else conversation.hostInstructions.clear('plan');
 
   if (content && content.some(p => p.type === 'image')) {
@@ -206,7 +206,7 @@ type ToolResponseOutcomeArgs = {
   onTurnTerminal?: ((publish: () => void) => void) | undefined;
   conversation: ConversationManager;
   agentManager: Pick<AgentManager, 'list' | 'spawn'>;
-  planManager: Pick<ExecutionPlanManager, 'getActive' | 'getSummary' | 'getNextItems' | 'updateItem'> | null;
+  planManager: Pick<ExecutionPlanManager, 'getActive'> | null;
   configManager: Pick<ConfigManager, 'get'>;
   providerRegistry: Pick<ProviderRegistry, 'getCurrentModel'>;
   runtimeBus: RuntimeEventBus | null;
@@ -290,7 +290,7 @@ async function handleOwnedToolResponseOutcome(args: ToolResponseOutcomeArgs): Pr
   // A request to the model only: it no longer adds a transcript line after every tool round.
   if (!isNativeConversationTurn() && args.planManager?.getActive(args.sessionId)) {
     args.conversation.hostInstructions.set('plan',
-      'Update the execution plan to reflect completed work. Mark items as COMPLETE or IN_PROGRESS with the agent ID.', { once: true, append: true });
+      'Keep the work plan current: set finished items to done and started ones to in_progress with the `work_plan` tool.', { once: true, append: true });
   }
 
   return { continueLoop: true, results };
@@ -298,7 +298,6 @@ async function handleOwnedToolResponseOutcome(args: ToolResponseOutcomeArgs): Pr
 
 type FinalResponseOutcomeArgs = {
   assertCompletionCurrent?: (() => void) | undefined;
-  assertPostTurnCurrent?: (() => void) | undefined;
   signal?: AbortSignal | undefined;
   assertCurrent?: (() => void) | undefined;
   onTurnTerminal?: ((publish: () => void) => void) | undefined;
@@ -306,16 +305,12 @@ type FinalResponseOutcomeArgs = {
   onAnswerCommitted?: (() => void) | undefined;
   conversation: ConversationManager;
   agentManager: Pick<AgentManager, 'list' | 'spawn'>;
-  planManager: Pick<ExecutionPlanManager, 'parseFromMarkdown' | 'replaceItems' | 'load' | 'save' | 'getActive' | 'getNextItems' | 'updateItem' | 'getIncarnation'> | null;
   configManager: Pick<ConfigManager, 'get'>;
   providerRegistry: Pick<ProviderRegistry, 'getCurrentModel'>;
   runtimeBus: RuntimeEventBus | null;
   emitterContext: EmitterContextFactory;
   turnId: string;
   response: ChatResponseWithReasoning;
-  preTurnPlan: ExecutionPlan | null;
-  requestRender: () => void;
-  sessionId?: string | undefined;
   /** This turn's MEMORY-sourced injected knowledge ids, stamped onto TURN_COMPLETED as metadata.memory.recordIds when non-empty (absent otherwise). */
   memoryRecordIds?: readonly string[] | undefined;
 };
@@ -332,11 +327,10 @@ export async function handleFinalResponseOutcome(args: FinalResponseOutcomeArgs)
     provider: args.providerRegistry.getCurrentModel().provider,
   });
   // The completion check covers the transcript exactly through this append.
-  // Plan notes, usage warnings and compaction legitimately change the
-  // transcript afterwards; they cannot change the answer checked here, so the
-  // fence is not re-run against them.
+  // Usage warnings and compaction legitimately change the transcript
+  // afterwards; they cannot change the answer checked here, so the fence is
+  // not re-run against them.
   args.assertCompletionCurrent?.();
-  await handleFinalPlanOutcome(args);
   args.signal?.throwIfAborted();
   args.assertCurrent?.();
   if (args.runtimeBus) {
@@ -348,65 +342,6 @@ export async function handleFinalResponseOutcome(args: FinalResponseOutcomeArgs)
     }), args.onTurnTerminal);
   }
   args.onAnswerCommitted?.();
-
-  return false;
-}
-
-async function handleFinalPlanOutcome(args: FinalResponseOutcomeArgs): Promise<false> {
-  if (isNativeConversationTurn()) return false;
-  const planManager = args.planManager;
-  if (args.preTurnPlan && args.preTurnPlan.awaitingPlan === true && planManager) {
-    const sessionId = args.sessionId;
-    const source = args.response.content;
-    const preTurn = JSON.stringify(args.preTurnPlan);
-    const incarnation = planManager.getIncarnation();
-    const assertPlanCurrent = () => {
-      args.signal?.throwIfAborted(); args.assertCurrent?.();
-      if (args.sessionId !== sessionId || args.response.content !== source || planManager.getIncarnation() !== incarnation
-        || JSON.stringify(args.preTurnPlan) !== preTurn || JSON.stringify(planManager.getActive(sessionId)) !== preTurn) {
-        throw new Error('Plan parsing owner changed');
-      }
-    };
-    let parsed: Awaited<ReturnType<ExecutionPlanManager['parseFromMarkdown']>>;
-    try {
-      assertPlanCurrent();
-      parsed = await planManager.parseFromMarkdown(source, { signal: args.signal, assertCurrent: assertPlanCurrent });
-      assertPlanCurrent();
-      parsed.assertCurrent?.();
-    } catch {
-      // Cancellation belongs to the turn; all other failures retain the shell
-      // and do not enter the timer fallback or leak provider/source material.
-      args.signal?.throwIfAborted(); args.assertCurrent?.();
-      args.conversation.addNotice('[Plan] Status reading is unavailable or the plan changed. The existing plan was retained. Retry the plan update when ready.', { level: 'warning' });
-      return false;
-    }
-    if (parsed.items && parsed.items.length > 0) {
-      planManager.replaceItems(args.preTurnPlan.id, parsed.items, { preserveReportedStatuses: true });
-      const filledPlan = planManager.load(args.preTurnPlan.id);
-      if (filledPlan) {
-        filledPlan.awaitingPlan = false;
-        planManager.save(filledPlan);
-      } else {
-        logger.warn('Orchestrator: the plan could not be reloaded after its items were saved; it stays awaiting its items', { planId: args.preTurnPlan.id });
-      }
-      if (parsed.parseIssues?.length) {
-        args.conversation.addNotice(
-          `[Plan] Parsed ${parsed.items.length} item(s) with ${parsed.parseIssues.length} formatting warning(s); unrecognized item statuses were marked pending.`,
-          { level: 'warning' },
-        );
-      }
-      args.conversation.addNotice(
-        `[Plan] Parsed ${parsed.items.length} item(s). Execution remains subject to the original request and normal checked agent admission.`,
-        { level: 'success' },
-      );
-      args.requestRender();
-    } else {
-      args.conversation.addNotice('[Plan] No items could be read from the reply; the plan is still awaiting its items.', { level: 'warning' });
-      args.requestRender();
-    }
-  }
-  // A checked final may save a requested plan. It cannot secretly start work
-  // after its completion observation or schedule an unchecked timer handoff.
 
   return false;
 }

@@ -21,19 +21,7 @@ export type OrchestratorCoreServices = {
   cacheHitTracker?: Pick<CacheHitTracker, 'getMetrics'> | undefined;
   sessionLineageTracker?: SessionLineageTracker | undefined;
   idempotencyStore?: IdempotencyStore | undefined;
-  planManager?: Pick<
-    ExecutionPlanManager,
-    | 'getActive'
-    | 'getSummary'
-    | 'getNextItems'
-    | 'toMarkdown'
-    | 'create'
-    | 'save'
-    | 'getIncarnation' | 'parseFromMarkdown'
-    | 'replaceItems'
-    | 'load'
-    | 'updateItem'
-  >;
+  planManager?: Pick<ExecutionPlanManager, 'getActive' | 'getInProgress' | 'toMarkdown'>;
   adaptivePlanner?: Pick<
     AdaptivePlanner,
     'select' | 'getMode' | 'setMode' | 'explain' | 'override' | 'clearOverride' | 'getOverride' | 'getLatest'

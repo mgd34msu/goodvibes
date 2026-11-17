@@ -1544,7 +1544,7 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
   const sessionMemoryStore = new SessionMemoryStore();
   const sessionLineageTracker = new SessionLineageTracker();
   const sessionChangeTracker = new SessionChangeTracker();
-  const planManager = new ExecutionPlanManager(workingDirectory);
+  const planManager = new ExecutionPlanManager(workPlanStore);
   const adaptivePlanner = new AdaptivePlanner();
   const idempotencyStore = new IdempotencyStore();
   const channelDeliveryRouter = new ChannelDeliveryRouter({

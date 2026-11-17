@@ -11,6 +11,7 @@ import { readNativeConversationTurnStatus } from '../core/native-turn-admission.
  */
 
 import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { ConversationManager } from '../core/conversation.js';
@@ -123,6 +124,13 @@ export interface HostedSessionRuntimeOptions {
   readonly ownerQuestions?: HostedOwnerQuestions | undefined;
   /** The daemon's trigger supervisor; the session's `trigger` tool creates and manages triggers on it. Absent: no `trigger` tool. */
   readonly triggers?: import('../triggers/manager.js').TriggerManager | undefined;
+  /**
+   * The daemon's project work plan. A session in that project keeps and reads it
+   * with `work_plan`; a session in another workspace is told where the plan
+   * lives. A surface turn that brings its own plan tool (the Agent's
+   * `agent_work_plan`) decides for itself. Absent: no `work_plan` tool.
+   */
+  readonly workPlan?: (import('../tools/work-plan/index.js').WorkPlanToolStore & { readonly projectRoot: string }) | undefined;
   /**
    * What this run's exec tool may do, when the caller decides per session
    * rather than per floor. Omitted ⇒ the floor's own decider, and
@@ -275,8 +283,17 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     ? askingQuestions(inbox, () => ({ session: sessionId, host: 'hosted', sessionWatch: answers }))
     : undefined;
 
+  const workPlanProject = options.workPlan && !options.surfaceTurn ? options.workPlan : undefined;
+  const workPlanHere = workPlanProject && resolve(workPlanProject.projectRoot) === resolve(options.workspaceRoot) ? workPlanProject : undefined;
+  if (workPlanProject && !workPlanHere) {
+    toolRegistry.declareElsewhere(['work_plan'], {
+      reason: `The work plan the daemon keeps is for its own project (${workPlanProject.projectRoot}), not this session's workspace (${options.workspaceRoot}).`,
+      next: "Use work_plan from a GoodVibes session opened in that project, or start the hosted session in the daemon's project.",
+    });
+  }
   const registeredTools = registerAllTools(toolRegistry, {
     ...(ownerQuestions ? { ownerQuestions } : {}),
+    ...(workPlanHere ? { workPlan: workPlanHere } : {}),
     ...(options.triggers ? { triggers: options.triggers } : {}),
     // Shared per WORKSPACE, deliberately: two sessions editing one tree must
     // agree about the file they both just wrote (see workspace-floor.ts).

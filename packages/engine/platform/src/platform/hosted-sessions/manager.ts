@@ -170,6 +170,8 @@ export interface HostedSessionManagerOptions {
   readonly ownerQuestions?: import('./session-runtime.js').HostedSessionRuntimeOptions['ownerQuestions'];
   /** The daemon's trigger supervisor, for each hosted session's `trigger` tool. */
   readonly triggers?: import('./session-runtime.js').HostedSessionRuntimeOptions['triggers'];
+  /** The daemon's project work plan, for each hosted session's `work_plan` tool. */
+  readonly workPlan?: import('./session-runtime.js').HostedSessionRuntimeOptions['workPlan'];
   /** Whether a workspace root is acceptable. Omitted ⇒ any absolute path. */
   readonly isWorkspaceUsable?: ((workspaceRoot: string) => boolean) | undefined;
   /**
@@ -579,6 +581,7 @@ export class HostedSessionManager {
         ...(this.options.cloudflareAuthToken ? { cloudflareAuthToken: this.options.cloudflareAuthToken } : {}),
         ...(this.options.ownerQuestions ? { ownerQuestions: this.options.ownerQuestions } : {}),
         ...(this.options.triggers ? { triggers: this.options.triggers } : {}),
+        ...(this.options.workPlan ? { workPlan: this.options.workPlan } : {}),
         attended: () => this.hasAttachedClient(sessionId),
       });
       const record: HostedSessionRecord = {
@@ -1155,6 +1158,7 @@ export class HostedSessionManager {
         ...(this.options.cloudflareAuthToken ? { cloudflareAuthToken: this.options.cloudflareAuthToken } : {}),
         ...(this.options.ownerQuestions ? { ownerQuestions: this.options.ownerQuestions } : {}),
         ...(this.options.triggers ? { triggers: this.options.triggers } : {}),
+        ...(this.options.workPlan ? { workPlan: this.options.workPlan } : {}),
         attended: () => this.hasAttachedClient(live.record.id),
       });
       live.runtime = runtime;

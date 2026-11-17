@@ -1,11 +1,7 @@
 /**
- * settings-modal-search, ranked search over the settings workspace.
- *
- * Split out of settings-modal-data.ts, which had reached its 800-line ceiling.
- * Scoring and search are a self-contained unit: they read a SettingEntry and a
- * label function and depend on nothing else in the assembly path, so moving
- * them changes no behavior. Both are re-exported from settings-modal-data.ts,
- * so no import site moved.
+ * Ranked search over the settings workspace of both terminal apps: every word
+ * of the query must occur in a setting's key, label or description, and the
+ * results are ordered by where the words occur.
  */
 
 export interface SearchSettingEntry {
@@ -16,18 +12,30 @@ export interface SearchSettingEntry {
 // fuzzyScoreSettingEntry, score an entry against a query for ranked search
 // ---------------------------------------------------------------------------
 
+/** Score of one query word in one entry: the best field it occurs in, earlier is better. */
+function wordScore(word: string, key: string, label: string, description: string): number | null {
+  const keyIdx = key.indexOf(word);
+  if (keyIdx !== -1) return 3000 + Math.max(0, 999 - keyIdx);
+  const labelIdx = label.indexOf(word);
+  if (labelIdx !== -1) return 2000 + Math.max(0, 999 - labelIdx);
+  const descIdx = description.indexOf(word);
+  if (descIdx !== -1) return 1000 + Math.max(0, 999 - descIdx);
+  return null;
+}
+
 /**
  * Score a single SettingEntry against a search query.
  *
- * Score tiers (higher = better match):
- *   - 3000–3999: exact key substring match (3000 + position bonus 0–999)
- *   - 2000–2999: exact label substring match (2000 + position bonus 0–999)
- *   - 1000–1999: exact description substring match (1000 + position bonus 0–999)
- *   - 1–99:      subsequence match across key+label+description
+ * The query is split on spaces and every word must occur, as written, in the
+ * key, the label or the description. Each word scores by the best field it
+ * occurs in (key 3000, label 2000, description 1000, plus up to 999 for an
+ * earlier position), and the entry's score is the sum. A query whose words all
+ * occur together in one field gets that field's score once more, so the exact
+ * phrase ranks first.
  *
- * Returns null when the query does not match at all.
+ * Returns null when any word does not occur: a typo matches nothing.
  *
- * @param query - The search string (already lowercased).
+ * @param query - The search string.
  * @param entry - The setting entry to test.
  * @param getLabel - Pure function mapping an entry to its display label.
  */
@@ -36,37 +44,19 @@ export function fuzzyScoreSettingEntry<Entry extends SearchSettingEntry>(
   entry: Entry,
   getLabel: (e: Entry) => string,
 ): number | null {
-  if (query.length === 0) return 0;
-  const lq = query.toLowerCase();
+  const words = query.toLowerCase().split(/\s+/).filter((word) => word.length > 0);
+  if (words.length === 0) return 0;
   const key = entry.setting.key.toLowerCase();
   const label = getLabel(entry).toLowerCase();
   const description = (entry.setting.description ?? '').toLowerCase();
-
-  // Tier 1: key substring, base 3000, position bonus up to 999
-  // A key match at position 0 scores 3999; at position 999 scores 3000.
-  const keyIdx = key.indexOf(lq);
-  if (keyIdx !== -1) return 3000 + Math.max(0, 999 - keyIdx);
-
-  // Tier 2: label substring, base 2000, position bonus up to 999
-  const labelIdx = label.indexOf(lq);
-  if (labelIdx !== -1) return 2000 + Math.max(0, 999 - labelIdx);
-
-  // Tier 3: description substring, base 1000, position bonus up to 999
-  const descIdx = description.indexOf(lq);
-  if (descIdx !== -1) return 1000 + Math.max(0, 999 - descIdx);
-
-  // Tier 4: subsequence across concatenated key + label + description, 1..99
-  const haystack = `${key} ${label} ${description}`;
-  let qi = 0;
   let score = 0;
-  for (let ci = 0; ci < haystack.length && qi < lq.length; ci++) {
-    if (haystack[ci] === lq[qi]) {
-      qi++;
-      score++;
-    }
+  for (const word of words) {
+    const scored = wordScore(word, key, label, description);
+    if (scored === null) return null;
+    score += scored;
   }
-  if (qi === lq.length) return Math.min(99, score);
-  return null;
+  if (words.length > 1) score += wordScore(words.join(' '), key, label, description) ?? 0;
+  return score;
 }
 
 /**
@@ -74,7 +64,8 @@ export function fuzzyScoreSettingEntry<Entry extends SearchSettingEntry>(
  * relevance score (highest first). Excludes the flags, mcp, and subscriptions
  * special categories (which have their own entry types).
  *
- * @param query - User input string. Empty string returns []. 
+ * @param query - User input string. Empty string returns []; a query no
+ *   setting contains returns [] too (the list then says no setting matches).
  * @param groups - The settings group map from buildSettingGroups.
  * @param getLabel - Pure function mapping an entry to its display label.
  */

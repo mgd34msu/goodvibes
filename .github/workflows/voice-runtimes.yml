@@ -7,10 +7,14 @@ name: Voice runtimes
 # filename. Upload is therefore non-clobbering: re-running for an already-present
 # filename fails loudly rather than silently replacing a pinned asset.
 #
-# Manual only: this publishes a durable artifact that the platform manifest pins, so
-# it is never triggered automatically. After a successful run, stamp the printed
-# WHISPER_ENGINES entry (url + bytes + sha256) into
-# packages/engine/platform/src/platform/voice/provisioning/manifest.ts in the same PR.
+# Two ways in:
+# - By hand, to build a new version. After a successful run, stamp the printed
+#   WHISPER_ENGINES entry (url + bytes + sha256) into
+#   packages/engine/platform/src/platform/voice/provisioning/manifest.ts in the same PR.
+# - On a push to main that changes that manifest: the linux-x64 bundle it pins
+#   must be published with exactly the pinned digest. When it already is, the run
+#   ends there; when it is missing, it is built, and published only if the build
+#   has the pinned digest. A published asset with other bytes fails the run.
 
 permissions:
   contents: read
@@ -33,10 +37,14 @@ on:
         description: "sha256 of the source archive, for a version the build script has no pin for (verify it against upstream first)"
         required: false
         default: ""
+  push:
+    branches: [main]
+    paths:
+      - packages/engine/platform/src/platform/voice/provisioning/manifest.ts
 
 concurrency:
   # Never let two publish runs race the same append-only tag.
-  group: voice-runtimes-${{ github.event.inputs.engine }}-${{ github.event.inputs.version }}
+  group: voice-runtimes
   cancel-in-progress: false
 
 env:
@@ -55,13 +63,57 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Setup Bun + deps (cached)
         uses: ./.github/actions/setup
+      - name: Choose the bundle (the input, or what the manifest pins)
+        id: bundle
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ]; then
+            echo "version=${INPUT_VERSION:-1.8.2}" >> "$GITHUB_OUTPUT"
+            echo "pinned-sha256=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          bun -e '
+            const { WHISPER_ENGINES } = await import("./packages/engine/platform/src/platform/voice/provisioning/manifest.ts");
+            const engine = WHISPER_ENGINES["linux-x64"];
+            if (!engine) throw new Error("The manifest pins no linux-x64 whisper engine.");
+            console.log(`version=${engine.version}`);
+            console.log(`pinned-sha256=${engine.bundle.sha256}`);
+          ' >> "$GITHUB_OUTPUT"
+      - name: Check whether the pinned bundle is already published
+        id: published
+        if: steps.bundle.outputs.pinned-sha256 != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BUNDLE_VERSION: ${{ steps.bundle.outputs.version }}
+          PINNED_SHA256: ${{ steps.bundle.outputs.pinned-sha256 }}
+        run: |
+          name="goodvibes-whisper-cpp-${BUNDLE_VERSION}-linux-x64.tar.gz"
+          remote=""
+          if gh release view "$VOICE_RUNTIMES_TAG" --repo "$REPO" >/dev/null 2>&1; then
+            remote=$(gh api "repos/$REPO/releases/tags/$VOICE_RUNTIMES_TAG" --jq ".assets[] | select(.name == \"$name\") | .digest")
+          fi
+          if [ -z "$remote" ]; then
+            echo "$name is not published yet; building it."
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          elif [ "$remote" = "sha256:$PINNED_SHA256" ]; then
+            echo "$name is published with the pinned digest."
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::$name is published as $remote, but the manifest pins sha256:$PINNED_SHA256."
+            exit 1
+          fi
       - name: Install build toolchain
+        if: steps.published.outputs.done != 'true'
         uses: ./.github/actions/apt-install
         with:
           packages: cmake build-essential
       - name: Build the reproducible bundle
+        if: steps.published.outputs.done != 'true'
         env:
-          BUNDLE_VERSION: ${{ github.event.inputs.version }}
+          BUNDLE_VERSION: ${{ steps.bundle.outputs.version }}
           SOURCE_SHA256: ${{ github.event.inputs.source_sha256 }}
           REPO: ${{ github.repository }}
         run: |
@@ -71,7 +123,19 @@ jobs:
             --tag "$VOICE_RUNTIMES_TAG" \
             --repo "$REPO" \
             ${SOURCE_SHA256:+--source-sha256 "$SOURCE_SHA256"}
+      - name: The build has the pinned digest
+        if: steps.published.outputs.done == 'false'
+        env:
+          BUNDLE_VERSION: ${{ steps.bundle.outputs.version }}
+          PINNED_SHA256: ${{ steps.bundle.outputs.pinned-sha256 }}
+        run: |
+          built=$(sha256sum ".tmp/voice-runtimes/goodvibes-whisper-cpp-${BUNDLE_VERSION}-linux-x64.tar.gz" | cut -d' ' -f1)
+          if [ "$built" != "$PINNED_SHA256" ]; then
+            echo "::error::The build is sha256:$built, but the manifest pins sha256:$PINNED_SHA256. Nothing was published."
+            exit 1
+          fi
       - name: Ensure the append-only release tag exists
+        if: steps.published.outputs.done != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -85,9 +149,10 @@ jobs:
               || gh release view "$VOICE_RUNTIMES_TAG" --repo "$REPO" >/dev/null  # another version's run may have created it first
           fi
       - name: Upload bundle + sidecar (append-only, fails if the asset already exists)
+        if: steps.published.outputs.done != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          BUNDLE_VERSION: ${{ github.event.inputs.version }}
+          BUNDLE_VERSION: ${{ steps.bundle.outputs.version }}
           REPO: ${{ github.repository }}
         run: |
           # No --clobber: a pinned asset is never replaced. Each file is uploaded on its

@@ -26,6 +26,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import type { EvalRawResult, EvalResult, EvalSuiteResult } from './types.js';
 
 /** One task's on-disk definition (task.json). */
 export interface TaskDefinition {
@@ -262,4 +263,55 @@ export function formatTaskSuiteResult(result: TaskSuiteResult): string {
   }
   lines.push(hr);
   return lines.join('\n');
+}
+
+/**
+ * A task-suite run read as an eval suite result, so baselines, the regression
+ * gate and the eval views carry real task outcomes: a task that passed scores
+ * 100 and one that did not scores 0 (failing its floor), on the quality
+ * dimension, with its measured duration. `startedAt` is when the run began.
+ */
+export function taskSuiteAsEvalSuite(suite: string, result: TaskSuiteResult, startedAt: number): EvalSuiteResult {
+  let clock = startedAt;
+  const results = result.results.map((task): EvalResult => {
+    const taskStartedAt = clock;
+    clock += task.durationMs;
+    const score = task.passed ? 100 : 0;
+    const raw: EvalRawResult = {
+      completed: task.sessionCompleted,
+      durationMs: task.durationMs,
+      observations: { verifierPassed: task.verifierPassed },
+      ...(task.passed ? {} : { errorMessage: task.reason }),
+    };
+    return {
+      scenario: {
+        id: task.taskId,
+        name: task.taskId,
+        suite,
+        description: `Task ${task.taskId}: run through a real session, then its verification script.`,
+        tags: ['task'],
+        // The recorded outcome; a task is run again only by running the suite again.
+        run: async () => raw,
+      },
+      raw,
+      scorecard: {
+        scenarioId: task.taskId,
+        scenarioName: task.taskId,
+        dimensions: [{ dimension: 'quality', score, weight: 1, rationale: task.reason }],
+        compositeScore: score,
+        passed: task.passed,
+        ...(task.passed ? {} : { notes: [task.reason] }),
+      },
+      startedAt: taskStartedAt,
+      finishedAt: clock,
+    };
+  });
+  return {
+    suite,
+    startedAt,
+    finishedAt: clock,
+    results,
+    meanScore: results.length > 0 ? results.reduce((sum, entry) => sum + entry.scorecard.compositeScore, 0) / results.length : 0,
+    passed: result.passed,
+  };
 }

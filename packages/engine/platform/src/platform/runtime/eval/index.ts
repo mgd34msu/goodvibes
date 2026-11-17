@@ -1,16 +1,17 @@
 /**
  * Evaluation Harness, barrel export.
  *
- * Provides the eval runner, scorecard scorer, built-in suites,
- * and baseline persistence utilities.
+ * Provides the eval runner, scorecard scorer, the task-suite adapter that
+ * evaluates the product on real work, and baseline persistence utilities.
  *
  * @example
  * ```ts
- * import { EvalRunner, BUILTIN_SUITES, captureBaseline, loadBaseline } from './eval/index.js';
+ * import { EvalRunner, createHeadlessRunExecutor, loadBaseline, runTaskSuite, taskSuiteAsEvalSuite } from './eval/index.js';
  *
- * const runner = new EvalRunner();
- * const result = await runner.runSuite('core-performance', BUILTIN_SUITES['core-performance']);
- * const gate = runner.evaluateGate(result, await loadBaseline('.goodvibes/eval/baseline.json'));
+ * const startedAt = Date.now();
+ * const tasks = await runTaskSuite('eval/tasks', { executor: createHeadlessRunExecutor() });
+ * const fresh = taskSuiteAsEvalSuite('eval/tasks', tasks, startedAt);
+ * const gate = new EvalRunner().evaluateGate(fresh, await loadBaseline('.goodvibes/eval/baseline.json'));
  * if (!gate.passed) process.exit(1);
  * ```
  */
@@ -37,8 +38,6 @@ export type { EvalRunnerOptions } from './runner.js';
 
 export { scoreScenario, formatScorecard, judgmentQualityScore, DIMENSION_FLOOR } from './scorecard.js';
 
-export { BUILTIN_SUITES, ALL_SCENARIOS } from './suites.js';
-
 export {
   captureBaseline,
   serialiseBaseline,
@@ -56,6 +55,7 @@ export {
   loadTaskDefinition,
   defaultShellVerifier,
   formatTaskSuiteResult,
+  taskSuiteAsEvalSuite,
 } from './task-suite.js';
 export type {
   TaskDefinition,

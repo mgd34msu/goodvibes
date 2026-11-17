@@ -270,7 +270,7 @@ Representative slash-command families, with a one-line summary of each:
 | `/mcp` | Manage MCP servers and their tools |
 | `/incident` | Open, export, and capture incident review bundles |
 | `/replay` | Deterministic replay: load, step, seek, diff, and export recorded runs |
-| `/eval` | Evaluation harness: run benchmark suites, compare baselines, and gate regressions |
+| `/eval` | Evaluate the product on real tasks: run a task suite through goodvibes run, compare baselines, and gate regressions |
 | `/session` | Session lifecycle and orchestration: list, resume, fork, save, export, and cross-session task handoff |
 | `/work-plan` | Track a persistent, workspace-scoped work plan |
 | `/search` | Provider-backed web search with ranked results and source labels |
@@ -750,7 +750,7 @@ Many commands also have matching modals and control rooms. High-signal examples:
 
 GoodVibes includes a post-execution and operator-repair stack:
 
-- `/eval` runs built-in evaluation suites, compares baselines, and applies regression gates
+- `/eval` runs a task suite (default `.goodvibes/eval/tasks`: one directory per task with a `task.json` instruction and a `verify.sh`) through headless `goodvibes run`, lets each task's script decide pass or fail, compares runs with a baseline, and gates on a failed or regressed task
 - `/replay` loads and steps deterministic replay runs
 - `/incident` opens, exports, and captures forensics bundles
 - Health and diagnostics surfaces expose repair actions, transport issues, task failure state, and replay hooks

@@ -5,7 +5,6 @@ import type { SlashCommand } from './command-registry.ts';
 import { policyCommand } from './commands/policy.ts';
 import { providerCommand } from './commands/provider.ts';
 import { evalCommand } from './commands/eval.ts';
-import { withEvalTasks } from './commands/eval-tasks.ts';
 import { sessionCommand, resumeCommand } from './commands/session.ts';
 import { recallCommand } from './commands/memory.ts';
 import { knowledgeCommand } from './commands/knowledge.ts';
@@ -201,7 +200,7 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: 'Owner Profile', register: registerProfileRuntimeCommands },
   { category: 'Policy', register: (registry) => registry.register(policyCommand) },
   { category: 'Providers', register: (registry) => registry.register(providerCommand) },
-  { category: 'Eval', register: (registry) => registry.register(withEvalTasks(evalCommand)) },
+  { category: 'Eval', register: (registry) => registry.register(evalCommand) },
   { category: 'Sessions & Replay', register: registerHostedRuntimeCommands },
   { category: 'Sessions & Replay', register: (registry) => registry.register(sessionCommand) },
   { category: 'Sessions & Replay', register: (registry) => registry.register(resumeCommand) },

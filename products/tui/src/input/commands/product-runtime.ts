@@ -1,10 +1,11 @@
 import { createTrustReviewTools, createTrustCommandFlow } from '@goodvibes-jev/engine/terminal-shell/trust-review';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { runnerToolsText } from './remote-ceiling-text.ts';
 import { listInstalledEcosystemEntries, loadEcosystemCatalog } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
-import { BUILTIN_SUITES } from '@/runtime/index.ts';
+import { discoverTasks } from '@/runtime/index.ts';
+import { DEFAULT_TASK_SUITE_DIR } from './eval.ts';
 import {
   requireEcosystemCatalogPaths,
   requireReadModels,
@@ -21,6 +22,7 @@ interface ReleaseBundle {
     readonly model: string;
     readonly sessionId: string;
   };
+  /** The tasks in the project's eval task suite (/eval run). */
   readonly evalSuites: readonly string[];
   readonly incidentCount: number;
   readonly remote: {
@@ -34,6 +36,17 @@ interface ReleaseBundle {
     readonly installedPlugins: number;
     readonly installedSkills: number;
   };
+}
+
+/** The ids of the tasks in the project's eval task suite; none when there is no suite or it cannot be read. */
+function projectEvalTasks(projectRoot: string): string[] {
+  const dir = join(projectRoot, DEFAULT_TASK_SUITE_DIR);
+  if (!existsSync(dir)) return [];
+  try {
+    return discoverTasks(dir).map((task) => task.definition.id);
+  } catch {
+    return [];
+  }
 }
 
 function buildReleaseBundle(
@@ -50,7 +63,7 @@ function buildReleaseBundle(
       model: ctx.session.runtime.model,
       sessionId: ctx.session.runtime.sessionId,
     },
-    evalSuites: Object.keys(BUILTIN_SUITES),
+    evalSuites: projectEvalTasks(requireShellPaths(ctx).workingDirectory),
     incidentCount: incidents.length,
     remote: {
       pools: remoteRuntime?.listPools().length ?? 0,
@@ -71,7 +84,7 @@ function inspectReleaseBundle(path: string): string {
   return [
     'Release Bundle Review',
     `  provider/model: ${parsed.runtime.provider || '(unset)'}/${parsed.runtime.model || '(unset)'}`,
-    `  eval suites: ${parsed.evalSuites.length}`,
+    `  eval tasks: ${parsed.evalSuites.length}`,
     `  incidents: ${parsed.incidentCount}`,
     `  remote pools/contracts/artifacts: ${parsed.remote.pools}/${parsed.remote.contracts}/${parsed.remote.artifacts}`,
     `  ecosystem catalog plugins/skills: ${parsed.ecosystem.pluginCatalog}/${parsed.ecosystem.skillCatalog}`,
@@ -285,7 +298,7 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
           [
             'Release Review',
             `  provider/model: ${bundle.runtime.provider || '(unset)'}/${bundle.runtime.model || '(unset)'}`,
-            `  eval suites: ${bundle.evalSuites.length}`,
+            `  eval tasks: ${bundle.evalSuites.length}`,
             `  incidents: ${bundle.incidentCount}`,
             `  remote pools/contracts/artifacts: ${bundle.remote.pools}/${bundle.remote.contracts}/${bundle.remote.artifacts}`,
             `  ecosystem catalog plugins/skills: ${bundle.ecosystem.pluginCatalog}/${bundle.ecosystem.skillCatalog}`,
@@ -301,7 +314,7 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
             '  1. Run /setup review and /setup doctor',
             '  2. Run /security review and /trust review',
             '  3. Run /policy preflight and /policy simulate',
-            '  4. Run /eval gate <suite> for required certification suites',
+            '  4. Run /eval gate [suite-dir] over the project\'s eval tasks',
             '  5. Review /incident latest and /bridge status',
             '  6. Export /release bundle export <path> for release evidence',
           ].join('\n'),

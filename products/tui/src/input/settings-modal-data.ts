@@ -10,7 +10,7 @@ import { isValidConfigKey } from '@goodvibes-jev/engine/platform/platform/config
 
 import { type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
-import { getResolvedSettingLookup } from '@/runtime/index.ts';
+import { readResolvedSettingLookups } from '@/runtime/index.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
 
 import { buildSubscriptionEntries } from '@goodvibes-jev/engine/terminal-shell/settings-subscriptions';
@@ -147,6 +147,7 @@ export function refreshSettingsPolicyAvailability(groups: Map<string, SettingEnt
     refreshHostSettingEntry(entry, configManager);
     unavailable ||= entry.metadataUnavailable !== undefined;
   }
+  let lookup: ReturnType<typeof readResolvedSettingLookups> | undefined;
   for (const entry of entries) {
     if (unavailable) {
       Object.assign(entry, {
@@ -155,7 +156,8 @@ export function refreshSettingsPolicyAvailability(groups: Map<string, SettingEnt
       });
     } else if (entry.kind !== 'host' && entry.metadataUnavailable) {
       refreshBuiltinSettingValue(entry, configManager);
-      const resolved = getResolvedSettingLookup(configManager, entry.setting.key)?.entry;
+      lookup ??= readResolvedSettingLookups(configManager);
+      const resolved = lookup(entry.setting.key)?.entry;
       Object.assign(entry, {
         effectiveSource: resolved?.effectiveSource, locked: resolved?.locked,
         conflict: resolved?.conflict, sourceLabel: resolved?.sourceLabel, lockReason: resolved?.lockReason,
@@ -209,6 +211,8 @@ export function buildSettingGroups(
   // The legacy builtin governance reader can quarantine malformed policy.
   // Keep that recovery out of this read pass when pure host metadata is
   // unavailable; otherwise opening settings could erase the policy failure.
+  // One read of the control-plane file for every row, not one per setting.
+  const lookup = hostMetadataUnavailable ? undefined : readResolvedSettingLookups(configManager);
   for (const setting of configManager.getSchema()) {
     // These lists keep their own one-line list editor rows, added below.
     if (isSandboxExecListConfigKey(setting.key) || isWorktreeSetupListConfigKey(setting.key)) continue;
@@ -216,7 +220,7 @@ export function buildSettingGroups(
     const cat = rawCat as SettingsCategory;
     // A settings row shows the stored setting; an owner-profile value is a consumer's fact, not this row's.
     const currentValue = configManager.getStored(setting.key as ConfigKey);
-    const resolved = hostMetadataUnavailable ? undefined : getResolvedSettingLookup(configManager, setting.key)?.entry;
+    const resolved = lookup?.(setting.key as ConfigKey)?.entry;
     const entry: SettingEntry = {
       setting,
       currentValue,

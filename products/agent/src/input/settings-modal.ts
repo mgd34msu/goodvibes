@@ -12,7 +12,7 @@ import type { ConfigManager, ConfigKey } from '@goodvibes-jev/engine/platform/pl
 import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { isAgentHostSettingKey } from '../config/host-settings.ts';
 import { getAgentSettingsSchema, type AgentSettingKey } from '../config/settings-catalog.ts';
-import { getResolvedSettingLookup } from '@/runtime/index.ts';
+import { readResolvedSettingLookups } from '@/runtime/index.ts';
 import type { ServiceInspectionQuery } from '@/runtime/index.ts';
 import { isSecretConfigKey } from '../config/secret-config.ts';
 import { agentDaemonConfigClient, agentDaemonConfigClientInstalled, isDaemonOwnedConfigKey, openEffectiveConfigView } from '../config/daemon-config-routing.ts';
@@ -737,6 +737,8 @@ export class SettingsModal extends TerminalSettingsModalState<
       this.groups.set(cat, []);
     }
 
+    // One read of the control-plane file for every row, not one per setting.
+    const lookup = policyError ? undefined : readResolvedSettingLookups(configManager);
     for (const setting of getAgentSettingsSchema(configManager)) {
       const rawCat = setting.key.split('.')[0] as string;
       const cat = rawCat as SettingsCategory;
@@ -748,7 +750,7 @@ export class SettingsModal extends TerminalSettingsModalState<
             : configManager.get(setting.key),
       );
       const currentValue = display.value;
-      const resolved = setting.kind === 'host' || policyError ? undefined : getResolvedSettingLookup(configManager, setting.key)?.entry;
+      const resolved = setting.kind === 'host' ? undefined : lookup?.(setting.key)?.entry;
       const entry: SettingEntry = {
         setting,
         currentValue,

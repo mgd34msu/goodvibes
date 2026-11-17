@@ -579,18 +579,36 @@ export function getSettingsControlPlaneSnapshot(configManager: ConfigManager): S
   };
 }
 
+/** One setting's resolution. Reads the control-plane file; a caller resolving many keys uses {@link readResolvedSettingLookups}. */
 export function getResolvedSettingLookup(
   configManager: ConfigManager,
   key: ConfigKey,
 ): ResolvedSettingLookup | null {
   const store = readStore(getConfigControlPlaneDir(configManager));
   const entry = buildResolvedEntries(configManager, store, key)[0];
-  if (!entry) return null;
+  return entry ? lookupFor(store, entry) : null;
+}
+
+/**
+ * Every setting's resolution from one read of the control-plane file, for a
+ * screen that shows them all (the settings modal); the per-key lookup reads
+ * and parses the file once per key.
+ */
+export function readResolvedSettingLookups(configManager: ConfigManager): (key: ConfigKey) => ResolvedSettingLookup | null {
+  const store = readStore(getConfigControlPlaneDir(configManager));
+  const entries = new Map(buildResolvedEntries(configManager, store).map((entry) => [entry.key, entry] as const));
+  return (key) => {
+    const entry = entries.get(key);
+    return entry ? lookupFor(store, entry) : null;
+  };
+}
+
+function lookupFor(store: SettingsControlPlaneStore, entry: ResolvedSettingEntry): ResolvedSettingLookup {
   return {
     entry,
-    lock: store.managedLocks.find((candidate) => candidate.key === key),
-    syncedLayer: store.syncedSettings.find((candidate) => candidate.key === key),
-    managedLayer: store.managedSettings.find((candidate) => candidate.key === key),
+    lock: store.managedLocks.find((candidate) => candidate.key === entry.key),
+    syncedLayer: store.syncedSettings.find((candidate) => candidate.key === entry.key),
+    managedLayer: store.managedSettings.find((candidate) => candidate.key === entry.key),
   };
 }
 

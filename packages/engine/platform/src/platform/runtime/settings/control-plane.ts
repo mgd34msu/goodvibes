@@ -307,7 +307,7 @@ async function buildManagedStage(
     path,
     importedAt: Date.now(),
     changeCount: changes.filter((entry) => entry.changed).length,
-    risk: await readBundleRisk(changes, 'runtime.settings.stage-bundle-risk'),
+    risk: readBundleRisk(changes),
     changes,
     ...(ignoredKeys.length > 0 ? { ignoredKeys } : {}),
   };
@@ -359,11 +359,7 @@ export async function applyStagedManagedBundle(
   if (plan.staged.length === 0) {
     throw new Error('No staged managed settings matched the requested keys.');
   }
-  // The risk read is a judgment call that awaits; read it first and take the store
-  // only afterwards, so nothing written while waiting is overwritten.
-  const remainingRisk = plan.remaining.length > 0
-    ? await readBundleRisk(plan.remaining, 'runtime.settings.remaining-bundle-risk')
-    : undefined;
+  const remainingRisk = plan.remaining.length > 0 ? readBundleRisk(plan.remaining) : undefined;
   return withStoreLock(configDir, () => applyPlannedManagedBundleLocked(configManager, configDir, planned, selectedSet, remainingRisk));
 }
 

@@ -4,10 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { ConfigManager } from '../../config/manager.js';
 import { CONFIG_SCHEMA } from '../../config/index.js';
 import type { ConfigKey } from '../../config/index.js';
-import type { JsonValue } from '@goodvibes-jev/judgment';
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { settingsRisk, type SettingsRisk } from './batteries/settings-risk.js';
-import { decisionOrClassic } from '../decision-policy.js';
+import { configKeyFacts } from '../../config/config-key-facts.js';
 import { ConfigError } from '../../types/errors.js';
 import { withSyncFileLock } from '../../config/sync-file-lock.js';
 import { defaultStore, getSettingsControlPath, migrateStore } from './host-setting-policy-read.js';
@@ -231,43 +228,22 @@ export function sourcePriority(source: SettingsSource): number {
 }
 
 /**
- * The risk shown for a staged managed bundle: the highest
- * `engine.runtime.settings-risk` reading over its changed settings, one
- * choice per change, all sent together. A reading that does not settle counts
- * as high. A bundle with no changed setting is low: applying it changes
- * nothing.
+ * The risk shown for a staged managed bundle, decided from what the schema
+ * declares about each changed setting; no value leaves the process. High: a
+ * credential or card setting, or a change its key declares as loosening
+ * security (the sandbox, permissions, a policy source). Medium: a setting the
+ * program does not know, or one a project file may not set. Low otherwise, and
+ * for a bundle that changes nothing.
  */
-export async function readBundleRisk(
-  changes: readonly ManagedBundleChange[],
-  site: string,
-): Promise<StagedManagedBundle['risk']> {
-  return decisionOrClassic(() => readDecisionBundleRisk(changes, site), () => changes.some(change => change.changed) ? 'unassessed' : 'low');
-}
-async function readDecisionBundleRisk(changes: readonly ManagedBundleChange[], site: string): Promise<SettingsRisk> {
-  const changed = changes.filter((change) => change.changed);
-  if (changed.length === 0) return 'low';
-  const port = judgmentPort(site);
-  const readings = await Promise.all(changed.map(async (change) => {
-    const description = CONFIG_SCHEMA.find((entry) => entry.key === change.key)?.description ?? '';
-    const run = await settingsRisk.run(port, {
-      key: change.key,
-      description,
-      previousValue: toJsonValue(change.previousValue),
-      nextValue: toJsonValue(change.nextValue),
-    }, { site });
-    const reading = run.readings.risk;
-    const risk: SettingsRisk = reading.outcome === 'act' ? reading.choice : 'high';
-    run.recordAction(`risk-${risk}`);
-    return risk;
-  }));
-  return readings.reduce<SettingsRisk>((highest, risk) => (RISK_RANK[risk] > RISK_RANK[highest] ? risk : highest), 'low');
-}
-
-const RISK_RANK: Readonly<Record<SettingsRisk, number>> = { low: 0, medium: 1, high: 2 };
-
-/** A setting value as JSON the reading can carry (undefined reads as null). */
-function toJsonValue(value: unknown): JsonValue {
-  return value === undefined ? null : JSON.parse(JSON.stringify(value)) as JsonValue;
+export function readBundleRisk(changes: readonly ManagedBundleChange[]): Exclude<StagedManagedBundle['risk'], 'unassessed'> {
+  let risk: 'low' | 'medium' = 'low';
+  for (const change of changes) {
+    if (!change.changed) continue;
+    const facts = configKeyFacts(change.key);
+    if (facts.secret || facts.cardMaterial || facts.loosens?.(change.previousValue, change.nextValue)) return 'high';
+    if (!facts.inSchema || !facts.projectSettable) risk = 'medium';
+  }
+  return risk;
 }
 
 export function makeRollbackToken(): string {

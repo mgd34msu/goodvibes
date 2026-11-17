@@ -69,9 +69,6 @@ registry.register(retryWait);
 
 // Runtime: tool output policy.
 
-// Runtime: settings control plane.
-import { settingsRisk } from './settings/batteries/settings-risk.js';
-registry.register(settingsRisk);
 
 // Runtime: forensics.
 

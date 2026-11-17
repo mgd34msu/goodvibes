@@ -1,5 +1,5 @@
 import { jsonErrorResponse } from './error-response.js';
-import { missingScopes, scopeMatches } from './route-helpers.js';
+import { scopeMatches } from './route-helpers.js';
 
 /** The kind of authenticated principal making a daemon request. */
 export type AuthenticatedPrincipalKind = 'user' | 'bot' | 'service' | 'token';
@@ -120,34 +120,6 @@ export function resolveAuthenticatedPrincipal(
 ): AuthenticatedPrincipal | null {
   const token = resolver.extractAuthToken(req);
   return token ? resolver.describeAuthenticatedPrincipal(token) : null;
-}
-
-/**
- * Build a structured 403 response body when a principal is missing required scopes.
- *
- * @param target - Human-readable name of the resource or action being checked.
- * @param requiredScopes - Scopes required to perform the action.
- * @param grantedScopes - Scopes held by the caller.
- * @returns An error body object, or `null` if all required scopes are present.
- */
-export function buildMissingScopeBody(
-  target: string,
-  requiredScopes: readonly string[],
-  grantedScopes: readonly string[] | undefined,
-): {
-  readonly error: string;
-  readonly requiredScopes: readonly string[];
-  readonly grantedScopes: readonly string[];
-  readonly missingScopes: readonly string[];
-} | null {
-  const missing = missingScopes(grantedScopes, requiredScopes);
-  if (missing.length === 0) return null;
-  return {
-    error: `Missing required scope${missing.length === 1 ? '' : 's'} for ${target}: ${missing.join(', ')}`,
-    requiredScopes: [...requiredScopes],
-    grantedScopes: [...(grantedScopes ?? [])],
-    missingScopes: missing,
-  };
 }
 
 /**

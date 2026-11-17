@@ -31,7 +31,6 @@ export { isPortAvailable, requirePortAvailable } from './port-check.js';
 export { resolveHostBinding, resolveWebPort } from './host-resolver.js';
 export type { ResolvedHostBinding } from './host-resolver.js';
 export {
-  buildMissingScopeBody,
   resolveAuthenticatedPrincipal,
   resolvePrivateHostFetchOptions,
 } from './http-policy.js';

@@ -31,7 +31,6 @@ export { dispatchDaemonApiRoutes } from './api-router.js';
 export type { DaemonApiRouteExtension } from './api-router.js';
 export { dispatchGatewayRestRoutes } from './gateway-rest-routes.js';
 export {
-  buildMissingScopeBody,
   principalHasScope,
   resolveAuthenticatedPrincipal,
   resolvePrivateHostFetchOptions,

@@ -9,7 +9,6 @@ export type {
   RequestPrincipal,
 } from '@goodvibes-jev/engine/daemon-api';
 export {
-  buildMissingScopeBody,
   principalHasScope,
   resolveAuthenticatedPrincipal,
   resolvePrivateHostFetchOptions,

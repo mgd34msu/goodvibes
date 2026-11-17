@@ -84,9 +84,10 @@ import type { GenericWebhookAdapterContext, SurfaceAdapterContext } from '../../
 import type { PlatformServiceManager } from '../service-manager.js';
 import type { JsonRecord } from '../helpers.js';
 import { jsonErrorResponse, serviceFailureStatus } from './error-response.js';
+import { missingScopeRefusal } from '@goodvibes-jev/engine/daemon-api/error-response';
 import { VERSION } from '../../version.js';
 import type { CompanionChatManager } from '../../companion/companion-chat-manager.js';
-import { buildMissingScopeBody, principalHasScope, type AuthenticatedPrincipal, type RequestContext } from '../http-policy.js';
+import { principalHasScope, type AuthenticatedPrincipal, type RequestContext } from '../http-policy.js';
 import { dispatchCompanionChatRoutes, isCompanionChatPath } from '../../companion/companion-chat-routes.js';
 import { dispatchModelRoutes } from './model-routes.js';
 import { dispatchBatchRoutes } from './batch-routes.js';
@@ -518,8 +519,8 @@ export class DaemonHttpRouter {
   private requireCallerScope(req: Request, scope: string): Response | null {
     const principal = this.context.authenticateRequest(req)?.principal;
     if (principal && principalHasScope(principal, scope)) return null;
-    const body = buildMissingScopeBody('this request', [scope], principal?.scopes);
-    return body ? Response.json(body, { status: 403 }) : null;
+    const refusal = missingScopeRefusal('this request', [scope], principal?.scopes);
+    return refusal ? jsonErrorResponse(refusal, { status: 403 }) : null;
   }
 
   /** The request's authenticated principal, or null. */

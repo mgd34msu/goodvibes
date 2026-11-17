@@ -437,7 +437,7 @@ When creating user accounts with `UserAuthManager.addUser()`, the default role i
 
 ### Principal kinds and scopes
 
-The `AuthenticatedPrincipal` type carries a `principalKind` (`user` | `bot` | `service` | `token`) and a `scopes` array. Route handlers use `buildMissingScopeBody()` to enforce required scopes before processing a request. Scope violations return a structured error with `requiredScopes`, `grantedScopes`, and `missingScopes` fields.
+The `AuthenticatedPrincipal` type carries a `principalKind` (`user` | `bot` | `service` | `token`) and a `scopes` array. Route handlers use `missingScopeRefusal()` to enforce required scopes before processing a request. Every route answers a scope violation with the same 403 body: `code: "MISSING_SCOPE"`, `category: "authorization"`, `state`, `next`, and the `requiredScopes`, `grantedScopes`, and `missingScopes` lists.
 
 ### Bootstrap credential file
 

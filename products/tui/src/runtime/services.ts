@@ -27,7 +27,7 @@ import { forwardGatewayMethodsToDaemon } from './gateway-daemon-forward.ts';
 import { terminalRunsRoutines } from './terminal-routines.ts';
 import { buildContinuationSpawnInput } from './continuation-spawn.ts';
 import { gateConsolidationToLocalWriter } from './memory-consolidation-gate.ts';
-import { createNotificationDispatcher, startNotificationFlush, wireRuntimeNotificationBridge, wireMemoryPressureNotice } from './notification-dispatch.ts';
+import { createNotificationDispatcher, wireRuntimeNotificationBridge, wireMemoryPressureNotice } from './notification-dispatch.ts';
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import { createWorkspaceCheckpointing } from './workspace-checkpointing.ts';
 import { createShellPathService } from '@/runtime/index.ts';
@@ -272,7 +272,6 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       const notificationDispatcher = createNotificationDispatcher(config);
       wireRuntimeNotificationBridge(options.runtimeBus, notificationDispatcher);
       wireMemoryPressureNotice(options.runtimeBus, notificationDispatcher);
-      scope.registry.add('notification flush', startNotificationFlush(notificationDispatcher));
       // Stores close only after a rewind in flight has finished with them.
       scope.registry.add('conversation rewind drain', () => conversationRewindClosing);
       // While the daemon is reachable it is the one writer of its own settings:

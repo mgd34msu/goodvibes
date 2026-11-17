@@ -13,13 +13,12 @@ existing rows their first native revision. Prepare stale, unsubmitted previews
 again after upgrading. Resume an import whose outcome is unknown with its original
 request ID and command so the durable receipt can resolve it without duplication.
 The store snapshots older schemas before migration and refuses schema downgrades.
-Concurrent saves compare the exact originally accepted database bytes and refuse
-stale writes. When another process (a terminal next to its daemon, for example)
-saved first, the refused write is not saved: the store reloads the current file,
-drops the unsaved write from memory, and reports a retryable
-`KnowledgeStoreConflictError`; retrying the operation applies it to the current
-data. A write inside a batch is not discarded while the batch runs; the reload
-happens once the batch's own save is refused. File replacement with
+The store is one SQLite file in WAL mode, written row by row. Two processes on
+the same file (a terminal next to its daemon, for example) do not refuse each
+other's writes: each write is its own transaction, and a commit by the other
+process is picked up before the next operation reads or writes. A guarded write
+(a conditional write or a prepared publication) compares and writes inside one
+immediate transaction, so it sees the other process's committed rows. File replacement with
 identical bytes is accepted; replacement of the store's original containing
 directory requires reopening the store. A reported indeterminate save may already
 be visible: resume the original request instead of restoring an older image.

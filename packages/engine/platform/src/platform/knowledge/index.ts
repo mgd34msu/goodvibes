@@ -237,7 +237,7 @@ export type {
 } from './knowledge-api.js';
 export { KnowledgeProjectionService } from './projections.js';
 export { KnowledgeStore } from './store.js';
-export { KnowledgeStoreConflictError, KnowledgeRefinementTaskRefusedError } from './store-conflict.js';
+export { KnowledgeRefinementTaskRefusedError } from './store-conflict.js';
 export { ACTIVE_REFINEMENT_STATES, knowledgeConsolidationCandidateLifecycle, knowledgeRefinementTaskLifecycle } from './types.js';
 export type { KnowledgeSourceSnapshot, KnowledgeSourceWriteResult } from './store-source-generation.js';
 export type { PlanningSourceIdentity } from './store-planning-source-selector.js';

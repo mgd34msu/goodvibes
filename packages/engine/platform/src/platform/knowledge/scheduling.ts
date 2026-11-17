@@ -3,7 +3,6 @@ import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModel
 import { getNextAutomationOccurrence, ensureAutomationCronPhase, normalizeCronSchedule, normalizeEverySchedule, validateSchedule, type AutomationScheduleDefinition } from '../automation/schedules.js';
 import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 import type { KnowledgeStore } from './store.js';
-import { KnowledgeStoreConflictError } from './store-conflict.js';
 import { knowledgeJobRunLifecycle, type KnowledgeJobMode, type KnowledgeJobRecord, type KnowledgeJobRunRecord, type KnowledgeJobStatus, type KnowledgeScheduleRecord } from './types.js';
 import { emitKnowledgeJobCompleted, emitKnowledgeJobFailed, emitKnowledgeJobQueued, emitKnowledgeJobStarted } from '../runtime/emitters/index.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
@@ -434,16 +433,7 @@ export class KnowledgeScheduleService {
     // Only the schedule owner rewrites schedules and sweeps runs at startup; a
     // second process opening the same file leaves them to it.
     if (this.ownsSchedules()) {
-      for (let attempt = 1; ; attempt++) {
-        try {
-          await this.prepareOwnedSchedules();
-          break;
-        } catch (error) {
-          // Another process saved first; the store has reloaded, so one more
-          // pass sees its rows (including any bootstrap schedule it created).
-          if (attempt >= 2 || !(error instanceof KnowledgeStoreConflictError) || !error.reloaded) throw error;
-        }
-      }
+      await this.prepareOwnedSchedules();
       if (this.disposed) return;
     }
     await this.reconcileSchedules();

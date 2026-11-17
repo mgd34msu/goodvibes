@@ -17,7 +17,6 @@ import type {
 import { NO_REPAIRER_BLOCK, NO_REPAIRER_REASON, recoverNoRepairerTasks, recoverStaleActiveTasks } from './self-improvement-recovery.js';
 import { readString, sourceKnowledgeSpace, uniqueStrings } from './utils.js';
 import { ACTIVE_REFINEMENT_STATES } from '../types.js';
-import { KnowledgeStoreConflictError } from '../store-conflict.js';
 import { KnowledgeScopeSelectionHeldError } from '../scope-selection.js';
 import { SemanticIdentityHeldError } from '../store-semantic-fact-selector.js';
 import { runWithBudget, timerBudgetMs } from './self-improvement-budget.js';
@@ -317,7 +316,6 @@ export function isSelfImproveHold(error: unknown): boolean {
   if (error instanceof DecisionModelsDisabledError || error instanceof JudgmentPortMissingError
     || (error instanceof Error && (error as { reason?: unknown }).reason === 'unconfigured')) return false;
   return error instanceof SemanticIdentityHeldError
-    || (error instanceof KnowledgeStoreConflictError && error.reloaded)
     || (error instanceof KnowledgeScopeSelectionHeldError && error.reason === 'stale')
     || (isKnowledgeSourceQualityFailure(error) && !(error instanceof KnowledgeNodeActivationHeldError && error.reason === 'aborted'));
 }

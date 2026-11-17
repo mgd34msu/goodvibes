@@ -987,14 +987,6 @@ export class ControlPlaneGateway {
     return { requestCount: this.requestCount, errorCount: this.errorCount, lastRequestAt: this.lastRequestAt, lastEventAt: this._lastEventAt };
   }
 
-  /**
-   * The gateway's live counters and clients, read at snapshot time. The
-   * runtime store's copy is refreshed only on connect, authenticate and
-   * disconnect, so a reader that wants current values reads them here.
-   */
-  liveness(): { readonly requestCount: number; readonly errorCount: number; readonly lastRequestAt: number | undefined; readonly lastEventAt: number; readonly clients: ControlPlaneClientDescriptor[] } {
-    return { ...this.livenessCounters(), clients: this.listClients() };
-  }
 
   /** Retained replay/message entries (ring + surface messages), for MemoryGovernor visibility. */
   retainedEventCount(): number {

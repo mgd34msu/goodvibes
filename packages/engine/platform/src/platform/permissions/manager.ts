@@ -37,6 +37,7 @@ import { isStateMutation } from '../gate/policy/state-policy.js';
 import { resolve } from 'node:path';
 import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';
 import { buildDurableRuleForDecision, buildRememberOptions, matchDurableRulesAsync, sessionApprovalKey, type RememberTier } from './approval-rules.js';
+import { stableStringify } from '../providers/registry-helpers.js';
 import { changesMcpTrust, classifyCall, classifyPaths, declaredRecoverable, declaredValues, ownerOnlyReason, recognizeOwnerOnly, type CallClass, type CallFacts, type CallRuleFact, type OwnerOnlyKind } from '../gate/classify.js';
 import { toolDecisionOf } from './denial.js';
 import { processHeldForOwner, type HeldForOwnerCall, type HeldForOwnerLedger } from './held-for-owner.js';
@@ -274,9 +275,13 @@ function sameSource(now: unknown, then: SourceFingerprint): boolean {
     && samePart(source.selectedDiffContext, then.diff);
 }
 
-/** A session answer to an owner-only item is kept apart, so only it settles that item again. */
-function ownerOnlySessionKey(kind: OwnerOnlyKind, key: string): string {
-  return `owner-only:${kind}|${key}`;
+/**
+ * A session answer to an owner-only item is kept apart, so only it settles that
+ * item again, and it covers that exact call: the arguments are part of the key,
+ * so trusting one MCP server does not trust another.
+ */
+function ownerOnlySessionKey(kind: OwnerOnlyKind, key: string, args: Record<string, unknown>): string {
+  return `owner-only:${kind}|${key}|${stableStringify(args)}`;
 }
 
 /** A settings projector's stand-in for a value it could not see (a daemon-owned key, a credential's posture). */
@@ -1169,6 +1174,11 @@ export class PermissionManager {
     }
     if (this.takeOwnerRevision(input)) return { result: this.result(true, false, 'user_prompt', 'user_approved', analysis) };
     if (input.ownerConfirmed === true) return this.ownerConfirmedOutcome(input);
+    // just-vibes interrupts no one: with decision models off, what needs the owner is held for the end of the run.
+    if (input.mode === 'just-vibes') {
+      return this.queuedForOwner(input, analysis,
+        ownerOnly ? `held for you: ${ownerOnlyReason(ownerOnly)}` : 'held for you: this needs a decision and decision models are off', ownerOnly);
+    }
     return this.askOwner(input, analysis, {
       reasons: ownerOnly ? [`Only you decide this: ${ownerOnlyReason(ownerOnly)}.`] : [],
       ownerOnly, revisedDetail: 'Prepare the exact action revised and approved by the owner during Classic operation.',
@@ -1594,7 +1604,7 @@ export class PermissionManager {
     };
     current();
     // An answer to an owner-only item is kept under its own key: only it says the owner settled that item.
-    const ownerAnswer = ownerOnly === undefined ? undefined : this.sessionApprovals.get(ownerOnlySessionKey(ownerOnly, key));
+    const ownerAnswer = ownerOnly === undefined ? undefined : this.sessionApprovals.get(ownerOnlySessionKey(ownerOnly, key, args));
     const session = ownerAnswer ?? this.sessionApprovals.get(key);
     if (session !== undefined) {
       return { approved: session, effect: session ? 'allow' : 'deny', source: 'session_override', reason: session ? 'session_cached_allow' : 'session_cached_deny',
@@ -1703,7 +1713,7 @@ export class PermissionManager {
     const approved = reply.approved === true;
     if (tier === 'session') {
       const key = this.getApprovalKey(toolName, args);
-      this.sessionApprovals.set(ownerOnly === undefined ? key : ownerOnlySessionKey(ownerOnly, key), approved);
+      this.sessionApprovals.set(ownerOnly === undefined ? key : ownerOnlySessionKey(ownerOnly, key, args), approved);
       // Search and map tools ask about one absolute path at a time (readAccess),
       // so a read answer is also kept for each file it covered.
       if (toolName === 'read') for (const path of extractPathArgs(args)) this.sessionApprovals.set(this.getApprovalKey('read', { path: this.absoluteReadPath(path) }), approved);
@@ -1853,7 +1863,7 @@ export class PermissionManager {
    */
   private queuedForOwner(input: Pick<SafetyInput, 'toolName' | 'args'>, analysis: PermissionRequestAnalysis, reason: string, ownerOnly?: OwnerOnlyKind): SafetyOutcome {
     const key = this.getApprovalKey(input.toolName, input.args);
-    const approvalKey = ownerOnly === undefined ? key : ownerOnlySessionKey(ownerOnly, key);
+    const approvalKey = ownerOnly === undefined ? key : ownerOnlySessionKey(ownerOnly, key, input.args);
     // Approving it later is the owner's session answer for this exact call, as if he had been asked now.
     const held = this.heldForOwner().hold({ key: approvalKey, toolName: input.toolName, summary: analysis.summary, reason }, () => {
       this.sessionApprovals.set(approvalKey, true);

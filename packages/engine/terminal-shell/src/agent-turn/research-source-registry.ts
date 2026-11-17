@@ -278,6 +278,24 @@ export function researchSourceReportLine(source: AgentResearchSourceRecord): str
   return [source.title, url, source.credibility, note].filter(Boolean).join(' | ');
 }
 
+/** The record `existing` becomes when a report uses it; throws when it cannot move to used. */
+function usedSource(existing: AgentResearchSourceRecord, input: AgentResearchSourceUseInput): AgentResearchSourceRecord {
+  assertSourceMove(existing, 'used');
+  const reportArtifactId = input.reportArtifactId?.trim() || existing.usedInReportArtifactId;
+  const note = input.note === undefined ? existing.note : input.note.trim() || undefined;
+  assertSourceContentSafe([reportArtifactId ?? '', note ?? '']);
+  const timestamp = nowIso();
+  const { note: _oldNote, usedInReportArtifactId: _oldArtifactId, ...base } = existing;
+  return {
+    ...base,
+    ...(note ? { note } : {}),
+    ...(reportArtifactId ? { usedInReportArtifactId: reportArtifactId } : {}),
+    status: 'used',
+    usedAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
 export class AgentResearchSourceRegistry {
   public constructor(private readonly storePath: string) {}
 
@@ -423,21 +441,37 @@ export class AgentResearchSourceRegistry {
     return this.mutate((store) => {
       const existing = resolveResearchSource(store.sources, idOrTitle);
       if (!existing) throw new Error(`Unknown research source ${idOrTitle}.`);
-      assertSourceMove(existing, 'used');
-      const reportArtifactId = input.reportArtifactId?.trim() || existing.usedInReportArtifactId;
-      const note = input.note === undefined ? existing.note : input.note.trim() || undefined;
-      assertSourceContentSafe([reportArtifactId ?? '', note ?? '']);
-      const timestamp = nowIso();
-      const { note: _oldNote, usedInReportArtifactId: _oldArtifactId, ...base } = existing;
-      const used: AgentResearchSourceRecord = {
-        ...base,
-        ...(note ? { note } : {}),
-        ...(reportArtifactId ? { usedInReportArtifactId: reportArtifactId } : {}),
-        status: 'used',
-        usedAt: timestamp,
-        updatedAt: timestamp,
-      };
+      const used = usedSource(existing, input);
       return { value: used, sources: store.sources.map((source) => source.id === existing.id ? used : source) };
+    });
+  }
+
+  /**
+   * Marks several sources used in one locked write. Each id settles on its
+   * own: one that is unknown or cannot move to used is named in `failures`
+   * and the rest are still marked.
+   */
+  public markUsedMany(idsOrTitles: readonly string[], input: AgentResearchSourceUseInput = {}): {
+    readonly used: readonly AgentResearchSourceRecord[];
+    readonly failures: readonly { readonly id: string; readonly reason: string }[];
+  } {
+    if (idsOrTitles.length === 0) return { used: [], failures: [] };
+    return this.mutate((store) => {
+      let sources = store.sources;
+      const used: AgentResearchSourceRecord[] = [];
+      const failures: { id: string; reason: string }[] = [];
+      for (const idOrTitle of idsOrTitles) {
+        try {
+          const existing = resolveResearchSource(sources, idOrTitle);
+          if (!existing) throw new Error(`Unknown research source ${idOrTitle}.`);
+          const marked = usedSource(existing, input);
+          sources = sources.map((source) => source.id === existing.id ? marked : source);
+          used.push(marked);
+        } catch (error) {
+          failures.push({ id: idOrTitle, reason: error instanceof Error ? error.message : String(error) });
+        }
+      }
+      return { value: { used, failures }, sources };
     });
   }
 

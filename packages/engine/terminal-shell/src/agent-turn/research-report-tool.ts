@@ -1,7 +1,7 @@
 import type { AgentResearchReportSource as ResearchSource } from './research-report-input.js';
-import { prepareProtectedResearchReport, createAgentResearchReportProjector, bindAgentResearchSourceOwner, bindAgentResearchReportSourceOwner, type PreparedResearchReport } from './protected-research-report.js';
+import { prepareProtectedResearchReport, hasPreparedResearchReport, createAgentResearchReportProjector, bindAgentResearchSourceOwner, bindAgentResearchReportSourceOwner, type PreparedResearchReport } from './protected-research-report.js';
 import { AgentResearchRunRegistry } from './research-run-registry.js';
-import { AgentResearchSourceRegistry, type AgentResearchSourceRecord } from './research-source-registry.js';
+import { AgentResearchSourceRegistry, resolveResearchSource, type AgentResearchSourceRecord } from './research-source-registry.js';
 import { bindResearchArtifacts, researchLedgers } from './research-ledgers.js';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
@@ -490,18 +490,20 @@ export function withStoredReportSources(args: Record<string, unknown>, paths: Re
       ? 'The research source store is not available in this session, so sourceIds cannot be checked; leave sourceIds out.'
       : 'The research source store is not available in this session; give the sources in `sources`.');
   }
-  const store = AgentResearchSourceRegistry.fromShellPaths(paths);
+  // One read of the source store; every id is looked up in it.
+  const stored = AgentResearchSourceRegistry.fromShellPaths(paths).list();
+  const find = (id: string): AgentResearchSourceRecord | null => resolveResearchSource(stored, id);
   if (hasGivenSources(args.sources)) {
-    if (ids.some(id => !store.get(id))) throw new ToolInputProjectionError('invalid', 'A source id in sourceIds is not in the research source store. List sources with research action:"sources", or leave sourceIds out.');
+    if (ids.some(id => !find(id))) throw new ToolInputProjectionError('invalid', 'A source id in sourceIds is not in the research source store. List sources with research action:"sources", or leave sourceIds out.');
     return args;
   }
   let records: AgentResearchSourceRecord[];
   if (ids.length > 0) {
-    records = ids.map(id => store.get(id) ?? (() => { throw new ToolInputProjectionError('invalid', 'A source id in sourceIds is not in the research source store. List sources with research action:"sources".'); })());
+    records = ids.map(id => find(id) ?? (() => { throw new ToolInputProjectionError('invalid', 'A source id in sourceIds is not in the research source store. List sources with research action:"sources".'); })());
   } else {
     const run = AgentResearchRunRegistry.fromShellPaths(paths).get(runId);
     if (!run) throw new ToolInputProjectionError('invalid', 'The run named by runId is not in the research run ledger. List runs with research action:"runs".');
-    records = run.sourceIds.map(id => store.get(id)).filter((record): record is AgentResearchSourceRecord => record?.status === 'reviewed');
+    records = run.sourceIds.map(id => find(id)).filter((record): record is AgentResearchSourceRecord => record?.status === 'reviewed');
     if (records.length === 0) throw new ToolInputProjectionError('invalid', 'The run has no reviewed sources. Review its sources with research action:"review_source", or give sources or sourceIds.');
   }
   return { ...args, sources: records.map(reportSource), sourceIds: records.map(record => record.id) };
@@ -521,10 +523,14 @@ function settleResearchRun(paths: ResearchLedgerPaths, runId: string, sourceIds:
   const lines: string[] = [];
   const used: string[] = [];
   if (sourceIds.length > 0) {
-    const store = AgentResearchSourceRegistry.fromShellPaths(paths);
-    for (const id of sourceIds) {
-      try { used.push(store.markUsed(id, { reportArtifactId: artifactId }).id); }
-      catch (error) { lines.push(`  source ${id} not marked used: ${error instanceof Error ? error.message : String(error)}`); }
+    // One locked write marks every source; each id still settles on its own.
+    try {
+      const marked = AgentResearchSourceRegistry.fromShellPaths(paths).markUsedMany(sourceIds, { reportArtifactId: artifactId });
+      used.push(...marked.used.map(record => record.id));
+      for (const failure of marked.failures) lines.push(`  source ${failure.id} not marked used: ${failure.reason}`);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      for (const id of sourceIds) lines.push(`  source ${id} not marked used: ${reason}`);
     }
     if (used.length > 0) lines.push(`  sources marked used by this report: ${used.join(', ')}`);
   }
@@ -611,7 +617,9 @@ export function createAgentResearchReportTool(
           if (!admitted) throw new Error('Research report writes require current recorded effect admission.');
         };
         assertWrite();
-        prepared = await prepareProtectedResearchReport(sourceOwner, withStoredReportSources(rawArgs, ledgers()), { signal: options?.signal, assertCurrent: assertWrite });
+        // Arguments the input projector prepared already carry the stored sources.
+        const input = hasPreparedResearchReport(rawArgs, sourceOwner) ? rawArgs : withStoredReportSources(rawArgs, ledgers());
+        prepared = await prepareProtectedResearchReport(sourceOwner, input, { signal: options?.signal, assertCurrent: assertWrite });
         const args = prepared.args as unknown as AgentResearchReportToolArgs & { readonly sources: readonly ResearchSource[] };
         if (args.preview === true) return output(preview(args, args.sources));
         // One check before the write; once the store has written, the result is the save.

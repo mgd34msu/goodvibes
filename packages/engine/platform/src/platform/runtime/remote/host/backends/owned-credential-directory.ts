@@ -16,6 +16,13 @@ export function probeCredentialOwner(pid: number): CredentialOwnerStatus {
   catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH' ? 'dead' : 'unknown'; }
 }
 
+/** A failure's errno code and call, or its own message; never a path. */
+function describeFailure(error: unknown): string {
+  const errno = error as NodeJS.ErrnoException;
+  if (typeof errno?.code === 'string') return errno.syscall ? `${errno.syscall} ${errno.code}` : errno.code;
+  return error instanceof Error ? error.message : 'unexpected failure';
+}
+
 function sameDirectory(stat: Stats, expected: Stats): boolean {
   return stat.isDirectory() && !stat.isSymbolicLink() && stat.dev === expected.dev && stat.ino === expected.ino;
 }
@@ -41,8 +48,7 @@ export interface OwnedCredentialDirectoryOptions {
 /** Private per-instance scratch; unmarked legacy files are never adopted/deleted. */
 export class OwnedCredentialDirectory {
   private readonly root: string;
-  private readonly ready: Promise<void>;
-  private preparationFailed = false;
+  private preparation: Promise<void> | null = null;
   private directoryPromise: Promise<string> | null = null;
   private owned: { path: string; stat: Stats; rootStat: Stats } | null = null;
   private readonly writes = new Set<Promise<string>>();
@@ -52,7 +58,7 @@ export class OwnedCredentialDirectory {
 
   constructor(private readonly options: OwnedCredentialDirectoryOptions) {
     this.root = resolve(options.rootDirectory);
-    this.ready = this.sweep().catch(() => { this.preparationFailed = true; });
+    this.preparation = this.startPreparation();
   }
 
   private assertOpen(): void {
@@ -95,16 +101,53 @@ export class OwnedCredentialDirectory {
     if (retained > 0) this.options.logger.warn('remote credential scratch entries without stale ownership proof were retained', { entries: retained });
   }
 
+  /**
+   * The instance's own directory, made on first use. Concurrent callers share
+   * one attempt; a failed attempt is forgotten so the next use tries again.
+   */
   directory(): Promise<string> {
     this.assertOpen();
-    this.directoryPromise ??= this.create();
-    return this.directoryPromise;
+    if (this.directoryPromise) return this.directoryPromise;
+    const attempt: Promise<string> = this.create().catch((error: unknown) => {
+      if (this.directoryPromise === attempt) this.directoryPromise = null;
+      if (error instanceof BackendDispatchError) throw error;
+      throw new BackendDispatchError(
+        `Could not create the credential scratch directory (${describeFailure(error)}); it will be retried on the next use.`,
+        'REMOTE_BACKEND_CREDENTIAL_STORAGE_FAILED',
+      );
+    });
+    this.directoryPromise = attempt;
+    return attempt;
   }
 
+  /**
+   * Waits for the stale-owner sweep. A failed sweep is forgotten so the next
+   * use sweeps again; concurrent callers share one sweep.
+   */
   async prepare(): Promise<void> {
-    await this.ready;
     this.assertOpen();
-    if (this.preparationFailed) throw new BackendDispatchError('Credential scratch could not be prepared.', 'REMOTE_BACKEND_CREDENTIAL_STORAGE_FAILED');
+    this.preparation ??= this.startPreparation();
+    try {
+      await this.preparation;
+    } catch (error) {
+      this.assertOpen();
+      throw new BackendDispatchError(
+        `Could not prepare the credential scratch directory (${describeFailure(error)}); it will be retried on the next use.`,
+        'REMOTE_BACKEND_CREDENTIAL_STORAGE_FAILED',
+      );
+    }
+    this.assertOpen();
+  }
+
+  private startPreparation(): Promise<void> {
+    const attempt: Promise<void> = this.sweep().catch((error: unknown) => {
+      if (this.preparation === attempt) this.preparation = null;
+      throw error;
+    });
+    // The constructor starts the sweep before anyone waits on it; its failure
+    // is reported to the next caller of prepare(), not as an unhandled rejection.
+    attempt.catch(() => {});
+    return attempt;
   }
 
   private async create(): Promise<string> {
@@ -119,12 +162,38 @@ export class OwnedCredentialDirectory {
     const name = `owner-${process.pid}-${randomBytes(12).toString('base64url')}`;
     const path = join(this.root, name);
     await mkdir(path, { mode: 0o700 });
-    this.owned = { path, stat: await lstat(path), rootStat };
-    const owner = { kind: OWNER_KIND, version: 1, pid: process.pid, directory: name };
-    const handle = await open(join(path, MARKER), 'wx', 0o600);
-    try { await handle.writeFile(JSON.stringify(owner)); } finally { await handle.close(); }
-    this.assertOpen();
+    let stat: Stats | null = null;
+    try {
+      stat = await lstat(path);
+      const owner = { kind: OWNER_KIND, version: 1, pid: process.pid, directory: name };
+      const handle = await open(join(path, MARKER), 'wx', 0o600);
+      try { await handle.writeFile(JSON.stringify(owner)); } finally { await handle.close(); }
+      this.assertOpen();
+    } catch (error) {
+      await this.discardPartial(path, stat, rootStat);
+      throw error;
+    }
+    this.owned = { path, stat, rootStat };
     return path;
+  }
+
+  /**
+   * Remove a directory this attempt made before it was complete, so a retry
+   * starts clean. Only a real directory whose identity still matches is removed.
+   */
+  private async discardPartial(path: string, made: Stats | null, rootStat: Stats): Promise<void> {
+    try {
+      await assertRealPath(path);
+      const current = await lstat(path);
+      const expected = made ?? current;
+      if (!sameDirectory(await lstat(this.root), rootStat) || !sameDirectory(current, expected)) {
+        throw new Error('Credential scratch directory identity changed.');
+      }
+      await rm(path, { recursive: true, force: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      try { this.options.logger.warn('remote credential scratch directory from a failed attempt was left in place', { reason: describeFailure(error) }); } catch {}
+    }
   }
 
   write(contents: string, extension: 'key' | 'cred'): Promise<string> {
@@ -175,7 +244,7 @@ export class OwnedCredentialDirectory {
     if (this.closing) return this.closing;
     this.closed = true;
     this.closing = Promise.resolve().then(async () => {
-      await Promise.allSettled([this.ready, this.directoryPromise, ...this.writes]);
+      await Promise.allSettled([this.preparation, this.directoryPromise, ...this.writes]);
       if (!this.owned) return;
       await assertRealPath(this.owned.path);
       try {

@@ -432,6 +432,7 @@ export async function authenticateDistributedPeerToken(
       return {
         peer: sanitizePeer(updatedPeer),
         token: updatedToken,
+        cameBack: !isPresentlyConnected(peer, now),
       };
     }
   }
@@ -473,7 +474,10 @@ export async function heartbeatDistributedPeer(
   // presented as connected) or a changed description is audited, written and
   // published, so heartbeats neither rewrite the store nor push the approval
   // and token records out of the bounded audit list.
-  const cameBack = !isPresentlyConnected(peer, now);
+  // Authentication already marked the peer connected, so whether it came back
+  // is read from what authentication saw; a caller holding an older auth falls
+  // back to the record as it stands.
+  const cameBack = auth.cameBack === true || !isPresentlyConnected(peer, now);
   const described = updated.metadata !== peer.metadata
     || updated.version !== peer.version
     || updated.clientMode !== peer.clientMode

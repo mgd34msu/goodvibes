@@ -170,6 +170,13 @@ export interface DistributedRuntimeWaiter {
 export interface DistributedPeerAuth {
   readonly peer: DistributedPeerRecord;
   readonly token: DistributedPeerTokenRecord;
+  /**
+   * True when this authentication brought the peer back: before it, the peer
+   * was not presented as connected (disconnected, or silent past the presence
+   * window). Decided on the record as it was, because authentication itself
+   * marks the peer connected.
+   */
+  readonly cameBack?: boolean;
 }
 
 export interface DistributedNodeHostContract {

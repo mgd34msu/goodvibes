@@ -105,7 +105,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
     description: 'Paired devices, their tokens, and this computer\'s power.',
     namespaces: ['device', 'surfaces', 'fleet', 'cluster', 'power'],
     keywords: ['pair', 'pairing', 'phone', 'device', 'qr', 'revoke', 'keep awake', 'sleep', 'slack', 'discord', 'telegram'],
-    items: ['Paired devices', 'Power', 'This browser as a phone node'],
+    items: ['Paired devices', 'Power', 'This browser as a phone node', 'Telegram delegated intake'],
   },
   {
     id: 'people',

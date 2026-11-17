@@ -2462,6 +2462,11 @@
       "types": "./terminal-shell/dist/telegram-cursor-command.d.ts",
       "import": "./terminal-shell/dist/telegram-cursor-command.js"
     },
+    "./terminal-shell/telegram-intake-command": {
+      "bun": "./terminal-shell/src/telegram-intake-command.ts",
+      "types": "./terminal-shell/dist/telegram-intake-command.d.ts",
+      "import": "./terminal-shell/dist/telegram-intake-command.js"
+    },
     "./terminal-shell/card-field-prompts": {
       "bun": "./terminal-shell/src/card-field-prompts.ts",
       "types": "./terminal-shell/dist/card-field-prompts.d.ts",

@@ -405,6 +405,41 @@ a bearer token or the original message. A restart can display that metadata but
 cannot recover the original message or its approval capability. Older saved
 review records remain readable by their matching owner.
 
+### Using it
+
+From the terminal app or the Agent (type these yourself; the model may only
+list and look up):
+
+```text
+/telegram configure -1001234567890 @my_bot      select a chat (chatId/threadId for one topic)
+/telegram                                        what waits for you and the review queue
+/telegram approve <id>                           accept a waiting message for review
+/telegram deny <id>                              refuse it; its original is released
+/telegram read <id>                              show an approved message's original
+/telegram cancel <id>                            close a review or withdraw a waiting message
+/telegram revoke <configurationId>               capture no new messages; the chat stays held
+/telegram release -1001234567890                 return the chat to normal handling
+```
+
+`configure` takes `--hold <time>` (how long a waiting message stays in memory,
+default 1h) and `--for <time>` (how long the configuration lasts, default 7d);
+`approve` takes `--keep <time>` (how long the original stays readable, default
+1h, and it must end before the configuration does) and `--record <time>` (how
+long the review row is kept, default 7d). Times are written `90s`, `30m`,
+`2h` or `7d`. Ids are the short ids `/telegram` prints.
+
+In the web UI the same actions are under Settings, Account, Devices and
+pairing, "Telegram delegated intake".
+
+Reading an original marks its review as read, so the queue shows which
+messages are still unread. A selected chat is not answered normally until it is
+released, even after its configuration ended or the daemon restarted: release
+it with `/telegram release <chatId>` (or the web UI's "Release this chat").
+Agents and scripts use the same `inbound.telegram.*` methods
+(`configure`, `decide`, `list`, `status`, `read`, `cancel`, `revoke`,
+`release`); a refused command answers `outcome: "held"` with a `reason`, a
+`message` and a `nextStep`.
+
 Native installations declare support for the explicit-owner receipt format
 before saving it. Updating or rolling back to a binary that cannot read that
 format is refused; choose a compatible build instead.

@@ -40,6 +40,7 @@ import { registerVibeRuntimeCommands } from './commands/vibe-runtime.ts';
 import { registerAgentSkillsRuntimeCommands } from './commands/agent-skills-runtime.ts';
 import { registerRoutinesRuntimeCommands } from './commands/routines-runtime.ts';
 import { registerChannelsRuntimeCommands } from './commands/channels-runtime.ts';
+import { registerTelegramIntakeCommands } from './commands/telegram-intake-runtime.ts';
 import { registerBriefRuntimeCommands } from './commands/brief-runtime.ts';
 import { registerSupportBundleRuntimeCommands } from './commands/support-bundle-runtime.ts';
 import { registerCompatRuntimeCommands } from './commands/compat-runtime.ts';
@@ -96,6 +97,7 @@ export function registerBuiltinCommands(registry: CommandRegistry): void {
   registerAgentSkillsRuntimeCommands(registry);
   registerRoutinesRuntimeCommands(registry);
   registerChannelsRuntimeCommands(registry);
+  registerTelegramIntakeCommands(registry);
   registerEmailRuntimeCommands(registry);
   registerGoogleRuntimeCommands(registry);
   registerDelegationRuntimeCommands(registry);

@@ -409,7 +409,10 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
           pending.assertCurrent();
         } catch { this.receiver.release(ref); original = null; }
       }
-      return { outcome: 'recorded', record: reviewRecordView(record), source: original ? 'available-in-memory' : 'expired-or-lost', recovery: original ? 'owner-review-available' : 'new-original-required', ...(read && original ? { original: { text: original.text, unsupportedSources: original.unsupportedSources.map(entry => ({ ...entry })) } } : {}) };
+      // Handing the owner the original is what marks the review read.
+      const shown = read && original ? (await this.receiver.markReviewed(ref)) ?? record : record;
+      if (shown !== record) assertCurrent();
+      return { outcome: 'recorded', record: reviewRecordView(shown), source: original ? 'available-in-memory' : 'expired-or-lost', recovery: original ? 'owner-review-available' : 'new-original-required', ...(read && original ? { original: { text: original.text, unsupportedSources: original.unsupportedSources.map(entry => ({ ...entry })) } } : {}) };
     }
     if (!pending || !sameNativeInboundSourceRef(pending.ref, ref)) return delegatedHold('missing-source-proof');
     if (!isDeepStrictEqual(owner, pending.configuration.expected)) throw new DelegatedIntakeRefusal('not-owner');

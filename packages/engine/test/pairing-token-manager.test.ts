@@ -2,6 +2,8 @@
 // Red when: The plain token is stored or listed, a revoked token or a token it handed off still authenticates (now or after a reload), or the legacy revocation flag is lost on a restart.
 // Proves: Revoking the shared operator token ends the value in use every time, the replacement included.
 // Red when: A second revoke leaves the first replacement accepted: a copy of it taken off the machine could never be ended.
+// Proves: A pairing code nobody used stays a live credential, or a device token past the rotation age still works.
+// Red when: The store stops refusing an offer whose time ran out unused, or a device token older than the managed rotation limit.
 /**
  * pairing-token-manager.test.ts
  *
@@ -12,7 +14,7 @@
  * hand-off verb is revoked with that device.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.ts';
@@ -152,5 +154,37 @@ describe('shared operator token revocation', () => {
     } finally {
       unbind();
     }
+  });
+});
+
+describe('a token that is too old', () => {
+  /** The store file as it will read later: each named record's field moved into the past. */
+  const age = (file: string, id: string, field: 'offeredUntil' | 'createdAt', at: number): void => {
+    const snapshot = JSON.parse(readFileSync(file, 'utf8')) as { tokens: Array<Record<string, unknown>> };
+    for (const record of snapshot.tokens) if (record.id === id) record[field] = at;
+    writeFileSync(file, JSON.stringify(snapshot));
+  };
+
+  test('an unused pairing code past its offer time and a device token past the rotation limit do not authenticate', () => {
+    const file = tempFile();
+    const mgr = new PairingTokenManager(file);
+    const DAY = 86_400_000;
+    const code = mgr.mint({ name: 'Shown on screen' });
+    const device = mgr.mint({ name: 'Old phone' });
+    expect(mgr.authenticate(device.token)?.id).toBe(device.id);
+    age(file, code.id, 'offeredUntil', Date.now() - 1_000);
+    age(file, device.id, 'createdAt', Date.now() - 100 * DAY);
+
+    mgr.setRotationLimit(() => 90 * DAY);
+    const limited = {
+      code: [mgr.authenticate(code.token), mgr.describeRefusal(code.token)?.code],
+      device: [mgr.authenticate(device.token), mgr.describeRefusal(device.token)?.code],
+    };
+    mgr.setRotationLimit(undefined);
+    expect({ ...limited, deviceWithoutLimit: mgr.authenticate(device.token)?.id }).toEqual({
+      code: [null, 'PAIRING_OFFER_EXPIRED'],
+      device: [null, 'PAIRING_TOKEN_ROTATION_DUE'],
+      deviceWithoutLimit: device.id,
+    });
   });
 });

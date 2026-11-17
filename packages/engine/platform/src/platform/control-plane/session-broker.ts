@@ -551,6 +551,12 @@ export class SharedSessionBroker {
     sessionsActive.set(active);
   }
 
+  /** The session whose active agent this is, for routing that agent's events: one pass, no sort or copy. */
+  findSessionForAgent(agentId: string): string | null {
+    for (const session of this.sessions.values()) if (session.activeAgentId === agentId) return session.id;
+    return null;
+  }
+
   listSessions(limit = 100, options: ListSharedSessionsOptions = {}): SharedSessionRecord[] {
     const sorted = sortSessions(this.sessions.values());
     const filtered = sorted.filter((session) => {

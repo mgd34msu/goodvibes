@@ -357,12 +357,7 @@ export function resolveDaemonFacadeRuntime(
 
   runtimeServices.knowledgeService.attachRuntimeBus(runtimeBus);
   agentKnowledgeService.attachRuntimeBus(runtimeBus);
-  runtimeServices.sessionBroker.attachRuntimeBus(runtimeBus, (agentId) => {
-    for (const s of runtimeServices.sessionBroker.listSessions(1000)) {
-      if (s.activeAgentId === agentId) return s.id;
-    }
-    return null;
-  });
+  runtimeServices.sessionBroker.attachRuntimeBus(runtimeBus, (agentId) => runtimeServices.sessionBroker.findSessionForAgent(agentId));
   // Stamp automatic workspace checkpoints with the owning session id, resolved
   // the same way agent terminal events reconcile to a session (the broker's
   // activeAgentId map). Returns undefined when the triggering agent maps to no

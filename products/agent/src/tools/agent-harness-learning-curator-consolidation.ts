@@ -1,6 +1,6 @@
 import { requireDecisionFeature } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { AgentWorkspaceLocalLibraryItem } from '../input/agent-workspace-types.ts';
-import type { LearningCandidateDraft, LearningConsolidationDiff, LearningConsolidationFields, LearningConsolidationPlan, LocalLearningCandidateDomain } from './agent-harness-learning-curator-types.ts';
+import type { LearningCandidateDraft, LearningConsolidationDiff, LearningConsolidationPlan, LocalLearningCandidateDomain } from './agent-harness-learning-curator-types.ts';
 import { localRegistryRoute, routeValue } from './agent-harness-learning-curator-common.ts';
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import type { LearningRecord } from './agent-harness-learning-curator-source.ts';
@@ -29,24 +29,6 @@ function mergeableDescription(domain: LocalLearningCandidateDomain, item: AgentW
     return item.description === fallback ? '' : item.description;
   }
   return item.description;
-}
-
-function rollbackFieldsForConsolidation(
-  domain: LocalLearningCandidateDomain,
-  survivor: AgentWorkspaceLocalLibraryItem,
-): LearningConsolidationFields {
-  const description = mergeableDescription(domain, survivor);
-  if (domain === 'memory') {
-    return {
-      ...(description ? { detail: description } : {}),
-      tags: survivor.tags,
-    };
-  }
-  return {
-    ...(description ? { description } : {}),
-    tags: survivor.tags,
-    triggers: survivor.triggers,
-  };
 }
 
 function consolidationDiff(
@@ -105,7 +87,6 @@ function consolidationCandidate(
   if (items.length < 2) return null;
   const duplicates = items.filter((item) => item.id !== survivor.id);
   if (duplicates.length === 0) return null;
-  const rollbackFields = rollbackFieldsForConsolidation(domain, survivor);
   const staleRoutes = duplicates.map((item) => `${localRegistryRoute(domain, 'stale', item.id)} reason:"Duplicate of ${routeValue(survivor.id)}; staged by learning curator consolidation."`);
   const deleteRoutes = duplicates.map((item) => `${localRegistryRoute(domain, 'delete', item.id)}`);
   // Same-entity evidence cannot authorize synthesized descriptions or new triggers, so the survivor is never rewritten;
@@ -121,7 +102,6 @@ function consolidationCandidate(
     ...(duplicates.some(item => item.reviewState === 'stale')
       ? { staleDuplicateIds: duplicates.filter(item => item.reviewState === 'stale').map(item => item.id) } : {}),
     diffs,
-    rollbackFields,
     staleRoutes,
     deleteRoutes,
     rollbackRoutes,

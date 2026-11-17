@@ -695,9 +695,9 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
           const rendered = output({
             ...result,
             message: result.promoted > 0
-              ? `Promoted ${result.promoted} item(s); consolidated ${result.consolidated} duplicate(s).`
+              ? `Promoted ${result.promoted} item(s); marked ${result.consolidated} duplicate(s) stale.`
               : 'No items eligible for promotion this pass.',
-            policy: 'Promotion under current recorded admission. Skills are created via the skill-draft runner. Memory, persona, routine creates call registry directly. Consolidation runs the full merge-stale-delete pipeline. Secret scanning enforced by each registry create().',
+            policy: 'Promotion under current recorded admission. Skills are created via the skill-draft runner. Memory, persona, routine creates call registry directly. Consolidation marks duplicates stale and keeps the originals; deleting them is a separate step (agent_learning_consolidation mode:"delete"). Secret scanning enforced by each registry create().',
           });
           assertAutoPromoteResultCurrent(result, deps.commandContext, learningEffectOptions);
           return rendered;

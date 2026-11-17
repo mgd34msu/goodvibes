@@ -40,7 +40,6 @@ function describeCandidate(candidate: LearningCandidate, includeParameters: bool
     inspectRoute: candidate.inspectRoute,
     ...(candidate.reviewRoute ? { reviewRoute: candidate.reviewRoute } : {}),
     ...(candidate.staleRoute ? { staleRoute: candidate.staleRoute } : {}),
-    ...(candidate.updateRoute ? { updateRoute: candidate.updateRoute } : {}),
     ...(candidate.createRoute ? { createRoute: candidate.createRoute } : {}),
     ...(candidate.deleteRoute ? { deleteRoute: candidate.deleteRoute } : {}),
     ...(includeParameters && candidate.cleanupRoutes ? { cleanupRoutes: candidate.cleanupRoutes } : {}),
@@ -53,10 +52,7 @@ function describeCandidate(candidate: LearningCandidate, includeParameters: bool
         model: candidate.modelRoute,
         review: candidate.reviewRoute ?? null,
         stale: candidate.staleRoute ?? null,
-        update: candidate.updateRoute ?? null,
         preview: candidate.consolidation ? `agent_learning_consolidation mode:"preview" candidateId:"${routeValue(candidate.id)}"` : null,
-        // The merge phase only exists when the plan carries survivor fields to write.
-        merge: candidate.consolidation && candidate.updateRoute ? `agent_learning_consolidation mode:"merge" candidateId:"${routeValue(candidate.id)}"` : null,
         stalePhase: candidate.consolidation ? `agent_learning_consolidation mode:"stale" candidateId:"${routeValue(candidate.id)}"` : null,
         deletePhase: candidate.consolidation ? `agent_learning_consolidation mode:"delete" candidateId:"${routeValue(candidate.id)}"` : null,
         create: candidate.createRoute ?? null,
@@ -95,9 +91,7 @@ function learningConsolidationBatchPlan(
       ...(includeParameters ? { duplicateIds: consolidation.duplicateIds } : {}),
       diffFields: consolidation.diffs.map((diff) => diff.field),
       detailRoute: `memory action:"candidate" candidateId:"${routeValue(candidate.id)}"`,
-      ...(candidate.updateRoute ? { updateRoute: candidate.updateRoute } : {}),
       previewRoute: `agent_learning_consolidation mode:"preview" candidateId:"${routeValue(candidate.id)}"`,
-      ...(candidate.updateRoute ? { mergeRoute: `agent_learning_consolidation mode:"merge" candidateId:"${routeValue(candidate.id)}"` } : {}),
       stalePhaseRoute: `agent_learning_consolidation mode:"stale" candidateId:"${routeValue(candidate.id)}"`,
       deletePhaseRoute: `agent_learning_consolidation mode:"delete" candidateId:"${routeValue(candidate.id)}"`,
       ...(candidate.staleRoute ? { staleRoute: candidate.staleRoute } : {}),
@@ -126,12 +120,6 @@ function learningConsolidationBatchPlan(
         goal: 'Open the candidate detail and survivor/duplicate records before changing durable context.',
         route: 'memory action:"curator" query:"consolidation" includeParameters:true',
       },
-      ...(consolidationCandidates.some((candidate) => candidate.updateRoute) ? [{
-        id: 'merge-survivor',
-        label: 'Merge visible survivor fields',
-        goal: 'Apply the survivor update route only when the visible diffs preserve useful names, descriptions, tags, and triggers.',
-        route: 'Use each topCandidates[].mergeRoute under current recorded admission.',
-      }] : []),
       {
         id: 'stale-duplicates',
         label: 'Stage duplicates as stale',
@@ -177,7 +165,6 @@ function promptPlanCandidate(candidate: LearningCandidate, includeParameters: bo
     inspectRoute: candidate.inspectRoute,
     ...(candidate.reviewRoute ? { reviewRoute: candidate.reviewRoute } : {}),
     ...(candidate.createRoute ? { createRoute: candidate.createRoute } : {}),
-    ...(candidate.updateRoute ? { updateRoute: candidate.updateRoute } : {}),
   };
 }
 

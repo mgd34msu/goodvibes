@@ -255,7 +255,7 @@ function consolidate(
       if (domain === 'skill') return AgentSkillRegistry.fromShellPaths(paths, effects).markStale(id, reason);
       return AgentRoutineRegistry.fromShellPaths(paths, effects).markStale(id, reason);
     }, context, options, assertOwnership, () => {
-      progress.count++; progress.lines.push(`consolidated duplicate ${domain}:${id} -> ${plan.survivorId}`);
+      progress.count++; progress.lines.push(`marked duplicate ${domain}:${id} stale; ${plan.survivorId} is kept`);
     });
   }
 }

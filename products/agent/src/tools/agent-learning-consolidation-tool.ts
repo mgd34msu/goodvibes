@@ -357,7 +357,6 @@ function previewCandidate(candidate: LearningCandidate): Record<string, unknown>
     duplicateIds: plan.duplicateIds,
     diffFields: plan.diffs.map((diff) => diff.field),
     diffs: plan.diffs,
-    updateFields: plan.updateFields ?? null,
     phases: [
       {
         id: 'stale',

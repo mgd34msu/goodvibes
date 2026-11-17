@@ -1,5 +1,7 @@
-import { assertCapturedInputPathContext } from '../../contract/input-authority.js';
-import { assertCapturedToolReadAccess, assertCapturedToolInvocationCurrent } from '../shared/captured-input-tools.js';
+import { assertCapturedInputPathContext, isCapturedInputPath } from '../../contract/input-authority.js';
+import { assertCapturedToolReadAccess, assertCapturedToolInvocationCurrent, hasCapturedToolInvocation } from '../shared/captured-input-tools.js';
+import { projectFileList, type FileListWalk } from './file-list.js';
+import { hostRipgrep } from './ripgrep.js';
 import { resolve, relative, basename, sep } from 'node:path';
 import { stat as statAsync } from 'node:fs/promises';
 import { statSync, lstatSync, existsSync, readFileSync, realpathSync } from 'node:fs';
@@ -606,17 +608,77 @@ export async function findNestedGitignoreFiles(
   return nested;
 }
 
-/** The files a text search considers: the walk's files, or the glob's. None is opened here. */
+/**
+ * The files a text search considers: the walk's files, or the glob's. None is
+ * opened here. A plain search walk (no hidden files, no followed links, no
+ * caller directory selection, outside a contract's captured input) is served
+ * from the project's held file list (file-list.ts), which a repeated search
+ * checks by directory stamps instead of walking; a glob or a file selection
+ * filters that list as the walk would have.
+ */
 export async function collectFilesForSearch(
   basePath: string,
   queryGlob: string | undefined,
   diagnostics?: FindDiagnostics,
   walkOptions: WalkDirOptions = {},
 ): Promise<string[]> {
+  const held = await heldSearchFiles(basePath, queryGlob, diagnostics, walkOptions);
+  if (held) return held;
   if (!queryGlob) {
     return collectWalkFiles(basePath, diagnostics, walkOptions);
   }
   return Array.from(await collectGlobFiles(basePath, [queryGlob], false, false, diagnostics, new DirectoryWalk(basePath), walkOptions));
+}
+
+/** The search's files from the held project list, or null when this search must walk for itself. */
+async function heldSearchFiles(
+  basePath: string,
+  queryGlob: string | undefined,
+  diagnostics: FindDiagnostics | undefined,
+  walkOptions: WalkDirOptions,
+): Promise<string[] | null> {
+  const { selectFile, selectDirectory, includeHidden, followSymlinks, maxFileSize, onSkippedProductWorktrees, ...callOptions } = walkOptions;
+  if (selectDirectory || includeHidden || followSymlinks || maxFileSize !== undefined || onSkippedProductWorktrees) return null;
+  if (hasCapturedToolInvocation() || isCapturedInputPath(basePath)) return null;
+  let glob: InstanceType<typeof Bun.Glob> | undefined;
+  if (queryGlob !== undefined) {
+    // A glob naming a conventionally skipped directory opts it in: that walk differs from the held one.
+    if (queryGlob.split('/').some((part) => WALK_SKIP_DIRS.has(part))) return null;
+    try { glob = new Bun.Glob(queryGlob); } catch { return null; }
+  }
+  const walk: FileListWalk = (start, hooks) => walkDir(start, {
+    ...callOptions,
+    onSkippedProductWorktrees: (path, entryCount) => {
+      hooks.notKept();
+      reportSkippedWorktrees(diagnostics, basePath)(path, entryCount);
+    },
+    selectDirectory: (directory) => {
+      if (isCapturedInputPath(directory)) {
+        hooks.notKept();
+        if (searchDirectorySelection(directory, {}, diagnostics) === false) return false;
+      }
+      return hooks.enter(directory) ? undefined : false;
+    },
+    beforeAttempt: () => {
+      assertCapturedToolInvocationCurrent();
+      callOptions.beforeAttempt?.();
+    },
+    beforeAsyncAttempt: async () => {
+      assertCapturedToolInvocationCurrent();
+      await callOptions.beforeAsyncAttempt?.();
+    },
+    assertPath: assertCapturedInputPathContext,
+    site: 'tools.find.skip-directory',
+  });
+  const listed = await projectFileList(
+    basePath, walkOptions.includeProductWorktrees === true, walk, isCapturedInputPath,
+    () => walkOptions.shouldContinue?.() === false,
+  );
+  walkOptions.signal?.throwIfAborted();
+  callOptions.beforeAttempt?.();
+  assertCapturedToolInvocationCurrent();
+  const files = listed.files.filter((file) => (!glob || matchesGlob(glob, file, basePath)) && selectFile?.(file) !== false);
+  return files;
 }
 
 /**
@@ -658,9 +720,24 @@ export interface FileSymbols {
 /** Files whose parsed symbols one service keeps; the oldest entry is dropped first. */
 const SYMBOL_CACHE_MAX_FILES = 20_000;
 
+export interface FindRuntimeOptions {
+  /** The rg program content search hands its first pass to; null never uses one. Default: rg on PATH, when there is one. */
+  readonly ripgrep?: string | null | undefined;
+}
+
 export class FindRuntimeService {
   private readonly searchCache = new Map<string, { value: CacheValue; accessedAt: number; chars: number }>();
   private readonly symbolCache = new Map<string, { size: number; mtimeMs: number; value: FileSymbols }>();
+  private readonly ripgrepOption: string | null | undefined;
+
+  constructor(options: FindRuntimeOptions = {}) {
+    this.ripgrepOption = options.ripgrep;
+  }
+
+  /** The rg program for content search's first pass, or null when there is none. */
+  ripgrep(): string | null {
+    return this.ripgrepOption !== undefined ? this.ripgrepOption : hostRipgrep();
+  }
 
   /** The symbols parsed for `file` when it has the same size and modification time; a changed file parses again. */
   symbolsGet(file: string, size: number, mtimeMs: number): FileSymbols | undefined {

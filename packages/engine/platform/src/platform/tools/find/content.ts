@@ -1,7 +1,8 @@
 import type { FindSearchOptions } from './shared.js';
 import { paginateFindResult } from './pagination.js';
 import type { WalkDirOptions } from '../../utils/walk-dir.js';
-import { assertCapturedToolAccessCurrent } from '../shared/captured-input-tools.js';
+import { assertCapturedToolAccessCurrent, hasCapturedToolInvocation } from '../shared/captured-input-tools.js';
+import { ripgrepCandidates, ripgrepSupersetPattern } from './ripgrep.js';
 import { isAbsolute, relative } from 'node:path';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { decisionOrClassic } from '../../runtime/decision-policy.js';
@@ -158,10 +159,16 @@ async function scanContentQuery(
 
   const skips = createSearchSkips();
   const literal = requiredLiteral(searchedPattern, query.case_sensitive === false);
+  const firstPass = async (): Promise<ReadonlySet<string> | null> => {
+    const pattern = await ripgrepPattern(runtime, regex, rawPattern, query.case_sensitive === false, files.length);
+    return pattern ? ripgrepFirstPass(pattern, basePath, files, options.signal) : null;
+  };
 
   if (query.negate) {
     const nonMatchingFiles: string[] = [];
     if (discoveryCut) addDiscoveryCutWarning(diagnostics, files.length);
+    // Files rg finds no match in are still read: a binary or unreadable file is not "text without the pattern".
+    const candidates = await firstPass();
     const scan = new BatchedLineScan(regex);
     const textFiles: string[] = [];
     for (let start = 0; start < files.length; start += SEARCH_READ_CONCURRENCY) {
@@ -177,6 +184,7 @@ async function scanContentQuery(
         if (read === null) continue;
         const file = chunk[offset]!;
         textFiles.push(file);
+        if (candidates && !candidates.has(file)) continue;
         if (literal !== undefined && !literal.test(read.text)) continue;
         await scan.add(file, read.text);
       }
@@ -205,6 +213,8 @@ async function scanContentQuery(
   let matchedFiles: Map<string, { content: string; matches: ContentMatch[] }>;
   let totalMatches: number;
   let scanStoppedAt: number | undefined;
+  let candidates: ReadonlySet<string> | null = null;
+  let passedStats: Promise<void> | undefined;
   const fileMtimesForCache = new Map<string, number>();
 
   if (cacheValid && cachedEntry) {
@@ -213,17 +223,30 @@ async function scanContentQuery(
   } else {
     matchedFiles = new Map<string, { content: string; matches: ContentMatch[] }>();
     totalMatches = 0;
-    // Each file is read once (stat, then one read; text or binary is decided
-    // from the bytes in hand) and its lines go to the isolated regex executor
-    // in batches of many files, one round trip per batch.
+    // Where the host has rg, it names the files that may hold a match and only
+    // those are read; the rest cannot match. Each file read is read once (stat,
+    // then one read; text or binary is decided from the bytes in hand) and its
+    // lines go to the isolated regex executor in batches of many files, one
+    // round trip per batch.
+    const plan = await ripgrepPattern(runtime, regex, rawPattern, query.case_sensitive === false, files.length);
+    if (plan) candidates = await ripgrepFirstPass(plan, basePath, files, options.signal);
+    const scanFiles = candidates ? files.filter((file) => candidates!.has(file)) : files;
+    const passed = files.length - scanFiles.length;
+    // A broad result is the one a later page asks for again: the files rg passed
+    // over are stat-ed beside the reads, so the result is cached and checked by
+    // modification time like any other. A narrow one is not (rg answers again
+    // in less time than the stats take).
+    if (candidates && scanFiles.length * BROAD_RESULT_SHARE >= files.length) {
+      passedStats = statPassedOver(files.filter((file) => !candidates!.has(file)), fileMtimesForCache);
+    }
     const scan = new BatchedLineScan(regex);
-    for (let start = 0; start < files.length; start += SEARCH_READ_CONCURRENCY) {
+    for (let start = 0; start < scanFiles.length; start += SEARCH_READ_CONCURRENCY) {
       // The call's time budget ran out: stop with what was found and say how far the search got.
-      if (options.shouldContinue?.() === false) { scanStoppedAt = start; break; }
-      // A few files are stat-ed and read at once; the scan still receives them in walk order.
+      if (options.shouldContinue?.() === false) { scanStoppedAt = passed + start; break; }
+      // A few files are stat-ed and read at once; the scan still receives them in list order.
       // The mtime is taken by the stat before the read: a file that changes in between is cached as
       // old text under the old mtime, so the next call sees the newer mtime and rereads it.
-      const chunk = files.slice(start, start + SEARCH_READ_CONCURRENCY);
+      const chunk = scanFiles.slice(start, start + SEARCH_READ_CONCURRENCY);
       const reads = await Promise.all(chunk.map(async (file) => {
         const info = await statSearchFile(file);
         return { file, info, read: await readSearchFile(file, diagnostics, skips, info) };
@@ -250,6 +273,7 @@ async function scanContentQuery(
       }
       matchedFiles.set(hit.file, { content: hit.content, matches: fileMatches });
     }
+    await passedStats;
   }
   addSearchSkipWarnings(diagnostics, skips);
 
@@ -263,7 +287,9 @@ async function scanContentQuery(
   // The entry is stored before the read filter runs: it describes the files,
   // not who may see them, and every call filters its own copy, so a restriction
   // that is later lifted (or applied) is honoured without a changed file.
-  if (!query.ranked && !query.preview_replace && !query.relationships && scanStoppedAt === undefined) {
+  // A search rg narrowed is kept only when every file it passed over was stat-ed.
+  if (!query.ranked && !query.preview_replace && !query.relationships && scanStoppedAt === undefined
+    && (candidates === null || passedStats !== undefined)) {
     runtime.searchCacheSet(cacheKey, {
       files,
       matchedFiles: copyMatches(matchedFiles, false),
@@ -410,6 +436,66 @@ async function scanContentQuery(
 
   regex.assertCurrent();
   return withFindWarnings(makeCountResult(totalMatches), diagnostics.warnings);
+}
+
+/** Fewer files than this are read directly: starting rg would cost more than it saves. */
+const RIPGREP_MIN_FILES = 64;
+/** rg named at least one file in this many: the result is broad, and cached for its later pages. */
+const BROAD_RESULT_SHARE = 4;
+/** A file modified this recently before its stat may have changed after rg read it. */
+const RACY_MTIME_MS = 2_000;
+
+/**
+ * Records the modification times of files rg found no match in. They are
+ * stat-ed after rg read them, so a file modified within {@link RACY_MTIME_MS}
+ * of its stat is recorded as unknown (-1, which no stat returns): the cached
+ * result then fails its check and the next search runs again.
+ */
+async function statPassedOver(files: readonly string[], mtimes: Map<string, number>): Promise<void> {
+  const infos = await Promise.all(files.map((file) => statSearchFile(file)));
+  const now = Date.now();
+  for (const [index, file] of files.entries()) {
+    const info = infos[index];
+    mtimes.set(file, info && Math.abs(now - info.mtimeMs) >= RACY_MTIME_MS ? info.mtimeMs : -1);
+  }
+}
+
+/**
+ * The rg program and the pattern to give it for this search (ripgrep.ts), or
+ * null when rg is not used: none on the host, too few files, a contract's
+ * captured input (each read there is authorised one file at a time), a pattern
+ * rg cannot be given with the same meaning, or a pattern that matches an empty
+ * line (the line split counts one after a final newline; rg does not).
+ */
+async function ripgrepPattern(
+  runtime: FindRuntimeService,
+  regex: AdmittedRegex,
+  pattern: string,
+  caseInsensitive: boolean,
+  fileCount: number,
+): Promise<{ readonly rg: string; readonly pattern: string } | null> {
+  const rg = runtime.ripgrep();
+  if (!rg || fileCount < RIPGREP_MIN_FILES || hasCapturedToolInvocation()) return null;
+  const translated = ripgrepSupersetPattern(pattern, caseInsensitive);
+  if (translated === null) return null;
+  if ((await regex.matchingLines('')).length > 0) return null;
+  return { rg, pattern: translated };
+}
+
+/** The files rg says may hold a match, or null when rg did not answer (the search then reads every file). */
+async function ripgrepFirstPass(
+  plan: { readonly rg: string; readonly pattern: string },
+  basePath: string,
+  files: readonly string[],
+  signal: AbortSignal | undefined,
+): Promise<ReadonlySet<string> | null> {
+  try {
+    return await ripgrepCandidates(plan.rg, basePath, files, plan.pattern, signal);
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    // rg could not be started: the search reads every file, as on a host without rg.
+    return null;
+  }
 }
 
 /** Files stat-ed and read at once during a content search (at most this many file texts are held before scanning). */

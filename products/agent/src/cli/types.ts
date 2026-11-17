@@ -70,7 +70,9 @@ export interface GoodVibesCliFlags {
   readonly fork: boolean;
   readonly rawOutput: boolean;
   readonly acceptRawOutputRisk: boolean;
-  /** `run` limits: declared so help and completions list them; `extractHeadlessRunFlags` consumes them before this parser runs. */
+  /** `run --intake-status|retry|resume|cancel`: recover the saved native input instead of sending a new one. */
+  readonly intakeMode?: 'status' | 'retry' | 'resume' | 'cancel' | undefined;
+  /** `run` limits, as typed; parseNativeShellCli checks them and turns them into the run's limits. */
   readonly timeout?: string | undefined;
   readonly maxTurns?: string | undefined;
   readonly omitAccumulated?: boolean | undefined;

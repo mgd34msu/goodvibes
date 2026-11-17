@@ -6,7 +6,7 @@ import { bootstrapRuntime } from '../runtime/bootstrap.ts';
 import { executeNativeHeadless, runWithHeadlessTimeout, writeNativeHeadlessResult, type NativeHeadlessHost } from './native-headless.ts';
 import type { HeadlessRunFlags } from '@goodvibes-jev/engine/terminal-shell/headless-turn-events';
 import { executeAdmittedHeadlessTurn, settleHeadlessTurn } from './native-headless-turn.ts';
-import type { NativeHeadlessMode } from './native-headless-options.ts';
+import type { NativeHeadlessMode } from '@goodvibes-jev/engine/terminal-shell/native-headless-options';
 
 import { createAgentNativeHostSelection } from '../runtime/agent-native-host-selection.ts';
 import { type SessionSnapshot } from '@/runtime/index.ts';

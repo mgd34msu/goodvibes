@@ -11,7 +11,6 @@ export type { ShellEntrypointRoots } from '@goodvibes-jev/engine/terminal-shell/
 // Only what every command shares loads here: parsing, the configuration and
 // its overrides. Each command's own module graph loads when it is chosen, so
 // `status` never loads the headless turn and neither loads the terminal UI.
-import { extractNativeHeadlessOptions } from './native-headless-options.ts';
 import { headlessRunFlagErrors } from '@goodvibes-jev/engine/terminal-shell/headless-turn-events';
 import { join } from 'node:path';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -70,7 +69,7 @@ export async function prepareShellCliRuntime(
   roots: ShellEntrypointRoots,
   binary = 'goodvibes-agent',
 ): Promise<PreparedShellCliRuntime> {
-  const { native, cli } = parseNativeShellCli(argv, binary, extractNativeHeadlessOptions, parseGoodVibesCli);
+  const { native, cli } = parseNativeShellCli(argv, binary, parseGoodVibesCli);
   const errors = [...cli.errors, ...headlessRunFlagErrors(native.run ?? {}, cli.command, cli.flags.outputFormat)];
 
   if (errors.length > 0) {

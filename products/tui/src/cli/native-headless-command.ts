@@ -7,7 +7,7 @@ import { executeNativeHeadless, runWithHeadlessTimeout, writeNativeHeadlessResul
 import type { HeadlessRunFlags } from '@goodvibes-jev/engine/terminal-shell/headless-turn-events';
 import { executeHeadlessTurn, headlessSessionSnapshot, settleHeadlessTurn } from './native-headless-turn.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import type { NativeHeadlessMode } from './native-headless-options.ts';
+import type { NativeHeadlessMode } from '@goodvibes-jev/engine/terminal-shell/native-headless-options';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
 import { resolveNativeHostCredential } from '../runtime/client/native-host-credential.ts';
 import { claimHeadlessSession, restoreHeadlessSession } from '@goodvibes-jev/engine/terminal-shell/startup-lifecycle';

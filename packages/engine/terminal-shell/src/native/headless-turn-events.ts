@@ -200,8 +200,8 @@ export function observeHeadlessTurn(bus: Pick<RuntimeEventBus, 'on'>, format: st
   };
 }
 
-// Argument parsing lives with the other pre-parse options, which load nothing.
-export { catalogValueOptions, extractHeadlessRunFlags, type HeadlessRunFlags } from './native-headless-options.js';
+// The run limits are read from the parsed flags with the intake mode (native-headless-options.ts).
+export type { HeadlessRunFlags } from './native-headless-options.js';
 import type { HeadlessRunFlags } from './native-headless-options.js';
 /**
  * Refuse run-only flags on any other command instead of ignoring them, and

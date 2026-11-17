@@ -1,3 +1,4 @@
+import { headlessInvocationFromFlags, type HeadlessCliFlags, type HeadlessInvocation } from './native/native-headless-options.js';
 export interface ShellEntrypointRoots {
   readonly defaultWorkingDirectory: string;
   readonly homeDirectory: string;
@@ -13,17 +14,19 @@ export function resolveShellRoots(
 ): ShellEntrypointOwnership {
   return { workingDirectory: workingDirOverride ?? roots.defaultWorkingDirectory, homeDirectory };
 }
+/**
+ * Parse a terminal app's command line once, with the product's catalog, and
+ * read the headless intake mode and `run` limits from the flags it parsed.
+ */
 export function parseNativeShellCli<
-  Native extends { readonly argv: readonly string[]; readonly errors: readonly string[]; readonly mode: string },
-  Cli extends { readonly command: string; readonly errors: readonly string[] },
+  Cli extends { readonly command: string; readonly errors: readonly string[]; readonly flags: HeadlessCliFlags },
 >(
   argv: readonly string[],
   binary: string,
-  extract: (argv: readonly string[]) => Native,
   parse: (argv: readonly string[], binary: string) => Cli,
-) {
-  const native = extract(argv);
-  const parsed = parse(native.argv, binary);
+): { readonly native: HeadlessInvocation; readonly cli: Cli } {
+  const parsed = parse(argv, binary);
+  const native = headlessInvocationFromFlags(parsed.flags);
   const nativeErrors = [...native.errors];
   if (native.mode !== 'submit' && parsed.command !== 'run') nativeErrors.push('Native intake recovery requires the run or exec command.');
   return { native, cli: { ...parsed, errors: [...parsed.errors, ...nativeErrors] } };

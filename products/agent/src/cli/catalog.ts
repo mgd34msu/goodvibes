@@ -275,10 +275,14 @@ const GLOBAL_FLAGS: readonly CommandFlagSpec<FlagField>[] = [
     kind: 'string',
     summary: 'Agent session',
   },
-  // run limits: consumed by extractHeadlessRunFlags before this parser runs; declared so help and completions list them.
   { field: 'permissionMode', tokens: ['--just-vibes'], kind: 'const', constValue: 'just-vibes', summary: 'Work without interrupting you for this launch: anything that needs you is held and listed at the end (permissions.mode just-vibes)' },
   // --no-worries-just-vibes is kept as an unlisted spelling of --yolo.
   { field: 'permissionMode', tokens: ['--yolo', '--no-worries-just-vibes'], kind: 'const', constValue: 'yolo', summary: 'Run every action without safety denials for this launch (permissions.mode yolo)' },
+  // run limits and native intake recovery: parsed here like every flag; parseNativeShellCli reads them.
+  { field: 'intakeMode', tokens: ['--intake-status'], kind: 'const', constValue: 'status', exclusive: true, summary: 'run: print the host\'s state of the saved native input instead of sending a new one; exits 0 when the host has a record of it' },
+  { field: 'intakeMode', tokens: ['--intake-retry'], kind: 'const', constValue: 'retry', exclusive: true, summary: 'run: request admission again for the same saved input' },
+  { field: 'intakeMode', tokens: ['--intake-resume'], kind: 'const', constValue: 'resume', exclusive: true, summary: 'run: explicit recovery of a saved input the host reports as processing' },
+  { field: 'intakeMode', tokens: ['--intake-cancel'], kind: 'const', constValue: 'cancel', exclusive: true, summary: 'run: cancel the saved input, or drop it when it already became work (the work stays in /work)' },
   { field: 'timeout', tokens: ['--timeout'], kind: 'string', summary: 'run: stop after this long (90, 90s, 5m, 1h); exits 124' },
   { field: 'maxTurns', tokens: ['--max-turns'], kind: 'string', summary: 'run: stop once the model has answered this many times and still asks for tools; exits 1' },
   { field: 'omitAccumulated', tokens: ['--omit-accumulated'], kind: 'boolean', summary: 'run: with stream-json, leave accumulated out of STREAM_DELTA frames' },

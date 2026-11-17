@@ -189,6 +189,9 @@ export type {
   ExecContainmentDecision,
 } from './exec/containment.js';
 export { formatDenialResponse, guardExecCommand } from './exec/ast-guard.js';
+// The owner's credential-env allowlist setting: its key and the one reader every
+// spawn uses, so a settings editor shows exactly the list commands get.
+export { EXEC_ENV_SCRUB_ALLOWLIST_KEY, configuredCredentialEnvScrub } from './exec/credential-env-config.js';
 export { createAnalyzeTool } from './analyze/index.js';
 export { InspectTool } from './inspect/index.js';
 export { createAgentTool } from './agent/index.js';

@@ -255,6 +255,18 @@ window rather than re-running from scratch.
 > `routes.bindings.patch` above. The HTTP route
 > (`PATCH /api/watchers/{watcherId}`) is unaffected.
 
+`watchers.create` makes a watcher the daemon can run on its own: kind
+`webhook` or `polling` with a `url`, `filesystem` with a `path`, or `manual`.
+A watcher with nothing to run (kind `socket` or `integration`, or a missing
+url or path) is refused with `WATCHER_NOTHING_TO_RUN`; those kinds are
+registered by the component that owns the connection. A `run` text is refused
+with `WATCHER_RUN_TEXT_UNSUPPORTED`: it was never executed. After a restart, a
+watcher whose work belongs to a component waits for that component to register
+it again; until then it reads `awaiting its owner since <time>`, and start or
+run is refused with `WATCHER_AWAITING_OWNER`. When the watcher store cannot be
+saved, a change still takes effect and its answer carries `persisted: false`
+with a notice: a restart would not keep it.
+
 A url or webhook watcher can send request headers. A header that carries a
 credential must be given as a `goodvibes://secrets/<name>` reference: the
 watcher stores the reference, never the value, and the daemon reads the secret
@@ -300,32 +312,34 @@ watcher.
 - [Feature settings](./feature-settings.md)
 - [Defaults](./defaults.md)
 
-## Trigger state and multiple terminal windows
+## Triggers: creating them, where they live, and who runs them
 
-The trigger family (`watchers.triggers.enabled`) saves current snapshots in
-`triggers-v2.json` under its selected surface directory. Fresh snapshots use
-validated records and durable atomic replacement. The previous `triggers.json`
-and its recovery report remain read-only so older installed readers cannot
-mistake the new format for a corrupt file and erase it.
+The trigger family (`watchers.triggers.enabled`) watches for something and
+starts an agent turn when it happens, without holding a turn open: an
+`on-exit` trigger runs a command and fires once when it ends, a `stream`
+trigger runs a long-lived command and fires on matching output lines, and a
+`condition` trigger checks a URL, file or command on an interval and fires
+when its rule holds. A trigger may run a command the owner approved in
+advance (an action grant); only the owner registers grants.
 
-One current process owns trigger execution for each surface. Additional terminal
-windows can inspect the stored triggers and grants without sweeping, rewriting,
-or running them; their manager reports `executionOwnership: other-process`.
-Mutating an owned family returns an explicit ownership error. Closing the owner
-drains admitted starts and actions before releasing its claim; a new supervisor
-can then own that surface. This does not turn a remembered PID into execution
-authority or terminate processes owned by an unrelated terminal.
+Triggers are saved in `triggers.db` under the selected surface directory, one
+row per trigger: a check writes that one trigger's row, whatever the number of
+triggers. An observation keeps at most a 512-character sample of the result
+plus a digest, so a change past the sample is still seen.
 
-Runnable state from `triggers.json` requires an explicit migration after closing
-older GoodVibes instances. Until that operation is performed, inspection and
-unrelated chat remain available and the family reports `migration-required`.
-The engine exposes `migratePrevious({ olderInstancesClosed: true })` for an
-operator control; it treats that acknowledgement as an operator statement, not
-as proof that another OS process has stopped. Terminal-only history can migrate
-without admitting old actions. The migration receipt binds the original source
-and records completed cutover; missing or corrupt new state cannot silently
-replay the preserved old actions. Changes to the original old source stop the
-new owner instead of being silently imported again.
+Nothing runs and nothing is written until the family is on and a trigger
+exists. Turning `watchers.triggers.enabled` on starts supervising stored
+triggers at once.
+
+One process supervises a surface's triggers; it holds a lock the operating
+system releases if the process dies. Other terminal windows can list the
+stored triggers, and report `executionOwnership: other-process`; a change from
+one of them is refused and says which process to use. When the supervising
+process exits, another takes over on its next supervision tick.
+
+A save that fails (a full disk, an unreadable file) fails only that save: the
+trigger keeps running, its `lastError` reads `not saved: <cause> (<path>)`,
+and the save is retried on the next tick.
 
 A trigger that has fired or been cancelled is finished. Reset applies only to
 `idle`, `backoff`, `circuit-open` and `failed` triggers: resetting a running,
@@ -333,11 +347,21 @@ fired or cancelled trigger is refused, and the refusal says to wait, cancel, or
 create a new trigger. Cancelling a trigger that is already fired or cancelled
 returns it unchanged and adds no run to its history.
 
-A one-shot action is durably reserved before invoking its executor. If a crash
-or cancellation prevents the executor's completion acknowledgement, its saved
-history reports that completion was not observed; the action is not automatically
-repeated. This is an admission rule, not a guarantee of exactly-once external
-effects after a network or process failure.
+An on-exit trigger is `firing` while its action is delivered and `fired` only
+once it was. An action that fails (the agent could not start, the provider is
+down) is kept owed: the trigger backs off and delivers it again when due, or
+after a reset once its breaker opened, and is never removed while it is owed.
+If the daemon restarts while an action is being delivered, an agent turn is
+delivered again; an approved command is not run twice unasked and waits for a
+reset. If the daemon restarts while the watched command is still running, the
+trigger waits (one liveness check per tick, up to the command's duration
+limit) and fires once it ends, saying its exit status was not observed.
+
+A stream trigger whose command ends after a healthy run (it stayed up for the
+first backoff step, or matched a line) starts again without a strike; a clean
+exit is a restart, not a failure. When a stream ends, the lines still queued
+go to one final agent turn, and a batch whose action failed goes back at the
+head of the queue.
 
 ## Inspect supervised triggers
 

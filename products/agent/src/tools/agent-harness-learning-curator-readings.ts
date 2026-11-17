@@ -107,7 +107,7 @@ export function readLearningSurvivor(source: { readonly domain: string; readonly
     if (alternatives.length) {
       const equivalent = await reading(alternatives.map(value => ({
         group: captured, selected: records[index], alternate: records[value.alternate],
-      })), options, learningSurvivorEquivalence, 'count', async (tieAuthority, items) => {
+      })), options, learningSurvivorEquivalence, async (tieAuthority, items) => {
         if (!Array.isArray(items)) throw new ToolInputProjectionError('held');
         const tie = await learningSurvivorEquivalence.count(tieAuthority.port, items.map(item => personalOpsJson(item)), {
           site: learningSurvivorEquivalence.name, signal: tieAuthority.signal, beforeAttempt: tieAuthority.assertCurrent,

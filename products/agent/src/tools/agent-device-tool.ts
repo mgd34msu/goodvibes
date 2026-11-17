@@ -95,7 +95,7 @@ function confirmedArgs(args: AgentDeviceToolArgs): Record<string, unknown> {
 function statusArgs(args: AgentDeviceToolArgs): Record<string, unknown> {
   return compactArgs({
     mode: 'pairing_posture',
-    query: args.query ?? args.target ?? 'device',
+    query: args.query ?? args.target,
     includeParameters: args.includeParameters,
     limit: args.limit,
   });
@@ -127,7 +127,7 @@ function computerArgs(action: 'browser' | 'open_browser' | 'control', args: Agen
 function voiceArgs(args: AgentDeviceToolArgs): Record<string, unknown> {
   return compactArgs({
     mode: 'media_posture',
-    query: args.query ?? args.target ?? 'voice',
+    query: args.query ?? args.target,
     includeParameters: args.includeParameters,
     limit: args.limit,
   });
@@ -185,7 +185,7 @@ export function createAgentDeviceTool(deps: AgentDeviceToolDeps): Tool {
           mediaProviderId: { type: 'string', description: 'Voice/media provider id.' },
           providerId: { type: 'string', description: 'Voice/media provider id alias.' },
           target: { type: 'string', description: 'Lookup or provider target.' },
-          query: { type: 'string', description: 'Search text. When omitted, action:"status" searches for "device" and action:"voice" for "voice", so the result is filtered, not complete.' },
+          query: { type: 'string', description: 'Search text for status, capability, voice and provider. Omit it for the complete map.' },
           includeParameters: { type: 'boolean', description: 'Include detailed route contracts.' },
           limit: { type: 'number', description: 'Maximum rows.' },
           confirm: { type: 'boolean', description: 'Optional provenance; does not grant authority. Opening is allowed only under the owner\'s recorded effect admission.' },

@@ -1,6 +1,5 @@
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { readHarnessBoolean } from './agent-harness-boolean-reading.ts';
 import type { Ranked } from '@goodvibes-jev/judgment';
 import type { CommandContext } from '../input/command-registry.ts';
 import {
@@ -140,16 +139,31 @@ function invalidKeyReason(key: string): string | null {
   return `"${key}" is not a key the shell can match. Use one character or one of: ${[...NAMED_KEYS].join(', ')}.`;
 }
 
-async function normalizeCombo(value: unknown, evidence: HarnessKeybindingArgs, options: CatalogRankingOptions): Promise<KeyCombo | null> {
+/** The closed set of spellings a modifier flag accepts; anything else is refused with the parameter's name. */
+const MODIFIER_FLAG_WORDS: Readonly<Record<string, boolean>> = {
+  true: true, false: false, yes: true, no: false, on: true, off: false, '1': true, '0': false,
+};
+
+function readModifierFlag(parameter: 'ctrl' | 'shift' | 'alt', value: unknown): boolean | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number' && (value === 0 || value === 1)) return value === 1;
+  if (typeof value === 'string') {
+    const flag = MODIFIER_FLAG_WORDS[value.trim().toLowerCase()];
+    if (flag !== undefined) return flag;
+  }
+  throw new Error(`set_keybinding was not applied: ${parameter} must be true or false (also accepted: yes/no, on/off, 1/0); got ${JSON.stringify(value)}.`);
+}
+
+async function normalizeCombo(value: unknown, _evidence: HarnessKeybindingArgs, options: CatalogRankingOptions): Promise<KeyCombo | null> {
+  options.signal?.throwIfAborted();
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
   const raw = captureCatalogData(value), fields = Object.getOwnPropertyDescriptors(raw);
   const key = normalizeKeyName(readString(fields.key?.value));
   if (!key) return null;
   const combo: KeyCombo = { key };
   for (const parameter of ['ctrl', 'shift', 'alt'] as const) {
-    const flag = await readHarnessBoolean({ tool: 'agent_harness mode:set_keybinding', parameter, value: fields[parameter]?.value,
-      description: `Whether the ${parameter} modifier must be held for this key combination.`, evidence: { arguments: evidence, combination: raw } }, options);
-    options.signal?.throwIfAborted(); options.assertCurrent?.();
+    const flag = readModifierFlag(parameter, fields[parameter]?.value);
     if (flag !== undefined) combo[parameter] = flag;
   }
   return combo;

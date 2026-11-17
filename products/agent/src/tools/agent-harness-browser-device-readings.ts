@@ -66,18 +66,12 @@ export async function readBrowserDeviceEvidence(source: BrowserDeviceEvidenceInp
   });
 }
 
-/** Every nonempty query reads every original candidate; unknown fits hold. */
+/** No query is the whole list; a query goes to the one catalog selector (code first, at most one reading). */
 export async function browserDeviceCatalogMatches<T>(entries: readonly T[], query: string,
   describe: (entry: T) => { readonly id: string; readonly description: string; readonly evidence: unknown },
   options: CatalogRankingOptions, site: string): Promise<readonly T[]> {
-  const caller = captureAsyncHarnessInput({ entries, query }, options);
-  caller.retainSourceCurrent();
-  if (!caller.args.query) return withModelReadingSource(caller.args, caller.options, async (captured, current) => {
-    current.assertCurrent?.(); return captured.entries;
-  });
-  const result = await rankHarnessCatalog(caller.args.entries, caller.args.query, describe, site, { ...caller.options, requirePreservedSource: true });
-  caller.assertCurrent();
-  if (result.provenance === 'classic') return result.matches.map(({ entry }) => entry);
-  if (result.judgments.some(({ reading }) => reading.outcome !== 'act' || reading.verdict === 'uncertain')) throw new ToolInputProjectionError('held');
-  return result.matches.filter(({ judgment }) => judgment?.reading.outcome === 'act' && judgment?.reading.verdict === 'yes').map(({ entry }) => entry);
+  options.signal?.throwIfAborted();
+  if (!query) return entries;
+  const result = await rankHarnessCatalog(entries, query, describe, site, options);
+  return result.matches.map(({ entry }) => entry);
 }

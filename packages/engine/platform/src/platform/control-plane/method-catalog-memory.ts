@@ -65,7 +65,7 @@ const MEMORY_COPY_SCHEMA = objectSchema({
   reason: STRING_SCHEMA,
   createdAt: NUMBER_SCHEMA,
   sizeBytes: NUMBER_SCHEMA,
-  recordCount: { type: ['number', 'null'] },
+  recordCount: { anyOf: [NUMBER_SCHEMA, { type: 'null' }] },
 }, ['name', 'reason', 'createdAt', 'sizeBytes', 'recordCount']);
 
 const MEMORY_COPY_ERROR_CODES: readonly ContractErrorCode[] = [

@@ -43,12 +43,16 @@ export function registerWorkLedgerImportGatewayMethods(catalog: GatewayMethodCat
       actorId: `host:work-ledger-import:${randomUUID()}` });
     try {
       if (prepare) {
-        const parsed = z.strictObject({ projectId: z.string().min(1).max(200), sourceIds: z.array(z.string().min(1).max(200)).min(1).max(500) }).safeParse(input);
+        const parsed = z.strictObject({ projectId: z.string().min(1).max(200), sourceIds: z.array(z.string().min(1).max(200)).max(500) }).safeParse(input);
         if (!parsed.success) throw new GatewayVerbError('Invalid source capture request', 'INVALID_ARGUMENT', 400);
         if (parsed.data.projectId !== host.projectId) throw new GatewayVerbError('Selected host project mismatch', 'FORBIDDEN', 403);
         const snapshot = await host.service.readSnapshot(actor);
         if (invocation.isAuthorized() !== true) throw new GatewayVerbError('Owner authorization changed', 'FORBIDDEN', 403);
-        const sources = parsed.data.sourceIds.map(id => host.readSource(id));
+        // The project's work-plan tasks are rows of their own, not knowledge sources, so the client cannot list them: the host adds them.
+        const selected = new Set(parsed.data.sourceIds);
+        const ids = [...parsed.data.sourceIds, ...(host.workPlanTaskImportIds?.(host.projectId) ?? []).filter(id => !selected.has(id))];
+        if (ids.length === 0) return { kind: 'blocked', code: 'invalid-source', reason: `No saved planning sources or work-plan tasks for project ${host.projectId}; nothing to import.` };
+        const sources = ids.map(id => host.readSource(id));
         if (sources.some(source => source.generation === null)) throw new GatewayVerbError('A persisted source is unavailable', 'WORK_LEDGER_SOURCE_UNAVAILABLE', 409);
         return prepareLegacyWorkLedgerMigration({ hostId: host.hostId, projectId: host.projectId,
           expectedLedgerRevision: snapshot.revision, pendingLocalChanges: false,

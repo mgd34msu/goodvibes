@@ -104,11 +104,13 @@ export async function openLegacyImportOperator(options: LegacyImportOperatorOpti
       cursor = page.hasMore ? page.nextCursor! : undefined;
       if (cursor) { if (cursors.has(cursor)) throw new Error('Source cursor repeated'); cursors.add(cursor); }
     } while (cursor);
-    if (!sourceIds.length) throw new Error(`No saved legacy planning sources for project ${projectId} were found on the host; nothing to import`);
+    // The host adds the project's work-plan tasks (rows of their own, not listed as knowledge sources), so an empty list is still a request.
     const prepared = preparationSchema.parse(await client.invoke('workLedger.prepareLegacyImport', { projectId, sourceIds: sourceIds.sort() }, lifetime.signal));
     if (prepared.kind === 'blocked') return prepared;
     const manifest = prepared.manifest;
-    if (manifest.projectId !== projectId || JSON.stringify(manifest.sources.map(item => String(item.source.id)).sort()) !== JSON.stringify(sourceIds)) throw new Error('Prepared source selection changed');
+    const captured = manifest.sources.filter(item => item.source.metadata === null || typeof item.source.metadata !== 'object' || Array.isArray(item.source.metadata)
+      || item.source.metadata['planningArtifactKind'] !== 'work-plan-task').map(item => String(item.source.id)).sort();
+    if (manifest.projectId !== projectId || JSON.stringify(captured) !== JSON.stringify(sourceIds)) throw new Error('Prepared source selection changed');
     return { kind: 'prepared', manifest };
   };
   const dispatch = async (entry: LegacyImportEntry): Promise<LegacyImportEntry> => {

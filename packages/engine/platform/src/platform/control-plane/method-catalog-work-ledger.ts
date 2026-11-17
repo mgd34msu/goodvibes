@@ -32,10 +32,10 @@ export type WorkLedgerHistoryPage = z.infer<typeof workLedgerHistoryPageSchema>;
 export const builtinGatewayWorkLedgerMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
     id: 'workLedger.prepareLegacyImport', title: 'Prepare Legacy Work Import', category: 'work-ledger',
-    description: 'Capture bounded complete legacy sources on the selected authoritative host. Preparation does not write or grant execution authority.',
+    description: 'Capture bounded complete legacy sources on the selected authoritative host, plus every work-plan task of the project (the host adds those). Preparation does not write or grant execution authority.',
     access: 'admin', scopes: [WORK_LEDGER_READ_SCOPE, 'read:knowledge'],
     http: { method: 'POST', path: '/api/work-ledger/legacy-import/prepare' },
-    inputSchema: json(strictObject({ projectId, sourceIds: array(string().min(1).max(200)).min(1).max(500) }), 'input'),
+    inputSchema: json(strictObject({ projectId, sourceIds: array(string().min(1).max(200)).max(500) }), 'input'),
     outputSchema: json(union([
       strictObject({ kind: literal('prepared'), manifest: legacyWorkLedgerManifestSchema }),
       strictObject({ kind: literal('blocked'), code: string(), reason: string() }),

@@ -225,6 +225,33 @@ function prepare(input: LegacyMigrationInput, signal: AbortSignal | undefined, v
       links.push({ sourceId, pointer, from, relation, to: id(to, relation) });
       if (links.length > MAX_LINKS) fail('limit', 'Too many legacy links.');
     }
+    /** One task of a planning state or a work plan, or a work-plan task captured as its own row. */
+    function addTask(sourceId: string, item: Json | undefined, pointer: string, kind: 'state' | 'work-plan' | 'work-plan-task'): void {
+      at = { sourceId, pointer };
+      const task = object(item, 'task'); const taskId = id(kind === 'state' ? task.id : task.taskId, 'task ID');
+      if (typeof task.title !== 'string' || !task.title.trim()) { at = { sourceId, pointer: `${pointer}/title` }; fail('invalid-source', `Task ${taskId} has no title; add one in the source, then prepare again`, task.title ?? null); }
+      if (kind === 'work-plan') {
+        const meta = object(sources.get(sourceId)?.source.metadata, 'source.metadata');
+        if (task.projectId !== meta.projectId || task.knowledgeSpaceId !== meta.knowledgeSpaceId) fail('invalid-source', 'Task project or knowledge space disagrees with source.');
+      }
+      at = { sourceId, pointer: `${pointer}/status` };
+      if (task.metadata !== undefined) {
+        const metadata = object(task.metadata, 'task.metadata');
+        // Actual ProjectPlanningService projection preserves both its generated work
+        // ID and the originating planning task identity, rather than merging them.
+        if (metadata.planningTaskId !== undefined) link(sourceId, `${pointer}/metadata/planningTaskId`, taskId, 'planningTaskId', metadata.planningTaskId);
+        if (metadata.planningId !== undefined) link(sourceId, `${pointer}/metadata/planningId`, taskId, 'planningId', metadata.planningId);
+        if (metadata.dependencies !== undefined) array(metadata.dependencies, 'metadata.dependencies').forEach((to, i) => link(sourceId, `${pointer}/metadata/dependencies/${i}`, taskId, 'dependencies', to));
+      }
+      add('work', taskId, task, sourceId, pointer, reported(task.status, kind === 'state'));
+      at = { sourceId, pointer };
+      for (const field of ['parentTaskId', 'contractId', 'phaseId', 'agentId', 'turnId', 'decisionId', 'sourceMessageId'] as const) {
+        if (task[field] !== undefined) link(sourceId, `${pointer}/${field}`, taskId, field, task[field]);
+      }
+      for (const field of ['dependencies', 'linkedArtifactIds', 'linkedSourceIds', 'linkedNodeIds'] as const) {
+        if (task[field] !== undefined) array(task[field], field).forEach((to, i) => link(sourceId, `${pointer}/${field}/${i}`, taskId, field, to));
+      }
+    }
     for (const [sourceId, entry] of [...sources].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
       at = { sourceId, pointer: '/metadata' };
       const meta = object(entry.source.metadata, 'source.metadata');
@@ -232,9 +259,11 @@ function prepare(input: LegacyMigrationInput, signal: AbortSignal | undefined, v
       const space = id(meta.knowledgeSpaceId, 'knowledgeSpaceId');
       const artifactId = id(meta.planningArtifactId, 'planningArtifactId');
       const kind = meta.planningArtifactKind; const value = object(meta.value, 'metadata.value');
-      if (!['state', 'work-plan', 'decision', 'language'].includes(String(kind))) fail('invalid-source', 'Unknown planning artifact kind.');
-      if (kind !== 'language' && value.id !== artifactId) fail('identity-conflict', 'Artifact envelope and value IDs disagree.');
+      if (!['state', 'work-plan', 'work-plan-task', 'decision', 'language'].includes(String(kind))) fail('invalid-source', 'Unknown planning artifact kind.');
+      if (kind !== 'language' && (kind === 'work-plan-task' ? value.taskId : value.id) !== artifactId) fail('identity-conflict', 'Artifact envelope and value IDs disagree.');
       if (kind !== 'decision' && (value.projectId !== projectId || value.knowledgeSpaceId !== space)) fail('invalid-source', 'Artifact project or knowledge space disagrees with source.');
+      // A work-plan task is one stored row (its value is the task): it is work, not an artifact holding work.
+      if (kind === 'work-plan-task') { addTask(sourceId, value, '/metadata/value', 'work-plan-task'); continue; }
       // Source ID is the globally unique artifact identity; preserve the legacy artifact ID in original.
       add('artifact', sourceId, value, sourceId, '/metadata/value');
       if (kind === 'decision') add('decision', artifactId, value, sourceId, '/metadata/value');
@@ -250,30 +279,7 @@ function prepare(input: LegacyMigrationInput, signal: AbortSignal | undefined, v
         });
       }
       if (kind === 'state' || kind === 'work-plan') {
-        array(value.tasks, 'tasks').forEach((item, index) => {
-          const pointer = `/metadata/value/tasks/${index}`;
-          at = { sourceId, pointer };
-          const task = object(item, 'task'); const taskId = id(kind === 'state' ? task.id : task.taskId, 'task ID');
-          if (typeof task.title !== 'string' || !task.title.trim()) { at = { sourceId, pointer: `${pointer}/title` }; fail('invalid-source', `Task ${taskId} has no title; add one in the source, then prepare again`, task.title ?? null); }
-          if (kind === 'work-plan' && (task.projectId !== projectId || task.knowledgeSpaceId !== space)) fail('invalid-source', 'Task project or knowledge space disagrees with source.');
-          at = { sourceId, pointer: `${pointer}/status` };
-          if (task.metadata !== undefined) {
-            const metadata = object(task.metadata, 'task.metadata');
-            // Actual ProjectPlanningService projection preserves both its generated work
-            // ID and the originating planning task identity, rather than merging them.
-            if (metadata.planningTaskId !== undefined) link(sourceId, `${pointer}/metadata/planningTaskId`, taskId, 'planningTaskId', metadata.planningTaskId);
-            if (metadata.planningId !== undefined) link(sourceId, `${pointer}/metadata/planningId`, taskId, 'planningId', metadata.planningId);
-            if (metadata.dependencies !== undefined) array(metadata.dependencies, 'metadata.dependencies').forEach((to, i) => link(sourceId, `${pointer}/metadata/dependencies/${i}`, taskId, 'dependencies', to));
-          }
-          add('work', taskId, task, sourceId, pointer, reported(task.status, kind === 'state'));
-          at = { sourceId, pointer };
-          for (const field of ['parentTaskId', 'contractId', 'phaseId', 'agentId', 'turnId', 'decisionId', 'sourceMessageId'] as const) {
-            if (task[field] !== undefined) link(sourceId, `${pointer}/${field}`, taskId, field, task[field]);
-          }
-          for (const field of ['dependencies', 'linkedArtifactIds', 'linkedSourceIds', 'linkedNodeIds'] as const) {
-            if (task[field] !== undefined) array(task[field], field).forEach((to, i) => link(sourceId, `${pointer}/${field}/${i}`, taskId, field, to));
-          }
-        });
+        array(value.tasks, 'tasks').forEach((item, index) => addTask(sourceId, item, `/metadata/value/tasks/${index}`, kind));
       }
     }
     at = {};

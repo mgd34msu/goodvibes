@@ -2,6 +2,7 @@ import { unlinkSync } from 'node:fs';
 import { knowledgeSchemaColumns } from './store-schema-validation-data.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { readKnowledgeSourceSnapshot } from './store-source-generation.js';
+import { readWorkPlanTaskImportRecord } from './store-work-plan-tasks.js';
 import type { SQLiteStore, SqlDatabase } from '../state/sqlite-store.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
@@ -104,6 +105,12 @@ export function readKnowledgeWorkLedger(db: Pick<SqlDatabase, 'exec'>, projectId
   return state;
 }
 
+/** A record the legacy import captured: a knowledge source, or a work-plan task row (kind `work-plan-task`). */
+function readLegacyImportRecord(db: Pick<SqlDatabase, 'exec'>, id: string): { readonly source: unknown; readonly generation: string | null } {
+  const source = readKnowledgeSourceSnapshot(db, { id });
+  return source.source ? source : readWorkPlanTaskImportRecord(db, id);
+}
+
 /** Internal adapter composed exclusively by the existing KnowledgeStore owner. */
 export function createKnowledgeWorkLedgerStorage(sqlite: SQLiteStore, projectId: string, refresh: () => void, hooks?: {
   beforeDecision(db: SqlDatabase): void;
@@ -187,7 +194,7 @@ export function createKnowledgeWorkLedgerStorage(sqlite: SQLiteStore, projectId:
         // Parsing copies mutable ledger records while retaining only genuinely
         // validated immutable manifest originals. A blanket structuredClone
         // destroys that private provenance and rehashes every historical import.
-        const decision = decide(workLedgerStateSchema.parse(current), { readSource: id => readKnowledgeSourceSnapshot(db, { id }) });
+        const decision = decide(workLedgerStateSchema.parse(current), { readSource: id => readLegacyImportRecord(db, id) });
         if (decision && typeof (decision as unknown as { then?: unknown }).then === 'function') {
           if (decision instanceof Promise) void decision.catch(() => {});
           throw new TypeError('Work ledger decision must be synchronous');

@@ -758,7 +758,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     const nativeImport = registerWorkLedgerImportGatewayMethods(gatewayMethods, {
       hostId: workLedgerOwner.importHostId, projectId: projectPlanningProjectId, projectRoot: workingDirectory,
       storeId: knowledgeStore.storagePath, service: workLedgerOwner.service, authority: workLedgerOwner.authority,
-      readSource: id => knowledgeStore.getSourceSnapshot({ id }), scopes: nativeScopes,
+      readSource: id => knowledgeStore.getLegacyImportRecord(id), workPlanTaskImportIds: projectId => knowledgeStore.listWorkPlanTaskImportIds(projectId),
+      scopes: nativeScopes,
       port: judgment.port, decisionLog: judgment.decisionLog,
     });
     disposalScope.ownUntilRegistered('native legacy import', nativeImport.close);

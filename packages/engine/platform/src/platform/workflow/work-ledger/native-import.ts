@@ -17,6 +17,8 @@ export interface NativeLegacyImportDependencies {
   readonly service: WorkLedgerService; readonly authority: WorkLedgerAuthority;
   readonly scopes: NativeExecutionScopeOwner; readonly port: JudgmentPort; readonly decisionLog: Pick<DecisionLog, 'get'>;
   readonly readSource: (id: string) => { readonly source: unknown; readonly generation: string | null };
+  /** The import record ids of the project's work-plan tasks, which are rows of their own, not knowledge sources; `readSource` reads them. */
+  readonly workPlanTaskImportIds?: ((projectId: string) => readonly string[]) | undefined;
 }
 /**
  * Lossless display of host protocol metadata. These fields are created by the

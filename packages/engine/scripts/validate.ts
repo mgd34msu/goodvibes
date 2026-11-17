@@ -5,7 +5,7 @@
  * `bun run validate --job <job>`, so the two cannot drift: a local
  * `bun run validate` runs the same commands in the same order, and a green run
  * predicts a green pull request. What CI adds around these steps is host
- * set-up (Bun, dependencies, bubblewrap, Chromium), passing the build between
+ * set-up (Bun, dependencies, bubblewrap, ripgrep, Chromium), passing the build between
  * jobs, the dependency audit and secret scan (they need the network and the
  * repository's history), and the daemon on other platforms on pushes to main.
  *

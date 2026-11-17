@@ -9,6 +9,7 @@ const inbound: Loader = async () => (await import('./inbound.ts')).scenarios;
 const state: Loader = async () => (await import('./state.ts')).scenarios;
 const mail: Loader = async () => (await import('./mail.ts')).scenarios;
 const hosted: Loader = async () => (await import('./hosted.ts')).scenarios;
+const find: Loader = async () => (await import('./find.ts')).scenarios;
 
 export interface ScenarioEntry {
   readonly name: string;
@@ -28,6 +29,10 @@ export const SCENARIOS: readonly ScenarioEntry[] = [
   { name: 'turn-8-slow-reads', load: tools },
   { name: 'permission-decision-10-rules', load: tools },
   { name: 'permission-decision-100-rules', load: tools },
+  { name: 'find-content-first', load: find, budgeted: ['readdirs', 'stats'] },
+  { name: 'find-content-repeat', load: find, budgeted: ['readdirs', 'stats'] },
+  { name: 'find-content-repeat-ripgrep', load: find, budgeted: ['readdirs', 'stats'] },
+  { name: 'find-content-after-edit', load: find, budgeted: ['readdirs', 'stats'] },
   { name: 'session-heartbeat', load: stores },
   { name: 'session-append-message', load: stores },
   { name: 'knowledge-list-200', load: stores },

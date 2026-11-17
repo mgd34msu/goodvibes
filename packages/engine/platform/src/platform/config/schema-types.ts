@@ -49,7 +49,7 @@ import type {
 } from "./schema-types-platform.js";
 
 export * from "./schema-types-permissions.js";
-import type { BackgroundAgentsMode, LineNumberMode, PermissionAction, PermissionMode, PermissionsToolConfig } from "./schema-types-permissions.js";
+import type { LineNumberMode, PermissionAction, PermissionMode, PermissionsToolConfig } from "./schema-types-permissions.js";
 export * from "./schema-types-payments.js";
 import type { PaymentsConfig } from "./schema-types-payments.js";
 import type { ContractSettings } from "./schema-types-contract.js";
@@ -123,7 +123,6 @@ export interface GoodVibesConfig {
   permissions: {
     mode: PermissionMode;       // default: 'prompt'
     tools: PermissionsToolConfig;
-    backgroundAgents: BackgroundAgentsMode; // default: 'inherit'
     engine: 'baseline' | 'policy-engine'; // default: 'baseline'. Layered tool/path policy evaluator (restart to apply)
     simulation: boolean;        // default: true. Dual-evaluator shadow pipeline recording divergence (restart to apply)
     divergenceDashboard: boolean; // default: true. Divergence aggregation + enforce-mode gate

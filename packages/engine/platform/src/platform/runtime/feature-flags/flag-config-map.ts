@@ -41,7 +41,7 @@ export const FEATURE_FLAG_CONFIG: Readonly<Record<string, FeatureFlagConfigAssoc
   // ── Permissions ──────────────────────────────────────────────────────────
   'permissions-policy-engine': {
     configCategories: ['permissions'],
-    configKeys: ['permissions.mode', 'permissions.backgroundAgents', ...PERMISSION_TOOL_KEYS],
+    configKeys: ['permissions.mode', ...PERMISSION_TOOL_KEYS],
   },
   'permissions-simulation': { configCategories: [], configKeys: [] },
   'permission-divergence-dashboard': {

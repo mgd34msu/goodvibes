@@ -107,8 +107,7 @@ export interface BrokeredPermissionManagerOptions {
  * Background/subagent tool calls are brokered through the SAME session
  * permission mode as the foreground turn loop, so a background ask surfaces
  * through the same blocked-on-user machinery, here carrying the subagent's
- * attribution. The escape hatch (config `permissions.backgroundAgents:
- * 'allow-all'`) exempts background agents.
+ * attribution.
  */
 export function createBrokeredPermissionManager(options: BrokeredPermissionManagerOptions): PermissionManager {
   return new PermissionManager(

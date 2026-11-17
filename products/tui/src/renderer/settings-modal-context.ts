@@ -39,10 +39,6 @@ export const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
     guided: SHARED_SETTING_ENUM_DESCRIPTIONS['behavior.guidanceMode']['guided'],
   },
   'permissions.mode': Object.fromEntries(Object.values(GATE_PRESETS).map((preset) => [preset.mode, preset.summary])),
-  'permissions.backgroundAgents': {
-    inherit: 'Background and subagent tool calls run through the SAME session permission mode as foreground work.',
-    'allow-all': 'Background and subagent tool calls are exempt from prompting (auto-approved) even when foreground work is gated.',
-  },
   'diagnostics.postEdit': {
     on: 'After the model edits or writes a file, run language diagnostics on it and surface any new problems.',
     off: 'Do not run diagnostics automatically after edits.',

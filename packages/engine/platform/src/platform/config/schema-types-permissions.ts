@@ -3,8 +3,6 @@ export type PermissionMode = 'safe-owner' | 'safe-jev' | 'yolo' | 'plan'
   // Read-compatible saved settings; active mutations use the canonical modes.
   | 'prompt' | 'allow-all' | 'custom' | 'accept-edits';
 export type PermissionAction = 'allow' | 'prompt' | 'deny';
-/** Saved background mode aliases; execution follows the owning session. */
-export type BackgroundAgentsMode = 'inherit' | 'allow-all';
 export type LineNumberMode = 'all' | 'code' | 'off';
 
 /** Deny blocks a tool in safe modes. Allow and saved prompt follow mode risk assessment. */

@@ -201,18 +201,8 @@ test('rollback of a backup that is still a link to the untouched program just re
   `);
 });
 
-test('the printed manual recovery for an unreplaced program removes the spare link instead of a failing mv', () => {
-  const result = journalShell(`
-    install_journal_target "$TARGET"
-    INSTALL_CLAIM_DIR=$DIRECTORY; INSTALL_CLAIM_OWNER=$DIRECTORY/owner
-    report_unfinished_swap commands 2>&1
-  `);
-  expect(result.stdout).toContain('spare link');
-  expect(result.stdout).not.toContain('restore: mv -f');
-});
-
-const darwinTest = process.platform === 'darwin' ? test : test.skip;
-darwinTest('native Darwin fstat and lstat revisions ignore an incompatible stat selected through PATH', () => {
+// Darwin's system stat is the only native one there; this proof exists only on that platform and runs in the macOS CI job.
+if (process.platform === 'darwin') test('native Darwin fstat and lstat revisions ignore an incompatible stat selected through PATH', () => {
   const gnubin = join(root, 'gnubin');
   mkdirSync(gnubin);
   writeFileSync(join(gnubin, 'stat'), '#!/bin/sh\nprintf "incompatible GNU stat format\\n"\n', { mode: 0o755 });

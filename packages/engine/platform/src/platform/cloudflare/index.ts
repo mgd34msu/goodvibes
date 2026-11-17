@@ -6,7 +6,13 @@ export type {
   CloudflareTunnelConnectorState,
   CloudflareTunnelConnectorStatus,
 } from './tunnel-connector.js';
-export { cloudflareAccessFetchFor, resolveAccessCredentials, withCloudflareAccess } from './access-client.js';
+export {
+  cloudflareAccessFetchFor,
+  createCloudflareAccessFetch,
+  installCloudflareAccessFetch,
+  resolveAccessCredentials,
+  withCloudflareAccess,
+} from './access-client.js';
 export type { CloudflareAccessCredentials } from './access-client.js';
 export { createCloudflareApiClient } from './client.js';
 export { GOODVIBES_CLOUDFLARE_WORKER_MODULE } from './worker-source.js';

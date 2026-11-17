@@ -68,6 +68,74 @@ export function withCloudflareAccess(
   return Object.assign(wrapped, base) as typeof fetch;
 }
 
+function requestHostname(input: Parameters<typeof fetch>[0]): string {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * A fetch that presents the Access service token to the protected daemon
+ * hostname, read from the settings on every request, so a client that turns
+ * Access on, or is pointed at the daemon's Cloudflare hostname, presents it
+ * with no restart. Per request: three in-memory setting reads, and a URL parse
+ * only while Access is on. The token is looked up once per setting change; a
+ * missing one is looked up again on the next request to that host.
+ */
+export function createCloudflareAccessFetch(
+  configManager: Pick<ConfigManager, 'get'>,
+  secretsManager: Pick<SecretsManager, 'get' | 'getGlobalHome'> | null | undefined,
+  base: typeof fetch = fetch,
+): typeof fetch {
+  let cached: { readonly key: string; readonly credentials: Promise<CloudflareAccessCredentials | null> } | null = null;
+  const credentialsFor = (key: string): Promise<CloudflareAccessCredentials | null> => {
+    if (cached?.key === key) return cached.credentials;
+    const credentials = resolveAccessCredentials(configManager, secretsManager).catch(() => null);
+    const entry = { key, credentials };
+    cached = entry;
+    void credentials.then((value) => {
+      if (value === null && cached === entry) cached = null;
+    });
+    return credentials;
+  };
+  const wrapped = async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]): Promise<Response> => {
+    const appId = configManager.get('cloudflare.accessAppId');
+    const hostname = appId ? normalizeHostname(configManager.get('cloudflare.daemonHostname')) : '';
+    if (!hostname || requestHostname(input) !== hostname) return base(input, init);
+    const credentials = await credentialsFor(`${hostname}\u0000${appId}\u0000${configManager.get('cloudflare.accessServiceTokenRef')}`);
+    return credentials ? withCloudflareAccess(base, hostname, credentials)(input, init) : base(input, init);
+  };
+  return Object.assign(wrapped, base) as typeof fetch;
+}
+
+let installedAccessFetch: { readonly base: typeof fetch; readonly wrapper: typeof fetch } | null = null;
+
+/**
+ * Makes this process's `fetch` present the Access service token to the
+ * protected daemon hostname, so every client path that reaches the daemon by
+ * that hostname (JSON calls, event streams, pairing, receipts) is let through
+ * by Access. Requests to any other host are untouched. A terminal app calls it
+ * once at start; calling it again replaces the settings it reads instead of
+ * wrapping twice. Returns the undo.
+ */
+export function installCloudflareAccessFetch(
+  configManager: Pick<ConfigManager, 'get'>,
+  secretsManager: Pick<SecretsManager, 'get' | 'getGlobalHome'> | null | undefined,
+): () => void {
+  const base = installedAccessFetch && globalThis.fetch === installedAccessFetch.wrapper ? installedAccessFetch.base : globalThis.fetch;
+  const wrapper = createCloudflareAccessFetch(configManager, secretsManager, base);
+  globalThis.fetch = wrapper;
+  installedAccessFetch = { base, wrapper };
+  return () => {
+    if (globalThis.fetch !== wrapper) return;
+    globalThis.fetch = base;
+    installedAccessFetch = null;
+  };
+}
+
 /**
  * The fetch a client should use for `baseUrl`: Access-wrapped when that URL is
  * the protected daemon hostname and credentials are stored, else `base`.

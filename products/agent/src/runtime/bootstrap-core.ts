@@ -22,6 +22,7 @@ import { registerSessionConversation, unregisterSessionConversation } from './co
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { existingGoogleConnectionOwner } from '@goodvibes-jev/engine/platform/platform/google';
+import { installCloudflareAccessFetch } from '@goodvibes-jev/engine/platform/platform/cloudflare';
 import { getConfiguredSystemPrompt } from '../config/index.ts';
 import { buildAgentConfigRouting, installAgentDaemonConfigClient } from '../config/daemon-config-routing.ts';
 import { installAgentDaemonCredentialsClient } from '../config/daemon-credential-routing.ts';
@@ -406,6 +407,10 @@ export async function initializeBootstrapCore(
       'bootstrap.webhooks',
     );
   }
+
+  // Requests to the daemon's Access-protected Cloudflare hostname present the
+  // stored Access service token, so turning Access on does not lock this app out.
+  runtimeUnsubs.push(installCloudflareAccessFetch(configManager, services.secretsManager));
 
   const notifier = await createRuntimeNotifier(services.serviceRegistry, (key) => readAgentHostSetting(configManager, key), configManager, services.secretsManager);
   runtimeUnsubs.push(keepTerminalDeadLetters(notifier, deadLetterDirectory, 'chat'));

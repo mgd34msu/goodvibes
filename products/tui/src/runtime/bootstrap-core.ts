@@ -34,6 +34,7 @@ import { registerSessionConversation, unregisterSessionConversation } from './co
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { getConfiguredSystemPrompt } from '@goodvibes-jev/engine/platform/platform/config';
+import { installCloudflareAccessFetch } from '@goodvibes-jev/engine/platform/platform/cloudflare';
 import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers/provider-model';
 import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { registerAllTools } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -526,6 +527,10 @@ export async function initializeBootstrapCore(
   runtimeUnsubs.push(keepTerminalDeadLetters(services.webhookNotifier, deadLetterDirectory, 'webhooks'));
   services.webhookNotifier.attachToRuntimeBus(runtimeBus, runtimeNotifications);
   runtimeUnsubs.push(() => services.webhookNotifier.detach());
+
+  // Requests to the daemon's Access-protected Cloudflare hostname present the
+  // stored Access service token, so turning Access on does not lock this app out.
+  runtimeUnsubs.push(installCloudflareAccessFetch(configManager, services.secretsManager));
 
   const notifier = await createRuntimeNotifier(services.serviceRegistry, () => readTuiNotificationsMetadataOnly(configManager), configManager, services.secretsManager);
   runtimeUnsubs.push(keepTerminalDeadLetters(notifier, deadLetterDirectory, 'chat'));

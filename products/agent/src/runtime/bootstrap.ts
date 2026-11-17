@@ -73,6 +73,7 @@ import { createMemorySpineRecheck, resolveMemorySpineRecheckMs } from './memory-
 import { capabilitySnapshot, refreshCapabilityIndex } from '../capabilities/capability-snapshot.ts';
 import { GOODVIBES_AGENT_OPERATOR_POLICY } from '@goodvibes-jev/engine/terminal-shell/agent-turn/operator-policy';
 import { flushPendingChannelRows } from '../agent/channel-outbox-flush.ts';
+import { formatChannelProfileRouteSyncReport } from '../agent/channel-profile-routing.ts';
 import { createDaemonOperatorInvoke, resolveDaemonOperatorConnection } from '@goodvibes-jev/engine/terminal-shell/agent-turn/daemon-operator-client';
 
 // ── Bootstrap context type ──────────────────────────────────────────────────
@@ -583,8 +584,16 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       onAttach: () => {
         services.sessionBroker.activate(sessionInputsClient);
         // Channel drafts and routing assignments saved while the daemon was away reach it now.
+        // A route the operator removed that the daemon still routes on is told at once, not only logged.
         void flushPendingChannelRows(services.shellPaths, createDaemonOperatorInvoke(() =>
-          resolveDaemonOperatorConnection(configManager, services.shellPaths.homeDirectory)));
+          resolveDaemonOperatorConnection(configManager, services.shellPaths.homeDirectory))).then(({ routes }) => {
+          if (!routes || routes.withdrawFailed.length === 0) return;
+          services.daemonReceiptFeed.push([{
+            id: `channel-route-withdraw:${routes.withdrawFailed.map((failure) => failure.assignmentId).join(',')}`,
+            text: formatChannelProfileRouteSyncReport(routes),
+            at: Date.now(),
+          }]);
+        });
         return services.consumeDaemonReceipts();
       },
       onDetach: () => services.sessionBroker.deactivate('the connected host stopped answering'),

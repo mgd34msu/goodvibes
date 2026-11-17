@@ -369,7 +369,7 @@ export interface ChannelProfileRouteSyncReport {
   readonly synced: number;
   readonly refused: number;
   readonly routes: readonly ChannelProfileRoute[];
-  /** Routes removed locally while offered whose withdrawal from the daemon failed; the daemon may still route on them. */
+  /** Routes removed locally while offered whose withdrawal from the daemon failed; each is back in the mirror, as the daemon still routes on it. */
   readonly withdrawFailed: readonly { readonly routeId: string; readonly assignmentId: string; readonly error: string }[];
 }
 
@@ -425,9 +425,12 @@ export async function syncChannelProfileRoutes(
   });
   // A route removed locally while its offer was in flight can still have been
   // taken by the daemon; withdraw it there so the removal is not undone. A
-  // withdrawal that fails is reported with the assignment id, since no local
-  // row is left to retry from.
+  // withdrawal that fails puts the row back as the daemon holds it, so the
+  // mirror never claims a route is gone while the daemon still routes on it and
+  // removing it again retries the withdrawal (as removeChannelProfileRouteEverywhere
+  // keeps the row when the daemon does not answer). The report names each one.
   const withdrawFailed: { routeId: string; assignmentId: string; error: string }[] = [];
+  const restored: ChannelProfileRoute[] = [];
   for (const { route, assignmentId } of vanished) {
     let error: string | undefined;
     try {
@@ -436,9 +439,18 @@ export async function syncChannelProfileRoutes(
     } catch (thrown) {
       error = thrown instanceof Error ? thrown.message : String(thrown);
     }
-    if (error !== undefined) withdrawFailed.push({ routeId: route.id, assignmentId, error });
+    if (error !== undefined) {
+      withdrawFailed.push({ routeId: route.id, assignmentId, error });
+      restored.push(route);
+    }
   }
-  return { attempted: pending.length, synced, refused, routes, withdrawFailed };
+  const finalRoutes = restored.length === 0 ? routes : updateRoutes(path, (fresh) => {
+    // A row assigned again for the same channel meanwhile is the newer instruction; it stays and is not doubled.
+    const back = restored.filter((route) => !fresh.some((r) => r.id === route.id || (r.surfaceKind === route.surfaceKind && r.routeId === route.routeId)));
+    const next = back.length === 0 ? fresh : [...back, ...fresh];
+    return { value: next, ...(back.length === 0 ? {} : { routes: next }) };
+  });
+  return { attempted: pending.length, synced, refused, routes: finalRoutes, withdrawFailed };
 }
 
 /** One line per outcome of a sync run, for a caller to print. */
@@ -446,7 +458,7 @@ export function formatChannelProfileRouteSyncReport(report: ChannelProfileRouteS
   if (report.attempted === 0 && report.withdrawFailed.length === 0) return 'No held channel routes to offer.';
   return [
     `Held channel routes offered to the daemon: ${report.attempted} (${report.synced} taken, ${report.refused} still held)`,
-    ...report.withdrawFailed.map((failure) => `  route ${failure.routeId} was removed here but the daemon still holds assignment ${failure.assignmentId}: ${failure.error}`),
+    ...report.withdrawFailed.map((failure) => `  route ${failure.routeId} was removed here while the daemon took it, and withdrawing assignment ${failure.assignmentId} failed: ${failure.error}. The route is listed again because the daemon still routes on it; remove it again to retry.`),
   ].join('\n');
 }
 

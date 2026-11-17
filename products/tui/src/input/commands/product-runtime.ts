@@ -107,16 +107,18 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
         }
         const choice = (args[1] ?? '').toLowerCase();
         if (choice === 'trusted' || choice === 'trust' || choice === 'full' || choice === 'yes') {
-          await manager.setLevel('trusted');
+          const saved = await manager.setLevel('trusted');
           ctx.print('This workspace is now TRUSTED; all tools may run, subject to your permission settings.');
+          if (!saved.saved) ctx.print(`This applies to this session only: ${saved.fault ?? 'the decision could not be saved'}. It will be asked again next time.`);
           ctx.renderRequest();
           return;
         }
         if (choice === 'restricted' || choice === 'restrict' || choice === 'readonly' || choice === 'read-only' || choice === 'no') {
-          await manager.setLevel('restricted');
+          const saved = await manager.setLevel('restricted');
           ctx.print(
             'This workspace is now RESTRICTED; read-only exploration; write/execute/delegate tools are denied until you run `/trust workspace trusted`.',
           );
+          if (!saved.saved) ctx.print(`This applies to this session only: ${saved.fault ?? 'the decision could not be saved'}. It will be asked again next time.`);
           ctx.renderRequest();
           return;
         }
@@ -126,12 +128,13 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
         }
         const level = manager.getLevel();
         const lines = [
-          `Workspace trust: ${level.toUpperCase()}` + (manager.wasGrandfathered() ? ' (grandfathered from prior GoodVibes state)' : ''),
+          `Workspace trust: ${level.toUpperCase()}`,
           level === 'trusted'
             ? 'All tools may run, subject to your normal permission settings.'
             : 'Read-only exploration: write, execute, and delegate tools are denied until you trust this workspace.',
         ];
         if (!manager.isDecided()) lines.push('Not yet decided: run `/trust workspace trusted` to enable full capability.');
+        if (manager.hasIgnoredLegacyDecision()) lines.push('A trust.json inside this workspace was found and is not honored: a project cannot decide its own trust. Decisions are kept in your own GoodVibes state.');
         const registrationManager = ctx.workspace.workspaceRegistrationManager;
         if (registrationManager) {
           lines.push(`Registration: ${await registrationManager.describe()}`);

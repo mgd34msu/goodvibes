@@ -65,10 +65,11 @@ export interface CliSandboxStatus {
 
 /** Read-only snapshot of this workspace's trust gate and registration coverage. */
 export interface CliWorkspaceStatus {
-  /** TUI-local trust decision; 'undecided' when no choice is persisted yet. */
+  /** This directory's trust decision in the user's workspace register; 'undecided' when none is recorded. */
   readonly trustLevel: 'trusted' | 'restricted' | 'undecided';
-  readonly trustGrandfathered: boolean;
-  /** Why the saved trust record could not be read; absent when it is fine or never existed. */
+  /** True when an earlier build's trust.json inside the workspace was found; it is not honored. */
+  readonly trustLegacyIgnored: boolean;
+  /** Why the workspace register could not be read; absent when it is fine or never existed. */
   readonly trustFault?: string | undefined;
   /** Coverage verdict from the shared workspace registry. */
   readonly registrationStatus: 'covered' | 'declined' | 'unknown';
@@ -194,7 +195,7 @@ function renderWorkspaceSection(workspace: CliWorkspaceStatus | null): string[] 
   if (!workspace) return [];
   return [
     'Workspace:',
-    `  trust: ${workspace.trustLevel}${workspace.trustGrandfathered ? ' (grandfathered)' : ''}`,
+    `  trust: ${workspace.trustLevel}${workspace.trustLegacyIgnored ? ' (a trust.json inside this workspace is not honored; choose a level with /trust workspace)' : ''}`,
     ...(workspace.trustFault ? [`  trust record: damaged, autonomous work stays restricted until a level is chosen (${workspace.trustFault})`] : []),
     `  registration: ${registrationLine(workspace)}`,
     `  root: ${workspace.registrationRoot}`,

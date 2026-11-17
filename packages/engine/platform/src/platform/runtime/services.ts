@@ -149,9 +149,9 @@ type WorkspaceTrustConstraint = Pick<WorkspaceTrustManager, 'prepareAutonomousCo
 /**
  * Whether this product gates asks on a per-workspace trust decision.
  * - `none`: no separate workspace policy; external and autonomous execution decline.
- * - `surface`: one trust owner at `<workingDir>/.goodvibes/<surface root>/trust.json`, in front of every ask the
- *   graph raises. An undecided workspace asks once through `requestTrustDecision`, by default an ordinary
- *   approval record on this graph's broker that any attached surface can answer. `resolveFor` names the trust
+ * - `surface`: one trust owner for the working directory (its decision kept in the user's workspace register), in
+ *   front of every ask the graph raises. An undecided workspace asks once through `requestTrustDecision`, by default
+ *   an ordinary approval record on this graph's broker that any attached surface can answer. `resolveFor` names the trust
  *   owner for another directory an autonomous protocol process runs in.
  */
 export type WorkspaceTrustChoice =

@@ -18,9 +18,9 @@ import { nativeHostedConversationOwner } from './native-hosted-conversation-comp
  * approval record for whichever surface is attached to answer, a trusted one is
  * exactly as permissive as before, and a restricted one refuses non-read
  * categories without asking. What this file adds is PER-WORKSPACE scope: the
- * daemon's own gate reads `<its cwd>/.goodvibes/<surface>/trust.json`, and a
- * session hosted in another directory has to be gated by that directory's
- * decision, not by the daemon's.
+ * daemon's own gate reads its own directory's decision in the user's workspace
+ * register, and a session hosted in another directory has to be gated by that
+ * directory's decision, not by the daemon's.
  *
  * Everything else in a floor comes from `createClientRuntimeServices`, the
  * same composition a terminal runs, so a hosted turn's tools, hooks, plugins
@@ -68,7 +68,7 @@ import {
   hostedAgentAsker,
 } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 import { CONVERSATIONAL_DIAGNOSIS_SECTION, askingQuestions } from '@goodvibes-jev/engine/platform/platform/agents';
-import { createSessionSurface, createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser, type ApprovalRaise } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { createSessionSurface, createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser, WORKSPACE_TRUST_ASK_TIMEOUT_MS, type ApprovalRaise } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import type { RuntimeServices } from './runtime-services-types.js';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -117,10 +117,9 @@ function hostedExecPosture(): HostedSessionExecPosture {
  */
 export function createHostedSessionOptions(services: RuntimeServices): DaemonHostedSessionsOptions {
   /**
-   * One trust manager per workspace, cached: `load()` is idempotent but a
-   * manager per floor keeps the decision file and the in-memory answer for a
-   * workspace in one place, so two sessions in one directory cannot end up
-   * having been asked the trust question twice.
+   * One trust manager per workspace, cached: the manager owns the workspace's
+   * in-memory answer and its one open trust question, so two sessions in one
+   * directory share one question instead of each asking.
    */
   const trustFor = createDaemonWorkspaceTrustResolver(services);
 
@@ -134,6 +133,7 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
       // of scoping it here: a daemon hosting three sessions in three
       // directories asks three separate questions, each answerable on its own.
       createWorkspaceTrustDecisionAsk({ broker: services.approvalBroker, workingDirectory: workspaceRoot }),
+      { waitMs: WORKSPACE_TRUST_ASK_TIMEOUT_MS },
     );
   };
 

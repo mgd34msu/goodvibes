@@ -92,7 +92,7 @@ import {
 } from './permissions/permission-composition.js';
 import { resolveCanonicalMemoryDbPath } from '../state/canonical-memory.js';
 import { WorkspaceTrustManager } from './workspace-trust.js';
-import { createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser } from './workspace-trust-approval.js';
+import { createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser, WORKSPACE_TRUST_ASK_TIMEOUT_MS } from './workspace-trust-approval.js';
 import { FeatureAnnouncementStore, featureAnnouncementsPath } from './feature-announcements.js';
 import { DeterministicReplayEngine } from '../core/deterministic-replay.js';
 import { buildPricingSeams } from './cost/pricing-seams.js';
@@ -581,6 +581,8 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
       workspaceTrustManager,
       raiseApproval,
       trustChoice.requestTrustDecision ?? createWorkspaceTrustDecisionAsk({ broker: approvalBroker, workingDirectory }),
+      // A product's own question has a person at its screen; the broker's question may have nobody attached.
+      trustChoice.requestTrustDecision ? {} : { waitMs: WORKSPACE_TRUST_ASK_TIMEOUT_MS },
     )
     : raiseApproval;
   const workspaceTrustFor = trustChoice?.resolveFor && workspaceTrustManager ? trustChoice.resolveFor(workspaceTrustManager) : undefined;

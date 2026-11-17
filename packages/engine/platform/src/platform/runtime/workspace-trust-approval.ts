@@ -4,9 +4,9 @@
  *
  * The terminal app composes the trust gate at the permission machinery's final
  * ask layer and raises the question as a modal on its own screen. The daemon
- * has the same gate, `trustGatedAsk` next door, reading the same
- * `<cwd>/.goodvibes/<surface>/trust.json` the terminal app writes, and no
- * screen to raise anything on. Before this module it therefore
+ * has the same gate, `trustGatedAsk` next door, reading the same decision in
+ * the user's workspace register the terminal app writes, and no screen to
+ * raise anything on. Before this module it therefore
  * did neither: the gate was constructed, never loaded, never consulted, and no
  * hosted run passed through it.
  *
@@ -30,17 +30,18 @@
  *
  * What the daemon does NOT do here is decide by default. An untrusted
  * workspace's hosted run neither runs as if trusted nor fails as if refused: it
- * asks. If the ask cannot be answered, nothing attached, or the broker itself
- * failed, the workspace stays undecided and this run is refused, with the
- * reason in the log rather than in a silence. A refusal that records nothing is
- * the failure mode this whole seam exists to remove.
+ * asks, once. The question stays open until someone answers it (or the daemon
+ * restarts, which cancels it); a request waits for it at most
+ * WORKSPACE_TRUST_ASK_TIMEOUT_MS after it was raised, and after that every
+ * non-read request is refused at once, saying the question is still open,
+ * while reads keep working. One question per workspace, never one per attempt.
  */
 import { randomUUID } from 'node:crypto';
 import { logger } from '../utils/logger.js';
 import { assertPermissionActive, awaitPermission } from '../permissions/cancellation.js';
 import type { PermissionPromptDecision, PermissionPromptRequest } from '../permissions/prompt.js';
 import type { ApprovalBroker } from '../control-plane/approval-broker.js';
-import { trustGatedAsk, type WorkspaceTrustLevel, type WorkspaceTrustManager } from './workspace-trust.js';
+import { trustGatedAsk, type TrustGateOptions, type WorkspaceTrustLevel, type WorkspaceTrustManager } from './workspace-trust.js';
 
 /**
  * The extra fields a raise carries beside the request itself, the attribution
@@ -62,13 +63,14 @@ export type ApprovalRaise = (
 ) => Promise<PermissionPromptDecision>;
 
 /**
- * How long a raised trust question stays open before it expires.
+ * How long requests wait on the open trust question, counted from when it was
+ * raised. The question itself stays open after this; only the waiting stops.
  *
  * A hosted run blocked on a question nobody is there to answer is a run that
  * never finishes, and an unattended daemon is the normal case, not the edge
  * one. Ten minutes is long enough for someone who is at a surface to see the
- * ask and answer it, and short enough that an unattended run fails with a
- * reason instead of hanging until the process restarts.
+ * ask and answer it, and short enough that an unattended run gets a reason
+ * instead of hanging; later attempts get that reason at once.
  */
 export const WORKSPACE_TRUST_ASK_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -86,6 +88,7 @@ export interface WorkspaceTrustDecisionAskDeps {
   readonly broker: Pick<ApprovalBroker, 'raiseApproval' | 'getApproval'>;
   /** The workspace the question is about, it names the directory being trusted. */
   readonly workingDirectory: string;
+  /** An expiry for the question itself; absent, it stays open until answered or the daemon restarts. */
   readonly timeoutMs?: number | undefined;
 }
 
@@ -123,7 +126,7 @@ export function createWorkspaceTrustDecisionAsk(
     try {
       const raised = await deps.broker.raiseApproval({
         request,
-        timeoutMs: deps.timeoutMs ?? WORKSPACE_TRUST_ASK_TIMEOUT_MS,
+        ...(deps.timeoutMs !== undefined ? { timeoutMs: deps.timeoutMs } : {}),
         metadata: { source: 'workspace-trust', workspace: deps.workingDirectory },
       });
       const { id, callId, createdAt } = raised.approval;
@@ -143,9 +146,9 @@ export function createWorkspaceTrustDecisionAsk(
       // remembered-rule sweep can permanently decide workspace trust.
       throw new WorkspaceTrustDecisionUnsettledError();
     } catch (error) {
-      // Nothing attached, or the broker failed. Say so and leave the workspace
-      // undecided, the next run asks again rather than inheriting a decision
-      // nobody made.
+      // Cancelled, or the broker failed. Say so and leave the workspace
+      // undecided, the next request asks again rather than inheriting a
+      // decision nobody made.
       logger.warn('Workspace trust question could not be answered; this run is refused and the workspace stays undecided', {
         workspace: deps.workingDirectory,
         error: error instanceof Error ? error.message : String(error),
@@ -157,8 +160,8 @@ export function createWorkspaceTrustDecisionAsk(
 
 /** The slice of the trust manager this seam uses. */
 export type TrustGateManager =
-  & Pick<WorkspaceTrustManager, 'isCategoryAllowed' | 'isDecided' | 'setLevel'>
-  & { load(): Promise<void> };
+  & Pick<WorkspaceTrustManager, 'isCategoryAllowed' | 'isDecided' | 'trustQuestion'>
+  & { readonly workspaceRoot?: string; load(): Promise<void> };
 
 /**
  * Wrap an approval raiser with the workspace trust gate.
@@ -178,6 +181,7 @@ export function trustGatedApprovalRaiser(
   manager: TrustGateManager,
   raise: ApprovalRaise,
   requestTrustDecision: () => Promise<WorkspaceTrustLevel>,
+  options: TrustGateOptions = {},
 ): ApprovalRaise {
   const extrasByRequest = new WeakMap<PermissionPromptRequest, ApprovalRaiseExtras>();
   const gated = trustGatedAsk(
@@ -188,6 +192,7 @@ export function trustGatedApprovalRaiser(
       return raise({ request, ...extras });
     },
     requestTrustDecision,
+    options,
   );
   return async (input) => {
     const signal = input.signal;

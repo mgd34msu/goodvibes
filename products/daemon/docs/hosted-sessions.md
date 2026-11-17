@@ -6,7 +6,14 @@ client leaves depends on its detach policy.
 
 The daemon composes each session with tools, model providers, and a workspace
 runtime. Workspace trust applies to the session's workspace, rather than the
-daemon's working directory. Hosted conversational commands require containment
+daemon's working directory. The decision is kept in your own state
+(`~/.goodvibes/shared/workspace-registrations.json`, by the directory's real
+path), never in the workspace, so a project cannot mark itself trusted. An
+undecided workspace raises one trust question, which stays open until it is
+answered from an attached surface. Reads run meanwhile; a write, command or
+delegation waits for the answer at most ten minutes after the question was
+raised, and after that is refused at once, saying the question is still open.
+Hosted conversational commands require containment
 and cannot fall back to uncontained host execution or control the owner's
 terminal. Jev admission and current permission constraints still govern tool
 actions. An attachment or a `survive` policy grants no additional tool authority.

@@ -43,4 +43,5 @@ export {
   type WorkspaceGitMetadata,
   type ResolveWorkspaceInput,
   type WorkspaceResolution,
+  type WorkspaceTrustRecord,
 } from './types.js';

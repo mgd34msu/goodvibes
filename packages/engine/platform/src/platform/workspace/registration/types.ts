@@ -104,6 +104,19 @@ export interface DeclinedWorkspaceRecord {
   readonly declinedAt: string;
 }
 
+/**
+ * The owner's trust decision for one directory, kept in the user's own register
+ * and never in the directory it judges: a checkout cannot vouch for itself.
+ * Exact-path, not subtree: each directory is decided on its own.
+ */
+export interface WorkspaceTrustRecord {
+  /** Canonical (real) absolute path of the directory decided. */
+  readonly root: string;
+  readonly level: 'trusted' | 'restricted';
+  /** ISO-8601 timestamp of the decision. */
+  readonly decidedAt: string;
+}
+
 /** Public coverage snapshot. Registry generations remain store-owned. */
 export interface WorkspaceRegistrySnapshot {
   readonly workspaces: readonly RegisteredWorkspaceRecord[];

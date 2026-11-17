@@ -53,6 +53,7 @@ import {
   type WorkspaceGitMetadata,
   type WorkspaceRegistrySnapshot,
   type WorkspaceResolution,
+  type WorkspaceTrustRecord,
 } from './types.js';
 import { probeWorktreeLinkAsync } from './worktree-link.js';
 
@@ -60,6 +61,8 @@ interface PersistedRegistry extends Record<string, unknown> {
   version: 1 | 2;
   workspaces: RegisteredWorkspaceRecord[];
   declines: DeclinedWorkspaceRecord[];
+  /** Workspace trust decisions (see WorkspaceTrustRecord); absent until the first one. */
+  trust?: WorkspaceTrustRecord[];
   registryId?: string;
   scopeGeneration?: number;
 }
@@ -119,8 +122,25 @@ export function normalizeLegacyRegisterRows(workspaces: unknown, declines: unkno
   return { workspaces: dedupe(rows, (row) => row.registeredAt), declines: dedupe(declined, (row) => row.declinedAt) };
 }
 
+/**
+ * Trust rows as read: a malformed row is dropped (that directory is simply
+ * undecided again) rather than making the whole register unreadable, and a
+ * repeated root keeps the later decision.
+ */
+function normalizeTrustRows(rows: unknown): WorkspaceTrustRecord[] | undefined {
+  if (!Array.isArray(rows)) return undefined;
+  const kept: WorkspaceTrustRecord[] = [];
+  for (const row of rows as unknown[]) {
+    if (!isObject(row) || typeof row.root !== 'string' || row.root.trim() === '') continue;
+    if (row.level !== 'trusted' && row.level !== 'restricted') continue;
+    kept.push({ root: normalizeWorkspaceRoot(row.root.trim()), level: row.level, decidedAt: timestamp(row.decidedAt) });
+  }
+  return dedupe(kept, (row) => row.decidedAt);
+}
+
 function validate(snapshot: PersistedRegistry | null): PersistedRegistry {
   if (!snapshot) return { version: 1, workspaces: [], declines: [] };
+  const trust = normalizeTrustRows(snapshot.trust);
   if ((snapshot.version !== 1 && snapshot.version !== 2) || !Array.isArray(snapshot.workspaces)) {
     throw new Error('Workspace registration store snapshot is invalid.');
   }
@@ -158,9 +178,10 @@ function validate(snapshot: PersistedRegistry | null): PersistedRegistry {
     if (badDecline !== undefined) {
       throw new Error(`Workspace decline is invalid${badDecline && typeof badDecline.root === 'string' ? ` for ${badDecline.root}` : ''}.`);
     }
-    return snapshot;
+    const { trust: _raw, ...rest } = snapshot;
+    return { ...rest, ...(trust ? { trust } : {}) };
   }
-  return { version: 1, ...normalizeLegacyRegisterRows(snapshot.workspaces, snapshot.declines) };
+  return { version: 1, ...normalizeLegacyRegisterRows(snapshot.workspaces, snapshot.declines), ...(trust ? { trust } : {}) };
 }
 
 /** One synchronous read of the register file, judged by the store's own rules. */
@@ -172,6 +193,7 @@ export type WorkspaceRegisterRead =
     /** v1 rows come normalized (see normalizeLegacyRegisterRows). */
     readonly workspaces: readonly RegisteredWorkspaceRecord[];
     readonly declines: readonly DeclinedWorkspaceRecord[];
+    readonly trust: readonly WorkspaceTrustRecord[];
   }
   | { readonly state: 'unreadable'; readonly reason: string };
 
@@ -192,7 +214,7 @@ export function readWorkspaceRegisterSync(path: string): WorkspaceRegisterRead {
   try {
     // `validate` is the runtime check of this shape; anything else throws there.
     const state = validate(JSON.parse(bytes) as PersistedRegistry | null);
-    return { state: 'ok', version: state.version, workspaces: state.workspaces, declines: state.declines };
+    return { state: 'ok', version: state.version, workspaces: state.workspaces, declines: state.declines, trust: state.trust ?? [] };
   } catch (error) {
     return { state: 'unreadable', reason: error instanceof Error ? error.message : String(error) };
   }
@@ -572,6 +594,28 @@ export class WorkspaceRegistrationStore {
       const record: DeclinedWorkspaceRecord = { root: target, declinedAt: new Date().toISOString() };
       await this.persist({ ...advance(state), declines: [...state.declines, record] });
       return { root: target, alreadyDeclined: false };
+    });
+  }
+
+  /** The trust decision recorded for exactly this directory, or null when there is none. */
+  async trustDecision(root: string): Promise<WorkspaceTrustRecord | null> {
+    const target = normalizeWorkspaceRoot(root);
+    const state = await this.read();
+    return state.trust?.find((row) => row.root === target) ?? null;
+  }
+
+  /**
+   * Record the owner's trust decision for exactly this directory, replacing an
+   * earlier one. Registration, declines and native scopes are untouched (no
+   * generation moves), so a trust change never stales a native scope.
+   */
+  async setTrust(root: string, level: WorkspaceTrustRecord['level']): Promise<WorkspaceTrustRecord> {
+    const target = normalizeWorkspaceRoot(root);
+    return this.run(async () => {
+      const state = await this.readForMutation();
+      const record: WorkspaceTrustRecord = { root: target, level, decidedAt: new Date().toISOString() };
+      await this.persist({ ...state, trust: [...(state.trust ?? []).filter((row) => row.root !== target), record] });
+      return record;
     });
   }
 

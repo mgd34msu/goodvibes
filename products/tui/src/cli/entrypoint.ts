@@ -190,14 +190,14 @@ export async function prepareShellCliRuntime(
       workingDirectory: bootstrapWorkingDir,
       homeDirectory: bootstrapHomeDirectory,
     });
-    // Read-only workspace posture for the report: the trust reader never
-    // persists (no grandfathering side effect), and registration resolve() is
-    // read-only, so `status`/`doctor` observe state without mutating it.
+    // Read-only workspace posture for the report: the trust reader and
+    // registration resolve() never write, so `status`/`doctor` observe state
+    // without mutating it.
     const trustView = readPersistedWorkspaceTrust(shellPaths, GOODVIBES_TUI_SURFACE_ROOT);
     const registrationEvaluation = await new WorkspaceRegistrationManager({ shellPaths }).evaluate();
     const workspaceStatus: CliWorkspaceStatus = {
       trustLevel: trustView.level,
-      trustGrandfathered: trustView.grandfathered,
+      trustLegacyIgnored: trustView.legacyIgnored,
       trustFault: trustView.fault,
       registrationStatus: registrationEvaluation.status,
       registrationRoot: registrationEvaluation.root,

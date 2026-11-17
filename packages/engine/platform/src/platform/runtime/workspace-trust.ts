@@ -18,80 +18,102 @@ import { assertPermissionActive, awaitPermission } from '../permissions/cancella
  * composes with, and cannot drift from, the existing PermissionManager layer
  * chain.
  *
- * Trust is persisted per-workspace in <cwd>/.goodvibes/<surfaceRoot>/trust.json. There
- * is no more grandfathering: a workspace that already carries prior GoodVibes
- * runtime state gets no special treatment (that side-effect-based shortcut
- * used to paper over the fact that the first session's write attempts were
- * silently denied without ever recording a real decision, now that the first
- * attempt properly raises the question and persists the answer, the shortcut
- * is unnecessary and would only hide a decision the user should actually see
- * once, even on an upgrade).
+ * Trust is the owner's decision about a directory, so it is kept in the
+ * owner's own state, never in the directory it judges: one row per directory
+ * (keyed by its real path) in the user's workspace register
+ * (~/.goodvibes/shared/workspace-registrations.json), shared by every product.
+ * A `trust.json` found inside a project, which earlier builds wrote there, is
+ * not honored: a checkout could ship one saying "trusted". Such a directory
+ * reads as undecided and is asked once more.
  */
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
-import { JsonFileStore } from '../state/index.js';
+import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import {
+  openWorkspaceRegistrationStore,
+  readWorkspaceRegisterSync,
+  sharedWorkspaceRegisterPath,
+  type WorkspaceRegistrationStore,
+} from '../workspace/index.js';
+import { normalizeWorkspaceRoot } from '../workspace/registration/resolution.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { PermissionCategory } from '../permissions/index.js';
 import type { PermissionRequestHandler } from '../permissions/index.js';
+
+/** How long a request waits on the open trust question before it is refused. */
+export interface TrustGateOptions {
+  /**
+   * Absent: wait until the question is answered (a person is at this screen).
+   * Set: a request waits at most this long after the question was raised; once
+   * that has passed, every later non-read request is refused at once while the
+   * one question stays open for whoever attaches next.
+   */
+  readonly waitMs?: number | undefined;
+}
 
 /**
  * Wrap the permission machinery's final ask callback with the workspace trust
  * gate. This runs inside PermissionManager's own layer chain (it IS the ask
  * layer), so it composes with, and cannot drift from, the real machinery.
  *
+ * - Read requests always pass to `ask`, also while the trust question is open.
  * - Trusted workspace: every category passes through to `ask` unchanged.
  * - Restricted workspace with an EXPLICIT prior decision: non-read categories
- *   are denied outright, same as before, that IS what "restricted" means
- *   once the user has actually chosen it.
- * - Undecided workspace (no decision yet, ever): the first non-read request
- *   raises `requestTrustDecision()`, one modal, persisted via `setLevel`,
- *   and, if the answer is 'trusted', the ORIGINAL request is forwarded to
- *   `ask` so the very thing the user just approved actually happens instead
- *   of failing anyway. Concurrent requests that arrive before the first
- *   decision resolves await the same in-flight prompt rather than opening a
- *   second one.
+ *   are denied outright, that IS what "restricted" means.
+ * - Undecided workspace: the first non-read request raises the workspace's one
+ *   trust question (owned by the manager, so every gate over the same workspace
+ *   shares it), and, if the answer is 'trusted', the ORIGINAL request is
+ *   forwarded to `ask` so the very thing the user just approved happens.
+ *   Requests that arrive while the question is open wait on the same question
+ *   (bounded by `options.waitMs` when set) rather than opening a second one.
  */
 export function trustGatedAsk(
-  manager: Pick<WorkspaceTrustManager, 'isCategoryAllowed' | 'isDecided' | 'setLevel'>,
+  manager: Pick<WorkspaceTrustManager, 'isCategoryAllowed' | 'isDecided' | 'trustQuestion'> & { readonly workspaceRoot?: string },
   ask: PermissionRequestHandler,
   requestTrustDecision: () => Promise<WorkspaceTrustLevel>,
+  options: TrustGateOptions = {},
 ): PermissionRequestHandler {
-  // The prompt and the save are one shared step, so N concurrent requests
-  // cause one persisted write, and none of them is let through on trust that
-  // is still being saved.
-  let pendingDecision: Promise<WorkspaceTrustLevel> | null = null;
-  return async (request, options) => {
-    assertPermissionActive(options?.signal);
-    if (pendingDecision === null) {
-      if (manager.isCategoryAllowed(request.category)) return ask(request, options);
-      if (manager.isDecided()) return { approved: false };
-      pendingDecision = requestTrustDecision()
-        .then(async (level) => {
-          await manager.setLevel(level);
-          return level;
-        })
-        .finally(() => {
-          pendingDecision = null;
-        });
+  return async (request, execution) => {
+    const signal = execution?.signal;
+    assertPermissionActive(signal);
+    if (manager.isCategoryAllowed(request.category)) return ask(request, execution);
+    if (manager.isDecided()) return { approved: false };
+    const question = manager.trustQuestion(requestTrustDecision);
+    const where = manager.workspaceRoot ? ` for ${manager.workspaceRoot}` : '';
+    const unanswered = {
+      approved: false,
+      reason: `Workspace trust${where} is undecided and the trust question is still open with nobody answering it. `
+        + 'Reads keep working; writes, commands and delegation are refused until it is answered. '
+        + 'Answer the workspace trust request from an attached surface (the approvals list), then retry.',
+    } as const;
+    if (options.waitMs === undefined) {
+      await awaitPermission(() => question.answer, signal);
+    } else {
+      const remaining = question.openedAt + options.waitMs - Date.now();
+      if (remaining <= 0) return unanswered;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const answered = await awaitPermission(() => Promise.race([
+        question.answer.then(() => true),
+        new Promise<false>((resolveWait) => { timer = setTimeout(() => resolveWait(false), remaining); }),
+      ]), signal).finally(() => clearTimeout(timer));
+      if (!answered) return unanswered;
     }
-    const decision = pendingDecision;
-    await awaitPermission(() => decision, options?.signal);
-    assertPermissionActive(options?.signal);
-    if (manager.isCategoryAllowed(request.category)) return ask(request, options);
+    assertPermissionActive(signal);
+    if (manager.isCategoryAllowed(request.category)) return ask(request, execution);
     return { approved: false };
   };
 }
 
 export type WorkspaceTrustLevel = 'trusted' | 'restricted';
 
-interface PersistedWorkspaceTrust {
-  level: WorkspaceTrustLevel;
-  decidedAt: string;
-  grandfathered?: boolean;
-}
+/** The file earlier builds kept inside the workspace; read only to say it is no longer honored. */
+const LEGACY_TRUST_FILE = 'trust.json';
 
-const TRUST_FILE = 'trust.json';
+/** The directory's real path, or its absolute path when it does not exist (yet). */
+function canonicalWorkspaceRoot(workingDirectory: string): string {
+  try { return normalizeWorkspaceRoot(realpathSync(workingDirectory)); }
+  catch { return normalizeWorkspaceRoot(resolve(workingDirectory)); }
+}
 
 /**
  * detectPriorWorkspaceState, true if <workingDirectory>/.goodvibes already
@@ -131,17 +153,25 @@ export function detectPriorWorkspaceState(workingDirectory: string, surfaceRoot:
 }
 
 export interface WorkspaceTrustPaths {
-  readonly projectGoodVibesRoot: string;
+  /** The workspace being judged; its real path keys the decision. */
+  readonly workingDirectory: string;
   resolveProjectPath(...segments: string[]): string;
+  /** The user's own state (`~/.goodvibes/...`), where the decision is kept. */
+  resolveUserPath(...segments: string[]): string;
 }
 
 /** Read-only view of the persisted trust decision, for status/doctor reporting. */
 export interface PersistedWorkspaceTrustView {
   /** 'trusted' | 'restricted' when a decision exists; 'undecided' when none is persisted yet. */
   readonly level: WorkspaceTrustLevel | 'undecided';
-  readonly grandfathered: boolean;
   /**
-   * Present when trust.json exists but could not be read. The level then reads
+   * True when the directory has no decision in the register but carries a
+   * `trust.json` an earlier build kept inside it, which is not honored: the
+   * owner chooses again.
+   */
+  readonly legacyIgnored: boolean;
+  /**
+   * Present when the register could not be read. The level then reads
    * 'undecided' because nothing readable is recorded, which is not the same as
    * nobody ever deciding: a report should say the record is damaged.
    */
@@ -149,86 +179,129 @@ export interface PersistedWorkspaceTrustView {
 }
 
 /**
- * readPersistedWorkspaceTrust, read <cwd>/.goodvibes/<surfaceRoot>/trust.json WITHOUT the
- * side effects of WorkspaceTrustManager.load() (which grandfathers and persists).
- * Reporting surfaces (`status`/`doctor`) must never mutate trust state, so they
- * use this pure reader instead of constructing a manager.
+ * readPersistedWorkspaceTrust, read this directory's decision from the user's
+ * workspace register without loading a manager. Reporting surfaces
+ * (`status`/`doctor`) use it; it never writes.
  */
 export function readPersistedWorkspaceTrust(
   paths: WorkspaceTrustPaths,
   surfaceRoot: string,
 ): PersistedWorkspaceTrustView {
-  const file = paths.resolveProjectPath(surfaceRoot, TRUST_FILE);
-  try {
-    if (!existsSync(file)) return { level: 'undecided', grandfathered: false };
-    const parsed = JSON.parse(readFileSync(file, 'utf-8')) as Partial<PersistedWorkspaceTrust>;
-    if (parsed.level === 'trusted' || parsed.level === 'restricted') {
-      return { level: parsed.level, grandfathered: parsed.grandfathered ?? false };
-    }
-  } catch (error) {
-    // Unreadable/corrupt: report undecided rather than crash the report, and say why.
-    return { level: 'undecided', grandfathered: false, fault: `${file} could not be read (${summarizeError(error)})` };
+  const legacyIgnored = (): boolean => existsSync(paths.resolveProjectPath(surfaceRoot, LEGACY_TRUST_FILE));
+  const registerPath = sharedWorkspaceRegisterPath(paths);
+  const read = readWorkspaceRegisterSync(registerPath);
+  if (read.state === 'unreadable') {
+    return { level: 'undecided', legacyIgnored: false, fault: `the workspace register ${registerPath} could not be read (${read.reason})` };
   }
-  return { level: 'undecided', grandfathered: false };
+  const root = canonicalWorkspaceRoot(paths.workingDirectory);
+  const row = read.state === 'ok' ? read.trust.find((entry) => entry.root === root) : undefined;
+  return row ? { level: row.level, legacyIgnored: false } : { level: 'undecided', legacyIgnored: legacyIgnored() };
 }
 
 export interface WorkspaceTrustManagerOptions {
   readonly shellPaths: WorkspaceTrustPaths;
-  /** The owning product's storage scope, the `<surfaceRoot>` segment trust.json sits under. */
+  /** The owning product's storage scope; only used to notice a `trust.json` earlier builds kept in the workspace. */
   readonly surfaceRoot: string;
+  /** Inject a register store (tests); defaults to the process's store for the user's shared register. */
+  readonly store?: WorkspaceRegistrationStore | undefined;
+}
+
+/** The workspace's one open trust question: raised once, shared by every gate over this workspace. */
+export interface WorkspaceTrustQuestion {
+  /** Settles with the decision once answered and recorded; rejects when the question could not be answered. */
+  readonly answer: Promise<WorkspaceTrustLevel>;
+  /** Epoch ms the question was raised. */
+  readonly openedAt: number;
 }
 
 export class WorkspaceTrustManager {
   private level: WorkspaceTrustLevel | null = null; // null = undecided (new place)
-  private grandfathered = false;
   private loaded = false;
   private revision = 0;
   private decisionRevision = 0;
   private pendingDecisions = 0;
-  /** Saves of a not-yet-trusted workspace becoming trusted that have not finished. */
-  private unsavedTrust = 0;
-  /** Why trust.json could not be read, or null. A damaged record is not a missing one. */
+  /** Why the register could not be read, or null. A damaged record is not a missing one. */
   private loadFault: string | null = null;
-  private readonly file: string;
-  private readonly store: JsonFileStore<PersistedWorkspaceTrust>;
+  /** True when an earlier build's in-workspace trust.json was found and not honored. */
+  private legacyIgnored = false;
+  private question: WorkspaceTrustQuestion | null = null;
+  /** The directory judged, as its real path: the key of the decision. */
+  readonly workspaceRoot: string;
+  private readonly legacyFile: string;
+  private readonly registerPath: string;
+  private readonly store: WorkspaceRegistrationStore;
 
   constructor(options: WorkspaceTrustManagerOptions) {
-    this.file = options.shellPaths.resolveProjectPath(options.surfaceRoot, TRUST_FILE);
-    this.store = new JsonFileStore<PersistedWorkspaceTrust>(this.file);
+    const { shellPaths } = options;
+    this.workspaceRoot = canonicalWorkspaceRoot(shellPaths.workingDirectory);
+    this.legacyFile = shellPaths.resolveProjectPath(options.surfaceRoot, LEGACY_TRUST_FILE);
+    this.registerPath = sharedWorkspaceRegisterPath(shellPaths);
+    const daemonStateDir = shellPaths.resolveUserPath();
+    this.store = options.store ?? openWorkspaceRegistrationStore({
+      path: this.registerPath,
+      homeDir: dirname(daemonStateDir),
+      daemonStateDir,
+    });
   }
 
   /**
-   * Load the persisted decision, if one exists. No grandfathering: a
-   * workspace with no persisted decision stays undecided (the gate treats it
-   * as restricted, and the first non-read tool request raises the trust
-   * question via `trustGatedAsk`'s `requestTrustDecision` callback), even
-   * one that already carries prior GoodVibes runtime state. `grandfathered`
-   * on an already-persisted decision is read-only history from before this
-   * fix (status/doctor still report it honestly); nothing new is ever
-   * grandfathered.
+   * Load this directory's decision from the user's register, if one exists. A
+   * directory with no decision stays undecided (the gate treats it as
+   * restricted, and the first non-read tool request raises the trust
+   * question); a `trust.json` inside the directory is noted, never honored.
    */
   async load(): Promise<void> {
     if (this.loaded) return;
     const revision = this.revision;
     let fault: string | null = null;
-    const persisted = await this.store.load().catch((error: unknown) => {
-      fault = `${this.file} could not be read (${summarizeError(error)})`;
+    const persisted = await this.store.trustDecision(this.workspaceRoot).catch((error: unknown) => {
+      fault = `the workspace register ${this.registerPath} could not be read (${summarizeError(error)})`;
       return null;
     });
     if (this.loaded || this.revision !== revision) return;
     if (fault !== null) {
-      // The file exists but is unusable, so a decision may have been recorded
-      // (possibly a restriction). Autonomous callers stay restricted until the
-      // owner decides again; a person at the keyboard is simply asked.
+      // The register exists but is unusable, so a decision may have been
+      // recorded (possibly a restriction). Autonomous callers stay restricted
+      // until the owner decides again; a person at the keyboard is simply asked.
       this.loadFault = fault;
-      logger.warn('workspace trust: the saved trust decision could not be read; autonomous actions stay restricted until it is replaced', { file: this.file, fault });
+      logger.warn('workspace trust: the saved trust decision could not be read; autonomous actions stay restricted until it is replaced', { file: this.registerPath, fault });
     }
-    if (persisted && (persisted.level === 'trusted' || persisted.level === 'restricted')) {
+    if (persisted) {
       this.level = persisted.level;
-      this.grandfathered = persisted.grandfathered ?? false;
+    } else if (fault === null && existsSync(this.legacyFile)) {
+      this.legacyIgnored = true;
+      logger.info('workspace trust: a trust decision stored inside the workspace is not honored; the owner is asked once more', { file: this.legacyFile });
     }
     this.loaded = true;
     this.revision++;
+  }
+
+  /**
+   * The workspace's one trust question: the open one, or a new one raised with
+   * `requestTrustDecision`. The answer is recorded before the question settles,
+   * so every waiter sees the decision in effect. A question that could not be
+   * answered (cancelled, nobody to ask) closes, and the next request asks again.
+   */
+  trustQuestion(requestTrustDecision: () => Promise<WorkspaceTrustLevel>): WorkspaceTrustQuestion {
+    if (this.question) return this.question;
+    const answer = (async () => {
+      const level = await requestTrustDecision();
+      const saved = await this.setLevel(level);
+      if (!saved.saved) {
+        logger.warn('workspace trust: the answer applies to this session but could not be saved, so it will be asked again next time', { workspace: this.workspaceRoot, fault: saved.fault });
+      }
+      return level;
+    })().finally(() => { this.question = null; });
+    // A waiter may have gone; the question's own failure is reported to the ones still waiting.
+    answer.catch(() => undefined);
+    const question: WorkspaceTrustQuestion = { answer, openedAt: Date.now() };
+    this.question = question;
+    return question;
+  }
+
+  /** True when the directory carries an earlier build's `trust.json`, which is not honored. */
+  hasIgnoredLegacyDecision(): boolean {
+    return this.legacyIgnored;
   }
 
   /** A per-action constraint, never a saved grant for an undecided workspace. */
@@ -265,40 +338,30 @@ export class WorkspaceTrustManager {
     return this.level ?? 'restricted';
   }
 
-  /** Trust still being saved does not count: it is withdrawn if the save fails. */
   isTrusted(): boolean {
-    return this.level === 'trusted' && this.unsavedTrust === 0;
+    return this.level === 'trusted';
   }
 
-  wasGrandfathered(): boolean {
-    return this.grandfathered;
-  }
-
-  async setLevel(level: WorkspaceTrustLevel): Promise<void> {
-    const previous = { level: this.level, grandfathered: this.grandfathered, loaded: this.loaded };
-    const decision = ++this.decisionRevision;
+  /**
+   * Record the owner's decision. It takes effect at once for this process; the
+   * save to the user's register only spares asking again next time, so a save
+   * that fails is reported (`saved: false`) rather than withdrawing the answer.
+   */
+  async setLevel(level: WorkspaceTrustLevel): Promise<{ readonly saved: boolean; readonly fault?: string | undefined }> {
+    ++this.decisionRevision;
     this.revision++;
     this.level = level;
-    this.grandfathered = false;
     this.loaded = true;
+    this.legacyIgnored = false;
     this.pendingDecisions++;
-    const grantsTrust = level === 'trusted' && previous.level !== 'trusted';
-    if (grantsTrust) this.unsavedTrust++;
-    try { await this.persist(); this.loadFault = null; }
-    catch (error) {
-      // Trust that was not saved is withdrawn rather than kept for the session
-      // behind an error; a restriction that was not saved stays in effect.
-      if (level === 'trusted' && this.decisionRevision === decision) {
-        this.revision++;
-        this.level = previous.level;
-        this.grandfathered = previous.grandfathered;
-        this.loaded = previous.loaded;
-      }
-      throw error;
-    }
-    finally {
+    try {
+      await this.store.setTrust(this.workspaceRoot, level);
+      this.loadFault = null;
+      return { saved: true };
+    } catch (error) {
+      return { saved: false, fault: `the workspace register ${this.registerPath} could not be written (${summarizeError(error)})` };
+    } finally {
       this.pendingDecisions--;
-      if (grantsTrust) this.unsavedTrust--;
     }
   }
 
@@ -311,14 +374,5 @@ export class WorkspaceTrustManager {
   isCategoryAllowed(category: PermissionCategory): boolean {
     if (this.isTrusted()) return true;
     return category === 'read';
-  }
-
-  private async persist(): Promise<void> {
-    if (this.level === null) return;
-    await this.store.save({
-      level: this.level,
-      decidedAt: new Date().toISOString(),
-      grandfathered: this.grandfathered,
-    });
   }
 }

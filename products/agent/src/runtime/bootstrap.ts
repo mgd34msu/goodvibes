@@ -36,6 +36,7 @@ import type { Compositor } from '../renderer/compositor.ts';
 import type { RuntimeContext, BootstrapOptions } from './context.ts';
 import '@/runtime/index.ts';
 import { createTaskManager, emitSessionResumed } from '@/runtime/index.ts';
+import { emitSessionRecoveryFailed } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 import '@/runtime/index.ts';
 import { loadLastConversation } from '@/runtime/index.ts';
@@ -438,6 +439,13 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
         runtimeBus,
         { sessionId: resumedSessionId, traceId: `${resumedSessionId}:session-resume`, source: 'bootstrap' },
         { sessionId: resumedSessionId, turnCount },
+      );
+    },
+    announceSessionRecoveryFailed: (failedSessionId, reason) => {
+      emitSessionRecoveryFailed(
+        runtimeBus,
+        { sessionId: runtime.sessionId, traceId: `${runtime.sessionId}:session-resume:${failedSessionId}`, source: 'bootstrap' },
+        { sessionId: failedSessionId, error: reason },
       );
     },
     getControlPlaneRecentEvents: (limit) => controlPlaneRecentEventsRef.value(limit),

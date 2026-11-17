@@ -134,6 +134,7 @@ export interface BootstrapCommandSectionOptions {
   readonly changeTracker?: import('@goodvibes-jev/engine/platform/platform/sessions').SessionChangeTracker;
   readonly writeLastSessionPointer?: (sessionId: string) => void;
   readonly announceSessionResumed?: (resumedSessionId: string, turnCount: number) => void;
+  readonly announceSessionRecoveryFailed?: (sessionId: string, reason: string) => void;
   readonly surface?: import('@/runtime/index.ts').SessionSurface;
   readonly hydrateSessionUsage?: () => void;
   readonly agentManager?: ShellAgentManagerService;
@@ -238,6 +239,7 @@ export function createBootstrapCommandSessionSection(
     | 'changeTracker'
     | 'writeLastSessionPointer'
     | 'announceSessionResumed'
+    | 'announceSessionRecoveryFailed'
     | 'surface'
     | 'hydrateSessionUsage'
   >,
@@ -246,6 +248,7 @@ export function createBootstrapCommandSessionSection(
     ...projectCommandSessionSection(options),
     writeLastSessionPointer: options.writeLastSessionPointer,
     announceSessionResumed: options.announceSessionResumed,
+    announceSessionRecoveryFailed: options.announceSessionRecoveryFailed,
     surface: options.surface,
   };
 }

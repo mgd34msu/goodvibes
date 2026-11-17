@@ -135,6 +135,7 @@ export type CreateBootstrapCommandContextOptions = {
   componentHealthMonitor: import('@/runtime/index.ts').ComponentHealthMonitor;
   writeLastSessionPointer?: (sessionId: string) => void;
   announceSessionResumed?: (resumedSessionId: string, turnCount: number) => void;
+  announceSessionRecoveryFailed?: (sessionId: string, reason: string) => void;
   surface?: import('@/runtime/index.ts').SessionSurface;
   hydrateSessionUsage?: () => void;
 };
@@ -219,6 +220,7 @@ export function createBootstrapCommandContext(options: CreateBootstrapCommandCon
       'memoryConsolidationScheduler',
       'writeLastSessionPointer',
       'announceSessionResumed',
+      'announceSessionRecoveryFailed',
       'surface',
       'hydrateSessionUsage',
     ],

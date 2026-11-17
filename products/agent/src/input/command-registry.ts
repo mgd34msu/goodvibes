@@ -142,6 +142,8 @@ export interface CommandSessionServices extends TerminalCommandSessionServices {
   readonly writeLastSessionPointer?: (sessionId: string) => void;
   /** Tell the runtime bus (and so the SessionResumed hook) that this process finished resuming a session. Called once the resume happened, never for a refused one. */
   readonly announceSessionResumed?: (resumedSessionId: string, turnCount: number) => void;
+  /** Tell the runtime bus a saved session passed the resume checks and then failed to load or restore (the ops playbooks read it). */
+  readonly announceSessionRecoveryFailed?: (sessionId: string, reason: string) => void;
   /**
    * The runtime's declare-once session-storage handle: the directory the
    * session files and their sidecars (rewind anchors, work-tree view) live in.

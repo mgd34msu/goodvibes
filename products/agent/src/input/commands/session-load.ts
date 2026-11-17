@@ -4,6 +4,7 @@ import {
   loadSavedSessionIntoLive as loadSavedSession,
   type LoadSavedSessionOptions,
 } from '@goodvibes-jev/engine/terminal-shell/session-resume';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CommandContext } from '../command-registry.ts';
 
 export interface LoadedSavedSession {
@@ -46,6 +47,7 @@ export async function loadSavedSessionIntoLive(
       ctx.abandonHostedSession?.();
       ctx.session.writeLastSessionPointer?.(sessionId);
     },
+    recoveryFailed: (sessionId, error) => ctx.session.announceSessionRecoveryFailed?.(sessionId, summarizeError(error)),
   }, sessionManager, name, options);
   ctx.session.announceSessionResumed?.(loaded.name, loaded.messageCount);
   return {

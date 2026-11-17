@@ -381,6 +381,11 @@ export interface LoadSavedSessionDeps {
   readonly isGenerating?: (() => boolean) | undefined;
   /** Runs after the live conversation and identity moved to the loaded session. */
   readonly afterSwitch?: ((sessionId: string) => void) | undefined;
+  /**
+   * Runs when the load passed its refusal checks and then failed to read or
+   * restore the saved session (the error is rethrown after it). Refusals do not call it.
+   */
+  readonly recoveryFailed?: ((sessionId: string, error: unknown) => void) | undefined;
 }
 
 export interface LoadedSavedSession extends SessionResumeOutcome {
@@ -426,16 +431,22 @@ export async function loadSavedSessionIntoLive(
       );
     }
   }
-  const outcome = await resumeSessionCore(name, {
-    sessionManager,
-    conversation: deps.conversation,
-    runtime: deps.runtime,
-    surface,
-    selectModel: deps.selectModel,
-    hydrateSessionUsage: deps.hydrateSessionUsage,
-    canResume: () => !deps.isGenerating?.(),
-    agents: deps.agents,
-  });
+  let outcome: SessionResumeOutcome;
+  try {
+    outcome = await resumeSessionCore(name, {
+      sessionManager,
+      conversation: deps.conversation,
+      runtime: deps.runtime,
+      surface,
+      selectModel: deps.selectModel,
+      hydrateSessionUsage: deps.hydrateSessionUsage,
+      canResume: () => !deps.isGenerating?.(),
+      agents: deps.agents,
+    });
+  } catch (error) {
+    deps.recoveryFailed?.(name, error);
+    throw error;
+  }
   deps.afterSwitch?.(name);
   return { ...outcome, name, messageCount: outcome.resumedMessageCount };
 }

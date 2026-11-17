@@ -46,6 +46,7 @@ import { applyConversationOverlays, buildConversationLayers } from './renderer/c
 import { buildActivityAgentRows, type ActivityView } from './renderer/activity-modal.ts';
 import { ActivityModal } from './input/activity-modal.ts';
 import { envFlag, logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { emitAgentAwaitingMessage, emitAgentAwaitingTool } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
 import { bootstrapRuntime } from './runtime/bootstrap.ts';
 import { readAgentHostSetting } from './config/host-settings.ts';
 import type { BootstrapContext } from './runtime/bootstrap.ts';
@@ -824,8 +825,22 @@ async function main() {
     render();
   };
   // see shell/terminal-focus-mode.ts
+  const showPermissionCard = commandUi.requestPermission as typeof permissionPromptRef.requestPermission;
+  // A delegated agent asking the owner is waiting on them until the card is answered;
+  // the answer settles its call, so it leaves the wait for that tool call.
+  const askOwner: typeof permissionPromptRef.requestPermission = (request, options) => {
+    const askingAgent = request.attribution?.kind === 'background-agent' ? request.attribution.agentId : null;
+    if (askingAgent === null) return showPermissionCard(request, options);
+    const bus = ctx.services.runtimeBus;
+    const emitter = { sessionId: runtime.sessionId, traceId: `${runtime.sessionId}:ask:${request.callId}`, source: 'permission-card' };
+    emitAgentAwaitingMessage(bus, emitter, { agentId: askingAgent });
+    return showPermissionCard(request, options).then((decision) => {
+      emitAgentAwaitingTool(bus, emitter, { agentId: askingAgent, callId: request.callId, tool: request.tool });
+      return decision;
+    });
+  };
   permissionPromptRef.requestPermission = wrapRequestPermissionWithApprovalAlert(
-    commandUi.requestPermission as typeof permissionPromptRef.requestPermission,
+    askOwner,
     { focusTracker: ctx.services.focusTracker, configGet: (key) => readAgentHostSetting(configManager, key), conversation },
   );
 

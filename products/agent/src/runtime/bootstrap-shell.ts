@@ -52,6 +52,7 @@ export interface BootstrapShellOptions {
   readonly permissionPromptRef: { requestPermission: PermissionRequestHandler };
   readonly writeLastSessionPointer: (sessionId: string) => void;
   readonly announceSessionResumed: (resumedSessionId: string, turnCount: number) => void;
+  readonly announceSessionRecoveryFailed: (sessionId: string, reason: string) => void;
   readonly getControlPlaneRecentEvents: (limit: number) => readonly ControlPlaneRecentEvent[];
   readonly toolRegistry: ToolRegistry;
   readonly promptContextReceipts?: AgentPromptContextReceiptStore;
@@ -113,6 +114,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     permissionPromptRef,
     writeLastSessionPointer,
     announceSessionResumed,
+    announceSessionRecoveryFailed,
     getControlPlaneRecentEvents,
     toolRegistry,
     promptContextReceipts,
@@ -221,6 +223,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     },
     writeLastSessionPointer,
     announceSessionResumed,
+    announceSessionRecoveryFailed,
   });
   commandContextRef = commandContext;
 

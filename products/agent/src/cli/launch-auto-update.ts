@@ -220,9 +220,9 @@ export async function selfUpdateAtLaunch(params: SelfUpdateAtLaunchParams): Prom
 /**
  * Replaces this process with the (just-swapped) binary at execPath and the
  * given CLI arguments on the same terminal; where the platform cannot replace
- * a process, starts it and returns 0 so the caller exits and one process
- * remains. The receipt marker travels in the environment, never on the
- * command line.
+ * a process (Windows), runs it on this console, waits for it and returns its
+ * exit status for the caller to exit with. The receipt marker travels in the
+ * environment, never on the command line.
  */
 export function restartOntoUpdatedBinary(options: RestartOntoUpdatedBinaryOptions): number {
   return restart(options, LAUNCH_UPDATED_FROM_ENV);

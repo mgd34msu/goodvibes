@@ -1,5 +1,5 @@
 import net from 'node:net';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 export async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | 'timeout'> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -32,9 +32,12 @@ type ProcessExecve = (file: string, args: readonly string[], env: NodeJS.Process
  * Where the runtime can replace the process image (`process.execve`, every
  * platform but Windows) it does: one process, the same pid and terminal, so a
  * supervisor's signal reaches the program that runs and nothing waits behind
- * it. Without that, the new program starts on this terminal and the returned
- * 0 lets the caller exit; nothing blocks on the child. A start that fails
- * returns 1 and says why on stderr.
+ * it. Without that (Windows), this process stays as a thin waiter: the new
+ * program runs on this console, this one waits for it and returns its exit
+ * status, so the shell does not take the console back while the new program
+ * reads it. Ctrl+C reaches the new program from the console; this process
+ * ignores it while it waits. A start that fails returns 1 and says why on
+ * stderr before anything else happens.
  */
 export function restartOntoUpdatedBinary(options: RestartOntoUpdatedBinaryOptions, receiptEnvironmentKey: string): number {
   const env = { ...options.env, [receiptEnvironmentKey]: options.fromVersion };
@@ -47,13 +50,16 @@ export function restartOntoUpdatedBinary(options: RestartOntoUpdatedBinaryOption
   if (typeof execve === 'function') {
     try { execve.call(process, options.execPath, [options.execPath, ...options.argv], env); } catch (error) { return failed(error); }
   }
+  const ignoreInterrupt = (): void => {};
+  process.on('SIGINT', ignoreInterrupt);
   try {
-    const child = spawn(options.execPath, [...options.argv], { stdio: 'inherit', env });
-    child.once('error', failed);
-    child.unref();
-    return 0;
+    const result = spawnSync(options.execPath, [...options.argv], { stdio: 'inherit', env });
+    if (result.error) return failed(result.error);
+    return result.status ?? 1;
   } catch (error) {
     return failed(error);
+  } finally {
+    process.off('SIGINT', ignoreInterrupt);
   }
 }
 /** Await the replacement's real close, retaining cancellation ownership while

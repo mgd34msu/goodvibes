@@ -299,10 +299,11 @@ export async function handDaemonOverAtLaunch(params: HandDaemonOverAtLaunchParam
 }
 
 /**
- * Runs the (just-swapped) binary at execPath with the original CLI arguments
- * and an inherited terminal, blocking until it exits, and returns its exit
- * code for the caller to process.exit with. The receipt marker travels in the
- * child's environment, never on the command line.
+ * Replaces this process with the (just-swapped) binary at execPath and the
+ * original CLI arguments on the same terminal; where the platform cannot
+ * replace a process (Windows), runs it on this console, waits for it and
+ * returns its exit status for the caller to process.exit with. The receipt
+ * marker travels in the environment, never on the command line.
  */
 
 export function restartOntoUpdatedBinary(options: RestartOntoUpdatedBinaryOptions): number {

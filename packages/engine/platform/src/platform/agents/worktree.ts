@@ -80,7 +80,7 @@ export async function uniqueWork(rootDir: string, worktreePath: string, branch: 
     };
     if (existsSync(worktreePath)) {
       const tree = await createSimpleGit({ baseDir: worktreePath });
-      const status = await tree.raw(['status', '--porcelain', '--untracked-files=all', '--ignored']);
+      const status: string = await tree.raw(['status', '--porcelain', '--untracked-files=all', '--ignored']);
       const lines = status.split('\n').filter((line) => line.length > 0);
       if (lines.some((line) => !line.startsWith('!! '))) return 'it has uncommitted changes';
       if (lines.length > 0) return `it has ignored files no commit holds (${lines.slice(0, 3).map((line) => line.slice(3)).join(', ')}${lines.length > 3 ? `, +${lines.length - 3} more` : ''})`;
@@ -586,7 +586,8 @@ export class IsolatedWorktree {
       const wgit = await createSimpleGit({ baseDir: this.path });
       beforeRepositoryWrite?.(); beforeEvict?.();
       await wgit.raw(['add', '-A']);
-      const ignored = (await wgit.raw(['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored=matching']))
+      const porcelain: string = await wgit.raw(['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored=matching']);
+      const ignored = porcelain
         .split('\0').filter((entry) => entry.startsWith('!! ')).map((entry) => entry.slice(3));
       const carried: string[] = [];
       let bytes = 0;

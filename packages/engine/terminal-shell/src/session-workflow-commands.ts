@@ -4,12 +4,12 @@ import { formatReturnContextForDisplay } from '@goodvibes-jev/engine/platform/pl
 import type { TerminalConversationManager } from './terminal-conversation.js';
 import {
   captureTranscriptSource,
+  describeTranscriptReadFailure,
   transcriptReadingCanceled,
-  TRANSCRIPT_UNAVAILABLE,
   type TranscriptCommandContext,
 } from './transcript-reading.js';
 import { describeUnknownTranscriptKind, readTranscriptKind } from './transcript-kinds.js';
-import { createTranscriptReviewFormatter } from './transcript-review.js';
+import { createTranscriptReviewFormatter, readTranscriptReviewArguments } from './transcript-review.js';
 import { requireYesFlag, stripYesFlag } from './command-confirmation.js';
 export interface SessionWorkflowContext extends TranscriptCommandContext<TerminalConversationManager> {
   readonly session: {
@@ -231,14 +231,23 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
     }
 
     if (sub === 'events' || sub === 'groups' || sub === 'hotspots') {
-      const kind = readTranscriptKind(args[1]);
+      const parsed = readTranscriptReviewArguments(args.slice(1));
+      if ('refusal' in parsed) {
+        ctx.print(parsed.refusal);
+        return true;
+      }
+      if (sub === 'hotspots' && (parsed.page.start !== undefined || parsed.page.size !== undefined)) {
+        ctx.print('Not shown: hotspots counts the whole transcript and takes only a kind. Usage: /session hotspots [kind]');
+        return true;
+      }
+      const kind = readTranscriptKind(parsed.kindWord);
       if (kind === undefined) {
-        ctx.print(describeUnknownTranscriptKind(args[1] ?? ''));
+        ctx.print(describeUnknownTranscriptKind(parsed.kindWord ?? ''));
         return true;
       }
       const source = captureTranscriptSource(ctx);
       try {
-        const lines = await buildTranscriptReviewLines(ctx, kind, sub, source);
+        const lines = await buildTranscriptReviewLines(ctx, kind, sub, source, parsed.page);
         source.assertPublishable();
         ctx.print(lines.join('\n'));
       } catch (error) {
@@ -247,7 +256,7 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
         } catch {
           return true;
         }
-        if (!transcriptReadingCanceled(error)) ctx.print(TRANSCRIPT_UNAVAILABLE);
+        if (!transcriptReadingCanceled(error)) ctx.print(describeTranscriptReadFailure(error));
       }
       return true;
     }

@@ -12,9 +12,9 @@ export const SESSION_SUBCOMMAND_ARG_HINTS: Record<string, string> = {
   export: '<id|.> [markdown|text]',
   search: '<query>',
   delete: '<id>',
-  events: '[kind]',
-  groups: '[kind]',
-  hotspots: '',
+  events: '[kind] [start-row] [--last N]',
+  groups: '[kind] [start-row] [--last N]',
+  hotspots: '[kind]',
   graph: '[--session <sid>] [--format text|json]',
   g: '[--session <sid>] [--format text|json]',
 };

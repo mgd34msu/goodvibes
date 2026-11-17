@@ -82,7 +82,7 @@ export const sessionCommand: SlashCommand = {
             'Usage: /session <subcommand>',
             '  list | rename <name> | resume <id|name> [--force] | fork [name] | save [name] | info [id] | export <id> [format] | search <query> | delete <id> --yes',
             '                                , Session continuity, export, resume, and pruning',
-            '  events [kind] | groups [kind] | hotspots',
+            '  events [kind] [start-row] [--last N] | groups [kind] [start-row] [--last N] | hotspots [kind]',
             '                                , Transcript structure: event log, grouped view, hotspot summary',
             '  graph [--session <sid>] [--format text|json]',
             '                                , Display the cross-session task dependency graph',

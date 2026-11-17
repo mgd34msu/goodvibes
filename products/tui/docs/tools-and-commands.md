@@ -305,9 +305,9 @@ A typed line that starts with `!` runs the rest as a shell command in the workin
 | `export <id\|.> [format]` | Export a session (`.` is the current one) |
 | `search <query>` | Search saved sessions |
 | `delete <id>` | Delete a saved session |
-| `events [kind]` | List transcript events, optionally filtered to one kind |
-| `groups [kind]` | List transcript events grouped, with per-group event counts and message ranges |
-| `hotspots` | Show per-kind event counts and the busiest transcript groups |
+| `events [kind] [start-row] [--last N]` | List transcript events, optionally filtered to one kind. Shows the newest 16 by default with the range (`events 285-300 of 300`) and the command for the earlier and later pages; a start row shows the page from that row, `--last N` sets the page size |
+| `groups [kind] [start-row] [--last N]` | List transcript events grouped, with per-group event counts and message ranges; pages like `events` (12 per page) |
+| `hotspots [kind]` | Show per-kind event counts and the busiest transcript groups, optionally for one kind |
 
 The orchestration subcommands manage a cross-session task DAG with cycle detection:
 

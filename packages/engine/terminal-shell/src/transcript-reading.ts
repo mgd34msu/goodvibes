@@ -32,17 +32,29 @@ export function captureTranscriptSource<Conversation extends TranscriptConversat
 export function transcriptReadingCanceled(error: unknown): boolean {
     return error instanceof TranscriptSourceChangedError || error instanceof JudgmentAuthorityRetiredError;
 }
-export async function readTranscriptIndex(ctx: TranscriptCommandContext, source = captureTranscriptSource(ctx)) {
+export type TranscriptIndex = Awaited<ReturnType<TranscriptConversation['getTranscriptEventIndex']>>;
+export type TranscriptIndexReading =
+    | { readonly index: TranscriptIndex; readonly failure?: undefined }
+    | { readonly index: null; readonly failure: string };
+/** The index is built by code from the messages (no model request), so a failure's own message is the reason to show. */
+export function describeTranscriptReadFailure(error: unknown): string {
+    const raw = error instanceof Error ? (error.message || error.name) : String(error);
+    const reason = raw.replace(/\s+/g, ' ').trim().slice(0, 200) || 'no reason given';
+    return `Transcript index could not be read: ${reason}. Your messages are unchanged; run the command again.`;
+}
+export async function readTranscriptIndexReading(ctx: TranscriptCommandContext, source = captureTranscriptSource(ctx)): Promise<TranscriptIndexReading> {
     try {
         const index = await source.conversation.getTranscriptEventIndex({ assertCurrent: source.assertCurrent, lifetime: source.lifetime, signal: source.signal });
         source.assertPublishable();
-        return index;
+        return { index };
     }
     catch (error) {
         source.assertPublishable();
         if (transcriptReadingCanceled(error))
             throw error;
-        // Neither provider errors nor transcript content are echoed into a display.
-        return null;
+        return { index: null, failure: describeTranscriptReadFailure(error) };
     }
+}
+export async function readTranscriptIndex(ctx: TranscriptCommandContext, source = captureTranscriptSource(ctx)): Promise<TranscriptIndex | null> {
+    return (await readTranscriptIndexReading(ctx, source)).index;
 }

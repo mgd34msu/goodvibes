@@ -7,6 +7,7 @@ import {
   buildStatus,
   inferExtFromOutputFormat,
   inferMimeFromExtension,
+  voiceHttpError,
 } from './shared.js';
 import { instrumentedFetch } from '../../utils/fetch-with-timeout.js';
 
@@ -55,7 +56,7 @@ async function listMicrosoftVoices(): Promise<readonly VoiceDescriptor[]> {
     `https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list?trustedclienttoken=${(await loadEdgeTtsDrm()).TRUSTED_CLIENT_TOKEN}`,
     { headers: await buildMicrosoftVoiceHeaders() },
   );
-  if (!response.ok) throw new Error(`Microsoft voices failed: HTTP ${response.status}`);
+  if (!response.ok) throw await voiceHttpError('Microsoft', 'voice list', response);
   const payload = await response.json() as MicrosoftVoiceListEntry[];
   return Array.isArray(payload)
     ? payload

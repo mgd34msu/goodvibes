@@ -75,6 +75,10 @@ export class VoiceService {
     const voices: VoiceDescriptor[] = [];
     for (const provider of providers) {
       if (!provider.listVoices) continue;
+      // Asked for all, a provider with no credentials has no voices to list and nothing went wrong.
+      if (!providerId && provider.status) {
+        try { if (!(await provider.status()).configured) continue; } catch { /* its listVoices below says what is wrong */ }
+      }
       try {
         voices.push(...await provider.listVoices());
       } catch (error) {

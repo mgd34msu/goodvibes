@@ -72,6 +72,8 @@ const CACHE_TTL_MS = 60_000; // 1 minute
 interface CacheEntry {
   /** Epoch ms when this entry was fetched. */
   fetchedAt: number;
+  /** The server address it was read from: a reading of another address is not this server's. */
+  baseURL: string;
   /** Map of model ID → raw context_length from the API (tokens). */
   models: Map<string, number>;
   /** True if the last fetch attempt failed (prevents repeated retries). */
@@ -94,6 +96,8 @@ interface CacheEntry {
  * @returns Map of model ID → raw context length from the API, or null if
  *          the provider is offline or returned an unrecognised response.
  */
+export type LocalContextReadings = Pick<LocalContextIngestionService, 'ingestProviderContextWindows'>;
+
 export class LocalContextIngestionService {
   private readonly providerCache = new Map<string, CacheEntry>();
 
@@ -107,7 +111,7 @@ export class LocalContextIngestionService {
   ): Promise<Map<string, number> | null> {
     const now = this.now();
     const cached = this.providerCache.get(providerName);
-    if (cached && now - cached.fetchedAt < CACHE_TTL_MS) {
+    if (cached && cached.baseURL === baseURL && now - cached.fetchedAt < CACHE_TTL_MS) {
       return cached.failed ? null : cached.models;
     }
 
@@ -123,11 +127,32 @@ export class LocalContextIngestionService {
     }
     this.providerCache.set(providerName, {
       fetchedAt: now,
+      baseURL,
       models: discovered,
       failed,
     });
 
     return failed ? null : discovered;
+  }
+
+  /**
+   * These readings for a second registry over the same providers directory (a
+   * daemon's hosted-session workspace floor, built again whenever a
+   * workspace's next session starts). A server this service has read at the
+   * same address is answered from that reading at any age, a failed one
+   * included: the owner of this service reads it again whenever its providers
+   * reload, so the borrower knows exactly what the owner knows and probes
+   * nothing. Only a server with no reading here is asked, through this
+   * service, so the owner gains that reading too.
+   */
+  lend(): LocalContextReadings {
+    return {
+      ingestProviderContextWindows: (providerName, baseURL, apiKey) => {
+        const cached = this.providerCache.get(providerName);
+        if (cached && cached.baseURL === baseURL) return Promise.resolve(cached.failed ? null : cached.models);
+        return this.ingestProviderContextWindows(providerName, baseURL, apiKey);
+      },
+    };
   }
 
   clearProviderCache(providerName: string): void {

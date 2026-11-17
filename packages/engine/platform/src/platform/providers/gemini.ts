@@ -17,6 +17,7 @@ import {
   fetchGeminiModelIds,
   runLiveModelRefresh,
   type LiveModelDiscoveryResult,
+  type ProviderModelRefreshOptions,
 } from './live-model-discovery.js';
 
 import { createGeminiResponseIdentityAccumulator } from './gemini-response-identity.js';
@@ -192,9 +193,11 @@ export class GeminiProvider implements LLMProvider {
    * list, and reports the honest reason when live discovery fails rather
    * than silently keeping stale data with no explanation.
    */
-  async refreshModels(force = false): Promise<LiveModelDiscoveryResult> {
+  async refreshModels(force = false, options: ProviderModelRefreshOptions = {}): Promise<LiveModelDiscoveryResult> {
     const result = await runLiveModelRefresh({
       providerName: this.name,
+      recordTo: options.recordTo,
+      borrowFrom: options.borrowFrom,
       cachePath: this.modelsCachePath,
       datedStaticModels: GEMINI_DATED_STATIC_MODELS,
       datedStaticAsOf: GEMINI_DATED_STATIC_MODELS_AS_OF,

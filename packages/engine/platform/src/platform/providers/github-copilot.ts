@@ -5,7 +5,7 @@ import type { ChatRequest, ChatResponse, LLMProvider, ProviderModelSource, Provi
 import { OpenAICompatProvider } from './openai-compat.js';
 import { AnthropicCompatProvider } from './anthropic-compat.js';
 import { buildStandardProviderAuthRoutes, summarizeProviderAuth } from './runtime-metadata.js';
-import { runLiveModelRefresh, type LiveModelDiscoveryResult } from './live-model-discovery.js';
+import { runLiveModelRefresh, type LiveModelDiscoveryResult, type ProviderModelRefreshOptions } from './live-model-discovery.js';
 import { toProviderError } from '../utils/error-display.js';
 import { instrumentedLlmCall } from '../runtime/llm-observability.js';
 
@@ -234,7 +234,7 @@ export class GitHubCopilotProvider implements LLMProvider {
    * dated-static list, and reports the honest reason when live discovery
    * fails rather than silently keeping stale data with no explanation.
    */
-  async refreshModels(force = false, options: { skipUnavailableLocal?: boolean } = {}): Promise<LiveModelDiscoveryResult> {
+  async refreshModels(force = false, options: ProviderModelRefreshOptions = {}): Promise<LiveModelDiscoveryResult> {
     const owner = this.observeCredentials();
     // A sweep over every provider (the bulk refresh sets skipUnavailableLocal) is not the owner
     // choosing Copilot: it reads the cache or the bundled list and exchanges no token. A refresh
@@ -248,6 +248,8 @@ export class GitHubCopilotProvider implements LLMProvider {
     try {
       result = await runLiveModelRefresh({
         providerName: this.name,
+        recordTo: options.recordTo,
+        borrowFrom: options.borrowFrom,
         cachePath: this.options.modelsCachePath,
         datedStaticModels: COPILOT_DATED_STATIC_MODELS,
         datedStaticAsOf: COPILOT_DATED_STATIC_MODELS_AS_OF,

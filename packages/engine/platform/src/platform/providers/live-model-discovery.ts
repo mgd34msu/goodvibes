@@ -162,14 +162,76 @@ export interface LiveModelRefreshOptions {
   readonly assertCurrent?: (() => void) | undefined;
   /** Bulk discovery may skip an unused optional loopback server that is not running. */
   readonly skipUnavailableLocal?: boolean | undefined;
+  /** Where this refresh's listing is recorded for a second registry to borrow; see {@link LiveModelListings}. */
+  readonly recordTo?: LiveModelListings | undefined;
+  /** A host registry's listings this refresh takes instead of reading and fetching again, unless `force`. */
+  readonly borrowFrom?: LiveModelListings | undefined;
+}
+
+/** What a registry hands each provider's `refreshModels` beside `force`. */
+export interface ProviderModelRefreshOptions {
+  /** Bulk discovery may skip an unused optional loopback server that is not running. */
+  readonly skipUnavailableLocal?: boolean | undefined;
+  readonly recordTo?: LiveModelListings | undefined;
+  readonly borrowFrom?: LiveModelListings | undefined;
 }
 
 /**
- * Run a single live-discovery refresh cycle for one provider: try the cache
- * for a diff baseline, attempt a live fetch when configured, fall back to
+ * The model listings one registry's refreshes produced, by provider name, so a
+ * second registry over the same providers and persistence root (a daemon's
+ * hosted-session workspace floor, built again whenever a workspace's next
+ * session starts) takes them instead of reading every provider's cache file
+ * and probing every unconfigured loopback server the host has just probed.
+ *
+ * A listing is lent while it is younger than the on-disk list's lifetime
+ * (a cached list counts from when it was fetched); the host records every
+ * refresh it runs, so the borrower knows what the host knows. An older listing,
+ * or a provider the host never listed, is refreshed by the borrower itself.
+ * A borrowed listing is reported as `cache`: the borrower fetched nothing.
+ */
+export class LiveModelListings {
+  readonly #byProvider = new Map<string, { readonly result: LiveModelDiscoveryResult; readonly listedAt: number }>();
+
+  /** `now` is injectable so a listing's lifetime can be driven without waiting. */
+  constructor(private readonly now: () => number = Date.now) {}
+
+  record(providerName: string, result: LiveModelDiscoveryResult, listedAt: number): void {
+    this.#byProvider.set(providerName, { result, listedAt });
+  }
+
+  lend(providerName: string): LiveModelDiscoveryResult | undefined {
+    const entry = this.#byProvider.get(providerName);
+    if (!entry || this.now() - entry.listedAt > TTL_24H_MS) return undefined;
+    const { result } = entry;
+    return { ...result, source: result.source === 'live' ? 'cache' : result.source, added: [], removed: [] };
+  }
+}
+
+/** A host registry's listings as it lends them: the store, and when the host's startup sweep has settled. */
+export interface LentModelListings {
+  readonly listings: LiveModelListings;
+  readonly settled: () => Promise<void>;
+}
+
+/**
+ * Run a single live-discovery refresh cycle for one provider: take a host
+ * registry's current listing when one is lent, otherwise try the cache for a
+ * diff baseline, attempt a live fetch when configured, fall back to
  * cache-then-dated-static on failure, and persist a successful fetch.
  */
 export async function runLiveModelRefresh(opts: LiveModelRefreshOptions): Promise<LiveModelDiscoveryResult> {
+  if (!opts.force && opts.borrowFrom) {
+    const lent = opts.borrowFrom.lend(opts.providerName);
+    if (lent) return lent;
+  }
+  const { result, listedAt } = await refreshListing(opts);
+  opts.recordTo?.record(opts.providerName, result, listedAt);
+  return result;
+}
+
+/** One refresh, with when its listing was taken: a cached list's fetch time, otherwise now. */
+async function refreshListing(opts: LiveModelRefreshOptions): Promise<{ result: LiveModelDiscoveryResult; listedAt: number }> {
+  const listed = (result: LiveModelDiscoveryResult, listedAt = Date.now()) => ({ result, listedAt });
   const sourceCurrent = opts.assertCurrent;
   const assertCurrent = (): void => {
     try {
@@ -185,19 +247,20 @@ export async function runLiveModelRefresh(opts: LiveModelRefreshOptions): Promis
   assertCurrent();
 
   if (cache && !opts.force && !isTtlCacheStale(cache)) {
-    return { models: cache.models, source: 'cache', added: [], removed: [] };
+    return listed({ models: cache.models, source: 'cache', added: [], removed: [] }, cache.fetchedAt);
   }
 
   if (!opts.isConfigured) {
-    if (cache) return { models: cache.models, source: 'cache', added: [], removed: [] };
+    // No fetch is made without credentials, so this answer is current at any age of the file.
+    if (cache) return listed({ models: cache.models, source: 'cache', added: [], removed: [] });
     const { added, removed } = diffModelIds(baseline, opts.datedStaticModels);
-    return {
+    return listed({
       models: opts.datedStaticModels,
       source: 'dated-static',
       added,
       removed,
       asOf: opts.datedStaticAsOf,
-    };
+    });
   }
 
   try {
@@ -211,28 +274,28 @@ export async function runLiveModelRefresh(opts: LiveModelRefreshOptions): Promis
     const { added, removed } = diffModelIds(baseline, fetched);
     if (opts.cachePath) saveModelListCache(fetched, opts.cachePath, unclassifiedModels);
     assertCurrent();
-    return { models: fetched, source: 'live', added, removed,
-      ...(unclassifiedModels.length ? { unclassifiedModels } : {}) };
+    return listed({ models: fetched, source: 'live', added, removed,
+      ...(unclassifiedModels.length ? { unclassifiedModels } : {}) });
   } catch (err) {
     assertCurrent();
     const code = err instanceof Error && 'code' in err ? err.code : undefined;
     if (opts.skipUnavailableLocal && !cache && (code === 'ConnectionRefused' || code === 'ECONNREFUSED')) {
-      return { models: opts.datedStaticModels, source: 'dated-static', added: [], removed: [],
-        asOf: opts.datedStaticAsOf, skippedReason: 'local-endpoint-unavailable' };
+      return listed({ models: opts.datedStaticModels, source: 'dated-static', added: [], removed: [],
+        asOf: opts.datedStaticAsOf, skippedReason: 'local-endpoint-unavailable' });
     }
     const message = summarizeError(err);
     logger.warn('[provider-models] Live model discovery failed', { provider: opts.providerName, error: message });
     if (cache) {
-      return { models: cache.models, source: 'cache', added: [], removed: [], error: message };
+      return listed({ models: cache.models, source: 'cache', added: [], removed: [], error: message }, cache.fetchedAt);
     }
-    return {
+    return listed({
       models: opts.datedStaticModels,
       source: 'dated-static',
       added: [],
       removed: [],
       error: message,
       asOf: opts.datedStaticAsOf,
-    };
+    });
   }
 }
 

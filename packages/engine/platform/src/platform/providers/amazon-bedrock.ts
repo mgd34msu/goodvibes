@@ -9,7 +9,7 @@
 import { loadBedrockAuth, loadBedrockLibrary } from './optional-bedrock.js';
 import { AnthropicMessagesProvider, type AnthropicMessagesProviderOptions } from './anthropic-messages-provider.js';
 import type { ProviderModelSource } from './interface.js';
-import { diffModelIds, runLiveModelRefresh, type LiveModelDiscoveryResult } from './live-model-discovery.js';
+import { diffModelIds, runLiveModelRefresh, type LiveModelDiscoveryResult, type ProviderModelRefreshOptions } from './live-model-discovery.js';
 import { fetchWithTimeout, instrumentedFetch } from '../utils/fetch-with-timeout.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -313,10 +313,12 @@ export class BedrockFamilyProvider extends AnthropicMessagesProvider {
    * falls back to the on-disk cache, then to the dated-static list, and
    * reports the reason when live discovery fails.
    */
-  async refreshModels(force = false): Promise<LiveModelDiscoveryResult> {
+  async refreshModels(force = false, options: ProviderModelRefreshOptions = {}): Promise<LiveModelDiscoveryResult> {
     const previous = [...this.models];
     const result = await runLiveModelRefresh({
       providerName: this.name,
+      recordTo: options.recordTo,
+      borrowFrom: options.borrowFrom,
       cachePath: this.modelsCachePath,
       datedStaticModels: BEDROCK_DATED_STATIC_MODELS,
       datedStaticAsOf: BEDROCK_DATED_STATIC_MODELS_AS_OF,

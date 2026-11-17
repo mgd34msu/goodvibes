@@ -26,7 +26,7 @@ import type * as Resources from '@anthropic-ai/sdk/resources/index';
 import type { AuthClient, GoogleAuth } from 'google-auth-library';
 import { AnthropicMessagesProvider } from './anthropic-messages-provider.js';
 import type { ProviderModelSource } from './interface.js';
-import { runLiveModelRefresh, type LiveModelDiscoveryResult } from './live-model-discovery.js';
+import { runLiveModelRefresh, type LiveModelDiscoveryResult, type ProviderModelRefreshOptions } from './live-model-discovery.js';
 import { fetchWithTimeout, instrumentedFetch } from '../utils/fetch-with-timeout.js';
 import { isRecord } from '../utils/record-coerce.js';
 import { loadOptionalDependency } from '../utils/optional-dependency.js';
@@ -492,9 +492,11 @@ export class AnthropicVertexProvider extends AnthropicMessagesProvider {
    * when live discovery fails rather than silently keeping stale data with
    * no explanation.
    */
-  async refreshModels(force = false): Promise<LiveModelDiscoveryResult> {
+  async refreshModels(force = false, options: ProviderModelRefreshOptions = {}): Promise<LiveModelDiscoveryResult> {
     const result = await runLiveModelRefresh({
       providerName: this.name,
+      recordTo: options.recordTo,
+      borrowFrom: options.borrowFrom,
       cachePath: this.modelsCachePath,
       datedStaticModels: VERTEX_DATED_STATIC_MODELS,
       datedStaticAsOf: VERTEX_DATED_STATIC_MODELS_AS_OF,

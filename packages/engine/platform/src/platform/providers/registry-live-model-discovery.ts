@@ -18,10 +18,12 @@ import type { ModelDefinition } from './registry-types.js';
 import {
   buildProviderNativeModelDefinition,
   type LiveModelDiscoveryResult,
+  type LiveModelListings,
+  type ProviderModelRefreshOptions,
 } from './live-model-discovery.js';
 
 export type ProviderRefreshableModel = Pick<LLMProvider, 'name'> &
-  Partial<{ refreshModels: (force?: boolean, options?: { skipUnavailableLocal?: boolean }) => Promise<LiveModelDiscoveryResult> }>;
+  Partial<{ refreshModels: (force?: boolean, options?: ProviderModelRefreshOptions) => Promise<LiveModelDiscoveryResult> }>;
 
 /**
  * Seed `providerNativeModels` for one provider from its current `.models`
@@ -83,7 +85,14 @@ export async function sweepLiveModelDiscovery(
   providers: Iterable<ProviderRefreshableModel>,
   providerNativeModels: readonly ModelDefinition[] | (() => readonly ModelDefinition[]),
   providerId: string | undefined,
-  options: { force?: boolean; isRegistered?: (providerName: string) => boolean },
+  options: {
+    force?: boolean;
+    isRegistered?: (providerName: string) => boolean;
+    /** Record each provider's listing for a second registry to borrow (LiveModelListings). */
+    recordTo?: LiveModelListings | undefined;
+    /** Take a host registry's current listings instead of refreshing again (LiveModelListings). */
+    borrowFrom?: LiveModelListings | undefined;
+  },
 ): Promise<LiveModelDiscoverySweepResult> {
   const all = [...providers];
   const targets = (providerId ? all.filter((p) => p.name === providerId) : all)
@@ -91,7 +100,11 @@ export async function sweepLiveModelDiscovery(
 
   const checked = await Promise.all(targets.map(async (provider) => {
     try {
-      const result = await provider.refreshModels!(options.force ?? false, { skipUnavailableLocal: providerId === undefined });
+      const result = await provider.refreshModels!(options.force ?? false, {
+        skipUnavailableLocal: providerId === undefined,
+        recordTo: options.recordTo,
+        borrowFrom: options.borrowFrom,
+      });
       return { report: { providerId: provider.name, ...result }, threw: false };
     } catch (error: unknown) {
       // No list came back, so the provider keeps the one it has.

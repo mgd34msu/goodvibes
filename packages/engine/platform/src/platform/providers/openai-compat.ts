@@ -18,6 +18,7 @@ import {
   fetchModelIdsFromListing,
   runLiveModelRefresh,
   type LiveModelDiscoveryResult,
+  type ProviderModelRefreshOptions,
 } from './live-model-discovery.js';
 import type { ProviderCapability } from './capabilities.js';
 import { ProviderError } from '../types/errors.js';
@@ -362,9 +363,11 @@ export class OpenAICompatProvider implements LLMProvider {
    * backend has no listing API (`modelListing: 'none'`, verified per
    * provider), this reports the dated-static source without a network call.
    */
-  async refreshModels(force = false, options: { skipUnavailableLocal?: boolean } = {}): Promise<LiveModelDiscoveryResult> {
+  async refreshModels(force = false, options: ProviderModelRefreshOptions = {}): Promise<LiveModelDiscoveryResult> {
     const result = await runLiveModelRefresh({
       providerName: this.name,
+      recordTo: options.recordTo,
+      borrowFrom: options.borrowFrom,
       cachePath: this.modelsCachePath,
       datedStaticModels: this.datedStaticModels,
       datedStaticAsOf: this.modelsAsOf ?? 'unknown',

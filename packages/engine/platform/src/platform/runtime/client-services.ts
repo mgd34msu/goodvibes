@@ -392,10 +392,10 @@ export interface ClientRuntimeServicesOptions {
    */
   readonly modelDiscovery?: ProviderModelDiscoveryMode | undefined;
   /**
-   * The benchmark leaderboard and local servers' context-window readings of a
-   * host's own provider stack, lent to this composition so building it fetches
-   * and probes none of them again (a daemon's hosted-session workspace floor).
-   * Default: this composition loads its own.
+   * The benchmark leaderboard, local servers' context-window readings and live
+   * model listings of a host's own provider stack, lent to this composition so
+   * building it fetches, probes and re-reads none of them (a daemon's
+   * hosted-session workspace floor). Default: this composition loads its own.
    */
   readonly providerHostFacts?: ProviderStackHostFacts | undefined;
   /**

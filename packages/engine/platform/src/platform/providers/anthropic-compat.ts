@@ -15,6 +15,7 @@ import {
   fetchModelIdsFromListing,
   runLiveModelRefresh,
   type LiveModelDiscoveryResult,
+  type ProviderModelRefreshOptions,
 } from './live-model-discovery.js';
 import { applyAnthropicReasoning, isAnthropicThinkingEnabled } from './anthropic-stream.js';
 import { reasoningRejectionHint } from './reasoning-rejection-hint.js';
@@ -218,9 +219,11 @@ export class AnthropicCompatProvider implements LLMProvider {
    * (`modelListing: 'none'`, verified per provider), reports the
    * dated-static source without a network call.
    */
-  async refreshModels(force = false): Promise<LiveModelDiscoveryResult> {
+  async refreshModels(force = false, options: ProviderModelRefreshOptions = {}): Promise<LiveModelDiscoveryResult> {
     const result = await runLiveModelRefresh({
       providerName: this.name,
+      recordTo: options.recordTo,
+      borrowFrom: options.borrowFrom,
       cachePath: this.modelsCachePath,
       datedStaticModels: this.datedStaticModels,
       datedStaticAsOf: this.modelsAsOf ?? 'unknown',

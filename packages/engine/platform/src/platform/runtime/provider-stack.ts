@@ -29,7 +29,8 @@ import { CacheHitTracker } from '../providers/cache-strategy.js';
 import { ProviderCapabilityRegistry } from '../providers/capabilities.js';
 import { FavoritesStore } from '../providers/favorites.js';
 import { BenchmarkStore } from '../providers/model-benchmarks.js';
-import type { LocalContextIngestionService } from '../providers/local-context-ingestion.js';
+import type { LocalContextReadings } from '../providers/local-context-ingestion.js';
+import type { LentModelListings } from '../providers/live-model-discovery.js';
 import { ModelLimitsService } from '../providers/model-limits.js';
 import { ProviderOptimizer } from '../providers/optimizer.js';
 import { ProviderRegistry } from '../providers/registry.js';
@@ -63,16 +64,21 @@ export type ProviderModelDiscoveryMode = 'run' | 'skip';
 /**
  * Provider facts a host's own stack already holds for the same machine and the
  * same providers directory, lent to a second stack it composes (the daemon's
- * hosted-session workspace floors). The benchmark leaderboard and the local
- * servers' context windows are the same for every workspace; without the loan
- * each floor built after a workspace's last session ended read the leaderboard
- * file again (and fetched it from the network whenever the host's copy was
- * missing or stale) and probed every custom server's endpoints again. The host
- * keeps owning their load and refresh.
+ * hosted-session workspace floors). The benchmark leaderboard, the local
+ * servers' context windows and each provider's live model listing are the
+ * same for every workspace; without the loan each floor built after a
+ * workspace's last session ended read the leaderboard file again (and fetched
+ * it from the network whenever the host's copy was missing or stale), probed
+ * every custom server's endpoints again, and swept every provider again
+ * (reading each cached model list and probing each unconfigured loopback
+ * server). The host keeps owning their load and refresh.
  */
 export interface ProviderStackHostFacts {
   readonly benchmarkStore: BenchmarkStore;
-  readonly localContextIngestion: LocalContextIngestionService;
+  /** `ProviderRegistry.localContextReadings` of the host's registry. */
+  readonly localContextIngestion: LocalContextReadings;
+  /** `ProviderRegistry.liveModelListings` of the host's registry. */
+  readonly liveModelListings: LentModelListings;
 }
 
 export interface ProviderStackOptions {
@@ -163,7 +169,7 @@ export function createProviderStack(options: ProviderStackOptions): ProviderStac
     favoritesStore,
     benchmarkStore,
     modelLimitsService,
-    ...(hostFacts ? { localContextIngestion: hostFacts.localContextIngestion } : {}),
+    ...(hostFacts ? { localContextIngestion: hostFacts.localContextIngestion, liveModelListings: hostFacts.liveModelListings } : {}),
     featureFlags: options.featureFlags,
     runtimeBus: options.runtimeBus,
     registerDispose: options.registerDispose,

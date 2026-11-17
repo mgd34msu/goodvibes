@@ -34,7 +34,7 @@ import type { FeatureFlagManager } from '../runtime/feature-flags/index.js';
 import type { FavoritesStore } from './favorites.js';
 import type { BenchmarkStore } from './model-benchmarks.js';
 import type { CanonicalModel } from './synthetic.js';
-import { LocalContextIngestionService } from './local-context-ingestion.js';
+import { LocalContextIngestionService, type LocalContextReadings } from './local-context-ingestion.js';
 import { getModelLimitsCachePath, ModelLimitsService } from './model-limits.js';
 import { getGitHubCopilotTokenCachePath } from './github-copilot.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -50,7 +50,7 @@ import { buildModelRegistry, diffCustomModels, findModelDefinition, findModelDef
 import { assertProviderCredentialAuthority } from './credential-authority-contract.js';
 import { resolveModelReference } from './model-id-resolution.js';
 import { ConfiguredModelFollower } from './registry-configured-model.js';
-import type { LiveModelDiscoveryResult } from './live-model-discovery.js';
+import { LiveModelListings, type LentModelListings, type LiveModelDiscoveryResult } from './live-model-discovery.js';
 import { applyProviderNativeModelBaseline, removeProviderNativeModels, StartupModelDiscovery, sweepLiveModelDiscovery } from './registry-live-model-discovery.js';
 import type {
   ModelDefinition, ProviderCatalogOptions, ProviderRegistryOptions, RuntimeProviderRegistration, TokenLimits,
@@ -106,6 +106,10 @@ export class ProviderRegistry {
   private _watchingClosed: Promise<void> | undefined;
   private _readyPromise: Promise<void> | null = null;
   private readonly startupDiscovery = new StartupModelDiscovery();
+  /** Every listing this registry's refreshes take, for a second registry to borrow (LiveModelListings). */
+  private readonly ownModelListings = new LiveModelListings();
+  /** A host registry's listings this one takes instead (ProviderRegistryOptions.liveModelListings). */
+  private readonly hostModelListings: LentModelListings | null;
   private readonly configManager: ProviderRegistryOptions['configManager'];
   private readonly subscriptionManager: Pick<SubscriptionManager, 'get' | 'getPending' | 'saveSubscription' | 'resolveAccessToken'>;
   private readonly capabilityRegistry: ProviderCapabilityRegistry;
@@ -117,7 +121,9 @@ export class ProviderRegistry {
   private readonly gatewayPricing: GatewayPricingService;
   private readonly runtimeMetadataDeps: ProviderRuntimeMetadataDeps;
   private readonly runtimeBus: RuntimeEventBus | null;
-  private readonly localContextIngestionService: LocalContextIngestionService;
+  private readonly localContextIngestionService: LocalContextReadings;
+  /** What `localContextReadings` lends: its own service's lending view, or the host's view it was given. */
+  private readonly lendableContextReadings: LocalContextReadings;
   private catalogModels: CatalogModel[] = [];
   private pricingCatalog: PricingCatalog | null = null;
   private syntheticCanonicalModels: CanonicalModel[] = [];
@@ -159,7 +165,15 @@ export class ProviderRegistry {
     this.cacheHitTracker = options.cacheHitTracker;
     this.favoritesStore = options.favoritesStore;
     this.benchmarkStore = options.benchmarkStore;
-    this.localContextIngestionService = options.localContextIngestion ?? new LocalContextIngestionService();
+    if (options.localContextIngestion) {
+      this.localContextIngestionService = options.localContextIngestion;
+      this.lendableContextReadings = options.localContextIngestion;
+    } else {
+      const ownContextReadings = new LocalContextIngestionService();
+      this.localContextIngestionService = ownContextReadings;
+      this.lendableContextReadings = ownContextReadings.lend();
+    }
+    this.hostModelListings = options.liveModelListings ?? null;
     this.modelLimitsService = options.modelLimitsService
       ?? new ModelLimitsService({ cachePath: getModelLimitsCachePath(this.getPersistenceRoot()) });
     this.gatewayPricing = new GatewayPricingService({ cacheDir: this.getPersistenceRoot() });
@@ -394,7 +408,12 @@ export class ProviderRegistry {
         this.providers.values(),
         () => this.providerNativeModels,
         providerId,
-        { ...options, isRegistered: (name) => this.providers.has(name) },
+        {
+          ...options,
+          isRegistered: (name) => this.providers.has(name),
+          // A borrower takes the host's listings and records none: the host's store holds only what the host read.
+          ...(this.hostModelListings ? { borrowFrom: this.hostModelListings.listings } : { recordTo: this.ownModelListings }),
+        },
       );
       this.providerNativeModels = providerNativeModels;
       if (reports.length > 0) { this._invalidateModelRegistry(); }
@@ -1094,8 +1113,13 @@ export class ProviderRegistry {
   /** Model tier readings (routing.model-tier), for the route planner. */
   get modelTiers(): ModelTierStore { return this.routingReadings.tiers; }
 
-  /** The context-window readings this registry takes from local and custom servers, to lend a second registry over the same providers. */
-  get localContextReadings(): LocalContextIngestionService { return this.localContextIngestionService; }
+  /** The context-window readings of local and custom servers, as lent to a second registry over the same providers (LocalContextIngestionService.lend). */
+  get localContextReadings(): LocalContextReadings { return this.lendableContextReadings; }
+
+  /** This registry's live model listings, as lent to a second registry over the same providers and persistence root (LiveModelListings). */
+  get liveModelListings(): LentModelListings {
+    return this.hostModelListings ?? { listings: this.ownModelListings, settled: () => this.modelDiscoverySettled() };
+  }
 
   /** The benchmark leaderboard, for the route planner's ordering of each tier's candidates. */
   get benchmarks(): Pick<BenchmarkStore, 'getKnownBenchmarks' | 'readBenchmarks' | 'benchmarksSettled'> { return this.benchmarkStore; }
@@ -1172,7 +1196,11 @@ export class ProviderRegistry {
 
   /** Background, TTL-respecting live model discovery sweep (never blocks/throws); separate from initCatalog() so tests calling that without mocking a provider API aren't surprised by a live network call. Real callers invoke this once at startup too. */
   initProviderModelDiscovery(): void {
-    this.startupDiscovery.start(() => this.refreshLiveModelDiscovery());
+    const host = this.hostModelListings;
+    // A borrower waits for the host's own startup sweep, already running, rather than repeating it.
+    this.startupDiscovery.start(host
+      ? async () => { await host.settled(); return this.refreshLiveModelDiscovery(); }
+      : () => this.refreshLiveModelDiscovery());
   }
 
   /** When the startup sweep settled (StartupModelDiscovery); at once when none was started. */

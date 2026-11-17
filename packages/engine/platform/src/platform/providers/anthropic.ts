@@ -17,6 +17,7 @@ import {
   fetchAnthropicModels,
   runLiveModelRefresh,
   type LiveModelDiscoveryResult,
+  type ProviderModelRefreshOptions,
 } from './live-model-discovery.js';
 import { applyAnthropicReasoning, isAnthropicThinkingEnabled } from './anthropic-stream.js';
 import { documentedMaxOutput } from './anthropic-output-caps.js';
@@ -439,9 +440,11 @@ export class AnthropicProvider implements LLMProvider {
    * dated-static list, and reports the honest reason when live discovery
    * fails rather than silently keeping stale data with no explanation.
    */
-  async refreshModels(force = false): Promise<LiveModelDiscoveryResult> {
+  async refreshModels(force = false, options: ProviderModelRefreshOptions = {}): Promise<LiveModelDiscoveryResult> {
     const result = await runLiveModelRefresh({
       providerName: this.name,
+      recordTo: options.recordTo,
+      borrowFrom: options.borrowFrom,
       cachePath: this.modelsCachePath,
       datedStaticModels: ANTHROPIC_DATED_STATIC_MODELS,
       datedStaticAsOf: ANTHROPIC_DATED_STATIC_MODELS_AS_OF,

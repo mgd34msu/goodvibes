@@ -10,7 +10,7 @@
  *
  *  - a provider stack, including a model-DISCOVERY pass at construction
  *    (provider-stack.ts: `initProviderModelDiscovery`), a network round trip
- *    per configured provider;
+ *    per configured provider unless the product lends its own listings;
  *  - filesystem watchers on the config tree (`watchConfigFiles`) plus a
  *    config→bus bridge;
  *  - a plugin manager and an MCP registry, each of which reaches processes and
@@ -34,10 +34,11 @@
  * So: floors are keyed by resolved workspace root, reference-counted by the
  * sessions using them, and disposed when the last one goes. A workspace with no
  * live hosted session holds no watchers. Building the floor again for that
- * workspace's next session adds tens of milliseconds to its create and repeats
- * no network work the host already did when the product lends its provider
- * facts (`providerHostFacts`), which is less than keeping an idle floor's
- * memory and watchers would cost.
+ * workspace's next session adds about ten milliseconds to its create and, when
+ * the product lends its provider facts (`providerHostFacts`: leaderboard,
+ * context-window readings, model listings), sends no request and reads no
+ * provider cache the host already read, which is less than keeping an idle
+ * floor's memory and watchers would cost.
  *
  * ── Why the factory is injected ────────────────────────────────────────────
  *

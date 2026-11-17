@@ -117,14 +117,11 @@ export interface RuntimePromptCompositionInput {
    * The memory spine's cached recall snapshot (platform 1.2.0 sync-recall seam), when the
    * caller has one to offer.
    *
-   * SYNC-RECALL SEAM (memory-spine full-detach adoption, platform 1.2.0): this function is
-   * called synchronously from the platform's `Orchestrator.getSystemPrompt` callback, which
-   * the platform defines as non-async, while a wire client's memory reads are async. Rather
-   * than reading `memoryRegistry.getAll()` directly (a frozen local snapshot that would
-   * silently miss whatever the daemon wrote after this process last opened its own
-   * copy, the exact failure the 1.1.0-era `memorySpineMode` degrade note used to flag),
-   * the caller drives an ASYNC pre-turn hook (`MemorySpineClient.refreshRecallSnapshot`)
-   * and passes the resulting freshness-stamped `MemoryRecallSnapshot` in here. When
+   * Memory as it is when this turn's prompt is built. Rather than reading
+   * `memoryRegistry.getAll()` directly (a frozen local snapshot that would silently miss
+   * whatever the daemon wrote after this process last opened its own copy), the prompt
+   * builder awaits `MemorySpineClient.refreshRecallSnapshot` before composing and passes
+   * the resulting freshness-stamped `MemoryRecallSnapshot` in here. When
    * present, its `records` (captured with `{ recall: false }`, an unfiltered browse
    * set, matching the old `getAll()` semantics exactly) replace the direct registry
    * read, and its own honest `stale`/`mode`/`note` fields drive the 'memory' receipt

@@ -232,16 +232,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       activePromptTurnId = event.payload.turnId;
       activePromptTurnText = event.payload.prompt;
       occasionsNudgeSurface.noteTurnSubmitted();
-      // Per-turn recall refresh (platform 1.2.0 sync-recall seam): the ASYNC
-      // pre-turn hook. getSystemPrompt below is SYNCHRONOUS and cannot await
-      // this, so it is fired here (not awaited) and read back via the cached
-      // recallSnapshot() a moment later when the orchestrator actually builds
-      // the prompt. A miss (this turn's prompt reads last turn's snapshot, or
-      // the still-empty boot snapshot on a very first turn) is surfaced
-      // honestly by the snapshot's own staleness note, never silently hidden.
-      services.memorySpineClient.refreshRecallSnapshot(undefined, { recall: false }).catch((error: unknown) => {
-        logger.debug('Per-turn memory recall snapshot refresh failed', { error: summarizeError(error) });
-      });
     }),
     runtimeBus.on<Extract<TurnEvent, { type: 'TURN_COMPLETED' }>>('TURN_COMPLETED', (event) => {
       promptContextReceipts.recordTurnOutcome({
@@ -332,21 +322,30 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
           shellPaths: services.shellPaths,
           memoryRegistry: services.memoryRegistry,
           turnText: activePromptTurnText,
-          memoryRecallSnapshot: services.memorySpineClient.recallSnapshot(),
           // Resolved once per turn (in-memory lookups and a handful of stats), so a credential
           // connected or removed mid-session is what this turn's prompt says.
           capabilityIndex: refreshCapabilityIndex() ?? capabilitySnapshot(),
         };
         const composedPrompt = (async () => {
           signal?.throwIfAborted();
-          const tierPrompt = await readTierPromptSupplement(
-            factsFor({ catalog: providerRegistry }, currentModel),
-            providerRegistry.modelTiers,
-            'agent.conversation-system-prompt',
-            { audience: 'conversation', signal },
-          );
+          // The turn's prompt carries memory as it is now: a memory saved during
+          // the last turn is in this one. The refresh runs beside the tier
+          // reading, bounded by its own deadline and the turn's signal; when it
+          // fails the last snapshot is used, with its own staleness note.
+          const [tierPrompt, memoryRecallSnapshot] = await Promise.all([
+            readTierPromptSupplement(
+              factsFor({ catalog: providerRegistry }, currentModel),
+              providerRegistry.modelTiers,
+              'agent.conversation-system-prompt',
+              { audience: 'conversation', signal },
+            ),
+            services.memorySpineClient.refreshRecallSnapshot(undefined, { recall: false, signal }).catch((error: unknown) => {
+              logger.debug('Per-turn memory recall snapshot refresh failed', { error: summarizeError(error) });
+              return services.memorySpineClient.recallSnapshot();
+            }),
+          ]);
           signal?.throwIfAborted();
-          const composed = await composeRuntimePromptWithReceipt({ ...captured, tierPrompt });
+          const composed = await composeRuntimePromptWithReceipt({ ...captured, memoryRecallSnapshot, tierPrompt });
           signal?.throwIfAborted();
           promptContextReceipts.record(composed.receipt);
           recordComposedPromptUsage(() => memoryUsageTracker.onComposed(turnId, composed.receipt));

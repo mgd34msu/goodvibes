@@ -473,15 +473,19 @@ export class MemorySpineClient implements MemoryAccess {
    * daemon that is slow to answer rejects the refresh instead of holding the turn,
    * the request is cancelled, and the previous snapshot stays in place with its
    * age and `stale` note, so a caller that waits on the refresh starts the turn
-   * on what it already had.
+   * on what it already had. A caller's `signal` (the turn's) ends it sooner.
    */
   async refreshRecallSnapshot(
     filter: MemorySearchFilter = {},
-    options: MemoryRecallRefreshOptions & { readonly timeoutMs?: number | undefined } = {},
+    options: MemoryRecallRefreshOptions & {
+      readonly timeoutMs?: number | undefined;
+      readonly signal?: AbortSignal | undefined;
+    } = {},
   ): Promise<MemoryRecallSnapshot> {
     const recall = options.recall ?? true;
     if (this.transport === null && this.localReload) await this.localReload;
-    const signal = AbortSignal.timeout(options.timeoutMs ?? RECALL_REFRESH_TIMEOUT_MS);
+    const deadline = AbortSignal.timeout(options.timeoutMs ?? RECALL_REFRESH_TIMEOUT_MS);
+    const signal = options.signal ? AbortSignal.any([deadline, options.signal]) : deadline;
     const operation = this.operation({ signal }), mode = this.mode(), route = this.route();
     // The snapshot describes memory as it was when the search began, and the
     // newest search to START wins: a slow earlier one that finishes last must not

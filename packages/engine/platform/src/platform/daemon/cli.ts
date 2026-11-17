@@ -34,7 +34,6 @@ function installServiceAndExit(config: ConfigManager, workingDir: string, homeDi
   const manager = new PlatformServiceManager(config, {
     workingDirectory: workingDir,
     homeDirectory,
-    surfaceRoot: 'goodvibes',
     binaryBaseName: 'goodvibes',
     defaultServiceName: resolveDaemonServiceDefault(homeDirectory),
     defaultServiceDescription: 'goodvibes omnichannel daemon host',

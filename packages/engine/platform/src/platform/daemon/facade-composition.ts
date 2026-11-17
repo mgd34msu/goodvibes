@@ -470,7 +470,6 @@ export function resolveDaemonFacadeRuntime(
     platformServiceManager: new PlatformServiceManager(resolvedConfigManager, {
       workingDirectory: runtimeServices.workingDirectory,
       homeDirectory: runtimeServices.homeDirectory,
-      surfaceRoot: 'goodvibes',
       binaryBaseName: 'goodvibes',
       defaultServiceName: resolveDaemonServiceDefault(runtimeServices.homeDirectory),
       defaultServiceDescription: 'goodvibes omnichannel daemon host',

@@ -1,9 +1,8 @@
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync, spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { processStartTime } from '../config/process-start-time.js';
 import { ConfigManager } from '../config/manager.js';
-import { resolveScopedDirectory } from '../runtime/surface-root.js';
 import type { FeatureFlagReader } from '../runtime/feature-flags/index.js';
 import { isFeatureGateEnabled, requireFeatureGate } from '../runtime/feature-flags/index.js';
 import { SERVICE_MANAGEMENT_FEATURE_FLAG } from '../runtime/feature-flags/flags.js';
@@ -102,11 +101,37 @@ export interface ManagedServiceManagerOptions extends ManagedServicePaths {
   readonly actionRunner?: ((command: string, args: readonly string[]) => ManagedServiceActionResult) | undefined;
   /** A retained caller restriction checked before native publication and platform actions. */
   readonly assertCurrent?: (() => void) | undefined;
-  readonly surfaceRoot?: string | undefined;
   readonly binaryBaseName?: string | undefined;
   readonly defaultServiceName?: string | undefined;
   readonly defaultServiceDescription?: string | undefined;
   readonly featureFlags?: FeatureFlagReader | undefined;
+}
+
+/**
+ * The directory under a home where the managed service keeps its own state:
+ * the pid file the manual platform finds, stops and restarts it by, the default
+ * log, and the manual and Windows definitions. One value for every process
+ * that manages the service (the daemon, the terminals, autostart).
+ */
+export const SERVICE_STATE_ROOT = 'daemon';
+
+/**
+ * The service's state directory: under the home its unit is registered from
+ * (the manager's `homeDirectory`), never a process's working directory, so
+ * the terminal that started the service and the daemon that runs it read the
+ * same pid file and report the same log.
+ */
+export function serviceStateDirectory(homeDirectory: string): string {
+  return join(resolve(homeDirectory), '.goodvibes', SERVICE_STATE_ROOT, 'service');
+}
+
+/** Where earlier versions kept the same files: under the working directory, in one of three roots. */
+function legacyServiceStateDirectories(workingDirectory: string): string[] {
+  return [
+    join(workingDirectory, '.goodvibes', 'goodvibes', 'service'),
+    join(workingDirectory, '.goodvibes', 'daemon', 'service'),
+    join(workingDirectory, '.goodvibes', 'service'),
+  ];
 }
 
 /** Resolves the configured `service.platform` (default `auto`) against the host operating system. */
@@ -170,11 +195,11 @@ function resolveLogPath(
   configManager: ConfigManager,
   platform: ManagedServicePlatform,
   workingDirectory: string,
-  surfaceRoot?: string,
+  stateDirectory: string,
 ): string {
   const configured = String(configManager.get('service.logPath') ?? '').trim();
   if (configured) return resolve(workingDirectory, configured);
-  return resolveScopedDirectory(workingDirectory, surfaceRoot, 'service', `${platform}.log`);
+  return join(stateDirectory, `${platform}.log`);
 }
 
 /**
@@ -373,7 +398,6 @@ function definitionPath(
   platform: ManagedServicePlatform,
   serviceName: string,
   paths: ManagedServicePaths,
-  surfaceRoot?: string,
 ): string {
   switch (platform) {
     case 'systemd':
@@ -381,22 +405,15 @@ function definitionPath(
     case 'launchd':
       return join(paths.homeDirectory, 'Library', 'LaunchAgents', `${serviceName}.plist`);
     case 'windows':
-      return resolveScopedDirectory(paths.workingDirectory, surfaceRoot, 'service', 'windows-task.txt');
+      return join(serviceStateDirectory(paths.homeDirectory), 'windows-task.txt');
     case 'manual':
     default:
-      return resolveScopedDirectory(paths.workingDirectory, surfaceRoot, 'service', 'manual-service.txt');
+      return join(serviceStateDirectory(paths.homeDirectory), 'manual-service.txt');
   }
 }
 
-function pidFilePath(platform: ManagedServicePlatform, workingDirectory: string, surfaceRoot?: string): string {
-  switch (platform) {
-    case 'systemd':
-    case 'launchd':
-    case 'windows':
-    case 'manual':
-    default:
-      return resolveScopedDirectory(workingDirectory, surfaceRoot, 'service', `${platform}.pid`);
-  }
+function pidFilePath(platform: ManagedServicePlatform, stateDirectory: string): string {
+  return join(stateDirectory, `${platform}.pid`);
 }
 
 function suggestedCommands(platform: ManagedServicePlatform, path: string, serviceName: string): string[] {
@@ -434,7 +451,10 @@ export class PlatformServiceManager {
   private readonly definitionOverride?: ManagedServiceDefinition | undefined;
   private readonly actionRunner?: ((command: string, args: readonly string[]) => ManagedServiceActionResult) | undefined;
   private readonly currentRestriction?: (() => void) | undefined;
-  private readonly surfaceRoot?: string | undefined;
+  /** {@link serviceStateDirectory} of this manager's home. */
+  private readonly stateDirectory: string;
+  /** Records left in a legacy location are moved once per manager. */
+  private legacyStateAdopted = false;
   private readonly binaryBaseName?: string | undefined;
   private readonly defaultServiceName?: string | undefined;
   private readonly defaultServiceDescription?: string | undefined;
@@ -448,7 +468,7 @@ export class PlatformServiceManager {
     this.definitionOverride = options.definitionOverride;
     this.actionRunner = options.actionRunner;
     this.currentRestriction = options.assertCurrent;
-    this.surfaceRoot = options.surfaceRoot;
+    this.stateDirectory = serviceStateDirectory(this.homeDirectory);
     this.binaryBaseName = options.binaryBaseName;
     this.defaultServiceName = options.defaultServiceName;
     this.defaultServiceDescription = options.defaultServiceDescription;
@@ -475,13 +495,53 @@ export class PlatformServiceManager {
     };
   }
 
+  /** {@link getPaths}, after any record a legacy location still holds was moved to the state directory. */
+  private statePaths(): ManagedServicePaths {
+    this.adoptLegacyState();
+    return this.getPaths();
+  }
+
+  /** The pid file of `platform`, after any legacy record was moved into place. */
+  private pidPath(platform: ManagedServicePlatform): string {
+    this.adoptLegacyState();
+    return pidFilePath(platform, this.stateDirectory);
+  }
+
+  /**
+   * Earlier versions kept the pid file and the manual/Windows definitions
+   * under the working directory, in a root that depended on which process
+   * built the manager. The first read of a path moves each such file into
+   * the one state directory when nothing is there yet: a few existence checks
+   * once per manager, nothing after.
+   */
+  private adoptLegacyState(): void {
+    if (this.legacyStateAdopted) return;
+    this.legacyStateAdopted = true;
+    const names = ['systemd.pid', 'launchd.pid', 'windows.pid', 'manual.pid', 'manual-service.txt', 'windows-task.txt'];
+    for (const legacy of legacyServiceStateDirectories(this.workingDirectory)) {
+      if (legacy === this.stateDirectory) continue;
+      for (const name of names) {
+        const from = join(legacy, name);
+        const to = join(this.stateDirectory, name);
+        if (!existsSync(from) || existsSync(to)) continue;
+        try {
+          this.assertCurrent();
+          mkdirSync(this.stateDirectory, { recursive: true });
+          renameSync(from, to);
+        } catch {
+          // Left where it is; the next manager tries again.
+        }
+      }
+    }
+  }
+
   /** Read-only identity check; an installed definition grants no authority for another selected host. */
   installedDefinitionMatches(): boolean {
     this.assertCurrent();
     if (!this.isEnabled()) return false;
     const platform = detectPlatform(String(this.configManager.get('service.platform')));
     const serviceName = resolveServiceName(this.configManager, this.defaultServiceName);
-    const path = definitionPath(platform, serviceName, this.getPaths(), this.surfaceRoot);
+    const path = definitionPath(platform, serviceName, this.statePaths());
     try {
       const actual = readFileSync(path, 'utf-8');
       const definition = this.resolveDefinition();
@@ -550,7 +610,7 @@ export class PlatformServiceManager {
     this.assertCurrent();
     const platform = detectPlatform(String(this.configManager.get('service.platform')));
     const serviceName = resolveServiceName(this.configManager, this.defaultServiceName);
-    const path = definitionPath(platform, serviceName, this.getPaths(), this.surfaceRoot);
+    const path = definitionPath(platform, serviceName, this.statePaths());
     if (!this.isEnabled()) {
       const definition = this.resolveDefinition();
       return {
@@ -560,7 +620,7 @@ export class PlatformServiceManager {
         installed: false,
         autostart: false,
         running: false,
-        logPath: resolveLogPath(this.configManager, platform, this.workingDirectory, this.surfaceRoot),
+        logPath: resolveLogPath(this.configManager, platform, this.workingDirectory, this.stateDirectory),
         commandPreview: [definition.command, ...definition.args].join(' '),
         suggestedCommands: [],
         lastAction: 'status',
@@ -578,7 +638,7 @@ export class PlatformServiceManager {
       autostart: Boolean(this.configManager.get('service.autostart')),
       running,
       ...(pid !== undefined && running ? { pid } : {}),
-      logPath: resolveLogPath(this.configManager, platform, this.workingDirectory, this.surfaceRoot),
+      logPath: resolveLogPath(this.configManager, platform, this.workingDirectory, this.stateDirectory),
       commandPreview: installed ? path : [definition.command, ...definition.args].join(' '),
       contents: installed ? redactDefinitionSecrets(readFileSync(path, 'utf-8')) : undefined,
       suggestedCommands: suggestedCommands(platform, path, serviceName),
@@ -593,7 +653,7 @@ export class PlatformServiceManager {
     const platform = detectPlatform(String(this.configManager.get('service.platform')));
     const serviceName = resolveServiceName(this.configManager, this.defaultServiceName);
     const definition = this.resolveDefinition();
-    const path = definitionPath(platform, serviceName, this.getPaths(), this.surfaceRoot);
+    const path = definitionPath(platform, serviceName, this.statePaths());
     const contents = platform === 'systemd'
       ? renderSystemdUnit(definition, yield* this.systemdMajorVersionFlow())
       : platform === 'launchd'
@@ -713,7 +773,7 @@ export class PlatformServiceManager {
         if (status.platform === 'systemd') yield { run: ['systemctl', '--user', 'daemon-reload'] };
       }
     }
-    const pidPath = pidFilePath(status.platform, this.workingDirectory, this.surfaceRoot);
+    const pidPath = this.pidPath(status.platform);
     if (existsSync(pidPath) && accepted === undefined) {
       this.assertCurrent();
       rmSync(pidPath, { force: true });
@@ -763,8 +823,8 @@ export class PlatformServiceManager {
       };
     }
     const definition = this.resolveDefinition();
-    const logPath = resolveLogPath(this.configManager, platform, this.workingDirectory, this.surfaceRoot);
-    const pidPath = pidFilePath(platform, this.workingDirectory, this.surfaceRoot);
+    const logPath = resolveLogPath(this.configManager, platform, this.workingDirectory, this.stateDirectory);
+    const pidPath = this.pidPath(platform);
     this.assertCurrent();
     mkdirSync(dirname(pidPath), { recursive: true });
     this.assertCurrent();
@@ -831,7 +891,7 @@ export class PlatformServiceManager {
   }
 
   private stopManualProcess(platform: ManagedServicePlatform): void {
-    const pidPath = pidFilePath(platform, this.workingDirectory, this.surfaceRoot);
+    const pidPath = this.pidPath(platform);
     const record = existsSync(pidPath) ? this.readPidRecord(pidPath) : undefined;
     if (record !== undefined && this.isServiceProcess(record)) {
       this.assertCurrent();
@@ -858,7 +918,7 @@ export class PlatformServiceManager {
 
   /** Stops the recorded process, waits for it to exit, and only then starts a new one. */
   private *restartManualFlow(platform: ManagedServicePlatform): ServiceFlow<ManagedServiceStatus> {
-    const pidPath = pidFilePath(platform, this.workingDirectory, this.surfaceRoot);
+    const pidPath = this.pidPath(platform);
     const record = existsSync(pidPath) ? this.readPidRecord(pidPath) : undefined;
     if (record !== undefined && record.pid === process.pid && this.isServiceProcess(record)) {
       // This daemon is the recorded process: its own SIGTERM cannot be handled
@@ -890,7 +950,7 @@ export class PlatformServiceManager {
 
   private *platformActionFlow(platform: ManagedServicePlatform, action: 'start' | 'stop' | 'restart', fromDaemon: boolean): ServiceFlow<ManagedServiceStatus> {
     const serviceName = resolveServiceName(this.configManager, this.defaultServiceName);
-    const path = definitionPath(platform, serviceName, this.getPaths(), this.surfaceRoot);
+    const path = definitionPath(platform, serviceName, this.statePaths());
     if (fromDaemon && action !== 'start' && (platform === 'systemd' || platform === 'launchd')) {
       const before = yield* this.statusFlow();
       if (this.runsThisDaemon(before)) {
@@ -1001,7 +1061,7 @@ export class PlatformServiceManager {
       const pid = pidToken && /^\d+$/.test(pidToken) ? Number(pidToken) : undefined;
       return pid !== undefined ? { running: true, pid } : { running: false };
     }
-    const pidPath = pidFilePath(platform, this.workingDirectory, this.surfaceRoot);
+    const pidPath = this.pidPath(platform);
     const record = existsSync(pidPath) ? this.readPidRecord(pidPath) : undefined;
     const running = record !== undefined ? this.isServiceProcess(record) : false;
     // Status is observational; explicit stop/uninstall own stale PID cleanup.

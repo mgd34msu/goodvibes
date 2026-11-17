@@ -112,9 +112,6 @@ export function createDaemonServiceControl(options: DaemonServiceControlOptions)
     manager: new PlatformServiceManager(pinnedConfigView(resolvedName), {
       workingDirectory: options.workingDirectory,
       homeDirectory: options.homeDirectory,
-      // Match the daemon's own service scope (log/pid layout on the manual
-      // platform); systemd/launchd/windows entries are home-scoped anyway.
-      surfaceRoot: 'daemon',
       defaultServiceName: resolvedName,
       ...(options.actionRunner ? { actionRunner: options.actionRunner } : {}),
     }),

@@ -238,6 +238,8 @@ export class HostedSessionManager {
   private alerter: ((text: string) => void) | null = null;
   private requestPath: HostedDaemonRequestPath | null = null;
   private busUnsubscribers: (() => void)[] = [];
+  /** Waiters for a session's next turn start or end (waitForNativeAvailability). */
+  private readonly turnWaiters = new Map<string, Set<() => void>>();
   private disposed = false;
   private disposal: Promise<void> | null = null;
   /** Initial registration and persistence must settle before shutdown saves. */
@@ -1023,12 +1025,38 @@ export class HostedSessionManager {
       signal.throwIfAborted();
       if (live.runtime && !live.runtime.isRunning() && !live.runtime.orchestrator.isThinking
         && live.runtime.liveTurnControls.listQueuedMessages().length === 0) return;
-      await new Promise<void>((resolve, reject) => {
-        const abort = () => { clearTimeout(timer); reject(signal.reason); };
-        const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve(); }, 20);
-        signal.addEventListener('abort', abort, { once: true });
-      });
+      // A running turn wakes this at its end event; one long fallback covers a
+      // missed event. Between turns (the ended turn still settling, or a queued
+      // message about to start) it rechecks briefly until one or the other holds.
+      await this.nextTurnChange(sessionId, signal, live.record.status === 'running' ? 1_000 : 20);
     }
+  }
+
+  /** Resolves at the session's next turn start or end, or after `ms`; rejects on abort. */
+  private nextTurnChange(sessionId: string, signal: AbortSignal, ms: number): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      let waiters = this.turnWaiters.get(sessionId);
+      if (!waiters) { waiters = new Set(); this.turnWaiters.set(sessionId, waiters); }
+      const own = waiters;
+      const finish = (): void => {
+        clearTimeout(timer);
+        signal.removeEventListener('abort', abort);
+        own.delete(wake);
+        if (own.size === 0 && this.turnWaiters.get(sessionId) === own) this.turnWaiters.delete(sessionId);
+      };
+      const wake = (): void => { finish(); resolve(); };
+      const abort = (): void => { finish(); reject(signal.reason); };
+      const timer = setTimeout(wake, ms);
+      own.add(wake);
+      signal.addEventListener('abort', abort, { once: true });
+    });
+  }
+
+  private wakeTurnWaiters(sessionId: string): void {
+    const waiters = this.turnWaiters.get(sessionId);
+    if (!waiters) return;
+    this.turnWaiters.delete(sessionId);
+    for (const wake of [...waiters]) wake();
   }
 
   private history(live: LiveSession): readonly HostedSessionHistoryMessage[] {
@@ -1275,6 +1303,8 @@ export class HostedSessionManager {
     };
     const mark = (sessionId: string | undefined, status: 'running' | 'idle', event: HostedSessionLifecycleEvent, detail: string, turnId?: string): void => {
       if (!sessionId) return;
+      // A queued native turn rechecks availability now (waitForNativeAvailability), after the record below is updated.
+      queueMicrotask(() => this.wakeTurnWaiters(sessionId));
       const live = this.sessions.get(sessionId);
       if (!live || live.record.status === 'terminated') { openTurns.delete(sessionId); return; }
       if (status === 'running' && turnId !== undefined) opened(sessionId).add(turnId);

@@ -345,7 +345,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       contracts?.started(contractId);
     },
     say: (line) => {
-      conversation.addSystemMessage(line);
+      conversation.addNotice(line, { level: 'info', kind: 'contract' });
       contracts?.said(line);
     },
   });

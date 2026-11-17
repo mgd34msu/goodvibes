@@ -134,7 +134,7 @@ export function createProviderFromEntry(entry: AutoRegisterEntry, apiKey: string
  * // Startup sequence:
  * // const names = autoRegisterProviders();
  * // if (names.length > 0) {
- * //   conversation.addSystemMessage(`Auto-registered ${names.length} providers: ${names.join(', ')}`);
+ * //   conversation.addNotice(`Auto-registered ${names.length} providers: ${names.join(', ')}`, { level: 'info' });
  * // }
  */
 export function autoRegisterProviders(

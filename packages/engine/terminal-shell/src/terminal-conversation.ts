@@ -252,14 +252,14 @@ export class TerminalConversationManager extends PlatformConversationManager {
         super.addToolResults(results);
         this.markDirty();
     }
-    public override addSystemMessage(content: string, runtimeEvent?: RuntimeEventProvenance | undefined): void {
+    public override addEventNotice(content: string, runtimeEvent: RuntimeEventProvenance): void {
         // Clear any stale kind entry at the index this message will occupy.
         // undo() splices the tail of this.messages, freeing indices that ARE reused
         // by subsequent adds. Without this delete, a recycled index could carry a
         // stale kind (e.g. 'operational') and silently mis-classify the new message.
         const nextIndex = this.getMessageCount();
         this.messageKindRegistry.delete(nextIndex);
-        super.addSystemMessage(content, runtimeEvent);
+        super.addEventNotice(content, runtimeEvent);
         this.markDirty();
         this.publishSystemNotice(nextIndex, false);
     }
@@ -286,7 +286,11 @@ export class TerminalConversationManager extends PlatformConversationManager {
     public addTypedSystemMessage(content: string, kind: SystemMessageKind, runtimeEvent?: RuntimeEventProvenance | undefined): void {
         const nextIndex = this.getMessageCount();
         this.messageKindRegistry.set(nextIndex, kind);
-        super.addSystemMessage(content, runtimeEvent);
+        // A line restating a runtime event takes that event's level; any other typed line is information.
+        if (runtimeEvent)
+            super.addEventNotice(content, runtimeEvent);
+        else
+            super.addNotice(content, { level: 'info', kind });
         this.markDirty();
         this.publishSystemNotice(nextIndex, false);
     }

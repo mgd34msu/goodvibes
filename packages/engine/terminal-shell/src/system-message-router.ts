@@ -59,7 +59,7 @@ export function activityKindFor(
   return Object.hasOwn(SYSTEM_MESSAGE_TAG_ACTIVITIES, tag) ? SYSTEM_MESSAGE_TAG_ACTIVITIES[tag]! : 'system';
 }
 export interface SystemMessageConversation {
-  addSystemMessage(message: string, runtimeEvent?: RuntimeEventProvenance | undefined): void;
+  addEventNotice(message: string, runtimeEvent: RuntimeEventProvenance): void;
   addTypedSystemMessage(message: string, kind: SystemMessageKind, runtimeEvent?: RuntimeEventProvenance | undefined): void;
   addNotice(message: string, meta: NoticeMeta): void;
 }
@@ -127,7 +127,7 @@ export class TerminalSystemMessageRouter<Feed extends SystemMessageActivityFeed 
       if (runtimeEvent === undefined) this.addDeclared(message, priority, this.presentation.typedConversation ? kind : undefined, level);
       // A line restating a runtime event takes that event's declared level.
       else if (this.presentation.typedConversation) this.conversation.addTypedSystemMessage(message, kind, runtimeEvent);
-      else this.conversation.addSystemMessage(message, runtimeEvent);
+      else this.conversation.addEventNotice(message, runtimeEvent);
     }
   }
   /** Store the line with the level its writer declared, so the transcript and the toast show it as given. */

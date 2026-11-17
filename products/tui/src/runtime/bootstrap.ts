@@ -140,7 +140,7 @@ export type BootstrapContext = RuntimeContext & {
    *
    * @remarks
    * Route operational messages through this rather than calling
-   * conversation.addSystemMessage() directly so routing-target config
+   * conversation.addNotice() directly so routing-target config
    * (target 'panel' / 'conversation' / 'both') and the forced-inline critical prefixes stay
    * centralized in one place.
    */

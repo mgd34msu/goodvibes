@@ -31,7 +31,7 @@ import type { SystemMessageKind } from '@goodvibes-jev/engine/platform/platform/
  *   - 'wrfc'        YES, WRFC chain events are important and worth navigating to.
  *   - 'operational' NO , tool/scan/plugin/MCP status noise; not useful to jump to.
  *
- * When a message has no recorded kind (added via bare addSystemMessage), it
+ * When a message has no recorded kind (a notice written without one), it
  * defaults to 'system' and is therefore navigable.
  */
 const NAVIGABLE_KINDS: ReadonlySet<SystemMessageKind> = new Set(['system', 'contract']);

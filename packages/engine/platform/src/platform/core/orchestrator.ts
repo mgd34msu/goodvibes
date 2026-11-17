@@ -259,6 +259,8 @@ export class Orchestrator {
 
   private animInterval: ReturnType<typeof setInterval> | null = null;
   private abortController: AbortController | null = null;
+  /** When the current turn's abort was first asked for; TURN_CANCEL carries it so the cancel latency is measured. */
+  private abortRequestedAt: number | undefined;
   private disposed = false;
   /** Per-tool-call abort registry (per-call cancel; see orchestrator-live-turn.ts). */
   private readonly toolCallAborts = new ToolCallAbortRegistry();
@@ -662,6 +664,7 @@ export class Orchestrator {
 
   /** Abort the current in-flight LLM request, if any. */
   public abort(): void {
+    if (this.abortController && !this.abortController.signal.aborted) this.abortRequestedAt = Date.now();
     this.nativeAdmissionAbort?.abort();
     this.abortController?.abort();
     this.followUpRuntime?.cancel();
@@ -862,6 +865,7 @@ export class Orchestrator {
     this.streamingInputTokens = estimatedInputTokens ?? this.lastRequestInputTokens;
     this.streamingOutputTokens = 0;
     this.abortController = new AbortController();
+    this.abortRequestedAt = undefined;
     // animInterval is always (re)started on every think call to reset the frame
     // counter and ensure a fresh animation cycle, even if already running.
     if (this.animInterval) clearInterval(this.animInterval);
@@ -1272,13 +1276,14 @@ export class Orchestrator {
       this.reconcileUnresolvedToolCalls([], 'exception-before-results');
       this.conversation.removeMessagesAfter(this.turnStartMessageCount, { preserveCompletedTools: true });
       this.conversation.markLastUserMessageCancelled(this.turnStartMessageCount);
-      this.conversation.addSystemMessage('[Response cancelled]', { type: 'TURN_CANCEL' });
+      this.conversation.addEventNotice('[Response cancelled]', { type: 'TURN_CANCEL' });
       this.turnCancellation.end(turnId);
       if (this.runtimeBus) {
         emitTurnCancel(this.runtimeBus, createEmitterContext(this.currentSessionId, turnId), {
           turnId,
           reason: 'cancelled',
           stopReason: 'cancelled',
+          requestedAt: this.abortRequestedAt,
         });
       }
       return;

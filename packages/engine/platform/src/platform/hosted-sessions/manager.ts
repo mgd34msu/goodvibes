@@ -1065,7 +1065,7 @@ export class HostedSessionManager {
     try {
       runtime.conversation.fromJSON(payload as Parameters<typeof runtime.conversation.fromJSON>[0]);
       if (live.record.status !== 'terminated') {
-        runtime.conversation.addSystemMessage(RESTART_NOTICE);
+        runtime.conversation.addNotice(RESTART_NOTICE, { level: 'warning', kind: 'operational' });
       }
     } catch (error) {
       logger.warn('[hosted-sessions] a restored transcript could not be replayed; the session resumes empty', {

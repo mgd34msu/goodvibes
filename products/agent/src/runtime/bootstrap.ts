@@ -116,7 +116,7 @@ export type BootstrapContext = RuntimeContext & {
    *
    * @remarks
    * Route operational messages through this rather than calling
-   * conversation.addSystemMessage() directly so that low-priority messages
+   * conversation.addNotice() directly so that low-priority messages
    * stay out of the main conversation and go to the activity feed instead.
    */
   systemMessageRouter: SystemMessageRouter;

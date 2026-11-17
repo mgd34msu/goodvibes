@@ -380,10 +380,10 @@ export class ConversationManager {
   /**
    * A line for the person restating a runtime event the producer declared
    * (agent finished, turn cancelled, contract state). Its level comes from the
-   * declared event; any other line is information. No model reads it.
-   * A writer that knows its line's level uses `addNotice`.
+   * declared event. Display only, like every notice: no model reads it. Any
+   * other line is written with `addNotice` and the level its writer knows.
    */
-  public addSystemMessage(content: string, runtimeEvent?: RuntimeEventProvenance): void {
+  public addEventNotice(content: string, runtimeEvent: RuntimeEventProvenance): void {
     const presentation = declaredNoticePresentation(content, runtimeEvent) ?? noticePresentation(INFO_NOTICE);
     this.messages.push({ role: 'system', content, presentation,
       ...(runtimeEvent ? { runtimeEvent: storedRuntimeEvent(runtimeEvent) } : {}),

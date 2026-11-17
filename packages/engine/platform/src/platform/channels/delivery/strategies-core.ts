@@ -87,8 +87,12 @@ export function createWebhookDeliveryStrategy(
     },
     async deliver(request) {
       const attachments = await resolveAttachments(request, artifactStore, configManager, 128 * 1024);
-      // A binding's callback URL was supplied by the outside party that bound it.
-      const outsideAddress = request.target.address === undefined && typeof request.binding?.metadata.callbackUrl === 'string';
+      // A binding's callback and response URLs were supplied by the outside
+      // party that bound it. The router and scheduled delivery copy them into
+      // the target's address, so the origin is read from the binding, not from
+      // whether the address was set: such an address is held to public hosts.
+      const boundUrls = [request.binding?.metadata.callbackUrl, request.binding?.metadata.responseUrl]
+        .filter((value): value is string => typeof value === 'string');
       const address = request.target.address
         ?? (typeof request.binding?.metadata.callbackUrl === 'string' ? request.binding.metadata.callbackUrl : undefined)
         // The default target is declared secret-bearing (it can carry its own
@@ -100,6 +104,7 @@ export function createWebhookDeliveryStrategy(
         })
         ?? '';
       if (!address) throw new Error('Missing webhook delivery target');
+      const outsideAddress = boundUrls.includes(address);
       const approvedPrivateHosts = outsideAddress ? undefined : options.privateDeliveryHosts?.() ?? [];
       if (approvedPrivateHosts === undefined) {
         const validation = validatePublicWebhookUrl(address);

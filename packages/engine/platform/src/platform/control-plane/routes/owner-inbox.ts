@@ -7,6 +7,7 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import {
+  OWNER_ITEM_KINDS,
   OwnerInboxInputError,
   type NewOwnerItem,
   type OwnerAnswerOutcome,
@@ -20,7 +21,8 @@ import { readInvocationParams, requireStringValue } from './invocation-params.js
 export type OwnerInboxGatewayService = Pick<OwnerInbox, 'listNow' | 'get' | 'answer' | 'postNow' | 'withdraw' | 'reportDelivery' | 'postedBy' | 'revision' | 'subscribe'>;
 
 const LIST_STATUSES = new Set(['open', 'closed', 'all']);
-const KINDS = new Set<string>(['approval', 'question', 'claim', 'purchase', 'queued-action']);
+/** Every kind the list can filter by, decision included (the schema's enum). */
+const KINDS: ReadonlySet<string> = new Set<string>(OWNER_ITEM_KINDS);
 /** What a process outside the daemon may post; claims and purchase windows come from the daemon's own subsystems. */
 const WIRE_POSTABLE = new Set<string>(['question', 'queued-action']);
 
@@ -67,7 +69,7 @@ export function createOwnerInboxListHandler(inbox: OwnerInboxGatewayService): Ga
     }
     const rawKinds = params['kinds'];
     if (rawKinds !== undefined && (!Array.isArray(rawKinds) || !rawKinds.every((kind) => typeof kind === 'string' && KINDS.has(kind)))) {
-      throw new GatewayVerbError('Invalid kinds: expected a list of approval, question, claim, purchase, queued-action', 'INVALID_ARGUMENT', 400, 'kinds');
+      throw new GatewayVerbError(`Invalid kinds: expected a list of ${OWNER_ITEM_KINDS.join(', ')}`, 'INVALID_ARGUMENT', 400, 'kinds');
     }
     const limit = params['limit'];
     if (limit !== undefined && (typeof limit !== 'number' || !Number.isFinite(limit) || limit < 1)) {

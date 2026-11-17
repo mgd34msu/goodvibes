@@ -21,6 +21,8 @@ import { SESSION_UPDATE_WIRE_EVENT } from '../lib/sessions-union';
 
 /** The approval broker's wire event; the daemon tags it with the `gate` domain. */
 const APPROVAL_UPDATE_WIRE_EVENT = 'approval-update';
+/** The owner inbox's wire event for every item that is not an approval, also tagged `gate`. */
+const OWNER_INBOX_UPDATE_WIRE_EVENT = 'owner-inbox-update';
 
 /**
  * Every domain this tab needs app-wide; wire events ride the domain the daemon tags them with.
@@ -34,8 +36,8 @@ const APP_DOMAINS: readonly RuntimeEventDomain[] = [
 
 /**
  * Frame name -> the query keys it revalidates. A domain frame is named after its domain;
- * the broker's wire events (session-update, hosted-session-update, approval-update) carry
- * their own names on the same stream.
+ * the broker's wire events (session-update, hosted-session-update, approval-update,
+ * owner-inbox-update) carry their own names on the same stream.
  */
 const DOMAIN_INVALIDATIONS: Record<string, readonly (readonly unknown[])[]> = {
   tasks: [queryKeys.tasks],
@@ -44,6 +46,8 @@ const DOMAIN_INVALIDATIONS: Record<string, readonly (readonly unknown[])[]> = {
   // `sessions` prefix revalidates whichever session's permission chip is mounted.
   gate: [queryKeys.approvals, queryKeys.sessions, queryKeys.permissionRules],
   [APPROVAL_UPDATE_WIRE_EVENT]: [queryKeys.approvals, queryKeys.permissionRules],
+  // A question posted, answered (from any surface), withdrawn or delivered, and Jev's decisions.
+  [OWNER_INBOX_UPDATE_WIRE_EVENT]: [queryKeys.ownerInbox],
   // MODEL_CHANGED and provider metadata ride `providers`; a model change can also
   // replace a session's context window, so mounted context usage is re-read too.
   providers: [queryKeys.providers, queryKeys.sessions, ['daemon-health', 'model']],

@@ -20,6 +20,8 @@ export const queryKeys = {
   workPlan: ['work-plan'] as const,
   workPlanSnapshot: (revision: number) => ['work-plan', revision] as const,
   approvals: ['approvals'] as const,
+  // The owner inbox's questions and Jev's decisions (views/work/OwnerQuestions.tsx).
+  ownerInbox: ['owner-inbox'] as const,
   // Durable approval rules (permissions.rules.list), remembered decisions at a
   // generalizing tier. Invalidate alongside approvals: a decision can mint a
   // rule, a deletion makes matching asks prompt again.

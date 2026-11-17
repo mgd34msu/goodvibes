@@ -11,11 +11,17 @@
  * files the call changed, never, always and ask set a standing rule for calls
  * like it, keep leaves it. The app whose gate decided carries the choice out;
  * the toast says what was done, or why it could not be.
+ *
+ * One `inbox.list` read carries all three lists. It is re-read when an
+ * `owner-inbox-update` frame arrives on the shared event stream
+ * (useRealtimeInvalidation) and polled only while that stream is not live.
  */
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client as platformClient } from '../../lib/goodvibes';
 import { formatError } from '../../lib/errors';
+import { useEventStreamState } from '../../lib/event-stream';
+import { queryKeys } from '../../lib/queries';
 import { useToast } from '../../lib/toast';
 import { RowGroup } from '../../components/data-view/DataView';
 import { Button } from '../../components/ui/Button';
@@ -23,11 +29,46 @@ import { Chip } from '../../components/ui/Chip';
 import { Input } from '../../components/ui/Field';
 import type { StatusTone } from '../../components/ui/StatusDot';
 
-const QUESTIONS_QUERY_KEY = ['owner-inbox', 'questions', 'open'] as const;
-const ANSWERS_QUERY_KEY = ['owner-inbox', 'questions', 'closed'] as const;
-const DECISIONS_QUERY_KEY = ['owner-inbox', 'decisions'] as const;
+const INBOX_QUERY_KEY = [...queryKeys.ownerInbox, 'questions-and-decisions'] as const;
 /** Recent answers shown with where they are; older ones are in /decisions. */
 const ANSWERS_SHOWN = 20;
+/** The daemon's largest inbox.list page. */
+const LIST_LIMIT = 500;
+/** Poll cadence while the event stream is not live; while it is, frames refresh the list. */
+const FALLBACK_POLL_MS = 30_000;
+
+interface InboxLists {
+  readonly open: OwnerQuestion[];
+  readonly answered: AnsweredQuestion[];
+  readonly decisions: JevDecision[];
+}
+
+function itemsOf(value: unknown): unknown[] {
+  const items = (value as { items?: unknown } | null)?.items;
+  return Array.isArray(items) ? items : [];
+}
+
+/**
+ * Questions and Jev's decisions in one read, newest first, split here. A full
+ * page may have left older open items out, so only then the open ones are read
+ * on their own: an open question is never hidden behind answered ones.
+ */
+async function readInbox(): Promise<InboxLists> {
+  const kinds = ['question', 'decision'];
+  const all = itemsOf(await platformClient.operator.invoke('inbox.list', { status: 'all', kinds, limit: LIST_LIMIT }));
+  let items = all;
+  if (all.length >= LIST_LIMIT) {
+    const seen = new Set(all.map((item) => (item as { id?: unknown }).id));
+    const open = itemsOf(await platformClient.operator.invoke('inbox.list', { status: 'open', kinds, limit: LIST_LIMIT }));
+    items = [...all, ...open.filter((item) => !seen.has((item as { id?: unknown }).id))];
+  }
+  const page = { items };
+  return {
+    open: readQuestions(page),
+    answered: readAnswered(page).slice(0, ANSWERS_SHOWN),
+    decisions: readDecisions(page).slice(0, ANSWERS_SHOWN),
+  };
+}
 
 interface OwnerQuestion {
   readonly id: string;
@@ -227,25 +268,12 @@ function QuestionRow({ question, onAnswer, busy }: {
 export function OwnerQuestions({ enabled }: { enabled: boolean }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const questions = useQuery({
-    queryKey: QUESTIONS_QUERY_KEY,
-    queryFn: async () => readQuestions(await platformClient.operator.invoke('inbox.list', { status: 'open', kinds: ['question'] })),
+  const streamLive = useEventStreamState('app').status === 'live';
+  const inbox = useQuery({
+    queryKey: INBOX_QUERY_KEY,
+    queryFn: readInbox,
     enabled,
-    refetchInterval: 30_000,
-    retry: false,
-  });
-  const answers = useQuery({
-    queryKey: ANSWERS_QUERY_KEY,
-    queryFn: async () => readAnswered(await platformClient.operator.invoke('inbox.list', { status: 'closed', kinds: ['question'], limit: ANSWERS_SHOWN })),
-    enabled,
-    refetchInterval: 30_000,
-    retry: false,
-  });
-  const decisions = useQuery({
-    queryKey: DECISIONS_QUERY_KEY,
-    queryFn: async () => readDecisions(await platformClient.operator.invoke('inbox.list', { status: 'all', kinds: ['decision'], limit: ANSWERS_SHOWN })),
-    enabled,
-    refetchInterval: 30_000,
+    refetchInterval: streamLive ? false : FALLBACK_POLL_MS,
     retry: false,
   });
   const choose = useMutation({
@@ -259,7 +287,7 @@ export function OwnerQuestions({ enabled }: { enabled: boolean }) {
       }
     },
     onError: (error) => toast({ title: 'The choice was not sent', description: formatError(error), tone: 'danger' }),
-    onSettled: () => { void queryClient.invalidateQueries({ queryKey: DECISIONS_QUERY_KEY }); },
+    onSettled: () => { void queryClient.invalidateQueries({ queryKey: INBOX_QUERY_KEY }); },
   });
   const answer = useMutation({
     mutationFn: async (input: { itemId: string; option?: string; text?: string }) =>
@@ -277,14 +305,11 @@ export function OwnerQuestions({ enabled }: { enabled: boolean }) {
       }
     },
     onError: (error) => toast({ title: 'The answer was not sent', description: formatError(error), tone: 'danger' }),
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: QUESTIONS_QUERY_KEY });
-      void queryClient.invalidateQueries({ queryKey: ANSWERS_QUERY_KEY });
-    },
+    onSettled: () => { void queryClient.invalidateQueries({ queryKey: INBOX_QUERY_KEY }); },
   });
-  const open = enabled ? questions.data ?? [] : [];
-  const answered = enabled ? answers.data ?? [] : [];
-  const decided = enabled ? decisions.data ?? [] : [];
+  const open = enabled ? inbox.data?.open ?? [] : [];
+  const answered = enabled ? inbox.data?.answered ?? [] : [];
+  const decided = enabled ? inbox.data?.decisions ?? [] : [];
   if (open.length === 0 && answered.length === 0 && decided.length === 0) return null;
   return (
     <>

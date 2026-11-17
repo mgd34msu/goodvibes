@@ -340,7 +340,7 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
       summary: 'YOLO execution mode is active.',
       cause: 'The selected execution mode is YOLO.',
       impact: 'Powerful write, edit, network, and execution tools can run without a Human-in-the-Loop (HITL) approval prompt.',
-      action: 'Select Safe owner or Safe Jev when dangerous actions need a safety decision.',
+      action: 'Select ask-me, jev-decides or just-vibes when dangerous actions need a safety decision.',
     });
   }
 

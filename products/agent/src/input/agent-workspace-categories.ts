@@ -114,7 +114,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
     detail: 'Choose an execution mode to set who decides consequential actions. The rest stay at safe defaults unless you change them.',
     actions: [
       // Top-level approval policy
-      settingAction({ id: 'permissions-mode', label: 'Execution mode', detail: 'Choose Safe owner, Safe Jev, or YOLO. Plan is a separate read-only posture.', key: 'permissions.mode' }),
+      settingAction({ id: 'permissions-mode', label: 'Execution mode', detail: 'Choose ask-me, jev-decides, just-vibes or yolo. plan is a separate read-only posture.', key: 'permissions.mode' }),
       // Common per-tool overrides for file and shell work
       settingAction({ id: 'permissions-read', label: 'File reads', detail: 'Cycle allow, prompt, or deny for file read operations.', key: 'permissions.tools.read' }),
       settingAction({ id: 'permissions-write', label: 'File writes', detail: 'Cycle allow, prompt, or deny for file write operations.', key: 'permissions.tools.write' }),

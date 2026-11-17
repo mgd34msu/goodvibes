@@ -34,7 +34,7 @@ export async function refreshExecutionMode(config: object): Promise<void> {
 }
 
 export async function setExecutionMode(config: Pick<ConfigManager, 'get' | 'set'>, mode: unknown): Promise<void> {
-  if (typeof mode !== 'string' || !isGatePresetName(mode)) throw new Error('Select Safe owner, Safe Jev, YOLO, or Plan.');
+  if (typeof mode !== 'string' || !isGatePresetName(mode)) throw new Error('Select an execution mode: ask-me, jev-decides, just-vibes, yolo or plan.');
   const owner = owners.get(config);
   if (owner && (owner.hasHostedOwner?.() ?? owner.hostedSessionId() !== null)) {
     await owner.setExecutionMode(mode);

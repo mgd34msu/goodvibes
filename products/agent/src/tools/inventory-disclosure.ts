@@ -8,8 +8,10 @@
  * "there is nothing here" and told its owner it could not send a message.
  *
  * An inventory that filters must say so in the same breath. This helper is the
- * one place that wording is produced, so every list explains what matched and
- * what it means.
+ * one place that wording is produced: the harness catalogs (`catalogEnvelope`),
+ * every other harness list at its `output()` boundary (any payload with
+ * `returned` < `total` and no note of its own), the channel list and the
+ * artifact list all use it.
  */
 
 export interface InventoryDisclosureInput {

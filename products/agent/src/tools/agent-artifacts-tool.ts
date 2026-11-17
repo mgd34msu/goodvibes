@@ -8,6 +8,7 @@ import type { ToolRegistry, ToolExecuteOptions } from '@goodvibes-jev/engine/pla
 import { toolErrorText } from './tool-error-text.ts';
 import { agentArtifactEffectGuard, assertAgentArtifactBytes, captureAgentArtifactSource, captureAgentExportPath } from './agent-artifact-effect.ts';
 import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
+import { inventoryDisclosure } from './inventory-disclosure.ts';
 import {
   packageArtifactFilename,
   safeArtifactExportFilename,
@@ -201,20 +202,25 @@ function describeArtifact(artifact: ArtifactDescriptor, options: { readonly incl
   ];
 }
 
-async function formatList(artifacts: readonly ArtifactDescriptor[], total: number, args: AgentArtifactsToolArgs, cappedAt: number | null,
+async function formatList(artifacts: readonly ArtifactDescriptor[], total: number, scanned: number, args: AgentArtifactsToolArgs, cappedAt: number | null,
   signal: AbortSignal | undefined): Promise<string> {
+  // Rows withheld by the filters or the limit are said so in the shared list wording.
+  const disclosure = inventoryDisclosure({
+    subject: 'artifacts', returned: artifacts.length, total: scanned,
+    filters: { query: readString(args.query), kind: readString(args.kind), mimeType: readString(args.mimeType), purpose: readString(args.purpose) },
+    listAllRoute: 'agent_artifacts mode:"list" limit:100',
+    ...(cappedAt === null ? {} : { context: [`Only the newest ${cappedAt} artifacts were searched; older ones were not.`] }),
+  });
   if (artifacts.length === 0) {
     return [
       'Agent artifact browser',
-      cappedAt === null
-        ? 'No artifacts matched the requested filters.'
-        : `No artifacts matched the requested filters among the newest ${cappedAt} artifacts; older ones were not searched.`,
-      'Try agent_artifacts mode:"list" without filters, or create an upload/export/media/compare artifact first.',
+      disclosure?.note ?? 'No artifacts are stored yet. Create an upload, export, media or compare artifact first.',
     ].join('\n');
   }
   const lines = [
     'Agent artifact browser',
     `  returned ${artifacts.length}/${total}${cappedAt === null ? '' : ` (searched the newest ${cappedAt} artifacts only; older ones were not searched)`}`,
+    ...(disclosure ? [`  ${disclosure.note}`] : []),
     `  query ${readString(args.query) || '(none)'}`,
     `  kind ${readString(args.kind) || '(any)'}`,
     `  mime ${readString(args.mimeType) || '(any)'}`,
@@ -716,7 +722,7 @@ export function createAgentArtifactsTool(
           const source = artifactStore.list(ARTIFACT_SCAN_CAP);
           const filtered = source.filter((artifact) => matchesFilter(artifact, args));
           const selected = filtered.slice(0, limit);
-          const text = await formatList(selected, filtered.length, args, source.length >= ARTIFACT_SCAN_CAP ? ARTIFACT_SCAN_CAP : null, executionOptions?.signal);
+          const text = await formatList(selected, filtered.length, source.length, args, source.length >= ARTIFACT_SCAN_CAP ? ARTIFACT_SCAN_CAP : null, executionOptions?.signal);
           executionOptions?.signal?.throwIfAborted();
           return output(`${UNTRUSTED_ARTIFACT_NOTICE}\n${text}`);
         }

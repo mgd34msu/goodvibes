@@ -1,6 +1,7 @@
 import type { AgentHarnessToolArgs } from './agent-harness-tool-types.ts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
+import { inventoryDisclosure, withInventoryDisclosure } from './inventory-disclosure.ts';
 
 /**
  * Shows a path under the home directory as `~/...`. The account name and
@@ -135,39 +136,39 @@ export function catalogEnvelope(
     return envelope;
   }
 
-  // A SHORTENED page discloses that it is short.
-  //
-  // This envelope used to say nothing whenever it returned any rows at all, on
-  // the reasoning that a populated page speaks for itself. It does not: "here
-  // are 20 of 300" read as a complete answer is the same failure as an empty
-  // page read as "no such capability", just in slower motion. `returned` and
-  // `total` were always both present, but a number two fields away is easy to
-  // miss in a way a sentence is not.
-  if (items.length > 0) {
-    if (items.length >= total) return envelope;
-    const shownFilters = applied.map(([name, value]) => `${name}="${value}"`).join(', ');
-    envelope.note = `Showing ${items.length} of ${total} ${key}. `
-      + (shownFilters
-        ? `This is a filtered view (${shownFilters}), not the full catalog`
-        : 'This is a partial view, not the full catalog')
-      + `${discovery ? `; re-send as ${discovery} to see everything` : ''}.`;
-    return envelope;
-  }
-
-  const shown = applied.map(([name, value]) => `${name}="${value}"`).join(', ');
-  envelope.note = applied.length > 0
-    ? `No ${key} matched ${shown}. ${total} ${key} exist in this catalog`
-      + `${discovery ? `; re-send as ${discovery} to list them all` : '; re-send without that filter to list them all'}`
-      + `, or supply a different value.${elsewhere}`
-    : `This catalog reports ${total} ${key} but returned none for these arguments`
-      + `${discovery ? `; ${discovery} lists them all` : ''}.`;
+  // A shortened or emptied page says so, in the one wording every list uses.
+  const disclosure = inventoryDisclosure({
+    subject: key, returned: items.length, total, filters: Object.fromEntries(applied),
+    listAllRoute: discovery ?? 'the same call without filters or limit',
+    ...(items.length === 0 && elsewhere ? { context: [elsewhere.trim()] } : {}),
+  });
+  if (disclosure) { envelope.note = disclosure.note; envelope.listAllRoute = disclosure.listAllRoute; }
   return envelope;
+}
+
+/**
+ * Every harness list that withholds rows says so, whichever mode built it: a
+ * payload carrying `returned` < `total` and no note of its own gets the shared
+ * inventory disclosure. A key lookup per result; nothing when nothing was withheld.
+ */
+function discloseWithheldRows(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const payload = value as Record<string, unknown>;
+  const { returned, total } = payload;
+  if (typeof returned !== 'number' || typeof total !== 'number' || returned >= total
+    || typeof payload.note === 'string' || typeof payload.listAllRoute === 'string') return value;
+  const subject = Object.entries(payload).find(([, entry]) => Array.isArray(entry) && entry.length === returned)?.[0] ?? 'records';
+  const applied = payload.appliedFilters && typeof payload.appliedFilters === 'object' && !Array.isArray(payload.appliedFilters)
+    ? payload.appliedFilters as Record<string, unknown> : {};
+  return withInventoryDisclosure(payload, { subject, returned, total,
+    filters: { ...applied, query: payload.query, target: payload.target },
+    listAllRoute: 'the same call without query, target, filters or limit' });
 }
 
 export function output(value: unknown): { readonly success: true; readonly output: string } {
   return {
     success: true,
-    output: typeof value === 'string' ? value : JSON.stringify(value, null, 2),
+    output: typeof value === 'string' ? value : JSON.stringify(discloseWithheldRows(value), null, 2),
   };
 }
 

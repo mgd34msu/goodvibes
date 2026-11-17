@@ -217,7 +217,17 @@ export { createDaemonSystemRouteHandlers } from './system-routes.js';
 export { createDaemonKnowledgeRouteHandlers } from './knowledge-routes.js';
 export { createDaemonKnowledgeRefinementRouteHandlers } from './knowledge-refinement-routes.js';
 export { createDaemonMediaRouteHandlers } from './media-routes.js';
-export type { ConversationMessageEnvelope, DaemonRuntimeRouteContext } from './runtime-route-types.js';
+export type {
+  ConversationMessageEnvelope,
+  DaemonRuntimeRouteContext,
+  ExecutionIntent,
+  RouteBindingRecordLike,
+  SessionInputState,
+  SessionKind,
+  SessionParticipantInput,
+  SessionSurfaceKind,
+  SharedSessionRoutingIntent,
+} from './runtime-route-types.js';
 export { createDaemonRuntimeAutomationRouteHandlers } from './runtime-automation-routes.js';
 export { createDaemonRuntimeSessionRouteHandlers } from './runtime-session-routes.js';
 export { createDaemonRuntimeRouteHandlers } from './runtime-routes.js';

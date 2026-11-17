@@ -9,10 +9,39 @@ import type { ConversationMessageEnvelope } from '@goodvibes-jev/engine/contract
  */
 export type { ConversationMessageEnvelope };
 
-// Boundary type kept intentionally wide so daemon-api does not depend on
-// runtime implementation unions from higher-level packages.
+/**
+ * The surfaces an inbound message or route binding can come from (the
+ * platform's transport surfaces). The router hands the platform's broker over
+ * against these types, so a list that drifts from the platform's fails to
+ * compile there.
+ */
+export const AUTOMATION_SURFACE_KINDS = [
+  'tui', 'web', 'slack', 'discord', 'ntfy', 'webhook', 'homeassistant', 'telegram', 'google-chat',
+  'signal', 'whatsapp', 'telephony', 'imessage', 'msteams', 'bluebubbles', 'mattermost', 'matrix', 'service',
+] as const;
 /** @public */
-export type AutomationSurfaceKind = string;
+export type AutomationSurfaceKind = typeof AUTOMATION_SURFACE_KINDS[number];
+/** Every surface a session participant can speak through: the transport surfaces and the first-party products. */
+export const SESSION_SURFACE_KINDS = [...AUTOMATION_SURFACE_KINDS, 'agent', 'webui', 'companion', 'automation'] as const;
+export type SessionSurfaceKind = typeof SESSION_SURFACE_KINDS[number];
+export const SESSION_INPUT_STATES = ['queued', 'delivered', 'spawned', 'completed', 'cancelled', 'failed', 'rejected'] as const;
+export type SessionInputState = typeof SESSION_INPUT_STATES[number];
+export const SESSION_KINDS = ['tui', 'agent', 'webui', 'companion-task', 'companion-chat', 'automation', 'channel', 'acp', 'hosted'] as const;
+export type SessionKind = typeof SESSION_KINDS[number];
+export const EXECUTION_RISK_CLASSES = ['safe', 'elevated', 'dangerous'] as const;
+export const EXECUTION_NETWORK_POLICIES = ['inherit', 'allow', 'deny', 'scoped'] as const;
+export const EXECUTION_FILESYSTEM_POLICIES = ['inherit', 'workspace-write', 'read-only', 'isolated'] as const;
+
+/**
+ * How a run asks to be executed; each field the route checked against its list.
+ * @public
+ */
+export interface ExecutionIntent {
+  readonly riskClass?: typeof EXECUTION_RISK_CLASSES[number] | undefined;
+  readonly requiresApproval?: boolean | undefined;
+  readonly networkPolicy?: typeof EXECUTION_NETWORK_POLICIES[number] | undefined;
+  readonly filesystemPolicy?: typeof EXECUTION_FILESYSTEM_POLICIES[number] | undefined;
+}
 export interface SharedSessionRoutingIntent {
   readonly modelId?: string | undefined;
   readonly providerId?: string | undefined;
@@ -24,8 +53,8 @@ export interface SharedSessionRoutingIntent {
     readonly modelId: string;
   } | undefined;
   readonly tools?: readonly string[] | undefined;
-  readonly executionIntent?: unknown | undefined;
-  // Boundary type kept intentionally wide, same reasoning as above: which
+  readonly executionIntent?: ExecutionIntent | undefined;
+  // Kept a plain string rather than a fixed enum: which
   // levels a given model actually accepts is per-model (see the platform package's
   // providers/reasoning-effort.ts, which daemon-api must not depend on), so
   // this stays a plain string rather than a fixed enum.
@@ -34,10 +63,39 @@ export interface SharedSessionRoutingIntent {
 interface AutomationRouteBinding {
   readonly id?: string | undefined;
 }
-// Boundary type kept intentionally opaque so daemon-api can carry execution
-// intent metadata without depending on higher-level runtime interfaces.
-/** @public */
-export type ExecutionIntent = unknown;
+
+/** A stored route binding, as the binding store returns it and a new session adopts it. */
+export interface RouteBindingRecordLike {
+  readonly id: string;
+  readonly kind: 'session' | 'thread' | 'channel' | 'message';
+  readonly surfaceKind: AutomationSurfaceKind;
+  readonly surfaceId: string;
+  readonly externalId: string;
+  readonly sessionPolicy?: 'create-or-bind' | 'continue-existing' | 'require-existing' | undefined;
+  readonly threadPolicy?: 'preserve' | 'replace' | 'detached' | undefined;
+  readonly deliveryGuarantee?: 'best-effort' | 'at-least-once' | undefined;
+  readonly threadId?: string | undefined;
+  readonly channelId?: string | undefined;
+  readonly sessionId?: string | undefined;
+  readonly jobId?: string | undefined;
+  readonly runId?: string | undefined;
+  readonly title?: string | undefined;
+  readonly lastSeenAt: number;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+  readonly metadata: Record<string, unknown>;
+}
+
+/** A session participant: the surface it speaks through and who it is there. */
+export interface SessionParticipantInput {
+  readonly surfaceKind: SessionSurfaceKind;
+  readonly surfaceId: string;
+  readonly externalId?: string | undefined;
+  readonly userId?: string | undefined;
+  readonly displayName?: string | undefined;
+  readonly routeId?: string | undefined;
+  readonly lastSeenAt: number;
+}
 type AgentRecordLike = {
   readonly id: string;
   readonly status: string;
@@ -93,7 +151,7 @@ export interface DaemonRuntimeRouteContext {
       routing?: SharedSessionRoutingIntent | undefined;
     }): Promise<{
       mode: 'continued-live' | 'spawn' | 'queued-follow-up' | 'queued-for-surface' | 'rejected';
-      input: { id: string; routing?: SharedSessionRoutingIntent };
+      input: { id: string; routing?: SharedSessionRoutingIntent | undefined };
       session: { id: string; status: string };
       routeBinding?: AutomationRouteBinding | undefined;
       task?: string | undefined;
@@ -116,7 +174,7 @@ export interface DaemonRuntimeRouteContext {
       allowSpawnFallback?: boolean | undefined;
     }): Promise<{
       mode: 'continued-live' | 'spawn' | 'queued-follow-up' | 'queued-for-surface' | 'rejected';
-      input: { id: string; state: string; routing?: SharedSessionRoutingIntent };
+      input: { id: string; state: string; routing?: SharedSessionRoutingIntent | undefined };
       session: { id: string; status: string };
       routeBinding?: AutomationRouteBinding | undefined;
       task?: string | undefined;
@@ -138,7 +196,7 @@ export interface DaemonRuntimeRouteContext {
       routing?: SharedSessionRoutingIntent | undefined;
     }): Promise<{
       mode: 'continued-live' | 'spawn' | 'queued-follow-up' | 'queued-for-surface' | 'rejected';
-      input: { id: string; state: string; routing?: SharedSessionRoutingIntent };
+      input: { id: string; state: string; routing?: SharedSessionRoutingIntent | undefined };
       session: { id: string; status: string };
       routeBinding?: AutomationRouteBinding | undefined;
       task?: string | undefined;
@@ -151,41 +209,25 @@ export interface DaemonRuntimeRouteContext {
       id?: string | undefined;
       title?: string | undefined;
       metadata?: Record<string, unknown> | undefined;
-      routeBinding?: AutomationRouteBinding | undefined;
-      participant?: {
-        surfaceKind: string;
-        surfaceId: string;
-        externalId?: string | undefined;
-        userId?: string | undefined;
-        displayName?: string | undefined;
-        routeId?: string | undefined;
-        lastSeenAt: number;
-      } | undefined;
+      routeBinding?: RouteBindingRecordLike | undefined;
+      participant?: SessionParticipantInput | undefined;
     }): Promise<{ id: string }>;
     register(input: {
       sessionId: string;
-      kind?: string | undefined;
+      kind?: SessionKind | undefined;
       project?: string | undefined;
       title?: string | undefined;
-      participant: {
-        surfaceKind: string;
-        surfaceId: string;
-        externalId?: string | undefined;
-        userId?: string | undefined;
-        displayName?: string | undefined;
-        routeId?: string | undefined;
-        lastSeenAt: number;
-      };
+      participant: SessionParticipantInput;
       reopen?: boolean | undefined;
     }): Promise<{
       record: { id: string };
       reopened: boolean;
       conflict?: { readonly status: 'closed' } | undefined;
     }>;
-    getSession(sessionId: string): { id: string; status: string; messageCount: number; activeAgentId?: string } | null;
+    getSession(sessionId: string): { id: string; status: string; messageCount: number; activeAgentId?: string | undefined } | null;
     getMessages(sessionId: string, limit: number, offset?: number): unknown[];
     getInputs(sessionId: string, limit: number): unknown[];
-    getInputsSince(sessionId: string, options: { state?: string | undefined; since?: number | undefined; limit?: number | undefined }): unknown[];
+    getInputsSince(sessionId: string, options: { state?: SessionInputState | undefined; since?: number | undefined; limit?: number | undefined }): unknown[];
     markInputDelivered(sessionId: string, inputId: string, options: { consumed?: boolean | undefined; agentId?: string | undefined; claim?: boolean | undefined; beforeApply?: (() => void) | undefined }): Promise<unknown | null>;
     closeSession(sessionId: string): Promise<{ id: string } | null>;
     reopenSession(sessionId: string): Promise<{ id: string } | null>;
@@ -241,7 +283,7 @@ export interface DaemonRuntimeRouteContext {
   readonly normalizeCronSchedule: (expression: string, timezone?: string, staggerMs?: unknown) => unknown;
   readonly routeBindings: {
     start(): Promise<void>;
-    getBinding(id: string): AutomationRouteBinding | undefined;
+    getBinding(id: string): RouteBindingRecordLike | undefined;
   };
   readonly trySpawnAgent: (input: {
     mode: 'spawn';

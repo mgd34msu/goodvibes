@@ -1,5 +1,5 @@
 import type { JsonRecord } from './route-helpers.js';
-import type { AutomationSurfaceKind } from './runtime-route-types.js';
+import { AUTOMATION_SURFACE_KINDS, type AutomationSurfaceKind } from './runtime-route-types.js';
 export type { AutomationSurfaceKind };
 
 export type DaemonApiClientKind =
@@ -20,11 +20,8 @@ export type DaemonApiClientKind =
   | 'daemon';
 
 /** The surfaces a route binding can name (the platform's transport surfaces). */
-export const ROUTE_BINDING_SURFACE_KINDS = [
-  'tui', 'web', 'slack', 'discord', 'ntfy', 'webhook', 'homeassistant', 'telegram', 'google-chat',
-  'signal', 'whatsapp', 'telephony', 'imessage', 'msteams', 'bluebubbles', 'mattermost', 'matrix', 'service',
-] as const;
-export type RouteBindingSurfaceKind = typeof ROUTE_BINDING_SURFACE_KINDS[number];
+export const ROUTE_BINDING_SURFACE_KINDS = AUTOMATION_SURFACE_KINDS;
+export type RouteBindingSurfaceKind = AutomationSurfaceKind;
 export const ROUTE_BINDING_KINDS = ['session', 'thread', 'channel', 'message'] as const;
 export type AutomationRouteBindingKind = typeof ROUTE_BINDING_KINDS[number];
 export const AUTOMATION_SESSION_POLICIES = ['create-or-bind', 'continue-existing', 'require-existing'] as const;

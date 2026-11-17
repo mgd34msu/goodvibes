@@ -10,12 +10,39 @@ import { withAdmin } from './auth-helpers.js';
 import { randomUUID } from 'node:crypto';
 import { jsonErrorResponse } from './error-response.js';
 import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
-import type {
-  AutomationSurfaceKind,
-  DaemonRuntimeRouteContext,
-  ExecutionIntent,
-  SharedSessionRoutingIntent,
+import {
+  AUTOMATION_SURFACE_KINDS,
+  EXECUTION_FILESYSTEM_POLICIES,
+  EXECUTION_NETWORK_POLICIES,
+  EXECUTION_RISK_CLASSES,
+  SESSION_INPUT_STATES,
+  SESSION_SURFACE_KINDS,
+  type AutomationSurfaceKind,
+  type DaemonRuntimeRouteContext,
+  type ExecutionIntent,
+  type SessionInputState,
+  type SessionKind,
+  type SharedSessionRoutingIntent,
 } from './runtime-route-types.js';
+
+function isOneOf<T extends string>(accepted: readonly T[], value: string): value is T {
+  return (accepted as readonly string[]).includes(value);
+}
+
+/** A 400 that names the field and its accepted values. */
+function invalidChoice(field: string, value: unknown, accepted: readonly string[]): Response {
+  return jsonErrorResponse({
+    error: `${field} must be one of ${accepted.join(', ')}; got ${JSON.stringify(value)}.`,
+    code: 'INVALID_ARGUMENT',
+    field,
+  }, { status: 400 });
+}
+
+/** The surface a message comes from: absent is the web surface; a name no transport has is a 400. */
+function readMessageSurfaceKind(value: unknown): AutomationSurfaceKind | Response {
+  if (value === undefined) return 'web';
+  return typeof value === 'string' && isOneOf(AUTOMATION_SURFACE_KINDS, value) ? value : invalidChoice('surfaceKind', value, AUTOMATION_SURFACE_KINDS);
+}
 import {
   createRouteBodySchema,
   createRouteBodySchemaRegistry,
@@ -52,7 +79,7 @@ type SharedSessionMessageInput = {
   readonly metadata?: Record<string, unknown> | undefined;
   readonly routing?: SharedSessionRoutingIntent | undefined;
 };
-export type SharedSessionKind = 'tui' | 'agent' | 'webui' | 'companion-task' | 'companion-chat' | 'automation' | 'channel' | 'acp' | 'hosted';
+export type SharedSessionKind = SessionKind;
 export type SharedSessionRecordResponse = {
   readonly id: string;
   /** A known kind, or any other string a newer producer registered (a read never blanks a record over its kind). */
@@ -92,7 +119,6 @@ type SharedSessionParticipantResponse = {
 const DEFAULT_LIST_LIMIT = 100;
 const MAX_LIST_LIMIT = 500;
 const MAX_SESSION_TOOL_NAMES = 64;
-export const SHARED_SESSION_KINDS = new Set<SharedSessionKind>(['tui', 'agent', 'webui', 'companion-task', 'companion-chat', 'automation', 'channel', 'acp', 'hosted']);
 const SHARED_SESSION_STATUSES = new Set<SharedSessionRecordResponse['status']>(['active', 'closed']);
 
 function readBoundedLimit(url: URL, key = 'limit'): number {
@@ -259,6 +285,7 @@ const runtimeSessionBodySchemas = createRouteBodySchemaRegistry({
       return jsonErrorResponse({ error: 'Missing required field: task (non-empty string)' }, { status: 400 });
     }
     const routing = readSharedSessionRoutingIntent(body.routing);
+    if (routing instanceof Response) return routing;
     const model = readOptionalStringField(body, 'model');
     const tools = readStringArrayField(body, 'tools', MAX_SESSION_TOOL_NAMES);
     return {
@@ -278,14 +305,18 @@ async function handleCreateSharedSession(context: DaemonRuntimeRouteContext, req
   const routeBinding = typeof body.routeId === 'string'
     ? context.routeBindings.getBinding(body.routeId)
     : undefined;
+  const participantSurface = typeof body.surfaceKind === 'string' && typeof body.surfaceId === 'string' ? body.surfaceKind : undefined;
+  if (participantSurface !== undefined && !isOneOf(SESSION_SURFACE_KINDS, participantSurface)) {
+    return invalidChoice('surfaceKind', participantSurface, SESSION_SURFACE_KINDS);
+  }
   const session = await context.sessionBroker.createSession({
     id: typeof body.id === 'string' ? body.id : undefined,
     title: typeof body.title === 'string' ? body.title : undefined,
     metadata: typeof body.metadata === 'object' && body.metadata !== null ? body.metadata as Record<string, unknown> : {},
     routeBinding,
-    participant: typeof body.surfaceKind === 'string' && typeof body.surfaceId === 'string'
+    participant: participantSurface !== undefined && typeof body.surfaceId === 'string'
       ? {
-          surfaceKind: body.surfaceKind as AutomationSurfaceKind,
+          surfaceKind: participantSurface,
           surfaceId: body.surfaceId,
           externalId: typeof body.externalId === 'string' ? body.externalId : undefined,
           userId: typeof body.userId === 'string' ? body.userId : undefined,
@@ -307,10 +338,12 @@ async function handlePostTask(context: DaemonRuntimeRouteContext, req: Request):
   if (input instanceof Response) return input;
   const wantsSharedSession = typeof body.sessionId === 'string' || typeof body.routeId === 'string' || typeof body.surfaceKind === 'string';
   if (wantsSharedSession) {
+    const surfaceKind = readMessageSurfaceKind(body.surfaceKind);
+    if (surfaceKind instanceof Response) return surfaceKind;
     const submission = await callOrSessionClosed(() => context.sessionBroker.submitMessage({
       sessionId: typeof body.sessionId === 'string' ? body.sessionId : undefined,
       routeId: typeof body.routeId === 'string' ? body.routeId : undefined,
-      surfaceKind: typeof body.surfaceKind === 'string' ? body.surfaceKind as AutomationSurfaceKind : 'web',
+      surfaceKind,
       surfaceId: typeof body.surfaceId === 'string' ? body.surfaceId : 'surface:web',
       externalId: typeof body.externalId === 'string' ? body.externalId : undefined,
       threadId: typeof body.threadId === 'string' ? body.threadId : undefined,
@@ -383,16 +416,7 @@ async function handlePostTask(context: DaemonRuntimeRouteContext, req: Request):
     task: input.task,
     ...(input.model !== undefined && { model: input.model }),
     ...(input.tools !== undefined && { tools: input.tools }),
-    ...(typeof body.routing === 'object'
-      && body.routing !== null
-      && typeof (body.routing as { executionIntent?: unknown }).executionIntent === 'object'
-      && (body.routing as { executionIntent?: unknown }).executionIntent !== null
-      ? {
-          executionIntent: (body.routing as {
-            executionIntent: ExecutionIntent;
-          }).executionIntent,
-        }
-      : {}),
+    ...(input.routing?.executionIntent ? { executionIntent: input.routing.executionIntent } : {}),
   }, 'DaemonServer', typeof body.sessionId === 'string' ? body.sessionId : undefined);
   if (spawnResult instanceof Response) return spawnResult;
   return context.recordApiResponse(req, '/task', Response.json({
@@ -457,12 +481,8 @@ async function handleGetSharedSessionInputs(
   });
 }
 
-const SHARED_SESSION_INPUT_STATES = new Set([
-  'queued', 'delivered', 'spawned', 'completed', 'cancelled', 'failed', 'rejected',
-]);
-
-function readSessionInputState(value: string | null): string | undefined {
-  return value !== null && SHARED_SESSION_INPUT_STATES.has(value) ? value : undefined;
+function readSessionInputState(value: string | null): SessionInputState | undefined {
+  return value !== null && isOneOf(SESSION_INPUT_STATES, value) ? value : undefined;
 }
 
 function readPositiveInt(value: string | null): number | undefined {
@@ -578,6 +598,7 @@ async function handlePostSharedSessionMessage(context: DaemonRuntimeRouteContext
   }
 
   const input = buildSharedSessionMessageInput(sessionId, body, message);
+  if (input instanceof Response) return input;
 
   // kind='followup', always queues/spawns a follow-up turn via followUpMessage()
   if (kind === 'followup') {
@@ -736,8 +757,10 @@ async function handlePostSharedSessionSteer(context: DaemonRuntimeRouteContext, 
   if (!message) {
     return jsonErrorResponse({ error: 'Missing shared session steer body' }, { status: 400 });
   }
+  const input = buildSharedSessionMessageInput(sessionId, body, message);
+  if (input instanceof Response) return input;
   const submission = await callOrSessionClosed(() => context.sessionBroker.steerMessage({
-    ...buildSharedSessionMessageInput(sessionId, body, message),
+    ...input,
     ...(body.allowSpawnFallback === true ? { allowSpawnFallback: true } : {}),
   }));
   if (submission instanceof Response) return submission;
@@ -753,7 +776,9 @@ async function handlePostSharedSessionFollowUp(context: DaemonRuntimeRouteContex
   if (!message) {
     return jsonErrorResponse({ error: 'Missing shared session follow-up body' }, { status: 400 });
   }
-  const submission = await callOrSessionClosed(() => context.sessionBroker.followUpMessage(buildSharedSessionMessageInput(sessionId, body, message)));
+  const input = buildSharedSessionMessageInput(sessionId, body, message);
+  if (input instanceof Response) return input;
+  const submission = await callOrSessionClosed(() => context.sessionBroker.followUpMessage(input));
   if (submission instanceof Response) return submission;
   return await respondToSessionSubmission(context, req, submission, message, `/api/sessions/${sessionId}/follow-up`, 'DaemonServer.handlePostSharedSessionFollowUp', {
     context: `shared-session:${submission.session.id}`,
@@ -808,11 +833,14 @@ function buildSharedSessionMessageInput(
   sessionId: string,
   body: JsonRecord,
   message: string,
-): SharedSessionMessageInput {
+): SharedSessionMessageInput | Response {
   const routing = readSharedSessionRoutingIntent(body.routing);
+  if (routing instanceof Response) return routing;
+  const surfaceKind = readMessageSurfaceKind(body.surfaceKind);
+  if (surfaceKind instanceof Response) return surfaceKind;
   return {
     sessionId,
-    surfaceKind: typeof body.surfaceKind === 'string' ? body.surfaceKind as AutomationSurfaceKind : 'web',
+    surfaceKind,
     surfaceId: typeof body.surfaceId === 'string' ? body.surfaceId : 'surface:web',
     ...(typeof body.externalId === 'string' ? { externalId: body.externalId } : {}),
     ...(typeof body.threadId === 'string' ? { threadId: body.threadId } : {}),
@@ -832,9 +860,39 @@ function readToolNames(value: unknown): string[] | undefined {
   return tools.length > 0 ? tools : undefined;
 }
 
-function readSharedSessionRoutingIntent(value: unknown): SharedSessionRoutingIntent | undefined {
-  if (typeof value !== 'object' || value === null) return undefined;
-  const record = value as Record<string, unknown>;
+/**
+ * How a run asks to be executed. A value outside a field's list is a 400: an
+ * execution limit the caller asked for is never dropped silently.
+ */
+function readExecutionIntent(value: unknown): ExecutionIntent | undefined | Response {
+  if (value === undefined || value === null) return undefined;
+  if (!isJsonRecord(value)) return jsonErrorResponse({ error: 'routing.executionIntent must be an object.', code: 'INVALID_ARGUMENT', field: 'routing.executionIntent' }, { status: 400 });
+  const { riskClass, requiresApproval, networkPolicy, filesystemPolicy } = value;
+  if (riskClass !== undefined && !(typeof riskClass === 'string' && isOneOf(EXECUTION_RISK_CLASSES, riskClass))) {
+    return invalidChoice('routing.executionIntent.riskClass', riskClass, EXECUTION_RISK_CLASSES);
+  }
+  if (networkPolicy !== undefined && !(typeof networkPolicy === 'string' && isOneOf(EXECUTION_NETWORK_POLICIES, networkPolicy))) {
+    return invalidChoice('routing.executionIntent.networkPolicy', networkPolicy, EXECUTION_NETWORK_POLICIES);
+  }
+  if (filesystemPolicy !== undefined && !(typeof filesystemPolicy === 'string' && isOneOf(EXECUTION_FILESYSTEM_POLICIES, filesystemPolicy))) {
+    return invalidChoice('routing.executionIntent.filesystemPolicy', filesystemPolicy, EXECUTION_FILESYSTEM_POLICIES);
+  }
+  if (requiresApproval !== undefined && typeof requiresApproval !== 'boolean') {
+    return jsonErrorResponse({ error: 'routing.executionIntent.requiresApproval must be true or false.', code: 'INVALID_ARGUMENT', field: 'routing.executionIntent.requiresApproval' }, { status: 400 });
+  }
+  return {
+    ...(typeof riskClass === 'string' && isOneOf(EXECUTION_RISK_CLASSES, riskClass) ? { riskClass } : {}),
+    ...(typeof requiresApproval === 'boolean' ? { requiresApproval } : {}),
+    ...(typeof networkPolicy === 'string' && isOneOf(EXECUTION_NETWORK_POLICIES, networkPolicy) ? { networkPolicy } : {}),
+    ...(typeof filesystemPolicy === 'string' && isOneOf(EXECUTION_FILESYSTEM_POLICIES, filesystemPolicy) ? { filesystemPolicy } : {}),
+  };
+}
+
+function readSharedSessionRoutingIntent(value: unknown): SharedSessionRoutingIntent | undefined | Response {
+  if (!isJsonRecord(value)) return undefined;
+  const record = value;
+  const executionIntent = readExecutionIntent(record.executionIntent);
+  if (executionIntent instanceof Response) return executionIntent;
   const tools = readToolNames(record.tools);
   const fallbackModels = readStringArrayField(record, 'fallbackModels', MAX_SESSION_TOOL_NAMES);
   const helperModel = readHelperModel(record.helperModel);
@@ -849,7 +907,7 @@ function readSharedSessionRoutingIntent(value: unknown): SharedSessionRoutingInt
     ...(fallbackModels?.length ? { fallbackModels } : {}),
     ...(helperModel ? { helperModel } : {}),
     ...(tools ? { tools } : {}),
-    ...(record.executionIntent !== undefined ? { executionIntent: record.executionIntent } : {}),
+    ...(executionIntent ? { executionIntent } : {}),
     ...(reasoningEffort ? { reasoningEffort } : {}),
   };
 }

@@ -1,9 +1,11 @@
-import type { DaemonRuntimeRouteContext } from './runtime-route-types.js';
+import { SESSION_KINDS, SESSION_SURFACE_KINDS, type DaemonRuntimeRouteContext } from './runtime-route-types.js';
 import { jsonErrorResponse } from './error-response.js';
 import { isJsonRecord } from './route-helpers.js';
-import { toSharedSessionRecordResponse, SHARED_SESSION_KINDS, type SharedSessionKind } from './runtime-session-routes.js';
+import { toSharedSessionRecordResponse } from './runtime-session-routes.js';
 
-type RegisterKind = SharedSessionKind;
+function isOneOf<T extends string>(accepted: readonly T[], value: string): value is T {
+  return (accepted as readonly string[]).includes(value);
+}
 
 function readString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
@@ -36,13 +38,19 @@ export async function handleRegisterSharedSession(
       { status: 400 },
     );
   }
+  if (!isOneOf(SESSION_SURFACE_KINDS, surfaceKind)) {
+    return jsonErrorResponse(
+      { error: `sessions.register: unknown participant surfaceKind '${surfaceKind}'. Expected one of: ${SESSION_SURFACE_KINDS.join(', ')}.`, code: 'INVALID_ARGUMENT', field: 'participant.surfaceKind' },
+      { status: 400 },
+    );
+  }
 
   // Honest input validation: an unknown session kind is a 400, NOT a silent
   // coercion to 'tui'. Absent kind is allowed (the broker defaults it).
   const kindRaw = readString(body.kind);
-  if (kindRaw !== undefined && !SHARED_SESSION_KINDS.has(kindRaw as RegisterKind)) {
+  if (kindRaw !== undefined && !isOneOf(SESSION_KINDS, kindRaw)) {
     return jsonErrorResponse(
-      { error: `sessions.register: unknown session kind '${kindRaw}'. Expected one of: ${[...SHARED_SESSION_KINDS].join(', ')}.` },
+      { error: `sessions.register: unknown session kind '${kindRaw}'. Expected one of: ${SESSION_KINDS.join(', ')}.` },
       { status: 400 },
     );
   }
@@ -52,7 +60,7 @@ export async function handleRegisterSharedSession(
   const reopen = body.reopen === true;
   const result = await context.sessionBroker.register({
     sessionId,
-    ...(kindRaw ? { kind: kindRaw as RegisterKind } : {}),
+    ...(kindRaw ? { kind: kindRaw } : {}),
     ...(readString(body.project) ? { project: readString(body.project) } : {}),
     ...(readString(body.title) ? { title: readString(body.title) } : {}),
     participant: {

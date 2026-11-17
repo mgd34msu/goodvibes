@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { readFileSync, existsSync, linkSync, realpathSync, renameSync, statSync, unlinkSync, type BigIntStats } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
+import { confirmFileDurable, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
 
 /**
@@ -163,7 +163,7 @@ export function getOrCreateCompanionToken(
     const winner = publishNewTokenRecord(tokenPath, record);
     if (winner) return { token: winner.token, peerId: winner.peerId, createdAt: winner.createdAt };
   } else {
-    writeJsonFileAtomic(tokenPath, record, { mode: 0o600, trailingNewline: false });
+    writeJsonFileAtomic(tokenPath, record, { mode: 0o600, trailingNewline: false, durable: true });
   }
 
   return {
@@ -186,17 +186,20 @@ function publishNewTokenRecord(tokenPath: string, record: CompanionTokenRecord):
   writeJsonFileAtomic(staging, record, { mode: 0o600, trailingNewline: false });
   try {
     linkSync(staging, tokenPath);
+    // The link is the publication: the token file and its directory entry reach
+    // the disk before any client is handed this token.
+    confirmFileDurable(tokenPath);
     return null;
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'EEXIST') {
       const existing = readTokenRecord(tokenPath).record;
       if (existing) return existing;
-      writeJsonFileAtomic(tokenPath, record, { mode: 0o600, trailingNewline: false });
+      writeJsonFileAtomic(tokenPath, record, { mode: 0o600, trailingNewline: false, durable: true });
       return null;
     }
     if (code === 'EPERM' || code === 'ENOSYS' || code === 'EOPNOTSUPP' || code === 'EXDEV') {
-      writeJsonFileAtomic(tokenPath, record, { mode: 0o600, trailingNewline: false });
+      writeJsonFileAtomic(tokenPath, record, { mode: 0o600, trailingNewline: false, durable: true });
       return null;
     }
     throw error;
@@ -330,7 +333,7 @@ export function replaceCompanionToken(
     createdAt: Date.now(),
   };
   commit(record.token);
-  writeJsonFileAtomic(tokenPath, record, { mode: 0o600, trailingNewline: false });
+  writeJsonFileAtomic(tokenPath, record, { mode: 0o600, trailingNewline: false, durable: true });
   return { token: record.token, peerId: record.peerId, createdAt: record.createdAt };
 }
 

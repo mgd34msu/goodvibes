@@ -29,6 +29,7 @@ function readLimit(value: unknown, fallback: number): number {
 function routeUnavailable(surface: UiSurfaceDefinition): Record<string, unknown> {
   return {
     status: 'route_unavailable',
+    done: false,
     surface: surface.id,
     note: 'The current runtime did not provide the shell opener for this UI surface.',
   };
@@ -37,6 +38,7 @@ function routeUnavailable(surface: UiSurfaceDefinition): Record<string, unknown>
 function opened(surface: UiSurfaceDefinition, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     status: 'opened',
+    done: true,
     surface: surface.id,
     kind: surface.kind,
     ...extra,
@@ -45,7 +47,7 @@ function opened(surface: UiSurfaceDefinition, extra: Record<string, unknown> = {
 }
 
 function notOpened(surface: UiSurfaceDefinition, reason: string): Record<string, unknown> {
-  return { status: 'not_opened', surface: surface.id, kind: surface.kind, note: reason };
+  return { status: 'not_opened', done: false, surface: surface.id, kind: surface.kind, note: reason };
 }
 
 const MODEL_PICKER_TARGETS = 'main, helper, tool or tts';
@@ -170,6 +172,7 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
       if (route.status === 'unavailable') {
         return {
           status: 'unavailable',
+          done: false,
           surface: surface.id,
           kind: surface.kind,
           route,
@@ -179,6 +182,7 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
       if (route.enabled !== true) {
         return {
           status: 'setup_needed',
+          done: false,
           surface: surface.id,
           kind: surface.kind,
           route,
@@ -193,6 +197,7 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
         ? opened(surface, { url, route, browserOpened })
         : {
           status: 'open_failed',
+          done: false,
           surface: surface.id,
           kind: surface.kind,
           url,

@@ -197,16 +197,18 @@ const EFFECT_FAILURE_STATUSES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Reports the result of an effect handler. A handler that refused, could not
- * run, or wrote nothing answers with one of the failure statuses; that is a
- * failed tool result, with the handler's own body kept in `output`, so the
- * result flag and tool cards agree with the status. Real no-ops
+ * Reports the result of an effect handler. A handler says whether the effect
+ * happened with `done`; `done: false` is a failed tool result, with the
+ * handler's own body kept in `output`, so the result flag and tool cards
+ * agree with what happened. A handler that does not say is read by its
+ * status: one of the failure statuses fails. Real no-ops
  * (`nothing_to_recover`, `completed`) stay successes.
  */
 export function effectOutput(value: unknown): { readonly success: boolean; readonly output: string; readonly error?: string } {
   const body = typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : null;
   const status = body?.status;
-  if (!body || typeof status !== 'string' || !EFFECT_FAILURE_STATUSES.has(status)) return output(value);
+  const done = typeof body?.done === 'boolean' ? body.done : undefined;
+  if (!body || done === true || (done === undefined && (typeof status !== 'string' || !EFFECT_FAILURE_STATUSES.has(status)))) return output(value);
   const reason = [body.error, body.reason, body.usage, body.note].find((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
   return { success: false, output: JSON.stringify(value, null, 2), error: `${status}: ${reason ?? (Array.isArray(body.candidates) ? 'the request matched more than one target, so nothing was done. Repeat with one exact id from candidates.' : 'the requested effect did not happen.')}` };
 }

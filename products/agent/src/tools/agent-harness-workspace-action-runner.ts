@@ -6,7 +6,7 @@ import { runLocalWorkspaceAction } from './agent-harness-local-operations.ts';
 import { AGENT_WORKSPACE_CATEGORIES, buildWorkspaceEditorContext, createWorkspaceEditor, describeWorkspaceAction, describeWorkspaceCategory, listWorkspaceActions, resolveWorkspaceActionDetail } from './agent-harness-workspace-actions.ts';
 import { runTranslatedWorkspaceCommand } from './agent-harness-command-runner.ts';
 import { runWorkspaceEditorAction } from './agent-harness-workspace-editor-runner.ts';
-import { error, output, readString, requireConfirmedAction } from './agent-harness-tool-utils.ts';
+import { effectOutput, error, output, readString, requireConfirmedAction } from './agent-harness-tool-utils.ts';
 import { formatHarnessError } from '../agent/harness-control.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { executeAdmittedAgentSettingsImport, isAgentSettingsImportMutation } from './agent-settings-import-admission.ts';
@@ -68,8 +68,9 @@ export async function runWorkspaceAction(
   }
   if (action.kind === 'command' && action.command) {
     if (/<[^>\s]+(?:\s+[^>]*)?>/.test(action.command)) {
-      return output({
+      return effectOutput({
         status: 'needs_concrete_command',
+        done: false,
         action: describeWorkspaceAction(category, action, { lookup }),
         note: 'This workspace action is a command template. Provide concrete values with mode:"run_command" once the exact command is known.',
       });
@@ -192,8 +193,10 @@ export async function runWorkspaceAction(
     });
   }
   const editorContext = buildWorkspaceEditorContext(deps.commandContext, args);
-  return output({
+  return effectOutput({
     status: 'no_direct_effect',
+    done: false,
+    reason: 'This workspace action has no effect run_workspace_action can perform; nothing was run. Use the routes in its description.',
     action: describeWorkspaceAction(category, action, { includeEditor: true, editorContext, lookup }),
   });
 }

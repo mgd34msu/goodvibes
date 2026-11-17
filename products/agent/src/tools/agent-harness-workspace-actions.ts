@@ -11,7 +11,7 @@ import type { AgentWorkspaceAction, AgentWorkspaceCategory, AgentWorkspaceEditor
 import { parseSlashCommand } from '../input/slash-command-parser.ts';
 import { describeCommandPolicy } from './agent-harness-metadata.ts';
 import { describeLocalWorkspaceModelExecution } from './agent-harness-local-operations.ts';
-import { describeWorkspaceEditorModelExecution } from './agent-harness-workspace-editor-execution.ts';
+import { describeWorkspaceEditorModelExecution, workspaceEditorRouteHint } from './agent-harness-workspace-editor-execution.ts';
 import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 export { AGENT_WORKSPACE_CATEGORIES };
@@ -132,79 +132,6 @@ function commandRouteHint(command: string): string {
   return describeCommandPolicy(commandName).preferredModelTool ?? `workspace action:"run_command" commandName:"${commandName}"`;
 }
 
-function editorRouteHint(editorKind: AgentWorkspaceEditorKind): string {
-  const hint = editorFirstClassRoute(editorKind);
-  // The execution table is what the runner dispatches through, so it decides the tool. A first-class
-  // route with an action (`research action:"..."`) is another entry point to the same effect and stays.
-  const executionTool = describeWorkspaceEditorModelExecution(editorKind).tool;
-  if (typeof executionTool !== 'string' || !executionTool) return hint;
-  if (hint === executionTool || (hint.includes(' ') && !hint.startsWith('agent_harness '))) return hint;
-  return executionTool === 'agent_harness' ? 'agent_harness mode:"run_workspace_action"' : executionTool;
-}
-
-function editorFirstClassRoute(editorKind: AgentWorkspaceEditorKind): string {
-  if (
-    editorKind === 'memory'
-    || editorKind === 'note'
-    || editorKind === 'persona'
-    || editorKind === 'skill'
-    || editorKind === 'routine'
-  ) return 'agent_local_registry';
-  if (
-    editorKind === 'knowledge-url'
-    || editorKind === 'knowledge-urls'
-    || editorKind === 'knowledge-file'
-    || editorKind === 'knowledge-bookmarks'
-    || editorKind === 'knowledge-browser-history'
-    || editorKind === 'knowledge-connector-ingest'
-  ) return 'agent_knowledge_ingest';
-  if (
-    editorKind === 'knowledge-reindex'
-    || editorKind === 'knowledge-review-issue'
-    || editorKind === 'knowledge-consolidate'
-  ) return 'workspace action:"run"';
-  if (editorKind.startsWith('knowledge-')) return 'agent_knowledge';
-  if (
-    editorKind === 'document-review-packet-preset'
-    || editorKind === 'document-review-packet-preset-refresh'
-  ) return 'agent_review_packet_presets';
-  if (editorKind === 'document-review-packet-share') return 'agent_review_packet_share';
-  if (editorKind.startsWith('document-')) return 'agent_documents';
-  if (
-    editorKind === 'artifact-browser'
-    || editorKind === 'artifact-show'
-    || editorKind === 'artifact-export-file'
-    || editorKind === 'artifact-export-package'
-  ) return 'agent_artifacts';
-  if (editorKind === 'artifact-promote-knowledge') return 'agent_knowledge_ingest';
-  if (editorKind === 'web-research' || editorKind === 'web-fetch') return 'main conversation prompt';
-  if (editorKind === 'research-run') return 'research action:"create_run"';
-  if (editorKind === 'research-source') return 'research action:"add_source"';
-  if (editorKind === 'research-report') return 'research action:"report"';
-  if (editorKind === 'media-generate') return 'agent_media_generate';
-  if (
-    editorKind === 'model-compare'
-    || editorKind === 'local-model-benchmark'
-    || editorKind === 'model-compare-review'
-    || editorKind === 'model-compare-judge'
-    || editorKind === 'model-compare-apply'
-    || editorKind === 'model-compare-route-decision'
-    || editorKind === 'model-compare-export'
-    || editorKind === 'model-compare-analytics'
-  ) return 'agent_model_compare';
-  if (editorKind === 'channel-send') return 'agent_channel_send';
-  if (editorKind === 'notify-send' || editorKind === 'notify-webhook-test') return 'agent_notify';
-  if (editorKind === 'reminder-schedule') return 'schedule action:"remind"';
-  if (editorKind === 'schedule-edit') return 'schedule action:"edit"';
-  if (editorKind === 'schedule-run') return 'schedule action:"run"';
-  if (
-    editorKind.startsWith('approval-')
-    || editorKind.startsWith('automation-')
-  ) return 'agent_operator_action';
-  if (editorKind.startsWith('workplan-') || editorKind.startsWith('task-')) return 'agent_work_plan';
-  return 'agent_harness mode:"run_workspace_action"';
-}
-
 function localActionRouteHint(action: AgentWorkspaceAction): string {
   const modelExecution = describeLocalWorkspaceModelExecution(action);
   const tool = modelExecution && typeof modelExecution.tool === 'string' ? modelExecution.tool : '';
@@ -248,7 +175,7 @@ function workspaceActionRouteHint(action: AgentWorkspaceAction): string {
   if (action.id === 'memory-prompt-plan') return 'memory action:"curator" includeParameters:true';
   if (action.id === 'memory-posture') return 'memory action:"status"';
   if (action.command) return commandRouteHint(action.command);
-  if (action.editorKind) return editorRouteHint(action.editorKind);
+  if (action.editorKind) return workspaceEditorRouteHint(action.editorKind);
   if (action.kind === 'local-selection' || action.kind === 'local-operation') return localActionRouteHint(action);
   // Compatibility detail route remains: agent_harness mode:"open_ui_surface".
   if (action.targetCategoryId || action.kind === 'workspace') return 'workspace action:"open"';

@@ -6,10 +6,18 @@
  * or a wrap-around gave to some other program is never listed or signalled as
  * this one. A record whose process is gone is dropped the next time the list
  * is read.
+ *
+ * The log files are owned here too: a log is removed with its record (the
+ * process was stopped, or found ended), a running process's log is cut to its
+ * last {@link DETACHED_LOG_KEEP_BYTES} once it passes
+ * {@link DETACHED_LOG_CAP_BYTES} whenever the list is read, and a log left with
+ * no record (its start could not be recorded) is removed once nothing has
+ * written to it for a day.
  */
 import { spawnSync } from 'node:child_process';
-import { closeSync, fstatSync, openSync, readFileSync, readSync } from 'node:fs';
+import { appendFileSync, closeSync, fstatSync, openSync, readdirSync, readFileSync, readSync, statSync, truncateSync, unlinkSync } from 'node:fs';
 import { uptime } from 'node:os';
+import { basename, dirname, join } from 'node:path';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { redactSensitiveData } from '@goodvibes-jev/engine/platform/platform/utils';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
@@ -42,6 +50,72 @@ function storePath(shellPaths: DetachedPaths): string {
 /** A fresh log file path for one detached start. */
 export function detachedProcessLogPath(shellPaths: DetachedPaths): string {
   return shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'processes', `detached-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.log`);
+}
+
+/** A running detached process's log is cut once it is larger than this. */
+export const DETACHED_LOG_CAP_BYTES = 8 * 1024 * 1024;
+/** What a cut keeps: the newest output. */
+export const DETACHED_LOG_KEEP_BYTES = 1024 * 1024;
+/** A log no record names is removed once nothing has written to it for this long. */
+const ORPHAN_LOG_AGE_MS = 24 * 60 * 60 * 1000;
+const LOG_NAME = /^detached-\d+-[a-z0-9]+\.log$/;
+
+/**
+ * A log path this module made: one of its own names, in the processes
+ * directory. A path read from the record file is checked before anything is
+ * removed or cut, so an edited record cannot point a delete anywhere else.
+ */
+function ownedLogPath(shellPaths: DetachedPaths, path: string): boolean {
+  return LOG_NAME.test(basename(path)) && dirname(path) === dirname(storePath(shellPaths));
+}
+
+function removeLog(shellPaths: DetachedPaths, path: string): void {
+  if (!ownedLogPath(shellPaths, path)) return;
+  try { unlinkSync(path); } catch { /* already gone */ }
+}
+
+/**
+ * Cut a running process's log to its newest output once it passes the cap.
+ * The process appends (`>>`), so it keeps writing at the new end; a line it
+ * writes during the cut may land before the kept tail.
+ */
+function trimLog(shellPaths: DetachedPaths, path: string): void {
+  if (!ownedLogPath(shellPaths, path)) return;
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, 'r');
+    const size = fstatSync(fd).size;
+    if (size <= DETACHED_LOG_CAP_BYTES) return;
+    const start = size - DETACHED_LOG_KEEP_BYTES;
+    const buffer = Buffer.alloc(DETACHED_LOG_KEEP_BYTES);
+    let got = 0;
+    while (got < buffer.length) { const n = readSync(fd, buffer, got, buffer.length - got, start + got); if (n === 0) break; got += n; }
+    closeSync(fd); fd = undefined;
+    let tail = buffer.subarray(0, got);
+    const newline = tail.indexOf(0x0a);
+    if (newline >= 0) tail = tail.subarray(newline + 1);
+    truncateSync(path, 0);
+    appendFileSync(path, Buffer.concat([Buffer.from(`[log cut at ${new Date().toISOString()}: ${size} bytes reached the ${DETACHED_LOG_CAP_BYTES}-byte cap; the newest output is kept]\n`), tail]));
+  } catch {
+    /* A log that cannot be cut now is cut on a later read. */
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+/** Remove logs no record names that nothing has written to for a day. One directory read, run when a detached process starts. */
+function sweepOrphanLogs(shellPaths: DetachedPaths, records: readonly DetachedProcessRecord[]): void {
+  const directory = dirname(storePath(shellPaths));
+  const named = new Set(records.map(record => record.logPath));
+  let names: string[];
+  try { names = readdirSync(directory); } catch { return; }
+  const cutoff = Date.now() - ORPHAN_LOG_AGE_MS;
+  for (const name of names) {
+    if (!LOG_NAME.test(name)) continue;
+    const path = join(directory, name);
+    if (named.has(path)) continue;
+    try { if (statSync(path).mtimeMs < cutoff) unlinkSync(path); } catch { /* gone or unreadable */ }
+  }
 }
 
 function parseRecord(value: unknown): DetachedProcessRecord | null {
@@ -157,11 +231,16 @@ export function listDetachedProcesses(shellPaths: DetachedPaths): readonly Detac
   if (!starts) return [];
   const alive = records.filter(record => stillOurs(record, starts));
   if (alive.length !== records.length) {
-    const gone = new Set(records.filter(record => !alive.includes(record)).map(record => record.processId));
+    const goneRecords = records.filter(record => !alive.includes(record));
+    const gone = new Set(goneRecords.map(record => record.processId));
     // Only the records seen gone here are removed; one another session added meanwhile stays.
-    try { runStoreFileUpdateSync(path, () => writeStoreJson(path, { version: 1, processes: readRecords(path).filter(record => !gone.has(record.processId)) })); }
-    catch { /* A record of a finished process is harmless; the next read drops it. */ }
+    try {
+      runStoreFileUpdateSync(path, () => writeStoreJson(path, { version: 1, processes: readRecords(path).filter(record => !gone.has(record.processId)) }));
+      // The process ended, so nothing writes its log and nothing can reach it once the record is gone.
+      for (const record of goneRecords) removeLog(shellPaths, record.logPath);
+    } catch { /* A record of a finished process is harmless; the next read drops it with its log. */ }
   }
+  for (const record of alive) trimLog(shellPaths, record.logPath);
   return alive;
 }
 
@@ -179,21 +258,32 @@ export function recordDetachedProcess(shellPaths: DetachedPaths, start: Detached
   if (!leaderStart) return false;
   const record: DetachedProcessRecord = { ...start, command: redactSensitiveData(start.command), boot: currentBoot(), leaderStart };
   const path = storePath(shellPaths);
-  runStoreFileUpdateSync(path, () => {
+  const { dropped, kept } = runStoreFileUpdateSync(path, () => {
     const others = readRecords(path).filter(row => row.processId !== record.processId);
     const starts = leaderStarts(others.map(row => row.pid));
-    const kept = starts ? others.filter(row => stillOurs(row, starts)) : others;
-    writeStoreJson(path, { version: 1, processes: [...kept, record] });
+    const live = starts ? others.filter(row => stillOurs(row, starts)) : others;
+    writeStoreJson(path, { version: 1, processes: [...live, record] });
+    return { dropped: others.filter(row => !live.includes(row)), kept: [...live, record] };
   });
+  for (const row of dropped) removeLog(shellPaths, row.logPath);
+  sweepOrphanLogs(shellPaths, kept);
   return true;
 }
 
+/**
+ * Drop a stopped process's record and its log: once the record is gone nothing
+ * in the product can reach the log. A process still finishing writes into the
+ * removed file, which the system frees when it exits.
+ */
 export function forgetDetachedProcess(shellPaths: DetachedPaths, processId: string): void {
   const path = storePath(shellPaths);
-  runStoreFileUpdateSync(path, () => {
+  const forgotten = runStoreFileUpdateSync(path, () => {
     const records = readRecords(path);
-    if (records.some(row => row.processId === processId)) writeStoreJson(path, { version: 1, processes: records.filter(row => row.processId !== processId) });
+    const record = records.find(row => row.processId === processId);
+    if (record) writeStoreJson(path, { version: 1, processes: records.filter(row => row.processId !== processId) });
+    return record;
   });
+  if (forgotten) removeLog(shellPaths, forgotten.logPath);
 }
 
 /**

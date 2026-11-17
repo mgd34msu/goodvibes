@@ -10,7 +10,7 @@ import { redactSensitiveData, resolveAndValidatePath } from '@goodvibes-jev/engi
 import { harnessCatalogInvocationAuthority } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ingress';
 import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import { processClassificationOptions, spawnBackgroundProcess, type ProcessClassificationOptions } from './agent-harness-process-launch.ts';
-import { detachedProcessLogPath, findDetachedProcess, forgetDetachedProcess, listDetachedProcesses, readDetachedProcessLog, recordDetachedProcess, stopDetachedProcess,
+import { DETACHED_LOG_CAP_BYTES, DETACHED_LOG_KEEP_BYTES, detachedProcessLogPath, findDetachedProcess, forgetDetachedProcess, listDetachedProcesses, readDetachedProcessLog, recordDetachedProcess, stopDetachedProcess,
   type DetachedProcessRecord } from './agent-harness-detached-processes.ts';
 import { operatorContractMethods, type OperatorContractMethodEntry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/operator-contract-routes';
 import type { BackgroundProcess, ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -301,6 +301,9 @@ async function matchingProcesses(manager: ProcessManager, input: string, options
     'agent.harness.background-processes', options);
   return { ...ranked, all: entries, assertCurrent };
 }
+
+/** How a detached log is bounded, as the start result states it. */
+const DETACHED_LOG_LIMIT_NOTE = `cut to its newest ${Math.round(DETACHED_LOG_KEEP_BYTES / (1024 * 1024))} MB once it passes ${Math.round(DETACHED_LOG_CAP_BYTES / (1024 * 1024))} MB`;
 
 /** A detached process's log tail, read from its file. */
 function detachedLogView(record: DetachedProcessRecord, maxChars: number): Record<string, unknown> {
@@ -737,8 +740,8 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
         lifetimeBehavior: lifetime !== 'detached'
           ? 'Ended when the Agent closes.'
           : recorded
-            ? `Keeps running after the Agent exits; output goes to ${homeRelative(logPath ?? '')}. Later sessions list it under process action:"list" and can stop it with process action:"kill".`
-            : `Keeps running after the Agent exits; output goes to ${homeRelative(logPath ?? '')}. Its start time could not be read (it may already have ended), so later sessions will not list it: stop it with process action:"kill" in this session.`,
+            ? `Keeps running after the Agent exits; output goes to ${homeRelative(logPath ?? '')} (${DETACHED_LOG_LIMIT_NOTE}). Later sessions list it under process action:"list" and can stop it with process action:"kill"; the log is removed when it is stopped or found ended.`
+            : `Keeps running after the Agent exits; output goes to ${homeRelative(logPath ?? '')}. Its start time could not be read (it may already have ended), so later sessions will not list it: stop it with process action:"kill" in this session. The log is removed after a day without output.`,
         timeoutBehavior: timeoutMs === 0 ? 'No automatic deadline; stop it explicitly with process action:"kill".' : killOnTimeout
           ? `SIGTERM then SIGKILL after ${timeoutMs}ms.`
           : `Left running past ${timeoutMs}ms; stop it explicitly with process action:"kill".`,

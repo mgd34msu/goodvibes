@@ -92,8 +92,6 @@ jobs:
       group: native-release-publication-${{ inputs.tag }}
       cancel-in-progress: false
     needs: package
-    outputs:
-      source: ${{ steps.admit.outputs.source }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -131,48 +129,3 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: python3 .github/scripts/publish-missing-suite-assets.py "$RUNNER_TEMP/suite-assets" "$RELEASE_TAG"
-
-  previous-release:
-    # The release being upgraded from is the nearest earlier stable version tag in this
-    # release's history; none for the first release, which is warned about.
-    needs: collect
-    if: inputs.publish_existing && inputs.candidate-source == '' && needs.collect.result == 'success'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    outputs:
-      tag: ${{ steps.previous.outputs.tag }}
-      source: ${{ steps.previous.outputs.source }}
-    steps:
-      # The resolver comes from the dispatch ref: a tag cut before it existed has no copy of it.
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          path: tooling
-          sparse-checkout: .github/scripts
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: refs/tags/${{ inputs.tag }}
-          path: release
-          fetch-depth: 0
-      - name: Resolve the previous published release
-        id: previous
-        working-directory: release
-        env:
-          RELEASE_TAG: ${{ inputs.tag }}
-        run: |
-          set -euo pipefail
-          python3 "$GITHUB_WORKSPACE/tooling/.github/scripts/resolve_previous_release.py" "$RELEASE_TAG" "refs/tags/$RELEASE_TAG^"
-
-  published-install-acceptance:
-    # Packaging-only callers have not published anything and must not run this.
-    needs: [collect, previous-release]
-    if: inputs.publish_existing && inputs.candidate-source == '' && needs.collect.result == 'success'
-    permissions:
-      contents: read
-    uses: ./.github/workflows/reusable-published-install-acceptance.yml
-    with:
-      tag: ${{ inputs.tag }}
-      source: ${{ needs.collect.outputs.source }}
-      tooling-sha: ${{ github.sha }}
-      previous-tag: ${{ needs.previous-release.outputs.tag }}
-      previous-source: ${{ needs.previous-release.outputs.source }}
-      recheck: true

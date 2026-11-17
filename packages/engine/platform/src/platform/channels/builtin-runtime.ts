@@ -537,13 +537,6 @@ export class BuiltinChannelRuntime {
     actionId: string,
     input?: Record<string, unknown>,
   ): Promise<ChannelActionOutcome> {
-    if (surface === 'telegram' && actionId === 'restart-ingress') {
-      // The way back from any state that waits for a person: start() stops the
-      // current loop or webhook first and decides again from the live settings.
-      if (!this.deps.telegramOffsetPath) throw new TelegramOffsetStoreError('unavailable');
-      await this.startIngress();
-      return actionOk({ status: this.telegramIngress?.status ?? null });
-    }
     if (surface === 'telegram' && (actionId === 'cursor-migration-preview' || actionId === 'cursor-migration-commit')) {
       if (!this.telegramIngress) throw new TelegramOffsetStoreError('unavailable');
       if (actionId === 'cursor-migration-preview') return actionOk(await this.telegramIngress.previewCursorMigration());

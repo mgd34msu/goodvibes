@@ -1,5 +1,7 @@
 // Proves: The writer under settings, secrets, ledgers and offsets leaves a torn or world-readable file, or lets a writer that lost its right replace a newer document.
 // Red when: A file is written with the wrong mode or keeps bytes of a longer document, a write happens in place so a failure destroys the document, or the currency check is not made just before the rename.
+// Proves: Two whole-document saves in flight land in the wrong order and the older state is what a restart reads.
+// Red when: The document store stops chaining each save behind the one before it, so an earlier, larger save is renamed into place after a later one.
 /**
  * The durable writer used for settings, secrets, ledgers and offsets: a
  * document is replaced whole or not at all, a writer that lost its right to
@@ -11,6 +13,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { atomicWriteFileSync } from '../platform/src/platform/config/atomic-write.ts';
+import { PersistentStore } from '../platform/src/platform/state/persistent-store.ts';
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'gv-atomic-write-')); });
@@ -46,4 +49,14 @@ test('a writer whose operation stopped being current while it staged does not re
   const assertCurrent = (): void => { checks += 1; if (checks > 1) throw new Error('superseded'); };
   expect(() => atomicWriteFileSync(path, 'stale writer', { assertCurrent })).toThrow();
   expect(readFileSync(path, 'utf8')).toBe('written by the current owner');
+});
+
+test('two document saves in flight land in the order they were asked for', async () => {
+  const path = join(dir, 'approvals.json');
+  const store = new PersistentStore<{ readonly state: string; readonly padding: string }>(path);
+  // A large save, then a small one, not awaited between: without the order kept, the small one finishes first and the large one lands last.
+  const older = store.persist({ state: 'pending', padding: 'x'.repeat(8 * 1024 * 1024) });
+  const newer = store.persist({ state: 'answered', padding: '' });
+  await Promise.all([older, newer]);
+  expect((await new PersistentStore<{ readonly state: string }>(path).load())?.state).toBe('answered');
 });

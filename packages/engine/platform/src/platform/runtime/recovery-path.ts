@@ -69,9 +69,9 @@ const BELONGS_ATTEMPTS = 3;
  * keeps racing the error is thrown, because "could not tell" must not be answered "not mine": the
  * caller would then allocate a second recovery file for a session that already has one.
  */
-function belongsTo(path: string, id: string, readHeader: (path: string) => Record<string, unknown> = readRecoveryHeader): boolean {
+function belongsTo(path: string, id: string): boolean {
   for (let attempt = 1; ; attempt++) {
-    try { const header = readHeader(path); return header['type'] === 'meta' && header['sessionId'] === id; }
+    try { const header = readRecoveryHeader(path); return header['type'] === 'meta' && header['sessionId'] === id; }
     catch (error) {
       if (!(error instanceof RecoverySourceChangedError)) return false;
       if (attempt >= BELONGS_ATTEMPTS) throw error;
@@ -81,7 +81,7 @@ function belongsTo(path: string, id: string, readHeader: (path: string) => Recor
 
 /** Existing files, including previously SHA-suffixed names, are selected by
  * their actual original header. Never recompute an old filename commitment. */
-function existingRecoveryPath(directory: string, id: string, readHeader?: (path: string) => Record<string, unknown>): string | undefined {
+function existingRecoveryPath(directory: string, id: string): string | undefined {
   let names: string[];
   try { names = readdirSync(directory); } catch { return undefined; }
   const matches: Array<{ path: string; at: bigint }> = [];
@@ -90,7 +90,7 @@ function existingRecoveryPath(directory: string, id: string, readHeader?: (path:
     const path = join(directory, name);
     // A file that keeps changing under the scan is skipped; the canonical file is checked first and is never skipped.
     let mine: boolean;
-    try { mine = belongsTo(path, id, readHeader); } catch { continue; }
+    try { mine = belongsTo(path, id); } catch { continue; }
     if (!mine) continue;
     try { matches.push({ path, at: lstatSync(path, { bigint: true }).mtimeNs }); } catch { /* Retired snapshot. */ }
   }
@@ -113,8 +113,6 @@ function directoryVersion(path: string): string | undefined {
 export function createRecoveryPathResolver(
   directory: string,
   nativeDataWriter?: NativeDataWriteOwner,
-  /** How a recovery file's first line is read; replaced only where a test needs to make a read race. */
-  readHeader?: (path: string) => Record<string, unknown>,
 ): (id: string) => string {
   const paths = new Map<string, string>();
   const versions = new Map<string, string | undefined>();
@@ -128,10 +126,10 @@ export function createRecoveryPathResolver(
   const resolve = (id: string): string => {
     const safe = safeRecoverySessionSegment(id);
     const canonical = safe === undefined ? undefined : join(directory, `recovery-${safe}.jsonl`);
-    if (canonical !== undefined && belongsTo(canonical, id, readHeader)) return canonical;
+    if (canonical !== undefined && belongsTo(canonical, id)) return canonical;
     const cached = paths.get(id);
-    if (cached !== undefined && versions.get(id) === directoryVersion(directory) && belongsTo(cached, id, readHeader)) return cached;
-    const existing = existingRecoveryPath(directory, id, readHeader);
+    if (cached !== undefined && versions.get(id) === directoryVersion(directory) && belongsTo(cached, id)) return cached;
+    const existing = existingRecoveryPath(directory, id);
     if (existing !== undefined) return remember(id, existing);
     // Even a safe caller ID must not overwrite an unrelated opaque filename.
     if (canonical !== undefined) {

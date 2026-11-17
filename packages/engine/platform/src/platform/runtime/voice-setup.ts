@@ -4,7 +4,9 @@
  *
  * `install()` is SINGLE-FLIGHT: concurrent installs are never meaningful, a
  * second (and every further) concurrent caller joins the in-progress install's
- * promise instead of starting parallel multi-hundred-MB downloads.
+ * promise instead of starting parallel multi-hundred-MB downloads. The run
+ * belongs to no caller: a caller that cancels only stops waiting, and the
+ * download stops only when every caller that could still want it has gone.
  *
  * `status()` carries LIVE INSTALL PROGRESS and the LAST RESULT: while an
  * install runs, the provisioner's onProgress stream (bytes as they land) is
@@ -148,8 +150,7 @@ export interface VoiceSetupService {
   /**
    * Start the install, or join the one running, and return at once. The run's
    * result is read from status() as `lastInstall`. `assertCurrent` is checked
-   * before the run's effects, as for install(); it throws at once when it
-   * already fails.
+   * once, at admission; the run then finishes on its own.
    */
   startInstall(options?: Pick<VoiceProofLifetime, 'assertCurrent'>): VoiceInstallStart;
   /** Plan voice setup from the host's facts, do what the plan says, and return the plan with what happened. */
@@ -181,30 +182,57 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
   // subdirectory, so they share this service's ownership of that tree.
   const wake = createWakeSetupService({ managedVoiceRoot: deps.managedVoiceRoot });
 
-  let inFlight: { readonly run: Promise<VoiceInstallReceipt>; readonly startedAt: number } | undefined;
+  // The shared run owns its own lifetime: callers are admitted once, and a
+  // caller that goes away only stops waiting. The download stops only when no
+  // one is left who could still want it (every waiter cancelled and nobody
+  // started it fire-and-forget); bytes already on disk are configured and
+  // proved, and the receipt is kept for status().
+  interface InstallRun {
+    readonly run: Promise<VoiceInstallReceipt>;
+    readonly startedAt: number;
+    readonly stop: AbortController;
+    /** Set once a caller that cannot cancel (startInstall, or install with no signal) holds the run. */
+    pinned: boolean;
+    /** Callers with a signal still waiting. */
+    waiters: number;
+  }
+  let inFlight: InstallRun | undefined;
   let lastInstall: VoiceInstallOutcome | undefined;
-  // The first request owns the shared work; its outcome is kept for status().
-  const beginRun = (request: VoiceProofLifetime): { readonly run: Promise<VoiceInstallReceipt>; readonly startedAt: number } => {
+  const beginRun = (): InstallRun => {
     const startedAt = Date.now();
-    const run = runInstall(request).then(
+    const stop = new AbortController();
+    const run = runInstall(stop.signal).then(
       (receipt) => { lastInstall = { startedAt, finishedAt: Date.now(), receipt }; return receipt; },
       (error: unknown) => { lastInstall = { startedAt, finishedAt: Date.now(), error: error instanceof Error ? error.message : String(error) }; throw error; },
     ).finally(() => { inFlight = undefined; });
-    return { run, startedAt };
+    return { run, startedAt, stop, pinned: false, waiters: 0 };
   };
-  const runInstall = async (request: VoiceProofLifetime): Promise<VoiceInstallReceipt> => {
-    assertVoiceProofCurrent(request);
+  const holdRun = (current: InstallRun, signal: AbortSignal | undefined): void => {
+    if (!signal) { current.pinned = true; return; }
+    current.waiters += 1;
+    const leave = (): void => {
+      current.waiters -= 1;
+      if (current.waiters === 0 && !current.pinned) {
+        current.stop.abort(new Error('Every request waiting for the voice install was cancelled.'));
+      }
+    };
+    signal.addEventListener('abort', leave, { once: true });
+    void current.run.catch(() => undefined).finally(() => signal.removeEventListener('abort', leave));
+  };
+  const runInstall = async (stopSignal: AbortSignal): Promise<VoiceInstallReceipt> => {
     progress.begin();
     try {
       const result = await provision({
         managedRoot: deps.managedVoiceRoot,
+        signal: stopSignal,
         onProgress: (event) => progress.onProgress(event),
       });
-      assertVoiceProofCurrent(request);
       let configured: VoiceInstallReceipt['configured'] = { set: [], skipped: [], superseded: [] };
       const notes: string[] = [];
+      if (stopSignal.aborted) {
+        notes.push('The download was stopped because every request waiting for it was cancelled. What was downloaded is kept, so the next install resumes from there.');
+      }
       let proof: VoiceRoundTripProof | undefined;
-      let proofLifetime: VoiceProofLifetime = request;
       const ttsProvisioned = result.tts.state === 'provisioned' && !!result.tts.binaryPath && !!result.tts.modelPath;
       const sttProvisioned = result.stt.state === 'provisioned' && !!result.stt.binaryPath && !!result.stt.modelPath;
 
@@ -263,12 +291,13 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
         const configKeys = ['voice.local.ttsEngine', 'voice.local.ttsBinary', 'voice.local.ttsModelPath',
           'voice.local.sttEngine', 'voice.local.sttBinary', 'voice.local.sttModelPath'];
         const config = configKeys.map(key => deps.getConfig(key));
-        proofLifetime = {
-          signal: AbortSignal.any([AbortSignal.timeout(120_000), ...(request.signal ? [request.signal] : [])]),
+        // The proof must prove the settings just written; it does not follow
+        // any caller, only its own deadline.
+        const proofLifetime: VoiceProofLifetime = {
+          signal: AbortSignal.timeout(120_000),
           assertCurrent: () => {
-            assertVoiceProofCurrent(request);
             if (configKeys.some((key, index) => deps.getConfig(key) !== config[index])) {
-              throw new Error('Voice setup configuration changed during the proof. Retry the original request.');
+              throw new Error('The voice settings changed while the install was proving them, so the proof no longer describes them. Run the voice install again to prove the current settings.');
             }
           },
         };
@@ -305,7 +334,6 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
           + 'and no round trip could be proven. Dictation and the wake word can use speech-to-text now.',
         );
       }
-      assertVoiceProofCurrent(proofLifetime);
       return {
         // Installed AND proven. A failed proof, or a speech-to-text half that
         // failed where it is supported, reports NOT provisioned, because a false
@@ -407,26 +435,23 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
       };
     },
     async install(options: VoiceProofLifetime = {}): Promise<VoiceInstallReceipt> {
-      const request = Object.freeze({ ...options });
-      assertVoiceProofCurrent(request);
-      // Downloads stream to disk a network chunk at a time, so an install
-      // holds no file in memory and needs no memory-pressure admission.
-      // Joining callers may cancel their wait, but cannot lend new authority
-      // to the original installation.
-      inFlight ??= beginRun(request);
-      const ownedRun = inFlight.run;
-      const receipt = await executePolicyCheck(() => ownedRun, request.signal);
-      assertVoiceProofCurrent(request);
-      return receipt;
+      // Admission, once: the caller is still wanted and still allowed. Downloads
+      // stream to disk a network chunk at a time, so an install holds no file
+      // in memory and needs no memory-pressure admission.
+      assertVoiceProofCurrent(options);
+      const current = (inFlight ??= beginRun());
+      holdRun(current, options.signal);
+      // A cancelled caller stops waiting; the run goes on for everyone else.
+      return executePolicyCheck(() => current.run, options.signal);
     },
     startInstall(options = {}): VoiceInstallStart {
-      const request = Object.freeze({ ...options });
-      assertVoiceProofCurrent(request);
+      assertVoiceProofCurrent(options);
       const joined = inFlight !== undefined;
-      inFlight ??= beginRun(request);
+      const current = (inFlight ??= beginRun());
+      holdRun(current, undefined);
       // The outcome is read through status(); nobody awaits this run here.
-      inFlight.run.catch(() => undefined);
-      return { state: 'running', startedAt: inFlight.startedAt, joined };
+      current.run.catch(() => undefined);
+      return { state: 'running', startedAt: current.startedAt, joined };
     },
     setup: (request) => runSetup(request),
     wakeStatus: () => wake.status(),

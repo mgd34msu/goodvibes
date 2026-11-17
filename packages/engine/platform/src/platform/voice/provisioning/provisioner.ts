@@ -163,6 +163,8 @@ export interface VoiceProvisionOptions {
   readonly managedRoot: string;
   readonly fetchImpl?: typeof fetch | undefined;
   readonly onProgress?: ((progress: VoiceProvisionProgress) => void) | undefined;
+  /** Stops the downloads; a partial file is kept so the next install resumes it. */
+  readonly signal?: AbortSignal | undefined;
   readonly extractArchive?: ArchiveExtractor | undefined;
   /** Override the detected platform (tests). */
   readonly platform?: VoicePlatform | null | undefined;
@@ -204,6 +206,7 @@ async function provisionLocalVoiceRuntimeLocked(options: VoiceProvisionOptions):
       spec,
       destPath: dest,
       fetchImpl: options.fetchImpl,
+      signal: options.signal,
       onProgress: (phase, message, bytesDone) => emit(id, phase, message, {
         bytesTotal: spec.bytes,
         ...(bytesDone !== undefined ? { bytesDone } : {}),

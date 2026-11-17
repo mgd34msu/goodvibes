@@ -113,10 +113,10 @@ revision once. Before sending, the app durably publishes the exact source, IDs a
 revision in its private `native-work-submission.json` journal under its product
 state directory. The journal binds each request to the exact daemon endpoint,
 canonical workspace, project and live server-verified paired principal. It stores
-no bearer token. The journal has at most 16 bindings and 2 MiB. A binding is
-released once its submission has a validated receipt; one whose outcome is not yet
-known is never evicted, so when 16 are retained a new binding is refused with a
-message naming the cap until `submission-status` settles one. Corrupt, oversized,
+no bearer token. The journal has no record cap; the file is bounded at 2 MiB. A
+binding is removed once its submission has a validated receipt, or when
+`submission-discard` drops it after the host reported it does not have it; one
+whose outcome is not yet known is never evicted. Corrupt, oversized,
 symlink-backed or unconfirmable state fails closed without a submission.
 
 After a restart, use `submission-status` or `submission-retry` to recover the
@@ -165,21 +165,22 @@ The footer keeps an honest running total: fresh input tokens separated from cach
 
 <img src="docs/assets/workspace-trust.png" alt="A modal titled New workspace, choose a trust level, offering two options: Trust this workspace, full capability, all tools may run; and Keep restricted, read-only, explore safely, writes and commands are denied until trusted. Navigation hints read Up/Down Navigate, Enter Choose, Esc Close." width="820">
 
-The first time you open a directory, GoodVibes asks how much it is allowed to do there. Restricted is read-only. The model can look around, but writes and commands are refused until you trust the workspace.
+The first time you open a directory, GoodVibes asks how much it is allowed to do there. Restricted is read-only. The model can look around, but writes and commands are refused until you trust the workspace. Until then a `hooks.json` in the workspace is not loaded and the MCP servers its `.mcp/mcp.json` or `.goodvibes/mcp.json` name do not start. The decision is kept in your own workspace register; a project cannot mark itself trusted. `/trust workspace trusted|restricted` changes it later.
 
 <img src="docs/assets/permission-prompt.png" alt="An execution approval prompt. A header reads EXECUTE, Shell Execution Approval, one more waiting. Fields list the requesting session, the tool exec, the full command mkdir -p build, the working directory, a Risk line reading HIGH write in red, the surface and radius, a summary, the decision class, the effects: process execution, filesystem mutation, possible network access, a reviewer checklist, and the raw tool arguments. Below, four numbered remember options scope an approval to this exact command, to every mkdir command, to every exec call in this project, or to the rest of the session in memory only. The action line reads: Y Allow once, 1-4 Allow and remember, N Deny, or type a reason to deny." width="900">
 
-After that, the default execution mode is `safe-owner`: ordinary work runs without asking, and dangerous actions stop and ask. The prompt shows what will run, in which directory, its assessed risk, and what it can affect. You can allow it once, deny it (optionally typing a reason the model sees), or remember the decision at whichever scope fits: this exact command, this command shape, this tool for the whole project, or just for the rest of the session.
+After that, reads, searches, edits inside the workspace and commands a saved rule covers start at once. What only you decide (spending over your limit, a deletion nothing can bring back, a new recipient, granting access, loosening a security setting, changing a contract) always asks you. Everything else is a judgment call, and `permissions.mode` decides who answers it. The default is `jev-decides`: Jev, the decision model, decides judgment calls, and with no working decision model you are asked instead. When you are asked, the prompt shows what will run, in which directory, its assessed risk, and what it can affect. You can allow it once, deny it (optionally typing a reason the model sees), or remember the decision at whichever scope fits: this exact command, this command shape, this tool for the whole project, or just for the rest of the session.
 
-Other modes are available when that is not what you want:
+The other modes:
 
-- `safe-jev` lets Jev decide in the owner's place, refusing genuinely harmful actions
-- `yolo` runs authorized actions without general safety decisions (host containment, secret storage and payment rules still apply)
+- `ask-me`: Jev reads each judgment call's risk; low-stakes calls run and high-stakes ones ask you
+- `just-vibes`: nothing interrupts you; anything that needs you is held and listed at the end of the run, and `/held` approves or sets it aside
+- `yolo` runs every action without approval prompts (authentication, containment, secret storage and payment limits still apply)
 - `plan` allows read-only tools and refuses every mutating or exec call
 
-An explicit `permissions.tools.<name>` set to `deny` blocks that tool in the safe modes. Older values still load: `prompt`, `accept-edits` and `custom` as `safe-owner`, `auto` as `safe-jev`, `allow-all` as `yolo`.
+`/decisions` lists what Jev decided for you, with undo, never, always and ask. An explicit `permissions.tools.<name>` set to `deny` blocks that tool. Older saved values still load: `safe-owner`, `prompt`, `normal`, `accept-edits` and `custom` as `ask-me`, `safe-jev` and `auto` as `jev-decides`, `allow-all` as `yolo`. How the mode combines with the decision model setting is in [decision-model policies](../../docs/decision-model-policy.md#how-much-you-are-asked).
 
-`Shift+Tab` cycles `safe-owner`, `safe-jev` and `yolo` for the current session only, and asks before switching to `yolo`; the saved default is set with `/permissions` or in Settings. `/plan` toggles plan mode directly.
+`Shift+Tab` cycles the mode for the current session only, and asks before switching to `yolo`; the saved default is set with `/permissions` or in Settings, and `--just-vibes` or `--yolo` picks one for a single launch. `/plan` toggles plan mode directly.
 
 ### Models and providers
 
@@ -234,7 +235,7 @@ Each row links to the page that documents it. The product's own `?` overlay and 
 | Keyboard | The complete binding reference, and how to rebind | [tools-and-commands.md](docs/tools-and-commands.md) |
 | Agents and workflows | Built-in and custom archetypes, spawning, git worktree isolation, automation and scheduled jobs | [tools-and-commands.md](docs/tools-and-commands.md) |
 | Extending it | Hooks and hook chains, the plugin manifest and API, MCP servers, the curated marketplace | [tools-and-commands.md](docs/tools-and-commands.md) |
-| Diagnostics | Evaluation suites, deterministic replay, incident bundles, the state inspector, telemetry | [tools-and-commands.md](docs/tools-and-commands.md) |
+| Diagnostics | Evaluation suites, deterministic replay, incident bundles, telemetry | [tools-and-commands.md](docs/tools-and-commands.md) |
 | CLI flags | Session lifecycle (`--continue`, `--resume`, `--fork`), non-interactive mode, output formats, host selection | [cli-flags.md](docs/cli-flags.md) |
 | Knowledge and memory | Session and durable memory, a structured knowledge store with connectors and extractors, embeddings and retrieval, artifacts, multimodal analysis | [knowledge-artifacts-and-multimodal.md](docs/knowledge-artifacts-and-multimodal.md) |
 | Session durability | Saved session after every turn plus a crash snapshot at each turn moment, offered at the next start | [session-durability.md](docs/session-durability.md) |
@@ -264,7 +265,8 @@ Edit them live with `/settings` or the fullscreen `/config` workspace rather tha
 
 | Key | Default | What it does |
 | --- | --- | --- |
-| `permissions.mode` | `safe-owner` | `safe-owner`, `safe-jev`, `yolo`, or `plan` |
+| `permissions.mode` | `jev-decides` | `ask-me`, `jev-decides`, `just-vibes`, `yolo`, or `plan` |
+| `judgment.policy` | `Hybrid` | `Hybrid`, `Decision Model Only`, or `No Decision Model` |
 | `provider.model` | `openrouter:openrouter/free` | Active model for main chat |
 | `provider.reasoningEffort` | `medium` | Reasoning depth on models that support it |
 | `display.theme` | `goodvibes` | Color theme |
@@ -288,11 +290,11 @@ Everything lives in plain files, split between the per-user `~/.goodvibes/tui/` 
 | `~/.goodvibes/tui/secrets.enc` or `.goodvibes/tui/secrets.enc` | Encrypted secrets, global or per project |
 | `~/.goodvibes/tui/providers/*.json` | Custom provider definitions, hot-reloaded |
 | `~/.goodvibes/tui/keybindings.json` | Keybinding overrides |
-| `.goodvibes/tui/services.json` | The service registry |
+| `~/.goodvibes/tui/services.json` | The service registry (a project's `.goodvibes/tui/services.json` adds only services whose credentials are keys in your secret store) |
 | `.goodvibes/tui/automation-*.json` | Scheduled jobs and the rest of the automation store |
 | `.goodvibes/agents/*.md` | Agent archetypes |
-| `.goodvibes/mcp.json` | MCP server definitions |
-| `hooks.json` (project root) | Hooks and hook chains |
+| `.goodvibes/mcp.json` | MCP server definitions (a project's start only once the workspace is trusted) |
+| `hooks.json` (project root) | Hooks and hook chains (loaded only once the workspace is trusted) |
 | `.goodvibes/` (rest) | Sessions, artifacts, and other project runtime state in the working directory |
 
 ---
@@ -342,9 +344,9 @@ Some decisions worth knowing before you read the source:
 - **Crash recovery.** A crash snapshot written when a prompt is accepted and after each tool batch, offered at the next start.
 - **Render coalescing and a per-message line cache.** Same-tick render requests collapse into one composite frame, and transcript growth re-renders only the appended message instead of rebuilding the whole conversation.
 
-The TUI consumes `@goodvibes-jev/engine` and `@goodvibes-jev/daemon` through `workspace:*` dependencies for shared runtime behavior, contracts and transports, and keeps terminal rendering, input and product composition here. Reference clients written only against the published engine entry points live under `examples/`: [`reference-http-client`](examples/reference-http-client/README.md) talks to a running daemon, [`reference-operator-client`](examples/reference-operator-client/README.md) makes the same calls against the generated fixture daemon, and `bun run test` runs both.
+The TUI consumes `@goodvibes-jev/engine` and `@goodvibes-jev/daemon` through `workspace:*` dependencies for shared runtime behavior, contracts and transports, and keeps terminal rendering, input and product composition here. Reference clients written only against the published engine entry points live under `examples/`: [`reference-http-client`](examples/reference-http-client/README.md) talks to a running daemon, [`reference-operator-client`](examples/reference-operator-client/README.md) makes the same calls against the generated fixture daemon.
 
-Source layout, in brief (the layer rules and the operator API bridge are in docs/architecture.md):
+Source layout, in brief:
 
 ```text
 src/
@@ -357,10 +359,10 @@ src/
 ├── config/                 settings layering, surface roots, secrets, credential availability
 ├── permissions/            approval cards, hunk selection, sandbox exec gate
 ├── cli/                    flag parsing, management verbs, doctor, launch-time self-update
-├── tools/, mcp/            TUI-local tool guards, MCP runtime reload
+├── providers/              provider classification and reasoning-effort presentation
 ├── audio/, export/         voice capture, wake word, playback and speech routing; gist upload
-├── verification/, widget/  live verifier, the terminal widget module
-├── utils/, scripts/        formatting and clipboard helpers, message processing script
+├── verification/           live verifier
+├── utils/                  formatting and clipboard helpers
 └── test/                   the suite, mirroring the tree above
 ```
 
@@ -368,7 +370,7 @@ src/
 
 ## Stability
 
-The upstream product follows semver from 1.0.0: incompatible changes to CLI flags, config keys, slash commands, key bindings, daemon routes, and on-disk layouts land only in major releases, and deprecations are noted in [CHANGELOG.md](CHANGELOG.md) first. The product reference above describes inherited upstream behavior; the Jev migration status and current decision contract take precedence for this workspace.
+GoodVibes ships as one suite version. Changes, including renamed settings and removed commands, are recorded in the [suite changelog](../../packages/engine/CHANGELOG.md) and the [release notes](../../docs/releases/); the current release is [3.3.0](../../docs/releases/3.3.0.md).
 
 ## License
 

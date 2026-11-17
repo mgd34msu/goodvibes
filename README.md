@@ -1,61 +1,66 @@
 # GoodVibes
 
 GoodVibes includes a terminal UI, personal agent, daemon and browser UI, sharing
-one platform and one release version. It supports hosted and local decision
-models, with Classic operation available when decision models are disabled.
+one platform and one release version. It works with hosted and local decision
+models, and everything keeps working with none configured.
 
-## Decision models and permissions
+## Who decides
 
-`judgment.policy` controls decision-model use independently of execution permissions:
+Code settles what the program already knows: a read, a search, an edit inside
+the workspace and a command an existing rule covers start at once, with no
+model request and no question. You are asked only what is yours to decide
+(spending over your limit, a deletion nothing can bring back, a new recipient,
+granting access, loosening a security setting, changing a contract), once, and
+the answer is remembered. The rest are judgment calls for Jev, the decision
+model, with a deadline and a fallback so nothing hangs.
 
-| Policy | Behavior |
-| --- | --- |
-| **Default - On** | Use the configured hosted/local decision chain and halt on exhaustion. This remains the default for existing installations. |
-| **Preferred** | Use that chain; continue the current operation in Classic only when available targets are exhausted. |
-| **Classic - Off** | Use Classic from startup, with zero decision-model requests. Ordinary answering models remain available. |
-
-Classic supports chat, native tools, editing, commands, test results, final answers
-and conversation recovery. Tools retain deterministic permission rules and owner
-approvals. `safe-jev` uses owner approval handling during Classic; explicit YOLO
-retains its meaning. Classic results identify their provenance and do not claim
-independent semantic verification. The Decision Router uses its configured General
-target without categorization. Inherently semantic features report their limitation.
-
-A genuine refusal, malformed response, privacy rejection, cancellation or stale
-authority cannot select Preferred fallback. Completed actions and conversation
-history survive fallback; actions are not replayed. See the [policy and capability guide](docs/decision-model-policy.md).
-
-Execution uses one of three modes across local, hosted and channel sessions:
+`permissions.mode` chooses how much you are asked:
 
 | Mode | Behavior |
 | --- | --- |
-| `safe-owner` | Ordinary work runs automatically. Dangerous actions wait for the owner's reply, bound to the exact action. |
-| `safe-jev` | Jev stands in for the owner, permitting ordinary work and justified risk while refusing genuinely harmful actions. |
-| `yolo` | General execution safety adds no denial, approval prompt or Jev safety call. |
+| `ask-me` | Jev reads each judgment call's risk; low-stakes calls run, and high-stakes calls and owner-only items ask you. |
+| `jev-decides` (default) | Jev decides judgment calls; owner-only items ask you. With no working decision model it behaves as `ask-me`. |
+| `just-vibes` | Nothing interrupts you: Jev decides what it can, and anything that needs you is held and listed at the end of the run (`/held`). |
+| `yolo` | No approval prompts. Authentication, workspace containment, secret storage and spending limits still apply. |
 
-`plan` is a separate read-only planning posture. Selecting an execution mode
-replaces the legacy automatic-approval override. Background work uses its
-session's current mode. A mode change invalidates pending execution authority.
+`plan` is a separate read-only posture. `Shift+Tab` changes the mode of the
+current session only; `--just-vibes` and `--yolo` pick one for a single launch.
+`/decisions` lists what Jev decided for you, with undo, never, always and ask.
 
-When decision models are enabled, they handle interpretation, planning, repair and task verification. Their
-decision receipts carry actual
-recorded decisions; owner approval and YOLO do not fabricate Jev receipts.
-Authentication, supported input formats, cancellation, exact invocation identity
-and duplicate-execution protection remain execution mechanics in every mode.
-Host containment and workspace scope, explicit blocked destinations, and
-secret-storage requirements remain binding. The separate
-[payment contract](packages/engine/docs/payments.md) retains its spending limits,
-merchant rules, owner authorization and distinct approval/veto windows in every
-mode. A general tool decision cannot authorize spending outside that contract.
+## Decision model setting
 
-The shared judgment port owns transient availability handling. Primary-only
-routes use finite attempts; explicit cross-model failover chains
-return typed `unavailable` on exhaustion. Products consume that lifecycle
-without adding retry loops or inventing semantic answers.
+`judgment.policy` chooses whether a decision model is used and what happens
+when it fails:
 
-Provisioning, account login and user cancellation remain legitimate product
-interactions. This runtime contract does not change development-tool permissions
-or authorize live external actions by a developer.
+| Policy | Behavior |
+| --- | --- |
+| **Hybrid** (default) | Use the set decision model. When it fails, the operation continues without it and you are told once, naming the model, what failed and the next step. |
+| **Decision Model Only** | Use the set decision model. When it fails, work that needs it stops and reports the model, what failed and the next step. |
+| **No Decision Model** | Make no decision-model requests. |
+
+With no decision model set, every policy runs without one: nothing waits and
+nothing reports an error. The conversation, `goodvibes status`,
+`goodvibes-agent status`, headless JSON results and the web UI always say when
+no decision model is in use.
+
+How much a person is in the loop, for each policy and permission mode. Code
+settles reads, workspace edits and calls your rules or `permissions.tools.*`
+settings allow before any of this, and in every mode but `yolo` the owner-only
+items always come to you:
+
+| Policy | `ask-me` | `jev-decides` | `just-vibes` | `yolo` |
+| --- | --- | --- | --- | --- |
+| Hybrid (default) | Jev reads each judgment call and you are asked only about high-stakes, irreversible or security-weakening ones; with no model set or while it fails, you are asked about every judgment call your tool settings do not allow. | Jev decides every judgment call; with no model set, while it fails, or (as the unchosen default) on a model the shipped calibration did not measure, you are asked as in `ask-me`. | You are never interrupted: what Jev would not run, or with no working model every judgment call your tool settings do not allow, is held and listed at the end of the run. | You are asked nothing, and no decision model is consulted for permission. |
+| Decision Model Only | As Hybrid, except that while the set model fails, the call fails with the model's error instead of asking you. | As Hybrid, except that while the set model fails, the call fails with the model's error instead of asking you. | As Hybrid, except that while the set model fails, the call fails with the model's error instead of being held. | Same as Hybrid: you are asked nothing. |
+| No Decision Model | You are asked about every judgment call your tool settings do not allow. | You are asked about every judgment call your tool settings do not allow, exactly as in `ask-me`. | You are never interrupted: every judgment call your tool settings do not allow is held and listed at the end of the run. | You are asked nothing. |
+
+The shipped calibration record covers `jev-latest`, the model used when
+`judgment.model` is empty. Details, the decision deadline, fallback chains and
+the features that need a decision model are in the
+[decision model policy guide](docs/decision-model-policy.md). The
+[payment contract](packages/engine/docs/payments.md) keeps its spending limits,
+merchant rules and approval and veto windows in every mode; a tool decision
+cannot authorize spending outside it.
 
 ## Install the application
 
@@ -71,12 +76,12 @@ install build dependencies or compile anything. One release version is used for
 the complete suite. To select a release explicitly:
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.1.2 sh
+curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.3.0 sh
 ```
 
 Commands install in `~/.local/bin` by default; existing `~/.goodvibes` data is
-preserved. The installer retains upgrade/restart handling, service migration,
-PATH setup and uninstall. Use `GOODVIBES_INSTALL_DIR` for a custom command path,
+preserved. The installer handles upgrade and restart, has the daemon write
+its own service definition, sets up PATH and uninstalls. Use `GOODVIBES_INSTALL_DIR` for a custom command path,
 `GOODVIBES_DAEMON_SERVICE=0` to skip service setup, or
 `GOODVIBES_UNINSTALL=1` to remove installed programs while keeping user data.
 See [installation instructions](docs/installation.md).

@@ -63,12 +63,8 @@ inspects and reopens observation; `intake-retry`, `intake-resume` and
 `intake-cancel` recover or cancel that same original. A lost reply never creates
 fresh IDs or switches delivery modes. An input whose journal save failed never
 reached the host; `intake-cancel` discards it so the next input can be sent.
-The intake journal keeps one record per host, project, workspace and principal,
-at most 16. At the cap, a new binding replaces the least recently used record
-this surface already handed off (dispatched work, or a hosted input the host
-acknowledged and no other live process of this client owns); a turn with a
-dispatch claim is never replaced, nor is a record whose input the host may never
-have captured, and the refusal names the journal file.
+The intake journal holds only inputs in flight (see below) and never refuses a
+new input for being full.
 
 With connected-host dialing enabled and the shared operator credential configured,
 pair Agent from its live terminal:
@@ -102,6 +98,10 @@ Both products use the same command contract:
 - `/work submission-status` looks up the retained request without writing work.
 - `/work submission-retry` first looks up that same request. Only a `not-found`
   result can lead to replay of the exact retained request.
+- `/work submission-discard` first looks up that same request. When the host
+  has it, its receipt is shown and nothing is dropped; otherwise the retained
+  request is removed and nothing is sent, so a corrected source can be
+  submitted.
 
 Example source file:
 
@@ -128,10 +128,11 @@ flight: a record exists from submit until the host gives a terminal answer
 exists and its execution was requested, the hosted turn finishes, or the local
 turn that was dispatched has ended; then it is removed. It has no record cap and
 never refuses a new input for being full. Corrupt, oversized, symlink-backed or
-unconfirmable state fails closed without a submission. In the work-submission journal, a binding is released once its
-submission has a validated receipt; one whose outcome is not yet known is never
-evicted, so a new binding at the cap is refused with a message naming the cap
-until `submission-status` settles one.
+unconfirmable state fails closed without a submission. The work-submission
+journal has no record cap (the file is bounded at 2 MiB): a binding is removed
+once its submission has a validated receipt, or when `submission-discard` drops
+it after the host reported it does not have it, and one whose outcome is not
+yet known is never evicted.
 
 After a restart, use `submission-status` or `submission-retry` to recover the
 original request. Both first look it up using that same identity. Retry does not
@@ -173,7 +174,7 @@ GoodVibes Agent is an installable autonomous operator assistant. You run `goodvi
 
 **Local behavior is yours to shape.** A friendly `VIBE.md` personality file, separate from project instruction files (`AGENTS.md`, `CLAUDE.md`, and similar), plus local memory, notes, personas, and skills all live under the Agent home and are scanned for secret-looking content before they ever reach a prompt. Personas capture a reusable voice or role; skills capture a reusable capability; routines capture a reusable sequence you can start in chat and, as a separate explicit and confirmation-gated step, promote to a connected schedule.
 
-**Automation stays visible and confirmed.** Reminders, schedules, channel sends, media generation, and visible background agents all show up in one autonomy queue, and every one of them requires an explicit user request plus confirmation before anything actually sends, spends, or runs unattended.
+**Automation stays visible, and you decide what is yours to decide.** Reminders, schedules, channel sends, media generation, and visible background agents all show up in one autonomy queue. Who approves the rest follows `permissions.mode`, as in the terminal app: owner-only items (spending over your limit, a new recipient, granting access, loosening a security setting, a deletion nothing can bring back) always ask you; in the default `jev-decides` mode Jev, the decision model, answers the judgment calls, and with no working decision model you are asked instead. Purchases inside the limits you set go ahead after a veto window. See [decision-model policies](../../docs/decision-model-policy.md#how-much-you-are-asked).
 
 **The model can plan its own route.** Ask a plain question like "email the team a summary" or "what's blocked in setup" and the underlying model can call a route planner that maps the request to the right tool and confirmation boundary before doing anything. It does not have to guess at internal tool names, and ambiguous requests come back as candidates instead of a wrong guess.
 
@@ -280,7 +281,7 @@ The Agent consumes `@goodvibes-jev/engine` and `@goodvibes-jev/daemon` through `
 
 ## Stability
 
-The Jev migration status and current decision contract take precedence for this workspace; upstream changes are recorded in [CHANGELOG.md](CHANGELOG.md).
+GoodVibes ships as one suite version. Changes are recorded in the [suite changelog](../../packages/engine/CHANGELOG.md) and the [release notes](../../docs/releases/); the current release is [3.3.0](../../docs/releases/3.3.0.md).
 
 ## License
 

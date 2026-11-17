@@ -35,8 +35,8 @@ From `products/webui`:
 - `bun run dev`: local Vite server, with daemon binding discovery
 - `bun run build`: verify engine-derived snapshots, then compile the browser app
 - `bun run typecheck`: browser, tooling and Playwright TypeScript programs
-- `bun run test`: Bun behavior tests, run through the shared runner (`packages/engine/scripts/test.ts`)
-- `bun run e2e --project=phone --project=desktop`: synthetic daemon browser matrix
+- `bun run e2e` (or `bun run test`): the browser journeys against a synthetic daemon, on the phone and desktop projects (`e2e:phone`, `e2e:desktop` for one)
+- `bun run test:live`: the web UI's own client against one real daemon in an isolated home
 - `bun run lint`: source and tooling lint
 - `bun run release:gate`: shared engine workspace dependency/export checks
 - `bun run release:prepare`: regenerate engine data snapshots and versioned assets
@@ -52,6 +52,6 @@ publication. Product-level preparation only writes generated browser data and
 asset cache stamps. Existing legacy URLs continue to map into Chat, Work,
 Library, Personal and Settings while preserving deep-link fragments.
 
-See development, testing and validation,
-runtime boundaries and [known limitations](docs/known-limitations.md)
-for the supported workflows and remaining integration work.
+See [known limitations](docs/known-limitations.md) for the remaining
+integration work, and the [3.3.0 release notes](../../docs/releases/3.3.0.md)
+for what changed in this release.

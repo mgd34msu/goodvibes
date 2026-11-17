@@ -13,7 +13,7 @@ Copyright (c) 2026 Mike Davis.
 - [Suite installation and uninstall](../../docs/installation.md): install released suite binaries and configure the Linux user service
 - [Troubleshooting](docs/troubleshooting.md): startup, authentication, binding, services and tool refusals
 
-Configured inbox deployment requires an established trusted local screening host.
+Configured Slack and Discord inboxes require an established trusted screening host. A configured email inbox runs without one: its rows then carry `screening: not-screened` with the reason, and triage and label write-back stay off.
 
 ## Product boundary
 
@@ -32,9 +32,9 @@ commands retain the existing guarded service adapters.
 
 The shipped `serve` (or bare invocation) admits a genuinely unconfigured inbox:
 Slack, Discord and email are all reported explicitly as `unconfigured`, with no
-source polling or mirror storage. Configured sources require established account
-and trusted-local screening authority; missing or unreadable authority refuses
-startup and rolls back owned resources. An unavailable credential store is not
+source polling or mirror storage. Configured Slack and Discord sources require
+established account and trusted-local screening authority; an email source whose
+screening consent or credentials are missing is built unscreened instead. An unavailable credential store is not
 reported as a fresh install.
 For an admitted screening host, `createProductionDaemonRuntime({}, screening)`
 constructs the canonical Discord bot owner from `surfaces.discord.inboxBotUserId`
@@ -62,7 +62,7 @@ local proposal service and `jev-latest`, including established ephemeral retenti
 The standalone launcher has no managed local screening runner; settings or endpoint
 addresses cannot establish its retention policy.
 
-Service install/start/restart/migrate requires a
+Service install/start/restart requires a
 launcher that supplies both real inbox composition and its installed executable
 path. Systemd service definitions preserve the selected tree, daemon home and
 workspace; start and restart with relocated homes or an explicit workspace
@@ -129,7 +129,7 @@ a trusted intended-channel scope and a protected screening owner; it does not
 discover exhaustive historical DMs. 
 
 `createEmailDaemonInboxFactory({ account, screening })` supplies an explicit
-TLS mailbox inbox for single-node or account-eligible clustered operation, with
+mailbox inbox (TLS, or plaintext on a loopback host only) for single-node or account-eligible clustered operation, with
 canonical mail lifecycle, complete-source protection, account-scoped ownership
 and durable UIDVALIDITY/UID progress. The root supplies its owned mail-service
 constructor and, in cluster mode, awaitable election gates. First polling records
@@ -253,4 +253,4 @@ required for custom composition. The production constructor includes explicit
 unconfigured membership and explicit account-bound Slack, Discord and email
 sources.
 
-Current monorepo releases are documented in [release notes](../../docs/releases/). Historical upstream implementation notes are kept outside the published user documentation.
+Current monorepo releases are documented in [release notes](../../docs/releases/); the current release is [3.3.0](../../docs/releases/3.3.0.md). Historical upstream implementation notes are kept outside the published user documentation.

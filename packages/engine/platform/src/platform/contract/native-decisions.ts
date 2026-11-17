@@ -6,7 +6,7 @@ import type { ExternalOperationSource } from '../permissions/external-request.js
 /** Native semantic ownership. Registered continuations never run through an owner reply or a fake tool. */
 import { hashState, JudgmentError, type EntryType, type JudgmentPort, type JudgmentRetryProgress } from '@goodvibes-jev/judgment';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
-import { captureJevDecisionContext, opaqueUuid, parseJevDecision, type JevDecision, type JevDecisionBinding, type JevVersionRef } from '@goodvibes-jev/judgment/decisions';
+import { captureJevDecisionContext, parseJevDecision, type JevDecision, type JevDecisionBinding, type JevVersionRef } from '@goodvibes-jev/judgment/decisions';
 import { decideAutonomous, type AutonomousDecision } from '../gate/autonomous-decision.js';
 import { autonomousSourceEvidence } from '../permissions/autonomous.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
@@ -264,25 +264,9 @@ function nativeCriteriaEvidence(contract: Contract): JevVersionRef {
   const admission = contract.durableAdmission;
   if (admission !== undefined) {
     assertDurableCheckpoint(contract, admission);
-    // Native requests retain the exact ledger work identity in their criteria
-    // key. An earlier canonical raw UUID changes spelling only in this model
-    // reference; the saved source, durable key and their revisions stay exact.
-    if (source.criteriaId === `criteria-v2:${admission.key.workId}` && admission.key.criteriaId === source.criteriaId
-      && source.criteriaRevision === admission.key.criteriaRevision) {
-      const previous = /^work-([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/.exec(admission.key.workId);
-      if (previous) return { id: `criteria-v2:work-${opaqueUuid(previous[1]!)}`, revision: source.criteriaRevision };
-      if (/^work-[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/.test(admission.key.workId)) {
-        return { id: source.criteriaId, revision: source.criteriaRevision };
-      }
-    }
-    // Earlier freestanding opaque criteria labels already contain no decimal
-    // runs. Retain them without deriving a work-ID checksum.
-    if (/^criteria-v2:[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/.test(source.criteriaId)
-      && admission.key.criteriaId === source.criteriaId && source.criteriaRevision === admission.key.criteriaRevision) {
-      return { id: source.criteriaId, revision: source.criteriaRevision };
-    }
-    // Only an exact earlier saved spelling needs its old work-ID recipe.
-    // Ordinary caller-supplied references never invoke that compatibility hash.
+    // Only the earlier saved `criteria:` digest needs its old work-ID recipe.
+    // Every other reference, `criteria-v2:` work identities in either UUID
+    // spelling included, is passed to the model exactly as saved.
     if (/^criteria:[0-9a-f]{64}$/.test(source.criteriaId) && admission.key.criteriaId === source.criteriaId
       && source.criteriaRevision === admission.key.criteriaRevision) {
       let saved = historicalCriteriaApply(historicalCriteriaGet, historicalCriteriaReferences, [admission]) as { readonly workId: string; readonly criteriaId: string } | undefined;

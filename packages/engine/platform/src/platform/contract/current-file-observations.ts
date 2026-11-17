@@ -1,9 +1,8 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readSync, realpathSync, type BigIntStats } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { JsonValue } from '@goodvibes-jev/judgment';
 import { summarizeError } from '../utils/error-display.js';
 import { originalContractInputFileDigest, type ContractInputFile } from './input-snapshot.js';
@@ -39,7 +38,8 @@ const nativeFiles = new WeakMap<object, NativeFileObservation>();
 // never file bytes, and only the latest incarnation per path: A -> B -> A
 // cannot recover an earlier label after an intervening observed version.
 const ownerLabels = new WeakMap<object, Map<string, { readonly facts: CurrentFileReviewFacts; readonly id: string }>>();
-const observationLabel = /^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/;
+// New labels are plain UUIDs; saved labels spelled with the letters a to p still read.
+const observationLabel = /^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$/;
 export function parseCurrentFileReviewFacts(value: unknown): CurrentFileReviewFacts {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid native file observation facts');
   const source = value as Record<string, unknown>;
@@ -194,7 +194,7 @@ export function currentFileObservations(cwd: string, paths: readonly string[], o
         if (!labels) { labels = new Map(); ownerLabels.set(options.owner, labels); }
       }
       const previous = labels?.get(absolute);
-      const observationId = previous && isDeepStrictEqual(previous.facts, facts) ? previous.id : opaqueUuid();
+      const observationId = previous && isDeepStrictEqual(previous.facts, facts) ? previous.id : randomUUID();
       labels?.set(absolute, { facts, id: observationId });
       const expected = options.inputFile, expectedOid = expected?.oid;
       if (expected && (expected.path !== path || expected.kind !== 'file' || !expectedOid || expected.identity !== inputIdentity(before)))

@@ -6,7 +6,6 @@ import { isContractId, type ContractView } from './types.js';
 import type { QualityGateResult } from './gates.js';
 import type { JsonValue } from '@goodvibes-jev/judgment';
 import { ownerEvidenceIdentity } from './owner-evidence.js';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 
 type ArchiveOwner = Pick<ContractView, 'id'> & Partial<Pick<ContractView, 'projectRoot' | 'inputSnapshot' | 'units' | 'groups'>>;
 interface ReceiptArchive {
@@ -157,12 +156,8 @@ export function verifyPrivateReceiptPreservation(contract: ArchiveOwner, unit: P
       output: JSON.stringify({ operation: 'native-host-private-preservation-check', success: true,
         privateFileRead: receipt.hostFileRead, acceptedSourceUnitsVerified: archive.units.length,
         originalReadRecordsIdentical: true,
-        // The retained native Git ID stays unchanged for git show above. Reuse
-        // the lossless hex-nibble spelling (a=0 through p=f), not UUID parsing,
-        // only for this model-facing canonical Git object identity.
-        baseline: unit.baseline?.head && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(unit.baseline.head)
-          ? { encoding: 'git-object-id-hex-nibbles-a-p', value: opaqueUuid(unit.baseline.head) }
-          : unit.baseline?.head ?? null,
+        // The baseline Git object id exactly as `git show` above used it.
+        baseline: unit.baseline?.head ?? null,
         referenceChecks,
         ...(absentAtBaseline.length === 0 ? {} : { absentAtBaseline }),
         meaning: 'Actual filesystem/provenance comparisons passed. Original declared public reference text is preserved exactly after removing read-tool line-number prefixes and normalizing line endings and one terminal newline. This proves retention, not a new inspection or semantic acceptance. Public edits, citations and final output still require native Jev review.' }) };

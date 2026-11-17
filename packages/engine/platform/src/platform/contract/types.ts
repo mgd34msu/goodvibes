@@ -18,7 +18,6 @@ import type { DurableContractAdmission } from './durable-admission.js';
 import type { ContractInputSnapshot } from './input-snapshot.js';
 
 import type { NativeContractDecisionState, NativeContractProgress, NativeContractTransportProgress } from './native-decisions.js';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { JsonValue, Outcome, ReplyReadingName } from '@goodvibes-jev/judgment';
 import type {
   CheckResult,
@@ -101,9 +100,10 @@ export type AgentManagerLike = Pick<AgentManager, 'spawn' | 'getStatus' | 'list'
 // bookkeeping. Older readers must refuse it rather than erase those records.
 export const CURRENT_CONTRACT_SCHEMA_VERSION = 6;
 
-/** Full opaque128bit UUID labels are emitted; actual saved8hex IDs remain readable. */
-const opaqueContractPattern = /^ctr-[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/;
-const contractIdPattern = /^ctr-(?:[0-9a-f]{8}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12})$/;
+/** Full 128-bit UUID ids are emitted. Saved 8-hex ids and saved UUIDs spelled
+ * with the letters a to p (an earlier spelling) stay readable. */
+const opaqueContractPattern = /^ctr-[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$/;
+const contractIdPattern = /^ctr-(?:[0-9a-f]{8}|[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12})$/;
 export const CONTRACT_ID_PATTERN = new RegExp(contractIdPattern.source);
 export function isContractId(value: unknown): value is string {
   return typeof value === 'string' && contractIdPattern.test(value);
@@ -111,8 +111,8 @@ export function isContractId(value: unknown): value is string {
 export function isOpaqueContractId(value: unknown): value is string {
   return typeof value === 'string' && opaqueContractPattern.test(value);
 }
-/** A fresh full128bit contract id, with no card-shaped decimal runs. */
-export function newContractId(): string { return `ctr-${opaqueUuid()}`; }
+/** A fresh full 128-bit contract id. */
+export function newContractId(): string { return `ctr-${crypto.randomUUID()}`; }
 
 // ── Routing ────────────────────────────────────────────────────────────────────
 

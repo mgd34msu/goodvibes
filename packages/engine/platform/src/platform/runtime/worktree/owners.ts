@@ -13,7 +13,7 @@ export interface ContractLookup {
  * read as before.
  */
 function plannerContractId(name: string): string {
-  return /^(ctr-(?:[0-9a-f]{8}|[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}))-./.exec(name)?.[1] ?? name;
+  return /^(ctr-(?:[0-9a-f]{8}|[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}))-./.exec(name)?.[1] ?? name;
 }
 
 /**

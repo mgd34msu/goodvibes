@@ -104,7 +104,7 @@ export function hydrateStoredReviewObservations(contract: Contract, schemaVersio
         return descriptor;
       }
       if (schemaVersion < 6 || Object.keys(source).sort().join(',') !== 'nativeFileObservation,observationId,path'
-        || typeof source['observationId'] !== 'string' || !/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/.test(source['observationId'])) throw invalid();
+        || typeof source['observationId'] !== 'string' || !/^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$/.test(source['observationId'])) throw invalid();
       const facts = physicalFacts(source['nativeFileObservation']);
       const origin = (source['nativeFileObservation'] as Record<string, unknown>)['origin'];
       const descriptor = Object.freeze({ path: source['path'], observationId: source['observationId'] });

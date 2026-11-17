@@ -1,7 +1,10 @@
 import { mapLimit } from '@goodvibes-jev/judgment';
 import type { KnowledgeStore } from '../store.js';
 import type { KnowledgeEdgeRecord, KnowledgeExtractionRecord, KnowledgeNodeRecord, KnowledgeSourceRecord } from '../types.js';
-import { assertJudgmentInput, JudgmentInputError } from '../../gate/judgment-input.js';
+import { assertJudgmentInput } from '../../gate/judgment-input.js';
+import { logger } from '../../utils/logger.js';
+import { summarizeError } from '../../utils/error-display.js';
+import { knowledgeTerms, selectKnowledgePassages, splitKnowledgePassages } from '../passages.js';
 import { getKnowledgeSpaceId } from '../spaces.js';
 import { belongsToSpace, edgeIsActive, isGeneratedPageSource } from './helpers.js';
 import { assertKnowledgeExtractionInput, knowledgeExtractionNeedsRefresh } from '../extraction-policy.js';
@@ -45,51 +48,83 @@ export function readHomeGraphSearchState(store: KnowledgeStore, spaceId: string)
   return { spaceId, sources, nodes, edges, extractionBySourceId };
 }
 
+/** Documents read by the decision model for one question's repair pre-pass, at most. */
+const REPAIR_CANDIDATE_READS = 4;
+/** Passages of a candidate's stored text sent with its reading. */
+const REPAIR_CANDIDATE_TEXT_BYTES = 12 * 1024;
+
+/**
+ * The documents worth re-extracting before one question is answered. Only a
+ * document whose extraction needs repair can be one; it is shortlisted in code
+ * by the words it shares with the question, through its own identity or the
+ * objects it is linked to, and at most {@link REPAIR_CANDIDATE_READS} are read
+ * by the decision model. A candidate whose reading does not settle, or whose
+ * text may not be sent, is not repaired now; the question goes on with what is
+ * stored and reindex repairs it later.
+ */
 export async function selectHomeGraphExtractionRepairCandidates(
   query: string, sources: readonly KnowledgeSourceRecord[], nodes: readonly KnowledgeNodeRecord[],
   edges: readonly KnowledgeEdgeRecord[], extractionBySourceId: (sourceId: string) => KnowledgeExtractionRecord | null | undefined,
   limit: number, signal?: AbortSignal,
 ): Promise<KnowledgeSourceRecord[]> {
   signal?.throwIfAborted();
-  if (!query.trim()) return [];
-  // Only documents whose stored extraction needs repair are read; the rest cost nothing.
-  const eligible = sources.filter((source) => source.artifactId && homeGraphExtractionNeedsRepair(extractionBySourceId(source.id)));
+  const terms = knowledgeTerms([query]);
+  if (terms.length === 0) return [];
+  // Only documents whose stored extraction needs repair are considered; the rest cost nothing.
+  const eligible = sources.filter((source) => source.artifactId
+    && homeGraphExtractionNeedsRepair(extractionBySourceId(source.id), source.artifactId));
   if (eligible.length === 0) return [];
-  assertExtractionInputs(eligible, extractionBySourceId);
   const links = buildSourceLinkIndex(edges, nodes);
-  const snapshots = eligible.map((source) => {
-    const extraction = extractionBySourceId(source.id);
-    return { request: query, source: { title: source.title, summary: source.summary, description: source.description,
-      sourceType: source.sourceType, tags: source.tags, uri: source.sourceUri,
-      extraction: extraction ? { title: extraction.title, summary: extraction.summary, excerpt: extraction.excerpt, text: repairProfileSourceText(extraction) } : null,
-      subjects: nodes.filter((node) => links.get(source.id)?.has(node.id)).map(repairProfileSubject) } };
-  });
-  for (const state of snapshots) assertJudgmentInput(state);
-  if (snapshots.some(state => JSON.stringify(state).length > 160_000)) throw new JudgmentInputError('unsupported-input');
-  const decisionGuards: Array<() => void> = [];
-  const results = await mapLimit(snapshots, 4, async (state, index) => {
-    const source = eligible[index]!;
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const shortlist = eligible.map((source, order) => {
+    const subjects = [...(links.get(source.id) ?? [])].flatMap((id) => { const node = nodesById.get(id); return node ? [node] : []; });
+    const extraction = extractionBySourceId(source.id) ?? null;
+    const words = new Set(knowledgeTerms([source.title, source.summary, source.description, source.tags, source.sourceUri,
+      extraction?.title, extraction?.summary, subjects.map((node) => [node.title, node.aliases])]));
+    let score = 0;
+    for (const term of terms) if (words.has(term)) score += term.length >= 5 || /\d/.test(term) ? 2 : 1;
+    return { source, subjects, extraction, order, score };
+  }).filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score || left.order - right.order)
+    .slice(0, Math.max(REPAIR_CANDIDATE_READS, limit));
+  const readings = await mapLimit(shortlist, 4, async ({ source, subjects, extraction }) => {
     signal?.throwIfAborted();
-    const run = await readKnowledgeBattery(repairSourceRelevance, state, signal);
-    decisionGuards.push(run.assertDecisionCurrent);
-    return run.readings.relevant.verdict === 'yes' ? { source, score: run.readings.relevant.probability } : undefined;
+    try {
+      assertJudgmentInput({ summary: source.summary, description: source.description });
+      assertKnowledgeExtractionInput(extraction);
+      const state = { request: query, source: { title: source.title, summary: source.summary, description: source.description,
+        sourceType: source.sourceType, tags: source.tags, uri: source.sourceUri,
+        extraction: extraction ? { title: extraction.title, summary: extraction.summary, excerpt: extraction.excerpt,
+          text: repairCandidateText(repairProfileSourceText(extraction), terms) } : null,
+        subjects: subjects.map(repairProfileSubject) } };
+      const run = await readKnowledgeBattery(repairSourceRelevance, state, signal);
+      return run.readings.relevant.verdict === 'yes'
+        ? { source, score: run.readings.relevant.probability, assertCurrent: run.assertDecisionCurrent } : undefined;
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.info('Home Graph question left a document unrepaired: its relevance was not settled', { sourceId: source.id, error: summarizeError(error) });
+      return undefined;
+    }
   });
   signal?.throwIfAborted();
-  for (const check of decisionGuards) check();
-  return results.filter((entry): entry is NonNullable<typeof entry> => entry !== undefined)
-    .sort((a, b) => b.score - a.score || a.source.id.localeCompare(b.source.id))
+  return readings.filter((entry): entry is NonNullable<typeof entry> => {
+    if (!entry) return false;
+    try { entry.assertCurrent(); return true; } catch { return false; }
+  }).sort((a, b) => b.score - a.score || a.source.id.localeCompare(b.source.id))
     .slice(0, Math.max(1, limit)).map((entry) => entry.source);
 }
-/** Decided from the extraction's stored version and readability. */
-export function homeGraphExtractionNeedsRepair(extraction: KnowledgeExtractionRecord | null | undefined): boolean {
-  return knowledgeExtractionNeedsRefresh(extraction ?? null);
+
+/** The passages of a candidate's stored text that mention the question, within the reading's budget. */
+function repairCandidateText(text: string, terms: readonly string[]): string {
+  if (new TextEncoder().encode(text).byteLength <= REPAIR_CANDIDATE_TEXT_BYTES) return text;
+  const selection = selectKnowledgePassages(splitKnowledgePassages([[text]], 1_200), terms, REPAIR_CANDIDATE_TEXT_BYTES);
+  const kept = selection.passages.map((passage) => passage.text).join('\n\n');
+  return selection.omitted.passages > 0 ? `${kept}\n\n[${selection.omitted.passages} passage(s) not shown]` : kept;
 }
-function assertExtractionInputs(
-  sources: readonly KnowledgeSourceRecord[],
-  extractionBySourceId: (sourceId: string) => KnowledgeExtractionRecord | null | undefined,
-): void {
-  for (const source of sources) {
-    assertJudgmentInput({ summary: source.summary, description: source.description });
-    assertKnowledgeExtractionInput(extractionBySourceId(source.id));
-  }
+/**
+ * Decided from the extraction's stored version and the artifact it was made
+ * from; a current extraction that found no readable text is final.
+ */
+export function homeGraphExtractionNeedsRepair(extraction: KnowledgeExtractionRecord | null | undefined, artifactId?: string | undefined): boolean {
+  return knowledgeExtractionNeedsRefresh(extraction ?? null, undefined, artifactId);
 }

@@ -191,7 +191,7 @@ export async function recompileKnowledgeSource(context: KnowledgeIngestContext, 
   const uris = createKnowledgeIngestUriCanonicalizer(context, options, sourceCurrent);
   const assertCurrent = () => { sourceCurrent(); uris.assertCurrent(); };
   let refreshed: KnowledgeExtractionUpsertInput | undefined;
-  if (source.artifactId && knowledgeExtractionNeedsRefresh(extraction)) {
+  if (source.artifactId && knowledgeExtractionNeedsRefresh(extraction, undefined, source.artifactId)) {
     assertCurrent();
     uris.attachArtifact(source.artifactId);
     const prepared = await abortableCompileRead(prepareKnowledgeExtraction(context, source.id, source.artifactId, uris, { signal, assertCurrent }), signal);

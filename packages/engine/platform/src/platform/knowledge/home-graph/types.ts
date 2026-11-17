@@ -472,6 +472,8 @@ export interface HomeGraphReindexResult {
   readonly reparsed: number;
   readonly skipped: number;
   readonly failed: number;
+  /** Documents whose current extraction found no readable text (an image, a scanned PDF, a type with no extractor); they are read again only when their file or the extractor changes. */
+  readonly notExtractable?: number | undefined;
   readonly changedSourceCount?: number | undefined;
   readonly forcedSourceCount?: number | undefined;
   readonly skippedGeneratedPageArtifactCount?: number | undefined;

@@ -11,6 +11,7 @@ import { resolveReadableHomeGraphSpace } from './space-selection.js';
 import { readHomeGraphSearchState } from './search.js';
 import { readHomeGraphState } from './state.js';
 import { homeGraphExtractionNeedsRepair } from './search.js';
+import { knowledgeExtractionIsReadable } from '../extraction-policy.js';
 import {
   HOME_GRAPH_PAGE_POLICY_VERSION,
   refreshHomeGraphDevicePassport,
@@ -157,9 +158,11 @@ async function runStage<T>(signal: AbortSignal | undefined, remaining: () => num
 
 /**
  * Re-extracts the documents whose stored extraction needs it. Which documents
- * those are is read from the stored extractor version and readability of every
- * document in one pass, so a damaged extraction anywhere in the space is found;
- * only the re-extraction itself spends the run budget.
+ * those are is read from the stored extractor version and artifact of every
+ * document in one pass, so an outdated extraction anywhere in the space is
+ * found; only the re-extraction itself spends the run budget. A current
+ * extraction that found no readable text is final and counted in
+ * `notExtractable`.
  */
 export async function reindexHomeGraphSources(input: {
   readonly signal?: AbortSignal | undefined;
@@ -174,7 +177,11 @@ export async function reindexHomeGraphSources(input: {
   const sources: KnowledgeSourceRecord[] = [];
   const failures: Array<{ readonly sourceId: string; readonly error: string }> = [];
   const withArtifact = input.sources.filter((source) => typeof source.artifactId === 'string' && source.artifactId.length > 0);
-  const needing = withArtifact.filter((source) => homeGraphExtractionNeedsRepair(input.extractionBySourceId.get(source.id)));
+  const needing = withArtifact.filter((source) => homeGraphExtractionNeedsRepair(input.extractionBySourceId.get(source.id), source.artifactId));
+  const needingIds = new Set(needing.map((source) => source.id));
+  // Current extractions that found no readable text are final; they are counted, not re-read.
+  let notExtractable = withArtifact.filter((source) => !needingIds.has(source.id)
+    && !knowledgeExtractionIsReadable(input.extractionBySourceId.get(source.id))).length;
   const scanned = withArtifact.length;
   let skipped = scanned - needing.length;
   const repairs = needing.slice(0, clampPositive(input.limit, needing.length, 1, 10_000));
@@ -209,11 +216,12 @@ export async function reindexHomeGraphSources(input: {
       continue;
     }
     reparsed += 1;
+    if (!knowledgeExtractionIsReadable(extraction)) notExtractable += 1;
     sources.push(source);
     await yieldToEventLoop();
   }
   const deferred = needing.length - attempted;
-  return { ok: true, spaceId: input.spaceId, scanned, reparsed, skipped, failed, sources, failures,
+  return { ok: true, spaceId: input.spaceId, scanned, reparsed, skipped, failed, notExtractable, sources, failures,
     truncated: deferred > 0, budgetExhausted, deferred };
 }
 

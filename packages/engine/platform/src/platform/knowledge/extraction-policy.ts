@@ -66,16 +66,22 @@ export function knowledgeExtractionIsReadable(extraction: Pick<KnowledgeExtracti
 
 /**
  * True when the extraction must be produced again from its stored artifact:
- * there is none, an older extractor wrote it, or it was read as unreadable when
- * written. Decided from stored fields; no model request.
+ * there is none, an older extractor wrote it, or it was made from other bytes
+ * than the source's current artifact (`artifactId`, when the caller knows it).
+ * An extraction the current extractor made from the current bytes is final
+ * whatever it found: one with no readable text (an image, a scanned PDF, a type
+ * with no extractor) would only find the same again, so it is reported as not
+ * extractable ({@link knowledgeExtractionIsReadable}) instead of being re-read.
+ * Decided from stored fields; no model request.
  */
 export function knowledgeExtractionNeedsRefresh(
   extraction: KnowledgeExtractionRecord | null,
   currentExtractorVersion: number = KNOWLEDGE_EXTRACTOR_VERSION,
+  artifactId?: string | undefined,
 ): boolean {
   if (!extraction) return true;
   if (readKnowledgeExtractorVersion(extraction.metadata) < currentExtractorVersion) return true;
-  return !knowledgeExtractionIsReadable(extraction);
+  return artifactId !== undefined && extraction.artifactId !== undefined && extraction.artifactId !== artifactId;
 }
 
 /** The stored search text of an extraction container (`searchText`, `text` or `content`). */

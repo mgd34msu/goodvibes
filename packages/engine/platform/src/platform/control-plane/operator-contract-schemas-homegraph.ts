@@ -100,6 +100,7 @@ export const HOME_GRAPH_REINDEX_OUTPUT_SCHEMA = objectSchema({
   reparsed: NUMBER_SCHEMA,
   skipped: NUMBER_SCHEMA,
   failed: NUMBER_SCHEMA,
+  notExtractable: NUMBER_SCHEMA,
   changedSourceCount: NUMBER_SCHEMA,
   forcedSourceCount: NUMBER_SCHEMA,
   skippedGeneratedPageArtifactCount: NUMBER_SCHEMA,

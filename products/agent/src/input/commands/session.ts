@@ -39,6 +39,24 @@ function printSessionGraphMutationBlocked(context: CommandContext): void {
 
 // ── Top-level command definition ───────────────────────────────────────────────
 
+/** Every `/session` subcommand the Agent handles, carried as the command's `subcommands`; the link-task, handoff and cancel verbs are blocked here, so they carry no argument hint. */
+export const SESSION_SUBCOMMAND_ARG_HINTS: Record<string, string> = {
+  list: '',
+  rename: '<name>',
+  resume: '<id|name>',
+  fork: '[name]',
+  save: '[name] [--replace] [--switch]',
+  info: '[id]',
+  export: '<id|.> [markdown|text]',
+  search: '<query>',
+  delete: '<id>',
+  events: '[kind] [start-row] [--last N]',
+  groups: '[kind] [start-row] [--last N]',
+  hotspots: '[kind]',
+  graph: '[--session <sid>] [--format text|json]',
+  g: '[--session <sid>] [--format text|json]',
+};
+
 /**
  * sessionCommand, The `/session` slash command.
  *
@@ -51,6 +69,7 @@ export const sessionCommand: SlashCommand = {
   description: 'Session continuity and read-only cross-session graph inspection.',
   usage: '<subcommand> [args]',
   argsHint: 'list|resume|save|events|groups|hotspots|graph',
+  subcommands: SESSION_SUBCOMMAND_ARG_HINTS,
   // A new name is the rest of the line exactly as typed.
   rawRest: (args) => (args[0] === 'rename' && args.length === 1 ? 1 : undefined),
   handler: async (args: string[], context: CommandContext): Promise<void> => {

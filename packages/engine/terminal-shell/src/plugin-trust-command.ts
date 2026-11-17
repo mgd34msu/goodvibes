@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { PluginManager } from '@goodvibes-jev/engine/platform/platform/plugins';
 import type { TerminalSlashCommand } from './command-registry.js';
+import type { CommandSubcommandHints } from './command-args-hint.js';
 import { commandRefusal, withOwnerConfirmation, type CommandConfirmation, type ConfirmationHost } from './command-confirmation.js';
 
 type PluginTrustTierName = 'untrusted' | 'limited' | 'trusted';
@@ -141,7 +142,7 @@ export async function runPluginTrustSubcommand(
  */
 export function createPluginTrustCommand<Context extends ConfirmationHost>(
   manager: (context: Context) => PluginTrustControls | undefined,
-): TerminalSlashCommand<Context> {
+): TerminalSlashCommand<Context> & CommandSubcommandHints {
   const command = {
     name: 'plugin',
     effect: 'mixed' as const,
@@ -149,6 +150,10 @@ export function createPluginTrustCommand<Context extends ConfirmationHost>(
     aliases: [] as string[],
     description: 'List plugins and set what each one may do (its trust tier)',
     usage: `list | ${PLUGIN_TRUST_USAGE}`,
+    subcommands: {
+      list: '', trust: '<name> <untrusted|limited|trusted> [note]', 'trust-key': '<name> <key.pem>',
+      verify: '<name>', capabilities: '<name>',
+    },
     confirm: (args: readonly string[], context: Context): CommandConfirmation | undefined => pluginTrustConfirmation(manager(context), args),
     async handler(args: string[], context: Context): Promise<void> {
       const plugins = manager(context);

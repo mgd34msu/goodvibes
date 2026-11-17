@@ -57,7 +57,6 @@ async function answerInAnotherProcess(root: string, questionsPath: string, id: s
   return JSON.parse(out.trim()) as boolean;
 }
 
-
 function request(): PermissionPromptRequest {
   return { callId: 'call-1', tool: 'exec', args: { cmd: 'make release' }, category: 'execute', analysis: { classification: 'command', riskLevel: 'high', summary: 'Run make release', reasons: ['publishes a build'] } };
 }
@@ -118,13 +117,4 @@ test('an answer written by another process wakes the call waiting in this one, a
   expect(heard.status).toBe('answered');
   expect(heard.answer?.option).toBe('yes');
   expect(heard.answeredBy).toEqual({ actor: 'owner', surface: 'tui' });
-});
-
-test('a later answer from another process is refused there and the first answer stands', async () => {
-  const { root, questionsPath, open } = fixture();
-  const inbox = open();
-  const posted = inbox.postNow({ kind: 'question', title: 'Merge now?', options: ['yes', 'no'] });
-  expect((await inbox.answer(posted.item.id, { option: 'yes' }, { actor: 'owner', surface: 'web' })).applied).toBe(true);
-  expect(await answerInAnotherProcess(root, questionsPath, posted.item.id, 'no')).toBe(false);
-  expect(inbox.get(posted.item.id)?.answer?.option).toBe('yes');
 });

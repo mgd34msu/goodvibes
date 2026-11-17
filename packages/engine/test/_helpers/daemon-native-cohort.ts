@@ -1,5 +1,5 @@
 import { dirname, join } from 'node:path';
-import { resolveDaemonNativePayloads, sha256, type DaemonCiArtifact, type NativeReaderCapabilities, type UpdateFileIo } from '../../platform/src/platform/runtime/self-update.ts';
+import { resolveDaemonNativePayloads, sha256, type DaemonCiArtifact, type NativeReaderCapabilities } from '../../platform/src/platform/runtime/self-update.ts';
 
 interface NativeCohortOptions {
   readonly version: string;
@@ -56,80 +56,6 @@ export function nativeCohortFixture(options: NativeCohortOptions) {
   };
 }
 
-/** A release consumer explicitly requests descriptor pins and a plain manifest. */
-export function nativeCohortReleaseFixture(options: NativeCohortOptions & { readonly readerChecksum?: string }) {
-  const readerChecksum = options.readerChecksum;
-  const original = nativeCohortFixture(options);
-  const checksumManifest = original.members.map((member, index) => `${original.artifact.files[index]!.sha256}  ${member.assetName}\n`).join('')
-    + Object.entries(original.assets).filter(([name]) => !original.members.some(member => member.assetName === name))
-      .map(([name, bytes]) => `${name.endsWith('.reader-ci-artifact.json') && readerChecksum !== undefined ? readerChecksum : sha256(bytes)}  ${name}\n`).join('');
-  return { ...original, checksumManifest };
-}
-
-/** Declared DTO only: parser/association tests do not claim payload integrity. */
-export function nativeDescriptorFixture(options: { readonly version: string; readonly arch?: 'x64' | 'arm64'; readonly readers?: NativeReaderCapabilities }) {
-  const { version, arch = 'x64', readers } = options;
-  const payloads = resolveDaemonNativePayloads('linux', arch);
-  if (!payloads) throw new Error('Descriptor fixture requires a supported Linux target');
-  const files = payloads.map((payload, index) => ({ path: payload.relativePath, sha256: String.fromCharCode(97 + index).repeat(64),
-    mode: payload.executable ? 0o755 : 0o644, size: index + 1 }));
-  const artifact = fixtureArtifact(arch, files, readers, 'a'.repeat(40));
-  return { artifact, receipt: fixtureReceipt(version, artifact) };
-}
-
 export function fixtureStrings(files: Record<string, Buffer>): Record<string, string> {
   return Object.fromEntries(Object.entries(files).map(([path, bytes]) => [path, bytes.toString('utf8')]));
-}
-
-function fixtureMode(path: string): number {
-  const live = path.replace(/\.(previous|update-download|update-previous|rollback-exchange|update-transaction)$/, '');
-  return live.endsWith('.bun') || (!live.includes('/lib/') && !live.endsWith('.json') && !live.endsWith('.md')) ? 0o755 : 0o644;
-}
-
-/** Files have independent inode identities; renaming retains their identity. */
-export function nativeMemoryIo(initial: Record<string, Buffer>) {
-  const files = new Map<string, Buffer>(Object.entries(initial).map(([path, data]) => [path, Buffer.from(data)]));
-  const modes = new Map<string, number>(Object.keys(initial).map(path => [path, fixtureMode(path)]));
-  const identities = new Map<string, string>();
-  let nextIdentity = 0;
-  for (const path of files.keys()) identities.set(path, `inode-${++nextIdentity}`);
-  const mutations: string[] = [];
-  const io: UpdateFileIo & {
-    readFile(path: string): Buffer;
-    observe(path: string): { identity: string; ownerIdentity: string; mode: number } | null;
-  } = {
-    writeExclusive(path, data) {
-      mutations.push(`claim:${path}`);
-      if (files.has(path)) throw new Error(`file already exists: ${path}`);
-      files.set(path, Buffer.from(data)); modes.set(path, 0o600); identities.set(path, `inode-${++nextIdentity}`);
-    },
-    remove(path) { mutations.push(`remove:${path}`); files.delete(path); modes.delete(path); identities.delete(path); },
-    writeFile(path, data) {
-      mutations.push(`write:${path}`); files.set(path, Buffer.from(data));
-      if (!identities.has(path)) identities.set(path, `inode-${++nextIdentity}`);
-      if (!modes.has(path)) modes.set(path, 0o600);
-    },
-    rename(from, to) {
-      mutations.push(`rename:${from}:${to}`);
-      const data = files.get(from); const mode = modes.get(from); const identity = identities.get(from);
-      if (!data || mode === undefined || identity === undefined) throw new Error(`rename source missing: ${from}`);
-      files.delete(from); modes.delete(from); identities.delete(from);
-      files.set(to, data); modes.set(to, mode); identities.set(to, identity);
-    },
-    chmod(path, mode) { mutations.push(`chmod:${path}`); modes.set(path, mode); },
-    exists(path) { return files.has(path); },
-    mkdir(path) { mutations.push(`mkdir:${path}`); },
-    readFile(path) {
-      const data = files.get(path);
-      if (!data) throw new Error(`read source missing: ${path}`);
-      return Buffer.from(data);
-    },
-    observe(path) {
-      if (!files.has(path)) return null;
-      const mode = modes.get(path); const identity = identities.get(path);
-      if (mode === undefined || identity === undefined) throw new Error(`fixture observation missing: ${path}`);
-      return { identity, ownerIdentity: identity, mode };
-    },
-  };
-  return { files, modes, identities, mutations, io };
 }

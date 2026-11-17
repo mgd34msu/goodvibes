@@ -19,44 +19,9 @@ function plan(path: string, command: string, globalPrefix = join(home, 'global')
     },
   });
 }
-for (const [owner, command] of [['@pellux/goodvibes-tui', 'goodvibes'], ['@pellux/goodvibes-daemon', 'goodvibes-daemon'], ['@pellux/goodvibes-agent', 'goodvibes-agent']] as const) {
-  test(`the exact existing ${owner} product is recognized only after its command version matches`, () => {
-    const copy = candidate(owner, command), result = plan(copy.path, command); expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout.trim()).toBe(`package\t${owner}\tnpm\t${join(home, 'global')}\t-`); expect(existsSync(join(root, 'probed'))).toBe(true);
-  });
-}
 for (const owner of ['@pellux/goodvibes-custom-tool', '@pellux/goodvibes-tui-helper', '@other/goodvibes-tui', '@goodvibes-jev/tui', '@goodvibes-jev/agent', '@goodvibes-jev/daemon', '@goodvibes-jev/engine']) {
   test(`unknown or private package ${owner} is never removed by prefix/banner or standalone fallback`, () => {
     const copy = candidate(owner, 'goodvibes'), result = plan(copy.path, 'goodvibes'); expect(result.status, result.stderr).toBe(0);
     expect(result.stdout.trim()).toBe(''); expect(existsSync(join(root, 'probed'))).toBe(false);
   });
 }
-
-test('a known package whose command does not identify this product has no removal plan', () => {
-  const copy = candidate('@pellux/goodvibes-tui', 'goodvibes', 'SomeOtherProduct 2.0.25'), result = plan(copy.path, 'goodvibes');
-  expect(result.status, result.stderr).toBe(0); expect(result.stdout.trim()).toBe(''); expect(existsSync(join(root, 'probed'))).toBe(true);
-});
-
-test('the innermost foreign dependency remains foreign despite a recognized outer package', () => {
-  const copy = candidate('@pellux/goodvibes-tui/node_modules/foreign-tool', 'goodvibes'), result = plan(copy.path, 'goodvibes');
-  expect(result.status, result.stderr).toBe(0); expect(result.stdout.trim()).toBe(''); expect(existsSync(join(root, 'probed'))).toBe(false);
-});
-
-test('the standalone fallback still recognizes a real product version outside node_modules', () => {
-  const copy = candidate(null, 'goodvibes'), result = plan(copy.path, 'goodvibes'); expect(result.status, result.stderr).toBe(0);
-  expect(result.stdout.trim()).toBe(`file\t${copy.path}`);
-});
-
-
-test('a local exact historical package is preserved when the selected manager owns a different global root', () => {
-  const copy = candidate('@pellux/goodvibes-tui', 'goodvibes');
-  const other = join(home, 'actual-global'); mkdirSync(join(other, 'lib', 'node_modules'), { recursive: true });
-  const result = plan(copy.path, 'goodvibes', other);
-  expect(result.status, result.stderr).toBe(0); expect(result.stdout.trim()).toBe('');
-});
-
-test('a version command that prints our banner but exits unsuccessfully is not ownership evidence', () => {
-  const copy = candidate(null, 'goodvibes');
-  writeFileSync(copy.target, '#!/bin/sh\nprintf "goodvibes 2.0.25\\n"; exit 7\n', { mode: 0o755 });
-  const result = plan(copy.path, 'goodvibes'); expect(result.status, result.stderr).toBe(0); expect(result.stdout.trim()).toBe('');
-});

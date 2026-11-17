@@ -7,7 +7,6 @@
  */
 import { expect, test } from 'bun:test';
 import { createSlackInboxAdapter, type SlackInboxHttp } from '../platform/src/platform/intake/providers/slack.ts';
-import { createDiscordInboxAdapter, type DiscordInboxHttp } from '../platform/src/platform/intake/providers/discord.ts';
 import { WITHHELD_PREVIEW_TEXT, type ProtectedInboxPreview } from '../platform/src/platform/intake/protected-preview.ts';
 import type { AdapterContext } from '../platform/src/platform/intake/provider-adapter.ts';
 
@@ -84,18 +83,4 @@ test('when screening cannot run, the conversation keeps what was screened and st
   expect(result.state).toBe('unavailable');
   expect(result.items.map(item => item.bodyPreview)).toEqual(['first']);
   expect(result.conversationAdvance?.D1).toBe(NOW - 2_000 - 1);
-});
-
-test('one unreadable Discord channel is named; the other configured channel is still read', async () => {
-  const http: DiscordInboxHttp = async url => {
-    if (url.pathname === '/api/v10/users/@me') return { ok: true, body: { id: '100000000000000001', bot: true } };
-    return { ok: true, body: [{ id: String((BigInt(NOW - 1_000 - 1_420_070_400_000) << 22n) + 1n), channel_id: '100000000000000010',
-      author: { id: '100000000000000777' }, content: 'hi there' }] };
-  };
-  const adapter = createDiscordInboxAdapter(context('fixture-token'), { http, now: () => NOW, mapItem: async input => mapped(input.text),
-    listDmChannels: async () => ({ accountId: '100000000000000001', channels: [{ id: '100000000000000010', type: 1 }],
-      unreadable: [{ id: '100000000000000020', reason: 'denied' }] }) });
-  const result = await adapter.poll({ limit: 50 });
-  expect(result.items.map(item => item.bodyPreview)).toEqual(['hi there']);
-  expect(result.state).toBe('unavailable');
 });

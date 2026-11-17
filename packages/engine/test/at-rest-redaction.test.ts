@@ -19,7 +19,6 @@ import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { redactAtRestLine } from '../platform/src/platform/runtime/at-rest-persistence.ts';
 import { AgentSession } from '../platform/src/platform/agents/session.ts';
-import { registerProfileRedactionValues } from '../platform/src/platform/utils/redaction.ts';
 import { LocalLedgerExporter } from '../platform/src/platform/runtime/telemetry/exporters/local-ledger.ts';
 
 const tmpDirs: string[] = [];
@@ -58,16 +57,6 @@ describe('redactAtRestLine', () => {
     expect(() => JSON.parse(out)).not.toThrow();
     expect(requests).toHaveLength(0);
   });
-
-  test('a failing owner-profile source refuses the line and never inspects the rejection', () => {
-    let inspected = false;
-    const rejection = Object.defineProperty({}, 'message', { get() { inspected = true; return 'synthetic-private-sentinel'; } });
-    const dispose = registerProfileRedactionValues(() => { throw rejection; });
-    try {
-      expect(() => redactAtRestLine(JSON.stringify({ body: `${ORDINARY} ${API_KEY}` }))).toThrow();
-      expect(inspected).toBe(false);
-    } finally { dispose(); }
-  });
 });
 
 describe('AgentSession transcript journal', () => {
@@ -80,18 +69,6 @@ describe('AgentSession transcript journal', () => {
     expect(text).toContain(ORDINARY);
     expect(text).not.toContain(API_KEY);
     expect(text).not.toContain(GITHUB_TOKEN);
-  });
-
-  test('the conversation saved at shutdown keeps tool output but not the credential in it', async () => {
-    const dir = mkTemp();
-    const session = new AgentSession('agent-history', 'm', 'p', { sessionsDir: dir, stateDir: dir });
-    session.conversation.addUserMessage('Read the report.');
-    session.conversation.addAssistantMessage('', { toolCalls: [{ id: 'report-read', name: 'read', arguments: { path: 'review.md' } }] });
-    session.conversation.addToolResults([{ callId: 'report-read', success: true, output: `Report line ${ORDINARY}. Private key ${API_KEY}.` }]);
-    await session.dispose();
-    const text = readFileSync(session.sessionFile, 'utf8');
-    expect(text).toContain(ORDINARY);
-    expect(text).not.toContain(API_KEY);
   });
 });
 

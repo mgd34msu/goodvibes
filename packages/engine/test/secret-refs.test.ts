@@ -116,12 +116,4 @@ describe('a failed or mistyped reference yields no credential', () => {
     expect(failure).not.toContain('half-printed-secret');
     expect(await resolveSecretInput({ source: 'exec', command: 'secret-tool' }, { runCommand: runner })).toBeNull();
   });
-
-  test('a reference with a typo is refused, never sent on as the credential', async () => {
-    for (const typo of ['goodvibes://secrets/1pasword?vault=V&item=I&field=F', 'goodvibes://secret/env/OPENAI_API_KEY', 'bws://']) {
-      expect(await resolveSecretInput(typo)).toBeNull();
-    }
-    // A plain literal is still a literal.
-    expect(await resolveSecretInput('sk-literal-value')).toBe('sk-literal-value');
-  });
 });

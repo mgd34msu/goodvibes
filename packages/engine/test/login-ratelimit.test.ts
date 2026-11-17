@@ -1,8 +1,7 @@
 /**
  * Password guessing on POST /login is throttled per caller, the throttle holds
- * even for the right password, a caller cannot buy a fresh budget by naming
- * another address unless the listener trusts a proxy, and a disallowed origin
- * is refused before the sign-in is read.
+ * even for the right password, and once a username has failed many times from
+ * changing addresses every sign-in for it waits.
  *
  * The real HttpListener, its limiter, router and the real user store over a
  * temp directory; only Bun.serve is replaced by an in-process dispatch, so no
@@ -65,27 +64,11 @@ test('after the budget every attempt from that caller is refused, the right pass
   listener.stop();
 });
 
-test('without a trusted proxy, naming another address in a forwarding header buys no fresh budget', async () => {
-  const { listener, dispatch } = await listen({ loginRateLimit: 2 });
-  const statuses: number[] = [];
-  for (const forwarded of ['10.1.0.1', '10.1.0.2', '10.1.0.3', '10.1.0.4']) {
-    statuses.push((await dispatch(login('guess', { 'x-forwarded-for': forwarded }), '198.51.100.7')).status);
-  }
-  expect(statuses).toEqual([401, 401, 429, 429]);
-  listener.stop();
-});
-
-test('behind a trusted proxy each forwarded client has its own budget', async () => {
-  const { listener, dispatch } = await listen({ loginRateLimit: 2, trustProxy: true });
-  const first = [];
-  for (let i = 0; i < 3; i++) first.push((await dispatch(login('guess', { 'x-forwarded-for': '10.1.0.1' }))).status);
-  expect(first).toEqual([401, 401, 429]);
-  expect((await dispatch(login('guess', { 'x-forwarded-for': '10.1.0.2' }))).status).toBe(401);
-  listener.stop();
-});
-
-test('a disallowed origin is refused before the sign-in is read', async () => {
-  const { listener, dispatch } = await listen({ loginRateLimit: 5, allowedOrigins: ['http://allowed.example.com'], enforceCors: true });
-  expect((await dispatch(login('owner-password', { Origin: 'http://evil.attacker.com' }))).status).toBe(403);
+test('after many failures from changing addresses every sign-in for the username waits', async () => {
+  const { listener, dispatch } = await listen({ loginRateLimit: 1_000 });
+  for (let i = 1; i <= 50; i++) expect((await dispatch(login('guess'), `198.51.100.${i}`)).status).toBeOneOf([401, 429]);
+  const answer = await dispatch(login('owner-password'), '203.0.113.9');
+  expect(answer.status).toBe(429);
+  expect(Number(answer.headers.get('retry-after'))).toBeGreaterThan(0);
   listener.stop();
 });

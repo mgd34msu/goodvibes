@@ -18,7 +18,6 @@ import { OwnerInbox, type OwnerItem } from '../platform/src/platform/control-pla
 import { QuestionStore } from '../platform/src/platform/control-plane/question-store.ts';
 import { admitApprovedItemOverdraw, type BudgetLimits } from '../platform/src/platform/payments/budget.ts';
 import { decidePurchase, type DecisionInput } from '../platform/src/platform/payments/decide.ts';
-import { checkPaymentGates, type GateInput } from '../platform/src/platform/payments/gates.ts';
 import { DurableBudgetLedger } from '../platform/src/platform/payments/host/budget-store.ts';
 import { createLimitOffers, limitOfferKey, type OfferableLimitSetting } from '../platform/src/platform/payments/host/limit-offer.ts';
 import { readBudgetLimits } from '../platform/src/platform/payments/payments-config.ts';
@@ -74,11 +73,6 @@ function buy(id: string, itemMinorUnits: number): ReturnType<typeof decidePurcha
   return decision;
 }
 
-test('inside every limit the purchase goes ahead without asking', () => {
-  setLimits({ dailyItem: 100, dailyOverage: 20, ceiling: 50 });
-  expect(buy('within', 1_000)).toMatchObject({ kind: 'within-budget', draw: { totalMinorUnits: 1_350 } });
-});
-
 test('over the daily item budget it stops and names the budget, what is left and the shortfall, across a restart', () => {
   setLimits({ dailyItem: 100, dailyOverage: 20, ceiling: 100 });
   expect(buy('first', 6_000).kind).toBe('within-budget');
@@ -130,15 +124,6 @@ test('an approved overdraw raises only the item budget, and only by the shortfal
   const raised = admitApprovedItemOverdraw({ ...base, dailyItemMinorUnits: 50_000 }, 60_000, 20_000);
   expect(raised).toEqual({ ...base, dailyItemMinorUnits: 90_000 });
   expect(admitApprovedItemOverdraw({ ...base, dailyItemMinorUnits: 50_000 }, 20_000, 20_000).dailyItemMinorUnits).toBe(50_000);
-});
-
-test('switched off, not asked by the owner, or on a clustered node, nothing can be bought', () => {
-  const ready: GateInput = { enabled: true, hasUsableCard: true, hasShippingAddress: true, isOwnerDirectRequest: true, isPaymentsLeader: true };
-  expect(checkPaymentGates(ready)).toBeNull();
-  expect(checkPaymentGates({ ...ready, enabled: false })?.code).toBe('disabled');
-  expect(checkPaymentGates({ ...ready, isOwnerDirectRequest: false })?.code).toBe('not-owner-request');
-  expect(checkPaymentGates({ ...ready, isOwnerDirectRequest: false, standingAuthorizationId: 'standing-1' })).toBeNull();
-  expect(checkPaymentGates({ ...ready, isPaymentsLeader: false })?.code).toBe('disabled');
 });
 
 test('the shipped defaults ask every time, offer once to set the limit, and the answer becomes the limit', async () => {

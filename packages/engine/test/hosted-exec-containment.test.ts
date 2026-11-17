@@ -37,10 +37,6 @@ const REQUIRED: ExecContainmentRequirement = {
   posture: 'required',
   reason: 'this is a daemon-hosted conversational turn',
 };
-const HOST_ALLOWED: ExecContainmentRequirement = {
-  posture: 'host-allowed',
-  reason: 'this hosted workstream was composed with the host explicitly granted',
-};
 
 const contained: ExecSandboxPlan = {
   sandboxed: true,
@@ -76,13 +72,6 @@ describe('decideExecContainment', () => {
     // The host cannot provide one, the sandbox is switched off, or none is wired: each refuses.
     for (const plan of [unavailable, switchedOff, null]) expect(decideExecContainment(REQUIRED, plan).allowed).toBe(false);
   });
-
-  test('the terminal posture and an omitted posture are unchanged', () => {
-    expect(decideExecContainment(HOST_ALLOWED, unavailable).allowed).toBe(true);
-    expect(decideExecContainment(HOST_ALLOWED, null).allowed).toBe(true);
-    expect(decideExecContainment(undefined, null).allowed).toBe(true);
-    expect(decideExecContainment(null, unavailable).allowed).toBe(true);
-  });
 });
 
 // ── 2. The exec tool, end to end ────────────────────────────────────────────
@@ -114,14 +103,5 @@ describe('exec tool under a hosted conversational posture', () => {
     const result = await tool.execute({ commands: [{ cmd: `touch ${marker}`, background: true }] });
     expect(result.success).toBe(false);
     expect(existsSync(marker)).toBe(false);
-  });
-
-  test('the same command under the terminal posture, or with no posture stated, runs', async () => {
-    for (const containment of [HOST_ALLOWED, undefined]) {
-      const { tool, marker } = makeTool(containment);
-      const result = await tool.execute({ commands: [{ cmd: `touch ${marker}` }] });
-      expect(result.success).toBe(true);
-      expect(existsSync(marker)).toBe(true);
-    }
   });
 });

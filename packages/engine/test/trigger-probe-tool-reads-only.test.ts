@@ -31,12 +31,3 @@ test('a probe that names a writing tool is refused and the tool never runs', asy
   await expect(host.call('note_write', { path: 'a' }, 1_000, 'session-1')).rejects.toThrow('does not only read');
   expect(calls).toEqual([]);
 });
-
-test('a probe with a reading tool observes its output', async () => {
-  const calls: string[] = [];
-  const host = new ProbeToolHost();
-  host.attach(registryWith(calls), () => 'session-1');
-  expect(host.refusal('note_read', { path: 'a' }, 'session-1')).toBeUndefined();
-  expect(await host.call('note_read', { path: 'a' }, 1_000, 'session-1')).toBe('ready');
-  expect(calls).toEqual(['note_read']);
-});

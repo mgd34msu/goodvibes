@@ -62,7 +62,7 @@ const RECEIPTS_ENTRY = `${PUBLIC_PACKAGE_NAME}/platform/daemon/receipts`;
 const REGISTRY = getPublishRegistryOverride() || 'https://registry.npmjs.org';
 
 const smokeScript = `
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
 
@@ -253,6 +253,25 @@ if (typeof Bun !== 'undefined') {
     if (!await lsp.isAvailable('bash')) throw new Error('packaged Bash LSP is unavailable');
     if (!(await lsp.getClient('bash'))?.isRunning) throw new Error('packaged Bash LSP handshake failed');
   } finally { await lsp.shutdown(); }
+}
+// Every code subpath of the installed export map loads through the package
+// name, as a consumer imports it: a subpath whose target is missing from the
+// package, or whose module throws on load, fails here. Run under Bun, the
+// runtime the engine targets; two speech subpaths depend on a Bun-only import
+// form and do not load under Node.
+if (typeof Bun !== 'undefined') {
+  const installed = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
+  const codeSubpaths = Object.entries(installed.exports)
+    .filter(([, target]) => target !== null && typeof target === 'object' && typeof target.import === 'string')
+    .map(([subpath]) => subpath);
+  if (codeSubpaths.length < 100) throw new Error('installed export map lists only ' + codeSubpaths.length + ' code subpaths');
+  const unloadable = [];
+  for (const subpath of codeSubpaths) {
+    try { await import('${ENGINE_PACKAGE_NAME}' + subpath.slice(1)); }
+    catch (error) { unloadable.push(subpath + ': ' + (error instanceof Error ? error.message : String(error))); }
+  }
+  if (unloadable.length > 0) throw new Error('installed subpaths that do not load:\\n' + unloadable.join('\\n'));
+  console.log('all ' + codeSubpaths.length + ' code subpaths load through the package name');
 }
 const nestedInternalRoot = join(packageRoot, 'node_modules', '@goodvibes-jev');
 if (existsSync(nestedInternalRoot)) {

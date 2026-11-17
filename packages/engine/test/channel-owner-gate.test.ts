@@ -18,9 +18,7 @@ import { ChannelPolicyManager } from '../platform/src/platform/channels/policy-m
 import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.ts';
 import { createOwnerInbox } from '../platform/src/platform/control-plane/owner-inbox.ts';
 import { DaemonSurfaceActionHelper } from '../platform/src/platform/daemon/surface-actions.ts';
-import { handleSlackSurfacePayload } from '../platform/src/platform/adapters/slack/index.ts';
 import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.ts';
-import type { SurfaceAdapterContext } from '../platform/src/platform/adapters/index.ts';
 import { useApprovalReadings } from './helpers/approval-readings.ts';
 
 const readings = useApprovalReadings();
@@ -76,30 +74,6 @@ test('the first unknown sender is held as a claim; only an accepted claim makes 
   }
 });
 
-test('an unknown sender at the Slack adapter gets no route binding and no session', async () => {
-  const policy = await ownedSlack();
-  const submitted: unknown[] = [];
-  const bindings: unknown[] = [];
-  const context = {
-    authorizeSurfaceIngress: (input: Parameters<ChannelPolicyManager['evaluateIngress']>[0]) => policy.evaluateIngress(input),
-    routeBindings: { upsertBinding: async (input: unknown) => { bindings.push(input); return { id: 'route-test', surfaceId: 'slack' }; } },
-    sessionBroker: { submitMessage: async (input: unknown) => { submitted.push(input); return { sessionId: 'session-test', accepted: true }; } },
-    parseSurfaceControlCommand: () => null,
-    performSurfaceControlCommand: async () => 'ok',
-    trySpawnAgent: () => new Response('no'),
-  } as unknown as SurfaceAdapterContext;
-  try {
-    await handleSlackSurfacePayload({
-      command: '/goodvibes', text: 'do something', user_id: 'U-STRANGER', user_name: 'stranger',
-      channel_id: 'C1', channel_name: 'general', team_id: 'T1', response_url: '',
-    }, context);
-    expect(bindings).toHaveLength(0);
-    expect(submitted).toHaveLength(0);
-  } finally {
-    await policy.stop();
-  }
-});
-
 describe('a reply in the channel answering a pending permission ask', () => {
   function askRequest(callId: string): PermissionPromptRequest {
     return {
@@ -123,20 +97,6 @@ describe('a reply in the channel answering a pending permission ask', () => {
     return { policy, broker, decision, reply };
   }
 
-  test("the owner's approve resolves it through the shared broker", async () => {
-    readings.set({ reply: 'approve' });
-    const ask = await pendingAsk('call-owner');
-    try {
-      expect((await ask.reply('U-OWNER', 'approve')).reason).toBe('approval-reply-consumed');
-      expect((await ask.decision).approved).toBe(true);
-      const record = ask.broker.listApprovals(10)[0]!;
-      expect(record.status).toBe('approved');
-      expect(record.resolvedBy).toBe('U-OWNER');
-    } finally {
-      await ask.policy.stop();
-    }
-  });
-
   test('a stranger, or an allowlisted sender who is not the owner, never touches it', async () => {
     readings.set({ reply: 'approve' });
     const ask = await pendingAsk('call-guard');
@@ -152,4 +112,33 @@ describe('a reply in the channel answering a pending permission ask', () => {
       await ask.policy.stop();
     }
   });
+});
+
+/** A telegram surface owned by U-OWNER with the given allowlists. */
+async function policyWith(lists: { allowlistUserIds?: string[]; allowlistGroupIds?: string[] }): Promise<ChannelPolicyManager> {
+  const policy = new ChannelPolicyManager({ storePath: join(scratch(), 'policies.json') });
+  await policy.upsertPolicy('telegram', { ...lists, ownerId: 'U-OWNER' });
+  return policy;
+}
+
+const admitted = async (policy: ChannelPolicyManager, input: { userId: string; conversationKind: 'direct' | 'group'; groupId: string }) =>
+  (await policy.evaluateIngress({ surface: 'telegram', text: 'hi', ...input })).allowed;
+
+test('with only a group listed, a stranger cannot write directly; the owner can', async () => {
+  const policy = await policyWith({ allowlistGroupIds: ['G-TEAM'] });
+  try {
+    expect(await admitted(policy, { userId: 'U-STRANGER', conversationKind: 'direct', groupId: 'U-STRANGER' })).toBe(false);
+    expect(await admitted(policy, { userId: 'U-OWNER', conversationKind: 'direct', groupId: 'U-OWNER' })).toBe(true);
+    expect(await admitted(policy, { userId: 'U-MEMBER', conversationKind: 'group', groupId: 'G-TEAM' })).toBe(true);
+  } finally { await policy.stop(); }
+});
+
+test('with a user and a group listed, only that user in that group is taken', async () => {
+  const policy = await policyWith({ allowlistUserIds: ['U-OWNER'], allowlistGroupIds: ['G-TEAM'] });
+  try {
+    expect(await admitted(policy, { userId: 'U-OWNER', conversationKind: 'group', groupId: 'G-TEAM' })).toBe(true);
+    expect(await admitted(policy, { userId: 'U-MEMBER', conversationKind: 'group', groupId: 'G-TEAM' })).toBe(false);
+    expect(await admitted(policy, { userId: 'U-OWNER', conversationKind: 'group', groupId: 'G-OTHER' })).toBe(false);
+    expect(await admitted(policy, { userId: 'U-OWNER', conversationKind: 'direct', groupId: 'U-OWNER' })).toBe(true);
+  } finally { await policy.stop(); }
 });

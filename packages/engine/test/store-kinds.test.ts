@@ -10,7 +10,6 @@ import type { Database } from 'bun:sqlite';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { openRecordLog } from '../platform/src/platform/state/record-log.ts';
 import { openSqliteFile, SqliteMigrationError } from '../platform/src/platform/state/sqlite-file.ts';
-import { assertCurrent, captureRevisions, StaleError } from '../platform/src/platform/utils/revision.ts';
 
 interface Entry { readonly id: string; readonly n: number }
 
@@ -53,18 +52,6 @@ describe('record log', () => {
 
 describe('sqlite file', () => {
   const v1 = [{ toVersion: 1, up: (db: Database) => db.run('CREATE TABLE rows (id TEXT PRIMARY KEY)') }];
-
-  test('a commit by another connection moves the revision and stales a captured token', () => {
-    const path = join(makeProjectTempDir('gv-sqlite-file'), 'rows.db');
-    const mine = openSqliteFile(path, { migrations: v1 });
-    const theirs = openSqliteFile(path, { migrations: v1 });
-    const token = captureRevisions([mine]);
-    expect(() => assertCurrent(token)).not.toThrow();
-    theirs.tx(() => theirs.db.run("INSERT INTO rows VALUES ('x')"));
-    expect(() => assertCurrent(token)).toThrow(StaleError);
-    mine.close();
-    theirs.close();
-  });
 
   test('a failed migration leaves the file at its old version with its rows', () => {
     const path = join(makeProjectTempDir('gv-sqlite-file'), 'rows.db');

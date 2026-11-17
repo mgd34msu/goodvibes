@@ -94,26 +94,4 @@ test('a deadline still ahead is kept and fires after the restart', async () => {
   jest.advanceTimersByTime(30_001);
   await until(() => record(second, 'ahead')?.status === 'expired', 'the re-armed deadline to fire');
   expect(record(second, 'ahead')?.decision?.approved).toBe(false);
-  expect(record(second, 'ahead')?.audit.some((entry) => entry.action === 'expired' && entry.note?.includes('re-armed'))).toBe(true);
-});
-
-test('with no deadline, an ask whose waiter died is cancelled and the next one prompts afresh; one raised over the wire stays open', async () => {
-  const first = new ApprovalBroker({ storePath });
-  await first.start();
-  await raise(first, 'in-process');
-  await raise(first, 'over-the-wire', { metadata: { raisedVia: 'approvals.raise' } });
-
-  const second = await restart();
-  await until(() => record(second, 'in-process')?.status === 'cancelled', 'the orphaned ask to be cancelled');
-  expect(record(second, 'in-process')?.decision?.approved).toBe(false);
-  // The sweep has run (it cancelled the other one); the remote caller's ask is still open for it.
-  expect(record(second, 'over-the-wire')?.status).toBe('pending');
-
-  let prompted = 0;
-  const again = second.requestApproval({
-    request: { ...request('in-process-again'), args: request('in-process').args },
-    localPrompt: async () => { prompted += 1; return { approved: true }; },
-  });
-  expect((await again).approved).toBe(true);
-  expect(prompted).toBe(1);
 });

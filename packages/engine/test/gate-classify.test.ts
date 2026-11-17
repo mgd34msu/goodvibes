@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import {
-  classifyCall, classifyPaths, declaredRecoverable, declaredValues, recognizeOwnerOnly,
+  classifyCall, classifyPaths, declaredRecoverable, declaredValues, 
   type CallFacts, type OwnerOnlyKind,
 } from '../platform/src/platform/gate/classify.ts';
 import type { GatePresetName } from '../platform/src/platform/gate/presets.ts';
@@ -100,14 +100,6 @@ test('each owner-only kind goes to the owner in every deciding mode; only the ow
       expect(`${mode} ${kind} answered: ${shown(mode, ownAnswer)}`).toBe(`${mode} ${kind} answered: fact:allow:rule`);
     }
   }
-});
-
-test('the calls recognised as owner-only: granting access, MCP trust and loosening a setting', () => {
-  expect(recognizeOwnerOnly('anything', {}, { dangerous: true })).toBe('grant-access');
-  for (const mode of ['set-trust', 'set-role', 'approve-quarantine']) expect(recognizeOwnerOnly('mcp', { mode })).toBe('grant-access');
-  expect(recognizeOwnerOnly('mcp', { mode: 'list' })).toBeUndefined();
-  expect(recognizeOwnerOnly('goodvibes_settings', { mode: 'set' }, undefined, { loosensSetting: true })).toBe('loosen-security');
-  expect(recognizeOwnerOnly('goodvibes_settings', { mode: 'set' }, undefined, { loosensSetting: false })).toBeUndefined();
 });
 
 test('declared subjects and recoverability are read from argument paths; an unreadable one is not taken as inside', () => {

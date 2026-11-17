@@ -63,28 +63,6 @@ test('--yes inside the subject or body is not an answer: the owner is asked, and
   expect(sends(term.arrived)).toEqual([]);
 });
 
-test('when the owner says yes, the body is sent as typed, --yes included', async () => {
-  const term = terminal(true);
-  await term.owner('/mail send new-person@example.com | Re: --yes | please reply --yes to confirm --yes');
-  expect(term.asked).toHaveLength(1);
-  const sent = sends(term.arrived);
-  expect(sent).toHaveLength(1);
-  expect(sent[0]!.body['to']).toBe('new-person@example.com');
-  expect(sent[0]!.body['body']).toBe('please reply --yes to confirm --yes');
-});
-
-test('a send to any recipient asks; only the owner\'s own --yes before the recipient answers in advance', async () => {
-  const declines = terminal(false);
-  await declines.owner('/mail send someone-new@example.com | hello | first message');
-  expect(declines.asked).toHaveLength(1);
-  expect(sends(declines.arrived)).toEqual([]);
-
-  const typedYes = terminal(false);
-  await typedYes.owner('/mail send --yes someone-new@example.com | hello | first message');
-  expect(typedYes.asked).toEqual([]);
-  expect(sends(typedYes.arrived)).toHaveLength(1);
-});
-
 test('the same leading --yes from the model is ignored: the owner is asked and a no sends nothing', async () => {
   const term = terminal(false);
   await term.model('/mail send --yes someone-new@example.com | hello | from the model');

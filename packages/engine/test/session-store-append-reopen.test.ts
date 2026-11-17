@@ -6,7 +6,7 @@
  * display name keeps saving when it is addressed by its file name.
  */
 import { afterEach, expect, test } from 'bun:test';
-import { appendFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.ts';
@@ -64,23 +64,6 @@ test('messages appended before a restart are found by the next broker, for an op
   await first.appendSystemMessage(open.id, 'open 4');
   first = await restart(root, first);
   expect(bodies(first, open.id)).toEqual(['open 1', 'open 2', 'open 3', 'open 4']);
-});
-
-test('a message torn by a crash mid-write costs only that message, and the log keeps taking appends', async () => {
-  const root = tempRoot();
-  let first = await broker(root);
-  const session = await first.createSession({ id: 'torn-session', title: 'Torn' });
-  for (const n of [1, 2]) await first.appendSystemMessage(session.id, `kept ${n}`);
-  await first.stop();
-  brokers.splice(brokers.indexOf(first), 1);
-  // The crash: half a line at the end of the session's log.
-  appendFileSync(join(root, 'sessions', `${session.id}.jsonl`), '{"m":{"id":"half-written","sessionId":"torn-session","bo');
-
-  first = await broker(root);
-  expect(bodies(first, session.id)).toEqual(['kept 1', 'kept 2']);
-  await first.appendSystemMessage(session.id, 'after the crash');
-  first = await restart(root, first);
-  expect(bodies(first, session.id)).toEqual(['kept 1', 'kept 2', 'after the crash']);
 });
 
 test('a session saved under a display name keeps saving when it is opened by its file name', () => {

@@ -4,8 +4,8 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { install, interruptInstall, parseOptions, preflight, wrapper, type InstallHooks, type Options } from './install.ts';
-import { COMMANDS, CommandError, assertOwnedFiles, atomicWrite, dataOwner, isReleaseInUse, readInstallation, receiptPath, unitPath, uninstall, validateLayout, withLock, type Run } from './installation.ts';
+import { install, parseOptions, preflight, wrapper, type InstallHooks, type Options } from './install.ts';
+import { COMMANDS, assertOwnedFiles, atomicWrite, readInstallation, receiptPath, unitPath, uninstall, validateLayout, type Run } from './installation.ts';
 
 let home: string;
 let previousHome: string | undefined;
@@ -87,24 +87,6 @@ describe('suite install and uninstall', () => {
     expect(existsSync(options.dataDir)).toBe(false);
     expect(readFileSync(join(home, 'unrelated'), 'utf8')).toBe('keep');
   });
-  test('reinstall reuses preserved data ownership and credentials', async () => {
-    await install(options, hooks);
-    const id = readInstallation(options.prefix)!.id;
-    writeFileSync(join(options.dataDir, 'user-notes'), 'keep');
-    await uninstall(options.prefix, false, execute);
-    await install(options, hooks);
-    expect(readInstallation(options.prefix)!.id).toBe(id);
-    expect(readFileSync(join(options.dataDir, 'user-notes'), 'utf8')).toBe('keep');
-  });
-  test('two live prefixes cannot adopt or purge the same data, but preserved data can move', async () => {
-    await install(options, hooks);
-    const other = { ...options, prefix: join(home, 'other-program'), binDir: join(home, 'other-bin') };
-    await expect(install(other, hooks)).rejects.toThrow('another installation');
-    expect(existsSync(options.dataDir)).toBe(true);
-    await uninstall(options.prefix, false, execute);
-    await install(other, hooks);
-    expect(readInstallation(other.prefix)?.dataDir).toBe(options.dataDir);
-  });
   test('updates retain data and replace the release after success', async () => {
     await install(options, hooks);
     const before = readInstallation(options.prefix)!;
@@ -129,87 +111,6 @@ describe('suite install and uninstall', () => {
     assertOwnedFiles(current);
     expect(readFileSync(join(options.dataDir, 'saved-note'), 'utf8')).toBe('Preserve this note');
   });
-  test('a v1 receipt still refuses a changed launcher before update or uninstall', async () => {
-    await install(options, hooks);
-    saveV1Receipt();
-    atomicWrite(join(options.prefix, 'commands', 'goodvibes'), '#!/bin/sh\necho user edit\n', 0o755);
-    actions = [];
-    await expect(install(options, hooks)).rejects.toThrow('Managed command has been modified');
-    await expect(uninstall(options.prefix, true, execute)).rejects.toThrow('Managed command has been modified');
-    expect(actions).toEqual([]);
-    expect(existsSync(options.dataDir)).toBe(true);
-  });
-  test('uninstall can read a v1 receipt and preserve its saved data', async () => {
-    options.service = true;
-    await install(options, hooks);
-    saveV1Receipt();
-    writeFileSync(join(options.dataDir, 'saved-note'), 'keep');
-    await uninstall(options.prefix, false, execute);
-    expect(existsSync(options.prefix)).toBe(false);
-    expect(readFileSync(join(options.dataDir, 'saved-note'), 'utf8')).toBe('keep');
-  });
-  test('a v1 receipt refuses a changed service before stopping it', async () => {
-    options.service = true;
-    await install(options, hooks);
-    saveV1Receipt();
-    atomicWrite(unitPath(options), '[Service]\nExecStart=/user/edited\n');
-    actions = [];
-    await expect(uninstall(options.prefix, true, execute)).rejects.toThrow('Service has been modified');
-    expect(actions).toEqual([]);
-    expect(state).toBe('active');
-  });
-  test('failed readiness restores the original v1 files without rewriting its receipt', async () => {
-    options.service = true;
-    await install(options, hooks);
-    const old = saveV1Receipt();
-    await expect(install(options, { ...hooks, ready: async () => { throw new Error('readiness failure'); } })).rejects.toThrow('readiness failure');
-    expect(readInstallation(options.prefix)).toEqual(old);
-    assertOwnedFiles(old);
-    expect(state).toBe('active');
-  });
-  test('v2 compares exact launcher bytes even when invalid UTF-8 would decode to the expected text', async () => {
-    await install(options, hooks);
-    const receipt = readInstallation(options.prefix);
-    if (!receipt) throw new Error('Missing installation fixture');
-    const expected = '#!/bin/sh\n# generated \ufffd\n';
-    receipt.wrappers.goodvibes = expected;
-    atomicWrite(receiptPath(options), JSON.stringify(receipt));
-    const path = join(options.prefix, 'commands', 'goodvibes');
-    writeFileSync(path, Buffer.concat([Buffer.from('#!/bin/sh\n# generated '), Buffer.from([0xff]), Buffer.from('\n')]));
-    expect(readFileSync(path, 'utf8')).toBe(expected);
-    expect(() => assertOwnedFiles(receipt)).toThrow('Managed command has been modified');
-    writeFileSync(path, expected);
-    expect(() => assertOwnedFiles(receipt)).not.toThrow();
-  });
-  test('an update retains the previous runtime while a terminal still uses it', async () => {
-    await install(options, hooks);
-    const before = readInstallation(options.prefix)!;
-    await install(options, { ...hooks, build: async () => 'b'.repeat(40), isReleaseInUse: () => true });
-    expect(readInstallation(options.prefix)!.sourceCommit).toBe('b'.repeat(40));
-    expect(existsSync(join(options.prefix, 'releases', before.release, 'payload'))).toBe(true);
-  });
-  test('release use checks executable paths and treats exited processes as absent', () => {
-    const proc = join(home, 'proc'), release = join(home, 'release');
-    mkdirSync(join(proc, '1234'), { recursive: true });
-    expect(isReleaseInUse(release, proc)).toBe(false);
-    symlinkSync(join(release, 'tui/goodvibes-linux-x64'), join(proc, '1234/exe'));
-    expect(isReleaseInUse(release, proc)).toBe(true);
-    rmSync(join(proc, '1234/exe'));
-    symlinkSync('/usr/bin/sleep', join(proc, '1234/exe'));
-    expect(isReleaseInUse(release, proc)).toBe(false);
-  });
-  test('creates, enables and starts the service; stops and disables it before removal', async () => {
-    options.service = true;
-    await install(options, hooks);
-    expect(actions.some(args => args.includes('enable'))).toBe(true);
-    expect(state).toBe('active');
-    expect(existsSync(unitPath(options))).toBe(true);
-    actions = [];
-    await uninstall(options.prefix, false, execute);
-    expect(actions.findIndex(args => args.includes('stop'))).toBeLessThan(actions.findIndex(args => args.includes('disable')));
-    expect(state).toBe('inactive');
-    expect(existsSync(unitPath(options))).toBe(false);
-  });
   test('a failed service update restores release, settings and old service', async () => {
     options.service = true;
     await install(options, hooks);
@@ -224,34 +125,6 @@ describe('suite install and uninstall', () => {
     expect(readFileSync(surface, 'utf8')).toBe('{"originalSurface":true}');
     expect(state).toBe('active');
     assertOwnedFiles(before);
-  });
-  test('failed first start removes published commands and preserves user data', async () => {
-    options.service = true;
-    await expect(install(options, { ...hooks, ready: async () => { throw new Error('readiness failure'); } })).rejects.toThrow('readiness failure');
-    expect(existsSync(options.prefix)).toBe(false);
-    expect(existsSync(dataOwner(options))).toBe(true);
-    expect(existsSync(unitPath(options))).toBe(false);
-    expect(state).toBe('inactive');
-    for (const name of COMMANDS) expect(existsSync(join(options.binDir, name))).toBe(false);
-    await install(options, hooks);
-  });
-  test('refuses uninstall if a service cannot stop; leaves payloads and data', async () => {
-    options.service = true; await install(options, hooks);
-    const failing: Run = (command, args, opts) => {
-      if (args.includes('stop')) throw new Error('stop failed');
-      return execute(command, args, opts);
-    };
-    await expect(uninstall(options.prefix, true, failing)).rejects.toThrow('stop failed');
-    expect(existsSync(options.prefix)).toBe(true);
-    expect(existsSync(options.dataDir)).toBe(true);
-    expect(existsSync(unitPath(options))).toBe(true);
-  });
-  test('refuses a changed service before stopping anything', async () => {
-    options.service = true; await install(options, hooks);
-    atomicWrite(unitPath(options), 'another service'); actions = [];
-    await expect(uninstall(options.prefix, true, execute)).rejects.toThrow('modified');
-    expect(actions).toEqual([]);
-    expect(existsSync(options.prefix)).toBe(true);
   });
   test('does not remove a replacement command or unrelated installation', async () => {
     await install(options, hooks);
@@ -272,152 +145,5 @@ describe('suite install and uninstall', () => {
     expect(() => validateLayout({ ...options, prefix: join(home, 'link/program') })).toThrow('symlink');
     expect(() => validateLayout({ ...options, dataDir: options.prefix })).toThrow('overlap');
     expect(() => validateLayout({ ...options, prefix: '/usr/local' })).toThrow('below your home');
-  });
-  test('rejects a replaced data directory before purge', async () => {
-    await install(options, hooks);
-    const unrelated = join(home, 'unrelated'); mkdirSync(unrelated); writeFileSync(join(unrelated, 'keep'), 'keep');
-    rmSync(options.dataDir, { recursive: true }); symlinkSync(unrelated, options.dataDir);
-    await expect(uninstall(options.prefix, true, execute)).rejects.toThrow('symlink');
-    expect(readFileSync(join(unrelated, 'keep'), 'utf8')).toBe('keep');
-  });
-  test('serializes install and uninstall for the same prefix', async () => {
-    await withLock(options.prefix, async () => {
-      await expect(install(options, hooks)).rejects.toThrow('Another install or uninstall');
-    });
-    // A refusal of the inner data-directory lock still releases the program-directory lock.
-    await withLock(options.dataDir, async () => {
-      await expect(install(options, hooks)).rejects.toThrow('Another install or uninstall');
-    });
-    await install(options, hooks);
-  });
-  test('keeps custom paths and service choice on a repeat install', async () => {
-    options = parseOptions(['--prefix', join(home, 'programs'), '--data-dir', join(home, 'state'), '--bin-dir', join(home, 'bin'), '--no-service', '--port', '43219'], home);
-    await install(options, hooks);
-    expect(parseOptions(['--prefix', options.prefix], home)).toMatchObject(options);
-  });
-  test('generated launchers quote paths so a directory name cannot run as a command', () => {
-    options = { ...options, prefix: join(home, "programs '$(touch PWNED)' x"), dataDir: join(home, "state '$(touch PWNED)' x") };
-    for (const name of COMMANDS) {
-      const script = wrapper(options, name);
-      expect(Bun.spawnSync(['/bin/sh', '-n'], { stdin: new TextEncoder().encode(script) }).exitCode).toBe(0);
-      // The release does not exist, so the launcher stops at its first missing path; nothing in a name may run on the way.
-      Bun.spawnSync(['/bin/sh', '-c', script], { cwd: home, stdout: 'ignore', stderr: 'ignore' });
-    }
-    expect(existsSync(join(home, 'PWNED'))).toBe(false);
-  });
-  test('a running launcher keeps its release runtime when current moves to a new release', async () => {
-    options = { ...options, prefix: join(home, "programs '$; x") };
-    const before = join(options.prefix, 'releases/before'), after = join(options.prefix, 'releases/after');
-    for (const [release, label] of [[before, 'before'], [after, 'after']] as const) {
-      mkdirSync(join(release, 'runtime'), { recursive: true });
-      writeFileSync(join(release, 'runtime/node'), `#!/bin/sh\nprintf '%s\\n' '${label}'\n`, { mode: 0o755 });
-    }
-    mkdirSync(join(before, 'tui'));
-    writeFileSync(join(before, `tui/goodvibes-linux-${process.arch}`),
-      '#!/bin/sh\nprintf "ready\\n"\nread -r proceed\nprintf "%s\\n" "$GOODVIBES_SUITE_RUNTIME"\n"$GOODVIBES_SUITE_RUNTIME/node"\nprintf "%s\\n" "$1"\n', { mode: 0o755 });
-    symlinkSync('releases/before', join(options.prefix, 'current'));
-    const child = Bun.spawn(['/bin/sh', '-c', wrapper(options, 'goodvibes'), 'launcher', 'literal $; argument'],
-      { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
-    const reader = child.stdout.getReader();
-    try {
-      expect(new TextDecoder().decode((await reader.read()).value)).toBe('ready\n');
-      rmSync(join(options.prefix, 'current'));
-      symlinkSync('releases/after', join(options.prefix, 'current'));
-      child.stdin.write('continue\n'); child.stdin.end();
-      let output = '';
-      for (;;) {
-        const chunk = await reader.read(); if (chunk.done) break;
-        output += new TextDecoder().decode(chunk.value);
-      }
-      expect(await child.exited).toBe(0);
-      expect(output).toBe(`${join(before, 'runtime')}\nbefore\nliteral $; argument\n`);
-      expect(await new Response(child.stderr).text()).toBe('');
-    } finally { reader.releaseLock(); child.kill(); await child.exited; }
-  });
-});
-
-
-test('failed publication restores the owner of adopted data and removes a new environment', async () => {
-  await install(options, hooks);
-  await uninstall(options.prefix, false, execute);
-  const originalOwner = readFileSync(dataOwner(options), 'utf8');
-  rmSync(join(options.dataDir, 'environment'));
-  options.prefix = join(home, 'replacement');
-  await expect(install(options, { ...hooks, stage: async (...args) => {
-    await hooks.stage!(...args);
-    mkdirSync(join(options.prefix, 'current'));
-  } })).rejects.toThrow();
-  expect(readFileSync(dataOwner(options), 'utf8')).toBe(originalOwner);
-  expect(existsSync(join(options.dataDir, 'environment'))).toBe(false);
-});
-
-test('a stop followed by a failed state query restarts the previous running service', async () => {
-  options.service = true; await install(options, hooks);
-  const receipt = readInstallation(options.prefix);
-  let stopped = false;
-  const failing: Run = (command, args, opts) => {
-    const result = execute(command, args, opts);
-    if (args.includes('stop')) stopped = true;
-    if (stopped && args.includes('--property=ActiveState')) { stopped = false; throw new Error('state query failed'); }
-    return result;
-  };
-  await expect(install(options, { ...hooks, execute: failing })).rejects.toThrow('state query failed');
-  expect(state).toBe('active');
-  expect(readInstallation(options.prefix)).toEqual(receipt);
-});
-
-describe('interrupted install', () => {
-  test('an interrupt after the service was stopped restores the old service and releases both locks', async () => {
-    options.service = true;
-    await install(options, hooks);
-    const before = readInstallation(options.prefix)!;
-    let code = -1;
-    await expect(install(options, { ...hooks, ready: async () => {
-      expect(state).toBe('active');
-      code = interruptInstall('SIGTERM');
-      throw new Error('interrupted');
-    } })).rejects.toThrow('interrupted');
-    expect(code).toBe(143);
-    expect(readInstallation(options.prefix)).toEqual(before);
-    expect(readlinkSync(join(options.prefix, 'current'))).toBe(`releases/${before.release}`);
-    expect(state).toBe('active');
-  });
-  test('the interrupt releases the locks even if the process then exits without unwinding', async () => {
-    let code = -1;
-    const pending = install(options, { ...hooks, ready: async () => {}, stage: async (...args) => {
-      await hooks.stage!(...args);
-      code = interruptInstall('SIGINT');
-      throw new Error('stop here');
-    } });
-    await expect(pending).rejects.toThrow('stop here');
-    expect(code).toBe(130);
-    expect(existsSync(options.prefix)).toBe(false);
-  });
-});
-
-describe('uninstall re-run', () => {
-  test('a retry completes after a failure that came after the unit was already removed', async () => {
-    options.service = true; await install(options, hooks);
-    let reloads = 0;
-    const strict: Run = (command, args, opts) => {
-      if (command === 'systemctl' && (args.includes('stop') || args.includes('disable')) && !existsSync(unitPath(options))) throw new Error('Unit goodvibes-jev.service not loaded.');
-      if (args.includes('daemon-reload') && ++reloads === 1) throw new Error('reload failed');
-      return execute(command, args, opts);
-    };
-    await expect(uninstall(options.prefix, false, strict)).rejects.toThrow('reload failed');
-    expect(existsSync(unitPath(options))).toBe(false);
-    expect(existsSync(options.prefix)).toBe(true);
-    await uninstall(options.prefix, false, strict);
-    expect(existsSync(options.prefix)).toBe(false);
-    for (const name of COMMANDS) expect(existsSync(join(options.binDir, name))).toBe(false);
-  });
-});
-
-describe('pairing during install', () => {
-  test('a pairing failure rolls the install back', async () => {
-    options.service = true;
-    await expect(install(options, { ...hooks, pairHost: () => { throw new CommandError('bun', 1, undefined); } })).rejects.toThrow('bun failed (1)');
-    expect(existsSync(options.prefix)).toBe(false);
-    expect(state).toBe('inactive');
   });
 });

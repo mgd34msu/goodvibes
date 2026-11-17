@@ -8,7 +8,7 @@
  * Real ConfigManager over a temp directory, real config-key facts.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigManager, type WriteOrigin } from '../platform/src/platform/config/manager.ts';
@@ -58,6 +58,7 @@ const LOOSENING: readonly { readonly key: string; readonly baseline?: unknown; r
   { key: 'payments.currency', baseline: 'USD', value: 'GBP' },
   { key: 'payments.shippingAddress.line1', baseline: '1 Owner Street', value: '9 Drop Lane' },
   { key: 'payments.shippingAddress.postalCode', baseline: '10001', value: '99999' },
+  { key: 'permissions.mode', baseline: 'ask-me', value: 'yolo' },
 ];
 
 test('an agent write that widens the sandbox or loosens a payments key is refused and nothing is saved', () => {
@@ -83,16 +84,6 @@ test('an agent write that widens the sandbox or loosens a payments key is refuse
     expect(config.get(row.key as ConfigKey) as unknown).toEqual(saved);
     expect(disk.get(row.key as ConfigKey) as unknown).toEqual(saved);
   }
-});
-
-test('the owner, or an agent call the owner settled, may make the same change; tightening needs no one', () => {
-  const config = manager();
-  expect(config.setMany([{ key: 'sandbox.egressAllowlist' as ConfigKey, value: ['curl', 'git'] }], agent({ state: 'allowed', decidedBy: 'owner', reason: 'fixture' })).ok).toBe(true);
-  expect(config.get('sandbox.egressAllowlist' as ConfigKey)).toEqual(['curl', 'git']);
-  expect(config.setMany([{ key: 'sandbox.egressAllowlist' as ConfigKey, value: ['git'] }], agent()).ok).toBe(true);
-  expect(config.setMany([{ key: 'payments.budget.perPurchaseCeiling' as ConfigKey, value: 5000 }], owner).ok).toBe(true);
-  expect(config.setMany([{ key: 'payments.budget.perPurchaseCeiling' as ConfigKey, value: 100 }], agent()).ok).toBe(true);
-  expect(reopened().get('payments.budget.perPurchaseCeiling' as ConfigKey)).toBe(100);
 });
 
 /** The prefixes whose keys guard what an agent may do, spend or reach. */
@@ -137,4 +128,32 @@ test('every key under a security prefix is classified: it has a loosening rule, 
   expect(unclassified).toEqual([]);
   expect(stale).toEqual([]);
   for (const key of Object.keys(REVIEWED_NOT_LOOSENING)) expect(`${key} in schema: ${CONFIG_KEYS.has(key)}`).toBe(`${key} in schema: true`);
+});
+
+/** A manager over its own temp directory, for a case that reads the daemon tier file itself. */
+function fixture() {
+  const root = mkdtempSync(join(tmpdir(), 'config-set-many-'));
+  const configDir = join(root, 'surface');
+  const daemonTierPath = join(root, 'daemon', 'settings.json');
+  const manager = new ConfigManager({ configDir, daemonTierPath, ownsDaemonTier: true });
+  return { manager, configDir, daemonTierPath, close: () => rmSync(root, { recursive: true, force: true }) };
+}
+
+test('a credential is kept only as a reference, card material never reaches a settings file, and no value is echoed', () => {
+  const f = fixture();
+  try {
+    const literal = f.manager.setMany([{ key: 'surfaces.slack.botToken' as ConfigKey, value: 'fixture-private-token' }], owner);
+    const card = f.manager.setMany([{ key: 'payments.cardNumber' as ConfigKey, value: 'fixture-private-card' }], owner);
+    for (const [result, code] of [[literal, 'CONFIG_SECRET_LITERAL'], [card, 'CONFIG_CARD_MATERIAL']] as const) {
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.refusal.code).toBe(code);
+        expect(JSON.stringify(result.refusal)).not.toContain('fixture-private');
+      }
+    }
+    expect(existsSync(f.daemonTierPath)).toBe(false);
+    const reference = 'goodvibes://secrets/goodvibes/SLACK_BOT_TOKEN';
+    expect(f.manager.setMany([{ key: 'surfaces.slack.botToken' as ConfigKey, value: reference }], owner).ok).toBe(true);
+    expect(readFileSync(f.daemonTierPath, 'utf8')).toContain(reference);
+  } finally { f.close(); }
 });

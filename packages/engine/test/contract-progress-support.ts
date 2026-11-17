@@ -1,7 +1,6 @@
 /**
- * Contracts and deterministic progress for contract-progress-restart.test.ts,
- * contract-progress-crash.test.ts and their second process
- * (contract-progress-child.ts). A contract is built in the shape the runner
+ * Contracts and deterministic progress for contract-progress-restart.test.ts
+ * and its second process (contract-progress-child.ts). A contract is built in the shape the runner
  * saves; `progressStep` advances it the way a run does.
  */
 import { randomUUID } from 'node:crypto';
@@ -70,7 +69,7 @@ export function progressContract(units: number, files: number): Contract {
   };
 }
 
-export function passingCheck(id: string, at: number): UnitCheck {
+function passingCheck(id: string, at: number): UnitCheck {
   return { id, at, trigger: 'turn-end', goal: { probabilityUnmet: 0.05, verdict: 'met', outcome: 'act' }, quality: {}, result: 'pass', decisionIds: [] };
 }
 

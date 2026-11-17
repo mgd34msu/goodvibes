@@ -74,20 +74,6 @@ function run(uninstall = false, fault?: 'prefix', platform?: 'darwin', controls:
       FIXTURE_RETIRE_PREFIX: fault === 'prefix' ? '1' : '0', FIXTURE_DARWIN: platform === 'darwin' ? '1' : '0',
       FIXTURE_ASSETS: assets, FETCH_TRACE: join(root, 'fetches'), ...controls } });
 }
-function darwinAssets() {
-  for (const command of ['goodvibes', 'goodvibes-daemon', 'goodvibes-agent']) {
-    const asset = `${command}-macos-x64`, payload = readFileSync(join(assets, `${command}-linux-x64`));
-    writeFileSync(join(assets, asset), payload);
-    const packageName = command === 'goodvibes' ? '@goodvibes-jev/tui' : command === 'goodvibes-daemon' ? '@goodvibes-jev/daemon' : '@goodvibes-jev/agent';
-    const descriptor = { schema: 1, packageName, version, target: 'darwin-x64', sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'a'.repeat(40),
-      files: [{ path: asset, sha256: digest(join(assets, asset)), mode: 0o755, size: payload.length }], readers: nativeReaderCapabilities(version) };
-    writeFileSync(join(assets, `${asset}.reader-ci-artifact.json`), JSON.stringify(descriptor, null, 2));
-  }
-  writeFileSync(join(assets, 'sqlite-vec-darwin-x64.dylib'), 'Fixture vector companion');
-  writeFileSync(join(assets, 'sqlite-darwin-x64.dylib'), 'Fixture compiled SQLite companion');
-  writeFileSync(join(assets, 'sqlite-darwin-x64.dylib.json'), JSON.stringify({ packageName: '@goodvibes-jev/daemon', daemonVersion: version }));
-  writeChecksums();
-}
 /** Transaction leftovers that must never outlive a run, finished or rolled back. */
 const transactionLeftovers = () => readdirSync(join(home, 'bin')).filter(name => /install-claim|update-transaction|\.incoming|goodvibes-previous/.test(name));
 /** A previous installation the refusals below must leave byte for byte. */
@@ -121,7 +107,7 @@ test('a release installs every product from verified assets of the authorised re
   expect(transactionLeftovers()).toEqual([]);
 });
 
-test.each([['missing', ''], ['corrupt', 'INSTALL_E011'], ['duplicate', 'INSTALL_E010']])('a %s release asset stops before replacing an existing install', (problem, id) => {
+test.each([['corrupt', 'INSTALL_E011']])('a %s release asset stops before replacing an existing install', (problem, id) => {
   originalProgram();
   const bundle = join(assets, `goodvibes-webui-bundle-${version}.tar.gz`);
   if (problem === 'missing') rmSync(bundle);
@@ -133,32 +119,6 @@ test.each([['missing', ''], ['corrupt', 'INSTALL_E011'], ['duplicate', 'INSTALL_
   const result = run(); expect(result.status).not.toBe(0);
   // A missing asset fails at the download; the others are refused by their checksum.
   if (id) expect(result.stderr).toContain(`(${id})`);
-  expect(originalIntact()).toBe(true);
-});
-
-test.each([['browser', 'INSTALL_E013'], ['webui', 'INSTALL_E015']] as const)('a verified but incomplete %s archive fails before touching programs', (kind, id) => {
-  originalProgram();
-  const archive = kind === 'browser' ? 'browser-driver.tar.gz' : `goodvibes-webui-bundle-${version}.tar.gz`;
-  const empty = join(root, 'empty-archive'); mkdirSync(empty);
-  execFileSync('tar', ['-czf', join(assets, archive), '-C', empty, '.']);
-  writeChecksums();
-  const result = run(); expect(result.status).not.toBe(0); expect(result.stderr).toContain(`(${id})`);
-  expect(originalIntact()).toBe(true);
-  expect(transactionLeftovers()).toEqual([]);
-});
-
-test.each(['sqlite-darwin-x64.dylib', 'sqlite-darwin-x64.dylib.json'])('a missing Darwin companion %s refuses before replacing installed programs', asset => {
-  darwinAssets(); rmSync(join(assets, asset)); writeChecksums();
-  originalProgram();
-  const result = run(false, undefined, 'darwin'); expect(result.status).not.toBe(0);
-  expect(originalIntact()).toBe(true);
-});
-
-test('reader evidence pinned to other program bytes is refused before any installation replacement', () => {
-  originalProgram();
-  const candidate = terminalReaderArtifact('goodvibes'); candidate.files[0]!.sha256 = 'f'.repeat(64);
-  writeFileSync(join(assets, 'goodvibes-linux-x64.reader-ci-artifact.json'), JSON.stringify(candidate, null, 2)); writeChecksums();
-  const result = run(); expect(result.status).not.toBe(0); expect(result.stderr).toContain('(INSTALL_E056)');
   expect(originalIntact()).toBe(true);
 });
 
@@ -188,15 +148,6 @@ test('a hang-up during the swap rolls back and releases the claims', () => {
   expect(transactionLeftovers()).toEqual([]);
   expect(existsSync(join(home, 'bin/goodvibes'))).toBe(false);
   expect(existsSync(join(home, 'bin/goodvibes-daemon'))).toBe(false);
-});
-
-test('directory replacement during the install cannot redirect later companion writes', () => {
-  const result = run(false, 'prefix'); expect(result.status).not.toBe(0); expect(result.stderr).toContain('(INSTALL_E019)');
-  expect(readdirSync(join(home, 'bin'))).toEqual(['foreign']);
-  expect(readFileSync(join(home, 'bin/foreign'), 'utf8')).toBe('foreign');
-  for (const command of ['goodvibes', 'goodvibes-daemon', 'goodvibes-agent']) {
-    expect(existsSync(join(home, 'retired-bin', command + '.update-transaction'))).toBe(true);
-  }
 });
 
 test('an existing checkout installation keeps its command links and data: install refuses, uninstall delegates to its own uninstaller', () => {

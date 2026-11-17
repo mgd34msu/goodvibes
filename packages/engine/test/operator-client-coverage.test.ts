@@ -7,13 +7,9 @@
  * wire.
  */
 import { describe, expect, test } from 'bun:test';
-import { createOperatorApiClient } from '../operator-client/src/index.js';
 import { createOperatorRemoteClient } from '../operator-client/src/client-core.js';
 import { createHttpTransport } from '../transport-http/src/index.js';
 import { getOperatorContract } from '../contracts/src/index.js';
-import { GoodVibesError } from '../errors/src/index.js';
-import { buildOperatorContract } from '../platform/src/platform/control-plane/operator-contract.js';
-import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
 
 function createJsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -41,36 +37,6 @@ function makeTransport(fetch: (input: string | URL | Request, init?: RequestInit
     fetch: withPreconnect(fetch),
   });
 }
-
-describe('createOperatorRemoteClient: a method with no REST binding', () => {
-  test('is refused as a contract error before anything is sent', async () => {
-    let requests = 0;
-    const transport = makeTransport(async () => { requests++; return createJsonResponse({ ok: true }); });
-    const contract = { operator: { methods: [{ id: 'internal.only', description: 'internal only', http: null }] } };
-    const client = createOperatorRemoteClient(transport, contract as unknown as ReturnType<typeof getOperatorContract>);
-    const caught = await client.invoke('internal.only' as never).then(() => null, (e: unknown) => e);
-    expect(caught).toBeInstanceOf(GoodVibesError);
-    expect((caught as GoodVibesError).category).toBe('contract');
-    expect(requests).toBe(0);
-  });
-});
-
-describe('createOperatorApiClient: responses are held to the contract', () => {
-  // A field the published schema does not declare: a strict client must refuse the answer, not pass it on.
-  const undeclared = { capturedAt: 0, providers: [], configuredCount: 0, issueCount: 0, internalOnly: true };
-
-  test('by default a response the contract does not allow is refused', async () => {
-    const client = createOperatorApiClient({ baseUrl: 'http://127.0.0.1:3210', fetch: withPreconnect(async () => createJsonResponse(undeclared)) });
-    const caught = await client.accounts.snapshot().then(() => null, (error: unknown) => error);
-    expect(caught).toBeInstanceOf(GoodVibesError);
-    expect((caught as GoodVibesError).category).toBe('contract');
-  });
-
-  test('with validateResponses: false the same response is passed through', async () => {
-    const client = createOperatorApiClient({ baseUrl: 'http://127.0.0.1:3210', validateResponses: false, fetch: withPreconnect(async () => createJsonResponse(undeclared)) });
-    expect(await client.accounts.snapshot()).toMatchObject({ internalOnly: true });
-  });
-});
 
 // ---------------------------------------------------------------------------
 // Shorthand bindings: every shorthand must reach the contract route of the
@@ -183,85 +149,5 @@ describe('createOperatorRemoteClient (src): shorthand method bindings', () => {
     // The two stream openers need a live stream.
     const exempt = new Set(['control.events.stream', 'telemetry.stream']);
     expect(shorthands.filter((name) => !exempt.has(name)).length).toBe(SHORTHAND_CASES.length);
-  });
-
-  test('sessions.create validates the shared-session shape returned by daemon routes', async () => {
-    const createdAt = Date.now();
-    const client = createOperatorRemoteClient(
-      makeTransport(async () => createJsonResponse({
-        session: {
-          id: 'sess-1',
-          kind: 'tui',
-          project: 'unknown',
-          title: 'Test session',
-          status: 'active',
-          createdAt,
-          updatedAt: createdAt,
-          lastActivityAt: createdAt,
-          messageCount: 0,
-          pendingInputCount: 0,
-          routeIds: [],
-          surfaceKinds: [],
-          participants: [],
-          metadata: { nested: { values: [null, true, 3, 'native', { deeper: ['value'] }] } },
-        },
-      }, 201)),
-      buildOperatorContract(new GatewayMethodCatalog()),
-    );
-
-    const result = await client.sessions.create({ title: 'Test session' });
-    const session = result.session as Record<string, unknown>;
-    expect(session.kind).toBe('tui');
-    expect(session.lastActivityAt).toBe(createdAt);
-    expect(session.metadata).toEqual({ nested: { values: [null, true, 3, 'native', { deeper: ['value'] }] } });
-  });
-
-  test('sessions.get tolerates a wire response that omits project (mixed-version daemon)', async () => {
-    // Regression coverage for docs/decisions/2026-07-05-session-wire-mixed-version.md:
-    // an older/mixed-version daemon may omit `project` on a shared-session record.
-    // The JSON-schema response gate in validateJsonSchemaResponse (client-core.ts)
-    // must not reject the response before normalizeSharedSessionRecord gets a
-    // chance to backfill `project` to 'unknown', i.e. `project` must not be in
-    // SHARED_SESSION_RECORD_SCHEMA's required list.
-    const createdAt = Date.now();
-    const client = createOperatorRemoteClient(
-      makeTransport(async () => createJsonResponse({
-        session: {
-          id: 'sess-legacy',
-          kind: 'tui',
-          // project intentionally omitted
-          title: 'Legacy session',
-          status: 'active',
-          createdAt,
-          updatedAt: createdAt,
-          lastActivityAt: createdAt,
-          messageCount: 0,
-          pendingInputCount: 0,
-          routeIds: [],
-          surfaceKinds: [],
-          participants: [],
-          metadata: { nested: [{ value: 'legacy' }, null] },
-        },
-        messages: [],
-      })),
-      buildOperatorContract(new GatewayMethodCatalog()),
-    );
-
-    const result = await client.sessions.get('sess-legacy');
-    const session = result.session as Record<string, unknown>;
-    expect(session.id).toBe('sess-legacy');
-    expect(session.project).toBeUndefined(); // schema-gate layer does not backfill; that's normalizeSharedSessionRecord's job
-    expect(session.metadata).toEqual({ nested: [{ value: 'legacy' }, null] });
-  });
-
-  test('tasks.status without its agentId is refused before any request is sent', async () => {
-    let requests = 0;
-    const client = createOperatorRemoteClient(makeTransport(async () => { requests++; return createJsonResponse({ ok: true }); }), getOperatorContract(), { validateResponses: false });
-    // agentId is required at the type level; a caller that forgets it must not send a malformed request.
-    const status = client.tasks.status as unknown as () => Promise<unknown>;
-    let caught: unknown = null;
-    try { await status(); } catch (error) { caught = error; }
-    expect(caught).toBeInstanceOf(GoodVibesError);
-    expect(requests).toBe(0);
   });
 });

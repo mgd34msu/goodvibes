@@ -128,6 +128,27 @@ function runningTailscaleAddresses(json: string): Set<string> {
   return out;
 }
 
+/** `tailscale status --json` from a running Tailscale, or null where no program can be run. Throws when it does not answer. */
+function askRunningTailscale(): string | null {
+  const runtimeProcess = (globalThis as { readonly process?: { readonly getBuiltinModule?: (id: string) => unknown } }).process;
+  const childProcess = runtimeProcess?.getBuiltinModule?.('node:child_process') as { readonly execFileSync?: ExecFileSync } | undefined;
+  if (!childProcess?.execFileSync) return null;
+  return childProcess.execFileSync('tailscale', ['status', '--json'], {
+    encoding: 'utf8', timeout: TAILSCALE_PROBE_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true,
+  });
+}
+let tailscaleStatus: () => string | null = askRunningTailscale;
+
+/**
+ * Replaces how a running Tailscale is asked (null restores the real question)
+ * and forgets the last answer. For a caller that must not depend on whether
+ * this machine runs Tailscale; not exported from the package.
+ */
+export function replaceTailscaleStatusProbe(probe: (() => string | null) | null): void {
+  tailscaleStatus = probe ?? askRunningTailscale;
+  tailscaleAnswer = undefined;
+}
+
 /**
  * Whether a running Tailscale on this machine lists the address as its own or a
  * peer's. Asked only for a 100.64/10 address nothing else stated, in a process
@@ -139,13 +160,8 @@ function tailscaleReports(ipv4: string): boolean {
   if (!tailscaleAnswer || now - tailscaleAnswer.at >= TAILSCALE_ANSWER_TTL_MS) {
     let addresses: ReadonlySet<string> = new Set();
     try {
-      const runtimeProcess = (globalThis as { readonly process?: { readonly getBuiltinModule?: (id: string) => unknown } }).process;
-      const childProcess = runtimeProcess?.getBuiltinModule?.('node:child_process') as { readonly execFileSync?: ExecFileSync } | undefined;
-      if (childProcess?.execFileSync) {
-        addresses = runningTailscaleAddresses(childProcess.execFileSync('tailscale', ['status', '--json'], {
-          encoding: 'utf8', timeout: TAILSCALE_PROBE_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true,
-        }));
-      }
+      const status = tailscaleStatus();
+      if (status !== null) addresses = runningTailscaleAddresses(status);
     } catch {
       // No Tailscale here, or it did not answer: it states nothing.
     }

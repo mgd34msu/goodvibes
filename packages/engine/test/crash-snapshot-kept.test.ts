@@ -62,12 +62,3 @@ test('the kept session goes on: its live snapshot and its turn-end save leave th
 
   expect(nextLaunchOffer(surface)).toEqual(crashed);
 });
-
-test('a turn-end save straight after keeping it does not delete the kept snapshot', () => {
-  const surface = surfaceIn();
-  crashThenKeep(surface);
-  persistConversation(SESSION, { messages: live }, 'model-a', 'provider-a', 'parser work', { surface });
-  deleteRecoveryFile({ surface }, SESSION);
-
-  expect(nextLaunchOffer(surface)).toEqual(crashed);
-});

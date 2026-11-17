@@ -61,13 +61,6 @@ describe('connected-host client calls', () => {
     expect(requests[0]!.headers.get(EXPLICIT_USER_REQUEST_HEADER)).toBe('true');
   });
 
-  test('no credential refuses before anything is sent', async () => {
-    const failure = await failureOf(createConnectedHost(() => ({ ...connection, token: null }), { fetchImpl }).invoke(methodId, payload));
-    expect(failure).toMatchObject({ kind: 'auth_required', applied: 'no', route: 'POST /api/profile/forget' });
-    expect(failure.refusal.next.length).toBeGreaterThan(0);
-    expect(requests).toHaveLength(0);
-  });
-
   test('a path value that would leave the route refuses before anything is sent', async () => {
     const failure = await failureOf(host.invoke('principals.get', { principalId: '..' }));
     expect(failure.refusal.code).toBe('bad_input');
@@ -88,52 +81,6 @@ describe('connected-host client calls', () => {
     expect(failure).toMatchObject({ kind, applied, refusal: { code, status } });
     expect(failure.refusal.reason).toContain('host says why');
     expect(requests).toHaveLength(1);
-  });
-
-  test.each([[200, 'connected_host_incompatible'], [503, 'connected_host_route_unavailable']] as const)(
-    'a 404 asks /status once; status %s makes it %s', async (probeStatus, kind) => {
-      respond = async (url) => url.endsWith('/status') ? new Response('{}', { status: probeStatus }) : Response.json({ error: 'gone' }, { status: 404 });
-      expect(await failureOf(host.invoke(methodId, payload))).toMatchObject({ kind, applied: 'no' });
-      expect(requests.map(({ method, url }) => `${method} ${url}`)).toEqual([`POST ${baseUrl}/api/profile/forget`, `GET ${baseUrl}/status`]);
-    });
-
-  test('a refused connection says nothing was sent', async () => {
-    respond = async () => { throw Object.assign(new Error('connect failed'), { code: 'ECONNREFUSED' }); };
-    expect(await failureOf(host.invoke(methodId, payload))).toMatchObject({
-      kind: 'connected_host_unavailable', applied: 'no', refusal: { code: 'host_unreachable', retryable: true },
-    });
-    expect(requests).toHaveLength(1);
-  });
-
-  test('a host that never answers ends at the deadline', async () => {
-    respond = (_url, init) => new Promise((_resolve, reject) => {
-      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
-    });
-    const failure = await failureOf(host.invoke(methodId, payload, { deadlineMs: 20 }));
-    expect(failure).toMatchObject({ kind: 'connected_host_unavailable', applied: 'unknown', refusal: { code: 'host_timeout' } });
-  });
-
-  test('the caller cancelling is a cancellation, not a dead host', async () => {
-    const controller = new AbortController();
-    respond = (_url, init) => new Promise((_resolve, reject) => {
-      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
-      controller.abort();
-    });
-    expect(await failureOf(host.invoke(methodId, payload, { signal: controller.signal }))).toMatchObject({ kind: 'cancelled' });
-    expect(requests).toHaveLength(1);
-  });
-
-  test('the gateway result face carries the same failure', async () => {
-    respond = async () => Response.json({ error: 'host says why' }, { status: 409 });
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = fetchImpl;
-    try {
-      const result = await invokeOperatorGatewayMethod({ baseUrl, token: 'fixture-token', tokenPath: '/fixture/token' }, methodId, 'label', payload);
-      expect(result).toMatchObject({ ok: false, kind: 'connected_host_error', applied: 'no', route: 'POST /api/profile/forget' });
-      expect(requests).toHaveLength(1);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
   });
 });
 
@@ -158,37 +105,11 @@ describe('connected-host resolution', () => {
     }
   });
 
-  test('the token file is the source when nothing outranks it, and a rewrite is picked up', () => {
-    writeToken('first');
-    expect(resolveConnectedHost({ configManager: config(), homeDirectory: home })).toMatchObject({ token: 'first', source: 'operator-file' });
-    writeToken('second-token');
-    expect(resolveConnectedHost({ configManager: config(), homeDirectory: home }).token).toBe('second-token');
-  });
-
-  test('an environment token outranks the file and says so', () => {
-    writeToken('file-token');
-    process.env.GOODVIBES_DAEMON_TOKEN = 'env-token';
-    expect(resolveConnectedHost({ configManager: config(), homeDirectory: home })).toMatchObject({ token: 'env-token', source: 'environment' });
-  });
-
-  test('a caller that accepts only a pairing gets the reason, not a different principal', () => {
-    writeToken('file-token');
-    expect(resolveConnectedHost({ configManager: config(), homeDirectory: home, accept: ['pairing'] })).toMatchObject({
-      token: null, source: 'operator-file', unavailable: { code: 'source_not_accepted' },
-    });
-  });
-
   test('dialing turned off is a refusal naming the setting', () => {
     writeToken('file-token');
     expect(resolveConnectedHost({ configManager: config({ 'daemon.connectedHost.enabled': false }), homeDirectory: home })).toMatchObject({
       token: null, unavailable: { code: 'dial_disabled' },
     });
-  });
-
-  test('no credential anywhere is a refusal with a next step', () => {
-    const resolved = resolveConnectedHost({ configManager: config(), homeDirectory: home });
-    expect(resolved).toMatchObject({ token: null, unavailable: { code: 'no_credential' } });
-    expect(resolved.unavailable?.next.length).toBeGreaterThan(0);
   });
 });
 

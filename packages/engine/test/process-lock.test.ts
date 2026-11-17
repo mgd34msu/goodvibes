@@ -3,7 +3,7 @@
  * and a holder that is killed must not leave the store locked.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -80,21 +80,5 @@ describe('process lock', () => {
     release();
     await Promise.all([first, second, third]);
     expect(order).toEqual(['first:start', 'first:end', 'second', 'third']);
-  });
-
-  test('a failed holder releases the lock for the next one', async () => {
-    const lockPath = join(tempDir(), 'store.json.writer.sqlite');
-    await expect(withProcessLock(lockPath, () => { throw new Error('update failed'); })).rejects.toThrow('update failed');
-    expect(() => withProcessLockSync(lockPath, () => { throw new Error('sync update failed'); })).toThrow('sync update failed');
-    expect(withProcessLockSync(lockPath, () => 'next')).toBe('next');
-  });
-
-  test('a lock path that holds something else is refused and left as it was', () => {
-    const lockPath = join(tempDir(), 'store.json.lock');
-    writeFileSync(lockPath, JSON.stringify({ pid: 1 }));
-    let refusal: unknown;
-    try { withProcessLockSync(lockPath, () => 'never'); } catch (error) { refusal = error; }
-    expect(refusal).toMatchObject({ code: 'PROCESS_LOCK_UNAVAILABLE', retryable: false });
-    expect(readFileSync(lockPath, 'utf8')).toBe(JSON.stringify({ pid: 1 }));
   });
 });

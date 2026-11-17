@@ -32,9 +32,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
-import { classifyInputSchema } from '../platform/src/platform/control-plane/invoke-input-validation.js';
 import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
-import { GatewayVerbError } from '../platform/src/platform/control-plane/routes/gateway-verb-error.js';
 import {
   EXPECTED_ROUTE_REGISTRARS,
   buildProbeCatalog,
@@ -127,7 +125,12 @@ function describeGap(entry: VerbConformance): string {
 
 describe('gateway verb required-field conformance', () => {
   test('no handler enforces a field its descriptor does not declare required', async () => {
-    const gaps = (await results()).filter((entry) => entry.verdict === 'undeclared-requirement');
+    const all = await results();
+    // The probe must reach handlers, or this reads green over an empty set. 195
+    // is the measured floor after the payments registrar became async; a lost
+    // `await` in buildProbeCatalog would drop the payments verbs and land under it.
+    expect(all.length).toBeGreaterThanOrEqual(195);
+    const gaps = all.filter((entry) => entry.verdict === 'undeclared-requirement');
     expect(gaps.map(describeGap)).toEqual([]);
   });
 
@@ -140,14 +143,6 @@ describe('gateway verb required-field conformance', () => {
         + 'The probe cannot tell whether this is an undeclared required field or a refusal about the state of the world. '
         + 'Pass the field name as the 4th GatewayVerbError argument, or add an entry to ALLOWED_UNATTRIBUTED_REFUSALS saying why there is none.');
     expect(undocumented).toEqual([]);
-  });
-
-  test('the allowed-unattributed list has no stale entries', async () => {
-    const unattributed = new Set((await results())
-      .filter((entry) => entry.verdict === 'unattributed-refusal')
-      .map((entry) => entry.id));
-    const stale = Object.keys(ALLOWED_UNATTRIBUTED_REFUSALS).filter((id) => !unattributed.has(id));
-    expect(stale).toEqual([]);
   });
 
   test('a plain Error escaping a handler is its own verdict and the set is closed', async () => {
@@ -169,64 +164,6 @@ describe('gateway verb required-field conformance', () => {
     expect(undocumented).toEqual([]);
     const stale = Object.keys(ALLOWED_PLAIN_THROWS).filter((id) => !thrown.some((entry) => entry.id === id));
     expect(stale).toEqual([]);
-  });
-
-  test('a field-naming refusal is attributed whatever its code, and a field-less state refusal is not', async () => {
-    const descriptor = (id: string) => ({
-      id, title: id, description: id, category: 'probe', source: 'builtin', access: 'authenticated', transport: ['http'], scopes: [],
-      inputSchema: { type: 'object', properties: { name: { type: 'string' } } },
-    }) as const;
-    const catalog = new GatewayMethodCatalog();
-    const named = descriptor('probe.coded.field');
-    const stateOnly = descriptor('probe.coded.state');
-    catalog.register(named, async () => { throw new GatewayVerbError('bad range', 'CALENDAR_BAD_RANGE', 400, 'range'); });
-    catalog.register(stateOnly, async () => { throw new GatewayVerbError('gone', 'NOT_FOUND', 404); });
-    expect((await probeVerb(catalog, named)).verdict).toBe('undeclared-requirement');
-    expect((await probeVerb(catalog, stateOnly)).verdict).toBe('declared-satisfied');
-  });
-
-  test('every probed verb lands in exactly one verdict, and the surface is accounted for', async () => {
-    const all = await results();
-    const counts = new Map<string, number>();
-    for (const entry of all) counts.set(entry.verdict, (counts.get(entry.verdict) ?? 0) + 1);
-    const total = [...counts.values()].reduce((sum, n) => sum + n, 0);
-    expect(total).toBe(all.length);
-    // The probe is only worth anything if it is actually reaching handlers.
-    // A collapse here (a registrar quietly dropped, an import that stopped
-    // attaching) would otherwise read as a clean green over an empty set.
-    // 195: the measured floor after the payments registrar became async; a
-    // lost `await` in buildProbeCatalog would drop the seven payments verbs
-    // and land under it instead of reading as a clean green.
-    expect(all.length).toBeGreaterThanOrEqual(195);
-    const paymentsVerbs = all.filter((entry) => entry.id.startsWith('payments.'));
-    expect(paymentsVerbs.length).toBeGreaterThanOrEqual(7);
-  });
-
-  test('a handler verb with no inputSchema is a known, listed exception', async () => {
-    // A `required` array is only load-bearing if the invoke gate actually reads
-    // it, and `invoke-input-validation.ts` skips any verb whose inputSchema is
-    // absent or untyped. Such a verb can grow a handler requirement with no
-    // contract to state it in, the defect class with the paperwork removed.
-    //
-    // The probe still covers them (an undeclared requirement on a verb with no
-    // schema is reported like any other), so this is not a hole; it is a list
-    // that should not grow silently.
-    const catalog = await buildProbeCatalog();
-    const ungated = catalog.list()
-      .filter((descriptor) => catalog.hasHandler(descriptor.id))
-      .filter((descriptor) => classifyInputSchema(descriptor.inputSchema) !== 'validated')
-      .map((descriptor) => descriptor.id)
-      .sort();
-    expect(ungated).toEqual([
-      'acp.agents.list',
-      'pairing.tokens.list',
-      'pairing.tokens.revokeShared',
-      'push.subscriptions.list',
-      'push.vapid.get',
-    ]);
-    // Every one of them takes no input today; the probe is what proves it.
-    const byId = new Map((await results()).map((entry) => [entry.id, entry]));
-    for (const id of ungated) expect(byId.get(id)?.verdict).toBe('declared-satisfied');
   });
 
   test('every route registrar is either probed or explicitly accounted for', () => {

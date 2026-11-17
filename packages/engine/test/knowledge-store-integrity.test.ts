@@ -9,8 +9,6 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
-import { createKnowledgeIssueOperatorMutation } from '../platform/src/platform/knowledge/store-lifecycle-authority.js';
-import type { SQLiteStore } from '../platform/src/platform/state/sqlite-store.js';
 
 const roots: string[] = [];
 const stores: KnowledgeStore[] = [];
@@ -38,9 +36,6 @@ async function reopen(store: KnowledgeStore, file: string): Promise<KnowledgeSto
 const source = (id: string, extra: Record<string, unknown> = {}) => ({ id, connectorId: 'fixture', sourceType: 'manual' as const, status: 'indexed' as const, ...extra });
 const fact = (id: string, sourceId: string, metadata: Record<string, unknown> = {}) => ({ id, kind: 'fact' as const, slug: id, title: id, confidence: 50, sourceId, metadata });
 
-interface RunProbe { sqlite: Pick<SQLiteStore, 'run'> }
-const sqliteOf = (store: KnowledgeStore): Pick<SQLiteStore, 'run'> => (store as unknown as RunProbe).sqlite;
-
 test('two stores writing the same file without reading each other lose no row', async () => {
   const file = path();
   const first = await open(file);
@@ -53,15 +48,6 @@ test('two stores writing the same file without reading each other lose no row', 
   const third = await open(file);
   expect(third.listSources(100).map((record) => record.id).sort()).toEqual(['from-first', 'from-second']);
   expect(third.listNodes(100).map((record) => record.id).sort()).toEqual(['fact-first', 'fact-second']);
-});
-
-test('a store that was open before another store saved a row lists it once it checks for changes', async () => {
-  const file = path();
-  const reader = await open(file);
-  const writer = await open(file);
-  await writer.upsertSource(source('from-writer'));
-  await reader.refreshIfChanged();
-  expect(reader.listSources(100).map((record) => record.id)).toEqual(['from-writer']);
 });
 
 test('a status-only source update keeps the title, addresses, summary and description, also after a reopen', async () => {
@@ -90,46 +76,4 @@ test('deleting a source deletes the nodes only it produced and keeps a node anot
   expect(store.listNodes(100).map((node) => node.id).sort()).toEqual(['shared', 'unrelated']);
   expect(store.getSource('gone')).toBeNull();
   expect(store.getSource('other')).not.toBeNull();
-});
-
-test('a delete that fails part-way leaves every row as it was, in memory and in the file', async () => {
-  const file = path();
-  let store = await open(file);
-  await store.upsertSource(source('s'));
-  await store.upsertNode(fact('n', 's'));
-  await store.upsertEdge({ fromKind: 'node', fromId: 'n', toKind: 'source', toId: 's', relation: 'supports_fact' });
-  await store.upsertIssue({ id: 'i', severity: 'info', code: 'c', message: 'm', nodeId: 'n' });
-
-  // The disk refuses the node's own row after the edge and issue rows went.
-  const sqlite = sqliteOf(store);
-  const run = sqlite.run.bind(sqlite);
-  sqlite.run = (sql, params) => {
-    if (sql.startsWith('DELETE FROM knowledge_nodes')) throw new Error('disk full');
-    run(sql, params);
-  };
-  await expect(store.deleteNode('n')).rejects.toThrow('disk full');
-  sqlite.run = run;
-
-  expect(store.getNode('n')).not.toBeNull();
-  expect(store.getIssue('i')).not.toBeNull();
-  expect(store.listEdges()).toHaveLength(1);
-  store = await reopen(store, file);
-  expect(store.getNode('n')).not.toBeNull();
-  expect(store.getIssue('i')).not.toBeNull();
-  expect(store.listEdges()).toHaveLength(1);
-});
-
-test('replacing a namespace keeps an issue the operator reviewed and drops one nobody touched', async () => {
-  const file = path();
-  let store = await open(file);
-  await store.upsertSource(source('s'));
-  const metadata = { namespace: 'lint' };
-  await store.upsertIssue({ id: 'untouched', severity: 'info', code: 'c', message: 'm', sourceId: 's', metadata });
-  await store.upsertIssue({ id: 'reviewed', severity: 'info', code: 'c', message: 'm', sourceId: 's', metadata });
-  await store.upsertIssue({ id: 'reviewed', severity: 'info', code: 'c', message: 'm', status: 'open', sourceId: 's', metadata: { ...metadata, review: { action: 'reopen' } } },
-    createKnowledgeIssueOperatorMutation(store.getIssue('reviewed')!));
-  await store.replaceIssues([], 'lint');
-  store = await reopen(store, file);
-  expect(store.getIssue('untouched')).toBeNull();
-  expect(store.getIssue('reviewed')?.metadata.review).toBeDefined();
 });

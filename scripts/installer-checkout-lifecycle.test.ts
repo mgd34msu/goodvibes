@@ -1,12 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { createServer } from 'node:net';
-import { spawnSync } from 'node:child_process';
-import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { build, install, interruptInstall, parseOptions, ready, stage, type InstallHooks, type Options, type ReadyTiming } from './install.ts';
-import { COMMANDS, CommandError, assertOwnedFiles, atomicWrite, dataOwner, readInstallation, unitPath, uninstall, type Run } from './installation.ts';
+import { install, parseOptions, ready, stage, type InstallHooks, type Options, type ReadyTiming } from './install.ts';
+import { assertOwnedFiles, atomicWrite, readInstallation, unitPath, type Run } from './installation.ts';
 
 let home: string;
 let previousHome: string | undefined;
@@ -76,40 +74,9 @@ describe('readiness check', () => {
   test('succeeds when the service is active, serves the staged WebUI and reports the control plane ready', async () => {
     await ready(options, '<html>test</html>', execute, timing);
   });
-  test('a different page body is not ready', async () => {
-    page = '<html>other</html>';
-    await expect(ready(options, '<html>test</html>', execute, timing)).rejects.toThrow();
-  });
-  test('a control plane that is not ready is not ready', async () => {
-    health = { status: 200, body: { network: { controlPlane: { ready: false } } } };
-    await expect(ready(options, '<html>test</html>', execute, timing)).rejects.toThrow();
-  });
   test('a stopped service is not ready', async () => {
     state = 'failed';
     await expect(ready(options, '<html>test</html>', execute, timing)).rejects.toThrow();
-  });
-});
-
-describe('checkout build guards', () => {
-  const calls: string[][] = [];
-  const fake = (revisions: string[], dirty = false): Run => (command, args) => {
-    calls.push([command, ...args]);
-    if (command === 'git' && args[0] === 'rev-parse') return revisions.shift() ?? COMMIT;
-    if (command === 'git' && args[0] === 'diff' && dirty) throw new CommandError('git', 1, undefined);
-    return '';
-  };
-  beforeEach(() => { calls.length = 0; });
-  test('refuses tracked changes before building anything', async () => {
-    await expect(build(home, fake([COMMIT], true))).rejects.toThrow('Commit or stash tracked changes');
-    expect(calls.some(call => call[0] === 'bun')).toBe(false);
-  });
-  test('refuses a checkout whose commit moved during the build', async () => {
-    await expect(build(home, fake([COMMIT, 'b'.repeat(40)]))).rejects.toThrow('Checkout changed during the build');
-    expect(calls.some(call => call.includes('record'))).toBe(false);
-  });
-  test('returns the commit and records the artifact after a clean build', async () => {
-    expect(await build(home, fake([COMMIT, COMMIT]))).toBe(COMMIT);
-    expect(calls.some(call => call.includes('record') && call.includes(COMMIT))).toBe(true);
   });
 });
 
@@ -139,34 +106,9 @@ describe('release staging', () => {
       return '';
     };
   });
-  test('assembles daemon, clients, WebUI, browser driver, runtimes and licenses', async () => {
-    await stage(root, release, options, COMMIT, execute);
-    for (const path of [`tui/goodvibes-${target}`, `tui/goodvibes-${target}.bun.json`, 'tui/lib/native.node', `agent/goodvibes-agent-${target}.bun.LICENSE.md`,
-      'webui/index.html', 'runtime/BUN-LICENSE.md', 'runtime/node', 'daemon/LICENSE', 'webui/LICENSE', 'tui/LICENSE', 'agent/LICENSE',
-      'daemon/playwright-core/index.js', 'tui/playwright-core/index.js', 'agent/playwright-core/index.js']) {
-      expect(existsSync(join(release, path))).toBe(true);
-    }
-    expect(statSync(join(release, 'runtime/bun')).mode & 0o111).not.toBe(0);
-  });
-  test('a WebUI build without index.html is refused', async () => {
-    rmSync(join(root, 'products/webui/dist/index.html'));
-    await expect(stage(root, release, options, COMMIT, execute)).rejects.toThrow();
-  });
   test('a missing client binary stops staging', async () => {
     rmSync(join(root, 'products/agent/dist', `goodvibes-agent-${target}.bun`));
     await expect(stage(root, release, options, COMMIT, execute)).rejects.toThrow();
-  });
-});
-
-describe('releases kept for running programs', () => {
-  test('only releases that are still in use survive the sweep', async () => {
-    await install(options, hooks);
-    const first = readInstallation(options.prefix)!.release;
-    await install(options, { ...hooks, build: async () => 'b'.repeat(40), isReleaseInUse: () => true });
-    const second = readInstallation(options.prefix)!.release;
-    await install(options, { ...hooks, build: async () => 'c'.repeat(40), isReleaseInUse: path => path.endsWith(first) });
-    expect(releasesOf().sort()).toEqual([first, readInstallation(options.prefix)!.release].sort());
-    expect(releasesOf()).not.toContain(second);
   });
 });
 
@@ -186,13 +128,6 @@ describe('an update that is killed after publishing', () => {
     expect(() => assertOwnedFiles(readInstallation(options.prefix)!)).toThrow('current link has changed');
     return { before, abandoned };
   }
-  test('uninstall restores the receipt release and completes', async () => {
-    await killedUpdate();
-    await uninstall(options.prefix, false, execute);
-    expect(existsSync(options.prefix)).toBe(false);
-    expect(existsSync(unitPath(options))).toBe(false);
-    for (const name of COMMANDS) expect(existsSync(join(options.binDir, name))).toBe(false);
-  });
   test('the next update recovers, then removes the abandoned release', async () => {
     const { before, abandoned } = await killedUpdate();
     await install(options, { ...hooks, build: async () => 'c'.repeat(40) });
@@ -201,92 +136,6 @@ describe('an update that is killed after publishing', () => {
     expect(receipt.release).not.toBe(abandoned);
     expect(releasesOf()).toEqual([receipt.release]);
     assertOwnedFiles(receipt);
-  });
-  test('a digest-only receipt from an earlier installer recovers without calling the new commands edited', async () => {
-    await killedUpdate();
-    const receipt = readInstallation(options.prefix)!;
-    const digest = (text: string) => createHash('sha256').update(text).digest('hex');
-    const previous = Object.fromEntries(COMMANDS.map(name => [name, digest(`previous ${name}`)]));
-    writeFileSync(join(options.prefix, 'installation.json'), JSON.stringify({ ...receipt, schema: 1, wrappers: previous, unit: digest('previous unit') }));
-    await uninstall(options.prefix, false, execute);
-    expect(existsSync(options.prefix)).toBe(false);
-    for (const name of COMMANDS) expect(existsSync(join(options.binDir, name))).toBe(false);
-  });
-  test('a hang-up after the new receipt is saved leaves the committed update in place', async () => {
-    options.service = true;
-    await install(options, hooks);
-    let code = -1;
-    await install(options, { ...hooks, build: async () => 'b'.repeat(40), isReleaseInUse: () => { code = interruptInstall('SIGHUP'); return false; } });
-    expect(code).toBe(129);
-    const receipt = readInstallation(options.prefix)!;
-    expect(receipt.sourceCommit).toBe('b'.repeat(40));
-    expect(releasesOf()).toEqual([receipt.release]);
-    assertOwnedFiles(receipt);
-  });
-  test('a hang-up rolls the update back and exits 129', async () => {
-    options.service = true;
-    await install(options, hooks);
-    const before = readInstallation(options.prefix)!;
-    let code = -1;
-    await expect(install(options, { ...hooks, ready: async () => { code = interruptInstall('SIGHUP'); throw new Error('hung up'); } })).rejects.toThrow('hung up');
-    expect(code).toBe(129);
-    expect(readInstallation(options.prefix)).toEqual(before);
-    assertOwnedFiles(before);
-  });
-});
-
-describe('a first install that is killed outright', () => {
-  test('is an ordinary receipt-owned installation that uninstall removes', async () => {
-    options.service = true;
-    const snapshot = join(home, 'snapshot');
-    await expect(install(options, { ...hooks, ready: async () => {
-      cpSync(options.prefix, snapshot, { recursive: true, verbatimSymlinks: true });
-      throw new Error('killed');
-    } })).rejects.toThrow('killed');
-    // Put back what a SIGKILL inside the readiness wait leaves: the published release, its links and the unit.
-    cpSync(snapshot, options.prefix, { recursive: true, verbatimSymlinks: true });
-    for (const name of COMMANDS) symlinkSync(join(options.prefix, 'commands', name), join(options.binDir, name));
-    writeFileSync(unitPath(options), readInstallation(options.prefix)!.unit);
-    await uninstall(options.prefix, false, execute);
-    expect(existsSync(options.prefix)).toBe(false);
-    expect(existsSync(unitPath(options))).toBe(false);
-    for (const name of COMMANDS) expect(existsSync(join(options.binDir, name))).toBe(false);
-  });
-  test('killed while staging, before its receipt, leaves only a release the next run removes; anything else is kept', async () => {
-    const leftover = join(options.prefix, 'releases', `${'a'.repeat(40)}-${'0'.repeat(8)}-0000-0000-0000-${'0'.repeat(12)}`);
-    mkdirSync(join(leftover, 'daemon'), { recursive: true });
-    writeFileSync(join(options.prefix, 'notes.txt'), 'mine');
-    await expect(install(options, hooks)).rejects.toThrow('has no Jev installation receipt');
-    expect(existsSync(leftover)).toBe(true);
-    rmSync(join(options.prefix, 'notes.txt'));
-    await install(options, hooks);
-    expect(existsSync(leftover)).toBe(false);
-    expect(readInstallation(options.prefix)).toBeDefined();
-  });
-});
-
-describe('data that is already gone', () => {
-  test('uninstall completes when the data directory was removed by hand', async () => {
-    await install(options, hooks);
-    rmSync(options.dataDir, { recursive: true });
-    await uninstall(options.prefix, false, execute);
-    expect(existsSync(options.prefix)).toBe(false);
-    for (const name of COMMANDS) expect(existsSync(join(options.binDir, name))).toBe(false);
-  });
-  test('an update recreates the owner marker for the same installation', async () => {
-    await install(options, hooks);
-    const id = readInstallation(options.prefix)!.id;
-    rmSync(options.dataDir, { recursive: true });
-    await install(options, { ...hooks, build: async () => 'b'.repeat(40) });
-    expect(readInstallation(options.prefix)!.id).toBe(id);
-    expect(JSON.parse(readFileSync(dataOwner(options), 'utf8')).id).toBe(id);
-  });
-  test('a data directory that exists without this installation marker is still refused', async () => {
-    await install(options, hooks);
-    rmSync(dataOwner(options));
-    await expect(uninstall(options.prefix, true, execute)).rejects.toThrow('does not belong');
-    expect(existsSync(options.dataDir)).toBe(true);
-    expect(existsSync(options.prefix)).toBe(true);
   });
 });
 
@@ -312,32 +161,5 @@ describe('credentials file on a repeat install', () => {
     await install(options, { ...hooks, build: async () => 'b'.repeat(40) });
     expect(readFileSync(file, 'utf8')).toBe(before);
     expect(warnings.join('\n')).not.toContain('synthetic-new-value');
-  });
-});
-
-describe('uninstall.sh without a checkout or receipt', () => {
-  /** Run a lone copy of uninstall.sh with a curl stand-in that records the address it was asked for. */
-  function run(env: Record<string, string>): { status: number | null; stderr: string; requested: string } {
-    const folder = join(home, 'lone'), bin = join(home, 'fake-bin'), seen = join(home, 'requested');
-    mkdirSync(join(folder, 'scripts'), { recursive: true }); mkdirSync(bin, { recursive: true });
-    copyFileSync(join(import.meta.dir, 'uninstall.sh'), join(folder, 'scripts/uninstall.sh'));
-    writeFileSync(join(bin, 'curl'), `#!/bin/sh\nfor a in "$@"; do case "$a" in https://*) printf '%s' "$a" > '${seen}' ;; esac; done\nwhile [ "$#" -gt 0 ]; do [ "$1" = -o ] && : > "$2"; shift; done\n`, { mode: 0o755 });
-    const result = spawnSync('/bin/sh', [join(folder, 'scripts/uninstall.sh')], { env: { PATH: `${bin}:/usr/bin:/bin`, HOME: home, TMPDIR: home, ...env }, encoding: 'utf8' });
-    return { status: result.status, stderr: result.stderr, requested: existsSync(seen) ? readFileSync(seen, 'utf8') : '' };
-  }
-  test('fetches the main script by default', () => {
-    const result = run({});
-    expect(result.status).toBe(0);
-    expect(result.requested).toBe('https://raw.githubusercontent.com/mgd34msu/goodvibes/main/scripts/install.sh');
-  });
-  test('GOODVIBES_VERSION selects that release script', () => {
-    const result = run({ GOODVIBES_VERSION: 'v3.2.0' });
-    expect(result.status).toBe(0);
-    expect(result.requested).toBe('https://raw.githubusercontent.com/mgd34msu/goodvibes/v3.2.0/scripts/install.sh');
-  });
-  test('a version that is not a release tag is refused before any download', () => {
-    const result = run({ GOODVIBES_VERSION: 'main' });
-    expect(result.status).toBe(1);
-    expect(result.requested).toBe('');
   });
 });

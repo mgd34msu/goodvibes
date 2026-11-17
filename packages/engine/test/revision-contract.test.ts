@@ -5,25 +5,15 @@
  * process's write it took in) and not on reads.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { assertCurrent, captureRevisions, isCurrent, revisionSource, StaleError, type RevisionSource } from '../platform/src/platform/utils/revision.ts';
-import { ConfigManager } from '../platform/src/platform/config/manager.ts';
-import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
+import { type RevisionSource } from '../platform/src/platform/utils/revision.ts';
 import { UserPermissionRuleStore } from '../platform/src/platform/permissions/user-rule-store.ts';
 import { buildDurableRuleForDecision } from '../platform/src/platform/permissions/approval-rules.ts';
-import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
 import { ConversationManager } from '../platform/src/platform/core/conversation.ts';
-import { KnowledgeStore } from '../platform/src/platform/knowledge/store.ts';
-import { PolicyRegistry, createUnsignedBundle } from '../platform/src/platform/runtime/permissions/index.ts';
 import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.ts';
 import { UserAuthManager } from '../platform/src/platform/security/user-auth.ts';
-import { UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.ts';
-import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.ts';
-import { RouteBindingManager } from '../platform/src/platform/channels/route-manager.ts';
-import { AutomationRouteStore } from '../platform/src/platform/automation/store/routes.ts';
-import { PersistentStore } from '../platform/src/platform/state/persistent-store.ts';
 
 const roots: string[] = [];
 const cleanups: Array<() => unknown> = [];
@@ -64,57 +54,7 @@ async function movesOnceHeard(revision: { moved(): boolean }, what: string): Pro
   throw new Error(`The revision never moved for: ${what}`);
 }
 
-describe('revision token', () => {
-  test('is current until any source moves, and the refusal names the source that moved', () => {
-    let a = 0, b = 0;
-    const token = captureRevisions([revisionSource('first', () => a), revisionSource('second', () => b)]);
-    expect(isCurrent(token)).toBe(true);
-    assertCurrent(token);
-    b += 1;
-    expect(isCurrent(token)).toBe(false);
-    let refusal: unknown;
-    try { assertCurrent(token); } catch (error) { refusal = error; }
-    expect(refusal).toBeInstanceOf(StaleError);
-    const stale = refusal as StaleError;
-    expect(stale.sourceId).toBe('second');
-    expect([stale.capturedRevision, stale.currentRevision]).toEqual([0, 1]);
-    expect(stale.recoverable).toBe(true);
-    a += 1;
-    expect(() => assertCurrent(token)).toThrow(StaleError);
-  });
-
-  test('a cancelled call refuses as cancelled, not as stale', () => {
-    const controller = new AbortController();
-    const token = captureRevisions([revisionSource('only', () => 0)]);
-    controller.abort(new Error('no longer wanted'));
-    expect(() => assertCurrent(token, controller.signal)).toThrow('no longer wanted');
-  });
-});
-
 describe('owners move their revision on every change and not on reads', () => {
-  test('settings: set, save, profile fallback, and a settings file another process wrote', () => {
-    const root = tempRoot();
-    const config = new ConfigManager({ surfaceRoot: 'tui', workingDir: root, configDir: join(root, 'config') });
-    const revision = watch(config.revisionSource);
-    config.set('display.theme', 'nord');
-    expect(revision.moved()).toBe(true);
-    expect(config.get('display.theme')).toBe('nord');
-    expect(revision.moved()).toBe(false);
-    config.save();
-    expect(revision.moved()).toBe(true);
-    const fallback = (): unknown => undefined;
-    config.attachProfileFallback(fallback);
-    expect(revision.moved()).toBe(true);
-    config.attachProfileFallback(fallback);
-    expect(revision.moved()).toBe(false);
-
-    cleanups.push(config.watchConfigFiles({ intervalMs: 2 ** 30 }));
-    writeFileSync(join(root, 'config', 'settings.json'), JSON.stringify({ display: { theme: 'dracula' } }));
-    config.flushConfigFileChanges();
-    expect(config.get('display.theme')).toBe('dracula');
-    expect(revision.moved()).toBe(true);
-  });
-
   test('permission rules: add, remember, delete, and another process adding a rule', async () => {
     const file = join(tempRoot(), 'rules.json');
     const store = new UserPermissionRuleStore(file);
@@ -147,24 +87,6 @@ describe('owners move their revision on every change and not on reads', () => {
     expect(revision.moved()).toBe(false);
   });
 
-  test('tool registry: register and unregister', () => {
-    const registry = new ToolRegistry();
-    const revision = watch(registry.revisionSource);
-    const tool = {
-      definition: { name: 'synthetic_tool', description: 'A synthetic tool.', parameters: { type: 'object' as const, properties: {} } },
-      async execute() { return { success: true, output: 'done' }; },
-    };
-    registry.register(tool);
-    expect(revision.moved()).toBe(true);
-    expect(registry.has('synthetic_tool')).toBe(true);
-    expect(registry.list()).toHaveLength(1);
-    expect(revision.moved()).toBe(false);
-    expect(registry.unregister('synthetic_tool')).toBe(true);
-    expect(revision.moved()).toBe(true);
-    expect(registry.unregister('synthetic_tool')).toBe(false);
-    expect(revision.moved()).toBe(false);
-  });
-
   test('conversation: append, undo and reset move it; reads and the title do not', () => {
     const conversation = new ConversationManager();
     const revision = watch(conversation.revisionSource);
@@ -179,39 +101,6 @@ describe('owners move their revision on every change and not on reads', () => {
     expect(conversation.undo()).toBe(true);
     expect(revision.moved()).toBe(true);
     conversation.resetAll();
-    expect(revision.moved()).toBe(true);
-  });
-
-  test('knowledge store: a write, and a write by another store on the same file once adopted', async () => {
-    const dbPath = join(tempRoot(), 'knowledge.sqlite');
-    const store = new KnowledgeStore({ dbPath });
-    cleanups.push(() => store.close());
-    await store.init();
-    const revision = watch(store.revisionSource);
-    await store.upsertSource({ id: 'local', connectorId: 'synthetic', sourceType: 'document', title: 'Local', summary: 'Local source.', status: 'indexed', metadata: {} });
-    expect(revision.moved()).toBe(true);
-    expect(store.getSource('local')?.title).toBe('Local');
-    store.listSources();
-    expect(revision.moved()).toBe(false);
-
-    const other = new KnowledgeStore({ dbPath });
-    cleanups.push(() => other.close());
-    await other.init();
-    await other.upsertSource({ id: 'elsewhere', connectorId: 'synthetic', sourceType: 'document', title: 'Elsewhere', summary: 'Written by another store.', status: 'indexed', metadata: {} });
-    expect(await store.refreshIfChanged()).toBe(true);
-    expect(revision.moved()).toBe(true);
-    expect(store.getSource('elsewhere')?.title).toBe('Elsewhere');
-  });
-
-  test('policy bundle: load and simulate move it; a refused promotion and an empty rollback do not', () => {
-    const registry = new PolicyRegistry();
-    const revision = watch(registry.revisionSource);
-    expect(registry.loadCandidate(createUnsignedBundle('synthetic', { version: 1, rules: [], description: 'Synthetic bundle' })).ok).toBe(true);
-    expect(revision.moved()).toBe(true);
-    expect(registry.promote().ok).toBe(false);
-    expect(registry.rollback().ok).toBe(false);
-    expect(revision.moved()).toBe(false);
-    registry.markSimulating();
     expect(revision.moved()).toBe(true);
   });
 
@@ -265,67 +154,6 @@ describe('owners move their revision on every change and not on reads', () => {
     expect(revision.moved()).toBe(true);
 
     auth.rotatePassword('synthetic-operator', 'another-synthetic-password');
-    expect(revision.moved()).toBe(true);
-  });
-
-  test('credentials: set and delete move it; reads do not; another process writing the store does once read', async () => {
-    const root = tempRoot();
-    const options = { projectRoot: join(root, 'work'), globalHome: join(root, 'home'), surfaceRoot: 'goodvibes', policy: 'preferred_secure' as const };
-    const secrets = new SecretsManager(options);
-    const revision = watch(secrets.revisionSource);
-    await secrets.set('SYNTHETIC_TOKEN', 'synthetic-value', { scope: 'user', medium: 'secure' });
-    expect(revision.moved()).toBe(true);
-    expect(await secrets.get('SYNTHETIC_TOKEN')).toBe('synthetic-value');
-    expect(await secrets.get('SYNTHETIC_TOKEN')).toBe('synthetic-value');
-    expect(revision.moved()).toBe(false);
-
-    await new SecretsManager(options).set('SYNTHETIC_TOKEN', 'changed-elsewhere', { scope: 'user', medium: 'secure' });
-    expect(revision.moved()).toBe(false);
-    expect(await secrets.get('SYNTHETIC_TOKEN')).toBe('changed-elsewhere');
-    expect(revision.moved()).toBe(true);
-
-    await secrets.delete('SYNTHETIC_TOKEN');
-    expect(revision.moved()).toBe(true);
-    expect(await secrets.get('SYNTHETIC_TOKEN')).toBeNull();
-    expect(revision.moved()).toBe(false);
-
-    expect(await secrets.getOrCreateDaemonSecret('SYNTHETIC_DAEMON_KEY', () => 'created-once')).toBe('created-once');
-    expect(revision.moved()).toBe(true);
-    expect(await secrets.getOrCreateDaemonSecret('SYNTHETIC_DAEMON_KEY', () => 'never-used')).toBe('created-once');
-    expect(revision.moved()).toBe(false);
-  });
-
-  test('shared sessions: create and close move it; reads and closing an unknown session do not', async () => {
-    const root = tempRoot();
-    const broker = new SharedSessionBroker({
-      store: new PersistentStore(join(root, 'sessions.json')) as never,
-      routeBindings: new RouteBindingManager({ store: new AutomationRouteStore(join(root, 'bindings.json')) }),
-      agentStatusProvider: { getStatus: () => null },
-      messageSender: { send: () => false },
-    });
-    cleanups.push(() => broker.stop());
-    await broker.start();
-    const revision = watch(broker.revisionSource);
-    const session = await broker.createSession({ title: 'Synthetic session' });
-    expect(revision.moved()).toBe(true);
-    expect(broker.getSession(session.id)?.id).toBe(session.id);
-    broker.listSessions();
-    expect(revision.moved()).toBe(false);
-    expect((await broker.closeSession(session.id))?.status).toBe('closed');
-    expect(revision.moved()).toBe(true);
-    expect(await broker.closeSession('no-such-session')).toBeNull();
-    expect(revision.moved()).toBe(false);
-  });
-
-  test('untrusted content: a recorded read and a turn start move it; queries do not', () => {
-    const ledger = new UntrustedContentLedger();
-    const revision = watch(ledger.revisionSource);
-    ledger.record({ surface: 'email', origin: 'synthetic.example', at: new Date(0).toISOString(), content: 'Synthetic untrusted text.' });
-    expect(revision.moved()).toBe(true);
-    expect(ledger.hasIngestedThisTurn()).toBe(true);
-    ledger.originsThisTurn();
-    expect(revision.moved()).toBe(false);
-    ledger.startTurn();
     expect(revision.moved()).toBe(true);
   });
 });

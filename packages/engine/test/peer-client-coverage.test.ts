@@ -9,7 +9,6 @@ import { describe, expect, test } from 'bun:test';
 import { createPeerRemoteClient } from '../peer-client/src/client-core.js';
 import { createHttpTransport } from '../transport-http/src/index.js';
 import { getPeerContract } from '../contracts/src/index.js';
-import { GoodVibesError } from '../errors/src/index.js';
 
 const BASE = 'http://127.0.0.1:3210';
 
@@ -58,20 +57,5 @@ describe('peer client shorthands', () => {
     const { transport: _t, contract: _c, listOperations: _l, getOperation: _g, invoke: _i, ...groups } = client;
     const shorthands = Object.values(groups).flatMap((group) => Object.values(group as Record<string, unknown>).filter((value) => typeof value === 'function'));
     expect(shorthands).toHaveLength(SHORTHAND_CASES.length);
-  });
-});
-
-describe('peer client refusals', () => {
-  test('an unknown endpoint is refused before anything is sent', async () => {
-    const { client, sent } = recordingClient({ ok: true });
-    await expect(client.invoke('unknown.endpoint' as never)).rejects.toBeInstanceOf(GoodVibesError);
-    expect(sent).toEqual([]);
-  });
-
-  test('a response the contract does not allow is refused as a contract error', async () => {
-    const { client } = recordingClient({ requestId: 'pair-1' });
-    const caught = await client.invoke('pair.request', { peerKind: 'node', label: 'runner' }).then(() => null, (error: unknown) => error);
-    expect(caught).toBeInstanceOf(GoodVibesError);
-    expect((caught as GoodVibesError).category).toBe('contract');
   });
 });

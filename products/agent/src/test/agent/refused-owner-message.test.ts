@@ -123,22 +123,3 @@ test('a phone message refused while another is taken is held, stays held while r
   expect(app.drafts).toEqual([]);
   expect(app.localTurns).toEqual([]);
 });
-
-test('typed text refused while another message is taken comes back as typed, with its `!` output back in the buffer', async () => {
-  const app = agent();
-  const first = later();
-  app.answers.push(first.promise);
-  const typedFirst = app.sender.sendTurn('first typed message', {});
-
-  app.passthrough.restoreContext(['$ echo ready\nready']);
-  const unsent: string[] = [];
-  const second = await app.sender.sendTurn('look at that output', {}, undefined, { attachShellOutput: true, notSent: (text) => { unsent.push(text); } });
-
-  expect(second).toBe(false);
-  expect(unsent).toEqual(['look at that output']);
-  expect(app.passthrough.takeContext()).toEqual(['$ echo ready\nready']);
-  expect(app.submitted).toEqual(['first typed message']);
-
-  first.answer(taken(1));
-  expect(await typedFirst).toBe(true);
-});

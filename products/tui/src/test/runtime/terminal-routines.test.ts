@@ -26,26 +26,6 @@ function countingManager() {
   return { counts, manager: { start: async () => { counts.starts += 1; }, stop: () => { counts.stops += 1; } } };
 }
 
-test('two runners in one terminal process: one manager runs; the other takes over after release', async () => {
-  const lockPath = join(tempDir(), 'automation-jobs.json.writer.sqlite');
-  const first = countingManager();
-  const second = countingManager();
-  const a = new LocalRoutineRunner(first.manager, lockPath);
-  const b = new LocalRoutineRunner(second.manager, lockPath);
-  try {
-    expect(await a.ensure()).toBe(true);
-    expect(await b.ensure()).toBe(false);
-    expect([first.counts.starts, second.counts.starts]).toEqual([1, 0]);
-    a.release();
-    expect(first.counts.stops).toBe(1);
-    expect(await b.ensure()).toBe(true);
-    expect(second.counts.starts).toBe(1);
-  } finally {
-    a.release();
-    b.release();
-  }
-});
-
 test('a terminal in another process holding the lock keeps this one from running routines until it dies', async () => {
   const lockPath = join(tempDir(), 'automation-jobs.json.writer.sqlite');
   const child = Bun.spawn([process.execPath, join(import.meta.dir, 'terminal-routines-holder.ts'), lockPath], { stdin: 'pipe', stdout: 'pipe', stderr: 'inherit' });

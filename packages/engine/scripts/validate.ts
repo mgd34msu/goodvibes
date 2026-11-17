@@ -112,7 +112,7 @@ const STEPS: readonly Step[] = [
   inPackage('package', 'daemon:build-binary', 'products/daemon', 'build:binary'),
   // The terminal and Agent programs start and finish a turn against a scripted model.
   script('package', 'test:e2e'),
-  // The web UI's three browser journeys against its production build.
+  // The web UI's browser journeys against its production build.
   inPackage('package', 'webui:e2e', 'products/webui', 'e2e'),
   // The daemon program inside bubblewrap: commands, a synthetic send, a hosted session.
   inPackage('package', 'daemon:verify-binary', 'products/daemon', 'verify:binary'),

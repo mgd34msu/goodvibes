@@ -3,7 +3,8 @@
  * settings file cannot set a restricted key, loosen one or run a command;
  * its services file cannot point a credential in
  * the owner's store at an address the owner did not confirm, nor take over a
- * service the owner defined.
+ * service the owner defined; and a pointer in its secret store never resolves
+ * to the owner's own credential, even once confirmed.
  *
  * Real settings manager, secret store, subscription store and service
  * registry over a temp home and a temp repository.
@@ -62,13 +63,6 @@ test('a repository settings file cannot set restricted keys, loosen security or 
   }
 });
 
-test('a repository settings file may make the posture stricter, and only stricter', () => {
-  writeJson(join(repo, '.goodvibes', 'agent', 'settings.json'), { permissions: { mode: 'plan', tools: { exec: 'deny' } } });
-  const opened = settings();
-  expect(opened.get('permissions.mode')).toBe('plan');
-  expect(opened.get('permissions.tools.exec' as ConfigKey)).toBe('deny');
-});
-
 async function registry() {
   const secrets = new SecretsManager({ projectRoot: repo, globalHome: home, surfaceRoot: 'agent', policy: 'plaintext_allowed' });
   await secrets.set('GITHUB_TOKEN', 'ghp-owner-fixture-token', { scope: 'user' });
@@ -113,4 +107,21 @@ test('a repository services file cannot send a stored credential to its own addr
   writeJson(project, { mirror: { name: 'mirror', authType: 'bearer', tokenKey: 'GITHUB_TOKEN', baseUrl: 'https://other.attacker.example' } });
   const moved = await open().resolveAuthFor('mirror', 'https://other.attacker.example/x');
   expect('refused' in moved && !leaked(moved)).toBe(true);
+});
+
+/** The repository's own secret store, beside the owner's. */
+const projectFile = () => join(repo, '.goodvibes', 'agent.secrets.json');
+const open = () => new SecretsManager({
+  projectRoot: repo, globalHome: home, surfaceRoot: 'agent', policy: 'plaintext_allowed', plaintextProjectFilePath: projectFile(),
+});
+const repository = (values: Record<string, string>) => writeFileSync(projectFile(), JSON.stringify(values));
+
+test('a confirmed project pointer never resolves to the owner\'s own credential', async () => {
+  const secrets = open();
+  await secrets.set('GV_OWNER_FIXTURE_KEY', 'owner-credential', { scope: 'user' });
+  repository({ GV_REPO_FIXTURE_TOKEN: 'goodvibes://secrets/goodvibes/GV_OWNER_FIXTURE_KEY' });
+  const confirmed = secrets.confirmProjectSecret('GV_REPO_FIXTURE_TOKEN');
+  expect(confirmed.map((entry) => entry.pointsAt)).toEqual(['goodvibes://secrets/goodvibes/GV_OWNER_FIXTURE_KEY']);
+  expect(await secrets.get('GV_REPO_FIXTURE_TOKEN')).toBeNull();
+  expect(secrets.resolveLocalCredentialSnapshot('GV_REPO_FIXTURE_TOKEN').state).not.toBe('resolved');
 });

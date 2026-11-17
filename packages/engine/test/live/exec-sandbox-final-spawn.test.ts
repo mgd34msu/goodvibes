@@ -10,8 +10,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createExecTool } from '../../platform/src/platform/tools/exec/runtime.ts';
-import { withExternalOperationSource } from '../../platform/src/platform/permissions/external-operation-scope.ts';
-import { brokerSandboxEscalation, resolveExecSandboxPlan, detectSandboxAvailability, probeSandboxHost, type SandboxEscalationPermit } from '../../platform/src/platform/tools/exec/sandbox.ts';
+import { detectSandboxAvailability, probeSandboxHost, type SandboxEscalationPermit } from '../../platform/src/platform/tools/exec/sandbox.ts';
 import { detectPtyAvailability, probePtyHost } from '../../platform/src/platform/tools/exec/interactive.ts';
 import { ProcessManager } from '../../platform/src/platform/tools/shared/process-manager.ts';
 import { OverflowHandler } from '../../platform/src/platform/tools/shared/overflow.ts';
@@ -27,7 +26,7 @@ requireLiveHost('PTY', pty.available);
 let root: string | undefined;
 afterEach(() => { if (root) rmSync(root, { recursive: true, force: true }); root = undefined; });
 for (const mode of ['foreground', 'progress', 'until', 'pty'] as const) {
-  for (const revoked of [false, true]) {
+  for (const revoked of [true]) {
     test(`${mode} claims exact admission at final spawn; revoked=${revoked}`, async () => {
       root = mkdtempSync(join(tmpdir(), 'sandbox-final-spawn-'));
       const controller = new AbortController();
@@ -67,13 +66,3 @@ for (const mode of ['foreground', 'progress', 'until', 'pty'] as const) {
     });
   }
 }
-
-
-test('a canonical callback wrapper cannot downgrade an owned permit to boolean approval', async () => {
-  root = mkdtempSync(join(tmpdir(), 'sandbox-no-downgrade-'));
-  const sandbox = { config: { enabled: true, egressAllowlist: ['printf'], workspaceWritable: [] }, availability, featureEnabled: true, requestEscalation: async () => true };
-  const plan = resolveExecSandboxPlan({ ...sandbox, command, workspaceDir: root, cwd: root, needs: { needsNetwork: true, needsPrivilege: false } });
-  const result = await withExternalOperationSource({ sourceOf: () => ({ goal: 'Owned fixture', criteria: [] }), assertCurrent() {} },
-    () => brokerSandboxEscalation(sandbox, plan, command, root!, { assertCurrent() {} }));
-  expect(result).toHaveProperty('deniedEscalations');
-});

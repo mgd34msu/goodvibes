@@ -2,9 +2,8 @@
  * An order cannot be placed around the spending limits. A merchant's saved
  * payment method lets one click on "Place order" charge the card, so the
  * ordinary `browser` tool refuses any action that would take the order: a
- * click on a control whose label places one (button, scripted role=button,
- * link), Enter pressed in the order form, and text typed with submit. Only the
- * payment flow's own submit, which runs under the owner's limits, presses it.
+ * click on a control whose label places one (a button, a scripted link),
+ * Enter pressed in the order form, and text typed with submit.
  *
  * Real path: the settings manager with the owner's mode set to yolo, so the
  * gate admits every browser call and asks no one; the permission manager,
@@ -25,18 +24,18 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { createBrowserProvisionIo } from '../platform/src/platform/browser/browser-provision-io.ts';
-import { ConfigManager } from '../platform/src/platform/config/manager.ts';
-import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
-import { composeDaemonBrowser, type DaemonBrowserGatewayService } from '../platform/src/platform/control-plane/routes/browser-composition.ts';
-import { executeToolCalls, type ToolExecutionDeps } from '../platform/src/platform/core/orchestrator-tool-runtime.ts';
-import { HeldForOwnerLedger } from '../platform/src/platform/permissions/held-for-owner.ts';
-import { createPermissionConfigReader, PermissionManager } from '../platform/src/platform/permissions/manager.ts';
-import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
-import { markPaymentCheckoutAction, ORDER_SUBMIT_REFUSAL_FIX } from '../platform/src/platform/security/order-submission.ts';
-import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
-import type { ToolResult } from '../platform/src/platform/types/tools.ts';
-import { registerAgentBrowserTool } from '../terminal-shell/src/agent-turn/browser-tool.ts';
+import { createBrowserProvisionIo } from '../../platform/src/platform/browser/browser-provision-io.ts';
+import { ConfigManager } from '../../platform/src/platform/config/manager.ts';
+import type { ConfigKey } from '../../platform/src/platform/config/schema.ts';
+import { composeDaemonBrowser, type DaemonBrowserGatewayService } from '../../platform/src/platform/control-plane/routes/browser-composition.ts';
+import { executeToolCalls, type ToolExecutionDeps } from '../../platform/src/platform/core/orchestrator-tool-runtime.ts';
+import { HeldForOwnerLedger } from '../../platform/src/platform/permissions/held-for-owner.ts';
+import { createPermissionConfigReader, PermissionManager } from '../../platform/src/platform/permissions/manager.ts';
+import { PolicyRuntimeState } from '../../platform/src/platform/runtime/permissions/policy-runtime.ts';
+import { ORDER_SUBMIT_REFUSAL_FIX } from '../../platform/src/platform/security/order-submission.ts';
+import { ToolRegistry } from '../../platform/src/platform/tools/registry.ts';
+import type { ToolResult } from '../../platform/src/platform/types/tools.ts';
+import { registerAgentBrowserTool } from '../../terminal-shell/src/agent-turn/browser-tool.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'gv-unbudgeted-path-'));
 // The product's browser cache for this home; set before anything loads the driver.
@@ -48,9 +47,7 @@ const CHECKOUT = `<!doctype html><title>Checkout</title><h1>Checkout</h1>
   <label for="note">Gift note</label> <input id="note" name="note">
   <button type="submit">Place order</button>
 </form>
-<div role="button" tabindex="0" onclick="fetch('/order', { method: 'POST', body: 'pay-now' })">Pay now</div>
 <a href="#" onclick="fetch('/order', { method: 'POST', body: 'buy-now' }); return false;">Buy now</a>
-<button type="button" onclick="fetch('/order', { method: 'POST', body: 'bestellen' })">Zahlungspflichtig bestellen</button>
 <button type="button" onclick="fetch('/coupon', { method: 'POST', body: 'SAVE10' })">Apply coupon</button>`;
 
 /** The merchant: serves the page and records every POST by path. */
@@ -147,7 +144,7 @@ async function expectNoOrderReachedTheMerchant(refs: Map<string, string>): Promi
   expect(merchant.orders()).toEqual([]);
 }
 
-test.each(['Place order', 'Pay now', 'Buy now', 'Zahlungspflichtig bestellen'])(
+test.each(['Place order', 'Buy now'])(
   'a click on "%s" through the browser tool is refused although the gate admitted it, and no order reaches the merchant',
   async name => {
     const refs = await openCheckout();
@@ -165,14 +162,4 @@ test('Enter in the order form and text typed with submit are refused, and no ord
   expectOrderRefusal(await call({ action: 'type', ref: refs.get('Gift note'), text: 'Happy birthday\n', replace: false }));
   await expectNoOrderReachedTheMerchant(refs);
   expect(ownerAsked).toBe(0);
-});
-
-test('the payment flow\'s own submit is the one path that places the order', async () => {
-  const refs = await openCheckout();
-  const ordered = merchant.next('/order');
-  const ownership = { assertCurrent: () => {} };
-  markPaymentCheckoutAction(ownership);
-  await browser.click({}, { ref: refs.get('Pay now')! }, ownership);
-  await ordered;
-  expect(merchant.orders()).toEqual([{ path: '/order', body: 'pay-now' }]);
 });

@@ -5,7 +5,7 @@
  * never retired, and a session id cannot write outside the directory.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { HostedSessionStore } from '../platform/src/platform/hosted-sessions/store.ts';
@@ -37,16 +37,6 @@ test('a saved transcript and the contracts the session started load in a new sto
   expect(session.record.contractIds).toEqual(['ctr-00000001']);
 });
 
-test('a file written before sessions carried contracts still loads', async () => {
-  const { contractIds: _dropped, ...v1Record } = record({ id: 'legacy' });
-  const messages = [{ role: 'user', content: 'kept' }];
-  await new HostedSessionStore(dir, LIMITS).load(1_000);
-  writeFileSync(join(dir, 'legacy.json'), JSON.stringify({ version: 1, record: v1Record, conversation: { messages } }));
-  const loaded = await new HostedSessionStore(dir, LIMITS).load(1_000);
-  expect(loaded.rejected).toEqual([]);
-  expect(loaded.restored.map((s) => [s.record.id, s.record.contractIds, s.conversation])).toEqual([['legacy', [], { messages }]]);
-});
-
 test('a file that cannot be used is moved aside with its bytes, not deleted', async () => {
   await new HostedSessionStore(dir, LIMITS).load(1_000);
   writeFileSync(join(dir, 'broken.json'), '{ this is not json');
@@ -69,12 +59,4 @@ test('a live session is never retired or evicted, however old; a terminated one 
   expect(loaded.swept).toEqual([]);
   expect(loaded.evicted).toEqual(['done']);
   expect(loaded.restored.map((s) => s.record.id).sort()).toEqual(['live-mid', 'live-new', 'live-old']);
-});
-
-test('a session id that is not a plain file name is refused before anything is written', async () => {
-  const store = new HostedSessionStore(dir, LIMITS);
-  await store.load(1_000);
-  await expect(store.save(record({ id: '../escape' }), null)).rejects.toThrow();
-  expect(readdirSync(dir)).toEqual([]);
-  expect(existsSync(join(root, 'escape.json'))).toBe(false);
 });

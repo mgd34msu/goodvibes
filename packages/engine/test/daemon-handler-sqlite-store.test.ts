@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { afterEach, expect, test } from 'bun:test';
+import { statSync } from 'node:fs';
+import { join } from 'node:path';
 import { HandlerSqliteStore } from '../platform/src/platform/state/daemon-handler-sqlite-store.ts';
+import { capturePrivateSqliteDirectory } from '../platform/src/platform/state/private-sqlite-path.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const SCHEMA = ['CREATE TABLE IF NOT EXISTS routes (id TEXT PRIMARY KEY, value TEXT NOT NULL)'];
@@ -38,14 +39,7 @@ test('a failed transaction leaves no row behind, and committed rows survive a re
   expect(reopened.all('SELECT id FROM routes')).toEqual([{ id: 'kept' }]);
 });
 
-test('a file that is not a database is kept aside, a fresh store starts, and the store says so', async () => {
-  const dir = makeProjectTempDir('handler-store-damaged');
-  const operator = join(dir, '.goodvibes', 'tui', 'operator');
-  mkdirSync(operator, { recursive: true });
-  writeFileSync(join(operator, 'routes.sqlite'), 'not a database at all');
-  const fresh = await store(dir);
-  expect(fresh.all('SELECT id FROM routes')).toEqual([]);
-  expect(fresh.recoveryNotice()).toContain('routes.sqlite.unreadable-1');
-  expect(existsSync(join(operator, 'routes.sqlite.unreadable-1'))).toBe(true);
-  expect(readFileSync(join(operator, 'routes.sqlite.unreadable-1'), 'utf8')).toBe('not a database at all');
+test('a plain workspace gets an owner-only store directory', () => {
+  const { directory } = capturePrivateSqliteDirectory(join(makeProjectTempDir('private-sqlite'), 'repo'), { create: true, assertCurrent() {} });
+  expect(statSync(directory).mode & 0o777).toBe(0o700);
 });

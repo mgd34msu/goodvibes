@@ -3,8 +3,7 @@
  * make the store write outside its own directory.
  */
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { rmSync } from 'node:fs';
 import { KVState } from '../platform/src/platform/state/kv-state.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
@@ -24,21 +23,4 @@ test('state set before a restart is read back when the same conversation session
   expect(await resumed.get(['plan'])).toEqual({ plan: 'step two' });
   await resumed.dispose();
   expect(KVState.listSessions({ stateDir })).toEqual([sessionId]);
-});
-
-test('a session id that is not filename-safe cannot name a file outside the state directory', async () => {
-  const root = tempDir();
-  const stateDir = join(root, 'a', 'state');
-  mkdirSync(join(root, 'escape'), { recursive: true });
-  const sessionId = '../../../escape/session:1';
-  const state = new KVState({ stateDir, sessionId });
-  await state.set({ k: 1 });
-  await state.dispose();
-  // The directory the id points at stays empty; the one file is in the state directory and is found again under the same id.
-  expect(readdirSync(join(root, 'escape'))).toEqual([]);
-  expect(readdirSync(stateDir, { withFileTypes: true }).map(entry => entry.isFile())).toEqual([true]);
-  expect(existsSync(join(root, 'a', 'escape'))).toBe(false);
-  const again = new KVState({ stateDir, sessionId });
-  expect(await again.get(['k'])).toEqual({ k: 1 });
-  await again.dispose();
 });

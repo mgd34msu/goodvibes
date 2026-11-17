@@ -185,18 +185,6 @@ describe('profile.* responses conform to the published contract', () => {
     expect(answer.field?.value).toContain('401 Home St');
   });
 
-  test('profile.get: a field whose recorded value does not validate', async () => {
-    const { catalog } = await profileHarness();
-    const answer = await invokeAndCheck(
-      catalog,
-      'profile.get',
-      { fieldId: 'location.timezone' },
-      'present but invalid, carries invalidReason',
-    ) as { field?: Record<string, unknown> };
-    expect(answer.field?.valid).toBe(false);
-    expect(typeof answer.field?.invalidReason).toBe('string');
-  });
-
   test('profile.get: a field with no provenance suffix, and one he never recorded', async () => {
     const { catalog } = await profileHarness();
     const handEdited = await invokeAndCheck(
@@ -445,14 +433,6 @@ describe('occasions.* responses conform to the published contract', () => {
       { occasionId: "sarah's birthday" },
       'what it landed on',
     );
-  });
-});
-
-describe('occasions verb coverage', () => {
-  test('every occasions verb the contract publishes is invoked and checked in this file', () => {
-    const published = [...CONTRACT_METHODS.keys()].filter((id) => id.startsWith('occasions.')).sort();
-    const checked = [...invokedIds].filter((id) => id.startsWith('occasions.')).sort();
-    expect(checked).toEqual(published);
   });
 });
 

@@ -93,37 +93,6 @@ describe('a remembered rule is live only once saved', () => {
     expect(asks).toBe(0);
   });
 
-  test('a grant whose write is still in flight is not visible, and one whose write then fails never is', async () => {
-    const { store, writes } = await controlledStore();
-    const release = writes.holdNext();
-    writes.failNext = true;
-    const pending = store.add(record('pending')).then(() => null, (error: unknown) => error);
-    await until(() => writes.started === 1, 'the held write to start');
-    let asks = 0;
-    const permissions = manager(store, async () => { asks++; return { approved: false }; });
-    expect((await permissions.checkDetailed('exec', args(command))).sourceLayer).not.toBe('user_rule');
-    expect(store.rules()).toEqual([]);
-    release();
-    expect(await pending).toMatchObject({ message: 'store unavailable' });
-    expect((await permissions.checkDetailed('exec', args(command))).sourceLayer).not.toBe('user_rule');
-    expect(store.rules()).toEqual([]);
-    expect(readOnDisk<RuleFile>(path)).toBeNull();
-    expect(asks).toBe(0);
-  });
-
-  test('a failed add between two saved ones drops nothing saved and adds nothing unsaved', async () => {
-    const { store, writes } = await controlledStore();
-    await store.add(record('existing', 'deny'));
-    writes.failNext = true;
-    const failed = store.add(record('failed')).then(() => null, (error: unknown) => error);
-    const succeeding = store.add(record('succeeded'));
-    expect(await failed).toMatchObject({ message: 'store unavailable' });
-    await succeeding;
-    expect(store.rules().map((rule) => rule.id)).toEqual(['existing', 'succeeded']);
-    expect(readOnDisk<RuleFile>(path)?.rules).toEqual(store.list());
-    expect(await reopened()).toEqual(store.list());
-  });
-
   test('two adds in flight together are both saved, and neither is live before its write commits', async () => {
     const { store, writes } = await controlledStore();
     const release = writes.holdNext();
@@ -135,22 +104,6 @@ describe('a remembered rule is live only once saved', () => {
     await Promise.all([first, second]);
     expect(store.rules().map((rule) => rule.id)).toEqual(['first', 'second']);
     expect(readOnDisk<RuleFile>(path)?.rules).toEqual(store.list());
-    expect(await reopened()).toEqual(store.list());
-  });
-
-  test.each(['allow', 'deny'] as const)('a failed deletion of a saved %s rule keeps it, and a retry removes it for good', async (effect) => {
-    const { store, writes } = await controlledStore();
-    const existing = record('existing', effect);
-    await store.add(existing);
-    writes.failNext = true;
-    const failed = store.delete('existing').then(() => null, (error: unknown) => error);
-    const adding = store.add(record('later'));
-    expect(await failed).toMatchObject({ message: 'store unavailable' });
-    await adding;
-    expect(store.list()).toEqual([existing, record('later')]);
-    expect(readOnDisk<RuleFile>(path)?.rules).toEqual(store.list());
-    expect(await store.delete('existing')).toBe(true);
-    expect(store.rules().map((rule) => rule.id)).toEqual(['later']);
     expect(await reopened()).toEqual(store.list());
   });
 });

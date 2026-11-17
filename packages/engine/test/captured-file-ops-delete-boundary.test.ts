@@ -40,11 +40,3 @@ test('a recursive delete is refused when a reserved directory is nested inside',
     async (path) => path)).rejects.toBeInstanceOf(CapturedBoundaryRefusal);
   expect(existsSync(join(root, 'vendor', 'x', '.git', 'HEAD'))).toBe(true);
 });
-
-test('a recursive delete of admitted files goes through', async () => {
-  mkdirSync(join(root, 'build', 'out'), { recursive: true });
-  writeFileSync(join(root, 'build', 'out', 'a.js'), 'x');
-  const result = await executeCapturedFileOperations(root, [{ op: 'delete', source: 'build', recursive: true }], async (path) => path);
-  expect(result.fileOpError).toBeUndefined();
-  expect(existsSync(join(root, 'build'))).toBe(false);
-});

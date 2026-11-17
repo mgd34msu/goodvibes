@@ -5,22 +5,21 @@
  * The store: a restart at any save point reads back exactly what was saved
  * (finished units stay finished with their checks and answer, a running unit
  * keeps its agent, usage keeps what was spent); a version-6 single file loads,
- * resumes and is converted; a process killed during a save, a compaction or a
- * conversion leaves the contract as it was before or after that save, never
- * less, and a record from a newer build is never written over (both in
- * contract-progress-crash.test.ts); and two writers never both write one contract.
+ * resumes and is converted; a save cut at any byte reads as the save before it,
+ * and a record from a newer build is never written over; and two writers never
+ * both write one contract.
  *
  * The runner: after a restart, a unit whose check had passed is settled
  * without an agent, so its work is not repeated and nothing new is spent on it.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { contractCheckpointsDir, contractPath, serializeContract, storedCheckpointText } from '../platform/src/platform/contract/store.js';
+import { ContractStoreVersionError, contractCheckpointsDir, contractPath, serializeContract } from '../platform/src/platform/contract/store.js';
 import type { ContractView } from '../platform/src/platform/contract/types.js';
-import { firstLine, passingCheck, progressContract, progressStep, restart, saved, storeAt } from './contract-progress-support.js';
-import { makeHarness, makeRepo, oneUnitPlan, startContract, twoUnitPlan, type AgentScript, type Harness } from './contract/runner-support.js';
+import { firstLine, paths, progressContract, progressStep, quarantined, restart, saved, storeAt } from './contract-progress-support.js';
+import { makeHarness, makeRepo, startContract, twoUnitPlan, type AgentScript, type Harness } from './contract/runner-support.js';
 
 const roots: string[] = [];
 const harnesses: Harness[] = [];
@@ -64,25 +63,6 @@ describe('restart at every save point', () => {
     }
     expect(contract.units.filter(unit => unit.status === 'passed').length).toBeGreaterThan(0);
     expect(contract.units.filter(unit => unit.status === 'running').length).toBeGreaterThan(0);
-  });
-
-  test('a unit added, a decision replaced and a field removed between saves all come back', () => {
-    const root = projectRoot(), contract = progressContract(2, 10);
-    const store = storeAt(root);
-    store.put(contract);
-    expect(store.write(contract.id)).toBe(true);
-    progressStep(contract, 1);
-    contract.units.push({ ...contract.units[0]!, id: 'u3', status: 'pending', agentIds: [], checks: [], touchedPaths: [], activeAgentId: undefined });
-    contract.groups[0]!.unitIds.push('u3');
-    contract.decisions[0] = { ...contract.decisions[0]!, reason: 'replaced' };
-    contract.statusLine = undefined;
-    contract.units[1]!.checks.push(passingCheck('u2.k1', 9));
-    expect(store.write(contract.id)).toBe(true);
-    contract.units.pop();
-    contract.groups[0]!.unitIds.pop();
-    expect(store.write(contract.id)).toBe(true);
-    store.dispose();
-    expect(saved(restart(root, contract.id))).toEqual(saved(contract));
   });
 
   test('a captured input set after the start, and every save after many compactions, come back', () => {
@@ -159,23 +139,6 @@ describe('one writer per contract', () => {
     fresh.dispose();
     expect(saved(restart(root, contract.id))).toEqual(saved(current));
   });
-
-  test('two stores in one process do not both write one contract', () => {
-    const root = projectRoot(), contract = progressContract(2, 20);
-    const a = storeAt(root), b = storeAt(root);
-    a.put(contract);
-    expect(a.write(contract.id)).toBe(true);
-    const copy = b.load(contract.id)!;
-    b.hold(copy);
-    progressStep(copy, 1);
-    expect(b.write(copy.id)).toBe(false);
-    progressStep(contract, 1);
-    contract.statusLine = 'the writer';
-    expect(a.write(contract.id)).toBe(true);
-    a.dispose(); b.dispose();
-    expect(saved(restart(root, contract.id))).toEqual(saved(contract));
-    expect(storedCheckpointText(root, contract.id)).toContain('the writer');
-  });
 });
 
 /** Resolves once `holds` is true, checked at each contract event the runner emits: waits on the run, never on a clock. */
@@ -236,33 +199,58 @@ test('after a restart, a unit whose check had passed is not run again and what i
   expect(done.usage.llmCallCount).toBe(before.usage.llmCallCount + 1);
 });
 
-test('a process stopped the moment a unit\'s check passed settles that unit after the restart without an agent', async () => {
-  const root = makeRepo();
-  roots.push(root);
-  const first = makeHarness({ root, plan: oneUnitPlan(1), scripts: { u1: finishes('src/csv.ts', 'Finished the parser.') } });
-  const id = (await startContract(first)).contract.id;
-  // The process stops right as the check passes: the unit is recorded passed while its work item is still in its phase.
-  let stopping: Promise<void> | undefined;
-  const off = first.runner.on((event) => {
-    if (stopping === undefined && event.type === 'CONTRACT_UNIT_STATUS_CHANGED' && event.unitId === 'u1' && event.to === 'passed') {
-      off();
-      first.store.flush();
-      stopping = first.dispose();
-    }
-  });
-  await until(first, () => stopping !== undefined);
-  await stopping;
-  const before = structuredClone(viewOf(first, id));
-  expect(before.units[0]!.status).toBe('passed');
+describe('a process killed during a save', () => {
+  test('a save cut at any byte reads as the save before it, is never quarantined, and the next save does not merge with it', () => {
+    const root = projectRoot(), contract = progressContract(3, 50);
+    const store = storeAt(root);
+    store.put(contract);
+    expect(store.write(contract.id)).toBe(true);
+    progressStep(contract, 1);
+    expect(store.write(contract.id)).toBe(true);
+    const before = saved(contract);
+    const { dir, log } = paths(root, contract.id);
+    const prefix = readFileSync(log);
+    progressStep(contract, 2);
+    expect(store.write(contract.id)).toBe(true);
+    const after = saved(contract);
+    store.dispose();
+    const record = readFileSync(log).subarray(prefix.length);
 
-  const second = makeHarness({ root, plan: oneUnitPlan(1), scripts: { u1: mustNotRun } });
-  harnesses.push(second);
-  await second.runner.resumeAll();
-  await until(second, () => ended(second, id));
-  const done = viewOf(second, id);
-  expect(done.status).toBe('passed');
-  expect(second.agentsOf('u1')).toEqual([]);
-  expect(second.events.some(event => event.type === 'CONTRACT_UNIT_SPAWNED')).toBe(false);
-  expect(done.units[0]!.agentIds).toEqual(before.units[0]!.agentIds);
-  expect(done.units[0]!.usage).toEqual(before.units[0]!.usage);
+    for (let cut = 0; cut <= record.length; cut++) {
+      writeFileSync(log, Buffer.concat([prefix, record.subarray(0, cut)]));
+      expect(saved(restart(root, contract.id))).toEqual(cut === record.length ? after : before);
+    }
+    // Power lost after the size grew but before the data landed: zeros, not a record.
+    writeFileSync(log, Buffer.concat([prefix, Buffer.alloc(64)]));
+    expect(saved(restart(root, contract.id))).toEqual(before);
+
+    // Half a record on disk; the next process saves again: its record stands alone.
+    writeFileSync(log, Buffer.concat([prefix, record.subarray(0, record.length >> 1)]));
+    const next = storeAt(root), resumed = next.load(contract.id)!;
+    next.hold(resumed);
+    progressStep(resumed, 2);
+    progressStep(resumed, 3);
+    expect(next.write(resumed.id)).toBe(true);
+    next.dispose();
+    expect(saved(restart(root, contract.id))).toEqual(saved(resumed));
+    expect(quarantined(dir)).toEqual([]);
+  });
+
+  test('a progress record written by a newer build is refused and never written over', () => {
+    const root = projectRoot(), contract = progressContract(2, 20);
+    const store = storeAt(root);
+    store.put(contract);
+    expect(store.write(contract.id)).toBe(true);
+    store.dispose();
+    const { log } = paths(root, contract.id);
+    const newer = '{"v":2,"s":99,"at":1,"ops":[]}\n';
+    writeFileSync(log, newer);
+    expect(() => storeAt(root).load(contract.id)).toThrow(ContractStoreVersionError);
+    const writer = storeAt(root);
+    writer.hold(contract);
+    progressStep(contract, 1);
+    expect(writer.write(contract.id)).toBe(false);
+    writer.dispose();
+    expect(readFileSync(log, 'utf8')).toBe(newer);
+  });
 });

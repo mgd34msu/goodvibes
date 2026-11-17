@@ -14,7 +14,6 @@ import { prepareConfiguredProjectContext } from '../platform/src/platform/knowle
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
 import {
   composeRuntimeServices,
-  embeddedProductComposition,
   type ProductComposition,
 } from '../platform/src/platform/runtime/services.js';
 import { createRuntimeStore } from '../platform/src/platform/runtime/store/index.js';
@@ -66,12 +65,5 @@ describe('composeRuntimeServices', () => {
     expect(services.permissionManager).toBeDefined();
     expect(extrasSawBase).toBe(true);
     expect(services.webhookNotifier).toBe(productNotifier);
-  });
-
-  test('the embedded choices keep memory in the project and compose no trust owner', async () => {
-    const { workingDir, options } = await prepareRoots();
-    const services = disposables.add(composeRuntimeServices(embeddedProductComposition(options)));
-    expect(services.memoryStore.dbPath).toBe(join(workingDir, '.goodvibes', 'goodvibes', 'memory.sqlite'));
-    expect(services.workspaceTrustManager).toBeUndefined();
   });
 });

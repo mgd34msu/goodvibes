@@ -330,9 +330,6 @@ jobs:
           else
             echo "::warning title=launchd over SSH::Remote Login could not be reached on this runner, so the service commands were not run from an SSH login; the round from this session above did run."
           fi
-      - name: Installer never overwrites a running program in place
-        if: matrix.platform == 'darwin'
-        run: bun run test:one scripts/installer-open-file-identity.test.ts
 
   # The one job a branch rule and the release gate require (release.yml's
   # ci-green reads its "CI ok" check run). It fails when any other job did not

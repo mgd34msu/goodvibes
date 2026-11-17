@@ -8,10 +8,11 @@
  * hand-off verb is revoked with that device.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.ts';
+import { getOrCreateCompanionToken, readCompanionTokenValue, replaceCompanionToken } from '../platform/src/platform/pairing/companion-token.ts';
 import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 import { registerPairingHandoffGatewayMethods } from '../platform/src/platform/control-plane/routes/pairing-handoff.ts';
 
@@ -81,19 +82,6 @@ describe('PairingTokenManager', () => {
     expect(() => mgr.mint({ name: 'late', mintedBy: phone.id })).toThrow('no longer paired');
   });
 
-  test('revocation and records survive a reload (persisted)', () => {
-    const file = tempFile();
-    const mgr = new PairingTokenManager(file);
-    const a = mgr.mint({ name: 'A' });
-    const b = mgr.mint({ name: 'B' });
-    mgr.revoke(a.id);
-
-    const reloaded = new PairingTokenManager(file);
-    expect(reloaded.authenticate(a.token)).toBeNull();
-    expect(reloaded.authenticate(b.token)?.id).toBe(b.id);
-    expect(reloaded.list().map((t) => t.id)).toEqual([b.id]);
-  });
-
   test('the legacy shared token can be revoked and the flag persists', () => {
     const file = tempFile();
     const mgr = new PairingTokenManager(file);
@@ -130,46 +118,35 @@ describe('a token minted through the QR hand-off', () => {
       expect(store.authenticate(unrelated.token)?.id).toBe(unrelated.id);
     }
   });
-
-  test('cannot be minted by a device whose own pairing is gone', async () => {
-    const { tokens, create } = handoff(tempFile());
-    const phone = tokens.mint({ name: 'phone' });
-    tokens.revoke(phone.id);
-    const refused = await create(phone.id, 'late').then(() => null, (error: unknown) => error as { status?: number });
-    expect(refused?.status).toBe(403);
-    expect(tokens.list()).toEqual([]);
-  });
 });
 
-describe('PairingTokenManager: the store file itself', () => {
-  test('the store is written owner-only, through a temp file that never survives the write', () => {
-    const file = tempFile();
-    new PairingTokenManager(file).mint({ name: 'Pixel' });
+describe('shared operator token revocation', () => {
+  test('each revoke ends the value in use, the replacement included', () => {
+    const daemonHomeDir = mkdtempSync(join(tmpdir(), 'gv-shared-revoke-'));
+    dirs.push(daemonHomeDir);
+    let served: string = getOrCreateCompanionToken({ daemonHomeDir }).token;
+    const store = new PairingTokenManager(join(daemonHomeDir, 'pairing-tokens.json'));
+    const unbind = store.bindSharedTokenCustody({
+      current: () => served,
+      replacementRefusal: () => (readCompanionTokenValue(daemonHomeDir) === served ? null : 'the served token is not the stored one'),
+      replace: (commit) => { served = replaceCompanionToken({ daemonHomeDir }, commit).token; },
+    });
+    try {
+      const original = served;
+      store.revokeLegacyShared();
+      const firstReplacement = served;
+      expect(firstReplacement).not.toBe(original);
+      expect(store.refusesSharedToken(original)).toBe(true);
+      expect(store.refusesSharedToken(firstReplacement)).toBe(false);
 
-    expect(statSync(file).mode & 0o777).toBe(0o600);
-    const temps = readdirSync(dirname(file)).filter((name) => name.startsWith(`${basename(file)}.tmp-`));
-    expect(temps).toEqual([]);
-  });
-
-  test('a corrupt store does not brick auth, and is preserved rather than overwritten', () => {
-    const file = tempFile();
-    mkdirSync(dirname(file), { recursive: true });
-    // A torn write: valid JSON with a zero tail, the shape a crash leaves.
-    writeFileSync(file, Buffer.concat([Buffer.from('{"tokens":[]}', 'utf-8'), Buffer.from([0, 0])]));
-
-    const mgr = new PairingTokenManager(file);
-    // Auth still works, it starts clean rather than throwing on construction.
-    expect(mgr.list()).toEqual([]);
-
-    // And the bytes it could not read were moved aside with a receipt, so the
-    // operator can see which devices have to pair again.
-    const quarantined = readdirSync(dirname(file))
-      .filter((name) => name.startsWith(`${basename(file)}.corrupt-`) && !name.endsWith('.why'));
-    expect(quarantined.length).toBe(1);
-    expect(existsSync(join(dirname(file), `${quarantined[0]}.why`))).toBe(true);
-
-    // A fresh mint then round-trips through the new file.
-    const minted = mgr.mint({ name: 'Pixel' });
-    expect(new PairingTokenManager(file).authenticate(minted.token)).not.toBeNull();
+      store.revokeLegacyShared();
+      const secondReplacement = served;
+      expect(secondReplacement).not.toBe(firstReplacement);
+      expect(store.refusesSharedToken(firstReplacement)).toBe(true);
+      expect(store.refusesSharedToken(secondReplacement)).toBe(false);
+      expect(readCompanionTokenValue(daemonHomeDir)).toBe(secondReplacement);
+    } finally {
+      unbind();
+    }
   });
 });

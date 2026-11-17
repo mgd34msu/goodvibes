@@ -110,13 +110,6 @@ export async function gotoView(page: Page, view: string): Promise<void> {
   await expect(page.locator('.app-shell')).toBeVisible();
 }
 
-/** Resolves after the page has painted two more frames (React has committed and run its effects). */
-export async function nextFrames(page: Page): Promise<void> {
-  await page.evaluate(
-    () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
-  );
-}
-
 /**
  * Make the primary navigation visible. On a phone (under 900) the sidebar is a
  * drawer behind the header's menu button; on desktop it is already on screen.
@@ -155,11 +148,6 @@ export async function openRow(page: Page, text: string | RegExp): Promise<Locato
   const detail = page.locator('.dv-detail');
   await expect(detail).toBeVisible();
   return detail;
-}
-
-/** The open detail pane of a data view. */
-export function detailPane(page: Page): Locator {
-  return page.locator('.dv-detail');
 }
 
 /**

@@ -14,12 +14,21 @@ import { HttpStatusError } from '@goodvibes-jev/engine/errors';
 import { Notifier } from '../platform/src/platform/integrations/notifier.ts';
 import { SlackSocketModeClient, type SlackIntegration } from '../platform/src/platform/integrations/slack.ts';
 import { NtfyIntegration, ntfyOutboundDedup } from '../platform/src/platform/integrations/ntfy.ts';
+import { DeliveryError, DeliveryQueue } from '../platform/src/platform/integrations/delivery.ts';
 
 const dirs: string[] = [];
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   ntfyOutboundDedup.reset();
 });
+
+const terminal = () => new DeliveryError('synthetic terminal failure', 'terminal');
+/** A delivery queue holding one dead letter. */
+async function seeded() {
+  const queue = new DeliveryQueue();
+  await queue.enqueue('fixture', 'retained', 'original synthetic payload', async () => { throw terminal(); });
+  return queue;
+}
 
 describe('failed notifications', () => {
   test('survive a restart and are delivered by a resend, which empties the list and its file', async () => {
@@ -50,6 +59,15 @@ describe('failed notifications', () => {
     } finally {
       await after.close();
     }
+  });
+
+  test('a replay that fails again leaves one row, not two', async () => {
+    const queue = await seeded();
+    try {
+      const result = await queue.replay(async () => { throw terminal(); });
+      expect(result.map((entry) => entry.outcome)).toEqual(['dead_letter']);
+      expect(queue.getDlq().map((entry) => entry.payload)).toEqual(['original synthetic payload']);
+    } finally { await queue.close(); }
   });
 });
 

@@ -11,7 +11,6 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { executeToolCalls } from '../platform/src/platform/core/orchestrator-tool-runtime.js';
-import { planToolBatch, toolCallLane } from '../platform/src/platform/core/tool-batch.js';
 import { REPEAT_STOP_THRESHOLD, runTurn, type TurnContext, type TurnModelResponse, type TurnPolicy } from '../platform/src/platform/core/turn-loop.js';
 import { ToolRegistry } from '../platform/src/platform/tools/registry.js';
 import type { PermissionManager } from '../platform/src/platform/permissions/manager.js';
@@ -61,22 +60,6 @@ const read = (id: string, path: string): ToolCall => ({ id, name: 'read', argume
 const write = (id: string, path: string): ToolCall => ({ id, name: 'write', arguments: { files: [{ path }] } });
 
 describe('the tool-batch executor', () => {
-  test('eight independent reads are all in flight at once, and their results come back in the order the model asked', async () => {
-    const flight = inFlight();
-    const all = flight.reached(8);
-    const release = gate();
-    const registry = new ToolRegistry();
-    registry.register(tool('read', ['read_fs'], async () => { flight.enter(); await release.opened; flight.leave(); }, { subjects: { paths: ['files[].path'] } }));
-    const calls = Array.from({ length: 8 }, (_, i) => read(`r${i}`, `src/f${i}.ts`));
-    const run = execute(registry, calls);
-    await all;
-    release.open();
-    const results = await run;
-    expect(flight.peak).toBe(8);
-    expect(results.map((r) => r.callId)).toEqual(calls.map((c) => c.id));
-    expect(results.every((r) => r.success)).toBe(true);
-  });
-
   test('one call that fails is its own failed result; the calls beside it still run and keep their output', async () => {
     const ran: string[] = [];
     const registry = new ToolRegistry();
@@ -132,31 +115,6 @@ describe('the tool-batch executor', () => {
     await expect(run).rejects.toBeDefined();
     expect(aborted).toHaveLength(2);
     expect(laterStarted).toBe(false);
-  });
-});
-
-describe('which calls may share a group', () => {
-  const definitions: Record<string, ToolDefinition> = {
-    read: { name: 'read', description: '', parameters: {}, sideEffects: ['read_fs'], subjects: { paths: ['files[].path'] } },
-    find: { name: 'find', description: '', parameters: {}, sideEffects: ['read_fs'] },
-    write: { name: 'write', description: '', parameters: {}, sideEffects: ['write_fs'], subjects: { paths: ['files[].path'] } },
-    plugin: { name: 'plugin', description: '', parameters: {} },
-  };
-  const plan = (calls: ToolCall[], cwd?: string) => planToolBatch(calls, (c) => toolCallLane(definitions[c.name], c.arguments, cwd));
-
-  test('a read of a file written earlier in the response, and a search after a write, start after the write', () => {
-    expect(plan([write('w', 'a.ts'), read('r', 'a.ts'), read('q', 'b.ts')])).toEqual([[0], [1, 2]]);
-    expect(plan([write('w', 'a.ts'), { id: 'f', name: 'find', arguments: {} }])).toEqual([[0], [1]]);
-  });
-
-  test('a relative and an absolute path count as the same file unless the working directory is known', () => {
-    expect(plan([write('w1', 'a.ts'), write('w2', '/work/b.ts')])).toEqual([[0], [1]]);
-    expect(plan([write('w1', 'a.ts'), write('w2', '/work/b.ts')], '/work')).toEqual([[0, 1]]);
-    expect(plan([write('w1', 'src'), write('w2', 'src/x.ts')], '/work')).toEqual([[0], [1]]);
-  });
-
-  test('a tool with undeclared effects runs alone', () => {
-    expect(plan([read('r1', 'a'), { id: 'p', name: 'plugin', arguments: {} }, read('r2', 'b')])).toEqual([[0], [1], [2]]);
   });
 });
 

@@ -1232,13 +1232,3 @@ export const EXEC_PROMPT_APPROVAL = {
   updatedAt: 530,
   metadata: { source: 'exec-prompt', command: 'ssh deploy@staging.internal' },
 };
-
-// One pre-seeded durable rule for the permissions-rules view proofs.
-export const SEEDED_PERMISSION_RULE = {
-  id: 'rule-seeded-1',
-  effect: 'allow',
-  tier: 'path',
-  tool: 'edit',
-  description: 'edits under src/**',
-  createdAt: 400,
-};

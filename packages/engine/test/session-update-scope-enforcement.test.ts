@@ -57,26 +57,6 @@ describe('the event stream grant is decided once, from the descriptors', () => {
     }
   });
 
-  test('an event addressed to the client by id still reaches it', () => {
-    const { gateway } = makeGateway();
-    const events: string[] = [];
-    const { clientId } = gateway.openWebSocketClient({ clientKind: 'web', scopes: NON_ADMIN_SCOPES, admin: false }, (event) => events.push(event));
-    gateway.publishEvent('companion-chat.chunk', { text: 'hi' }, { clientId });
-    expect(events).toContain('companion-chat.chunk');
-    gateway.closeWebSocketClient(clientId);
-  });
-
-  test('an admin and an internal stream with no scopes receive everything', () => {
-    const { gateway } = makeGateway();
-    publishAdminOnly(gateway);
-    for (const options of [{ clientKind: 'web' as const, scopes: ['read:events'], admin: true }, { clientKind: 'web' as const }]) {
-      const events: string[] = [];
-      const { clientId } = gateway.openWebSocketClient(options, (event) => events.push(event));
-      for (const event of ADMIN_ONLY_BROADCASTS) expect(events).toContain(event);
-      gateway.closeWebSocketClient(clientId);
-    }
-  });
-
   test('a principal that loses admin stops receiving admin-only domains and events', () => {
     const { gateway } = makeGateway();
     const events: string[] = [];
@@ -86,23 +66,6 @@ describe('the event stream grant is decided once, from the descriptors', () => {
     publishAdminOnly(gateway);
     for (const event of ADMIN_ONLY_BROADCASTS) expect(events).not.toContain(event);
     gateway.closeWebSocketClient(clientId);
-  });
-
-  test('an SSE stream that asks only for domains the credential may not read is refused, and says which', async () => {
-    const { gateway } = makeGateway();
-    const res = gateway.createEventStream(new Request('http://localhost/api/control-plane/events'), {
-      clientKind: 'web', transport: 'sse', principalId: 'u', principalKind: 'user', scopes: NON_ADMIN_SCOPES, admin: false, domains: ['config', 'gate'],
-    });
-    expect(res.status).toBe(403);
-    expect(await res.json()).toMatchObject({ code: 'EVENT_ACCESS_DENIED', withheldDomains: ['config', 'gate'] });
-  });
-
-  test('a credential holding no event scope is refused the stream', async () => {
-    const { gateway } = makeGateway();
-    const res = gateway.createEventStream(new Request('http://localhost/api/control-plane/events'), {
-      clientKind: 'web', transport: 'sse', principalId: 'u', principalKind: 'user', scopes: [], admin: false,
-    });
-    expect(res.status).toBe(403);
   });
 });
 

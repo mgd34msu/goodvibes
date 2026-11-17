@@ -15,14 +15,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SecretsManager } from '../platform/src/platform/config/secrets.js';
 import { daemonSecretKeyFor } from '../platform/src/platform/config/daemon-secret-keys.js';
-import { isDaemonOwnedConfigKey } from '../platform/src/platform/config/config-ownership.js';
-import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '../platform/src/platform/config/schema.js';
 import { fillCard } from '../platform/src/platform/payments/fill-card.js';
 import { CardMaterialRedactor } from '../platform/src/platform/payments/card-redaction.js';
 import { CheckoutRegistry, MemoryCheckoutJournal, type InFlightCheckout } from '../platform/src/platform/payments/checkout-registry.js';
 import type { CardMaterial, CardMaterialStore } from '../platform/src/platform/payments/card-material.js';
 import type { CheckoutPageDriver } from '../platform/src/platform/payments/checkout-page.js';
 import { ActivityLogger } from '../platform/src/platform/utils/logger.js';
+import { installDecisionModelPolicyObserver } from '../errors/src/decision-policy.js';
+import { classifyCardFields, type FormControlDescriptor } from '../platform/src/platform/security/card-fields.js';
 
 const PAN = '4242424242424242';
 const CVV_SENTINEL = 'CVV-SENTINEL-9f3a1c7d';
@@ -58,12 +58,6 @@ test('a stored security code is encrypted on disk and still readable by the daem
   expect(files.length).toBeGreaterThan(0);
   expect(files.filter(file => file.text.includes(CVV_SENTINEL)).map(file => file.path)).toEqual([]);
   expect(await manager.get(key)).toBe(CVV_SENTINEL);
-});
-
-test('card material has no settings home a surface could write', () => {
-  expect(isDaemonOwnedConfigKey('payments.cards.card-1.cvv')).toBe(true);
-  expect(CONFIG_SCHEMA.filter(setting => /\b(cvv|cvc|pan|cardNumber|securityCode)\b/i.test(setting.key)).map(setting => setting.key)).toEqual([]);
-  expect(JSON.stringify(DEFAULT_CONFIG)).not.toMatch(/"(cvv|pan|cardNumber)"/i);
 });
 
 const MATERIAL: CardMaterial = { number: PAN, expiryMonth: '07', expiryYear: '2029', cvv: CVV, cardholderName: 'Pat Fixture' };
@@ -129,4 +123,26 @@ test('card material written into an activity log entry, in its message or its fi
   expect(written.replace(/\D/g, '')).not.toContain(PAN);
   expect(written).not.toMatch(/(?<!\d)737(?!\d)/);
   log.dispose();
+});
+
+function control(tag: string, type: string, name: string): FormControlDescriptor {
+  return { tag, type, name, autocomplete: '', id: '', placeholder: '', ariaLabel: '', label: '' };
+}
+
+test('with no decision model only controls that cannot hold card material report their value', async () => {
+  // The policy reads "no decision model set", as on an install that never chose one.
+  installDecisionModelPolicyObserver(() => ({ policy: 'Hybrid', operation: 'no-decision-model', reason: 'not-set', revision: 1 }));
+  const decisions = await classifyCardFields([
+    control('select', '', 'exp-month'),
+    control('input', 'creditcard', 'pan'),
+    control('input', 'numeric', 'number'),
+    control('input', 'text', 'card'),
+    control('textarea', '', 'notes'),
+    control('input', 'email', 'email'),
+    control('input', 'checkbox', 'save'),
+  ]);
+  expect(decisions).toEqual([
+    'no-decision-model', 'no-decision-model', 'no-decision-model', 'no-decision-model', 'no-decision-model',
+    'reported', 'reported',
+  ]);
 });

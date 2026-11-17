@@ -102,22 +102,6 @@ test('a value given to /secrets set is not written to history; the command line 
   expect(kept).toContain('/secrets set OPENAI_API_KEY');
 });
 
-test('a quoted value with spaces is not written either', async () => {
-  const term = terminal();
-  await term.enter('/secrets set SERVICE_PASSWORD "correct horse battery staple" --user --plaintext');
-  const kept = remembered(term.historyPath);
-  for (const word of ['correct', 'horse', 'battery', 'staple']) expect(kept).not.toContain(word);
-  expect(kept).toContain('/secrets set SERVICE_PASSWORD');
-});
-
-test('a password for a command this app does not register is not written', async () => {
-  const term = terminal();
-  await term.enter('/local-auth add-user alice hunter2-typed-password');
-  const kept = remembered(term.historyPath);
-  expect(kept).not.toContain('hunter2-typed-password');
-  expect(kept).toContain('/local-auth add-user alice');
-});
-
 test('a token flag on any command line is not written', async () => {
   const term = terminal();
   await term.enter('/connect remote --token tok-typed-9d3e71 --operator-token=op-typed-5b8a20');

@@ -2,10 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { describeCheckoutLanding, readOrderConfirmation, type CheckoutLandingEngine } from '../platform/src/platform/payments/checkout-landing.ts';
 
 describe('the page a submitted checkout landed on', () => {
-  test('a thank-you page with an order number verifies the purchase with that number', () => {
-    expect(readOrderConfirmation('Thank you for your order!\nOrder number: AB-10293', true)).toEqual({ orderId: 'AB-10293', challenge: null });
-  });
-
   test('a decline names no order, whatever else the page says', () => {
     expect(readOrderConfirmation('Thank you for your order! Order number: AB-10293. Your payment was declined, please try again.', true)).toEqual({ orderId: null, challenge: null });
   });

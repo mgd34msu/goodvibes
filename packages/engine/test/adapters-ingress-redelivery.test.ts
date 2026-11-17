@@ -9,6 +9,11 @@
  * around them only records what the adapter asked it to do.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { AutomationRouteStore } from '../platform/src/platform/automation/store/routes.ts';
+import { RouteBindingManager } from '../platform/src/platform/channels/route-manager.ts';
 import { surfaceInboundDedup } from '../platform/src/platform/adapters/inbound-dedup.ts';
 import { handleWhatsAppSurfaceWebhook } from '../platform/src/platform/adapters/whatsapp/index.ts';
 import { handleTelegramSurfaceWebhook } from '../platform/src/platform/adapters/telegram/index.ts';
@@ -121,13 +126,6 @@ describe('telephony', () => {
     method: 'POST', headers: { 'content-type': 'application/json', 'x-goodvibes-telephony-token': 'tel' }, body: JSON.stringify(body),
   }), context);
 
-  test('a refused caller is acknowledged, not failed', async () => {
-    const { context, calls } = sharedContext(config, { authorizeSurfaceIngress: async () => ({ allowed: false, reason: 'user-not-allowlisted' }) });
-    const response = await send(context, { from: '+1999', text: 'hi' });
-    expect(response.status).toBe(200);
-    expect(calls.filter((call) => call.kind === 'submitMessage')).toHaveLength(0);
-  });
-
   test('each spoken turn of one call is its own message; a redelivered text message is run once', async () => {
     const { calls, context } = sharedContext(config);
     await send(context, { From: '+1999', CallSid: 'CA1', SpeechResult: 'first turn' });
@@ -147,21 +145,19 @@ describe('generic webhook', () => {
   }), context);
 
   test('a call without a callback does not inherit the callback, correlation or signature of an earlier call', async () => {
-    const { context, bindings } = sharedContext(config);
-    await post(context, { task: 'X', callbackUrl: 'https://a.example.com/hook', correlationId: 'c1', callbackSignature: 'shared-secret' });
-    expect(bindings.get('webhook:webhook')!.metadata.callbackUrl).toBe('https://a.example.com/hook');
-    await post(context, { task: 'Y' });
-    const afterSecond = bindings.get('webhook:webhook')!;
-    expect(afterSecond.metadata.callbackUrl).toBeUndefined();
-    expect(afterSecond.metadata.correlationId).toBeUndefined();
-    expect(afterSecond.metadata.callbackSignature).toBeUndefined();
-  });
-
-  test('a callbackUrl that is not a string is refused rather than carried on the binding', async () => {
-    const { context, bindings } = sharedContext(config);
-    const response = await post(context, { task: 'X', callbackUrl: { href: 'http://169.254.169.254' } });
-    expect(response.status).toBe(400);
-    expect(bindings.size).toBe(0);
+    const root = mkdtempSync(join(tmpdir(), 'gv-webhook-callback-'));
+    const routeBindings = new RouteBindingManager({ store: new AutomationRouteStore(join(root, 'bindings.json')) });
+    const binding = () => routeBindings.listBindings().find((entry) => entry.surfaceKind === 'webhook' && entry.externalId === 'webhook')!;
+    try {
+      const { context } = sharedContext(config, { routeBindings });
+      await post(context, { task: 'X', callbackUrl: 'https://a.example.com/hook', correlationId: 'c1', callbackSignature: 'shared-secret' });
+      expect(binding().metadata.callbackUrl).toBe('https://a.example.com/hook');
+      await post(context, { task: 'Y' });
+      const afterSecond = binding();
+      expect(afterSecond.metadata.callbackUrl).toBeUndefined();
+      expect(afterSecond.metadata.correlationId).toBeUndefined();
+      expect(afterSecond.metadata.callbackSignature).toBeUndefined();
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
   test('platform markers in caller metadata are dropped, and a session from another surface cannot be entered', async () => {

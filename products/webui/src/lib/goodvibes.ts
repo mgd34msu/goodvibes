@@ -23,6 +23,7 @@ import { readClientCompatibilityFloor, recordObservedClientCompatibilityFloor } 
 // type is what stops a caller passing neither. Type-only import: no runtime dependency.
 import type { ProfileForgetInput } from './owner-profile';
 import type {
+  JsonValue,
   OperatorMethodId,
   OperatorMethodInput,
   OperatorMethodOutput,
@@ -751,6 +752,24 @@ function approveInput(approvalId: string, input: ApprovalApproveInput = {}): Ope
   return { ...rest, approvalId, rememberTier: tier };
 }
 
+/** Whether a value survives JSON as it is: no function, symbol, class instance, NaN or Infinity silently changed on the way. */
+function isJsonValue(value: unknown, depth = 0): value is JsonValue {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value !== 'object' || depth > 64) return false;
+  if (Array.isArray(value)) return value.every((entry) => isJsonValue(entry, depth + 1));
+  const prototype: unknown = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  // An undefined field is left out of the JSON, as the daemon reads it.
+  return Object.values(value).every((entry) => entry === undefined || isJsonValue(entry, depth + 1));
+}
+
+/** The config.set value: one JSON cannot carry as it is is refused before anything is sent. */
+function configSetValue(key: string, value: unknown): JsonValue {
+  if (isJsonValue(value)) return value;
+  throw new Error(`The value for ${key} is not plain JSON (text, numbers, true/false, null, and lists or objects of those), so nothing was written. Enter it again.`);
+}
+
 /** Optional deny payload: `note` rides the audit trail; `reason` is the broker's structured user-declined feedback. */
 export type ApprovalDenyInput = Pick<OperatorMethodInput<'approvals.deny'>, 'note' | 'reason'>;
 
@@ -1059,8 +1078,8 @@ export const client = {
     // daemonOwned).
     config: {
       get: () => invokeOperator('config.get'),
-      set: (key: string, value: unknown): Promise<ConfigSetOutcome> =>
-        invokeOperator('config.set', { key, value }),
+      set: async (key: string, value: unknown): Promise<ConfigSetOutcome> =>
+        invokeOperator('config.set', { key, value: configSetValue(key, value) }),
       // Removes the key's explicit value so it reads as its default again; the
       // outcome reports the value the daemon now holds and the file it came from.
       reset: (key: string): Promise<ConfigSetOutcome> => invokeOperator('config.reset', { key }),

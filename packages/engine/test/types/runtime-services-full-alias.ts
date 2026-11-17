@@ -17,9 +17,9 @@
 import type { bootstrap } from '@goodvibes-jev/engine/platform/platform/runtime';
 
 // Mutual assignability == the alias IS the exact runtimeServices parameter type
-// (index 3 of startHostServices), no re-anchoring through the positional tuple.
+// (index 2 of startHostServices), no re-anchoring through the positional tuple.
 type Exact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
-type HostRuntimeServicesParam = Parameters<typeof bootstrap.startHostServices>[3];
+type HostRuntimeServicesParam = Parameters<typeof bootstrap.startHostServices>[2];
 const _aliasIsTheParamType: Exact<bootstrap.RuntimeServices, HostRuntimeServicesParam> = true;
 
 declare function stub<T>(): T;

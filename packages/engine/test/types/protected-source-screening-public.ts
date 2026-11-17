@@ -44,11 +44,17 @@ owner.project(referenceReceipt);
 // @ts-expect-error A display-preview receipt does not classify URL parameter roles.
 owner.projectResearchReference(sourceReceipt);
 const mapper = createProtectedInboxMapper(owner);
-const result: Promise<ProtectedInboxPreviewFields | null> = mapper(input, options.authority.signal);
+type ProtectedInboxPreview = Awaited<ReturnType<typeof mapper>>;
+const result: Promise<ProtectedInboxPreview> = mapper(input, options.authority.signal);
+// Only a mapped or withheld message carries preview fields; an unavailable screening carries none to show.
+declare const preview: ProtectedInboxPreview;
+const shown: ProtectedInboxPreviewFields | null = preview.status === 'unavailable' ? null : preview.fields;
+// @ts-expect-error An unavailable screening has no fields to read.
+const unscreened: ProtectedInboxPreviewFields = (preview as Extract<ProtectedInboxPreview, { status: 'unavailable' }>).fields;
 const close: Promise<void> = owner.close();
 // @ts-expect-error A structural empty object is not an owned source handle.
 const forgedSource: ProtectedSource = {};
 // @ts-expect-error A structural empty object is not a settled screening receipt.
 const forgedReceipt: SourceScreeningReceipt = {};
-export { hostedOwner, hostedAsLocal, hostedWithDestination, source, result, close, forgedSource, forgedReceipt, reference, referenceResult, referenceProjection, fencedReferenceResult,
+export { hostedOwner, hostedAsLocal, hostedWithDestination, source, result, shown, unscreened, close, forgedSource, forgedReceipt, reference, referenceResult, referenceProjection, fencedReferenceResult,
   inputProjector, projectedCall, exactReference, SOURCE_SCREENING_LIMITS };

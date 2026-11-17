@@ -8,7 +8,7 @@ import { createPeerApiClient } from '@goodvibes-jev/engine/peer-client';
 import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
 import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
 import { createBrowserKnowledgePlatform } from '@goodvibes-jev/engine/platform/browser/knowledge';
-import { createHttpTransport as createRuntimeHttpTransport, createRealtimeTransport } from '@goodvibes-jev/engine/platform/platform/runtime/transport';
+import { createHttpJsonTransport as createRuntimeHttpTransport, createRealtimeTransport } from '@goodvibes-jev/engine/platform/platform/runtime/transport';
 
 const callable: FetchLike = async (_input, _init) => new Response('fixture');
 const hostFetch: FetchLike = globalThis.fetch;

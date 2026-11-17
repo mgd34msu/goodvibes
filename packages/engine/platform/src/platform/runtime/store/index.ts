@@ -50,7 +50,6 @@ import type {
 } from './domains/index.js';
 import type { AutomationJob } from '../../automation/jobs.js';
 import type { AutomationRun } from '../../automation/runs.js';
-import type { AutomationSourceRecord } from '../../automation/sources.js';
 import type { AutomationRouteBinding } from '../../automation/routes.js';
 import type { AutomationSurfaceKind } from '../../automation/types.js';
 import type { AutomationDeliveryAttempt } from '../../automation/delivery.js';
@@ -65,7 +64,7 @@ import {
   updateAgentState,
   updateAutomationDomainFromJob,
   updateAutomationDomainFromRun,
-  updateAutomationDomainFromSource,
+  removeAutomationDomainJob,
   updateCommunicationState,
   updateConversationState,
   updateControlPlaneDomainFromClient,
@@ -130,8 +129,9 @@ export interface DomainDispatch {
     source?: string,
   ): void;
   syncIntegration(record: IntegrationRecord, source?: string): void;
-  syncAutomationSource(record: AutomationSourceRecord, source?: string): void;
+  /** The job's source comes with it; sources are kept for the jobs and runs the mirror retains. */
   syncAutomationJob(record: AutomationJob, source?: string): void;
+  removeAutomationJob(jobId: string, source?: string): void;
   syncAutomationRun(record: AutomationRun, source?: string): void;
   syncRouteBinding(record: AutomationRouteBinding, source?: string): void;
   removeRouteBinding(bindingId: string, source?: string): void;
@@ -250,16 +250,16 @@ export function createDomainDispatch(store: RuntimeStore): DomainDispatch {
         integrations: updateIntegrationDomainFromRecord(state.integrations, record, source),
       }));
     },
-    syncAutomationSource(record, source = 'domain-dispatch') {
-      mutateRuntimeStore(store, (state) => ({
-        ...state,
-        automation: updateAutomationDomainFromSource(state.automation, record, source),
-      }));
-    },
     syncAutomationJob(record, source = 'domain-dispatch') {
       mutateRuntimeStore(store, (state) => ({
         ...state,
         automation: updateAutomationDomainFromJob(state.automation, record, source),
+      }));
+    },
+    removeAutomationJob(jobId, source = 'domain-dispatch') {
+      mutateRuntimeStore(store, (state) => ({
+        ...state,
+        automation: removeAutomationDomainJob(state.automation, jobId, source),
       }));
     },
     syncAutomationRun(record, source = 'domain-dispatch') {

@@ -437,11 +437,20 @@ export function updateIntegrationDomainFromRecord(domain: IntegrationDomainState
   };
 }
 
-export function updateAutomationDomainFromSource(domain: AutomationDomainState, sourceRecord: AutomationSourceRecord, source: string): AutomationDomainState {
-  const sources = new Map(domain.sources);
-  sources.set(sourceRecord.id, sourceRecord);
+/** The sources the retained jobs and runs name, so a removed job or an evicted run takes its source with it. */
+function automationSources(
+  jobs: ReadonlyMap<string, AutomationJob>,
+  runs: ReadonlyMap<string, AutomationRun>,
+): Pick<AutomationDomainState, 'sources' | 'sourceIds'> {
+  const sources = new Map<string, AutomationSourceRecord>();
+  for (const job of jobs.values()) sources.set(job.source.id, job.source);
+  for (const run of runs.values()) if (run.triggeredBy?.id) sources.set(run.triggeredBy.id, run.triggeredBy);
   const sourceIds = [...sources.values()].sort((a, b) => a.label.localeCompare(b.label) || a.createdAt - b.createdAt).map((record) => record.id);
-  return { ...updateDomainMetadata(domain, source), sources, sourceIds };
+  return { sources, sourceIds };
+}
+
+function sortedJobIds(jobs: ReadonlyMap<string, AutomationJob>): string[] {
+  return [...jobs.values()].sort((a, b) => a.name.localeCompare(b.name) || a.createdAt - b.createdAt).map((record) => record.id);
 }
 
 const ENDED_RUN_STATUSES: ReadonlySet<AutomationRun['status']> = new Set(['completed', 'failed', 'cancelled', 'missed']);
@@ -474,27 +483,33 @@ function runTotals(runs: readonly AutomationRun[], retired: RetiredRunCounts | u
 
 export function updateAutomationDomainFromJob(domain: AutomationDomainState, job: AutomationJob, source: string): AutomationDomainState {
   const jobs = new Map(domain.jobs);
-  const sources = new Map(domain.sources);
   jobs.set(job.id, job);
-  sources.set(job.source.id, job.source);
-  const allRuns = [...domain.runs.values()];
-  const totals = runTotals(allRuns, domain.retiredRuns);
   return {
     ...updateDomainMetadata(domain, source),
     jobs,
-    jobIds: [...jobs.values()].sort((a, b) => a.name.localeCompare(b.name) || a.createdAt - b.createdAt).map((record) => record.id),
-    sources,
-    sourceIds: [...sources.values()].sort((a, b) => a.label.localeCompare(b.label) || a.createdAt - b.createdAt).map((record) => record.id),
+    jobIds: sortedJobIds(jobs),
+    ...automationSources(jobs, domain.runs),
     totalJobs: jobs.size,
-    ...totals,
+  };
+}
+
+/** A removed job leaves the mirror with the source only it named; an unknown id returns the domain unchanged. */
+export function removeAutomationDomainJob(domain: AutomationDomainState, jobId: string, source: string): AutomationDomainState {
+  if (!domain.jobs.has(jobId)) return domain;
+  const jobs = new Map(domain.jobs);
+  jobs.delete(jobId);
+  return {
+    ...updateDomainMetadata(domain, source),
+    jobs,
+    jobIds: sortedJobIds(jobs),
+    ...automationSources(jobs, domain.runs),
+    totalJobs: jobs.size,
   };
 }
 
 export function updateAutomationDomainFromRun(domain: AutomationDomainState, run: AutomationRun, source: string): AutomationDomainState {
   const runs = new Map(domain.runs);
-  const sources = new Map(domain.sources);
   runs.set(run.id, run);
-  sources.set(run.triggeredBy.id, run.triggeredBy);
   const dropped = evictOldestEnded(runs, (record) => ENDED_RUN_STATUSES.has(record.status), (record) => record.endedAt ?? record.queuedAt);
   const retiredRuns = dropped.length > 0 ? addRetiredRuns(domain.retiredRuns, dropped) : domain.retiredRuns;
   const allRuns = [...runs.values()];
@@ -505,8 +520,7 @@ export function updateAutomationDomainFromRun(domain: AutomationDomainState, run
     runIds: allRuns.sort((a, b) => b.queuedAt - a.queuedAt || a.id.localeCompare(b.id)).map((record) => record.id),
     activeRunIds: allRuns.filter((record) => record.status === 'queued' || record.status === 'running').map((record) => record.id),
     failedRunIds: allRuns.filter((record) => record.status === 'failed').map((record) => record.id),
-    sources,
-    sourceIds: [...sources.values()].sort((a, b) => a.label.localeCompare(b.label) || a.createdAt - b.createdAt).map((record) => record.id),
+    ...automationSources(domain.jobs, runs),
     totalJobs: domain.jobs.size,
     ...totals,
     ...(retiredRuns ? { retiredRuns } : {}),

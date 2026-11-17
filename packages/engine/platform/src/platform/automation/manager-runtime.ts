@@ -65,7 +65,7 @@ import {
   emitAutomationManagerRunStarted,
 } from './manager-runtime-events.js';
 import {
-  collectAutomationSources,
+  removeAutomationJobFromRuntime,
   syncAutomationJobToRuntime,
   syncAutomationRunToRuntime,
   syncAutomationRuntimeSnapshot,
@@ -358,6 +358,7 @@ export class AutomationManager {
       cancelled = true;
     }
     this.jobs.delete(jobId);
+    removeAutomationJobFromRuntime(this.runtimeDispatch, jobId, `automation.${reason}`);
     if (cancelled) {
       void this.saveRuns().catch((error: unknown) => {
         logger.warn('AutomationManager: run persistence failed', { reason: 'job-removed', jobId, error: summarizeError(error) });

@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { knowledgeClockIso, knowledgeClockNumber, knowledgeRawRepresentation, retainKnowledgeRepresentation, sameKnowledgeRecord } from './store-record-representation.js';
 import { KnowledgeSourceQualityHeldError } from './source-quality.js';
 import { KnowledgeRecordAdmissionHeldError } from './store-record-snapshot.js';
@@ -334,8 +334,7 @@ async function cleanOriginalGeneratedArtifact(store: KnowledgeStore, original: A
 
 function assertSynchronousProjectionGuard(guard: (() => void) | undefined, receiver?: unknown): void {
   if (!guard) return;
-  const result: unknown = Reflect.apply(guard, receiver, []);
-  if (result !== undefined) { drainOwned(result); throw new KnowledgeSourceQualityHeldError('stale'); }
+  assertSynchronousJudgmentGuard(() => Reflect.apply(guard, receiver, []), () => new KnowledgeSourceQualityHeldError('stale'));
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {

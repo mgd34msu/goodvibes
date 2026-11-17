@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 
 /**
  * attempts.ts, best-of-N sibling attempts for the orchestration engine.
@@ -213,9 +213,7 @@ export function createAttemptsCoordinator(deps: AttemptsCoordinatorDeps): Attemp
       if (typeof item.id !== 'string' || item.id.length === 0 || ids.has(item.id)) throw new AttemptError('Duplicate or invalid work item identity');
       ids.add(item.id);
     }
-    let prepared: unknown;
-    try { prepared = beforePublish?.(); } catch (error) { drainOwned(error); throw error; }
-    if (prepared !== undefined) { drainOwned(prepared); throw new AttemptError('Work item publication restriction must complete synchronously'); }
+    assertSynchronousJudgmentGuard(beforePublish, () => new AttemptError('Work item publication restriction must complete synchronously'));
     // Finish validation before any group is visible or a reentrant listener
     // can observe a partly constructed workstream.
     for (const [groupId, group] of pendingGroups) groups.set(groupId, group);

@@ -2,7 +2,7 @@ import { defineSelector, STAKES_BANDS } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
 import { prepareJudgmentResult, retainStrictJudgmentJson } from '../gate/judgment-result.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { rankClassicCatalog } from '../runtime/classic-catalog.js';
 
@@ -47,8 +47,7 @@ export async function readCommandDiscovery(input: CommandDiscoveryRequest, optio
     const current = () => {
       signal?.throwIfAborted(); source.assertCurrent();
       if (options.signal !== signal || options.assertCurrent !== callerCurrent) throw new Error('Command discovery owner changed.');
-      const restriction: unknown = callerCurrent?.();
-      if (restriction !== undefined) { drainOwned(restriction); throw new Error('Command discovery guard must be synchronous.'); }
+      assertSynchronousJudgmentGuard(callerCurrent, () => new Error('Command discovery guard must be synchronous.'));
       signal?.throwIfAborted(); source.assertCurrent();
     };
     current();

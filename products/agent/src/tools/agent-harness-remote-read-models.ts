@@ -1,5 +1,5 @@
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { capturePersonalOpsData, capturePersonalOpsSnapshot, assertPersonalOpsDataCurrent } from './agent-harness-personal-ops-source.ts';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
@@ -706,12 +706,10 @@ async function settleOwnedRemotePublisherSemantics(token: object, options: Param
         || projection.projectPath !== projectPath || projection.projectText !== projectText || projection.projectRecordText !== projectRecordText || projection.protectFields !== protectFields
         || owner.state.kind === 'retired') throw new ToolInputProjectionError('held');
       const checkBackend = (guard: () => void) => {
-        signal?.throwIfAborted(); const result: unknown = guard.call(options);
-        if (result !== undefined) { drainOwned(result); throw new ToolInputProjectionError('held'); }
+        signal?.throwIfAborted(); assertSynchronousJudgmentGuard(() => guard.call(options), () => new ToolInputProjectionError('held'));
       };
       assertPublisherEntryCurrent(owner, () => {
-        signal?.throwIfAborted(); const result: unknown = backendCurrent.call(options);
-        if (result !== undefined) { drainOwned(result); throw new ToolInputProjectionError('held'); }
+        signal?.throwIfAborted(); assertSynchronousJudgmentGuard(() => backendCurrent.call(options), () => new ToolInputProjectionError('held'));
       }, () => checkBackend(backendMethods ?? backendCurrent));
       for (const guard of retained.values()) guard();
       signal?.throwIfAborted(); assertOptions(); assertProjection();
@@ -721,8 +719,7 @@ async function settleOwnedRemotePublisherSemantics(token: object, options: Param
     };
     const assertCurrent = () => {
       assertSourceCurrent();
-      const result: unknown = callerCurrent.call(options);
-      if (result !== undefined) { drainOwned(result); throw new ToolInputProjectionError('held'); }
+      assertSynchronousJudgmentGuard(() => callerCurrent.call(options), () => new ToolInputProjectionError('held'));
       assertSourceCurrent();
     };
     const current = { ...options, assertCurrent, retainCurrent: retain };

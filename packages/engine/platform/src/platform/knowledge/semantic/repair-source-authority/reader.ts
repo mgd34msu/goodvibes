@@ -1,5 +1,5 @@
 import { requireSemanticKnowledge } from '../../decision-policy.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { judgmentPort, captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { checkAnswers, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, JudgmentInputError } from '../../../gate/judgment-input.js';
@@ -64,11 +64,7 @@ export function createRepairSourceAuthorityReader(options: RepairSourceAuthority
   };
   const assertOwnerCurrent = () => {
     assertOriginalIdentity();
-    const result: unknown = ownerCurrent?.();
-    if (result !== undefined) {
-      drainOwned(result);
-      throw new Held('stale');
-    }
+    assertSynchronousJudgmentGuard(ownerCurrent, () => new Held('stale'));
     assertOriginalIdentity();
   };
   const assertCurrent = () => {

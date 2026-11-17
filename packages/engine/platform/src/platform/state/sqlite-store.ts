@@ -32,7 +32,7 @@ import { activationCacheRowSql, readKnowledgeActivationDependencies, parseKnowle
 import { queryPersistedPlanningProjects } from '../knowledge/project-planning/persisted-project-query.js';
 import { planningSourceIdentityParams, planningSourceIdentitySql, type PlanningSourceIdentity } from '../knowledge/store-planning-source-selector.js';
 import { knowledgeRowGenerationFromRows } from '../knowledge/store-row-revisions.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { acquireArtifactReferenceLock } from './artifact-reference-lock.js';
 import { adoptSqliteDatabase, type SqliteFile, type SqliteMigration } from './sqlite-file.js';
 import { logger } from '../utils/logger.js';
@@ -235,10 +235,8 @@ function bindings(params: readonly unknown[] | undefined): SQLQueryBindings[] {
   return params.map((value) => (value === undefined ? null : value)) as SQLQueryBindings[];
 }
 
-function assertSynchronous(result: unknown, message: string): void {
-  if (result === undefined) return;
-  drainOwned(result);
-  throw new TypeError(message);
+function assertSynchronous(check: () => unknown, message: string): void {
+  assertSynchronousJudgmentGuard(check, () => new TypeError(message));
 }
 
 const KNOWLEDGE_ROW_TABLES = Object.freeze(['knowledge_sources', 'knowledge_nodes', 'knowledge_extractions', 'knowledge_edges'] as const);
@@ -274,11 +272,11 @@ export function captureSQLiteActivationPublication(store: SQLiteStore, nodeId: s
 
 /** Project ids recorded in a knowledge database image (a byte copy of the file). */
 export function inspectNativePlanningProjectImage(data: Uint8Array, assertCurrent: () => void): Promise<readonly string[]> {
-  assertSynchronous(assertCurrent(), 'SQLiteStore: the owner check must be synchronous');
+  assertSynchronous(assertCurrent, 'SQLiteStore: the owner check must be synchronous');
   const image = bunDatabase().deserialize(data, true);
   try {
     const ids = queryPersistedPlanningProjects(statementDatabase(image));
-    assertSynchronous(assertCurrent(), 'SQLiteStore: the owner check must be synchronous');
+    assertSynchronous(assertCurrent, 'SQLiteStore: the owner check must be synchronous');
     return Promise.resolve(ids);
   } catch (error) { return Promise.reject(error); }
   finally { image.close(); }
@@ -291,7 +289,7 @@ export function inspectNativePlanningProjectImage(data: Uint8Array, assertCurren
  * artifact. Read through the file (`inspectArtifactReferencesFile`) instead.
  */
 export function inspectNativeArtifactReferenceImage(_data: Uint8Array, ids: readonly string[], assertCurrent: () => void): Promise<readonly string[]> {
-  assertSynchronous(assertCurrent(), 'SQLiteStore: the owner check must be synchronous');
+  assertSynchronous(assertCurrent, 'SQLiteStore: the owner check must be synchronous');
   return Promise.resolve(Object.freeze([...ids]));
 }
 
@@ -637,7 +635,7 @@ export class SQLiteStore {
    */
   assertPersistedReadFrame(assertion: () => undefined): void {
     const db = this.getDb();
-    const invoke = () => assertSynchronous(assertion(), 'SQLiteStore: persisted read assertions must be synchronous and return no value');
+    const invoke = () => assertSynchronous(assertion, 'SQLiteStore: persisted read assertions must be synchronous and return no value');
     if (db.inTransaction) { invoke(); return; }
     db.run('BEGIN');
     try { invoke(); }
@@ -676,7 +674,7 @@ export class SQLiteStore {
       }
     }
     if (afterDurable) {
-      try { assertSynchronous(afterDurable(settled.value, this.#adapter), 'SQLiteStore: durable boundary must be synchronous'); }
+      try { assertSynchronous(() => afterDurable(settled.value, this.#adapter), 'SQLiteStore: durable boundary must be synchronous'); }
       catch (error) { return Promise.reject(error); }
     }
     this.notifyArtifactReferenceClean();
@@ -692,7 +690,7 @@ export class SQLiteStore {
   private notifyArtifactReferenceClean(): void {
     if (this.saveBatchDepth > 0) return;
     for (const listener of this.artifactReferenceCleanListeners) {
-      try { assertSynchronous(listener(), 'Artifact cleanup listener must be synchronous.'); }
+      try { assertSynchronous(listener, 'Artifact cleanup listener must be synchronous.'); }
       catch { logger.warn('Artifact cleanup notification was not accepted.'); }
     }
   }
@@ -738,11 +736,11 @@ export class SQLiteStore {
    */
   publishPrepared(operation: (db: SqlDatabase) => void, assertCurrent: () => void, onCommit: () => void): Promise<void> {
     try {
-      assertSynchronous(assertCurrent(), 'SQLiteStore: the currency check must be synchronous');
+      assertSynchronous(assertCurrent, 'SQLiteStore: the currency check must be synchronous');
       this.#writeTransaction(() => {
-        assertSynchronous(assertCurrent(), 'SQLiteStore: the currency check must be synchronous');
-        assertSynchronous(operation(this.#adapter), 'SQLiteStore: prepared operation must be synchronous and return no value');
-        assertSynchronous(assertCurrent(), 'SQLiteStore: the currency check must be synchronous');
+        assertSynchronous(assertCurrent, 'SQLiteStore: the currency check must be synchronous');
+        assertSynchronous(() => operation(this.#adapter), 'SQLiteStore: prepared operation must be synchronous and return no value');
+        assertSynchronous(assertCurrent, 'SQLiteStore: the currency check must be synchronous');
       });
     } catch (error) { return Promise.reject(error); }
     try { onCommit(); } catch (error) { return Promise.reject(new SQLitePublishedButFencedError(error)); }
@@ -823,7 +821,7 @@ export class SQLiteStore {
     const persistent = !isEphemeralDbPath(path);
     const target = options.schemaVersion ?? 1;
     const storeName = options.storeName ?? 'sqlite store';
-    assertSynchronous(this.beforeInitialRead?.(), 'SQLiteStore: initial read owner must complete synchronously');
+    assertSynchronous(() => this.beforeInitialRead?.(), 'SQLiteStore: initial read owner must complete synchronously');
     if (persistent) mkdirSync(dirname(path!), { recursive: true });
     const existed = persistent && existsSync(path!);
     // The store holds user content: a new file is private to its owner, and
@@ -908,7 +906,7 @@ export class SQLiteStore {
   #beginWrite(): void {
     const db = this.getDb();
     if (db.inTransaction) return;
-    if (!isEphemeralDbPath(this.dbPath)) assertSynchronous(this.beforePersist?.(), 'SQLiteStore: persistence owner must complete synchronously');
+    if (!isEphemeralDbPath(this.dbPath)) assertSynchronous(() => this.beforePersist?.(), 'SQLiteStore: persistence owner must complete synchronously');
     db.run('BEGIN IMMEDIATE');
     this.#implicit = true;
     queueMicrotask(() => {
@@ -936,7 +934,7 @@ export class SQLiteStore {
   #writeTransaction(body: () => void): void {
     this.#commitPending();
     const db = this.getDb();
-    if (!isEphemeralDbPath(this.dbPath)) assertSynchronous(this.beforePersist?.(), 'SQLiteStore: persistence owner must complete synchronously');
+    if (!isEphemeralDbPath(this.dbPath)) assertSynchronous(() => this.beforePersist?.(), 'SQLiteStore: persistence owner must complete synchronously');
     if (db.inTransaction) { body(); return; }
     db.transaction(body).immediate();
   }

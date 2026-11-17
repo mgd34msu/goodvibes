@@ -1,6 +1,6 @@
 import { unlinkSync } from 'node:fs';
 import { knowledgeSchemaColumns } from './store-schema-validation-data.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { readKnowledgeSourceSnapshot } from './store-source-generation.js';
 import { readWorkPlanTaskImportRecord } from './store-work-plan-tasks.js';
 import type { SQLiteStore, SqlDatabase } from '../state/sqlite-store.js';
@@ -216,16 +216,14 @@ export function createKnowledgeWorkLedgerStorage(sqlite: SQLiteStore, projectId:
             if (version === 3 || version === 4) explicitVersions.add(version);
           }
           for (const version of explicitVersions) {
-            const declared: unknown = beforeExplicitSourceWrite?.(version);
-            if (declared !== undefined) { drainOwned(declared); throw new Error('Explicit source publication requires a synchronous native owner'); }
+            assertSynchronousJudgmentGuard(() => beforeExplicitSourceWrite?.(version), () => new Error('Explicit source publication requires a synchronous native owner'));
           }
           const importVersions = new Set<2 | 3>();
           for (const event of next.history.slice(current.history.length)) {
             if (event.type === 'import_legacy' && (event.manifest.version === 2 || event.manifest.version === 3)) importVersions.add(event.manifest.version);
           }
           for (const version of importVersions) {
-            const declared: unknown = beforeHistoricalImportWrite?.(version);
-            if (declared !== undefined) { drainOwned(declared); throw new Error('Historical import publication requires a synchronous native owner'); }
+            assertSynchronousJudgmentGuard(() => beforeHistoricalImportWrite?.(version), () => new Error('Historical import publication requires a synchronous native owner'));
           }
           cached = undefined;
           writeKnowledgeWorkLedger(db, next);

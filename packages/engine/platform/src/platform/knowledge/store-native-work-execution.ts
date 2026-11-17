@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { knowledgeSchemaColumns, executionAttemptColumns } from './store-schema-validation-data.js';
 import { NativeExecutionMoveRefused, executionIntentMoveText, executionRecordMoveText } from './store-native-refusal.js';
 import { createNativeCiContinuationStorage } from './store-native-ci-continuation.js';
@@ -310,8 +310,7 @@ export function createNativeWorkExecutionStorage(sqlite: SQLiteStore, projectId:
       if (nextIntent?.state === 'associated' && !resultingRecord) throw new NativeWorkExecutionError('recovery-required');
       publishedOriginal = next ?? nextIntent ?? current.record ?? current.intent ?? original;
       if (nextIntent?.version === 2 || next?.version === 2) {
-        const declared: unknown = beforeV2Write?.();
-        if (declared !== undefined) { drainOwned(declared); throw new NativeWorkExecutionError('invalid'); }
+        assertSynchronousJudgmentGuard(beforeV2Write, () => new NativeWorkExecutionError('invalid'));
       }
       if (nextIntent) db.run('INSERT INTO native_work_execution_intents(project_id,attempt_id,format_version,state_json) VALUES (?,?,?,?) ON CONFLICT(project_id,attempt_id) DO UPDATE SET format_version=excluded.format_version,state_json=excluded.state_json', [projectId, nextIntent.target.attemptId, nextIntent.version, JSON.stringify(nextIntent)]);
       if (next) db.run('INSERT INTO native_work_executions(project_id,key_hash,format_version,state_json,attempt_id) VALUES (?,?,?,?,?) ON CONFLICT(project_id,key_hash) DO UPDATE SET format_version=excluded.format_version,state_json=excluded.state_json', [projectId, nativeExecutionStorageKey(next), next.version, JSON.stringify(next), next.target.attemptId]);
@@ -360,7 +359,7 @@ export function createNativeWorkExecutionStorage(sqlite: SQLiteStore, projectId:
           evidenceId: reduced.evidence.evidence!.id, targetAfterReport: reduced.evidence.evidence!.target, attestation: publication.attestation });
         candidate = { receipt, publication, runnerReceipt: record.receipt };
         if (receipt.version === 2) {
-          const declared: unknown = beforeSettlementV2Write?.(); if (declared !== undefined) { drainOwned(declared); throw new NativeWorkExecutionError('invalid'); }
+          assertSynchronousJudgmentGuard(beforeSettlementV2Write, () => new NativeWorkExecutionError('invalid'));
         }
         // Last owner/cancellation/artifact observation follows every reducer,
         // clock and format callback. Candidate comparison below is not adoption

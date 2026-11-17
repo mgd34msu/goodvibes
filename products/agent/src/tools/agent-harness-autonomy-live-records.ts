@@ -1,5 +1,5 @@
 import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { isDeepStrictEqual } from 'node:util';
@@ -250,8 +250,7 @@ async function ownedCaptureAutonomyLiveRecords(context: CommandContext, options:
   const assertSource = () => { optionsCurrent(); signal?.throwIfAborted(); source.assertCurrent(); };
   const assertCurrent = () => {
     assertSource();
-    const outcome: unknown = options.assertCurrent?.();
-    if (outcome !== undefined) { drainOwned(outcome); throw new ToolInputProjectionError('held'); }
+    assertSynchronousJudgmentGuard(() => options.assertCurrent?.(), () => new ToolInputProjectionError('held'));
     assertSource();
   };
   assertCurrent();

@@ -1,7 +1,7 @@
 import type { ArtifactOriginalObservation } from '../artifacts/types.js';
 import type { ArtifactCleanupResult } from './artifact-reference-ensemble.js';
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { KnowledgeIngestOwnership } from './ingest-context.js';
 import { randomUUID } from 'node:crypto';
 import { snapshotNodeInput } from './activation/projection.js';
@@ -580,11 +580,7 @@ export class KnowledgeService {
     const selection = await prepareKnowledgeScopeSelection(this.store, scope, {
       ...options, signal, shouldStop, assertCurrent: () => {
         assertRequestCurrent();
-        const current: unknown = callerCurrent?.();
-        if (current !== undefined) {
-          drainOwned(current);
-          throw new KnowledgeScopeSelectionHeldError('stale');
-        }
+        assertSynchronousJudgmentGuard(callerCurrent, () => new KnowledgeScopeSelectionHeldError('stale'));
         assertRequestCurrent();
       },
     });
@@ -867,11 +863,7 @@ export class KnowledgeService {
       includeAllSpaces: filters.includeAllSpaces,
     }, { ...options, signal, shouldStop, assertCurrent: () => {
       assertRequestCurrent();
-      const current: unknown = callerCurrent?.();
-      if (current !== undefined) {
-        drainOwned(current);
-        throw new KnowledgeScopeSelectionHeldError('stale');
-      }
+      assertSynchronousJudgmentGuard(callerCurrent, () => new KnowledgeScopeSelectionHeldError('stale'));
       assertRequestCurrent();
     } });
     return renderKnowledgeMap({

@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /** Email style readings. Code counts settled items and composes a draft; readers never send. */
 import { types as nodeTypes } from 'node:util';
 import { defineBattery, defineSelector, LIMITS, oneOf, STAKES_BANDS, type JudgmentPort } from '@goodvibes-jev/judgment';
@@ -146,8 +146,7 @@ export async function withEmailStyleSource<T, R>(
       current = () => {
         optionsCurrent(); retained.assertCurrent();
         if (signal?.aborted) throw new StyleReplyReadingError();
-        const returned: unknown = caller?.();
-        if (returned !== undefined) { drainOwned(returned); throw new StyleReplyReadingError(); }
+        assertSynchronousJudgmentGuard(caller, () => new StyleReplyReadingError());
         optionsCurrent(); retained.assertCurrent();
         if (signal?.aborted) throw new StyleReplyReadingError();
       };

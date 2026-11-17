@@ -1,7 +1,7 @@
 /** Private default-project bindings. Exact local workspace tuples are not wire
  * identifiers or permissions; the configured native owner still decides scope.
  */
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { randomUUID } from 'node:crypto';
 import { closeSync, constants, fchmodSync, fstatSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, unlinkSync, writeFileSync, type BigIntStats } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -20,7 +20,7 @@ interface ProjectBinding { readonly version: 1; readonly role: 'configured-defau
 export interface RegisteredProjectIdentity { readonly projectId: string; assertCurrent(): void }
 function sameFile(left: BigIntStats, right: BigIntStats): boolean { return left.dev === right.dev && left.ino === right.ino && left.uid === right.uid && left.gid === right.gid && left.birthtimeNs === right.birthtimeNs; }
 function exactFile(stat: BigIntStats): string { return [stat.dev, stat.ino, stat.mode, stat.uid, stat.gid, stat.nlink, stat.size, stat.birthtimeNs, stat.mtimeNs, stat.ctimeNs].join(':'); }
-function invokeGuard(guard: () => void): void { const result: unknown = guard(); if (result !== undefined) { drainOwned(result); throw new ProjectIdentityUnavailableError(); } }
+function invokeGuard(guard: () => void): void { assertSynchronousJudgmentGuard(guard, () => new ProjectIdentityUnavailableError()); }
 function opaqueId(): string { return `project-${randomUUID()}`; }
 function binding(value: unknown): ProjectBinding {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ProjectIdentityUnavailableError();

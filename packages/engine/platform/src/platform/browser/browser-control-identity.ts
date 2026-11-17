@@ -61,8 +61,7 @@ export class BrowserControlIdentityWork {
     this.signal?.throwIfAborted();
     this.pageCurrent?.();
     currentExecutionMode();
-    const result: unknown = this.callerCurrent?.();
-    if (result !== undefined) { drainOwned(result); throw new Error('Browser action owner must be synchronous.'); }
+    assertSynchronousJudgmentGuard(() => this.callerCurrent?.(), () => new Error('Browser action owner must be synchronous.'));
     if (!isClassicOperation()) this.owner?.assertCurrent();
   };
 

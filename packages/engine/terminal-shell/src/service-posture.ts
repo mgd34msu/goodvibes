@@ -1,5 +1,5 @@
 import { closeSync, existsSync, openSync, readSync, statSync, type Stats } from 'node:fs';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { resolveRuntimeEndpointBinding, type RuntimeEndpointBinding, type RuntimeEndpointId } from './cli-endpoints.js';
@@ -146,11 +146,7 @@ export function retainServicePostureInput(
   };
   return () => {
     sourceCurrent();
-    const result: unknown = callerCurrent?.();
-    if (result !== undefined) {
-      drainOwned(result);
-      throw new Error('Service posture ownership must be synchronous.');
-    }
+    assertSynchronousJudgmentGuard(callerCurrent, () => new Error('Service posture ownership must be synchronous.'));
     sourceCurrent();
   };
 }

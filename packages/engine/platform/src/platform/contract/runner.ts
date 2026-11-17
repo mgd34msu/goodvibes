@@ -1,6 +1,6 @@
 import { captureAutonomousSource, retainAutonomousSource } from '../permissions/autonomous.js';
 import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { getContractActionSource, getContractActionSignal } from '../tools/agent/contract-binding.js';
 import { bindOwnedContractSource, assertOwnedContractSource } from './owned-source.js';
@@ -1005,9 +1005,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       signal.throwIfAborted();
       if (disposed) throw new Error('Contract runner is disposed');
       requireDecisionFeature('autonomous contract planning and acceptance');
-      let result: unknown;
-      try { result = assertion?.(); } catch (error) { drainOwned(error); throw error; }
-      if (result !== undefined) { drainOwned(result); throw new Error('Contract start requires a synchronous current owner'); }
+      assertSynchronousJudgmentGuard(assertion, () => new Error('Contract start requires a synchronous current owner'));
       extraCurrent(); creation.assertCurrent();
       signal.throwIfAborted();
     };

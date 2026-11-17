@@ -14,7 +14,7 @@
  * weaker guarantees than a plain background command.
  */
 
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { TriggerChildProcesses } from './host-processes.js';
 import type { ProcessManager } from '../tools/shared/process-manager.js';
 import type { LaunchedProcess, ObservedTermination, TriggerProcessHost } from './process-triggers.js';
@@ -106,8 +106,7 @@ export function createBunStreamHost(processManager: ProcessManager): TriggerStre
         // The watcher itself is retained until its final callback returns.
         running.watch(original, async () => {
           await original.completion;
-          const returned: unknown = onExit(original.readStatus().exitCode);
-          if (returned !== undefined) { drainOwned(returned); throw new Error('Trigger exit observer must be synchronous'); }
+          assertSynchronousJudgmentGuard(() => onExit(original.readStatus().exitCode), () => new Error('Trigger exit observer must be synchronous'));
         });
         return { streamId: original.processId, pid: original.pid };
       });

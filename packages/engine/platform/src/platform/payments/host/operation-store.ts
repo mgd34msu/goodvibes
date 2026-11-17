@@ -13,7 +13,7 @@ import { readFileObservation, type FileObservation } from '../../utils/file-obse
 import { tryAcquireCrossProcessLock } from '../../workspace/checkpoint/cross-process-lock.js';
 import { purchaseDisposition, purchaseOutcomeText, readPaymentOperation, type PaymentOperationView } from '../operation-view.js';
 import type { PaymentUnreadableOperation } from '../window-view.js';
-import { drainOwned } from '@goodvibes-jev/judgment';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { capturePaymentReconciliation, type PaymentReconciliationCheckpoint } from './reconciliation-checkpoint.js';
 
 export class PaymentOperationStoreError extends Error {
@@ -66,8 +66,7 @@ export class DurablePaymentOperations {
   constructor(private readonly directory: string, private readonly beforeReconciliationWrite?: () => void) {}
 
   private declareReconciliation(): void {
-    const result: unknown = this.beforeReconciliationWrite?.();
-    if (result !== undefined) { drainOwned(result); throw new PaymentOperationStoreError('unavailable'); }
+    assertSynchronousJudgmentGuard(() => this.beforeReconciliationWrite?.(), () => new PaymentOperationStoreError('unavailable'));
   }
   private path(id: string): string { return join(this.directory, `${Buffer.from(checkoutRequestId(id)).toString('base64url')}.json`); }
   private lock(id: string): string { return join(this.directory, '.owners', `${Buffer.from(checkoutRequestId(id)).toString('base64url')}.lock`); }

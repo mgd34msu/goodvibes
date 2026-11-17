@@ -3,7 +3,7 @@
  * identical for Discord, Slack, email and generic triage selectors. */
 import { chmodSync, lstatSync, mkdirSync, realpathSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { writeJsonFileAtomic } from '../../state/durable-file-io.js';
 import { tryAcquireCrossProcessLock } from '../../workspace/checkpoint/cross-process-lock.js';
 import { readFileObservation, fileObservationIdentity } from '../../utils/file-observation.js';
@@ -33,7 +33,7 @@ class RegistryUnavailable extends Error {
 export function captureRegistryOwner(owner: InboxIdentityRegistryOwner): InboxIdentityRegistryOwner {
   return Object.freeze({ workingDirectory: owner.workingDirectory, assertCurrent: owner.assertCurrent.bind(owner), beforeWrite: owner.beforeWrite?.bind(owner) });
 }
-export function synchronous(check: () => void): void { const result: unknown = check(); if (result !== undefined) { drainOwned(result); throw unavailable(); } }
+export function synchronous(check: () => void): void { assertSynchronousJudgmentGuard(check, () => unavailable()); }
 const missing = (error: unknown): boolean => error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
 function directoryStamp(path: string): string {
   const stat = lstatSync(path, { bigint: true });

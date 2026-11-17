@@ -22,7 +22,7 @@
 
 import { decisionModelPolicyState, judgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { mapLimit } from '@goodvibes-jev/judgment';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { assertJudgmentInput, retainOwnedJson } from '../gate/judgment-input.js';
 import { decisionOrClassic, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { vibePersonaLine } from './batteries/vibe-persona-line.js';
@@ -182,8 +182,7 @@ export async function vibeBodyToConstraintOptions(
     const current = () => {
       signal?.throwIfAborted(); retained.assertCurrent(); decisionModelPolicyState();
       if (readingOptions.signal !== signal || readingOptions.assertCurrent !== caller) throw new Error('Persona import owner changed.');
-      const result: unknown = caller?.();
-      if (result !== undefined) { drainOwned(result); throw new Error('Persona import owner must be synchronous.'); }
+      assertSynchronousJudgmentGuard(caller, () => new Error('Persona import owner must be synchronous.'));
       retained.assertCurrent(); signal?.throwIfAborted();
     };
     current(); assertJudgmentInput(captured);

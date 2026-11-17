@@ -4,7 +4,7 @@ import { knowledgeDecisionStamp, knowledgeRawRepresentation } from './store-reco
 import type { SqlDatabase, SQLiteStore } from '../state/sqlite-store.js';
 import { readKnowledgeActivationDependencies, writeKnowledgeActivationCache } from './store-node-activation-cache.js';
 import { sameKnowledgeRecord } from './store-record-representation.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { captureKnowledgeSourceReferences, retainKnowledgeNodeActivationReferences } from './source-structural-references.js';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
@@ -93,8 +93,7 @@ async function prepareOwnedNodeActivationPass(store: KnowledgeStore, drafts: rea
     try {
       isClassicOperation(); // Policy changes retire the original operation; fallback does not change native scope.
       if (options.signal !== signal || options.assertCurrent !== assertCallerCurrent) throw new Held('stale');
-      const result: unknown = assertCallerCurrent?.();
-      if (result !== undefined) { drainOwned(result); throw new Held('stale'); }
+      assertSynchronousJudgmentGuard(assertCallerCurrent, () => new Held('stale'));
       stage?.assertCurrent();
       readset.assertCurrent();
     } catch { retired = true; throw new Held('stale'); }

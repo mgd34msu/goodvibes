@@ -1,5 +1,5 @@
 import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { readRecord, readString } from './agent-harness-model-routing-utils.ts';
@@ -574,8 +574,7 @@ async function ownedWatcherReadModelLiveRecords(context: CommandContext, options
   const signal = options.signal, callerCurrent = options.assertCurrent, retainCurrent = options.retainCurrent;
   const assertCaller = () => {
     optionsCurrent(); signal?.throwIfAborted();
-    const result: unknown = callerCurrent?.();
-    if (result !== undefined) { drainOwned(result); throw new ToolInputProjectionError('held'); }
+    assertSynchronousJudgmentGuard(callerCurrent, () => new ToolInputProjectionError('held'));
     optionsCurrent(); signal?.throwIfAborted();
   };
   assertCaller();

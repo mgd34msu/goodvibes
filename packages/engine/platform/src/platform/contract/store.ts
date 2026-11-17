@@ -39,7 +39,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import { captureQuarantineSource, QuarantineEncodingError, quarantineCorruptFile, reapOwnedQuarantineDirectories, reapOwnedAtomicTempFile, writeFileAtomic, type QuarantineSource } from '../utils/atomic-json-store.js';
 import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { contractWithStoredReviewObservations, hydrateStoredReviewObservations } from './review-file-observations.js';
 import { ownedContractCheckpointText, readOwnedContractCheckpoint, type OwnedContractCheckpointRead } from './owned-checkpoint-read.js';
 import { storedCurrentFileLabels, restoreCurrentFileLabels } from './current-file-observations.js';
@@ -401,8 +401,7 @@ export class ContractStore {
   prepareCheckpointWrite(contract?: Contract): void {
     const creation = contract ? this.creations.get(contract.id) : undefined;
     if (creation && creation.candidate !== contract) throw new Error('Contract creation belongs to another original');
-    const result: unknown = this.beforeWrite?.(contract);
-    if (result !== undefined) { drainOwned(result); throw new Error('Contract checkpoint publication requires a synchronous native owner'); }
+    assertSynchronousJudgmentGuard(() => this.beforeWrite?.(contract), () => new Error('Contract checkpoint publication requires a synchronous native owner'));
   }
 
   /**
@@ -415,8 +414,7 @@ export class ContractStore {
    */
   reserveCreation(id: string): ContractCreationReservation {
     if (!isContractId(id) || this.creations.has(id) || this.contracts.has(id)) throw new Error('Contract identity is already held');
-    const returned: unknown = this.beforeCreate?.(id);
-    if (returned !== undefined) { drainOwned(returned); throw new Error('Contract creation requires a synchronous native owner'); }
+    assertSynchronousJudgmentGuard(() => this.beforeCreate?.(id), () => new Error('Contract creation requires a synchronous native owner'));
     // Only actual earlier8hex producers could leave unindexed receipts; a caller-named older id is looked up.
     if (!isOpaqueContractId(id) && new DurableContractAdmissions(this.projectRoot).findByContractId(id) !== null) throw new Error('Contract identity is already admitted');
     const occupied = [contractPath(this.projectRoot, id), historicalContractPath(this.projectRoot, id)].some(path => !contractCreationPathAbsent(path) || !contractCreationPathAbsent(path + QUARANTINE_SUFFIX))

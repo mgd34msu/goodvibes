@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import { redactStructuredDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -325,8 +325,7 @@ async function protectPersonalOpsSource(value: unknown, options: CatalogRankingO
   // compared once, after it ran; the caller is only ever called with live options.
   const assertCurrent = () => {
     assertOptions();
-    const result: unknown = callerCurrent?.();
-    if (result !== undefined) { drainOwned(result); throw new ToolInputProjectionError('held'); }
+    assertSynchronousJudgmentGuard(callerCurrent, () => new ToolInputProjectionError('held'));
     assertSource();
   };
   assertCurrent();

@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { types } from 'node:util';
 import { createProtectedSourceOwner } from '../../security/source-screening/owner.js';
 import type { ProtectedSourceOwnerOptions } from '../../security/source-screening/types.js';
@@ -120,16 +120,8 @@ export async function createSlackInboxOwner(
   const current = (): void => {
     try {
       if (closed || signal.aborted) throw new Error();
-      const result: unknown = assertScope();
-      if (result !== null && (typeof result === 'object' || typeof result === 'function') && 'then' in result) {
-        drainOwned(result);
-        throw new Error();
-      }
-      const sourceResult: unknown = assertSource.call(sourceAuthority);
-      if (sourceResult !== undefined) {
-        if (types.isPromise(sourceResult)) void sourceResult.catch(() => {});
-        throw new Error();
-      }
+      assertSynchronousJudgmentGuard(assertScope, () => new Error());
+      assertSynchronousJudgmentGuard(() => assertSource.call(sourceAuthority), () => new Error());
       if (closed || signal.aborted) throw new Error();
     } catch { invalidateIdentity(); throw new Error('Slack inbox account scope is unavailable'); }
   };

@@ -8,7 +8,7 @@ import {
   type CallOptions, type ChoiceReading, type DecisionLog, type EntryType, type JudgmentPort,
   type JudgmentRetryProgress, type NamedDecision, type NoulResponse, type Questions, type YesNoReading,
 } from '@goodvibes-jev/judgment';
-import { captureJevDecisionContext, drainOwned, type JevDecisionBinding, type JevVersionRef } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, captureJevDecisionContext, type JevDecisionBinding, type JevVersionRef } from '@goodvibes-jev/judgment/decisions';
 import { criterionTrace, traceClaim } from '../../contract/batteries/criterion-trace.js';
 import { requestRoute } from '../../contract/batteries/request-route.js';
 import { decideAutonomous, inspectDecisionProtocolReferences, type AutonomousCondition, type AutonomousContinuation, type AutonomousDecision } from '../../gate/autonomous-decision.js';
@@ -101,10 +101,7 @@ function assertRecorded(log: Pick<DecisionLog, 'get'>, record: Omit<RecordedRead
   return stateHash;
 }
 function assertIntakeGuard(check: () => unknown, message: string): void {
-  let checked: unknown;
-  try { checked = check(); }
-  catch (error) { drainOwned(error); throw error; }
-  if (checked !== undefined) { drainOwned(checked); throw new JudgmentError('invalid-request', message); }
+  assertSynchronousJudgmentGuard(check, () => new JudgmentError('invalid-request', message));
 }
 function readSession(input: NativeIntakeReadInput, records: RecordedRead[] = [], finalSite = NATIVE_INTAKE_DECISION_SITE) {
   const text = input.text, sourceRevision = input.sourceRevision;

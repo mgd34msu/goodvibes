@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { isDeepStrictEqual } from 'node:util';
 import { knowledgeSchemaColumns } from './store-schema-validation-data.js';
 /** One durable transaction publishes native continuation claim and its exact ledger successor. */
@@ -41,7 +41,7 @@ export function createNativeCiContinuationStorage(sqlite: SQLiteStore, projectId
     return { record, original: readOriginal(db, originalKey, original?.execution) };
   }
   function put(db: Pick<SqlDatabase, 'run'>, record: NativeCiContinuationRecord): void {
-    if (record.version === 2) { const declared: unknown = beforeV2Write?.(); if (declared !== undefined) { drainOwned(declared); throw new Error('Native CI publication requires a synchronous reader owner'); } }
+    if (record.version === 2) { assertSynchronousJudgmentGuard(beforeV2Write, () => new Error('Native CI publication requires a synchronous reader owner')); }
     db.run('INSERT INTO native_ci_continuations(project_id,continuation_id,format_version,state_json) VALUES (?,?,?,?) ON CONFLICT(project_id,continuation_id) DO UPDATE SET format_version=excluded.format_version,state_json=excluded.state_json',
       [projectId, record.id, record.version, JSON.stringify(record)]);
   }

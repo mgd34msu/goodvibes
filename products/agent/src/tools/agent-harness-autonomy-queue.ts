@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { contractMethodsForAutonomy } from './agent-harness-personal-ops-discovery.ts';
@@ -604,11 +604,7 @@ async function captureQueueItems(context: CommandContext, options: CatalogRankin
   const assertRestrictions = () => { optionsCurrent(); ownerCurrent(); signal?.throwIfAborted(); };
   const assertCaller = () => {
     assertRestrictions();
-    const result: unknown = callerCurrent?.();
-    if (result !== undefined) {
-      drainOwned(result);
-      throw new ToolInputProjectionError('held');
-    }
+    assertSynchronousJudgmentGuard(callerCurrent, () => new ToolInputProjectionError('held'));
     assertRestrictions();
   };
   const children = new Map<string | (() => void), Set<() => void>>();

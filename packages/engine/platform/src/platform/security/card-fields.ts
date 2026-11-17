@@ -36,7 +36,7 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
  * is a confident no.
  */
 import { judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { checkAnswers, drainOwned, recordAction, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { checkAnswers, recordAction, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { cardField, type CardFieldView } from './batteries/card-field.js';
 import { askEach } from './batteries/ask-each.js';
 import { runDecisionOrClassic as decisionOrClassic } from '@goodvibes-jev/engine/errors';
@@ -147,8 +147,7 @@ export async function classifyCardFields(controls: readonly FormControlDescripto
   const source = reading?.port, signal = reading?.signal, assertion = reading?.assertCurrent, memory = reading?.memory;
   const current = (): void => {
     signal?.throwIfAborted();
-    const value: unknown = assertion?.();
-    if (value !== undefined) { drainOwned(value); throw new Error('The card-field reading owner must be synchronous.'); }
+    assertSynchronousJudgmentGuard(assertion, () => new Error('The card-field reading owner must be synchronous.'));
     signal?.throwIfAborted();
   };
   current();

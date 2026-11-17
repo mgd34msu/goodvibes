@@ -2,7 +2,7 @@
  * No schema callback, migration, directory creation, chmod or persistence runs.
  * Returned IDs are ordinary data; this module cannot authorize a project.
  */
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { lstatSync, readlinkSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { inspectNativePlanningProjectImage } from '../../state/sqlite-store.js';
@@ -46,7 +46,7 @@ function selectedPath(path: string, visited = new Set<string>()): { readonly pat
  * caller must retain the actual configured workspace/store family separately.
  */
 export async function inspectPersistedPlanningProjects(path: string, assertOwnerCurrent: () => void): Promise<PersistedPlanningProjects> {
-  const owner = () => { const result: unknown = assertOwnerCurrent(); if (result !== undefined) { drainOwned(result); throw new PlanningProjectInspectionError(); } };
+  const owner = () => { assertSynchronousJudgmentGuard(assertOwnerCurrent, () => new PlanningProjectInspectionError()); };
   owner(); const selected = selectedPath(path); const current = () => { owner(); selected.assertCurrent(); };
   const initial = () => { owner(); selected.assertInitialImage(); };
   current(); const leaf = lstatSync(selected.path, { throwIfNoEntry: false });

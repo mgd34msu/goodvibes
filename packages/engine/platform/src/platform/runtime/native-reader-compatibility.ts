@@ -5,6 +5,7 @@
 import { lstatSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { drainOwned } from '@goodvibes-jev/judgment';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { atomicWriteFileSync } from '../config/atomic-write.js';
 import { readFileObservation, type FileObservation } from '../utils/file-observation.js';
 import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
@@ -231,8 +232,7 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
   let publishAll = true;
   const current = () => {
     if (publisher.execPath !== execPath || publisher.version !== runningVersion || publisher.assertCurrent !== guard || publisher.readerCohort !== captureCohort) throw new NativeDataCompatibilityError('unavailable');
-    const result: unknown = guard.call(publisher);
-    if (result !== undefined) { drainOwned(result); throw new NativeDataCompatibilityError('unavailable'); }
+    assertSynchronousJudgmentGuard(() => guard.call(publisher), () => new NativeDataCompatibilityError('unavailable'));
   };
   const publish = (formats: readonly NativeDataFormat[]): void => {
     let release: (() => void) | null = null;
@@ -275,8 +275,7 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
         if (cohort !== undefined && typeof cohort !== 'function') { drainOwned(cohort); throw new NativeDataCompatibilityError('unconfirmed-reader'); }
         const assertCohort = () => {
           if (typeof cohort !== 'function') return;
-          const result: unknown = cohort();
-          if (result !== undefined) { drainOwned(result); throw new NativeDataCompatibilityError('unconfirmed-reader'); }
+          assertSynchronousJudgmentGuard(cohort, () => new NativeDataCompatibilityError('unconfirmed-reader'));
         };
         assertCohort();
         atomicWriteFileSync(path, contents, { mode: 0o600, assertCurrent: () => {

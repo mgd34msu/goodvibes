@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { sameKnowledgeRecord } from '../store-record-representation.js';
 import { assertKnowledgeRecordAdmissions, assertKnowledgeRecordContainers, KnowledgeRecordAdmissionHeldError, prepareKnowledgeRecordAdmission } from '../store-record-snapshot.js';
 import { captureOwnedJson } from '../../gate/judgment-input.js';
@@ -78,11 +78,7 @@ export async function prepareRepairSourceAuthorities(input: {
   const assertOriginalCurrent = () => {
     try { store.assertRecordSnapshotFrame(() => {
       assertOriginalIdentity();
-      const result: unknown = ownerCurrent?.();
-      if (result !== undefined) {
-        drainOwned(result);
-        throw new Held('stale');
-      }
+      assertSynchronousJudgmentGuard(ownerCurrent, () => new Held('stale'));
       assertOriginalIdentity();
       assertKnowledgeRecordAdmissions(store, admissions);
       for (const subject of originals.subjects) if (store.getNode(subject.id) !== subject) throw new Held('stale');

@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /** One exact closed-tier field; no shared address cache and no heuristic fallback. */
 import { checkAnswers, defineExtractionVerifier, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
@@ -51,8 +51,7 @@ export function createProfilePostalReader(
         const valid = field?.valid;
         const check = () => {
           options.signal?.throwIfAborted(); current.assertCurrent();
-          const result: unknown = options.assertCurrent?.();
-          if (result !== undefined) { drainOwned(result); throw new PostalAddressHeldError(); }
+          assertSynchronousJudgmentGuard(() => options.assertCurrent?.(), () => new PostalAddressHeldError());
           const now = source.get(fieldId);
           if (enabled() !== fallbackEnabled || now?.value !== field?.value || now?.valid !== valid) throw new PostalAddressHeldError();
         };

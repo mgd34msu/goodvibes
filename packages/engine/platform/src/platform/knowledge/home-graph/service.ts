@@ -1,5 +1,5 @@
 import { notifyKnowledgeCommitted } from '../commit-notification.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { createHomeGraphSourceIdentityPlanner, type HomeGraphSourceIdentity } from './source-identity-plan.js';
 import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { snapshotNodeInput } from '../activation/projection.js';
@@ -199,7 +199,7 @@ export class HomeGraphService {
         const current = () => {
           if (ownership.signal !== callerSignal || ownership.assertCurrent !== assertCurrent || ownership.onCommitted !== onCommitted
             || ownership.deferSemanticEnrichment !== deferSemanticEnrichment) throw new KnowledgeWebGapRepairHeldError('stale');
-          signal?.throwIfAborted(); const result: unknown = assertCurrent?.(); if (result !== undefined) { drainOwned(result); throw new KnowledgeWebGapRepairHeldError('malformed'); }
+          signal?.throwIfAborted(); assertSynchronousJudgmentGuard(assertCurrent, () => new KnowledgeWebGapRepairHeldError('malformed'));
         };
         current();
         this.requireAdmission('home-graph url ingestion');

@@ -1,5 +1,5 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { TelegramReceiveProgressOwner, TelegramReceiveScope } from './receive-progress.js';
 import type { TelegramPaymentReceiveSelector } from './payment-receive-span.js';
 
@@ -195,8 +195,7 @@ export function createTelegramSourceAccountOwner(isPaymentSpanTerminal?: (purcha
         if (!await check(session) || !live(session)) throw new Error('Telegram receive source is unavailable');
         const assertCovered = () => {
           if (signal.aborted || !live(session)) throw new Error('Telegram receive source is unavailable');
-          const result: unknown = covered();
-          if (result !== undefined) { drainOwned(result); throw new Error('Telegram receive assertions must be synchronous'); }
+          assertSynchronousJudgmentGuard(covered, () => new Error('Telegram receive assertions must be synchronous'));
         };
         assertCovered(); return assertCovered;
       } });

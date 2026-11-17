@@ -1,6 +1,6 @@
 import { observeKnowledgeValue } from '../local-value-observation.js';
 import { readExactSemanticIds, readExactSemanticId } from '../store-semantic-fact-selector.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { assertKnowledgeRecordAdmissions, assertKnowledgeRecordContainers, KnowledgeRecordAdmissionHeldError, prepareKnowledgeRecordAdmission } from '../store-record-snapshot.js';
 import { captureOwnedJson, retainOwnedJson } from '../../gate/judgment-input.js';
 import { prepareGeneratedFactIdentity, retainGeneratedFactRecordReferences, type GeneratedFactIdentity } from '../generated-fact-record-references.js';
@@ -526,11 +526,7 @@ async function prepareOwnedRepairProfileInputs(
   };
   const assertCallerCurrent = () => {
     assertOriginalOptions();
-    const result: unknown = callerCurrent?.();
-    if (result !== undefined) {
-      drainOwned(result);
-      throw new KnowledgeRepairSourceAuthorityHeldError('stale');
-    }
+    assertSynchronousJudgmentGuard(callerCurrent, () => new KnowledgeRepairSourceAuthorityHeldError('stale'));
     assertOriginalOptions();
   };
   assertCallerCurrent();

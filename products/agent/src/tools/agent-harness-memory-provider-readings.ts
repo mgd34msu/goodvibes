@@ -1,5 +1,5 @@
 import { decisionOrClassic, isClassicOperation, selectClassicCatalog, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
 import { routingRegistry, atRestCredential, memoryCredentialState, memoryLiveStatus, memoryProviderSelect, memoryReceiptMember, memoryRouteRole, memorySchemaCertified } from '@goodvibes-jev/engine/platform/platform/routing';
@@ -17,12 +17,10 @@ export function retainMemoryReadingOptions(original: CatalogRankingOptions): Cat
   const retainCurrent = retain ? captureCatalogMethods(retain, ['call']) : undefined;
   const assertSource = () => { fieldsCurrent(); callerCurrent?.(); retainCurrent?.(); signal?.throwIfAborted(); };
   const assertCurrent = () => {
-    assertSource(); const result: unknown = caller?.call(original); assertSource();
-    if (result !== undefined) { drainOwned(result); throw new ToolInputProjectionError('held'); }
+    assertSource(); assertSynchronousJudgmentGuard(() => caller?.call(original), () => new ToolInputProjectionError('held')); assertSource();
   };
   const retainGuard = (guard: () => void, key?: string) => {
-    assertSource(); const result: unknown = retain?.call(original, guard, key); assertSource();
-    if (result !== undefined) { drainOwned(result); throw new ToolInputProjectionError('held'); }
+    assertSource(); assertSynchronousJudgmentGuard(() => retain?.call(original, guard, key), () => new ToolInputProjectionError('held')); assertSource();
   };
   assertCurrent(); retainGuard(assertSource, 'agent.memory.reading-options');
   return { signal, sourceOwner, assertCurrent, retainCurrent: retainGuard,
@@ -31,8 +29,7 @@ export function retainMemoryReadingOptions(original: CatalogRankingOptions): Cat
 
 export function assertMemoryCurrent(options: CatalogRankingOptions): void {
   options.signal?.throwIfAborted();
-  const result: unknown = options.assertCurrent?.();
-  if (result !== undefined) { drainOwned(result); throw new ToolInputProjectionError('held'); }
+  assertSynchronousJudgmentGuard(() => options.assertCurrent?.(), () => new ToolInputProjectionError('held'));
   options.signal?.throwIfAborted();
 }
 

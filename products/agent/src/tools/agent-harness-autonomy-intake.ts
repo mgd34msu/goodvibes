@@ -1,5 +1,5 @@
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { readAutonomyIntake, type AutonomyIntakeOptions, type AutonomyIntakeSchedule, type AutonomyIntents } from '@goodvibes-jev/engine/platform/platform/routing';
 import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
 import type { CommandContext } from '../input/command-registry.ts';
@@ -665,11 +665,7 @@ export async function autonomyIntakeSummary(context: CommandContext, args: Agent
   };
   originalRetain?.(assertOperatorCurrent, 'agent.autonomy-intake.operator-contract');
   const assertCurrent = () => { signal?.throwIfAborted();
-    const assertion: unknown = originalCurrent?.();
-    if (assertion !== undefined) {
-      drainOwned(assertion);
-      throw new ToolInputProjectionError('held');
-    }
+    assertSynchronousJudgmentGuard(originalCurrent, () => new ToolInputProjectionError('held'));
     assertOperatorCurrent();
   };
   const readingOptions = { ...options, assertCurrent };

@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { Pool, interceptors } from 'undici/index.js';
 import * as directClient from './direct-client.js';
 import { types as nodeTypes } from 'node:util';
@@ -161,12 +161,8 @@ export function createScreeningTransport(options: ScreeningTransportOptions): Sc
       if (closed || runSignal.aborted || lifetime.signal.aborted) throw cancelled();
       if (signal?.aborted) throw signal.reason;
       try {
-        const result: unknown = assertCurrent();
         // An async hook must not silently authorize transmission before it fails.
-        if (result !== null && (typeof result === 'object' || typeof result === 'function') && 'then' in result) {
-          drainOwned(result);
-          throw unauthorized();
-        }
+        assertSynchronousJudgmentGuard(assertCurrent, () => unauthorized());
       } catch { throw unauthorized(); }
       if (closed || runSignal.aborted || lifetime.signal.aborted) throw cancelled();
       if (signal?.aborted) throw signal.reason;

@@ -1,5 +1,5 @@
 import { requireSemanticKnowledge } from '../../decision-policy.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { types as nodeTypes } from 'node:util';
 import { captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { readYesNo, toJson } from '@goodvibes-jev/judgment';
@@ -78,11 +78,7 @@ export function prepareKnowledgeExtractionValueReading(input: KnowledgeExtractio
   };
   const assertOwnerCurrent = () => {
     checkOriginal();
-    const result: unknown = callerCurrent();
-    if (result !== undefined) {
-      drainOwned(result);
-      throw new Held('stale');
-    }
+    assertSynchronousJudgmentGuard(callerCurrent, () => new Held('stale'));
     checkOriginal();
   };
   const assertCurrent = () => {

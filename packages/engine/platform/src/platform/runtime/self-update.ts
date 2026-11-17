@@ -16,7 +16,7 @@ export type { ClientReaderArtifact, ClientReaderPackage, ClientReaderTarget } fr
 export { assertStagedClientReaderCompatible } from './client-reader-update.js';
 export { admitInstalledClientDataWriter, installedReaderCommand } from './installed-client-data-writer.js';
 export type { InstalledClientDataOptions } from './installed-client-data-writer.js';
-import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /**
  * Verified binary updates with owned staging and compensating cohort renames.
  * Individual same-filesystem renames are atomic; the cohort and the brief gap
@@ -517,9 +517,7 @@ function transact(
     phase = 'admission';
     nativeGuard = restrictions.prepareNativeGuard?.();
     if (restrictions.readerExecPath) readerLease = acquireUpdateReaderLease(restrictions.readerExecPath, io, physical);
-    let admission: unknown;
-    try { admission = beforeCommit?.(); } catch (error) { drainOwned(error); throw error; }
-    if (admission !== undefined) { drainOwned(admission); throw new Error('beforeCommit must complete synchronously without returning a value'); }
+    assertSynchronousJudgmentGuard(beforeCommit, () => new Error('beforeCommit must complete synchronously without returning a value'));
     current();
     phase = 'commit'; commit((from, to) => move(from, to, false)); committed = true;
     phase = 'cleanup';
@@ -528,10 +526,7 @@ function transact(
     if (restrictions.retainPublication) {
       if (!nativeGuard) throw new Error('Native publication observation is unavailable');
       nativeGuard.assertCurrent();
-      let retained: unknown;
-      try { retained = restrictions.retainPublication(nativeGuard.assertCurrent.bind(nativeGuard)); }
-      catch (error) { drainOwned(error); throw error; }
-      if (retained !== undefined) { drainOwned(retained); throw new Error('Publication observation must complete synchronously'); }
+      assertSynchronousJudgmentGuard(() => restrictions.retainPublication(nativeGuard.assertCurrent.bind(nativeGuard)), () => new Error('Publication observation must complete synchronously'));
       nativeGuard.assertCurrent();
     }
     for (const claim of claims) removeCreated(claim);
@@ -847,11 +842,11 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
     assertCurrent();
     assertNativeCurrent?.();
     assertSynchronousCurrent(readerGuard);
-    const result = options.beforeCommit ? withVerifiedUpdateStage([...verifiedMembers.values()], nativeStage,
-      () => { assertCurrent(); assertStagedCurrent?.(); }, stage => options.beforeCommit!(stage)) : undefined;
-    if (result !== undefined) {
-      drainOwned(result);
-      throw new Error('beforeCommit must complete synchronously without returning a value');
+    const beforeCommit = options.beforeCommit;
+    if (beforeCommit) {
+      assertSynchronousJudgmentGuard(() => withVerifiedUpdateStage([...verifiedMembers.values()], nativeStage,
+        () => { assertCurrent(); assertStagedCurrent?.(); }, stage => beforeCommit(stage)),
+      () => new Error('beforeCommit must complete synchronously without returning a value'));
     }
     assertCurrent();
     assertNativeCurrent?.();
@@ -897,12 +892,7 @@ export function rollbackKeptPrevious(
   const skipped: RollbackTarget[] = [];
   transact('rollback', paths, io, () => {}, () => {
     if (options.requireComplete && paths.some(path => !io.exists(path.previous))) throw new Error('Previous native cohort is incomplete; refusing partial rollback');
-    let result: unknown;
-    try { result = beforeCommit?.(); } catch (error) { drainOwned(error); throw error; }
-    if (result !== undefined) {
-      drainOwned(result);
-      throw new Error('beforeCommit must complete synchronously without returning a value');
-    }
+    assertSynchronousJudgmentGuard(beforeCommit, () => new Error('beforeCommit must complete synchronously without returning a value'));
   }, (rename) => {
     for (let index = 0; index < paths.length; index += 1) {
       const path = paths[index]!;

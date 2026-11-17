@@ -2,7 +2,7 @@
  * authority, and a reservation never proves that Git actually created a tree. */
 import { lstatSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { captureExistingDirectory, writeFileAtomic } from '../utils/atomic-json-store.js';
 import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
 import { tryAcquireCrossProcessLock, assertCrossProcessLockCurrent } from '../workspace/checkpoint/cross-process-lock.js';
@@ -121,8 +121,7 @@ export class WorktreeIdentityRegistry {
     this.parent.assertCurrent();
     if (this.writer) {
       if (this.writer.declare !== this.declare || !this.declare) throw unavailable();
-      const returned: unknown = this.declare.call(this.writer, 'worktree-opaque-identities-v1');
-      if (returned !== undefined) { drainOwned(returned); throw unavailable(); }
+      assertSynchronousJudgmentGuard(() => this.declare.call(this.writer, 'worktree-opaque-identities-v1'), () => unavailable());
       if (this.writer.declare !== this.declare) throw unavailable();
       this.parent.assertCurrent();
     }

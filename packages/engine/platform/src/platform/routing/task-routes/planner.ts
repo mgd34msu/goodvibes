@@ -1,5 +1,5 @@
 import { requireDecisionFeature } from '../../runtime/decision-policy.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /**
  * The task route planner: the agent's planAgentTaskRoute, with the keyword
  * ladder replaced by Jev readings. One planning pass asks, concurrently, the
@@ -184,8 +184,7 @@ export async function planTaskRoute(
   const signal = options.signal, callerCurrent = options.assertCurrent, retainCurrent = options.retainCurrent;
   const assertCaller = () => {
     signal?.throwIfAborted();
-    const checked: unknown = callerCurrent?.();
-    if (checked !== undefined) { drainOwned(checked); throw new ToolInputProjectionError('held'); }
+    assertSynchronousJudgmentGuard(callerCurrent, () => new ToolInputProjectionError('held'));
     signal?.throwIfAborted();
   };
   assertCaller();

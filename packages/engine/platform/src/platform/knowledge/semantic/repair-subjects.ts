@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from '../types.js';
 import type { KnowledgeObjectProfilePolicy } from '../extensions.js';
 import type { KnowledgeStore } from '../store.js';
@@ -100,11 +100,7 @@ async function prepareRepairSubjects(input: RepairSubjectInput): Promise<RepairS
   const assertOriginalCurrent = () => {
     try { store.assertRecordSnapshotFrame(() => {
       assertOriginalIdentity();
-      const result: unknown = ownerCurrent?.();
-      if (result !== undefined) {
-        drainOwned(result);
-        throw new Held('stale');
-      }
+      assertSynchronousJudgmentGuard(ownerCurrent, () => new Held('stale'));
       assertOriginalIdentity();
       assertKnowledgeRecordAdmissions(store, admissions);
       for (const { source, extraction } of evidence) if (store.getExtractionBySourceId(source.id) !== extraction) throw new Held('stale');

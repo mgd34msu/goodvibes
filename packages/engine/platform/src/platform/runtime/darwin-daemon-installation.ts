@@ -1,7 +1,7 @@
 /** Darwin daemon release inspection. Reader metadata proves its declared image
  * pins; only the actual compiled entry can additionally supply SQLite's baked
  * producer owner. Historical metadata is never executed to discover readers. */
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { lstatSync } from 'node:fs';
 import { assertClientReaderPayload, clientReaderMemberPath, parseClientReaderArtifact, type ClientReaderArtifact } from './client-reader-artifact.js';
 import { retainDaemonNativeFiles } from './daemon-native-cohort.js';
@@ -46,8 +46,7 @@ export function inspectDarwinDaemonInstallation(execPath: string, arch: string, 
   const compiledCurrent = options.assertCompiledSqliteCurrent;
   if (compiledCurrent && !options.expectedSqliteOwner) throw new Error('Compiled SQLite provenance requires its actual owner');
   const current = () => {
-    original(); const result: unknown = compiledCurrent?.();
-    if (result !== undefined) { drainOwned(result); throw new Error('Compiled SQLite source guard must be synchronous'); } original();
+    original(); assertSynchronousJudgmentGuard(compiledCurrent, () => new Error('Compiled SQLite source guard must be synchronous')); original();
   };
   for (const target of selected) if (observe(target.path)?.mode !== (target.executable ? 0o755 : 0o644)) throw new Error('Darwin daemon installation is incomplete or has invalid modes');
   const bounded = (path: string, limit: number): Buffer => {

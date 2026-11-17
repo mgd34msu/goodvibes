@@ -2,7 +2,7 @@
  * source projection, judgment port, or scope-derived authorization is involved. */
 import { lstatSync, opendirSync, realpathSync, type Dir } from 'node:fs';
 import { join } from 'node:path';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { capturePrivateSqliteDirectory, readPrivateSqliteImage } from '../state/private-sqlite-path.js';
 import { fileObservationIdentity } from '../utils/file-observation.js';
 import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
@@ -37,10 +37,7 @@ export interface InactiveInboxRetentionOptions {
 const unavailable = () => new Error('Inactive inbox retention storage is unavailable');
 const missing = (error: unknown): boolean => error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
 function synchronous(check: () => void): void {
-  let result: unknown;
-  try { result = check(); }
-  catch (error) { drainOwned(error); throw error; }
-  if (result !== undefined) { drainOwned(result); throw unavailable(); }
+  assertSynchronousJudgmentGuard(check, () => unavailable());
 }
 function rootStamp(path: string): string {
   const stat = lstatSync(path, { bigint: true }); if (!stat.isDirectory() || stat.isSymbolicLink()) throw unavailable();

@@ -1,5 +1,5 @@
 import { decisionOrClassic } from '../runtime/decision-policy.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { retainStrictJudgmentJson, prepareJudgmentResult } from '../gate/judgment-result.js';
 /** Jev reads schedule meaning; code owns quantities, calendars and validation. */
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
@@ -153,8 +153,7 @@ export const scheduleReading: NaturalLanguageScheduleDecision = {
     assertJudgmentInput({ phrase: source.phrase, timezone: source.timezone });
     const checkSource = () => {
       original.assertCurrent(); options.signal?.throwIfAborted();
-      const checked: unknown = options.beforeAttempt?.();
-      if (checked !== undefined) { drainOwned(checked); throw new Error('Schedule source guard must be synchronous.'); }
+      assertSynchronousJudgmentGuard(() => options.beforeAttempt?.(), () => new Error('Schedule source guard must be synchronous.'));
     };
     checkSource();
     return decisionOrClassic(async () => {

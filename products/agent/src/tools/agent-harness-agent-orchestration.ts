@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, captureCatalogMethods, captureCatalogSnapshotGuard, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
@@ -948,8 +948,7 @@ async function captureOrchestrationPublisher(context: CommandContext, backend: R
     backend.assertCurrent(); assertOptions(); signal?.throwIfAborted();
   };
   const assertCallerCurrent = () => {
-    const result: unknown = callerCurrent?.call(options);
-    if (result !== undefined) { drainOwned(result); throw new ToolInputProjectionError('held'); }
+    assertSynchronousJudgmentGuard(() => callerCurrent?.call(options), () => new ToolInputProjectionError('held'));
   };
   const assertCurrent = () => {
     assertSourceCurrent();

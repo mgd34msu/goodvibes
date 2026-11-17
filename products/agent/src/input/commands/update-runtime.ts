@@ -2,7 +2,7 @@
 import { installedSuiteNeedsRepair, applySuiteUpdate, rollbackSuiteUpdate, captureUpdateFileIo, realUpdateFileIo,
   type SuiteUpdateResult, type UpdateFileIo } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { DAEMON_REPO_RELEASES_LATEST_URL, daemonReleaseDownloadBaseUrl } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { checkReleaseUpdate, prepareReleaseUpdate, requireBinaryUpdateInstall, createSelfUpdateCommand,
   retainSuiteUpdateConfiguration, formatSuiteUpdateReport,
   type ReleaseUpdateCheck, type SuiteUpdateConfigurationSource,
@@ -34,8 +34,7 @@ export interface ApplyUpdateOptions {
   readonly assertCurrent?: (() => void) | undefined;
 }
 function assertOwner(check: (() => void) | undefined): void {
-  const result: unknown = check?.();
-  if (result !== undefined) { drainOwned(result); throw new Error('Agent update ownership must complete synchronously'); }
+  assertSynchronousJudgmentGuard(check, () => new Error('Agent update ownership must complete synchronously'));
 }
 /** All installed products/native companions/directories are prepared before
  * replacement. The platform owns compensation and version-bound rollback. */

@@ -13,7 +13,7 @@
  */
 import { JudgmentAuthorityRetiredError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { sandboxNeeds } from '../../../gate/batteries/sandbox-needs.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { forgetProcessJudgments, judge } from '../../judge.js';
 
 export interface CommandNeeds {
@@ -55,10 +55,8 @@ export async function readCommandNeeds(
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   });
   // The caller's own operation may have ended while the reading ran.
-  let restriction: unknown;
-  try { restriction = options.assertCurrent?.(); }
-  catch (error) { drainOwned(error); throw new JudgmentAuthorityRetiredError(); }
-  if (restriction !== undefined) { drainOwned(restriction); throw new JudgmentAuthorityRetiredError(); }
+  try { assertSynchronousJudgmentGuard(() => options.assertCurrent?.(), () => new JudgmentAuthorityRetiredError()); }
+  catch { throw new JudgmentAuthorityRetiredError(); }
   return value;
 }
 

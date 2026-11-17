@@ -3,7 +3,7 @@
  * Actual products use this implementation instead of maintaining parallel
  * per-product downloaders.
  */
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { applyVerifiedUpdate, CHECKSUM_MANIFEST_NAME, DEFAULT_UPDATE_TIMEOUT_MS, parseChecksumFile, rollbackKeptPrevious, sha256, UpdateTransactionError,
@@ -122,8 +122,7 @@ export function configuredSuiteWebuiDirectory(config: { get(key: string): unknow
   return typeof fallback === 'string' && fallback.trim() ? fallback.trim() : undefined;
 }
 function synchronous(operation: (() => void) | undefined): void {
-  const value: unknown = operation?.();
-  if (value !== undefined) { drainOwned(value); throw new Error('Suite update admission must complete synchronously'); }
+  assertSynchronousJudgmentGuard(operation, () => new Error('Suite update admission must complete synchronously'));
 }
 function nativeDaemon(plan: SuiteUpdatePlan) {
   return plan.programs.find(program => program.readerKind === 'linux-daemon');

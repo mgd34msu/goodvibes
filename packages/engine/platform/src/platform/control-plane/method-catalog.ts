@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { builtinTriggerSupervisorMethodDescriptors } from './method-catalog-trigger-supervisor.js';
 import { builtinDelegatedInboundMethodDescriptors } from './method-catalog-delegated-inbound.js';
 import { builtinGatewayNativeHostedTurnMethodDescriptors } from './method-catalog-native-hosted-turn.js';
@@ -377,12 +377,7 @@ export class GatewayMethodCatalog {
     if (this.scopePolicyChanging) throw new Error('Gateway scope policy mutation is reentrant');
     this.scopePolicyChanging = true;
     try {
-      let result: unknown;
-      try { result = owner.beforeMutation(); } catch (error) { drainOwned(error); throw error; }
-      if (result !== undefined) {
-        drainOwned(result);
-        throw new Error('Gateway scope policy mutation must be synchronous');
-      }
+      assertSynchronousJudgmentGuard(() => owner.beforeMutation(), () => new Error('Gateway scope policy mutation must be synchronous'));
       if (this.scopePolicyOwner !== owner) throw new Error('Gateway scope policy owner changed');
     } finally { this.scopePolicyChanging = false; }
   }

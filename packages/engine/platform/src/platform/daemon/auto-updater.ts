@@ -80,7 +80,7 @@ import type { ServiceHandoverOutcome } from './service-handover.js';
 import { inspectDaemonUpdateInstallation, resolveDaemonUpdateTargets } from '../runtime/daemon-update-installation.js';
 import { assertStagedClientReaderCompatible } from '../runtime/client-reader-update.js';
 import { observesUpdateFiles } from '../runtime/update-file-io.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { applySuiteUpdate, installedSuiteNeedsRepair, retainSuiteUpdateConfiguration, SuiteUpdatePreparationError, SuiteUpdateRecoveryError, type SuiteUpdateResult } from '../runtime/suite-update.js';
 import { prepareHandoverBeforeStop, prepareServiceHandover, ServiceHandoverPreflightError, type PreparedServiceHandover } from './service-handover-preflight.js';
 import { writeFatalLine } from './fatal-boot-report.js';
@@ -592,8 +592,7 @@ export class DaemonAutoUpdater {
     const retainedNative = readerOwner !== undefined && observesUpdateFiles(io);
     const retainedCurrent = () => {
       if (!retainedNative || !readerOwner) return;
-      const result: unknown = readerOwner.assertCurrent();
-      if (result !== undefined) { drainOwned(result); throw new Error('The original installed daemon reader must be synchronous'); }
+      assertSynchronousJudgmentGuard(() => readerOwner.assertCurrent(), () => new Error('The original installed daemon reader must be synchronous'));
     };
     // Native startup already verified this exact installed cohort. Its original
     // source assertion detects replacement or edits without rehashing every

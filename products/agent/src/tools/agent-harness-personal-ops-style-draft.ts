@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { composeDraftReply, extractStyleProfile, type StyleReplyMessage, type StyleSentMessage } from '@goodvibes-jev/engine/platform/platform/email';
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { assertJudgmentInput, retainStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
@@ -59,8 +59,7 @@ export async function runPersonalOpsStyleDraft(fields: unknown, options: Catalog
       || (input.context !== undefined && typeof input.context !== 'string')) throw new ToolInputProjectionError('invalid');
     const current = () => {
       optionsCurrent(); source.assertCurrent(); signal?.throwIfAborted();
-      const returned: unknown = caller?.();
-      if (returned !== undefined) { drainOwned(returned); throw new ToolInputProjectionError('held'); }
+      assertSynchronousJudgmentGuard(caller, () => new ToolInputProjectionError('held'));
       optionsCurrent(); source.assertCurrent(); signal?.throwIfAborted();
     };
     current();

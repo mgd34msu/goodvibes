@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /**
  * routes/owner-profile-policy.ts, the owner's `profile.*` switches, enforced.
  *
@@ -101,12 +101,10 @@ export function applyOwnerProfilePolicy(
       const sourceCurrent = () => {
         if (service.person !== person) throw new Error('The profile person source is no longer current.');
       };
-      const retained: unknown = options.retain?.(sourceCurrent);
-      if (retained !== undefined) { drainOwned(retained); throw new Error('The profile person caller is no longer current.'); }
+      assertSynchronousJudgmentGuard(() => options.retain?.(sourceCurrent), () => new Error('The profile person caller is no longer current.'));
       const assertCurrent = () => {
         sourceCurrent();
-        const checked: unknown = callerCurrent?.();
-        if (checked !== undefined) { drainOwned(checked); throw new Error('The profile person caller is no longer current.'); }
+        assertSynchronousJudgmentGuard(callerCurrent, () => new Error('The profile person caller is no longer current.'));
         sourceCurrent();
       };
       assertCurrent();

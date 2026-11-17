@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { knowledgeClockIso } from '../store-record-representation.js';
 import type { KnowledgeStore } from '../store.js';
 import { captureOwnedJson, retainOwnedJson } from '../../gate/judgment-input.js';
@@ -45,8 +45,7 @@ export async function writeSupportedRepairSubjectLinks(input: {
   };
   const assertOwnerCurrent = () => {
     assertOriginalCurrent();
-    const result: unknown = ownerCurrent?.();
-    if (result !== undefined) { drainOwned(result); throw new KnowledgeRepairFactScoringHeldError('stale'); }
+    assertSynchronousJudgmentGuard(ownerCurrent, () => new KnowledgeRepairFactScoringHeldError('stale'));
     assertOriginalCurrent();
   };
   assertOwnerCurrent();

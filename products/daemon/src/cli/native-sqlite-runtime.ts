@@ -1,6 +1,6 @@
 import type { DarwinDaemonSqliteOwner } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { isCompiledBunModuleUrl } from '@goodvibes-jev/engine/platform/platform/runtime/compiled-native-startup';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, type BigIntStats } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -100,9 +100,7 @@ export interface DaemonSqliteAdmission {
   assertCurrent(): void;
 }
 function assertSqliteLifetime(check: (() => void) | undefined): void {
-  let result: unknown;
-  try { result = check?.(); } catch (error) { drainOwned(error); throw error; }
-  if (result !== undefined) { drainOwned(result); throw nativeStartupRefused('SQLITE_LIFETIME_ASYNC', 'Native SQLite lifetime must be synchronous'); }
+  assertSynchronousJudgmentGuard(check, () => nativeStartupRefused('SQLITE_LIFETIME_ASYNC', 'Native SQLite lifetime must be synchronous'));
 }
 
 /** Run before importing any service module that can construct a database. */

@@ -2,9 +2,9 @@
 import { chmodSync, closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { BigIntStats } from 'node:fs';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 const unavailable = () => new Error('Private SQLite storage path is unavailable');
-function synchronous(check: () => void): void { const result: unknown = check(); if (result !== undefined) { drainOwned(result); throw unavailable(); } }
+function synchronous(check: () => void): void { assertSynchronousJudgmentGuard(check, () => unavailable()); }
 
 /** The store directory was replaced (moved, deleted, recreated) while this process held it. */
 export class PrivateSqliteDirectoryMovedError extends Error {

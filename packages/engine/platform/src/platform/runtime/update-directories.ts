@@ -7,7 +7,7 @@ import * as fs from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { readTarGzEntries, type TarEntry } from '../browser/browser-driver-archive.js';
 import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { retainNativeUpdateDirectory } from './update-file-io.js';
 
 export interface NativeDirectoryPreparationOptions {
@@ -148,8 +148,7 @@ function previousReleaseVersion(value: Tree | undefined): string | undefined {
     && (row['kind'] === undefined || typeof row['kind'] === 'string') ? row['version'] : undefined;
 }
 function synchronous(check: (() => void) | undefined): void {
-  const result: unknown = check?.();
-  if (result !== undefined) { drainOwned(result); throw new Error('Native directory admission must be synchronous'); }
+  assertSynchronousJudgmentGuard(check, () => new Error('Native directory admission must be synchronous'));
 }
 
 /** New release tree. All archive validation completes before taking filesystem ownership. */

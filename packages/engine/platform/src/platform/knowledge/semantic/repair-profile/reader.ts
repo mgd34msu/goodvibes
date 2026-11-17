@@ -1,5 +1,5 @@
 import { requireSemanticKnowledge } from '../../decision-policy.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { retainStrictJudgmentJson, prepareJudgmentResult } from '../../../gate/judgment-result.js';
 import { captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { toJson, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
@@ -94,8 +94,7 @@ export async function prepareRepairProfileSelections(inputs: readonly RepairProf
     if (stoppedError) throw stoppedError;
     if (options.signal?.aborted) throw new Held('aborted');
     try { original.assertCurrent(); } catch { throw new Held('stale'); }
-    const checked: unknown = callerCurrent?.();
-    if (checked !== undefined) { drainOwned(checked); throw new Held('stale'); }
+    assertSynchronousJudgmentGuard(callerCurrent, () => new Held('stale'));
     if (options.assertCurrent !== callerCurrent) throw new Held('stale');
   };
   let requests = 0, bytes = 0;

@@ -1,5 +1,5 @@
 import { requireDecisionFeature } from '../../runtime/decision-policy.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { defineBattery, oneOf, STAKES_BANDS, yesNo, type BatteryRun, type EntryType, type JudgmentPort, type Questions, type JudgmentResult } from '@goodvibes-jev/judgment';
 import { prepareJudgmentResult, captureStrictJudgmentJson } from '../../gate/judgment-result.js';
@@ -114,11 +114,7 @@ export async function readAutonomyIntake(request: string, options: AutonomyIntak
     if (options.signal !== signal || options.sourceOwner !== owner || options.assertCurrent !== originalCurrent || options.retainCurrent !== retainCurrent || owner?.capture !== capture || owner?.screen !== screen || owner?.project !== project || owner?.release !== release || owner?.close !== close) throw new Error('Autonomy intake source changed.');
   };
   const current = () => { signal?.throwIfAborted();
-    const assertion: unknown = originalCurrent?.();
-    if (assertion !== undefined) {
-      drainOwned(assertion);
-      throw new Error('Autonomy intake authority must be synchronous.');
-    }
+    assertSynchronousJudgmentGuard(originalCurrent, () => new Error('Autonomy intake authority must be synchronous.'));
     assertOriginalBindings();
   };
   current();

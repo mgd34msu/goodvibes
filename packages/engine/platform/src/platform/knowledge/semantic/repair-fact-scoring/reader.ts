@@ -1,5 +1,5 @@
 import { requireSemanticKnowledge } from '../../decision-policy.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { types as nodeTypes } from 'node:util';
 import { captureJudgmentPort, judgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { checkAnswers, toJson, type JudgmentPort } from '@goodvibes-jev/judgment';
@@ -55,8 +55,7 @@ export async function prepareRepairFactScoring(inputs: readonly RepairFactScorin
     if (signal?.aborted) throw new Held('aborted');
     if (options.signal !== signal || options.assertCurrent !== ownerCurrent || options.timeoutMs !== configuredTimeout) throw new Held('stale');
     try { originals.assertCurrent(); } catch { throw new Held('stale'); }
-    const result: unknown = ownerCurrent?.();
-    if (result !== undefined) { drainOwned(result); throw new Held('stale'); }
+    assertSynchronousJudgmentGuard(ownerCurrent, () => new Held('stale'));
     if (options.signal !== signal || options.assertCurrent !== ownerCurrent || options.timeoutMs !== configuredTimeout || signal?.aborted) throw new Held('stale');
     try { originals.assertCurrent(); } catch { throw new Held('stale'); }
   };

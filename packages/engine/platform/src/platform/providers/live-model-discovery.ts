@@ -15,7 +15,7 @@
  */
 
 import fs from 'node:fs';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { dirname, join } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
@@ -173,8 +173,7 @@ export async function runLiveModelRefresh(opts: LiveModelRefreshOptions): Promis
   const sourceCurrent = opts.assertCurrent;
   const assertCurrent = (): void => {
     try {
-      const result: unknown = sourceCurrent?.();
-      if (result !== undefined) { drainOwned(result); throw new Error(); }
+      assertSynchronousJudgmentGuard(sourceCurrent, () => new Error());
     } catch (error) {
       drainOwned(error);
       throw new Error('The original model-discovery owner is no longer current.');

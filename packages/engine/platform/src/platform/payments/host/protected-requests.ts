@@ -4,7 +4,7 @@ import { closeSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readdir
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { captureOwnedJson } from '../../gate/judgment-input.js';
 import type { PaymentStoreStop } from '../payment-host-health.js';
 import { encryptStore, decryptStore, SECRETS_STORE_FORMAT_VERSION, type EncryptedStoreEnvelope } from '../../config/secrets-keyfile.js';
@@ -98,9 +98,7 @@ function optionalFields(row: Record<string, unknown>, keys: readonly string[]): 
   return Object.freeze(copy);
 }
 function current(check: () => void): void {
-  let result: unknown;
-  try { result = check(); } catch { throw new RefusedRequestError(); }
-  if (result !== undefined) { drainOwned(result); throw new RefusedRequestError(); }
+  try { assertSynchronousJudgmentGuard(check, () => new RefusedRequestError()); } catch { throw new RefusedRequestError(); }
 }
 /** Pure validation of what a caller supplied: no file is touched, so no failure here can mean damage. */
 function refuse<T>(validate: () => T): T {
@@ -328,8 +326,7 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
       this.declareMultiRecipientCheckpoint(request.window); current(check);
       if (request.replyHistory) {
         if (!this.beforeReplyHistory) throw new ProtectedPaymentRequestError();
-        const declared: unknown = this.declareHistory(request.replyHistory);
-        if (declared !== undefined) { drainOwned(declared); throw new ProtectedPaymentRequestError(); }
+        assertSynchronousJudgmentGuard(() => this.declareHistory(request.replyHistory), () => new ProtectedPaymentRequestError());
         current(check);
       }
       const path = this.path(request.purchaseId), key = this.keyBytes(true, check);
@@ -363,8 +360,7 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
       if (observed.physical !== file.physical || !observed.bytes.equals(file.bytes)) throw new ProtectedPaymentRequestError();
     };
     try {
-      before(); const declared = declare();
-      if (declared !== undefined) { drainOwned(declared); throw new ProtectedPaymentRequestError(); }
+      before(); assertSynchronousJudgmentGuard(declare, () => new ProtectedPaymentRequestError());
       before(); atomicWriteFileSync(path, `${JSON.stringify(encryptStore(plaintext, key))}\n`, { mode: 0o600, assertCurrent: before });
     } catch (error) {
       if (error instanceof RefusedRequestError) throw error;
@@ -392,10 +388,8 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
     // Declare this exact new shape before publication/adoption, including
     // imported encrypted windows, so rollback preflight sees the requirement.
     if (!this.beforeMultiRecipientCheckpoint) throw new ProtectedPaymentRequestError();
-    let result: unknown;
-    try { result = this.beforeMultiRecipientCheckpoint(); }
-    catch (error) { drainOwned(error); throw error instanceof Error ? error : new ProtectedPaymentRequestError(); }
-    if (result !== undefined) { drainOwned(result); throw new ProtectedPaymentRequestError(); }
+    try { assertSynchronousJudgmentGuard(() => this.beforeMultiRecipientCheckpoint?.(), () => new ProtectedPaymentRequestError()); }
+    catch (error) { throw error instanceof Error ? error : new ProtectedPaymentRequestError(); }
   }
 
   private declareHistory(history: PaymentReplyHistory): unknown {

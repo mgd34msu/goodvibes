@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /** Named People-line attribution is a reading, never permission to disclose a profile. */
 import {
   askAs, checkAnswers, defineBattery, estimateTokens, LIMITS, mapLimit, noul, readYesNo, recordAction, recordReadings,
@@ -45,8 +45,7 @@ export interface ProfilePersonReadingOptions extends JudgmentReadingOptions {
 }
 
 function synchronous(check: (() => void) | undefined): void {
-  const result: unknown = check?.();
-  if (result !== undefined) { drainOwned(result); throw new ProfilePersonReadingHeldError(); }
+  assertSynchronousJudgmentGuard(check, () => new ProfilePersonReadingHeldError());
 }
 
 /**

@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /**
  * `routing.task-route.slots`: what a user task asks for, beyond which route
  * handles it. These questions replace the agent's per-route effect word
@@ -256,8 +256,7 @@ export async function readSlots(
   const signal = options.signal, originalCurrent = options.assertCurrent, sources = options.namedIds, site = options.site;
   const assertCurrent = () => {
     signal?.throwIfAborted();
-    const assertion: unknown = originalCurrent?.();
-    if (assertion !== undefined) { drainOwned(assertion); throw new Error('Task-route slot ownership must be synchronous.'); }
+    assertSynchronousJudgmentGuard(originalCurrent, () => new Error('Task-route slot ownership must be synchronous.'));
   };
   assertCurrent();
   const snapshots = (Object.keys(NAMED_ID_KINDS) as NamedIdKind[])

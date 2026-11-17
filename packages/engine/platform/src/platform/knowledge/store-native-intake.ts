@@ -1,6 +1,6 @@
 import { knowledgeSchemaColumns, conversationRequestColumns } from './store-schema-validation-data.js';
 /** Durable conversation capture in the same coordinated image as its native ledger publication. */
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { isDeepStrictEqual } from 'node:util';
 import type { SQLiteStore, SqlDatabase } from '../state/sqlite-store.js';
 import { createEmptyWorkLedgerState, readWorkLedgerState } from '../workflow/work-ledger/service.js';
@@ -179,12 +179,10 @@ function write(db: Pick<SqlDatabase, 'exec' | 'run'>, projectId: string, key: Na
   const duplicate = db.exec('SELECT input_id FROM native_conversation_captures WHERE project_id = ? AND principal_id = ? AND request_id = ?', [projectId, key.principalId, next.requestId])[0]?.values[0];
   if (duplicate && duplicate[0] !== key.inputId) throw new NativeConversationStorageError('conflict');
   if (next.version === 2) {
-    const result: unknown = beforeWrite?.();
-    if (result !== undefined) { drainOwned(result); throw new NativeConversationStorageError('invalid'); }
+    assertSynchronousJudgmentGuard(beforeWrite, () => new NativeConversationStorageError('invalid'));
   }
   if (next.settled === true) {
-    const result: unknown = beforeSettledWrite?.();
-    if (result !== undefined) { drainOwned(result); throw new NativeConversationStorageError('invalid'); }
+    assertSynchronousJudgmentGuard(beforeSettledWrite, () => new NativeConversationStorageError('invalid'));
   }
   db.run('INSERT INTO native_conversation_captures(project_id, principal_id, input_id, request_id, format_version, state_json) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(project_id, principal_id, input_id) DO UPDATE SET format_version=excluded.format_version, state_json=excluded.state_json', [projectId, key.principalId, key.inputId, next.requestId, next.version, storedRow(db, projectId, current, next)]);
 }

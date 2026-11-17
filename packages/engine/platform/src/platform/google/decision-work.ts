@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { DecisionModelsDisabledError, JudgmentPortMissingError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { activateClassicFallback, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
@@ -11,8 +11,7 @@ export function googleCallerCurrent(options: JudgmentReadingOptions): () => void
   return () => {
     if (signal?.aborted) throw new JudgmentError('aborted', 'The Google operation was cancelled.');
     if (options.signal !== signal || options.assertCurrent !== guard) throw new Error('Google operation owner changed.');
-    const checked: unknown = guard?.();
-    if (checked !== undefined) { drainOwned(checked); throw new Error('Google operation ownership must be synchronous.'); }
+    assertSynchronousJudgmentGuard(guard, () => new Error('Google operation ownership must be synchronous.'));
     if (signal?.aborted) throw new JudgmentError('aborted', 'The Google operation was cancelled.');
   };
 }

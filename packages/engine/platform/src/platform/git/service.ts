@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { lstatSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { SimpleGit } from 'simple-git';
@@ -118,8 +118,7 @@ export function conflictPathsFromMergeOutput(message: string): string[] {
 const worktreeMutationTails = new Map<string, Promise<void>>();
 
 function assertGitRestriction(guard?: () => void): void {
-  const result: unknown = guard?.();
-  if (result !== undefined) { drainOwned(result); throw new Error('Native Git restriction must complete synchronously'); }
+  assertSynchronousJudgmentGuard(guard, () => new Error('Native Git restriction must complete synchronously'));
 }
 
 /** Each repository's canonical common directory, resolved once per working directory: it does not change while the repository exists. */

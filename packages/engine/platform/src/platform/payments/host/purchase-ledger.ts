@@ -9,7 +9,7 @@ import { capturePurchaseRecord } from '../purchase-record-codec.js';
 import type { PurchaseLedger } from '../payment-ports.js';
 import type { PurchaseRecord } from '../purchase-record.js';
 import { samePaymentEvidence } from '../evidence-equality.js';
-import { drainOwned } from '@goodvibes-jev/judgment';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import type { PaymentReconciliationCheckpoint } from './reconciliation-checkpoint.js';
 import { ORDER_MAIL_KINDS, type OrderMailKind } from '../message.js';
 
@@ -86,8 +86,7 @@ export class DaemonPurchaseLedger implements PurchaseLedger {
   constructor(options: DaemonPurchaseLedgerOptions) { this.filePath = options.filePath; this.beforeReconciliationWrite = options.beforeReconciliationWrite; }
 
   private declareReconciliation(): void {
-    const result: unknown = this.beforeReconciliationWrite?.();
-    if (result !== undefined) { drainOwned(result); throw new PaymentPurchaseLedgerError('unavailable'); }
+    assertSynchronousJudgmentGuard(() => this.beforeReconciliationWrite?.(), () => new PaymentPurchaseLedgerError('unavailable'));
   }
 
   private read(): LedgerSnapshot {

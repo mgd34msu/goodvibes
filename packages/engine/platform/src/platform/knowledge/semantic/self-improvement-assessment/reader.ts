@@ -1,5 +1,5 @@
 import { requireSemanticKnowledge } from '../../decision-policy.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { captureJudgmentPort, judgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { toJson } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, JudgmentInputError } from '../../../gate/judgment-input.js';
@@ -59,8 +59,7 @@ export async function readSelfImprovementAssessment(kind: 'context' | 'coverage'
     if (signal?.aborted) throw new Held('aborted');
     if (options.signal !== signal || options.assertCurrent !== ownerCurrent || options.timeoutMs !== configuredTimeout) throw new Held('stale');
     snapshot.assertCurrent();
-    const result: unknown = ownerCurrent?.();
-    if (result !== undefined) { drainOwned(result); throw new Held('stale'); }
+    assertSynchronousJudgmentGuard(ownerCurrent, () => new Held('stale'));
     snapshot.assertCurrent();
     if (signal?.aborted || options.signal !== signal || options.assertCurrent !== ownerCurrent || options.timeoutMs !== configuredTimeout) throw new Held(signal?.aborted ? 'aborted' : 'stale');
   };

@@ -1,5 +1,5 @@
 import { captureOwnedJson } from '../gate/judgment-input.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { readReasoningEffortLevel } from '../providers/reasoning-effort.js';
 import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibility.js';
 /**
@@ -83,6 +83,7 @@ import { CompanionChatRateLimiter } from './companion-chat-rate-limiter.js';
 import type { CompanionChatRateLimiterOptions } from './companion-chat-rate-limiter.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ToolCall, ToolResult } from '../types/tools.js';
+import { toolCallActivity } from '@goodvibes-jev/engine/contracts';
 import { runTurn, type TurnModelResponse, type TurnRequest } from '../core/turn-loop.js';
 import type { PermissionManager } from '../permissions/manager.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
@@ -1186,7 +1187,8 @@ export class CompanionChatManager {
               const toolCallId = chunk.toolCallId ?? '';
               const toolName = chunk.toolName ?? '';
               const toolInput = (chunk.toolInput ?? {}) as Record<string, unknown>;
-              publish({ type: 'turn.tool_call', sessionId, turnId, toolCallId, toolName, toolInput });
+              const activity = toolCallActivity(toolRegistry?.definitionOf(toolName)?.activity, toolInput);
+              publish({ type: 'turn.tool_call', sessionId, turnId, toolCallId, toolName, toolInput, ...(activity ? { activity } : {}) });
               if (toolCallId && toolName) toolCalls.push({ id: toolCallId, name: toolName, arguments: toolInput });
               break;
             }
@@ -1591,8 +1593,7 @@ export class CompanionChatManager {
     }
     if (!this.persistence) return;
     try {
-      const result: unknown = this.nativeDataWriter?.declare('companion-chat-effort-v1');
-      if (result !== undefined) { drainOwned(result); throw new Error('Session effort publication requires a synchronous native writer'); }
+      assertSynchronousJudgmentGuard(() => this.nativeDataWriter?.declare('companion-chat-effort-v1'), () => new Error('Session effort publication requires a synchronous native writer'));
     } catch (error) { drainOwned(error); throw error instanceof Error ? error : new Error('Session effort publication is unavailable'); }
   }
 

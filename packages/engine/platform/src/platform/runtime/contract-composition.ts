@@ -27,7 +27,7 @@ import { resolve } from 'node:path';
 import { createOwnerReadEvidenceReader } from './owner-read-evidence.js';
 import { resolveSurfaceDirectory } from './surface-root.js';
 import { mapLimit } from '@goodvibes-jev/judgment';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import type { ConfigManager } from '../config/manager.js';
 import { ContractStore } from '../contract/store.js';
 import { createContractRunner, type ContractRunner } from '../contract/runner.js';
@@ -235,10 +235,7 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
   const pending = (format: Format): boolean => writer !== undefined && !published.has(format);
   const publishFormat = (format: Format, refusal: string): void => {
     if (!pending(format)) return;
-    let result: unknown;
-    try { result = writer?.declare(format); }
-    catch (error) { drainOwned(error); throw error; }
-    if (result !== undefined) { drainOwned(result); throw new Error(refusal); }
+    assertSynchronousJudgmentGuard(() => writer?.declare(format), () => new Error(refusal));
     published.add(format);
   };
   const store = new ContractStore({ projectRoot: options.projectRoot,

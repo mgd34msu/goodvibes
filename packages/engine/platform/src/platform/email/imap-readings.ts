@@ -56,11 +56,7 @@ export function imapFailureText(error: unknown): string {
 export function assertImapReadingCurrent(options: JudgmentReadingOptions): void {
   try {
     if (options.signal?.aborted) throw new ImapReadingError();
-    const result: unknown = options.assertCurrent?.();
-    if (result !== undefined) {
-      drainOwned(result);
-      throw new ImapReadingError();
-    }
+    assertSynchronousJudgmentGuard(() => options.assertCurrent?.(), () => new ImapReadingError());
   } catch { throw new ImapReadingError(); }
 }
 

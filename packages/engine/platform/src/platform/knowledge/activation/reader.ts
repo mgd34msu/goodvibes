@@ -1,5 +1,6 @@
 import { judgmentPort, JudgmentPortMissingError, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
-import { JudgmentError, drainOwned, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { activateClassicFallback, decisionOrClassic, isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { freezeSupport } from '../semantic/verification/projection.js';
 import { nodeServingWithoutReview } from './battery.js';
@@ -54,8 +55,7 @@ async function readOwnedNodeActivations(snapshots: readonly NodeActivationReques
     try {
       isClassicOperation(); // Revalidate the operation's pinned host policy as well as its caller.
       if (options.signal !== signal || options.assertCurrent !== assertCurrent) throw new Held('stale');
-      const result: unknown = assertCurrent?.();
-      if (result !== undefined) { drainOwned(result); throw new Held('stale'); }
+      assertSynchronousJudgmentGuard(assertCurrent, () => new Held('stale'));
     } catch { retired = true; throw new Held('stale'); }
     if (signal?.aborted) throw new Held('aborted');
   };

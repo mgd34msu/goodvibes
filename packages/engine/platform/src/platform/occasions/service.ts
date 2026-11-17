@@ -9,7 +9,7 @@
  * No step on the sweep, list or pull path asks a model, except reading who a new
  * or changed `remember-only` line is about, which is stored (subject.ts).
  */
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import type { OccasionMutationOptions } from './operation.js';
 import { captureOccasionOperation, captureSettingsRevision, retainOccasionStateReceipts } from './operation.js';
 import { OccasionReadingWork, OccasionReadingHeldError } from './readings.js';
@@ -175,8 +175,7 @@ export class OccasionsService {
     const settings = captureSettingsRevision(this.deps.config);
     const admitted = (): void => {
       signal.throwIfAborted();
-      const checked: unknown = options.assertCurrent?.();
-      if (checked !== undefined) { drainOwned(checked); throw new OccasionReadingHeldError(); }
+      assertSynchronousJudgmentGuard(() => options.assertCurrent?.(), () => new OccasionReadingHeldError());
     };
     const assertCurrent = (): void => {
       admitted();
@@ -427,8 +426,7 @@ export class OccasionsService {
     const assertCurrent = () => {
       signal.throwIfAborted();
       if (this.answerOwners.get(key) !== controller) throw new OccasionReadingHeldError();
-      const checked: unknown = options.assertCurrent?.();
-      if (checked !== undefined) { drainOwned(checked); throw new OccasionReadingHeldError(); }
+      assertSynchronousJudgmentGuard(() => options.assertCurrent?.(), () => new OccasionReadingHeldError());
     };
     retainOccasionStateReceipts(assertCurrent, options);
     try {

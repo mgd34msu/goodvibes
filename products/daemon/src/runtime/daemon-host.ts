@@ -9,7 +9,7 @@ import { createHostedSessionOptions } from './hosted-session-composition.js';
 import { createRuntimeServices, type RuntimeServices, type RuntimeServicesOptions } from './services.js';
 import { observeNativeStartupPhase } from './startup-observation.js';
 import { createNativeDataWriteOwner, createInstalledReaderCohort } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
-import { drainOwned } from '@goodvibes-jev/judgment';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { defineLifecycle, logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 
@@ -189,8 +189,7 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
       fence();
       if (options.updateArtifact !== updateArtifact || updateArtifact.assertCurrent !== nativeGuard
         || updateArtifact.execPath !== nativeExecPath || updateArtifact.version !== nativeVersion) throw new Error('Native data publisher changed');
-      const result: unknown = nativeGuard.call(updateArtifact);
-      if (result !== undefined) { drainOwned(result); throw new Error('Native data publication requires a synchronous installation guard'); }
+      assertSynchronousJudgmentGuard(() => nativeGuard.call(updateArtifact), () => new Error('Native data publication requires a synchronous installation guard'));
     },
   })) : options.runtime.nativeDataWriter ?? options.runtime.configManager.getNativeDataWriter();
   // The failing owner's error rides as `cause`; the one fatal report masks and prints it.

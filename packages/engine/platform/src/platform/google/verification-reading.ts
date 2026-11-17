@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { defineSelector, STAKES_BANDS } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
@@ -43,8 +43,7 @@ export async function readVerificationArtifact(email: CandidateEmail, expectatio
     const callerCurrent = () => {
       source.assertCurrent(); signal?.throwIfAborted();
       if (options.signal !== signal || options.assertCurrent !== assertCurrent || options.sourceOwner !== sourceOwner) throw new Error('Verification request owner changed.');
-      const checked: unknown = assertCurrent?.();
-      if (checked !== undefined) { drainOwned(checked); throw new Error('Verification ownership must be synchronous.'); }
+      assertSynchronousJudgmentGuard(assertCurrent, () => new Error('Verification ownership must be synchronous.'));
     };
     callerCurrent();
     if (mechanical.artifact.kind === 'refused' && !insecureLink) return mechanical;

@@ -2,7 +2,7 @@
  * observation, not a content digest. Earlier saved v1 checksum rows verify that
  * published pin once when their bytes are adopted into v2. */
 import { createHash } from 'node:crypto';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { closeSync, constants, fchmodSync, fstatSync, fsyncSync, lstatSync, mkdirSync, chmodSync, openSync, unlinkSync, writeFile, type BigIntStats } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { PersistentStore } from '../state/persistent-store.js';
@@ -182,12 +182,12 @@ export class DeviceCaptureArtifactStore {
         };
         const current = () => {
           physicalCurrent(); for (const assertion of retained) assertion();
-          const returned: unknown = beforePublish?.(); if (returned !== undefined) { drainOwned(returned); throw new Error('Device capture owner assertions must be synchronous'); }
+          assertSynchronousJudgmentGuard(beforePublish, () => new Error('Device capture owner assertions must be synchronous'));
           physicalCurrent();
         };
         // Avoid a bare `declare()` statement: Bun's TypeScript parser treats it
         // as an ambient declaration and can erase the actual writer-floor call.
-        const declareFormat = () => { current(); const result: unknown = this.beforeObservationWrite?.(); if (result !== undefined) { drainOwned(result); throw new Error('Device capture format declaration must be synchronous'); } current(); };
+        const declareFormat = () => { current(); assertSynchronousJudgmentGuard(() => this.beforeObservationWrite?.(), () => new Error('Device capture format declaration must be synchronous')); current(); };
         const publish = async (rows: SavedArtifact[], final: boolean, additional?: () => void) => {
           current(); additional?.(); declareFormat();
           const guarded = () => { current(); additional?.(); };

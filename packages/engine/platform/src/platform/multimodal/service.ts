@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { logger } from '../utils/logger.js';
 import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 import { readMultimodalPdf } from './pdf-source.js';
@@ -358,8 +358,7 @@ export class MultimodalService {
     const held = this.held(result), signal = options.signal, assertOwner = options.assertCurrent?.bind(options);
     const owned = { assertCurrent: () => {
       signal?.throwIfAborted();
-      const value: unknown = assertOwner?.();
-      if (value !== undefined) { drainOwned(value); throw new TypeError('Multimodal write owner must complete synchronously and return no value.'); }
+      assertSynchronousJudgmentGuard(assertOwner, () => new TypeError('Multimodal write owner must complete synchronously and return no value.'));
       held.assertArtifacts();
     } };
     input = captureOwnedJson(input) as typeof input;

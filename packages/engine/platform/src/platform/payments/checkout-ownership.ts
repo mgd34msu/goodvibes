@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
 
 /** Restricts already authorized checkout work; it cannot grant a purchase. */
 export interface CheckoutOperationOwnership {
@@ -17,8 +17,7 @@ export function captureCheckoutOwnership(options: CheckoutOperationOwnership = {
   const assertCurrent = (): void => {
     signal?.throwIfAborted();
     try {
-      const result: unknown = assertion?.();
-      if (result !== undefined) { drainOwned(result); throw new CheckoutOwnershipError(); }
+      assertSynchronousJudgmentGuard(assertion, () => new CheckoutOwnershipError());
     } catch (error) { drainOwned(error); throw new CheckoutOwnershipError(); }
     signal?.throwIfAborted();
   };

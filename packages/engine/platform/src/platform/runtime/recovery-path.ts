@@ -1,6 +1,6 @@
 /** Recovery filenames are labels. The existing JSONL header binds a saved label
  * to its session; arbitrary session identifiers never become reversible paths. */
-import { drainOwned } from '@goodvibes-jev/judgment';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import type { NativeDataWriteOwner } from './native-reader-compatibility.js';
 import { chmodSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
@@ -239,10 +239,9 @@ export function publishRecoveryPath(directory: string, id: string, resolve: (id:
       const owner = publicationOwners.get(resolve);
       if (owner) {
         if (owner.writer.declare !== owner.declare) throw new Error('Recovery installation owner changed');
-        let result: unknown;
-        try { result = owner.declare.call(owner.writer, 'session-recovery-opaque-paths-v1'); }
-        catch { throw new Error('Recovery installation owner is unavailable'); }
-        if (result !== undefined) { drainOwned(result); throw new Error('Recovery installation owner did not finish synchronously'); }
+        let late: Error | undefined;
+        try { assertSynchronousJudgmentGuard(() => owner.declare.call(owner.writer, 'session-recovery-opaque-paths-v1'), () => (late = new Error('Recovery installation owner did not finish synchronously'))); }
+        catch (error) { throw error === late ? error : new Error('Recovery installation owner is unavailable'); }
         if (owner.writer.declare !== owner.declare) throw new Error('Recovery installation owner changed');
         assertCurrent();
       }

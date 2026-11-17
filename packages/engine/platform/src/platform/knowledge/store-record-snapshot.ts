@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { projectGeneratedFactRecordAdmission } from './generated-fact-record-references.js';
 import { captureKnowledgeSourceReferences, projectKnowledgeSourceReferences, projectKnowledgeNodeActivationMetadata, projectGeneratedKnowledgeNodeIdentity } from './source-structural-references.js';
 import { knowledgeRowGenerationFromRows, knowledgeRawRowForAdmission } from './store-row-revisions.js';
@@ -117,11 +117,7 @@ export function prepareKnowledgeRecordAdmission(store: KnowledgeStore, kind: Rec
   if (captureMetadata) {
     assertGeneration(kind === 'source' ? store.getSourceGeneration(selector.id) : store.getRecordGeneration(kind, selector.id));
     try {
-      const result: unknown = captureMetadata(decoded.metadata);
-      if (result !== undefined) {
-        drainOwned(result);
-        throw new KnowledgeRecordAdmissionHeldError('stale');
-      }
+      assertSynchronousJudgmentGuard(() => captureMetadata(decoded.metadata), () => new KnowledgeRecordAdmissionHeldError('stale'));
     } finally {
       assertGeneration(kind === 'source' ? store.getSourceGeneration(selector.id) : store.getRecordGeneration(kind, selector.id));
     }

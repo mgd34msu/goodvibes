@@ -29,7 +29,7 @@
  * host/checkout-handlers.ts) reads the same registry.
  */
 import type { SecurityCodeRequests } from './security-code-requests.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { BudgetLedger, type BudgetLimits } from './budget.js';
 import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { captureOwnedJson } from '../gate/judgment-input.js';
@@ -272,8 +272,7 @@ export class PaymentsGatewayServiceImpl {
       return { ...this.refused('The requested maximum must be one non-negative decimal amount in the budget currency, without grouping or prose.'), purchaseId: purchaseId ?? null };
     }
     try {
-      const available: unknown = this.deps.purchases.assertAvailable?.();
-      if (available !== undefined) { drainOwned(available); throw new CheckoutOwnershipError(); }
+      assertSynchronousJudgmentGuard(() => this.deps.purchases.assertAvailable?.(), () => new CheckoutOwnershipError());
     } catch (error) { drainOwned(error); throw error; }
     options.assertCurrent?.();
 

@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /** Private account-scoped Slack HTTP owner. Never exported by an platform barrel. */
 import { Client, interceptors, type Dispatcher } from 'undici/index.js';
 import { responseStream } from '../../security/source-screening/direct-client.js';
@@ -133,11 +133,7 @@ export function createSlackInboxHttpOwner(options: SlackInboxHttpOwnerOptions): 
     if (closed || isAborted(sourceSignal) || lifetime.signal.aborted) throw cancelled();
     if (signal?.aborted) throw signal.reason;
     try {
-      const result: unknown = assertCurrent();
-      if (result !== null && (typeof result === 'object' || typeof result === 'function') && 'then' in result) {
-        drainOwned(result);
-        throw unauthorized();
-      }
+      assertSynchronousJudgmentGuard(assertCurrent, () => unauthorized());
     } catch { throw unauthorized(); }
     if (closed || isAborted(sourceSignal) || lifetime.signal.aborted) throw cancelled();
     if (signal?.aborted) throw signal.reason;

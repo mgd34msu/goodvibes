@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { postalConfigKey, POSTAL_PARTS, PostalAddressHeldError, type ProfilePostalReader, type PostalKind, type PostalReadOptions, type PreparedPostalAddress, type PostalParts } from './postal-address.js';
 import { DurablePolicyEpochOwner } from './durable-policy-epoch.js';
 import { PreparedSettingsTarget, settingsFileIdentity } from './prepared-target.js';
@@ -494,8 +494,7 @@ export class ConfigManager {
       })) as Record<typeof POSTAL_PARTS[number], string>;
       const check = () => {
         options.signal?.throwIfAborted();
-        const result: unknown = options.assertCurrent?.();
-        if (result !== undefined) { drainOwned(result); throw new PostalAddressHeldError(); }
+        assertSynchronousJudgmentGuard(() => options.assertCurrent?.(), () => new PostalAddressHeldError());
         if (this.getConfigurationIncarnation() !== revision || this.profilePostalReader !== reader || this.profilePostalEpoch !== installation) throw new PostalAddressHeldError();
       };
       check();

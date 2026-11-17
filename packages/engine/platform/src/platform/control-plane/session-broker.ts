@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { readNativeConversationTurnPermit, revalidateNativeConversationTurnPermit, type NativeConversationTurnPermit } from '../workflow/work-ledger/native-intake-client.js';
 import { logger } from '../utils/logger.js';
 import { withChannelExecutionMode } from '../channel-profiles/install-inbound-intake.js';
@@ -1238,11 +1238,7 @@ export class SharedSessionBroker {
   ): Promise<SharedSessionInputRecord | null> {
     await this.start();
     // The async startup boundary must not turn a stale source into a claim.
-    const checked: unknown = options.beforeApply?.();
-    if (checked !== undefined) {
-      drainOwned(checked);
-      throw new Error('Session delivery authority checks must be synchronous');
-    }
+    assertSynchronousJudgmentGuard(() => options.beforeApply?.(), () => new Error('Session delivery authority checks must be synchronous'));
     if (options.claim === true && options.consumed !== true) assertSurfaceInputClaimable(this.sessionInputStore(), sessionId, inputId, Date.now());
     const applied = applySurfaceInputDelivery(this.sessionInputStore(), sessionId, inputId, options, {
       publish: (event, payload) => this.publishUpdate(event, payload),

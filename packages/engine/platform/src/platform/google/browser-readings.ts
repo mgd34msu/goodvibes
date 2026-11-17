@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /** Google setup observations never grant click, credential or storage authority. */
 import { checkAnswers, defineBattery, defineSelector, STAKES_BANDS, yesNo, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
@@ -73,8 +73,7 @@ export class GoogleReadingError extends Error {
 export function assertGoogleReadingCurrent(options: JudgmentReadingOptions): void {
   try {
     if (options.signal?.aborted) throw new GoogleReadingError();
-    const result: unknown = options.assertCurrent?.();
-    if (result !== undefined) { drainOwned(result); throw new GoogleReadingError(); }
+    assertSynchronousJudgmentGuard(() => options.assertCurrent?.(), () => new GoogleReadingError());
   } catch { throw new GoogleReadingError(); }
 }
 /** Admit every control descriptor that upstream card-field readings can see. */

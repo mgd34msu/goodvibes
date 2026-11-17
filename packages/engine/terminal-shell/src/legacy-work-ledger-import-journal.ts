@@ -3,7 +3,7 @@ import { types as nodeTypes } from 'node:util';
 import { closeSync, constants, fsyncSync, lstatSync, mkdirSync, openSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { array, boolean, enum as enumSchema, literal, number, strictObject, string, union } from 'zod/v4';
-import { drainOwned, parseJevDecision, type JevDecision } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned, parseJevDecision, type JevDecision } from '@goodvibes-jev/judgment/decisions';
 import { ledgerEventSchema, workLedgerCommandSchema, type WorkLedgerCommand, type WorkLedgerResult } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 
 export type LegacyImportCommand = Extract<WorkLedgerCommand, { type: 'import_legacy' }>;
@@ -47,8 +47,7 @@ export function bindingKey(binding: LegacyImportBinding): string {
 }
 function syncDirectory(path: string): void { const fd = openSync(path, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); } }
 function invoke(callback: (() => void) | undefined): void {
-  const result: unknown = callback?.();
-  if (result !== undefined) { drainOwned(result); throw new Error('Import journal format declarations must complete synchronously'); }
+  assertSynchronousJudgmentGuard(callback, () => new Error('Import journal format declarations must complete synchronously'));
 }
 /** The journal holds a saved command, so only its owner may be able to change it. Checked once per open. */
 function assertPrivateFile(path: string): void {

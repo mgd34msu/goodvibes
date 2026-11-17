@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { isClassicOperation } from '../runtime/decision-policy.js';
 import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
@@ -48,10 +48,8 @@ function restrictionFailure(error: unknown): Error {
 }
 /** Host restrictions are synchronous; returned or thrown work never admits an effect. */
 export function assertKnowledgeRestriction(check: (() => void) | undefined): void {
-  let result: unknown;
-  try { result = check?.(); }
-  catch (error) { drainOwned(error); throw restrictionFailure(error); }
-  if (result !== undefined) { drainOwned(result); throw new KnowledgeExtractionJudgmentHoldError(); }
+  try { assertSynchronousJudgmentGuard(check, () => new KnowledgeExtractionJudgmentHoldError()); }
+  catch (error) { throw restrictionFailure(error); }
 }
 /** Explicit per-extraction restrictions; never a global or ambient replacement port. */
 export interface KnowledgeExtractionOwner {

@@ -48,7 +48,7 @@ import { AtomicWriteDurabilityError, confirmFileDurable, readJsonFileOrQuarantin
 import { logger } from '../utils/logger.js';
 import { SettingsAuthorityUnavailableError, runSynchronousSettingsOperation } from '../security/settings-authority.js';
 import { NativeContinuationOwner, nativeContinuationParents, type NativeContinuationParents } from './native-continuation-owner.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibility.js';
 import { describeOwnerLock, reclaimDeadOwnerLock, recordOwnerLockHolder, removeOwnerLockDirectory, waitWhileLockIsBeingTaken } from '../config/durable-policy-epoch.js';
 import { revisionSource, type RevisionSource } from '../utils/revision.js';
@@ -793,8 +793,7 @@ export class PairingTokenManager {
         if (result.changed) {
           if (snapshot.continuations?.some(grant => grant.sourceBindingVersion === 2)) {
             try {
-              const declared: unknown = this.nativeDataWriter?.declare('pairing-native-source-bindings-v2');
-              if (declared !== undefined) { drainOwned(declared); throw new Error('Native source binding declaration must be synchronous'); }
+              assertSynchronousJudgmentGuard(() => this.nativeDataWriter?.declare('pairing-native-source-bindings-v2'), () => new Error('Native source binding declaration must be synchronous'));
             } catch (error) { drainOwned(error); throw error; }
             lock.assertOwned();
           }

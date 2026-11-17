@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { types } from 'node:util';
 import { createProtectedSourceOwner } from '../../security/source-screening/owner.js';
 import type { ProtectedSourceOwnerOptions } from '../../security/source-screening/types.js';
@@ -160,21 +160,9 @@ export async function createDiscordInboxOwner(
   const current = (): void => {
     try {
       if (closed || signal.aborted) throw new Error();
-      const result: unknown = assertScope();
-      if (result !== undefined) {
-        drainOwned(result);
-        throw new Error();
-      }
-      const channelResult: unknown = channels.assertCurrent();
-      if (channelResult !== undefined) {
-        drainOwned(channelResult);
-        throw new Error();
-      }
-      const sourceResult: unknown = assertSource.call(sourceAuthority);
-      if (sourceResult !== undefined) {
-        drainOwned(sourceResult);
-        throw new Error();
-      }
+      assertSynchronousJudgmentGuard(assertScope, () => new Error());
+      assertSynchronousJudgmentGuard(() => channels.assertCurrent(), () => new Error());
+      assertSynchronousJudgmentGuard(() => assertSource.call(sourceAuthority), () => new Error());
       if (closed || signal.aborted) throw new Error();
     } catch { invalidateIdentity(); throw new Error('Discord inbox account scope is unavailable'); }
   };

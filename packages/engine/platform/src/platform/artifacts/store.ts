@@ -1,7 +1,7 @@
 import { assertCrossProcessLockCurrent, tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
 import { freezeArtifactRecord, parseArtifactRecord } from './record-snapshot.js';
 import { createHash } from 'node:crypto';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { chmodSync, closeSync, createReadStream, createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile as writeFileDescriptor } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { ArtifactStorageOwner, type ArtifactCreatedLeaf } from './storage-ownership.js';
@@ -39,8 +39,7 @@ export interface ArtifactWriteOwnership {
 }
 
 function assertArtifactWriteCurrent(owner: { readonly assertCurrent?: (() => void) | undefined }): void {
-  const result: unknown = owner.assertCurrent?.();
-  if (result !== undefined) { drainOwned(result); throw new TypeError('Artifact write owner must complete synchronously and return no value.'); }
+  assertSynchronousJudgmentGuard(() => owner.assertCurrent?.(), () => new TypeError('Artifact write owner must complete synchronously and return no value.'));
 }
 
 export interface ArtifactStoreConfig {

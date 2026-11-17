@@ -14,6 +14,7 @@
  */
 import { atomicWriteFileSync } from '../../config/atomic-write.js';
 import { drainOwned } from '@goodvibes-jev/judgment';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { fileObservationIdentity, readFileObservation, type FileObservation } from '../../utils/file-observation.js';
 import { lstatSync } from 'node:fs';
 import { logger } from '../../utils/logger.js';
@@ -264,8 +265,7 @@ export class DurableBudgetLedger extends BudgetLedger {
     owner?.assertCurrent();
     // Declare before any incompatible accounting publication. The operation's
     // owner checkpoint has already bound this exact immutable receipt.
-    const declared: unknown = this.beforeReconciliationWrite?.();
-    if (declared !== undefined) { drainOwned(declared); throw new PaymentBudgetUnavailableError(); }
+    assertSynchronousJudgmentGuard(() => this.beforeReconciliationWrite?.(), () => new PaymentBudgetUnavailableError());
     owner?.assertCurrent();
     super.settleReconciliation(receipt, owner);
     this.writeToDisk(owner ? () => owner.assertCurrent() : undefined);
@@ -419,12 +419,10 @@ export class DurableBudgetLedger extends BudgetLedger {
 
   private declareRetainedHolds(): void {
     if (!super.state().reservations.some(reservation => reservation.retainUntilSettled === true)) return;
-    const declared: unknown = this.beforeFormatWrite?.();
-    if (declared !== undefined) { drainOwned(declared); throw new PaymentBudgetUnavailableError(); }
+    assertSynchronousJudgmentGuard(() => this.beforeFormatWrite?.(), () => new PaymentBudgetUnavailableError());
   }
   private declareReconciliations(): void {
     if (!super.state().reconciliations?.length) return;
-    const declared: unknown = this.beforeReconciliationWrite?.();
-    if (declared !== undefined) { drainOwned(declared); throw new PaymentBudgetUnavailableError(); }
+    assertSynchronousJudgmentGuard(() => this.beforeReconciliationWrite?.(), () => new PaymentBudgetUnavailableError());
   }
 }

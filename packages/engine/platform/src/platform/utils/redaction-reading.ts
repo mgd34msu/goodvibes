@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { profileDistinctive } from './batteries/redaction.js';
@@ -6,12 +6,9 @@ import { isClassicOperation } from '../runtime/decision-policy.js';
 
 /** A source assertion must finish before any observation can proceed. */
 export function assertRedactionCurrent(check: (() => void) | undefined): void {
-  let result: unknown;
-  try { result = check?.(); }
-  catch { throw new Error('Redaction source is no longer current'); }
-  if (result === undefined) return;
-  drainOwned(result);
-  throw new Error('Redaction source ownership must be synchronous');
+  let late: Error | undefined;
+  try { assertSynchronousJudgmentGuard(check, () => (late = new Error('Redaction source ownership must be synchronous'))); }
+  catch (error) { throw error === late ? error : new Error('Redaction source is no longer current'); }
 }
 
 export interface ProfileRedactionRole {

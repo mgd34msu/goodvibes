@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /**
  * memory-usage-detection.ts, reference detection and the per-turn usage
  * tracker every product shares.
@@ -64,8 +64,7 @@ export async function detectReferencedMemoryIds(
     const current = () => {
       signal?.throwIfAborted(); original.assertCurrent();
       if (options.signal !== signal || options.assertCurrent !== callerCurrent) throw new Error('Memory usage owner changed.');
-      const restriction: unknown = callerCurrent?.();
-      if (restriction !== undefined) { drainOwned(restriction); throw new Error('Memory usage guard must be synchronous.'); }
+      assertSynchronousJudgmentGuard(callerCurrent, () => new Error('Memory usage guard must be synchronous.'));
       signal?.throwIfAborted(); original.assertCurrent();
     };
     current();
@@ -81,8 +80,7 @@ async function detectDecisionReferencedMemoryIds(responseText: string, records: 
   const original = retainOwnedJson({ responseText, records });
   const input = snapshotJudgmentInput(original.snapshot) as { responseText: string; records: readonly MemoryReferenceInput[] };
   const current = () => { original.assertCurrent(); options.signal?.throwIfAborted();
-    const checked: unknown = options.assertCurrent?.();
-    if (checked !== undefined) { drainOwned(checked); throw new Error('Memory usage guard must be synchronous.'); }
+    assertSynchronousJudgmentGuard(() => options.assertCurrent?.(), () => new Error('Memory usage guard must be synchronous.'));
   };
   current();
   const referenced: string[] = [];

@@ -1,5 +1,5 @@
 import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { captureCatalogMethods, captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -151,11 +151,7 @@ async function ownedBuildLanes(
   };
   const assertCaller = () => {
     optionsCurrent(); ownerCurrent(); signal?.throwIfAborted();
-    const result: unknown = callerCurrent?.();
-    if (result !== undefined) {
-      drainOwned(result);
-      throw new ToolInputProjectionError('held');
-    }
+    assertSynchronousJudgmentGuard(callerCurrent, () => new ToolInputProjectionError('held'));
     optionsCurrent(); ownerCurrent(); signal?.throwIfAborted();
   };
   optionsCurrent(); ownerCurrent(); signal?.throwIfAborted(); assertCaller();

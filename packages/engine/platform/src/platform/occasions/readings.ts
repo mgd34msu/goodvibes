@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /** Occasion meaning is an observation, never delivery or closed-date authority. */
 import { checkAnswers, oneOf, defineBattery, defineSelector, STAKES_BANDS, yesNo, toJson, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, decisionModelPolicyState, JudgmentPortMissingError, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
@@ -69,8 +69,7 @@ export class OccasionReadingWork {
     this.options.signal?.throwIfAborted();
     const policy = decisionModelPolicyState();
     if (policy.policy !== this.policy) throw new OccasionReadingHeldError();
-    const checked: unknown = this.options.assertCurrent?.();
-    if (checked !== undefined) { drainOwned(checked); throw new OccasionReadingHeldError(); }
+    assertSynchronousJudgmentGuard(() => this.options.assertCurrent?.(), () => new OccasionReadingHeldError());
     for (const check of this.checks) check();
     if (policy.operation !== 'classic') this.owner?.assertCurrent();
   };

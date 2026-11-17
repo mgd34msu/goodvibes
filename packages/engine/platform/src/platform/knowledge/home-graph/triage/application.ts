@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
 import type { KnowledgeStore } from '../../store.js';
 import type { KnowledgeIssueRecord, KnowledgeNodeRecord, KnowledgeNodeUpsertInput, KnowledgeIssueUpsertInput } from '../../types.js';
 import { KnowledgeNodeMutationHeldError } from '../../store-node-authority.js';
@@ -19,8 +19,7 @@ export async function applyTriageReadings(store: KnowledgeStore, applications: r
   const guard = () => {
     if (signal?.aborted) throw new Held('aborted');
     try {
-      const current: unknown = assertCurrent?.();
-      if (current !== undefined) { drainOwned(current); throw new Held('stale'); }
+      assertSynchronousJudgmentGuard(assertCurrent, () => new Held('stale'));
     } catch (error) { drainOwned(error); throw new Held('stale'); }
     if (signal?.aborted) throw new Held('aborted');
     for (const [id, snapshot] of issues) if (JSON.stringify(store.getIssue(id)) !== snapshot) throw new Held('stale');

@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import type { MutationPublication } from './file-mutation.js';
 
 /** Optional restrictions on a delivery. Revocation cannot undo an accepted send. */
@@ -44,11 +44,7 @@ export async function runDeliveryPublication<T>(lifetime: DeliveryLifetime, oper
 /** Call after all asynchronous preparation, immediately before each outbound side effect. */
 export function assertDeliveryCurrent(lifetime: DeliveryLifetime): void {
   lifetime.signal?.throwIfAborted();
-  const result: unknown = lifetime.assertCurrent?.();
-  if (result !== undefined) {
-    drainOwned(result);
-    throw new Error('Delivery ownership must be checked synchronously.');
-  }
+  assertSynchronousJudgmentGuard(() => lifetime.assertCurrent?.(), () => new Error('Delivery ownership must be checked synchronously.'));
   // A currentness check may itself revoke the signal.
   lifetime.signal?.throwIfAborted();
 }

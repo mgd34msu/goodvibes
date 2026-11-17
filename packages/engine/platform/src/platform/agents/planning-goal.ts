@@ -2,7 +2,7 @@ import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev
 import { assertJudgmentInput, prepareJudgmentResult, retainStrictJudgmentJson } from '../gate/index.js';
 import { planningGoal } from './batteries/planning-goal.js';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 
 export type PlanningGoalReading = 'goal' | 'command' | 'held' | 'unassessed';
 export interface PlanningGoalObservation {
@@ -20,8 +20,7 @@ export async function readPlanningGoal(input: { readonly text: string }, options
     const current = () => {
       signal?.throwIfAborted(); original.assertCurrent();
       if (options.signal !== signal || options.assertCurrent !== callerCurrent) throw new TypeError('Planning source owner changed.');
-      const restriction: unknown = callerCurrent?.();
-      if (restriction !== undefined) { drainOwned(restriction); throw new TypeError('Invalid planning source guard.'); }
+      assertSynchronousJudgmentGuard(callerCurrent, () => new TypeError('Invalid planning source guard.'));
       signal?.throwIfAborted(); original.assertCurrent();
     };
     current();

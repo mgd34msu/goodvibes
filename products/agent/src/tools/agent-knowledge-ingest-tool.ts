@@ -178,7 +178,8 @@ function requestForArgs(args: AgentKnowledgeIngestToolArgs): AgentKnowledgeInges
   if (sourceKind === null) throw new IngestArgumentError(`sourceKind must be one of ${SOURCE_KINDS.join(', ')}.`);
 
   // Private-host protection is the daemon's; a model cannot widen it for itself.
-  // Anything but absent or false is refused, so no spelling of yes slips through.
+  // The schema does not offer the field; a call that sends it anyway is refused
+  // unless it says false, so no spelling of yes slips through.
   if (![undefined, null, false, 'false', ''].includes(args.allowPrivateHosts as never)) {
     throw new IngestArgumentError('allowPrivateHosts cannot be set by the model. Private-host sources are ingested by the owner from the workspace.');
   }
@@ -482,10 +483,6 @@ export function createAgentKnowledgeIngestTool(
           sinceDays: {
             type: 'number',
             description: 'Optional browser_history lookback window in whole days; omit for no window.',
-          },
-          allowPrivateHosts: {
-            type: 'boolean',
-            description: 'Not accepted from the model: private-host sources are ingested by the owner from the workspace.',
           },
           confirm: {
             type: 'boolean',

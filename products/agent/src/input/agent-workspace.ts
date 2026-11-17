@@ -79,6 +79,7 @@ export class AgentWorkspace {
 
   open(context: CommandContext, dispatchCommand: AgentWorkspaceCommandDispatcher, categoryId?: string, dispatchPrompt?: AgentWorkspacePromptDispatcher, onlyGroup?: AgentWorkspaceCategoryGroup, requestRender?: () => void): void {
     this.requestRender = requestRender ?? null;
+    if (this.context !== context) this.cancelToolCallSubmission();
     this.context?.nativeWorkLedger?.close();
     this.context = context;
     this.workContextScroll = 0;
@@ -155,6 +156,7 @@ export class AgentWorkspace {
   }
 
   close(): void {
+    this.cancelToolCallSubmission();
     this.active = false;
     this.context?.nativeWorkLedger?.close();
     this.localEditor = null;
@@ -295,6 +297,12 @@ export class AgentWorkspace {
 
   cancelLocalEditor(): void {
     if (!this.localEditor) return;
+    if (this.toolCallSubmission?.editorKind === this.localEditor.kind) {
+      // Esc on a form whose tool call is still running stops that call.
+      this.cancelToolCallSubmission();
+      this.localEditor = null;
+      return;
+    }
     const title = this.localEditor.title;
     this.localEditor = null;
     this.status = `${title} cancelled.`;
@@ -765,7 +773,22 @@ export class AgentWorkspace {
     }
   }
 
-  private toolCallSubmission: AbortController | null = null;
+  /** The one tool call a workspace form is running, so Esc or closing the workspace can stop it. */
+  private toolCallSubmission: { readonly controller: AbortController; readonly title: string; readonly editorKind: AgentWorkspaceLocalEditor['kind'] } | null = null;
+
+  /** Stops the running form's tool call, if there is one, and says so. */
+  private cancelToolCallSubmission(): void {
+    const running = this.toolCallSubmission;
+    if (!running) return;
+    this.toolCallSubmission = null;
+    running.controller.abort();
+    this.status = `Cancelled ${running.title}; nothing further was run.`;
+    this.lastActionResult = {
+      kind: 'guidance',
+      title: `${running.title} cancelled`,
+      detail: `The running ${running.title} call was stopped. Anything it finished before the stop stays done; nothing further was run.`,
+    };
+  }
 
   /**
    * Runs the one tool call a form stands for (the same call the agent's
@@ -797,7 +820,7 @@ export class AgentWorkspace {
     const request = `The owner filled in the workspace form "${editor.title}" and confirmed it.`;
     const args = { ...toolCall.build((fieldId) => this.editorField(fieldId), request) } as Record<string, unknown>;
     const controller = new AbortController();
-    this.toolCallSubmission = controller;
+    this.toolCallSubmission = { controller, title: editor.title, editorKind: editor.kind };
     this.status = `Running ${editor.title}...`;
     requestRender?.();
     let result: { readonly success: boolean; readonly output?: string | undefined; readonly error?: string | undefined };
@@ -810,7 +833,12 @@ export class AgentWorkspace {
     } catch (error) {
       result = { success: false, error: error instanceof Error ? error.message : String(error) };
     } finally {
-      if (this.toolCallSubmission === controller) this.toolCallSubmission = null;
+      if (this.toolCallSubmission?.controller === controller) this.toolCallSubmission = null;
+    }
+    // Cancelled from here (Esc, closing the workspace): the cancellation already said so.
+    if (controller.signal.aborted) {
+      requestRender?.();
+      return;
     }
     // The person may have closed the workspace or moved to another form meanwhile.
     if (this.context !== context) return;

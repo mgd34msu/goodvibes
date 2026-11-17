@@ -18,10 +18,10 @@
  * 1. The surface's health goes degraded with the real reason, through the
  *    observation the health rule already reads (`ChannelRuntimeObservation.lastError`
  *    → `resolveChannelHealthState` → `degraded`). No parallel health mechanism.
- * 2. The owner is told once, on a channel that still works. Not once per
- *    message: a broken processing path fails every message, and an alarm that
- *    fires per message is an alarm nobody reads. First failure notifies;
- *    repeats inside the window are counted, not re-sent; recovery says so once.
+ * 2. The owner hears it from the channel health watcher, the one announcer of a
+ *    surface going bad and coming back (health-watcher.ts). A failure run
+ *    starting or ending wakes the watcher at once instead of at its next sweep;
+ *    the watcher's own rules say how often a failing surface is repeated.
  *
  * The rollover in session-broker-intent.ts means the closed-session class
  * should not reach here at all any more. This is for the classes nobody has
@@ -32,10 +32,7 @@
 import type { ChannelSurface } from './types.js';
 import { logger } from '../utils/logger.js';
 
-/** How long after a notified failure the same surface stays quiet. */
-export const DEFAULT_INGRESS_ALARM_WINDOW_MS = 30 * 60 * 1000;
-
-/** What the owner is told, and what the health observation reports. */
+/** What the health observation reports for a surface whose processing fails. */
 export interface ChannelIngressFailureState {
   /** The named reason processing failed, carried verbatim into health. */
   readonly detail: string;
@@ -45,21 +42,21 @@ export interface ChannelIngressFailureState {
   readonly at: number;
   /** How many messages this run has failed to process. */
   readonly count: number;
-  /** When the owner was last told about this run, or null if never. */
-  readonly notifiedAt: number | null;
+}
+
+/**
+ * The failure as the surface's health reason: what failed and that the skipped
+ * messages are not retried, so the owner knows to send them again.
+ */
+export function describeIngressFailure(state: ChannelIngressFailureState | null | undefined): string | undefined {
+  if (!state) return undefined;
+  const skipped = state.count === 1
+    ? '1 arriving message was skipped and will not be retried; send it again once this works'
+    : `${state.count} arriving messages were skipped and will not be retried; send them again once this works`;
+  return `${state.detail} (${skipped})`;
 }
 
 export interface ChannelIngressAlarmDeps {
-  /**
-   * Put one line in front of the owner. The implementation picks a channel
-   * that still works, deliberately not necessarily `surface`, because the
-   * surface that just failed to RECEIVE may well still SEND (Telegram's sends
-   * worked throughout the incident this exists for), and if it cannot, another
-   * connected channel can.
-   */
-  readonly notify: (surface: ChannelSurface, text: string) => void;
-  /** Quiet window after a notification; defaults to 30 minutes. */
-  readonly windowMs?: number | undefined;
   /** Test seam. */
   readonly now?: (() => number) | undefined;
 }
@@ -91,33 +88,38 @@ export function ingressOutcome(answer: Response | number | null | undefined): In
 }
 
 /**
- * Per-surface latch over inbound-processing failures.
+ * Per-surface latch over inbound-processing failures: one instance per daemon,
+ * shared by every inbound path (the Telegram poller, the webhook seam in
+ * `ChannelPluginRegistry`, the streaming surfaces in
+ * `ChannelProviderRuntimeManager`, the detached slash-command paths), because
+ * "is this surface failing" is a question about the SURFACE, not about which
+ * mechanism noticed.
  *
  * Deliberately not per-message and not per-error-text: the question the owner
  * needs answered is "is this channel carrying my messages", which is a property
- * of the surface over time, not of any one update.
+ * of the surface over time, not of any one update. It tells nobody itself;
+ * listeners hear when a run starts or ends.
  */
 export class ChannelIngressAlarm {
   private readonly states = new Map<ChannelSurface, ChannelIngressFailureState>();
   /**
-   * When the owner was last told a surface is failing, kept past the end of a
-   * run. One broken chat among working ones ends a run on every success, and
-   * without this each new run notified at once: a "heads up" and a
-   * "processing again" per message.
+   * When a surface whose processing had failed last processed a message. Kept
+   * only for surfaces that failed once (a handful), so a webhook surface that
+   * nothing else can observe can be read as working again.
    */
-  private readonly lastNotifiedAt = new Map<ChannelSurface, number>();
+  private readonly processedAfterFailure = new Map<ChannelSurface, number>();
+  private readonly listeners = new Set<(surface: ChannelSurface) => void>();
 
-  constructor(private readonly deps: ChannelIngressAlarmDeps) {}
+  constructor(private readonly deps: ChannelIngressAlarmDeps = {}) {}
 
   private now(): number {
     return this.deps.now?.() ?? Date.now();
   }
 
-  private windowMs(): number {
-    const configured = this.deps.windowMs;
-    return typeof configured === 'number' && Number.isFinite(configured) && configured >= 0
-      ? configured
-      : DEFAULT_INGRESS_ALARM_WINDOW_MS;
+  /** Hear when a surface starts or stops failing; returns the unsubscribe. */
+  subscribe(listener: (surface: ChannelSurface) => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
   }
 
   /** The live failure run for a surface, or null when it is processing cleanly. */
@@ -125,13 +127,13 @@ export class ChannelIngressAlarm {
     return this.states.get(surface) ?? null;
   }
 
-  /**
-   * One inbound message could not be processed and was skipped.
-   *
-   * Returns true when this call notified the owner, so a caller can assert on
-   * the rate limit rather than on the notification side effect.
-   */
-  recordFailure(surface: ChannelSurface, detail: string): boolean {
+  /** When this surface last processed a message after having failed, if it ever failed. */
+  recoveredAt(surface: ChannelSurface): number | undefined {
+    return this.states.has(surface) ? undefined : this.processedAfterFailure.get(surface);
+  }
+
+  /** One inbound message could not be processed and was skipped. */
+  recordFailure(surface: ChannelSurface, detail: string): void {
     const at = this.now();
     const previous = this.states.get(surface);
     const state: ChannelIngressFailureState = {
@@ -139,8 +141,8 @@ export class ChannelIngressAlarm {
       since: previous?.since ?? at,
       at,
       count: (previous?.count ?? 0) + 1,
-      notifiedAt: previous?.notifiedAt ?? null,
     };
+    this.states.set(surface, state);
     // ERROR, not warn: the previous version of this condition was a warn line
     // in a debug file, which is why it went unseen for a day.
     logger.error('An inbound message could not be processed and was skipped', {
@@ -149,43 +151,23 @@ export class ChannelIngressAlarm {
       failedSinceStart: state.count,
       runStartedAt: state.since,
     });
-    const lastNotified = state.notifiedAt ?? this.lastNotifiedAt.get(surface) ?? null;
-    const quietUntil = lastNotified === null ? null : lastNotified + this.windowMs();
-    if (quietUntil !== null && at < quietUntil) {
-      this.states.set(surface, state);
-      return false;
-    }
-    this.states.set(surface, { ...state, notifiedAt: at });
-    this.lastNotifiedAt.set(surface, at);
-    this.send(
-      surface,
-      state.count === 1
-        ? `Heads up: a message that arrived on ${surface} could not be processed and was skipped, ${detail}. `
-          + `${surface} is being treated as degraded until one goes through.`
-        : `${surface} is still failing to process arriving messages (${state.count} skipped since this started), ${detail}.`,
-    );
-    return true;
+    if (!previous) this.changed(surface);
   }
 
-  /**
-   * A message processed cleanly. Ends a failure run, and says so once if the
-   * owner had been told about it.
-   */
+  /** A message processed cleanly. Ends a failure run. */
   recordSuccess(surface: ChannelSurface): void {
     const previous = this.states.get(surface);
-    if (!previous) return;
+    if (!previous) {
+      if (this.processedAfterFailure.has(surface)) this.processedAfterFailure.set(surface, this.now());
+      return;
+    }
     this.states.delete(surface);
+    this.processedAfterFailure.set(surface, this.now());
     logger.info('Inbound processing recovered on a channel that had been failing', {
       surface,
       skippedDuringOutage: previous.count,
     });
-    if (previous.notifiedAt === null) return;
-    this.send(
-      surface,
-      `${surface} is processing arriving messages again. ${previous.count} `
-      + `${previous.count === 1 ? 'message was' : 'messages were'} skipped while it was failing; `
-      + 'those are not retried, so anything you sent in that window is worth sending again.',
-    );
+    this.changed(surface);
   }
 
   /** Record one message's outcome: only `processed` ends a run, only `failed` starts or extends one. */
@@ -194,18 +176,17 @@ export class ChannelIngressAlarm {
     else if (outcome === 'failed') this.recordFailure(surface, detail);
   }
 
-  /**
-   * Notifying must never be a way for the alarm to take down the caller that
-   * was already handling a failure.
-   */
-  private send(surface: ChannelSurface, text: string): void {
-    try {
-      this.deps.notify(surface, text);
-    } catch (error) {
-      logger.error('The channel-ingress alarm could not be delivered', {
-        surface,
-        error: error instanceof Error ? error.message : String(error),
-      });
+  /** A listener must never take down the caller that was already handling a failure. */
+  private changed(surface: ChannelSurface): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(surface);
+      } catch (error) {
+        logger.error('A channel-ingress listener failed', {
+          surface,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 }
@@ -223,14 +204,14 @@ export class ChannelIngressAlarm {
  *
  * `lastError` is what an ingress folds into the health observation it publishes
  * (`observedRuntime(running, reason, lastError)` → `degraded`). The alarm, if
- * one is wired, decides separately whether the OWNER hears about it; a node
+ * one is wired, carries the failure to the daemon's health view; a node
  * without one still logs and still reports degraded.
  *
  * Written against `ChannelSurface` rather than Telegram so any ingress with a
  * catch-and-continue loop gets the same behaviour by holding one of these.
  */
 export class IngressProcessingHealth {
-  private failure: string | null = null;
+  private failure: ChannelIngressFailureState | null = null;
 
   constructor(
     private readonly surface: ChannelSurface,
@@ -239,7 +220,7 @@ export class IngressProcessingHealth {
 
   /** The reason processing is currently failing, or undefined when it is not. */
   get lastError(): string | undefined {
-    return this.failure ?? undefined;
+    return describeIngressFailure(this.failure);
   }
 
   /**
@@ -248,10 +229,11 @@ export class IngressProcessingHealth {
    * Skipping is still right, a cursor wedged on one poison message redelivers
    * it forever and takes the whole channel down instead of one message. What
    * changed is that it is loud: ERROR rather than the warn line that sat unread
-   * in a multi-megabyte debug file, plus degraded health, plus the alarm.
+   * in a multi-megabyte debug file, plus degraded health the watcher announces.
    */
   recordFailure(detail: string, context: Record<string, unknown> = {}): void {
-    this.failure = detail;
+    const at = Date.now();
+    this.failure = { detail, since: this.failure?.since ?? at, at, count: (this.failure?.count ?? 0) + 1 };
     logger.error('An inbound message could not be processed; advancing past it', {
       surface: this.surface,
       ...context,

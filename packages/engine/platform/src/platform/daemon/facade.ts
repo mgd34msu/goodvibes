@@ -349,7 +349,10 @@ export class DaemonServer {
     this.workProposals = collaborators.workProposals;
     this.transportEventsHelper = collaborators.transportEventsHelper;
     this.httpRouter = collaborators.httpRouter;
-    this.channelHealth = buildDaemonChannelHealthWatcher(resolved);
+    this.channelHealth = buildDaemonChannelHealthWatcher(resolved, {
+      delivery: collaborators.surfaceDeliveryHelper,
+      ingressAlarm: collaborators.ingressAlarm,
+    });
     this.clusterCoordinator = buildDaemonClusterCoordinator(config, resolved, collaborators);
 
     // Lifecycle sidecar: clean-shutdown marker, update/crash receipts, and

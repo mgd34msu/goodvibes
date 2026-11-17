@@ -110,6 +110,8 @@ export interface DaemonFacadeCollaborators {
   readonly workProposals: import('../agents/work-proposal-store.js').WorkProposalStore;
   /** Purchase windows waiting for the owner's answer over a channel; the payments notifier's reply source. */
   readonly paymentReplies: import('../payments/reply-inbox.js').PaymentReplyInbox;
+  /** Which surfaces are failing to process what arrives; the channel health watcher announces it. */
+  readonly ingressAlarm: import('../channels/ingress-alarm.js').ChannelIngressAlarm;
 }
 
 type JsonBody = Record<string, unknown>;

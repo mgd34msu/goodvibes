@@ -128,6 +128,8 @@ export interface BuiltinRuntimeObservers {
   readonly providerRuntimeStatus: (surface: ProviderRuntimeSurface) => ProviderRuntimeStatus | null;
   /** The live run of skipped inbound messages for a surface, if any. */
   readonly processingFailure?: ((surface: ChannelSurface) => string | undefined) | undefined;
+  /** When a surface whose processing had failed last processed a message, if it did. */
+  readonly processingRecoveredAt?: ((surface: ChannelSurface) => number | undefined) | undefined;
   /**
    * Whether this node is the one meant to read `surface`. Absent means it is:
    * without clustering every node reads everything it is configured for.
@@ -161,6 +163,15 @@ export function observeBuiltinRuntime(
       'nothing here confirms the control-plane listener is accepting connections; web.enabled reflects '
       + 'configuration only. Configuration is all this status knows.',
     );
+  }
+  // A webhook surface is otherwise unwatched, but a message it delivered that
+  // could not be processed is seen here, and so is the next one that was.
+  const failure = observers.processingFailure?.(surface);
+  if (failure) {
+    return observedRuntime(true, `${surface} is delivering messages by webhook, but they are not being processed`, failure);
+  }
+  if (observers.processingRecoveredAt?.(surface) !== undefined) {
+    return observedRuntime(true, `the last message that arrived on ${surface} was processed`);
   }
   return unobservableRuntime(describeUnobservableSurface(surface));
 }

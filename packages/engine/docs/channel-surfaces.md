@@ -240,6 +240,17 @@ that surface's health answer (`healthy`, `degraded`, `error` for a dead or
 unconfigured channel, `disabled`), with the exact health in `metadata.health`.
 A surface turned on, or a channel that died, shows without a restart.
 
+The daemon's channel health watcher is the one place that tells the owner a
+surface stopped working and that it works again. A surface that receives
+messages it cannot process reads `degraded`, with the reason and how many
+messages were skipped (they are not retried); the watcher hears of it at once
+rather than at its next one-minute sweep. A webhook surface, otherwise
+unwatched, reads `degraded` while what it delivers fails and `healthy` once a
+message it delivered goes through. The notice goes over another working
+surface, otherwise to the owner's own conversation on the failing surface,
+otherwise into a receipt the next attached terminal or web UI shows. A surface
+that stays failing is mentioned again every six hours.
+
 Every channel tool and operator action call ends in one of four outcomes: ok,
 not found, refused, or unknown action (with the surface's valid action ids).
 Only ok is reported as success; the others carry the reason and the next step.

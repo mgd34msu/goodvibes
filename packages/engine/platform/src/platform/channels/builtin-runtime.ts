@@ -25,6 +25,7 @@ import type { ChannelPlugin } from './plugin-registry.js';
 import type { ProviderRuntimeStatus, ProviderRuntimeSurface } from './provider-runtime.js';
 import { buildBuiltinAccount, resolveBuiltinAccount } from './builtin/accounts.js';
 import { observeBuiltinRuntime } from './builtin/health.js';
+import { describeIngressFailure } from './ingress-alarm.js';
 import {
   buildBuiltinContractHooks,
   editBuiltinAllowlist,
@@ -421,7 +422,8 @@ export class BuiltinChannelRuntime {
     return observeBuiltinRuntime({
       telegramIngressStatus: () => this.telegramIngressStatus(),
       providerRuntimeStatus: (providerSurface) => this.deps.providerRuntime?.status(providerSurface) ?? null,
-      processingFailure: (current) => this.deps.ingressAlarm?.failure(current)?.detail,
+      processingFailure: (current) => describeIngressFailure(this.deps.ingressAlarm?.failure(current)),
+      processingRecoveredAt: (current) => this.deps.ingressAlarm?.recoveredAt(current),
       ...(responsibility ? { isResponsible: responsibility } : {}),
     }, surface);
   }

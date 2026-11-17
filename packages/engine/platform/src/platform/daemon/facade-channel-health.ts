@@ -13,7 +13,8 @@
  * when none can, and policies deserve a file a reader can find.
  */
 import { ChannelHealthWatcher, isChannelWorking } from '../channels/index.js';
-import type { ChannelDeliveryTarget } from '../channels/index.js';
+import type { ChannelDeliveryTarget, ChannelIngressAlarm } from '../channels/index.js';
+import { deliverOwnerAlert, type OwnerAlertDelivery } from './owner-alert.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { ResolvedDaemonFacadeRuntime } from './facade-types.js';
@@ -42,13 +43,20 @@ const DELIVERABLE_ALERT_SURFACES = new Set<string>([
  * surface, because announcing a dead Telegram over Telegram is the failure
  * wearing the alert's clothes.
  *
- * When nothing survives, the alert is stated at ERROR in the daemon log and
- * nowhere else, and it says so, an owner reading that line later learns both
- * that a channel died and that they were never told.
+ * When no other surface carries it, the alert goes the owner-alert way: the
+ * owner's own conversation on the failing surface first (a surface that cannot
+ * process what it receives can usually still send), then a daemon receipt the
+ * next attached terminal or web UI shows.
+ *
+ * The ingress alarm wakes the watcher as soon as a surface starts or stops
+ * failing to process what arrives, so that news does not wait for a sweep.
  */
-export function buildDaemonChannelHealthWatcher(runtime: ResolvedDaemonFacadeRuntime): ChannelHealthWatcher {
+export function buildDaemonChannelHealthWatcher(
+  runtime: ResolvedDaemonFacadeRuntime,
+  owner?: { readonly delivery: OwnerAlertDelivery; readonly ingressAlarm?: ChannelIngressAlarm | undefined },
+): ChannelHealthWatcher {
   const deliveryRouter = runtime.deliveryManager.getDeliveryRouter();
-  return new ChannelHealthWatcher({
+  const watcher = new ChannelHealthWatcher({
     listStatus: () => runtime.channelPlugins.listStatus(),
     announce: async (alert, signal) => {
       const candidates = (await runtime.channelPlugins.listStatus()).filter((entry) =>
@@ -59,7 +67,14 @@ export function buildDaemonChannelHealthWatcher(runtime: ResolvedDaemonFacadeRun
       // though it is configured and not failing. Confirmed-working carriers go first; these are the fallback.
       const confirmed = candidates.filter((entry) => isChannelWorking(entry.state));
       const unconfirmed = candidates.filter((entry) => entry.state === 'unknown');
+      const ownerFallback = async (): Promise<boolean> => {
+        if (!owner) return false;
+        // Delivered on the owner's conversation, or kept as a receipt and logged.
+        await deliverOwnerAlert(runtime.routeBindings, owner.delivery, alert.surface, alert.message);
+        return true;
+      };
       if (confirmed.length === 0 && unconfirmed.length === 0) {
+        if (await ownerFallback()) return true;
         logger.error('A channel changed state and no surviving channel could carry the notice', {
           surface: alert.surface,
           state: alert.state,
@@ -95,7 +110,9 @@ export function buildDaemonChannelHealthWatcher(runtime: ResolvedDaemonFacadeRun
         return false;
       };
       const delivered = await deliverOver(confirmed) || await deliverOver(unconfirmed);
-      return delivered;
+      return delivered || (!signal?.aborted && await ownerFallback());
     },
   });
+  owner?.ingressAlarm?.subscribe(() => watcher.requestSweep());
+  return watcher;
 }

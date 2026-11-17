@@ -97,6 +97,8 @@ export class ChannelHealthWatcher {
   private readonly tracked = new Map<ChannelSurface, TrackedState>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private sweeping = false;
+  /** A change was reported while a sweep ran; see requestSweep(). */
+  private sweepAgain = false;
   private inFlight: AbortController | null = null;
 
   constructor(private readonly deps: ChannelHealthWatcherDeps) {}
@@ -131,12 +133,28 @@ export class ChannelHealthWatcher {
     this.inFlight?.abort();
   }
 
+  /**
+   * Sweep now because a surface's state just changed (for example its inbound
+   * processing started or stopped failing). A request that lands during a
+   * sweep runs one more sweep after it, so the change is never left for the
+   * next interval. Only while the watcher is started.
+   */
+  requestSweep(): void {
+    if (!this.timer) return;
+    if (this.sweeping) {
+      this.sweepAgain = true;
+      return;
+    }
+    void this.sweep();
+  }
+
   /** One pass. Public so a caller can force a check without waiting a cycle. */
   async sweep(): Promise<readonly ChannelHealthAlert[]> {
     // Overlap protection: a slow sweep must not stack, or a surface that is
     // slow to answer produces duplicate alerts about itself.
     if (this.sweeping) return [];
     this.sweeping = true;
+    this.sweepAgain = false;
     this.inFlight = new AbortController();
     try {
       return await this.sweepOnce(this.inFlight.signal);
@@ -148,6 +166,10 @@ export class ChannelHealthWatcher {
     } finally {
       this.inFlight = null;
       this.sweeping = false;
+      if (this.sweepAgain && this.timer) {
+        this.sweepAgain = false;
+        void this.sweep();
+      }
     }
   }
 

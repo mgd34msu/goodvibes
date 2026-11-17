@@ -25,30 +25,10 @@ import type { AutomationRouteBinding } from '../automation/routes.js';
 import type { RouteBindingManager } from '../channels/route-manager.js';
 import type { ChannelSurface } from '../channels/types.js';
 import type { DaemonSurfaceDeliveryHelper } from './surface-delivery.js';
-import { ChannelIngressAlarm } from '../channels/ingress-alarm.js';
 import { logger } from '../utils/logger.js';
 
-/**
- * THE per-surface ingress alarm for a daemon: one instance shared by every
- * inbound path there is, the Telegram poller, the shared webhook seam in
- * `ChannelPluginRegistry` (which covers the eleven webhook-delivered surfaces
- * at a stroke), the three streaming surfaces in
- * `ChannelProviderRuntimeManager`, and the two detached slash-command paths.
- *
- * One instance, because "have I already told the owner Telegram is failing" is a
- * question about the SURFACE, not about which of those mechanisms noticed.
- */
 /** What an owner alert needs from the delivery helper. */
 export type OwnerAlertDelivery = Pick<DaemonSurfaceDeliveryHelper, 'deliverSurfaceNotice' | 'channelOwner' | 'recordOwnerReceipt'>;
-
-export function createChannelIngressAlarm(
-  routeBindings: RouteBindingManager,
-  delivery: OwnerAlertDelivery,
-): ChannelIngressAlarm {
-  return new ChannelIngressAlarm({
-    notify: (surface, text) => { void deliverOwnerAlert(routeBindings, delivery, surface, text); },
-  });
-}
 
 function metadataText(binding: AutomationRouteBinding, key: string): string | undefined {
   // A binding saved by an older build can lack metadata altogether.

@@ -22,7 +22,7 @@ import {
   ChannelReplyPipeline,
   ChannelProviderRuntimeManager,
 } from '../channels/index.js';
-import { createChannelIngressAlarm } from './owner-alert.js';
+import { ChannelIngressAlarm } from '../channels/ingress-alarm.js';
 import { ControlPlaneGateway } from '../control-plane/index.js';
 import { buildSharedSessionAgentSpawnRoutingInput } from '../control-plane/session-intents.js';
 import type { ModelIdCandidate } from '../providers/model-id-resolution.js';
@@ -636,8 +636,8 @@ export function createDaemonFacadeCollaborators(
     const binding = runtime.routeBindings.getBinding(routeId) ?? undefined;
     void surfaceDeliveryHelper.deliverSurfaceNotice(binding, text);
   });
-  // One alarm, every inbound path, see createChannelIngressAlarm.
-  const ingressAlarm = createChannelIngressAlarm(runtime.routeBindings, surfaceDeliveryHelper);
+  // One alarm, every inbound path; the channel health watcher announces what it holds.
+  const ingressAlarm = new ChannelIngressAlarm();
   runtime.channelPlugins.setIngressAlarm(ingressAlarm);
   const workProposals = createFacadeWorkProposalStore(runtime.configManager, runtime.sessionBroker);
 
@@ -804,6 +804,7 @@ export function createDaemonFacadeCollaborators(
     builtinChannels,
     workProposals,
     paymentReplies: surfaceActionHelper.paymentReplies,
+    ingressAlarm,
   };
 }
 

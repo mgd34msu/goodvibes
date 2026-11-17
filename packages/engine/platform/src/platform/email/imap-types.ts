@@ -104,6 +104,12 @@ export interface ImapMessage extends ImapEnvelope {
  * them exactly as the inbox listing does.
  */
 export interface ImapMessageDetail extends ImapEnvelope {
+  /**
+   * When the server received the message (its INTERNALDATE), epoch ms. Set by
+   * the complete read; absent when the server sent none. Unlike `date`, the
+   * sender cannot write it.
+   */
+  readonly arrivedAt?: number;
   /** Decoded text/plain body, '' when the message has none. */
   readonly bodyText: string;
   /** Decoded text/html body, '' when the message has none. */

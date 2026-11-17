@@ -86,13 +86,16 @@ function senderDomainOf(from: string): string | undefined {
     && /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)+$/.test(domain) ? domain : undefined;
 }
 /**
- * The message's own time from its Date header, for display order, retention
- * and "arrived after" questions. A missing, unreadable or far-future date
- * falls back to when it was read here.
+ * The message's time for display order, retention and "arrived after"
+ * questions: when the server received it (IMAP INTERNALDATE), which the sender
+ * cannot set; otherwise its Date header. A missing, unreadable or far-future
+ * time falls back to when it was read here.
  */
-function messageTime(date: string | undefined, readAt: number): number {
+function messageTime(date: string | undefined, readAt: number, arrivedAt?: number): number {
+  const usable = (ms: number): boolean => Number.isSafeInteger(ms) && ms > 0 && ms <= readAt + 24 * 60 * 60 * 1000;
+  if (arrivedAt !== undefined && usable(arrivedAt)) return arrivedAt;
   const parsed = date ? Date.parse(date) : Number.NaN;
-  return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= readAt + 24 * 60 * 60 * 1000 ? parsed : readAt;
+  return usable(parsed) ? parsed : readAt;
 }
 
 /** The inbox status while a proxy variable keeps private screening from running; it does not pass by waiting. */
@@ -251,7 +254,7 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): EmailInb
     const unread = message.readUnread ? await message.readUnread() : true;
     await screenAndStage({
       id, uid: message.uid, from: detail.from, subject: detail.subject, body: detail.bodyText || detail.bodyHtml,
-      sentAt: messageTime(detail.date, Date.now()), unread,
+      sentAt: messageTime(detail.date, Date.now(), detail.arrivedAt), unread,
       parts: [read.rawHeaders, read.rawBodyStructure, read.textSections.map((section) => section.text).join('\n')],
     });
   };

@@ -624,7 +624,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
     id: 'channels.inbox.list',
     title: 'List Channel Inbox',
     description:
-      'Return the merged inbound message feed (Slack DMs, Discord messages, email threads) from the host\'s synced provider mirror, newest first. Read-only; no provider write. Every known provider reports its own state in `providers`, including the unconfigured and the failing ones, so a short list is never ambiguous, and `partial` is true whenever a configured provider\'s items are missing because its last sync failed. Page with ?limit and ?cursor (opaque, from nextCursor); ?since=<epoch-ms> returns only items newer than a previous answer\'s `cursor` watermark; ?provider=<id> narrows to one provider.',
+      'Return the merged inbound message feed (Slack DMs, Discord messages, email threads) from the host\'s synced provider mirror, newest first. Read-only; no provider write. Every known provider reports its own state in `providers`, including the unconfigured and the failing ones, so a short list is never ambiguous, and `partial` is true whenever a configured provider\'s items are missing because its last sync failed. Page with ?limit and ?cursor (opaque, from nextCursor); ?since=<cursor> returns only items committed after a previous answer\'s `cursor` watermark (the store\'s commit sequence, not a time); ?provider=<id> narrows to one provider.',
     category: 'channels',
     scopes: ['read:channels'],
     http: { method: 'GET', path: '/api/channels/inbox' },
@@ -642,8 +642,9 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
       truncated: BOOLEAN_SCHEMA,
       hasMore: BOOLEAN_SCHEMA,
       /**
-       * Freshness watermark: the newest receivedAt in the filtered mirror. Feed
-       * it back as `since` to ask only for what has arrived since. NOT a page
+       * Freshness watermark: the store's commit sequence of the newest item in
+       * the filtered mirror, not a time. Feed it back as `since` to ask only for
+       * what was committed after it, whatever its receivedAt. NOT a page
        * cursor, that is `nextCursor`, and the two are deliberately separate
        * because "what is new" and "the next page down" are different questions.
        */

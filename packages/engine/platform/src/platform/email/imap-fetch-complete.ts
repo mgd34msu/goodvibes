@@ -50,8 +50,34 @@ export function completeFetchSection(frames: readonly ImapFetchFrame[], uid: num
   return response.sections.get(section.toUpperCase()) ?? null;
 }
 
-/** Full structure from the canonical extractor, with exact outer syntax/UID. */
-export function completeFetchBodyStructure(frames: readonly ImapFetchFrame[], uid: number): string | null {
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+/** An IMAP date-time (`17-Jul-1996 02:44:25 -0700`, RFC 3501) as epoch ms, or undefined. */
+export function parseImapDateTime(value: string): number | undefined {
+  const match = /^ ?([0-9]{1,2})-([A-Za-z]{3})-([0-9]{4}) ([0-9]{2}):([0-9]{2}):([0-9]{2}) ([+-])([0-9]{2})([0-9]{2})$/.exec(value);
+  if (match === null) return undefined;
+  const month = MONTHS.indexOf(match[2]!.toLowerCase());
+  if (month < 0) return undefined;
+  const offsetMinutes = (match[7] === '-' ? -1 : 1) * (Number(match[8]) * 60 + Number(match[9]));
+  const ms = Date.UTC(Number(match[3]), month, Number(match[1]), Number(match[4]), Number(match[5]), Number(match[6])) - offsetMinutes * 60_000;
+  return Number.isSafeInteger(ms) && ms > 0 ? ms : undefined;
+}
+
+/** One `INTERNALDATE "<date-time>"` data item in a span of structural text. */
+const INTERNALDATE_ITEM = /INTERNALDATE[ \t]+"([^"\\\r\n]*)"[ \t]*/i;
+
+/** The structure, and the server's arrival time when the command asked for INTERNALDATE too. */
+export interface CompleteStructureFetch {
+  readonly structure: string;
+  readonly internalDate: string | undefined;
+}
+
+/**
+ * Full structure from the canonical extractor, with exact outer syntax/UID.
+ * One INTERNALDATE item beside it (either side, any order) is read and taken
+ * out before the outer syntax is checked; any other extra item is refused.
+ */
+export function completeFetchBodyStructure(frames: readonly ImapFetchFrame[], uid: number): CompleteStructureFetch | null {
   const responseFrames = exactFrames(frames, uid);
   if (responseFrames === null || responseFrames.some(frame => frame.literal !== undefined)) return null;
   const raw = responseFrames.map(frame => frame.syntax).join('\r\n');
@@ -59,8 +85,23 @@ export function completeFetchBodyStructure(frames: readonly ImapFetchFrame[], ui
   if (marker === null) return null;
   const structure = extractBodyStructure(responseFrames);
   const start = marker.index + marker[0].length;
-  if (!structure || !envelope(raw.slice(0, marker.index) + 'BODYSTRUCTURE ', raw.slice(start + structure.length), 'BODYSTRUCTURE ', uid)) return null;
-  return structure;
+  if (!structure) return null;
+  let prefix = raw.slice(0, marker.index);
+  let suffix = raw.slice(start + structure.length);
+  let internalDate: string | undefined;
+  const before = INTERNALDATE_ITEM.exec(prefix);
+  if (before !== null) {
+    internalDate = before[1];
+    prefix = prefix.slice(0, before.index) + prefix.slice(before.index + before[0].length);
+  } else {
+    const after = INTERNALDATE_ITEM.exec(suffix);
+    if (after !== null) {
+      internalDate = after[1];
+      suffix = suffix.slice(0, after.index) + suffix.slice(after.index + after[0].length);
+    }
+  }
+  if (!envelope(prefix + 'BODYSTRUCTURE ', suffix, 'BODYSTRUCTURE ', uid)) return null;
+  return { structure, internalDate };
 }
 
 /**

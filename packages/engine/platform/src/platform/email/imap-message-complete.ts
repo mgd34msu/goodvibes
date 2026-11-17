@@ -7,7 +7,7 @@ import {
   decodeCompleteTextPart,
   parseCompleteBodyStructure,
 } from './imap-bodystructure-complete.js';
-import { completeFetchBodyStructure, completeFetchSection } from './imap-fetch-complete.js';
+import { completeFetchBodyStructure, completeFetchSection, parseImapDateTime } from './imap-fetch-complete.js';
 import {
   extractAuthenticationResults,
   extractDeliveryEvidence,
@@ -72,10 +72,11 @@ function completeHeaders(raw: string): boolean {
 
 function detailFor(uid: number, mailbox: string, rawHeaders: string,
   textSections: readonly ImapCompleteTextSection[],
-  attachments: ImapMessageDetail['attachments']): ImapMessageDetail {
+  attachments: ImapMessageDetail['attachments'], arrivedAt: number | undefined): ImapMessageDetail {
   const deliveryEvidence = Object.freeze(extractDeliveryEvidence(rawHeaders).map(entry => Object.freeze(entry)));
   return Object.freeze({
     uid, mailbox,
+    ...(arrivedAt === undefined ? {} : { arrivedAt }),
     from: extractDisplayHeader(rawHeaders, 'From'),
     subject: extractDisplayHeader(rawHeaders, 'Subject'),
     date: extractHeader(rawHeaders, 'Date'),
@@ -111,11 +112,14 @@ export async function readCompleteMessageDetail(session: ImapSession, uid: numbe
     if (rawHeaders === null) return Object.freeze({ outcome: 'incomplete', reason: 'source-fetch-failed', fromMessage: false });
     if (!completeHeaders(rawHeaders)) return unreadable('headers-incomplete', rawHeaders);
 
-    const structureFrames = await session.commandFrames(`UID FETCH ${uid} BODYSTRUCTURE`,
+    // The arrival time rides on the structure read: the sender writes the Date header, the server writes INTERNALDATE.
+    const structureFrames = await session.commandFrames(`UID FETCH ${uid} (INTERNALDATE BODYSTRUCTURE)`,
       { maxResponseBytes: COMPLETE_MESSAGE_STRUCTURE_BYTES + 4_096 });
-    const structure = completeFetchBodyStructure(structureFrames, uid);
+    const fetched = completeFetchBodyStructure(structureFrames, uid);
+    const structure = fetched?.structure ?? null;
     const parts = structure === null ? null : parseCompleteBodyStructure(structure);
     if (parts === null || structure === null) return unreadable('bodystructure-incomplete-or-unsupported', rawHeaders);
+    const arrivedAt = fetched?.internalDate === undefined ? undefined : parseImapDateTime(fetched.internalDate);
     const textSections: ImapCompleteTextSection[] = [];
     let sourceBytes = Buffer.byteLength(rawHeaders, 'utf8') + Buffer.byteLength(structure, 'utf8');
     for (const part of parts) {
@@ -135,7 +139,7 @@ export async function readCompleteMessageDetail(session: ImapSession, uid: numbe
     }
     const frozenSections = Object.freeze(textSections);
     return Object.freeze({ outcome: 'complete', rawHeaders, rawBodyStructure: structure, textSections: frozenSections,
-      detail: detailFor(uid, mailbox, rawHeaders, frozenSections, attachmentsFromParts(parts)) });
+      detail: detailFor(uid, mailbox, rawHeaders, frozenSections, attachmentsFromParts(parts), arrivedAt) });
   } catch {
     return Object.freeze({ outcome: 'incomplete', reason: 'source-fetch-failed', fromMessage: false });
   }

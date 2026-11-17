@@ -6,9 +6,10 @@
  * answers (terminal, web UI, phone), the daemon publishes the item on
  * `owner-inbox-update`. {@link withAnswerDelivery} wraps the inbox the tool
  * posts to: while one of its questions is open it holds one subscription, and
- * when a question closes it hands the item to the host, which tells the asking
- * conversation on its next request. With nothing open there is no stream and
- * no request.
+ * when a question closes it goes to the agent that asked it, on that agent's
+ * next request, while the agent runs; otherwise to the host, which tells the
+ * asking conversation on its next request. With nothing open there is no
+ * stream and no request.
  */
 
 import type { OwnerAnswerOutcome, OwnerInboxListFilter, OwnerItem } from '../../control-plane/owner-inbox.js';
@@ -18,6 +19,8 @@ import { openServerSentEventStream } from '../transports/sse-stream.js';
 import { buildUrl } from '../transports/transport-paths.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
+import { callingAgentId } from '../../agents/calling-agent.js';
+import { tellRunningAgent } from '../../agents/agent-inlets.js';
 
 /** The wire event the daemon's owner inbox publishes question changes on. */
 export const OWNER_INBOX_UPDATE_WIRE_EVENT = 'owner-inbox-update';
@@ -91,7 +94,7 @@ export function questionClosedText(item: OwnerItem): string {
 export interface AnswerDeliveryOptions {
   /** Opens the inbox update stream (or an in-process subscription). */
   readonly watch: OwnerInboxUpdateWatch;
-  /** Hands a closed question to the conversation that asked it. */
+  /** Hands a closed question to the conversation that asked it, or that spawned the agent that asked it when that agent has ended. */
   readonly deliver: (item: OwnerItem) => void;
   /**
    * The session a question belongs to when the caller did not say: a spawned
@@ -102,22 +105,30 @@ export interface AnswerDeliveryOptions {
 
 /**
  * The inbox the `query` tool posts to, plus delivery of each answer to the
- * asking conversation. One subscription is held only while one of its
+ * asking agent or conversation. One subscription is held only while one of its
  * questions is open; it closes when the last one closes.
  */
 export function withAnswerDelivery(inbox: QuestionInbox, options: AnswerDeliveryOptions): QuestionInbox {
   const pending = new Set<string>();
+  // The spawned agent that asked each open question, when one did.
+  const askingAgents = new Map<string, string>();
   let subscription: OwnerInboxUpdateSubscription | null = null;
   let opening: Promise<void> | null = null;
 
   const closeWhenIdle = (): void => {
     if (pending.size === 0) { subscription?.close(); subscription = null; }
   };
+  const forget = (id: string): void => {
+    askingAgents.delete(id);
+    if (pending.delete(id)) closeWhenIdle();
+  };
 
   const settle = (item: OwnerItem): void => {
     if (item.status === 'open' || !pending.delete(item.id)) return;
+    const agentId = askingAgents.get(item.id);
+    askingAgents.delete(item.id);
     try {
-      options.deliver(item);
+      if (agentId === undefined || !tellRunningAgent(agentId, questionClosedText(item))) options.deliver(item);
     } catch (error) {
       logger.debug('[owner-inbox] delivering an answer failed', { itemId: item.id, error: summarizeError(error) });
     }
@@ -148,9 +159,11 @@ export function withAnswerDelivery(inbox: QuestionInbox, options: AnswerDelivery
   return {
     async post(item) {
       const session = item.sessionId ?? sessionId();
+      const agentId = callingAgentId();
       const outcome = await inbox.post(session ? { ...item, sessionId: session } : item);
       if (outcome.item.status === 'open') {
         pending.add(outcome.item.id);
+        if (agentId !== undefined && outcome.created) askingAgents.set(outcome.item.id, agentId);
         ensureWatching();
       }
       return outcome;
@@ -158,7 +171,7 @@ export function withAnswerDelivery(inbox: QuestionInbox, options: AnswerDelivery
     async find(id) {
       const item = await inbox.find(id);
       // The model read the answer itself; it is not told a second time.
-      if (item && item.status !== 'open' && pending.delete(item.id)) closeWhenIdle();
+      if (item && item.status !== 'open') forget(item.id);
       return item;
     },
     list(filter?: OwnerInboxListFilter) {
@@ -166,7 +179,7 @@ export function withAnswerDelivery(inbox: QuestionInbox, options: AnswerDelivery
       return inbox.list(session ? { ...filter, sessionId: session } : filter);
     },
     async withdraw(id, reason): Promise<OwnerAnswerOutcome> {
-      if (pending.delete(id)) closeWhenIdle();
+      forget(id);
       return await inbox.withdraw(id, reason);
     },
   };

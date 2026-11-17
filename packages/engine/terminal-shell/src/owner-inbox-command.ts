@@ -180,7 +180,11 @@ export function createOwnerInboxCommands<Context extends OwnerInboxCommandContex
             : { text: words };
           const outcome = await inbox.answer(item.id, answer);
           if (outcome.applied) {
-            say(context, `[inbox] Answered ${shortId(outcome.item.id)}: ${answerText(outcome.item)}`);
+            const delivery = outcome.delivery;
+            const handed = delivery === undefined ? ''
+              : delivery.delivered ? ` Sent to ${stripDangerousAnsi(delivery.to)}.`
+                : ` Not delivered to ${stripDangerousAnsi(delivery.to)}: ${stripDangerousAnsi(delivery.reason ?? 'it is not running')}`;
+            say(context, `[inbox] Answered ${shortId(outcome.item.id)}: ${answerText(outcome.item)}${handed}`);
             return;
           }
           say(context, `[inbox] ${formatRefusal(outcome.refusal)}`);

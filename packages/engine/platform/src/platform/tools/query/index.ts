@@ -87,7 +87,7 @@ export function createQueryTool(options: QueryToolOptions): Tool {
           return { success: true, output: JSON.stringify({
             ...view(item),
             ...(created ? {} : { note: 'A question under this key was already open; this is that question, not a new one.' }),
-            next: 'Carry on with what does not depend on the answer. Read it later with query mode "show".',
+            next: 'Carry on with what does not depend on the answer. It comes to you on a later request when the owner answers; query mode "show" reads it at any time.',
           }) };
         }
 

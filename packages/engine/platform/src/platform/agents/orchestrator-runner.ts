@@ -66,6 +66,7 @@ import { holdContractCompletion, reportContractTurnEnd } from './orchestrator-ru
 import { claimStartedProcesses, cleanupLeakedProcesses, disposeSession, finishCancelledRun, type AgentRunTerminal } from './orchestrator-runner-finish.js';
 import { selfBoundedCallDeadline } from './tool-call-liveness.js';
 import { withCallingAgent } from './calling-agent.js';
+import { openAgentInlet, type AgentInlet } from './agent-inlets.js';
 import { createWorkerContextAccountingSource } from './worker-context-accounting.js';
 import { maxParallelToolCalls, planToolBatch, runBounded, toolCallLane } from '../core/tool-batch.js';
 
@@ -581,6 +582,7 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
 
   let session: AgentSession | null = null;
   let conversation: ConversationManager | null = null;
+  let ownerAnswers: AgentInlet | null = null;
   const runProcessIds = new Set<string>();
   runProcessesByRecord.set(record, runProcessIds);
 
@@ -646,6 +648,9 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
     // closure's type is non-nullable without a runtime assertion.
     const activeConversation = conversation;
     context.registerConversationSource?.(record.id, () => activeConversation.getMessageSnapshot());
+    // The owner's answer to a question this agent asked reaches it on its next request.
+    const inlet = openAgentInlet(record.id, activeConversation.hostInstructions, () => record.status === 'running');
+    ownerAnswers = inlet;
 
     const spawnPromptContext = { ...context, projectFramework };
     let promptContext = preparedPromptContext ? { ...preparedPromptContext, projectFramework } : preparedPromptContext;
@@ -736,6 +741,7 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
       }
       turn++;
       if (turnBudget.limit > 0 && turn > turnBudget.limit) {
+        inlet.close();
         const lastMessages = conversation.getMessagesForLLM();
         const lastAssistant = [...lastMessages].reverse().find(m => m.role === 'assistant');
         if (lastAssistant) {
@@ -1029,6 +1035,7 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
             try { await codeAuthorityForAttempt?.(); } catch (error) { throw new ProviderAttemptDeniedError(error); }
             const chat = decisionRoute ? (request: ChatRequest) => chatWithDecisionRoute(decisionRoute, request) : (request: ChatRequest) => activeRoute.provider.chat(request);
             toolDefinitions = toolRegistry.getModelToolDefinitions();
+            const answersCarried = inlet.beforeRequest();
             response = await chat({
               model: activeRoute.modelId,
               messages: conversation.getMessagesForRequest(),
@@ -1042,6 +1049,7 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
             });
             terminal.assertCurrent();
             conversation.hostInstructions.delivered();
+            inlet.accepted(answersCarried);
             break;
           } catch (chatErr) {
             terminal.assertCurrent();
@@ -1370,14 +1378,23 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
           continue;
         }
         continueLoop = completeOrRegenerate(record, conversation, checkedResponse);
+        // The owner answered this agent's question while its final reply was being written: one more turn to act on it.
+        if (!continueLoop && inlet.unread()) {
+          continueLoop = true;
+          setAgentProgress(record, `Turn ${turn + 1} · Reading the owner's answer…`, 'operator');
+          context.emitAgentProgress(record.id, record.progress ?? '', 'operator');
+        }
         if (continueLoop) assertFinalCompletionCurrent = undefined;
+        else inlet.close();
       }
     }
 
     await finalizeAgentRun(context, record, session, runProcessIds, terminal, assertFinalCompletionCurrent);
   } catch (err) {
+    ownerAnswers?.close();
     await handleAgentRunFailure(context, record, conversation, session, runProcessIds, terminal, err);
   } finally {
+    ownerAnswers?.close();
     // Conversation-snapshot bridge: release on EVERY exit path (normal completion,
     // the mid-loop cancellation/MAX_TURNS early returns above, and the catch
     // above) so the live source is never retained past the run and a final

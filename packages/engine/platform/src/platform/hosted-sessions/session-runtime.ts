@@ -30,9 +30,8 @@ import { HostedSessionUnavailableError } from './errors.js';
 import type { HostedWorkspaceFloor } from './workspace-floor.js';
 import { createContractIntake } from '../contract/intake-route.js';
 import { observeSessionContracts } from './session-contracts.js';
-import type { QuestionInbox } from '../tools/query/index.js';
-import type { OwnerItem } from '../control-plane/owner-inbox.js';
-import { questionClosedText, withAnswerDelivery } from '../runtime/client/owner-inbox-updates.js';
+import { questionClosedText } from '../runtime/client/owner-inbox-updates.js';
+import { deliveringQuestions, type InProcessQuestionInbox, type QuestionAsker } from '../agents/agent-owner-questions.js';
 import { resolveSurfaceDirectory } from '../runtime/surface-root.js';
 import { getProcessUntrustedContentLedger, withUntrustedContentScope } from '../security/untrusted-content.js';
 import {
@@ -109,8 +108,11 @@ export interface HostedSessionRuntimeOptions {
   readonly originSurface?: string | undefined;
   /** The daemon's bearer token, read live; the context tool's Cloudflare status counts it as the Worker operator token. */
   readonly cloudflareAuthToken?: (() => string | null) | undefined;
-  /** The daemon's owner inbox: the session's `query` tool asks there and the answer comes back into this conversation. Absent: no `query`. */
-  readonly ownerQuestions?: (QuestionInbox & { subscribe(listener: (item: OwnerItem) => void): () => void }) | undefined;
+  /**
+   * The daemon's owner inbox: the session's `query` tool asks there and the answer comes back into this conversation;
+   * answered after the session closed, the owner is told it was not delivered. Absent: no `query`.
+   */
+  readonly ownerQuestions?: InProcessQuestionInbox | undefined;
   /**
    * What this run's exec tool may do, when the caller decides per session
    * rather than per floor. Omitted ⇒ the floor's own decider, and
@@ -215,15 +217,14 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
   });
 
   const inbox = options.ownerQuestions;
-  // An answer to this session's question reaches its next model request.
-  const ownerQuestions = inbox ? withAnswerDelivery(inbox, {
-    watch: (onItem) => {
-      const unsubscribe = inbox.subscribe(onItem);
-      return { close: unsubscribe };
-    },
-    deliver: (item) => conversation.hostInstructions.set('replay', questionClosedText(item), { once: true, append: true }),
-    sessionId: () => sessionId,
-  }) : undefined;
+  // An answer to this session's question reaches its next model request, handed over when the owner gives it.
+  const askerName = `session ${sessionId}`;
+  const asker: QuestionAsker = { to: askerName, receive: (item) => {
+    if (disposed) return { delivered: false, to: askerName, reason: 'the session was closed before the answer came. The answer is kept on the question.' };
+    conversation.hostInstructions.set('replay', questionClosedText(item), { once: true, append: true });
+    return { delivered: true, to: askerName };
+  } };
+  const ownerQuestions = inbox ? deliveringQuestions(inbox, () => asker) : undefined;
 
   const registeredTools = registerAllTools(toolRegistry, {
     ...(ownerQuestions ? { ownerQuestions } : {}),

@@ -1,8 +1,9 @@
 /**
  * The owner inbox the `query` tool asks in, for this terminal's conversation and
  * the agents it spawns: questions go to the daemon's inbox, and an answer the
- * owner gives anywhere (here, the web UI, the phone) reaches the asking
- * conversation's next model request. One instance per runtime, so the main
+ * owner gives anywhere (here, the web UI, the phone) reaches the spawned agent
+ * that asked it on its next model request while that agent runs, and otherwise
+ * the asking conversation's next model request. One instance per runtime, so the main
  * conversation and its spawned agents share one answer stream, opened only
  * while one of their questions is open.
  */

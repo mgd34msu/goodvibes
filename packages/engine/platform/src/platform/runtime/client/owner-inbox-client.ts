@@ -11,6 +11,7 @@ import { refusal } from '@goodvibes-jev/engine/errors';
 import type {
   NewOwnerItem,
   OwnerAnswer,
+  OwnerAnswerDelivery,
   OwnerAnswerOutcome,
   OwnerInboxListFilter,
   OwnerInboxPort,
@@ -37,10 +38,19 @@ function readItems(value: unknown): OwnerItem[] {
   return items.map(readOwnerItem).filter((item): item is OwnerItem => item !== undefined);
 }
 
+function readDelivery(value: unknown): OwnerAnswerDelivery | undefined {
+  const body = record(value);
+  if (typeof body['delivered'] !== 'boolean' || typeof body['to'] !== 'string') return undefined;
+  return { delivered: body['delivered'], to: body['to'], ...(typeof body['reason'] === 'string' ? { reason: body['reason'] } : {}) };
+}
+
 function readOutcome(value: unknown): OwnerAnswerOutcome {
   const body = record(value);
   const item = readOwnerItem(body['item']);
-  if (body['applied'] === true && item) return { applied: true, item };
+  if (body['applied'] === true && item) {
+    const delivery = readDelivery(body['delivery']);
+    return { applied: true, item, ...(delivery ? { delivery } : {}) };
+  }
   const carried = record(body['refusal']);
   return {
     applied: false,

@@ -71,9 +71,17 @@ export const OWNER_INBOX_ANSWER_INPUT_SCHEMA = objectSchema({
   option: STRING_SCHEMA,
   text: STRING_SCHEMA,
 }, ['itemId']);
+/** Whether the answer reached the agent or session that asked; absent when the asker hears it on the update stream itself. */
+const OWNER_ANSWER_DELIVERY_SCHEMA = objectSchema({
+  delivered: BOOLEAN_SCHEMA,
+  to: STRING_SCHEMA,
+  reason: STRING_SCHEMA,
+}, ['delivered', 'to']);
+
 export const OWNER_INBOX_ANSWER_OUTPUT_SCHEMA = objectSchema({
   applied: BOOLEAN_SCHEMA,
   item: OWNER_ITEM_SCHEMA,
+  delivery: OWNER_ANSWER_DELIVERY_SCHEMA,
   refusal: REFUSAL_SCHEMA,
 }, ['applied']);
 

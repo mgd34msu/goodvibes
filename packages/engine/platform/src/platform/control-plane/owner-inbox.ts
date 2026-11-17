@@ -83,8 +83,31 @@ export interface OwnerInboxListFilter {
   readonly limit?: number | undefined;
 }
 
+/**
+ * Whether an answer reached the agent or session that asked, told to the owner
+ * who gave it. Absent when the asker is not in the daemon (a terminal app hears
+ * the answer on the update stream itself).
+ */
+export interface OwnerAnswerDelivery {
+  readonly delivered: boolean;
+  /** Who the answer went to, or was meant for ("agent …", "session …"). */
+  readonly to: string;
+  /** Why it was not delivered. The answer stays on the item either way. */
+  readonly reason?: string | undefined;
+}
+
+/** Hands an answered item to whoever asked it in this process, and says whether it arrived. */
+export type OwnerAnswerRecipient = (item: OwnerItem) => OwnerAnswerDelivery;
+
+/**
+ * Metadata key naming the in-process asker an item's answer is meant for. Kept
+ * on the item, so an answer given after a restart (which ends every in-process
+ * asker) tells the owner it was not delivered and to whom.
+ */
+export const OWNER_ANSWER_TO_METADATA = 'answerTo';
+
 export type OwnerAnswerOutcome =
-  | { readonly applied: true; readonly item: OwnerItem }
+  | { readonly applied: true; readonly item: OwnerItem; readonly delivery?: OwnerAnswerDelivery | undefined }
   | { readonly applied: false; readonly item?: OwnerItem | undefined; readonly refusal: Refusal };
 
 export type OwnerPostOutcome =
@@ -373,6 +396,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort {
   readonly #approvals: OwnerInboxApprovalSource | undefined;
   readonly #now: () => number;
   readonly #listeners = new Set<OwnerInboxListener>();
+  readonly #recipients = new Map<string, OwnerAnswerRecipient>();
   readonly #unsubscribeApprovals: (() => void) | undefined;
   #approvalRevision = 0;
 
@@ -463,7 +487,10 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort {
     const entry = this.#questions.get(id);
     if (entry) {
       const item = projectStored(entry, now);
-      if (item.status !== 'open') return { applied: false, item, refusal: closedRefusal(item) };
+      if (item.status !== 'open') {
+        this.#recipients.delete(id);
+        return { applied: false, item, refusal: closedRefusal(item) };
+      }
       const checked = this.#checkAnswer(item, answer);
       if ('refusal' in checked) return { applied: false, item, refusal: checked.refusal };
       const result = this.#questions.answer(id, checked.answer, by, now);
@@ -471,7 +498,8 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort {
       const answered = projectStored(result.entry, now);
       if (!result.applied) return { applied: false, item: answered, refusal: closedRefusal(answered) };
       this.#emit(answered);
-      return { applied: true, item: answered };
+      const delivery = this.#deliver(answered);
+      return { applied: true, item: answered, ...(delivery ? { delivery } : {}) };
     }
     const approval = this.#approvals?.getApproval(id);
     if (!approval || !this.#approvals) return { applied: false, refusal: unknownRefusal(id) };
@@ -485,8 +513,38 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort {
     if (!result) return { applied: false, refusal: unknownRefusal(id) };
     const item = projectStored(result.entry, now);
     if (!result.applied) return { applied: false, item, refusal: closedRefusal(item) };
+    this.#recipients.delete(id);
     this.#emit(item);
     return { applied: true, item };
+  }
+
+  /**
+   * Names who in this process receives the answer to an open item: called once,
+   * when the owner answers, and its result is returned to the owner with the
+   * answer. Dropped when the item closes any other way. Nothing is held for an
+   * item that is not open.
+   */
+  deliverTo(id: string, recipient: OwnerAnswerRecipient): void {
+    if (this.get(id)?.status === 'open') this.#recipients.set(id, recipient);
+  }
+
+  #deliver(item: OwnerItem): OwnerAnswerDelivery | undefined {
+    const recipient = this.#recipients.get(item.id);
+    const meantFor = item.metadata?.[OWNER_ANSWER_TO_METADATA];
+    const to = typeof meantFor === 'string' ? meantFor : item.askedBy ?? 'the asker';
+    if (!recipient) {
+      return typeof meantFor === 'string'
+        ? { delivered: false, to, reason: 'it is no longer running: the daemon restarted after it asked. The answer is kept on the question.' }
+        : undefined;
+    }
+    this.#recipients.delete(item.id);
+    try {
+      return recipient(item);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn('[owner-inbox] handing an answer to its asker failed', { itemId: item.id, error: message });
+      return { delivered: false, to, reason: `handing it over failed (${message}). The answer is kept on the question.` };
+    }
   }
 
   /**
@@ -532,6 +590,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort {
   dispose(): void {
     this.#unsubscribeApprovals?.();
     this.#listeners.clear();
+    this.#recipients.clear();
     this.#questions.close();
   }
 

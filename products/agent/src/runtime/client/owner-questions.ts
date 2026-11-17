@@ -1,8 +1,9 @@
 /**
  * The connected host's owner inbox, for `/questions` and for the `query` tool
  * of this Agent's conversation and the agents it spawns. An answer the owner
- * gives anywhere (here, the web UI, the phone) reaches the asking
- * conversation's next model request. One question inbox per runtime, so the
+ * gives anywhere (here, the web UI, the phone) reaches the spawned agent that
+ * asked it on its next model request while that agent runs, and otherwise the
+ * asking conversation's next model request. One question inbox per runtime, so the
  * main conversation and its spawned agents share one answer stream, opened
  * only while one of their questions is open.
  */

@@ -2,7 +2,8 @@
  * Questions agents left the owner (the daemon's owner inbox, `inbox.list`),
  * answered here with `inbox.answer`. The first answer from any surface wins; a
  * question already answered elsewhere says so instead of taking a second one.
- * The asking agent hears the answer on its next request.
+ * The asking agent hears the answer on its next request; when the daemon knows
+ * it could not hand it over (the agent has ended), the toast says so and why.
  */
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -24,8 +25,14 @@ interface OwnerQuestion {
   readonly createdAt: number;
 }
 
+interface AnswerDelivery {
+  readonly delivered: boolean;
+  readonly to: string;
+  readonly reason?: string;
+}
+
 type AnswerOutcome =
-  | { readonly applied: true }
+  | { readonly applied: true; readonly delivery?: AnswerDelivery }
   | { readonly applied: false; readonly refusal: { readonly reason: string; readonly next?: readonly string[] } };
 
 function readQuestions(value: unknown): OwnerQuestion[] {
@@ -97,8 +104,11 @@ export function OwnerQuestions({ enabled }: { enabled: boolean }) {
     mutationFn: async (input: { itemId: string; option?: string; text?: string }) =>
       (await platformClient.operator.invoke('inbox.answer', input)) as AnswerOutcome,
     onSuccess: (outcome) => {
-      if (outcome.applied) toast({ title: 'Answer sent', description: 'The agent reads it on its next step.', tone: 'success' });
-      else toast({ title: 'Not sent', description: [outcome.refusal.reason, outcome.refusal.next?.[0]].filter(Boolean).join(' '), tone: 'warning' });
+      if (outcome.applied && outcome.delivery && !outcome.delivery.delivered) {
+        toast({ title: 'Answer saved, not delivered', description: `Not delivered to ${outcome.delivery.to}: ${outcome.delivery.reason ?? 'it is not running.'}`, tone: 'warning' });
+      } else if (outcome.applied) {
+        toast({ title: 'Answer sent', description: outcome.delivery ? `Sent to ${outcome.delivery.to}; it reads it on its next step.` : 'The agent reads it on its next step.', tone: 'success' });
+      } else toast({ title: 'Not sent', description: [outcome.refusal.reason, outcome.refusal.next?.[0]].filter(Boolean).join(' '), tone: 'warning' });
     },
     onError: (error) => toast({ title: 'The answer was not sent', description: formatError(error), tone: 'danger' }),
     onSettled: () => void queryClient.invalidateQueries({ queryKey: QUESTIONS_QUERY_KEY }),

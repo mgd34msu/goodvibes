@@ -29,3 +29,4 @@ export * from './planning-goal.js';
 export { readRequestedPlatformWork } from './platform-work-reading.js';
 
 export * from './calling-agent.js';
+export { callingAgentAsker, deliveringQuestions, type InProcessQuestionInbox, type QuestionAsker } from './agent-owner-questions.js';

@@ -1,6 +1,7 @@
 import { REGULAR_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { createApprovalDerivedHandlers, registerGateRuntimeEvents } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import { FeatureAnnouncementStore, featureAnnouncementsPath } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
+import { callingAgentAsker, deliveringQuestions } from '@goodvibes-jev/engine/platform/platform/agents';
 import { createDaemonWorkspaceTrustResolver } from './workspace-trust-composition.js';
 import { installNativeHostedConversationOwner } from './native-hosted-conversation-composition.js';
 import { createNativeWorkSubmissionHost } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-submission';
@@ -708,8 +709,9 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       toolExecutionObserver: (tool: string, args: Record<string, unknown>, success: boolean) => ciAutoWatchObserver?.(tool, args, success),
       contractRunner, contractHooks: contractRunner.hooks(),
       agentManager,
-      // A background agent's `query` tool leaves its questions in the same inbox.
-      ownerQuestions: ownerInbox,
+      // A background agent's `query` tool leaves its questions in the same inbox, and the owner's
+      // answer is handed to that agent's next model request (or the owner is told it has ended).
+      ownerQuestions: deliveringQuestions(ownerInbox, () => callingAgentAsker(agentManager)),
       surfaceRoot: surface.surfaceRoot,
       permissionManager,
       execPromptAnswerHandler,

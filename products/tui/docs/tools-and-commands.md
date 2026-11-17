@@ -42,7 +42,7 @@ The tool registry is part of the main runtime and is shared across the TUI, agen
 | --- | --- |
 | `fetch` | HTTP retrieval and extraction |
 | `web_search` | Provider-backed search and evidence shaping |
-| `query` | Leave the owner a question and carry on; read his answer later |
+| `query` | Leave the owner a question and carry on; his answer comes back on a later request |
 | `repl` | Evaluate a JavaScript or TypeScript snippet inside the command sandbox |
 
 ### Coordination and product control
@@ -217,7 +217,7 @@ Structured execution and coordination beyond a single conversation turn.
 
 ### query
 
-- `query`: leave the owner a question and carry on working. `ask` posts it to the owner inbox and returns its id at once; the owner sees it in `/questions` (alias `/inbox`) in either terminal app and, when push is on, as a notification on his phone, and answers it there. When the owner answers, the answer is passed to the asking conversation on its next model request (a spawned agent's question goes back to the conversation that spawned it); `show` and `list` read it back at any time; `withdraw` takes back a question that no longer matters. A `key` makes a repeated ask return the first open question instead of posting a second one. The tool is offered where the daemon's inbox is reachable
+- `query`: leave the owner a question and carry on working. `ask` posts it to the owner inbox and returns its id at once; the owner sees it in `/questions` (alias `/inbox`) in either terminal app and, when push is on, as a notification on his phone, and answers it there. When the owner answers, the answer is passed to the asker on its next model request: a spawned agent while it runs, otherwise the conversation that asked or spawned it (in the daemon, an answer to an agent or hosted session that has ended stays on the question, and the owner is told it was not delivered and why); `show` and `list` read it back at any time; `withdraw` takes back a question that no longer matters. A `key` makes a repeated ask return the first open question instead of posting a second one. The tool is offered where the daemon's inbox is reachable
 
 ### mcp / remote / control
 

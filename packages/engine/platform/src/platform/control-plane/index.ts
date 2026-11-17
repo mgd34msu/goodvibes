@@ -111,6 +111,7 @@ export type {
 } from './approval-broker.js';
 export { ApprovalBroker } from './approval-broker.js';
 export {
+  OWNER_ANSWER_TO_METADATA,
   OWNER_ITEM_KINDS,
   OWNER_ITEM_LIMITS,
   OwnerInbox,
@@ -122,7 +123,9 @@ export {
 export type {
   NewOwnerItem,
   OwnerAnswer,
+  OwnerAnswerDelivery,
   OwnerAnswerOutcome,
+  OwnerAnswerRecipient,
   OwnerAnswerSource,
   OwnerInboxApprovalSource,
   OwnerInboxListFilter,

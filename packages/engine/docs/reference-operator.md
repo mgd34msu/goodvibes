@@ -4,7 +4,7 @@ Generated from the synced GoodVibes operator contract artifact.
 
 ## Summary
 
-- Methods: `629`
+- Methods: `630`
 - Events: `36`
 - Auth modes: `shared-bearer`, `session-login`
 - HTTP status path: `/status`
@@ -28417,7 +28417,7 @@ Write triage labels to inbox messages at their provider: an IMAP keyword on mail
 
 #### `channels.inbox.list`
 
-Return the merged inbound message feed (Slack DMs, Discord messages, email threads) from the host's synced provider mirror, newest first. Read-only; no provider write. Every known provider reports its own state in `providers`, including the unconfigured and the failing ones, so a short list is never ambiguous, and `partial` is true whenever a configured provider's items are missing because its last sync failed. Page with ?limit and ?cursor (opaque, from nextCursor); ?since=<cursor> returns only items committed after a previous answer's `cursor` watermark (the store's commit sequence, not a time); ?provider=<id> narrows to one provider. Each provider with triage says in `triage` whether new messages are being labelled and, when not, why and what turns it on; channels.inbox.triage labels a page now.
+Return the merged inbound message feed (Slack DMs, Discord messages, email threads) from the host's synced provider mirror, newest first. Read-only; no provider write. Every known provider reports its own state in `providers`, including the unconfigured and the failing ones, so a short list is never ambiguous, and `partial` is true whenever a configured provider's items are missing because its last sync failed. Page with ?limit and ?cursor (opaque, from nextCursor); ?since=<cursor> returns only items committed after a previous answer's `cursor` watermark (the store's commit sequence, not a time); ?provider=<id> narrows to one provider; `uids` (a list of mail UIDs) returns only those messages of the live mailbox, matched by the email provider's current account and mailbox generation, so a client can look up a listed page without reading the feed. Each provider with triage says in `triage` whether new messages are being labelled and, when not, why and what turns it on; channels.inbox.triage labels a page now.
 
 - Title: `List Channel Inbox`
 - Source: `builtin`
@@ -28446,6 +28446,12 @@ Return the merged inbound message feed (Slack DMs, Discord messages, email threa
     },
     "cursor": {
       "type": "string"
+    },
+    "uids": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      }
     }
   },
   "additionalProperties": false
@@ -71923,6 +71929,47 @@ Authenticate a local control-plane user and create a session token.
 }
 ```
 
+#### `control.auth.logout`
+
+End the sign-in session that authenticates this request (its bearer or session cookie) and expire the session cookie. Any signed-in user may end their own session; ending another session is local_auth.sessions.delete (admin). A credential that is not a live sign-in session is answered 401 SESSION_UNKNOWN.
+
+- Title: `Logout`
+- Source: `builtin`
+- Access: `public`
+- Transport: `http`
+- HTTP: `POST /logout`
+- Scopes: none
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `no`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "revoked": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "revoked"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `control.clients.list`
 
 Return authenticated and recently connected control-plane clients.
@@ -76706,7 +76753,7 @@ Disclose the inbound-mail watcher: whether it is running and why, which source i
 
 #### `email.inbox.list`
 
-Return inbox message summaries fetched live from the configured IMAP account, newest first (ordered by server-assigned UID, never by the sender-written Date header). Read-only (EXAMINE / BODY.PEEK); never marks messages read. `before` pages backwards: pass the smallest UID of the page you have to get the next older page; `total` counts every match. When the server answered for a message and the daemon could not read the answer, the page is short and `unreadable` says so, an omitted message is not by itself evidence that it was deleted.
+Return inbox message summaries fetched live from the configured IMAP account, newest first (ordered by server-assigned UID, never by the sender-written Date header). Read-only (EXAMINE / BODY.PEEK); never marks messages read. `before` pages backwards: pass the smallest UID of the page you have to get the next older page; `total` counts every match. When the server answered for a message and the daemon could not read the answer, the page is short and `unreadable` says so, an omitted message is not by itself evidence that it was deleted. A message the daemon's inbox mirror has labelled carries `triageLabel` (spam, priority or normal); one not labelled yet has none.
 
 - Title: `List Email Inbox`
 - Source: `builtin`
@@ -76772,6 +76819,14 @@ Return inbox message summaries fetched live from the configured IMAP account, ne
           },
           "messageId": {
             "type": "string"
+          },
+          "triageLabel": {
+            "type": "string",
+            "enum": [
+              "spam",
+              "priority",
+              "normal"
+            ]
           }
         },
         "required": [
@@ -137485,7 +137540,7 @@ Dry-run preview of a unified rewind to a session turn anchor: exactly what resto
 
 #### `rewind.undo`
 
-Put a session's conversation back to how it was before a rewind, from the undo.conversation.undoSnapshotId of the rewind.apply receipt. The pre-rewind copy replaces the whole conversation, so the undo is refused while the conversation has newer messages than the rewind left it with. Answers undone:true, or undone:false with a refusal (code, state, reason, next) and nothing changed: the snapshot is gone (see the receipt's undo.conversation.expiresAfter), the conversation changed since, or the surface holding the conversation did not answer. A conversation a surface is hosting is restored by that surface, asked over its rewind.conversation.requests channel; one this daemon holds is restored here. Files are reversed separately with checkpoints.restore.
+Put a session's conversation back to how it was before a rewind, from the undo.conversation.undoSnapshotId of the rewind.apply receipt. The pre-rewind copy replaces the whole conversation, so the undo is refused while the conversation has newer messages than the rewind left it with. Answers undone:true, or undone:false with a refusal (code, state, reason, next) and nothing changed: the snapshot is gone (see the receipt's undo.conversation.expiresAfter), the conversation changed since, or the surface holding the conversation did not answer. When the undo took effect but the conversation's store could not save it, `notSaved` says so and what to do: a restart would bring back the rewound transcript. A conversation a surface is hosting is restored by that surface, asked over its rewind.conversation.requests channel; one this daemon holds is restored here. Files are reversed separately with checkpoints.restore.
 
 - Title: `Undo a Conversation Rewind`
 - Source: `builtin`
@@ -137566,6 +137621,9 @@ Put a session's conversation back to how it was before a rewind, from the undo.c
           "type": "null"
         }
       ]
+    },
+    "notSaved": {
+      "type": "string"
     }
   },
   "required": [
@@ -164804,14 +164862,16 @@ Start the single initial semantic admission of captured conversation text. Repla
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -165004,14 +165064,16 @@ Start the single initial semantic admission of captured conversation text. Repla
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -165223,14 +165285,16 @@ Start the single initial semantic admission of captured conversation text. Repla
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -165642,14 +165706,16 @@ Start the single initial semantic admission of captured conversation text. Repla
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -165863,14 +165929,16 @@ Start the single initial semantic admission of captured conversation text. Repla
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -166071,14 +166139,16 @@ Start the single initial semantic admission of captured conversation text. Repla
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -166271,14 +166341,16 @@ Start the single initial semantic admission of captured conversation text. Repla
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -166913,14 +166985,16 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -167113,14 +167187,16 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -167332,14 +167408,16 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -167751,14 +167829,16 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -167972,14 +168052,16 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -168180,14 +168262,16 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -168380,14 +168464,16 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -169147,14 +169233,16 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -169347,14 +169435,16 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -169566,14 +169656,16 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -169985,14 +170077,16 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -170206,14 +170300,16 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -170414,14 +170510,16 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -170614,14 +170712,16 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -171252,14 +171352,16 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     "policy": {
                       "type": "string",
                       "enum": [
-                        "Preferred",
-                        "Classic - Off"
+                        "Hybrid",
+                        "Decision Model Only",
+                        "No Decision Model"
                       ]
                     },
                     "reason": {
                       "type": "string",
                       "enum": [
                         "selected",
+                        "not-set",
                         "unavailable"
                       ]
                     }
@@ -171452,14 +171554,16 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     "policy": {
                       "type": "string",
                       "enum": [
-                        "Preferred",
-                        "Classic - Off"
+                        "Hybrid",
+                        "Decision Model Only",
+                        "No Decision Model"
                       ]
                     },
                     "reason": {
                       "type": "string",
                       "enum": [
                         "selected",
+                        "not-set",
                         "unavailable"
                       ]
                     }
@@ -171671,14 +171775,16 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     "policy": {
                       "type": "string",
                       "enum": [
-                        "Preferred",
-                        "Classic - Off"
+                        "Hybrid",
+                        "Decision Model Only",
+                        "No Decision Model"
                       ]
                     },
                     "reason": {
                       "type": "string",
                       "enum": [
                         "selected",
+                        "not-set",
                         "unavailable"
                       ]
                     }
@@ -172090,14 +172196,16 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     "policy": {
                       "type": "string",
                       "enum": [
-                        "Preferred",
-                        "Classic - Off"
+                        "Hybrid",
+                        "Decision Model Only",
+                        "No Decision Model"
                       ]
                     },
                     "reason": {
                       "type": "string",
                       "enum": [
                         "selected",
+                        "not-set",
                         "unavailable"
                       ]
                     }
@@ -172311,14 +172419,16 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     "policy": {
                       "type": "string",
                       "enum": [
-                        "Preferred",
-                        "Classic - Off"
+                        "Hybrid",
+                        "Decision Model Only",
+                        "No Decision Model"
                       ]
                     },
                     "reason": {
                       "type": "string",
                       "enum": [
                         "selected",
+                        "not-set",
                         "unavailable"
                       ]
                     }
@@ -172519,14 +172629,16 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     "policy": {
                       "type": "string",
                       "enum": [
-                        "Preferred",
-                        "Classic - Off"
+                        "Hybrid",
+                        "Decision Model Only",
+                        "No Decision Model"
                       ]
                     },
                     "reason": {
                       "type": "string",
                       "enum": [
                         "selected",
+                        "not-set",
                         "unavailable"
                       ]
                     }
@@ -172719,14 +172831,16 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     "policy": {
                       "type": "string",
                       "enum": [
-                        "Preferred",
-                        "Classic - Off"
+                        "Hybrid",
+                        "Decision Model Only",
+                        "No Decision Model"
                       ]
                     },
                     "reason": {
                       "type": "string",
                       "enum": [
                         "selected",
+                        "not-set",
                         "unavailable"
                       ]
                     }
@@ -173378,14 +173492,16 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -173578,14 +173694,16 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -173797,14 +173915,16 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -174216,14 +174336,16 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -174437,14 +174559,16 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -174645,14 +174769,16 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }
@@ -174845,14 +174971,16 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 "policy": {
                   "type": "string",
                   "enum": [
-                    "Preferred",
-                    "Classic - Off"
+                    "Hybrid",
+                    "Decision Model Only",
+                    "No Decision Model"
                   ]
                 },
                 "reason": {
                   "type": "string",
                   "enum": [
                     "selected",
+                    "not-set",
                     "unavailable"
                   ]
                 }

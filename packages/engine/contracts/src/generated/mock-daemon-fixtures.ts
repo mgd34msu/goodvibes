@@ -11436,6 +11436,17 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "expiresAt": 0
     }
   },
+  "control.auth.logout": {
+    "methodId": "control.auth.logout",
+    "http": {
+      "method": "POST",
+      "path": "/logout"
+    },
+    "status": 200,
+    "body": {
+      "revoked": false
+    }
+  },
   "control.clients.list": {
     "methodId": "control.clients.list",
     "http": {
@@ -12467,7 +12478,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "date": "sample",
           "unread": false,
           "bodyPreview": "sample",
-          "messageId": "sample"
+          "messageId": "sample",
+          "triageLabel": "spam"
         }
       ],
       "total": 0,
@@ -23761,7 +23773,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "next": [
           "sample"
         ]
-      }
+      },
+      "notSaved": "sample"
     }
   },
   "routes.bindings.create": {
@@ -27999,7 +28012,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "sessionId": "sample",
         "classic": {
           "provenance": "owner",
-          "policy": "Preferred",
+          "policy": "Hybrid",
           "reason": "selected"
         },
         "continuation": {
@@ -28035,7 +28048,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "sessionId": "sample",
         "classic": {
           "provenance": "owner",
-          "policy": "Preferred",
+          "policy": "Hybrid",
           "reason": "selected"
         },
         "continuation": {
@@ -28071,7 +28084,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "sessionId": "sample",
         "classic": {
           "provenance": "owner",
-          "policy": "Preferred",
+          "policy": "Hybrid",
           "reason": "selected"
         },
         "continuation": {
@@ -28107,7 +28120,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "sessionId": "sample",
         "classic": {
           "provenance": "owner",
-          "policy": "Preferred",
+          "policy": "Hybrid",
           "reason": "selected"
         },
         "continuation": {
@@ -28143,7 +28156,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "sessionId": "sample",
         "classic": {
           "provenance": "owner",
-          "policy": "Preferred",
+          "policy": "Hybrid",
           "reason": "selected"
         },
         "continuation": {

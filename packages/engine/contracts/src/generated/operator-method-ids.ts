@@ -171,6 +171,7 @@ export const OPERATOR_METHOD_IDS = [
   "contracts.summaries",
   "control.auth.current",
   "control.auth.login",
+  "control.auth.logout",
   "control.clients.list",
   "control.contract",
   "control.events.catalog",

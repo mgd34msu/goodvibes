@@ -3,7 +3,7 @@
   "info": {
     "title": "GoodVibes Operator API",
     "version": "3.3.0",
-    "description": "Generated from the operator contract (packages/contracts/artifacts/operator-contract.json). 629 cataloged methods: 522 with dedicated REST bindings, 107 reachable only through the generic invoke endpoint. Regenerate with `bun run openapi:generate`; drift fails `contracts:check`."
+    "description": "Generated from the operator contract (packages/contracts/artifacts/operator-contract.json). 630 cataloged methods: 523 with dedicated REST bindings, 107 reachable only through the generic invoke endpoint. Regenerate with `bun run openapi:generate`; drift fails `contracts:check`."
   },
   "servers": [
     {
@@ -27497,7 +27497,7 @@
       "get": {
         "operationId": "channels.inbox.list",
         "summary": "List Channel Inbox",
-        "description": "Return the merged inbound message feed (Slack DMs, Discord messages, email threads) from the host's synced provider mirror, newest first. Read-only; no provider write. Every known provider reports its own state in `providers`, including the unconfigured and the failing ones, so a short list is never ambiguous, and `partial` is true whenever a configured provider's items are missing because its last sync failed. Page with ?limit and ?cursor (opaque, from nextCursor); ?since=<cursor> returns only items committed after a previous answer's `cursor` watermark (the store's commit sequence, not a time); ?provider=<id> narrows to one provider. Each provider with triage says in `triage` whether new messages are being labelled and, when not, why and what turns it on; channels.inbox.triage labels a page now.",
+        "description": "Return the merged inbound message feed (Slack DMs, Discord messages, email threads) from the host's synced provider mirror, newest first. Read-only; no provider write. Every known provider reports its own state in `providers`, including the unconfigured and the failing ones, so a short list is never ambiguous, and `partial` is true whenever a configured provider's items are missing because its last sync failed. Page with ?limit and ?cursor (opaque, from nextCursor); ?since=<cursor> returns only items committed after a previous answer's `cursor` watermark (the store's commit sequence, not a time); ?provider=<id> narrows to one provider; `uids` (a list of mail UIDs) returns only those messages of the live mailbox, matched by the email provider's current account and mailbox generation, so a client can look up a listed page without reading the feed. Each provider with triage says in `triage` whether new messages are being labelled and, when not, why and what turns it on; channels.inbox.triage labels a page now.",
         "tags": [
           "channels"
         ],
@@ -27780,6 +27780,17 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "uids",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
             }
           }
         ]
@@ -61981,6 +61992,58 @@
         }
       }
     },
+    "/logout": {
+      "post": {
+        "operationId": "control.auth.logout",
+        "summary": "Logout",
+        "description": "End the sign-in session that authenticates this request (its bearer or session cookie) and expire the session cookie. Any signed-in user may end their own session; ending another session is local_auth.sessions.delete (admin). A credential that is not a live sign-in session is answered 401 SESSION_UNKNOWN.",
+        "tags": [
+          "control-plane"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "revoked": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "revoked"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-access": "public",
+        "x-transport": [
+          "http"
+        ],
+        "x-effect": "write",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/control-plane/clients": {
       "get": {
         "operationId": "control.clients.list",
@@ -64797,7 +64860,7 @@
       "get": {
         "operationId": "email.inbox.list",
         "summary": "List Email Inbox",
-        "description": "Return inbox message summaries fetched live from the configured IMAP account, newest first (ordered by server-assigned UID, never by the sender-written Date header). Read-only (EXAMINE / BODY.PEEK); never marks messages read. `before` pages backwards: pass the smallest UID of the page you have to get the next older page; `total` counts every match. When the server answered for a message and the daemon could not read the answer, the page is short and `unreadable` says so, an omitted message is not by itself evidence that it was deleted.",
+        "description": "Return inbox message summaries fetched live from the configured IMAP account, newest first (ordered by server-assigned UID, never by the sender-written Date header). Read-only (EXAMINE / BODY.PEEK); never marks messages read. `before` pages backwards: pass the smallest UID of the page you have to get the next older page; `total` counts every match. When the server answered for a message and the daemon could not read the answer, the page is short and `unreadable` says so, an omitted message is not by itself evidence that it was deleted. A message the daemon's inbox mirror has labelled carries `triageLabel` (spam, priority or normal); one not labelled yet has none.",
         "tags": [
           "email"
         ],
@@ -64834,6 +64897,14 @@
                           },
                           "messageId": {
                             "type": "string"
+                          },
+                          "triageLabel": {
+                            "type": "string",
+                            "enum": [
+                              "spam",
+                              "priority",
+                              "normal"
+                            ]
                           }
                         },
                         "required": [
@@ -149303,14 +149374,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -149503,14 +149576,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -149722,14 +149797,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -150141,14 +150218,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -150362,14 +150441,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -150570,14 +150651,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -150770,14 +150853,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -151427,14 +151512,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -151627,14 +151714,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -151846,14 +151935,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -152265,14 +152356,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -152486,14 +152579,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -152694,14 +152789,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -152894,14 +152991,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -153551,14 +153650,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -153751,14 +153852,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -153970,14 +154073,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -154389,14 +154494,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -154610,14 +154717,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -154818,14 +154927,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -155018,14 +155129,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -155802,14 +155915,16 @@
                                     "policy": {
                                       "type": "string",
                                       "enum": [
-                                        "Preferred",
-                                        "Classic - Off"
+                                        "Hybrid",
+                                        "Decision Model Only",
+                                        "No Decision Model"
                                       ]
                                     },
                                     "reason": {
                                       "type": "string",
                                       "enum": [
                                         "selected",
+                                        "not-set",
                                         "unavailable"
                                       ]
                                     }
@@ -156002,14 +156117,16 @@
                                     "policy": {
                                       "type": "string",
                                       "enum": [
-                                        "Preferred",
-                                        "Classic - Off"
+                                        "Hybrid",
+                                        "Decision Model Only",
+                                        "No Decision Model"
                                       ]
                                     },
                                     "reason": {
                                       "type": "string",
                                       "enum": [
                                         "selected",
+                                        "not-set",
                                         "unavailable"
                                       ]
                                     }
@@ -156221,14 +156338,16 @@
                                     "policy": {
                                       "type": "string",
                                       "enum": [
-                                        "Preferred",
-                                        "Classic - Off"
+                                        "Hybrid",
+                                        "Decision Model Only",
+                                        "No Decision Model"
                                       ]
                                     },
                                     "reason": {
                                       "type": "string",
                                       "enum": [
                                         "selected",
+                                        "not-set",
                                         "unavailable"
                                       ]
                                     }
@@ -156640,14 +156759,16 @@
                                     "policy": {
                                       "type": "string",
                                       "enum": [
-                                        "Preferred",
-                                        "Classic - Off"
+                                        "Hybrid",
+                                        "Decision Model Only",
+                                        "No Decision Model"
                                       ]
                                     },
                                     "reason": {
                                       "type": "string",
                                       "enum": [
                                         "selected",
+                                        "not-set",
                                         "unavailable"
                                       ]
                                     }
@@ -156861,14 +156982,16 @@
                                     "policy": {
                                       "type": "string",
                                       "enum": [
-                                        "Preferred",
-                                        "Classic - Off"
+                                        "Hybrid",
+                                        "Decision Model Only",
+                                        "No Decision Model"
                                       ]
                                     },
                                     "reason": {
                                       "type": "string",
                                       "enum": [
                                         "selected",
+                                        "not-set",
                                         "unavailable"
                                       ]
                                     }
@@ -157069,14 +157192,16 @@
                                     "policy": {
                                       "type": "string",
                                       "enum": [
-                                        "Preferred",
-                                        "Classic - Off"
+                                        "Hybrid",
+                                        "Decision Model Only",
+                                        "No Decision Model"
                                       ]
                                     },
                                     "reason": {
                                       "type": "string",
                                       "enum": [
                                         "selected",
+                                        "not-set",
                                         "unavailable"
                                       ]
                                     }
@@ -157269,14 +157394,16 @@
                                     "policy": {
                                       "type": "string",
                                       "enum": [
-                                        "Preferred",
-                                        "Classic - Off"
+                                        "Hybrid",
+                                        "Decision Model Only",
+                                        "No Decision Model"
                                       ]
                                     },
                                     "reason": {
                                       "type": "string",
                                       "enum": [
                                         "selected",
+                                        "not-set",
                                         "unavailable"
                                       ]
                                     }
@@ -157937,14 +158064,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -158137,14 +158266,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -158356,14 +158487,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -158775,14 +158908,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -158996,14 +159131,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -159204,14 +159341,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -159404,14 +159543,16 @@
                                 "policy": {
                                   "type": "string",
                                   "enum": [
-                                    "Preferred",
-                                    "Classic - Off"
+                                    "Hybrid",
+                                    "Decision Model Only",
+                                    "No Decision Model"
                                   ]
                                 },
                                 "reason": {
                                   "type": "string",
                                   "enum": [
                                     "selected",
+                                    "not-set",
                                     "unavailable"
                                   ]
                                 }
@@ -165091,6 +165232,14 @@
       "category": "control-plane",
       "access": "public",
       "rest": "POST /login",
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
+      "id": "control.auth.logout",
+      "category": "control-plane",
+      "access": "public",
+      "rest": "POST /logout",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
     },

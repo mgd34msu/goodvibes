@@ -10,7 +10,7 @@ import type { OperatorMethodId } from './operator-method-ids.js';
  * call sites) hand-written on top of these generated primitives.
  *
  * Contract product version: 3.3.0
- * Methods: 629 total, 522 REST-routed, 107 ws-only invoke.
+ * Methods: 630 total, 523 REST-routed, 107 ws-only invoke.
  */
 
 export type WebuiHttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -703,6 +703,10 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
   "control.auth.login": {
     "method": "POST",
     "path": "/login"
+  },
+  "control.auth.logout": {
+    "method": "POST",
+    "path": "/logout"
   },
   "control.clients.list": {
     "method": "GET",
@@ -2434,6 +2438,7 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "contracts.summaries": "ws-invoke",
   "control.auth.current": "rest",
   "control.auth.login": "rest",
+  "control.auth.logout": "rest",
   "control.clients.list": "rest",
   "control.contract": "rest",
   "control.events.catalog": "rest",
@@ -7459,7 +7464,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "provider": "sample",
       "limit": 0,
       "since": 0,
-      "cursor": "sample"
+      "cursor": "sample",
+      "uids": [
+        0
+      ]
     },
     "output": {
       "items": [
@@ -14382,6 +14390,12 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "expiresAt": 0
     }
   },
+  "control.auth.logout": {
+    "input": {},
+    "output": {
+      "revoked": false
+    }
+  },
   "control.clients.list": {
     "input": {},
     "output": {
@@ -15369,7 +15383,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "date": "sample",
           "unread": false,
           "bodyPreview": "sample",
-          "messageId": "sample"
+          "messageId": "sample",
+          "triageLabel": "spam"
         }
       ],
       "total": 0,
@@ -26998,7 +27013,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "next": [
           "sample"
         ]
-      }
+      },
+      "notSaved": "sample"
     }
   },
   "routes.bindings.create": {
@@ -31339,7 +31355,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "sessionId": "sample",
         "classic": {
           "provenance": "owner",
-          "policy": "Preferred",
+          "policy": "Hybrid",
           "reason": "selected"
         },
         "continuation": {
@@ -31373,7 +31389,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "sessionId": "sample",
         "classic": {
           "provenance": "owner",
-          "policy": "Preferred",
+          "policy": "Hybrid",
           "reason": "selected"
         },
         "continuation": {
@@ -31423,7 +31439,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "sessionId": "sample",
         "classic": {
           "provenance": "owner",
-          "policy": "Preferred",
+          "policy": "Hybrid",
           "reason": "selected"
         },
         "continuation": {
@@ -31456,7 +31472,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "sessionId": "sample",
         "classic": {
           "provenance": "owner",
-          "policy": "Preferred",
+          "policy": "Hybrid",
           "reason": "selected"
         },
         "continuation": {
@@ -31490,7 +31506,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "sessionId": "sample",
         "classic": {
           "provenance": "owner",
-          "policy": "Preferred",
+          "policy": "Hybrid",
           "reason": "selected"
         },
         "continuation": {

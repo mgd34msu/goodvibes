@@ -28318,7 +28318,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "channels.inbox.list",
         "title": "List Channel Inbox",
-        "description": "Return the merged inbound message feed (Slack DMs, Discord messages, email threads) from the host's synced provider mirror, newest first. Read-only; no provider write. Every known provider reports its own state in `providers`, including the unconfigured and the failing ones, so a short list is never ambiguous, and `partial` is true whenever a configured provider's items are missing because its last sync failed. Page with ?limit and ?cursor (opaque, from nextCursor); ?since=<cursor> returns only items committed after a previous answer's `cursor` watermark (the store's commit sequence, not a time); ?provider=<id> narrows to one provider. Each provider with triage says in `triage` whether new messages are being labelled and, when not, why and what turns it on; channels.inbox.triage labels a page now.",
+        "description": "Return the merged inbound message feed (Slack DMs, Discord messages, email threads) from the host's synced provider mirror, newest first. Read-only; no provider write. Every known provider reports its own state in `providers`, including the unconfigured and the failing ones, so a short list is never ambiguous, and `partial` is true whenever a configured provider's items are missing because its last sync failed. Page with ?limit and ?cursor (opaque, from nextCursor); ?since=<cursor> returns only items committed after a previous answer's `cursor` watermark (the store's commit sequence, not a time); ?provider=<id> narrows to one provider; `uids` (a list of mail UIDs) returns only those messages of the live mailbox, matched by the email provider's current account and mailbox generation, so a client can look up a listed page without reading the feed. Each provider with triage says in `triage` whether new messages are being labelled and, when not, why and what turns it on; channels.inbox.triage labels a page now.",
         "category": "channels",
         "source": "builtin",
         "access": "authenticated",
@@ -28347,6 +28347,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "cursor": {
               "type": "string"
+            },
+            "uids": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
             }
           },
           "additionalProperties": false
@@ -71653,6 +71659,41 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "invokable": false
       },
       {
+        "id": "control.auth.logout",
+        "title": "Logout",
+        "description": "End the sign-in session that authenticates this request (its bearer or session cookie) and expire the session cookie. Any signed-in user may end their own session; ending another session is local_auth.sessions.delete (admin). A credential that is not a live sign-in session is answered 401 SESSION_UNKNOWN.",
+        "category": "control-plane",
+        "source": "builtin",
+        "access": "public",
+        "transport": [
+          "http"
+        ],
+        "scopes": [],
+        "http": {
+          "method": "POST",
+          "path": "/logout"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "revoked": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "revoked"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
+        "invokable": false
+      },
+      {
         "id": "control.clients.list",
         "title": "List Control-Plane Clients",
         "description": "Return authenticated and recently connected control-plane clients.",
@@ -76292,7 +76333,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "email.inbox.list",
         "title": "List Email Inbox",
-        "description": "Return inbox message summaries fetched live from the configured IMAP account, newest first (ordered by server-assigned UID, never by the sender-written Date header). Read-only (EXAMINE / BODY.PEEK); never marks messages read. `before` pages backwards: pass the smallest UID of the page you have to get the next older page; `total` counts every match. When the server answered for a message and the daemon could not read the answer, the page is short and `unreadable` says so, an omitted message is not by itself evidence that it was deleted.",
+        "description": "Return inbox message summaries fetched live from the configured IMAP account, newest first (ordered by server-assigned UID, never by the sender-written Date header). Read-only (EXAMINE / BODY.PEEK); never marks messages read. `before` pages backwards: pass the smallest UID of the page you have to get the next older page; `total` counts every match. When the server answered for a message and the daemon could not read the answer, the page is short and `unreadable` says so, an omitted message is not by itself evidence that it was deleted. A message the daemon's inbox mirror has labelled carries `triageLabel` (spam, priority or normal); one not labelled yet has none.",
         "category": "email",
         "source": "builtin",
         "access": "authenticated",
@@ -76353,6 +76394,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   },
                   "messageId": {
                     "type": "string"
+                  },
+                  "triageLabel": {
+                    "type": "string",
+                    "enum": [
+                      "spam",
+                      "priority",
+                      "normal"
+                    ]
                   }
                 },
                 "required": [
@@ -136048,7 +136097,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "rewind.undo",
         "title": "Undo a Conversation Rewind",
-        "description": "Put a session's conversation back to how it was before a rewind, from the undo.conversation.undoSnapshotId of the rewind.apply receipt. The pre-rewind copy replaces the whole conversation, so the undo is refused while the conversation has newer messages than the rewind left it with. Answers undone:true, or undone:false with a refusal (code, state, reason, next) and nothing changed: the snapshot is gone (see the receipt's undo.conversation.expiresAfter), the conversation changed since, or the surface holding the conversation did not answer. A conversation a surface is hosting is restored by that surface, asked over its rewind.conversation.requests channel; one this daemon holds is restored here. Files are reversed separately with checkpoints.restore.",
+        "description": "Put a session's conversation back to how it was before a rewind, from the undo.conversation.undoSnapshotId of the rewind.apply receipt. The pre-rewind copy replaces the whole conversation, so the undo is refused while the conversation has newer messages than the rewind left it with. Answers undone:true, or undone:false with a refusal (code, state, reason, next) and nothing changed: the snapshot is gone (see the receipt's undo.conversation.expiresAfter), the conversation changed since, or the surface holding the conversation did not answer. When the undo took effect but the conversation's store could not save it, `notSaved` says so and what to do: a restart would bring back the rewound transcript. A conversation a surface is hosting is restored by that surface, asked over its rewind.conversation.requests channel; one this daemon holds is restored here. Files are reversed separately with checkpoints.restore.",
         "category": "rewind",
         "source": "builtin",
         "access": "authenticated",
@@ -136119,6 +136168,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "null"
                 }
               ]
+            },
+            "notSaved": {
+              "type": "string"
             }
           },
           "required": [
@@ -163456,14 +163508,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -163656,14 +163710,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -163875,14 +163931,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -164294,14 +164352,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -164515,14 +164575,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -164723,14 +164785,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -164923,14 +164987,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -165563,14 +165629,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -165763,14 +165831,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -165982,14 +166052,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -166401,14 +166473,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -166622,14 +166696,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -166830,14 +166906,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -167030,14 +167108,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -167795,14 +167875,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -167995,14 +168077,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -168214,14 +168298,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -168633,14 +168719,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -168854,14 +168942,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -169062,14 +169152,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -169262,14 +169354,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -169898,14 +169992,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "policy": {
                               "type": "string",
                               "enum": [
-                                "Preferred",
-                                "Classic - Off"
+                                "Hybrid",
+                                "Decision Model Only",
+                                "No Decision Model"
                               ]
                             },
                             "reason": {
                               "type": "string",
                               "enum": [
                                 "selected",
+                                "not-set",
                                 "unavailable"
                               ]
                             }
@@ -170098,14 +170194,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "policy": {
                               "type": "string",
                               "enum": [
-                                "Preferred",
-                                "Classic - Off"
+                                "Hybrid",
+                                "Decision Model Only",
+                                "No Decision Model"
                               ]
                             },
                             "reason": {
                               "type": "string",
                               "enum": [
                                 "selected",
+                                "not-set",
                                 "unavailable"
                               ]
                             }
@@ -170317,14 +170415,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "policy": {
                               "type": "string",
                               "enum": [
-                                "Preferred",
-                                "Classic - Off"
+                                "Hybrid",
+                                "Decision Model Only",
+                                "No Decision Model"
                               ]
                             },
                             "reason": {
                               "type": "string",
                               "enum": [
                                 "selected",
+                                "not-set",
                                 "unavailable"
                               ]
                             }
@@ -170736,14 +170836,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "policy": {
                               "type": "string",
                               "enum": [
-                                "Preferred",
-                                "Classic - Off"
+                                "Hybrid",
+                                "Decision Model Only",
+                                "No Decision Model"
                               ]
                             },
                             "reason": {
                               "type": "string",
                               "enum": [
                                 "selected",
+                                "not-set",
                                 "unavailable"
                               ]
                             }
@@ -170957,14 +171059,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "policy": {
                               "type": "string",
                               "enum": [
-                                "Preferred",
-                                "Classic - Off"
+                                "Hybrid",
+                                "Decision Model Only",
+                                "No Decision Model"
                               ]
                             },
                             "reason": {
                               "type": "string",
                               "enum": [
                                 "selected",
+                                "not-set",
                                 "unavailable"
                               ]
                             }
@@ -171165,14 +171269,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "policy": {
                               "type": "string",
                               "enum": [
-                                "Preferred",
-                                "Classic - Off"
+                                "Hybrid",
+                                "Decision Model Only",
+                                "No Decision Model"
                               ]
                             },
                             "reason": {
                               "type": "string",
                               "enum": [
                                 "selected",
+                                "not-set",
                                 "unavailable"
                               ]
                             }
@@ -171365,14 +171471,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "policy": {
                               "type": "string",
                               "enum": [
-                                "Preferred",
-                                "Classic - Off"
+                                "Hybrid",
+                                "Decision Model Only",
+                                "No Decision Model"
                               ]
                             },
                             "reason": {
                               "type": "string",
                               "enum": [
                                 "selected",
+                                "not-set",
                                 "unavailable"
                               ]
                             }
@@ -172022,14 +172130,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -172222,14 +172332,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -172441,14 +172553,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -172860,14 +172974,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -173081,14 +173197,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -173289,14 +173407,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -173489,14 +173609,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "policy": {
                           "type": "string",
                           "enum": [
-                            "Preferred",
-                            "Classic - Off"
+                            "Hybrid",
+                            "Decision Model Only",
+                            "No Decision Model"
                           ]
                         },
                         "reason": {
                           "type": "string",
                           "enum": [
                             "selected",
+                            "not-set",
                             "unavailable"
                           ]
                         }
@@ -179556,10 +179678,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       }
     ],
     "schemaCoverage": {
-      "methods": 629,
-      "typedInputs": 624,
+      "methods": 630,
+      "typedInputs": 625,
       "genericInputs": 5,
-      "typedOutputs": 627,
+      "typedOutputs": 628,
       "genericOutputs": 2
     },
     "eventCoverage": {
@@ -179568,8 +179690,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       "withWireEvents": 36
     },
     "validationCoverage": {
-      "methods": 629,
-      "validated": 622,
+      "methods": 630,
+      "validated": 623,
       "skippedGeneric": 0,
       "skippedUntyped": 7
     }

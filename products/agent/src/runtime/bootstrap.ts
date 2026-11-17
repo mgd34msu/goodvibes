@@ -71,6 +71,8 @@ import { recordComposedPromptUsage } from './prompt-usage-record.ts';
 import { createMemorySpineRecheck, resolveMemorySpineRecheckMs } from './memory-spine-recheck.ts';
 import { capabilitySnapshot, refreshCapabilityIndex } from '../capabilities/capability-snapshot.ts';
 import { GOODVIBES_AGENT_OPERATOR_POLICY } from './agent-operator-policy.ts';
+import { flushPendingChannelRows } from '../agent/channel-outbox-flush.ts';
+import { createDaemonOperatorInvoke, resolveDaemonOperatorConnection } from '../agent/daemon-operator-client.ts';
 
 // ── Bootstrap context type ──────────────────────────────────────────────────
 
@@ -584,6 +586,9 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       // stays receipt-neutral.
       onAttach: () => {
         services.sessionBroker.activate(sessionInputsClient);
+        // Channel drafts and routing assignments saved while the daemon was away reach it now.
+        void flushPendingChannelRows(services.shellPaths, createDaemonOperatorInvoke(() =>
+          resolveDaemonOperatorConnection(configManager, services.shellPaths.homeDirectory)));
         return services.consumeDaemonReceipts();
       },
       onDetach: () => services.sessionBroker.deactivate('the connected host stopped answering'),

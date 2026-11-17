@@ -824,6 +824,12 @@ export async function queueDraftToSend(
   shellPaths: ShellPaths,
   draftId: string,
   options: ChannelDraftStoreOptions = {},
+  /**
+   * Decides whether this delivery may happen, given exactly what would be sent.
+   * It runs before the draft is marked queued: a refusal throws and leaves the
+   * draft as it was, so a held send is never recorded as a delivery attempt.
+   */
+  admit?: (deliveryInput: AgentChannelDeliveryInput) => Promise<void>,
 ): Promise<ChannelDraftQueueResult> {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   // A draft written on another surface is on the daemon, the store of record.
@@ -848,7 +854,7 @@ export async function queueDraftToSend(
   if (queueingDraftIds.has(draft.id)) throw new Error(`Draft ${draftId} is already being queued for delivery by another call, so this one sent nothing. Wait for that send to finish, then check the draft's status.`);
   queueingDraftIds.add(draft.id);
   try {
-    return await promoteDraftToQueued(shellPaths, draft, draftId, options);
+    return await promoteDraftToQueued(shellPaths, draft, draftId, options, admit);
   } finally {
     queueingDraftIds.delete(draft.id);
   }
@@ -859,6 +865,7 @@ async function promoteDraftToQueued(
   draft: ChannelDraft,
   draftId: string,
   options: ChannelDraftStoreOptions,
+  admit: ((deliveryInput: AgentChannelDeliveryInput) => Promise<void>) | undefined,
 ): Promise<ChannelDraftQueueResult> {
   let webhook = draft.webhook;
   if (!webhook && draft.webhookSecretKey) {
@@ -875,6 +882,8 @@ async function promoteDraftToQueued(
     ...(webhook ? { webhook } : {}),
     ...(draft.link ? { link: draft.link } : {}),
   };
+
+  if (admit) await admit(deliveryInput);
 
   // The webhook is not passed back in: the save keeps the stored one, and the
   // URL stays out of the draft file.

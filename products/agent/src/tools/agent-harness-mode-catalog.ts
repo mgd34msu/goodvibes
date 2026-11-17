@@ -170,7 +170,7 @@ export const HARNESS_MODE_DESCRIPTORS: readonly HarnessModeDescriptor[] = [
   { id: 'channel_draft_send', kind: 'effect', family: 'comms', summary: 'Queue a draft and send through current recorded delivery admission.', next: 'Sends via agent_channel_send delivery path.', keywords: ['send draft', 'deliver draft', 'queue draft', 'draft send', 'channel send draft'], parameters: ['draftId', 'target'] },
   { id: 'channel_routing', kind: 'discover', family: 'comms', summary: 'List or inspect channel-to-profile routing rules.', next: 'Use surfaceKind/routeId to inspect one route.', keywords: ['channel routing', 'profile routing', 'routing rules', 'channel profile', 'surface routing'], parameters: ['surfaceKind', 'draftRoute', 'target', 'query', 'limit'] },
   { id: 'channel_routing_assign', kind: 'effect', family: 'comms', summary: 'Assign a channel surface to a profile route.', next: 'Check channel_routing to see saved assignments.', keywords: ['assign channel', 'profile assign', 'routing assign', 'channel to profile', 'route assign'], parameters: ['surfaceKind', 'profileId', 'draftRoute', 'routeLabel'] },
-  { id: 'channel_routing_remove', kind: 'effect', family: 'comms', summary: 'Remove a channel-to-profile routing assignment.', next: 'Check channel_routing after removal.', keywords: ['remove routing', 'delete routing', 'routing remove', 'profile unassign', 'unassign channel'], parameters: ['draftRoute', 'target'] },
+  { id: 'channel_routing_remove', kind: 'effect', family: 'comms', summary: 'Remove a channel-to-profile routing assignment.', next: 'Check channel_routing after removal.', keywords: ['remove routing', 'delete routing', 'routing remove', 'profile unassign', 'unassign channel'], parameters: ['assignmentId', 'surfaceKind', 'draftRoute', 'target'] },
 ] as const;
 
 /**
@@ -203,7 +203,7 @@ const EXPLICIT_REQUIRED_PARAMETERS: Readonly<Partial<Record<AgentHarnessMode, re
   channel_draft_save: ['draftMessage'],
   channel_draft_send: ['draftId|target'],
   channel_routing_assign: ['surfaceKind', 'profileId'],
-  channel_routing_remove: ['draftRoute|target'],
+  channel_routing_remove: ['assignmentId|surfaceKind|draftRoute|target'],
   cli_command: [],
   command: ['command|target|query'],
   mode: ['target|query'],

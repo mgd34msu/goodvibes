@@ -198,6 +198,7 @@ export interface AgentHarnessCommsArgs {
   readonly draftMessage?: unknown;
   readonly draftChannel?: unknown;
   readonly draftRoute?: unknown;
+  readonly assignmentId?: unknown;
   readonly draftWebhook?: unknown;
   readonly draftLink?: unknown;
   readonly draftTags?: unknown;
@@ -379,9 +380,8 @@ export async function channelDraftsSummary(
       pendingSync: {
         count: pendingDrafts.length,
         ids: pendingDrafts.map((draft) => draft.id),
-        // A list is a read and never sends draft text out; the offer is repeated by the confirmed save.
-        // A re-save keeps the stored target, webhook, tags and delivery outcome, so only the message is needed.
-        retry: 'agent_harness mode:"channel_draft_save" draftId:"<id>" with the same draftMessage and confirm:true offers the draft to the daemon again, keeping its stored target and delivery outcome.',
+        // A list is a read and never sends draft text out; the Agent offers these when it next attaches to the daemon.
+        next: 'Nothing to do: these drafts are offered to the daemon automatically the next time this Agent attaches to it, then every surface shows them.',
       },
     } : {}),
     ...(snapshot.parseError ? { parseError: snapshot.parseError } : {}),
@@ -427,6 +427,7 @@ export async function channelDraftSaveHandoff(
 
   return {
     mode: 'channel_draft_save',
+    status: 'saved',
     draft: redactDraftWebhook(result.draft),
     path: harnessDisplayPath(result.path, shellPaths.homeDirectory),
     daemon: result.daemon,
@@ -436,7 +437,7 @@ export async function channelDraftSaveHandoff(
     },
     policy: result.daemon.synced
       ? 'Draft held by the daemon and mirrored locally. Use channel_draft_send under current recorded admission to deliver.'
-      : `Draft saved locally; the daemon does not hold it yet (${result.daemon.error}). Use channel_draft_send under current recorded admission to deliver.`,
+      : `Draft saved locally; the daemon does not hold it yet (${result.daemon.error}). It is offered to the daemon automatically when this Agent next attaches to it. Use channel_draft_send under current recorded admission to deliver.`,
   };
 }
 
@@ -522,21 +523,40 @@ export async function channelDraftSendHandoff(
       return draft;
     }
   };
+  // The outward-effect decision is taken on exactly what would be sent, before
+  // the draft is marked queued: a send it holds leaves the draft as it was.
+  const hold: { decision?: { readonly reason: string; readonly fix?: string } } = {};
+  const admit = async (deliveryInput: Parameters<NonNullable<Parameters<typeof queueDraftToSend>[3]>>[0]): Promise<void> => {
+    const decision = await evaluateOutwardEffect({ request: { toolName: 'agent_harness', action: 'channel_draft_send', description: 'delivering the captured channel draft' },
+      ledger: owner.ledger, content: { ...deliveryInput },
+      taintOptions: { signal: options?.signal, exactMatchFields: ['channel', 'route', 'webhook', 'link'] } });
+    assertCurrent();
+    if (!decision.allowed) {
+      hold.decision = { reason: decision.reason ?? 'Channel draft delivery held.', ...(decision.fix ? { fix: decision.fix } : {}) };
+      throw new Error(hold.decision.reason);
+    }
+  };
   let queueResult: Awaited<ReturnType<typeof queueDraftToSend>>;
   try {
-    queueResult = await queueDraftToSend(shellPaths, draftId, storeOptions);
+    queueResult = await queueDraftToSend(shellPaths, draftId, storeOptions, admit);
     assertCurrent();
   } catch (err) {
+    const held = hold.decision;
+    if (held) {
+      return {
+        mode: 'channel_draft_send',
+        status: 'held',
+        draftId: publicReference,
+        reason: publicText(held.reason),
+        ...(held.fix ? { next: publicText(held.fix) } : {}),
+        policy: 'Nothing was sent and the draft is unchanged (not queued, not failed). Ask the owner to approve this delivery, or edit the draft so it no longer repeats content read this turn.',
+      };
+    }
     return publicText(err instanceof Error ? err.message : String(err));
   }
 
   let delivered: Awaited<ReturnType<typeof deliverAgentChannelMessage>> | undefined;
   try {
-    const decision = await evaluateOutwardEffect({ request: { toolName: 'agent_harness', action: 'channel_draft_send', description: 'delivering the captured channel draft' },
-      ledger: owner.ledger, content: { ...queueResult.deliveryInput },
-      taintOptions: { signal: options?.signal, exactMatchFields: ['channel', 'route', 'webhook', 'link'] } });
-    assertCurrent();
-    if (!decision.allowed) throw new Error([decision.reason ?? 'Channel draft delivery held.', decision.fix].filter(Boolean).join(' '));
     const result = await deliverAgentChannelMessage(router, queueResult.deliveryInput, { signal: options?.signal, assertCurrent });
     delivered = result;
     assertCurrent();
@@ -650,12 +670,12 @@ export function channelRoutingSummary(
       pendingSync: {
         count: pendingRoutes.length,
         ids: pendingRoutes.map((route) => route.id),
-        // A list is a read and does not contact the daemon; assigning again repeats the offer.
-        retry: 'agent_harness mode:"channel_routing_assign" with the same surfaceKind, draftRoute and profileId and confirm:true offers the assignment to the daemon again.',
+        // A list is a read and does not contact the daemon; the Agent offers these when it next attaches to it.
+        next: 'Nothing to do: these assignments are offered to the daemon automatically the next time this Agent attaches to it.',
       },
     } : {}),
     ...(snapshot.parseError ? { parseError: snapshot.parseError } : {}),
-    policy: 'Read-only routing list. Each assignment is offered to the daemon when made; rows with daemonSyncState pending are held locally until the daemon takes them.',
+    policy: 'Read-only routing list. Each assignment is offered to the daemon when made; rows with daemonSyncState pending are held locally and offered again when the Agent next attaches to the daemon.',
   };
 }
 
@@ -693,17 +713,18 @@ export async function channelRoutingAssignHandoff(
 
   return {
     mode: 'channel_routing_assign',
+    status: 'assigned',
     created: result.created,
     route: result.route,
     path: harnessDisplayPath(result.path, shellPaths.homeDirectory),
     daemon: result.daemon,
     routes: {
       list: 'agent_harness mode:"channel_routing"',
-      remove: 'agent_harness mode:"channel_routing_remove" draftRoute:"' + result.route.id + '"',
+      remove: 'agent_harness mode:"channel_routing_remove" assignmentId:"' + result.route.id + '"',
     },
     policy: result.daemon.synced
       ? 'Assignment held by the daemon and mirrored locally, so every surface routes the same way.'
-      : `Assignment saved locally and awaiting the daemon (${CHANNEL_ROUTING_ASSIGN_METHOD}): ${result.daemon.error}`,
+      : `Assignment saved locally and awaiting the daemon (${CHANNEL_ROUTING_ASSIGN_METHOD}: ${result.daemon.error}); it is offered again automatically when this Agent next attaches to the daemon.`,
   };
 }
 
@@ -721,24 +742,29 @@ export async function channelRoutingRemoveHandoff(
   const confirmationError = requireConfirmedAction(args, options, 'Channel routing removal');
   if (confirmationError) return confirmationError;
 
-  const given = readString(args.draftRoute || args.target);
   const surfaceKind = readOptString(args.surfaceKind);
-  if (!given && !surfaceKind) return 'channel_routing_remove requires draftRoute (the assignment id returned by channel_routing_assign), or surfaceKind to remove that surface\'s surface-wide assignment.';
+  // assignmentId names the assignment; draftRoute names a channel route (with surfaceKind).
+  // A call without either id that passes draftRoute alone is the older spelling of assignmentId.
+  const assignmentId = readString(args.assignmentId) || readString(args.target) || (surfaceKind ? '' : readString(args.draftRoute));
+  const channelRoute = surfaceKind ? readOptString(args.draftRoute) : undefined;
+  const given = assignmentId || channelRoute || '';
+  if (!assignmentId && !surfaceKind) return 'channel_routing_remove requires assignmentId (the id channel_routing_assign returned), or surfaceKind (with draftRoute for one channel route) to remove that surface\'s assignment.';
 
   const owner = captureCommsEffect(context, args, options, channelProfileRouteFilePath);
   const shellPaths = owner.paths;
   // The assignment id is what the store removes by. A caller that only knows
   // the channel (surfaceKind, with an optional channel route id) is resolved to it.
   const stored = listChannelProfileRoutes(shellPaths).routes;
-  const target = stored.find((route) => route.id === given)
-    ?? (surfaceKind ? stored.find((route) => route.surfaceKind === surfaceKind && route.routeId === (given || undefined)) : undefined);
+  const target = (assignmentId ? stored.find((route) => route.id === assignmentId) : undefined)
+    ?? (surfaceKind ? stored.find((route) => route.surfaceKind === surfaceKind && route.routeId === channelRoute) : undefined);
   if (!target) {
     return {
       mode: 'channel_routing_remove',
+      status: 'not_found',
       removed: false,
       routeId: given,
       routes: { list: 'agent_harness mode:"channel_routing"' },
-      policy: 'No assignment matches that id (or surfaceKind with draftRoute as the channel route id). Nothing was changed; use channel_routing to list the assignment ids.',
+      error: 'No assignment matches that assignmentId (or surfaceKind with draftRoute as the channel route). Nothing was changed; use channel_routing to list the assignment ids.',
     };
   }
 
@@ -746,16 +772,22 @@ export async function channelRoutingRemoveHandoff(
   const result = await removeChannelProfileRouteEverywhere(shellPaths, target.id,
     { ...(invoke ? { invoke } : {}), signal: options?.signal, assertCurrent: owner.assertCurrent, explicitUserRequest: false });
   owner.assertCurrent();
+  const refused = result.daemon.status === 'refused';
   return {
     mode: 'channel_routing_remove',
+    // A daemon refusal removed nothing, so it is a failed result; an assignment already gone is a real no-op.
+    status: refused ? 'not_applied' : result.removed ? 'removed' : 'already_removed',
     removed: result.removed,
     routeId: target.id,
     daemon: result.daemon,
     routes: {
       list: 'agent_harness mode:"channel_routing"',
     },
-    policy: result.daemon.status === 'refused'
-      ? `The daemon still holds this assignment and keeps routing on it (${result.daemon.error}); the local row was kept so the removal can be retried. Nothing was removed.`
+    ...(result.daemon.status === 'refused'
+      ? { error: `The daemon still holds this assignment and keeps routing on it (${result.daemon.error}); the local row was kept so the removal can be retried. Nothing was removed.` }
+      : {}),
+    policy: refused
+      ? 'Nothing was removed; the local row was kept so channel_routing_remove can be repeated once the daemon takes it.'
       : result.removed
         ? result.daemon.status === 'deleted'
           ? 'Assignment removed from the daemon and the local mirror.'

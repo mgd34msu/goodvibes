@@ -401,7 +401,11 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
   },
   draftRoute: {
     type: 'string',
-    description: 'Route id for channel_draft_save or channel_routing_remove.',
+    description: 'Channel route id for channel_draft_save and channel_routing_assign; with surfaceKind, the channel route whose assignment channel_routing_remove removes.',
+  },
+  assignmentId: {
+    type: 'string',
+    description: 'Routing assignment id (as channel_routing_assign returned it) for channel_routing_remove.',
   },
   draftWebhook: {
     type: 'string',

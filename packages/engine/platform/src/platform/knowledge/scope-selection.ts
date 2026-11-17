@@ -24,6 +24,9 @@ export class KnowledgeScopeSelectionHeldError extends Error {
 
 /** Readings one background pass takes before it stores them and yields. */
 const SCOPE_READINGS_PER_PASS = 64;
+/** Wait before a record whose reading failed is read again: doubles per failure, up to the cap. */
+const FAILED_READING_RETRY_MS = 60_000;
+const FAILED_READING_RETRY_CAP_MS = 60 * 60_000;
 
 export interface KnowledgeScopeSelectionOptions {
   readonly signal?: AbortSignal | undefined;
@@ -40,12 +43,14 @@ export interface KnowledgeScopeSelectionOptions {
  * The records a knowledge view shows. Built in one pass over the stored rows:
  * namespace membership comes from the records themselves, and whether a
  * default-space record belongs in the ordinary view is the reading stored with
- * it. A record with no current reading is shown. Building a selection never asks
- * a model and never waits on one.
+ * it. A record with no settled reading is shown and counted in `unsettled`.
+ * Building a selection never asks a model and never waits on one.
  */
 export interface KnowledgeScopeSelection {
-  /** Present when some shown record has no current ordinary-view reading. */
+  /** Present when some shown record has no settled ordinary-view reading, or decision models are off. */
   readonly provenance?: 'classic';
+  /** Shown default-space records whose ordinary-view reading has not settled (not read yet, failed, or read as uncertain). */
+  readonly unsettled?: number;
   readonly sources: readonly KnowledgeSourceRecord[];
   readonly nodes: readonly KnowledgeNodeRecord[];
   readonly issues: readonly KnowledgeIssueRecord[];
@@ -181,6 +186,24 @@ function currentVerdict(store: KnowledgeStore, value: ScopeRecord): KnowledgeSco
   return stored && stored.version === contentVersion(store, value) ? stored : undefined;
 }
 
+/**
+ * Readings that threw (a provider timeout, a 5xx, a malformed reply), per store
+ * and record, for the content version they were tried on. Nothing is stored for
+ * them, so the record stays unread; it is tried again once its wait is over.
+ */
+interface FailedReading { readonly version: string; readonly failures: number; readonly retryAt: number }
+const failedReadings = new WeakMap<KnowledgeStore, Map<string, FailedReading>>();
+function failedFor(store: KnowledgeStore): Map<string, FailedReading> {
+  let map = failedReadings.get(store);
+  if (!map) failedReadings.set(store, map = new Map());
+  return map;
+}
+/** Whether a record without a current reading may be read now (not waiting after a failed reading of this content). */
+function readableNow(store: KnowledgeStore, value: ScopeRecord, now: number): boolean {
+  const failed = failedReadings.get(store)?.get(keyFor(value));
+  return !failed || failed.version !== contentVersion(store, value) || failed.retryAt <= now;
+}
+
 export async function prepareKnowledgeScopeSelection(
   store: KnowledgeStore,
   scope: KnowledgeSpaceScopeInput = {},
@@ -210,21 +233,24 @@ export async function prepareKnowledgeScopeSelection(
   readAhead(store, options.sourceIds || options.nodeIds || options.issueIds ? records.filter(inBounds) : undefined);
   const view = resolveKnowledgeSpaceScope(scope);
   const accepted = new Set<string>();
-  const unread: ScopeRecord[] = [];
+  let unsettled = 0, readable = false;
+  const now = Date.now();
   for (const value of records) {
     if (!inBounds(value) || !membership(store, edgeIndex, value, scope)) continue;
     if (needsReading(store, edgeIndex, value)) {
       const verdict = currentVerdict(store, value);
-      if (!verdict) unread.push(value);
       // Explicit all-space browsing shows every record; other views leave out what was read as not belonging.
       if (view !== null && verdict?.included === false) continue;
+      if (!verdict || verdict.included === null) unsettled += 1;
+      if (!verdict && !readable) readable = readableNow(store, value, now);
     }
     accepted.add(keyFor(value));
   }
-  if (unread.length > 0) queueScopeReadings(store);
+  if (readable) queueScopeReadings(store);
   const selectedEdges = edges.filter(edge => accepted.has(`${edge.fromKind}:${edge.fromId}`) && accepted.has(`${edge.toKind}:${edge.toId}`));
   return Object.freeze({
-    ...(unread.length > 0 || isClassicOperation() ? { provenance: 'classic' as const } : {}),
+    ...(unsettled > 0 || isClassicOperation() ? { provenance: 'classic' as const } : {}),
+    ...(unsettled > 0 ? { unsettled } : {}),
     sources: Object.freeze(sources.filter(record => accepted.has(`source:${record.id}`))),
     nodes: Object.freeze(nodes.filter(record => accepted.has(`node:${record.id}`))),
     issues: Object.freeze(issues.filter(record => accepted.has(`issue:${record.id}`))),
@@ -278,33 +304,44 @@ async function runScopeReadingPass(store: KnowledgeStore): Promise<boolean> {
     ...store.listIssues(Number.MAX_SAFE_INTEGER).map(record => ({ kind: 'issue' as const, record })),
   ];
   readAhead(store);
+  const now = Date.now();
   for (const value of all) {
-    if (needsReading(store, edgeIndex, value) && !currentVerdict(store, value)) waiting.push(value);
+    if (needsReading(store, edgeIndex, value) && !currentVerdict(store, value) && readableNow(store, value, now)) waiting.push(value);
   }
   if (waiting.length === 0) return false;
   const batch = waiting.slice(0, SCOPE_READINGS_PER_PASS);
   const verdicts: KnowledgeScopeVerdict[] = [];
-  let unavailable = false;
+  const failed = failedFor(store);
+  let unavailable = false, failure = false;
   await mapLimit(batch, 4, async (value) => {
-    if (unavailable) return;
+    // A failed reading stops the pass: the provider is likely to fail the rest too.
+    if (unavailable || failure) return;
     const version = contentVersion(store, value);
-    let included: boolean | null = null;
+    let included: boolean | null;
     try {
       const state = scopeReadingState(store, edgeIndex, value);
       const captured = captureJudgmentPort(knowledgeScopeSelection.name, { prepareResultCapture: prepareRepairJudgmentResult });
       const run = await knowledgeScopeSelection.run(captured.port, state, { signal: captured.signal, site: knowledgeScopeSelection.name });
       const reading = run.readings.included;
+      // A reading that returned but did not settle is stored as unsettled (null) and counted as such in every view.
       included = reading.outcome === 'act' && reading.verdict !== 'uncertain' ? reading.verdict === 'yes' : null;
       run.recordAction(`ordinary-view reading ${reading.verdict}; stored with the record's content version`);
     } catch (error) {
       if (error instanceof JudgmentPortMissingError) { unavailable = true; return; }
-      // A record whose reading failed is stored as unsettled and stays shown until its content changes.
-      logger.debug('Knowledge scope reading did not settle', { record: keyFor(value), error: summarizeError(error) });
+      // Nothing is stored for a reading that threw: the record stays unread and is read again after a wait.
+      failure = true;
+      const previous = failed.get(keyFor(value));
+      const failures = previous?.version === version ? previous.failures + 1 : 1;
+      failed.set(keyFor(value), { version, failures,
+        retryAt: Date.now() + Math.min(FAILED_READING_RETRY_CAP_MS, FAILED_READING_RETRY_MS * 2 ** (failures - 1)) });
+      logger.debug('Knowledge scope reading failed; the record stays unread and is read again later', { record: keyFor(value), failures, error: summarizeError(error) });
+      return;
     }
+    failed.delete(keyFor(value));
     verdicts.push({ key: keyFor(value), version, included, decidedAt: Date.now() });
   });
   if (verdicts.length > 0 && store.isReady) await store.recordScopeVerdicts(verdicts);
-  return !unavailable && waiting.length > batch.length;
+  return !unavailable && !failure && waiting.length > batch.length;
 }
 
 /** The reading's input: the record, the records it is attached to in its space, and whether it reaches outside. */

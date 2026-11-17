@@ -95,7 +95,8 @@ async function answerWithinBudget(context: KnowledgeAnswerContext, input: Knowle
   const limit = Math.max(1, input.limit ?? 8);
   const objectProfiles = context.objectProfiles ?? [];
   const tally: AnswerUnsettledTally = { unsettled: 0 };
-  const gapUniverse = prepareAnswerGapUniverse(context.store, spaceId, input.query, { signal });
+  // A caller that may not write records no missing-answer gap (and asks no model about one).
+  const gapUniverse = input.recordGaps === false ? undefined : prepareAnswerGapUniverse(context.store, spaceId, input.query, { signal });
   let pass = await readAnswerEvidence(context.store, input, spaceId, limit, objectProfiles, signal, tally);
   check();
   const { selection } = pass.space;
@@ -233,8 +234,9 @@ function withReport(quality: KnowledgeAnswerQuality, tally: AnswerUnsettledTally
  * reading failed) is logged and the answer is returned without it. A cancel
  * still cancels.
  */
-async function recordGap(universe: PreparedAnswerGapUniverse, context: Parameters<PreparedAnswerGapUniverse['prepare']>[0],
+async function recordGap(universe: PreparedAnswerGapUniverse | undefined, context: Parameters<PreparedAnswerGapUniverse['prepare']>[0],
   reason: string, signal: AbortSignal): Promise<KnowledgeNodeRecord | null> {
+  if (!universe) return null;
   try {
     return await (await universe.prepare(context).read()).persist(reason);
   } catch (error) {

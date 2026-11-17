@@ -118,6 +118,8 @@ export interface KnowledgeSemanticAnswerInput {
   readonly linkedObjects?: readonly KnowledgeNodeRecord[] | undefined;
   readonly noMatchMessage?: string | undefined;
   readonly autoRepairGaps?: boolean | undefined;
+  /** False: the answer records no missing-answer gap, so it writes nothing. Set for a caller that may not write. */
+  readonly recordGaps?: boolean | undefined;
   readonly timeoutMs?: number | undefined;
 }
 

@@ -54,7 +54,9 @@ export async function answerHomeGraphQuery(input: {
         strictCandidates: true,
         linkedObjects: current?.linkedObjects ?? linkedObjects,
         noMatchMessage: `No Home Graph knowledge matched "${input.query.query}".`,
-        autoRepairGaps: true,
+        // A read-only ask writes nothing: no gap record, gap repair, web search or fact promotion.
+        autoRepairGaps: input.query.readOnly !== true,
+        recordGaps: input.query.readOnly !== true,
         timeoutMs: input.query.timeoutMs,
       };
       const chosen = current;

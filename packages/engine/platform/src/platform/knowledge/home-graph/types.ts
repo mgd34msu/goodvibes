@@ -371,7 +371,7 @@ export interface HomeGraphAskInput extends HomeGraphSpaceInput {
   readonly includeConfidence?: boolean | undefined;
   readonly includeLinkedObjects?: boolean | undefined;
   readonly timeoutMs?: number | undefined;
-  /** Answer from what is stored: no extraction repair, no device page refresh, no queued enrichment. Set for a caller that may not write. */
+  /** Answer from what is stored: no extraction repair, no gap record or repair, no device page refresh, no queued enrichment. Set for a caller that may not write. */
   readonly readOnly?: boolean | undefined;
 }
 

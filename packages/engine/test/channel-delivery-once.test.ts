@@ -57,9 +57,9 @@ async function ntfyServer(): Promise<{ readonly url: string; readonly received: 
 /**
  * One daemon's delivery pieces over the home's files. With `dies`, the process
  * stops inside its first channel send: the send never reaches the server and
- * never returns, as when the daemon is killed there.
+ * never returns, as when the daemon is killed there; `dies` is called on arrival.
  */
-async function daemon(root: string, options: { readonly dies?: { sending: boolean } } = {}) {
+async function daemon(root: string, options: { readonly dies?: () => void } = {}) {
   const configManager = new ConfigManager({ configDir: join(root, 'config'), daemonTierPath: join(root, 'daemon', 'settings.json'), ownsDaemonTier: true });
   const routeBindings = new RouteBindingManager({ store: new AutomationRouteStore(join(root, 'bindings.json')) });
   const sessionBroker = new SharedSessionBroker({
@@ -83,7 +83,7 @@ async function daemon(root: string, options: { readonly dies?: { sending: boolea
   channelPlugins.register({
     id: 'surface:ntfy', surface: 'ntfy', displayName: 'ntfy', capabilities: ['egress'],
     deliverReply: (pending, message) => {
-      if (options.dies) { options.dies.sending = true; return new Promise<void>(() => {}); }
+      if (options.dies) { options.dies(); return new Promise<void>(() => {}); }
       return helper.deliverNtfyAgentReply(pending as PendingSurfaceReply, message);
     },
   } as Parameters<ChannelPluginRegistry['register']>[0]);
@@ -144,8 +144,9 @@ test('an answer stored but not yet sent when the daemon stopped is sent after th
   const root = mkdtempSync(join(tmpdir(), 'gv-delivery-owed-'));
   cleanups.push(() => rmSync(root, { recursive: true, force: true }));
   const ntfy = await ntfyServer();
-  const dies = { sending: false };
-  const first = await daemon(root, { dies });
+  let reachedSend!: () => void;
+  const sending = new Promise<void>((resolve) => { reachedSend = resolve; });
+  const first = await daemon(root, { dies: () => reachedSend() });
   let firstRunning = true;
   cleanups.push(async () => { if (firstRunning) await first.stop(); });
   first.configManager.setMany([{ key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfy.url }], { kind: 'owner', surface: 'fixture' });
@@ -153,8 +154,8 @@ test('an answer stored but not yet sent when the daemon stopped is sent after th
 
   // The answer is stored, then the daemon stops inside the send.
   void first.helper.completeSurfaceReplyFromSurface({ agentId: 'agent-owed', sessionId: session, body: 'the owed answer' });
-  for (let turn = 0; turn < 1_000 && !dies.sending; turn += 1) await new Promise<void>((resolve) => setImmediate(resolve));
-  expect(dies.sending).toBe(true);
+  // Settled when the send is entered, however long the store takes on a loaded machine.
+  await sending;
   expect(ntfy.received).toHaveLength(0);
   await first.stop();
   firstRunning = false;

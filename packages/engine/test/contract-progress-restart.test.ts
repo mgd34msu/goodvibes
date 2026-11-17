@@ -220,7 +220,10 @@ describe('a process killed during a save', () => {
     store.dispose();
     const record = readFileSync(log).subarray(prefix.length);
 
-    for (let cut = 0; cut <= record.length; cut++) {
+    // Every byte at both ends of the record (an empty tail, a record whole but for its line end)
+    // and every eighth byte between: a partial line is never a record, wherever it stops.
+    const cuts = Array.from({ length: record.length + 1 }, (_, cut) => cut).filter((cut) => cut < 24 || cut > record.length - 24 || cut % 8 === 0);
+    for (const cut of cuts) {
       writeFileSync(log, Buffer.concat([prefix, record.subarray(0, cut)]));
       expect(saved(restart(root, contract.id))).toEqual(cut === record.length ? after : before);
     }

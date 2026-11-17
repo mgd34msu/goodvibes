@@ -54,7 +54,7 @@ function itemsOf(value: unknown): unknown[] {
  * on their own: an open question is never hidden behind answered ones.
  */
 async function readInbox(): Promise<InboxLists> {
-  const kinds = ['question', 'decision'];
+  const kinds = ['question', 'decision'] as const;
   const all = itemsOf(await platformClient.operator.invoke('inbox.list', { status: 'all', kinds, limit: LIST_LIMIT }));
   let items = all;
   if (all.length >= LIST_LIMIT) {

@@ -50,6 +50,7 @@ import type { TurnEvent } from '@/runtime/index.ts';
 import type { UiRuntimeServices } from './ui-services.ts';
 import { createDeferredStartupCoordinator } from '@/runtime/index.ts';
 import { wireAgentExternalServices } from './bootstrap-external-services.ts';
+import type { DaemonHost } from './daemon-repair.ts';
 import { initializeBootstrapCore } from './bootstrap-core.ts';
 import { ensureBootModelResolvable } from './provider-boot.ts';
 import { bindSessionContextAccounting } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -112,6 +113,12 @@ export type BootstrapContext = RuntimeContext & {
   _getConfiguredProviderIds: () => string[];
   /** Command registry used by InputHandler. main.ts needs this to wire input. */
   commandRegistry: import('../input/command-registry.ts').CommandRegistry;
+  /**
+   * The daemon on this machine as the connected-host controller sees it: its
+   * service state, and a bring-up that re-probes and adopts it in this session.
+   * The repair question uses it, so "repaired" means this session adopted it.
+   */
+  daemonHost: DaemonHost;
   /**
    * System message router instantiated at startup, wired to the conversation and the activity feed.
    *
@@ -708,6 +715,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     _getConfiguredProviderIds: () => services.providerRegistry.getConfiguredProviderIds(),
     commandRegistry,
     systemMessageRouter,
+    daemonHost: agentExternalServices.daemon,
     shutdown: createRuntimeShutdown({
       get sessionId() { return runtime.sessionId; },
       get model() { return runtime.model; },

@@ -1468,7 +1468,8 @@ async function main(prepared: PreparedShellCliRuntime) {
     shellPaths: ctx.services.shellPaths,
     providerRegistry,
     commandContext,
-    daemonRepair: { config: configManager, ask: createDaemonRepairQuestion(input) },
+    // The connected-host controller's daemon: an accepted repair re-probes and adopts it in this session.
+    daemonRepair: { config: configManager, ask: createDaemonRepairQuestion(input), host: ctx.daemonHost },
     askWorkspaceRegistration: createWorkspaceRegistrationQuestion(input),
     isHostedTurn: (turnId) => remoteConversation.isHostedTurn?.(turnId) ?? false,
     autonomy,

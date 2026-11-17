@@ -934,6 +934,9 @@ export class KnowledgeService {
     readonly includeSources?: boolean | undefined;
     readonly includeConfidence?: boolean | undefined;
     readonly includeLinkedObjects?: boolean | undefined;
+    readonly candidateSourceIds?: readonly string[] | undefined;
+    readonly candidateNodeIds?: readonly string[] | undefined;
+    readonly strictCandidates?: boolean | undefined;
   }, options: Pick<KnowledgeScopeSelectionOptions, 'signal'> = {}) {
     // The caller decides whether the answer is still wanted and still theirs
     // to see (the daemon route checks before and after); the signal stops the

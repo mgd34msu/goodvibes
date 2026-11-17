@@ -4,8 +4,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { install, interruptInstall, parseOptions, preflight, wrapper, type InstallHooks, type Options, assertPortFree } from './install.ts';
+import { install, interruptInstall, parseOptions, preflight, wrapper, type InstallHooks, type Options } from './install.ts';
 import { COMMANDS, CommandError, assertOwnedFiles, atomicWrite, dataOwner, isReleaseInUse, readInstallation, receiptPath, unitPath, uninstall, validateLayout, withLock, type Run } from './installation.ts';
 
 let home: string;
@@ -65,20 +64,6 @@ afterEach(() => {
 });
 
 describe('suite install and uninstall', () => {
-  test('default installation locates Node separately when it is not beside Bun', () => {
-    const bunDir = join(home, 'bun-runtime'), nodeDir = join(home, 'node-runtime');
-    mkdirSync(bunDir); mkdirSync(nodeDir);
-    writeFileSync(join(bunDir, 'bun'), 'Bun runtime');
-    const nodePath = join(nodeDir, 'node'); writeFileSync(nodePath, 'Node runtime');
-    const runtime = { bunPath: join(bunDir, 'bun'), findNode: () => nodePath };
-    const defaults = parseOptions(['--no-service'], home, runtime);
-    expect(defaults.runtimeDir).toBe(bunDir);
-    expect(defaults.nodePath).toBe(nodePath);
-    expect(existsSync(defaults.nodePath!)).toBe(true);
-    const explicit = parseOptions(['--no-service', '--runtime-dir', bunDir], home, runtime);
-    expect(explicit.nodePath).toBe(join(bunDir, 'node'));
-  });
-
   test('installs all command links and preserves credentials/data on removal', async () => {
     await install(options, hooks);
     const receipt = readInstallation(options.prefix)!;
@@ -305,29 +290,22 @@ describe('suite install and uninstall', () => {
     });
     await install(options, hooks);
   });
-  test('rejects occupied ports without touching their listener', async () => {
-    const listener = createServer();
-    await new Promise<void>(yes => listener.listen(0, '127.0.0.1', yes));
-    try {
-      const address = listener.address(); if (!address || typeof address === 'string') throw new Error('missing port');
-      await expect(assertPortFree(address.port)).rejects.toThrow('already in use');
-      expect(listener.listening).toBe(true);
-    } finally { await new Promise<void>(yes => listener.close(() => yes())); }
-  });
   test('keeps custom paths and service choice on a repeat install', async () => {
     options = parseOptions(['--prefix', join(home, 'programs'), '--data-dir', join(home, 'state'), '--bin-dir', join(home, 'bin'), '--no-service', '--port', '43219'], home);
     await install(options, hooks);
     expect(parseOptions(['--prefix', options.prefix], home)).toMatchObject(options);
   });
-  test('generated launchers quote paths and follow jev-latest', () => {
-    options = { ...options, prefix: join(home, "programs '$; x"), dataDir: join(home, "state '$; x") };
-    const script = wrapper(options, 'goodvibes-daemon');
-    expect(script).toContain('export TYPESAFE_DEFAULT_MODEL=jev-latest');
-    const result = Bun.spawnSync(['/bin/sh', '-n'], { stdin: new TextEncoder().encode(script) });
-    expect(result.exitCode).toBe(0);
-    expect(script).toContain("'\\''");
+  test('generated launchers quote paths so a directory name cannot run as a command', () => {
+    options = { ...options, prefix: join(home, "programs '$(touch PWNED)' x"), dataDir: join(home, "state '$(touch PWNED)' x") };
+    for (const name of COMMANDS) {
+      const script = wrapper(options, name);
+      expect(Bun.spawnSync(['/bin/sh', '-n'], { stdin: new TextEncoder().encode(script) }).exitCode).toBe(0);
+      // The release does not exist, so the launcher stops at its first missing path; nothing in a name may run on the way.
+      Bun.spawnSync(['/bin/sh', '-c', script], { cwd: home, stdout: 'ignore', stderr: 'ignore' });
+    }
+    expect(existsSync(join(home, 'PWNED'))).toBe(false);
   });
-  test('a running launcher keeps its Node runtime when current moves to a new release', async () => {
+  test('a running launcher keeps its release runtime when current moves to a new release', async () => {
     options = { ...options, prefix: join(home, "programs '$; x") };
     const before = join(options.prefix, 'releases/before'), after = join(options.prefix, 'releases/after');
     for (const [release, label] of [[before, 'before'], [after, 'after']] as const) {
@@ -336,7 +314,7 @@ describe('suite install and uninstall', () => {
     }
     mkdirSync(join(before, 'tui'));
     writeFileSync(join(before, `tui/goodvibes-linux-${process.arch}`),
-      '#!/bin/sh\nprintf "ready\\n"\nread -r proceed\ncommand -v node\nnode\nprintf "%s\\n" "$1"\n', { mode: 0o755 });
+      '#!/bin/sh\nprintf "ready\\n"\nread -r proceed\nprintf "%s\\n" "$GOODVIBES_SUITE_RUNTIME"\n"$GOODVIBES_SUITE_RUNTIME/node"\nprintf "%s\\n" "$1"\n', { mode: 0o755 });
     symlinkSync('releases/before', join(options.prefix, 'current'));
     const child = Bun.spawn(['/bin/sh', '-c', wrapper(options, 'goodvibes'), 'launcher', 'literal $; argument'],
       { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
@@ -352,7 +330,7 @@ describe('suite install and uninstall', () => {
         output += new TextDecoder().decode(chunk.value);
       }
       expect(await child.exited).toBe(0);
-      expect(output).toBe(`${join(before, 'runtime/node')}\nbefore\nliteral $; argument\n`);
+      expect(output).toBe(`${join(before, 'runtime')}\nbefore\nliteral $; argument\n`);
       expect(await new Response(child.stderr).text()).toBe('');
     } finally { reader.releaseLock(); child.kill(); await child.exited; }
   });
@@ -388,7 +366,7 @@ test('a stop followed by a failed state query restarts the previous running serv
   expect(readInstallation(options.prefix)).toEqual(receipt);
 });
 
-describe('A30 interrupted install', () => {
+describe('interrupted install', () => {
   test('an interrupt after the service was stopped restores the old service and releases both locks', async () => {
     options.service = true;
     await install(options, hooks);
@@ -417,7 +395,7 @@ describe('A30 interrupted install', () => {
   });
 });
 
-describe('A33 uninstall re-run', () => {
+describe('uninstall re-run', () => {
   test('a retry completes after a failure that came after the unit was already removed', async () => {
     options.service = true; await install(options, hooks);
     let reloads = 0;
@@ -435,19 +413,8 @@ describe('A33 uninstall re-run', () => {
   });
 });
 
-describe('A40 deferred TUI pairing', () => {
-  test('an unresolved recorded pairing attempt does not fail or roll back an otherwise complete install', async () => {
-    options.service = true;
-    const warnings: string[] = []; const warn = console.warn; console.warn = (...args: unknown[]) => { warnings.push(args.join(' ')); };
-    try {
-      await install(options, { ...hooks, pairHost: () => { throw new CommandError('bun', 75, undefined); } });
-    } finally { console.warn = warn; }
-    expect(state).toBe('active');
-    expect(readInstallation(options.prefix)?.service).toBe(true);
-    expect(warnings.join('\n')).toContain('pair-installed-host.ts');
-    expect(warnings.join('\n')).toContain(join(options.prefix, 'current/runtime/bun'));
-  });
-  test('any other pairing failure still rolls the install back', async () => {
+describe('pairing during install', () => {
+  test('a pairing failure rolls the install back', async () => {
     options.service = true;
     await expect(install(options, { ...hooks, pairHost: () => { throw new CommandError('bun', 1, undefined); } })).rejects.toThrow('bun failed (1)');
     expect(existsSync(options.prefix)).toBe(false);

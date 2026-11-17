@@ -1,9 +1,8 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import { redactStructuredDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureOwnedJson } from '@goodvibes-jev/engine/platform/platform/gate';
-import { inspectCatalogData, captureCatalogData, captureCatalogMethods, captureCatalogSnapshotGuard, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { inspectCatalogData, captureCatalogData, captureCatalogSnapshotGuard, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureModelReadingSnapshotGuard } from './agent-harness-model-reading-source.ts';
 import type { EntryType, JsonValue } from '@goodvibes-jev/judgment/decisions';
 import { personalOpsNativeFields, personalOpsResultFields, type PersonalOpsNativeSchema } from './agent-personal-ops-native-fields.ts';
@@ -312,26 +311,12 @@ export async function protectPersonalOpsResult(value: unknown, options: CatalogR
 }
 
 async function protectPersonalOpsSource(value: unknown, options: CatalogRankingOptions, nativeFacts: boolean, schema?: PersonalOpsNativeSchema): Promise<unknown> {
-  const source = capturePersonalOpsSnapshot(value), captured = source.captured;
-  const optionsCurrent = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent']);
-  const signal = options.signal, callerCurrent = options.assertCurrent, retainCurrent = options.retainCurrent;
-  const assertOptions = () => {
-    optionsCurrent();
-    if (options.signal !== signal || options.assertCurrent !== callerCurrent || options.retainCurrent !== retainCurrent) throw new ToolInputProjectionError('held');
-    signal?.throwIfAborted();
-  };
-  const assertSource = () => { assertOptions(); source.assertCurrent(value); };
-  // The caller is the only foreign code in a boundary, so the producer data is
-  // compared once, after it ran; the caller is only ever called with live options.
-  const assertCurrent = () => {
-    assertOptions();
-    assertSynchronousJudgmentGuard(callerCurrent, () => new ToolInputProjectionError('held'));
-    assertSource();
-  };
+  // One frozen copy, masked once. The masking is local and synchronous in
+  // effect, so the copy cannot change under it: the call's signal and the
+  // caller's own check are the only things looked at again.
+  const captured = capturePersonalOpsSnapshot(value).captured;
+  const assertCurrent = (): void => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
   assertCurrent();
-  // This detached tree is native-owned and fully immutable. Keep the original
-  // producer guard above, but avoid retaining its private copy as mutable data
-  // at every redaction boundary.
   const result = await redactStructuredDataAsync(captureOwnedJson(captured), { signal: options.signal, assertCurrent,
     declaredFields: freezeDeclarations(nativeFacts ? personalOpsNativeFields(captured, schema) : personalOpsResultFields(captured)),
   });
@@ -351,5 +336,5 @@ async function protectPersonalOpsSource(value: unknown, options: CatalogRankingO
     }
   };
   if (nativeFacts) preserveFacts(captured, result);
-  assertCurrent(); retainCurrent?.(assertSource); assertCurrent(); return result;
+  assertCurrent(); return result;
 }

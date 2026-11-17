@@ -1,19 +1,13 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogData, captureCatalogMethods, captureCatalogSnapshotGuard, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import { capturePersonalOpsData, capturePersonalOpsSnapshot, assertPersonalOpsDataCurrent, protectPersonalOpsData } from './agent-harness-personal-ops-source.ts';
-import { captureOwnedJson, judgmentInputCardProblem, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { captureRedactionSource, containsIssuerCredential } from '@goodvibes-jev/engine/platform/platform/utils';
-import { modelReadingServicePath, withModelReadingSource } from './agent-harness-model-reading-source.ts';
-import { captureNativeReadModelObservation } from './agent-harness-autonomy-live-records.ts';
+import { redactSensitiveData } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CommandContext } from '../input/command-registry.ts';
-import { captureWorkPlanItems, type WorkPlanItem } from '@goodvibes-jev/engine/platform/platform/workflow';
+import type { ProjectWorkPlanTask as WorkPlanItem } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { AGENT_TEMPLATES, AGENT_TOOL_MODES, agentOrchestrationDecisionCards } from './agent-harness-agent-orchestration-policy.ts';
-import { remoteReadModelSnapshot, captureNativeRemoteReadModelSnapshot, settleNativeRemotePublisherSemantics, currentNativeRemoteReadModelSnapshot, bindNativeRemoteWorkspaceDisplays, projectNativeRemoteWorkspaceDisplayReferences, captureNativeRemoteWorkspacePathSource, projectNativeRemoteWorkspacePathSource, type RemoteCaptureOutcomeRecord, type RemoteWorkspaceEvidenceRecord } from './agent-harness-remote-read-models.ts';
+import { remoteReadModelSnapshot, type RemoteCaptureOutcomeRecord, type RemoteWorkspaceEvidenceRecord } from './agent-harness-remote-read-models.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
-import { projectSetupSmokeEvidenceFull } from './agent-harness-setup-smoke.ts';
 import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 interface AgentHarnessAgentOrchestrationArgs {
@@ -140,11 +134,14 @@ function artifactCreatedAt(artifact: ArtifactDescriptor): number {
   return typeof artifact.createdAt === 'number' && Number.isFinite(artifact.createdAt) ? artifact.createdAt : 0;
 }
 
+/** How many of the newest artifacts are looked through for remote-runner receipts. */
+const RECEIPT_SCAN_LIMIT = 500;
+
 export function remoteReceiptArtifacts(context: CommandContext): readonly Record<string, unknown>[] {
   const store = context.platform.artifactStore;
   if (!store?.list) return [];
   try {
-    return store.list(Number.MAX_SAFE_INTEGER)
+    return store.list(RECEIPT_SCAN_LIMIT)
       .filter((artifact) => isRemoteArtifactReceipt(artifact as unknown as Record<string, unknown>))
       .filter((artifact) => remoteRunnerId(artifact as unknown as Record<string, unknown>))
       .sort((left, right) => artifactCreatedAt(right) - artifactCreatedAt(left))
@@ -154,10 +151,6 @@ export function remoteReceiptArtifacts(context: CommandContext): readonly Record
   }
 }
 
-// Bind clock columns to the particular native array acquisition, not an id,
-// field name, or record object that another source could later reuse.
-const artifactReceiptClocks = new WeakMap<readonly Record<string, unknown>[], ReadonlySet<Record<string, unknown>>>();
-
 function remoteArtifacts(context: CommandContext): readonly Record<string, unknown>[] {
   const runtimeArtifacts = remoteRuntimeArtifacts(context);
   const seen = new Set(runtimeArtifacts.map((artifact) => readString(artifact.id)).filter(Boolean));
@@ -165,23 +158,13 @@ function remoteArtifacts(context: CommandContext): readonly Record<string, unkno
     const id = readString(artifact.id);
     return !id || !seen.has(id);
   });
-  const artifacts = [...runtimeArtifacts, ...receiptArtifacts];
-  artifactReceiptClocks.set(artifacts, new Set(receiptArtifacts));
-  return artifacts;
+  return [...runtimeArtifacts, ...receiptArtifacts];
 }
 
-const orchestrationWorkspaceDisplays = new WeakMap<object, object>();
-
-type OrchestrationRemoteSource =
-  | { readonly kind: 'native'; readonly snapshot: ReturnType<typeof remoteReadModelSnapshot>; readonly token: object }
-  | { readonly kind: 'current'; readonly token: object };
-
-function remoteRuntimeSnapshot(context: CommandContext, source?: OrchestrationRemoteSource): RemoteRuntimeSnapshot {
+function remoteRuntimeSnapshot(context: CommandContext): RemoteRuntimeSnapshot {
   const pools = remotePools(context), contracts = remoteContracts(context), artifacts = remoteArtifacts(context);
-  const readModels = source?.kind === 'native' ? source.snapshot
-    : source?.kind === 'current' ? currentNativeRemoteReadModelSnapshot(context, source.token)
-    : remoteReadModelSnapshot(context);
-  const result: RemoteRuntimeSnapshot = {
+  const readModels = remoteReadModelSnapshot(context);
+  return {
     pools,
     contracts,
     artifacts,
@@ -191,8 +174,6 @@ function remoteRuntimeSnapshot(context: CommandContext, source?: OrchestrationRe
     ...(readModels.dropped ? { dropped: readModels.dropped } : {}),
     ...(readModels.sourceErrors ? { sourceErrors: readModels.sourceErrors } : {}),
   };
-  if (source?.kind === 'native') orchestrationWorkspaceDisplays.set(result, source.token);
-  return result;
 }
 
 /**
@@ -377,8 +358,6 @@ function artifactsByRunnerId(artifacts: readonly Record<string, unknown>[]): Map
     entries.push(artifact);
     grouped.set(id, entries);
   }
-  const receipts = artifactReceiptClocks.get(artifacts);
-  for (const entries of grouped.values()) artifactReceiptClocks.set(entries, new Set(entries.filter(entry => receipts?.has(entry))));
   return grouped;
 }
 
@@ -403,14 +382,14 @@ function workspacesByRunnerId(workspaces: readonly RemoteWorkspaceEvidenceRecord
 }
 
 function workPlanItems(context: CommandContext): readonly WorkPlanItem[] {
-  // A pure read: it takes no lock and writes nothing, and its failure names the plan file.
-  return context.workspace.workPlanStore?.listItems() ?? [];
+  // A pure read of the plan's rows: it takes no lock and writes nothing.
+  return context.workspace.workPlanStore?.snapshotNow().tasks ?? [];
 }
 
 function workPlanItemsByAgentId(items: readonly WorkPlanItem[]): Map<string, readonly WorkPlanItem[]> {
   const grouped = new Map<string, WorkPlanItem[]>();
   for (const item of items) {
-    const id = item.linked?.agentId;
+    const id = item.agentId;
     if (!id) continue;
     const entries = grouped.get(id) ?? [];
     entries.push(item);
@@ -432,7 +411,7 @@ function dispatchReceiptLines(item: WorkPlanItem): readonly string[] {
 function workPlanCloseoutItem(item: WorkPlanItem, includeParameters: boolean): Record<string, unknown> {
   const receipts = dispatchReceiptLines(item);
   return {
-    itemId: item.id,
+    itemId: item.taskId,
     title: previewHarnessText(item.title, includeParameters ? 160 : 72),
     status: item.status,
     owner: item.owner ?? null,
@@ -441,9 +420,9 @@ function workPlanCloseoutItem(item: WorkPlanItem, includeParameters: boolean): R
     dispatchReceiptBasis: DISPATCH_RECEIPT_BASIS,
     latestDispatchReceipt: receipts.at(-1) ? previewHarnessText(receipts.at(-1)!, includeParameters ? 260 : 120) : null,
     routes: {
-      inspect: `agent_work_plan action:"get" id:"${item.id}"`,
-      markDone: `agent_work_plan action:"set_status" id:"${item.id}" status:"done"`,
-      markBlocked: `agent_work_plan action:"set_status" id:"${item.id}" status:"blocked"`,
+      inspect: `agent_work_plan action:"get" id:"${item.taskId}"`,
+      markDone: `agent_work_plan action:"set_status" id:"${item.taskId}" status:"done"`,
+      markBlocked: `agent_work_plan action:"set_status" id:"${item.taskId}" status:"blocked"`,
     },
   };
 }
@@ -451,7 +430,7 @@ function workPlanCloseoutItem(item: WorkPlanItem, includeParameters: boolean): R
 function closeoutReviewRoutes(id: string, items: readonly WorkPlanItem[], artifacts: readonly Record<string, unknown>[], outcomes: readonly RemoteCaptureOutcomeRecord[] = [], workspaces: readonly RemoteWorkspaceEvidenceRecord[] = []): readonly string[] {
   return [
     routeForAgent('get', id),
-    ...items.map((item) => `agent_work_plan action:"get" id:"${item.id}"`),
+    ...items.map((item) => `agent_work_plan action:"get" id:"${item.taskId}"`),
     ...artifacts.map((artifact) => artifactReviewRoute(artifact)),
     ...outcomes.map((outcome) => outcome.modelRoute),
     ...workspaces.map((workspace) => workspace.modelRoute),
@@ -489,8 +468,8 @@ function closeoutCard(id: string, status: string, items: readonly WorkPlanItem[]
     workspaceEvidence: workspaces.slice(0, includeParameters ? 8 : 3),
     reviewRoutes: closeoutReviewRoutes(id, items, artifacts, outcomes, workspaces).slice(0, includeParameters ? 24 : 8),
     updateRoutes: items.slice(0, includeParameters ? 8 : 3).flatMap((item) => [
-      `agent_work_plan action:"set_status" id:"${item.id}" status:"done"`,
-      `agent_work_plan action:"set_status" id:"${item.id}" status:"blocked"`,
+      `agent_work_plan action:"set_status" id:"${item.taskId}" status:"done"`,
+      `agent_work_plan action:"set_status" id:"${item.taskId}" status:"blocked"`,
     ]),
     policy: 'Closeout is read-only here; status changes stay on agent_work_plan and artifact review stays on first-class routes.',
   };
@@ -729,481 +708,25 @@ export function agentOrchestrationCatalogStatus(context: CommandContext, toolReg
   };
 }
 
-function orchestrationSourceData(context: CommandContext, backend: ReturnType<typeof captureOrchestrationBackend>, toolRegistry?: ToolRegistry, remoteSource?: OrchestrationRemoteSource, originalSources = backend.originalSources) {
-  const records = exportAgents(context), workItems = backend.workItems(), sessionId = context.session.runtime.sessionId;
-  const tools = toolRegistry ? { tools: toolRegistry.getToolDefinitions() } : {};
-  // The current native token closes every producer callback, including these
-  // fact reads, before checking publisher records and bound workspace displays.
-  const remote = remoteRuntimeSnapshot(context, remoteSource);
-  return { originalSources, records, remote, workItems, sessionId, ...tools };
+/**
+ * One read of each source: the agent manager, the remote runtime, the remote
+ * receipts and the work plan. A listing is correct for the moment it was taken,
+ * so nothing re-reads it to prove it unchanged; the call's signal is the only
+ * "still wanted" check.
+ */
+function readOrchestrationSources(context: CommandContext) {
+  return { records: exportAgents(context), remote: remoteRuntimeSnapshot(context), workItems: workPlanItems(context) };
 }
 
-function orchestrationSources(context: CommandContext, backend: ReturnType<typeof captureOrchestrationBackend>, toolRegistry?: ToolRegistry, remoteSource?: OrchestrationRemoteSource) {
-  const data = orchestrationSourceData(context, backend, toolRegistry, remoteSource);
-  const sources = captureCatalogData(data);
-  const receipts = artifactReceiptClocks.get(data.remote.artifacts);
-  artifactReceiptClocks.set(sources.remote.artifacts, new Set(sources.remote.artifacts.filter((_record, index) => {
-    const original = data.remote.artifacts[index];
-    return original !== undefined && receipts?.has(original);
-  })));
-  const token = orchestrationWorkspaceDisplays.get(data.remote);
-  if (token) { bindNativeRemoteWorkspaceDisplays(token, sources.remote.workspaces); orchestrationWorkspaceDisplays.set(sources, token); }
-  return sources;
-}
-
-function captureOrchestrationBackend(context: CommandContext, toolRegistry?: ToolRegistry) {
-  const methodGuards: (() => void)[] = [];
-  const retainMethods: typeof captureCatalogMethods = (subject, keys) => {
-    const guard = captureCatalogMethods(subject, keys); methodGuards.push(guard); return guard;
-  };
-  // Canonical evidence uses complete acquired DTOs; public remote cards remain bounded.
-  const originalSources: unknown[] = [];
-  const nativeWorkspaceSources: { readonly index: number; readonly token: object }[] = [];
-  const pushOriginal = (entry: unknown, source: unknown, layout: 'snapshot' | 'map-entries', workspaceSource: boolean) => {
-    const index = originalSources.length; originalSources.push(entry);
-    if (workspaceSource) nativeWorkspaceSources.push({ index, token: captureNativeRemoteWorkspacePathSource(source, layout) });
-  };
-  const guards = [retainMethods(context, ['ops', 'platform', 'workspace', 'session', 'clients']),
-    retainMethods(context.ops, ['agentManager', 'remoteRuntime']), retainMethods(context.platform, ['artifactStore', 'readModels']),
-    retainMethods(context.workspace, ['workPlanStore']), retainMethods(context.session, ['runtime']),
-    retainMethods(context.session.runtime, ['sessionId'])];
-  if (context.ops.agentManager) guards.push(retainMethods(context.ops.agentManager, ['exportState']));
-  if (context.ops.remoteRuntime) guards.push(retainMethods(context.ops.remoteRuntime, ['listContracts', 'listPools', 'listArtifacts']));
-  if (context.platform.artifactStore) guards.push(retainMethods(context.platform.artifactStore, ['list']));
-  if (context.workspace.workPlanStore) guards.push(retainMethods(context.workspace.workPlanStore, ['listItems']));
-  const retainPublished = (subject: object, key: string, children?: readonly string[], workspaceSource = false, workspaceChildren: readonly string[] = []) => {
-    guards.push(retainMethods(subject, [key]));
-    const source = modelReadingServicePath(subject, [key]);
-    if (children) {
-      if (source !== undefined && source !== null) {
-        if (typeof source !== 'object') throw new ToolInputProjectionError('invalid');
-        for (const child of children) retainPublished(source, child, undefined, workspaceSource || workspaceChildren.includes(child));
-      }
-      return;
-    }
-    if (source instanceof Map) {
-      const methods = retainMethods(source, ['entries']);
-      const acquire = () => {
-        methods();
-        if (Object.getPrototypeOf(source) !== Map.prototype || Object.getOwnPropertyNames(source).length
-          || Object.getOwnPropertySymbols(source).length) throw new ToolInputProjectionError('invalid');
-        const entries = Array.from(Map.prototype.entries.call(source));
-        if (entries.some(([key]) => typeof key !== 'string')) throw new ToolInputProjectionError('invalid');
-        methods(); return entries;
-      };
-      const original = acquire(), snapshot = capturePersonalOpsSnapshot(original), complete = snapshot.captured;
-      pushOriginal({ slot: key, original: complete }, complete, 'map-entries', workspaceSource);
-      guards.push(() => { snapshot.assertCurrent(original); snapshot.assertCurrent(acquire()); });
-      return;
-    }
-    if (source && typeof source === 'object' && !Array.isArray(source)) {
-      const names = ['getSnapshot', 'snapshot', 'toJSON', 'listCaptureOutcomes', 'listOutcomes', 'listCaptures', 'listExports', 'listCloseouts', 'listArtifacts', 'listWorkspaceEvidence', 'listWorkspaceIsolation', 'listWorkspaces', 'listWorktrees', 'list'];
-      const methods = retainMethods(source, [...names, 'subscribe']); guards.push(methods);
-      let materialized = false;
-      for (const name of names) {
-        const read = modelReadingServicePath(source, [name]);
-        if (typeof read !== 'function') continue;
-        materialized = true;
-        if (name === 'getSnapshot' && typeof modelReadingServicePath(source, ['subscribe']) === 'function') guards.push(captureNativeReadModelObservation(source));
-        const acquire = () => { methods(); let value: unknown;
-          try { value = read.call(source); } catch { throw new ToolInputProjectionError('unavailable'); }
-          methods(); return value;
-        };
-        const original = acquire(), snapshot = capturePersonalOpsSnapshot(original), complete = snapshot.captured;
-        pushOriginal({ slot: key, method: name, original: complete }, complete, 'snapshot', workspaceSource);
-        guards.push(() => { snapshot.assertCurrent(original); snapshot.assertCurrent(acquire()); methods(); });
-      }
-      if (materialized) return;
-    }
-    if (typeof source === 'function') {
-      const acquire = () => { let value: unknown; try { value = source(); } catch { throw new ToolInputProjectionError('unavailable'); } return value; };
-      const original = acquire(), snapshot = capturePersonalOpsSnapshot(original), complete = snapshot.captured;
-      pushOriginal({ slot: key, original: complete }, complete, 'snapshot', workspaceSource);
-      guards.push(() => { snapshot.assertCurrent(original); snapshot.assertCurrent(acquire()); });
-      return;
-    }
-    const snapshot = capturePersonalOpsSnapshot(source), complete = snapshot.captured;
-    if (source !== undefined && source !== null) pushOriginal({ slot: key, original: complete }, complete, 'snapshot', workspaceSource);
-    guards.push(() => snapshot.assertCurrent(modelReadingServicePath(subject, [key])));
-  };
-  const readModels: unknown = Reflect.get(context.platform, 'readModels');
-  if (readModels && typeof readModels === 'object') {
-    retainPublished(readModels, 'remoteRuntime', ['captureOutcomes', 'outcomes', 'captures', 'exports', 'closeouts', 'workspaces', 'workspaceIsolation', 'worktrees'], false, ['workspaces', 'workspaceIsolation', 'worktrees']);
-    retainPublished(readModels, 'remoteRunners', ['captureOutcomes', 'workspaces'], false, ['workspaces']);
-    retainPublished(readModels, 'remote', ['captureOutcomes', 'workspaceIsolation'], false, ['workspaceIsolation']);
-    retainPublished(readModels, 'worktrees', ['remote'], true);
-    for (const key of ['remoteCaptureOutcomes', 'remoteRunnerOutcomes']) retainPublished(readModels, key);
-    for (const key of ['remoteWorkspaces', 'remoteWorkspaceIsolation']) retainPublished(readModels, key, undefined, true);
-  }
-  if (context.ops.remoteRuntime) retainPublished(context.ops.remoteRuntime, 'readModels', ['captureOutcomes', 'workspaces'], false, ['workspaces']);
-  if (context.clients) {
-    guards.push(retainMethods(context.clients, ['operator']));
-    const operator = context.clients.operator;
-    if (operator) {
-      guards.push(retainMethods(operator, ['remoteRuntime']));
-      const remote: unknown = Reflect.get(operator, 'remoteRuntime');
-      if (remote && typeof remote === 'object') { retainPublished(remote, 'captureOutcomes'); retainPublished(remote, 'workspaces', undefined, true); }
-    }
-  }
-  if (toolRegistry) guards.push(retainMethods(toolRegistry, ['getToolDefinitions']));
-  const nativeWorkItems = context.workspace.workPlanStore && captureWorkPlanItems(context.workspace.workPlanStore);
-  const readWorkItems = () => { if (!nativeWorkItems) return workPlanItems(context); nativeWorkItems.assertCurrent(); return nativeWorkItems.items; };
-  return { originalSources: captureCatalogData(originalSources), nativeWorkspaceSources, workItems: readWorkItems, assertMethods: () => { for (const guard of methodGuards) guard(); }, assertCurrent: () => { for (const guard of guards) guard(); } };
-}
-
-function retainOrchestrationSources(context: CommandContext, sources: ReturnType<typeof orchestrationSources>, options: CatalogRankingOptions, backend: ReturnType<typeof captureOrchestrationBackend>, toolRegistry?: ToolRegistry) {
-  const assertOptions = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent']);
-  const signal = options.signal, sourceOwner = options.sourceOwner, callerCurrent = options.assertCurrent, retainCurrent = options.retainCurrent;
-  // orchestrationSources owns and recursively freezes this complete private
-  // capture. It is reused by identity in each observation; its mutable native
-  // originals remain covered by backend and publisher guards below.
-  const { originalSources, ...sourceFacts } = sources;
-  const assertSnapshot = captureCatalogSnapshotGuard(sourceFacts);
-  const nativeDisplayToken = orchestrationWorkspaceDisplays.get(sources);
-  const assertOptionsCurrent = () => {
-    assertOptions();
-    if (options.signal !== signal || options.sourceOwner !== sourceOwner || options.assertCurrent !== callerCurrent || options.retainCurrent !== retainCurrent) throw new ToolInputProjectionError('held');
-    signal?.throwIfAborted();
-  };
-  const assertSourceCurrent = () => {
-    assertOptionsCurrent();
-    // The native token rechecks complete original and fresh publisher data
-    // before reading it. Fence method identity here before earlier fact reads.
-    if (nativeDisplayToken) backend.assertMethods(); else backend.assertCurrent();
-    // The current-token read is last and checks complete publisher and bound
-    // display state after all native method reads.
-    const { originalSources: currentOriginals, ...currentFacts } = orchestrationSourceData(context, backend, toolRegistry,
-      nativeDisplayToken ? { kind: 'current', token: nativeDisplayToken } : undefined, originalSources);
-    if (currentOriginals !== originalSources) throw new ToolInputProjectionError('held');
-    assertSnapshot(currentFacts);
-    if (!nativeDisplayToken) backend.assertCurrent();
-    assertOptionsCurrent();
-  };
-  const assertCurrent = () => { assertOptionsCurrent(); callerCurrent?.call(options); assertOptionsCurrent(); assertSourceCurrent(); };
-  assertCurrent();
-  return { assertCurrent, publish<T>(result: T): T {
-    // Until publication each reader is fenced by this exact source lifetime.
-    // Transfer the complete restriction to the parent only when it can own a
-    // result; feeding it back into the caller mid-operation repeats the proof.
-    assertCurrent();
-    retainCurrent?.call(options, assertSourceCurrent, 'agent.harness.agent-orchestration.sources');
-    assertCurrent(); return result;
-  } };
-}
-
-function producerClock(value: unknown): unknown {
-  if (typeof value !== 'number') return value;
-  const date = new Date(value);
-  if (!Number.isSafeInteger(value) || !Number.isFinite(date.getTime())) throw new ToolInputProjectionError('invalid');
-  return date.toISOString();
-}
-
-function projectOrchestrationArtifactClocks(artifacts: readonly Record<string, unknown>[]) {
-  const receipts = artifactReceiptClocks.get(artifacts);
-  return artifacts.map(original => {
-    const receipt = receipts?.has(original) === true;
-    const record = readObject(capturePersonalOpsData(original));
-    return { ...record, createdAt: producerClock(record.createdAt),
-      ...(receipt && Object.hasOwn(record, 'expiresAt') ? { expiresAt: producerClock(record.expiresAt) } : {}),
-      ...(!receipt && record.task && typeof record.task === 'object' ? { task: { ...readObject(record.task),
-        startedAt: producerClock(readObject(record.task).startedAt), completedAt: producerClock(readObject(record.task).completedAt) } } : {}) };
-  });
-}
-
-/** Only these native producer clock columns have structural time authority. */
-function projectOrchestrationPublisherClocks(facts: ReturnType<typeof orchestrationPublisherFacts>) {
-  // Make every own data field visible before clock projection uses spreads.
-  const complete = capturePersonalOpsData(facts) as typeof facts;
-  return { ...complete,
-    records: complete.records?.map(record => ({ ...record, startedAt: producerClock(record.startedAt), completedAt: producerClock(record.completedAt) })) ?? null,
-    remote: { ...complete.remote,
-      contracts: complete.remote.contracts.map(record => ({ ...record, createdAt: producerClock(record.createdAt) })),
-      artifacts: projectOrchestrationArtifactClocks(facts.remote.artifacts),
-    },
-    workItems: complete.workItems.map(record => ({ ...record, createdAt: producerClock(record.createdAt),
-      updatedAt: producerClock(record.updatedAt), completedAt: producerClock(record.completedAt) })),
-  };
-}
-
-function orchestrationPublisherFacts(context: CommandContext, backend: ReturnType<typeof captureOrchestrationBackend>, toolRegistry?: ToolRegistry) {
-  return {
-    records: exportAgents(context),
-    remote: { pools: remotePools(context), contracts: remoteContracts(context), artifacts: remoteArtifacts(context) },
-    workItems: backend.workItems(), sessionId: context.session.runtime.sessionId,
-    ...(toolRegistry ? { tools: toolRegistry.getToolDefinitions() } : {}),
-  };
-}
-
-async function captureOrchestrationPublisher(context: CommandContext, backend: ReturnType<typeof captureOrchestrationBackend>,
-  options: CatalogRankingOptions, toolRegistry?: ToolRegistry): Promise<Extract<OrchestrationRemoteSource, { readonly kind: 'native' }>> {
-  const assertOptions = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent']);
-  const { signal, sourceOwner, assertCurrent: callerCurrent, retainCurrent } = options;
-  const facts = orchestrationPublisherFacts(context, backend, toolRegistry), factsSnapshot = capturePersonalOpsSnapshot(facts);
-  const assertSourceCurrent = () => {
-    assertOptions(); signal?.throwIfAborted();
-    if (options.signal !== signal || options.sourceOwner !== sourceOwner || options.assertCurrent !== callerCurrent || options.retainCurrent !== retainCurrent)
-      throw new ToolInputProjectionError('held');
-    backend.assertCurrent();
-    factsSnapshot.assertCurrent(facts); factsSnapshot.assertCurrent(orchestrationPublisherFacts(context, backend, toolRegistry));
-    backend.assertCurrent(); assertOptions(); signal?.throwIfAborted();
-  };
-  const assertCallerCurrent = () => {
-    assertSynchronousJudgmentGuard(() => callerCurrent?.call(options), () => new ToolInputProjectionError('held'));
-  };
-  const assertCurrent = () => {
-    assertSourceCurrent();
-    assertCallerCurrent();
-    assertSourceCurrent();
-  };
-  assertCurrent();
-  // Full original-source and Agent/native-fact admission precedes every remote
-  // publisher reading. The actual native path owners select workspace paths.
-  const originalProjection = projectOrchestrationOriginalSources(backend.originalSources, backend, assertCurrent);
-  const preflight = capturePersonalOpsData([{ evidence: { originalSources: backend.originalSources, ...projectOrchestrationPublisherClocks(facts) } }]);
-  const problem = judgmentInputCardProblem(preflight);
-  if (problem) throw new ToolInputProjectionError(problem === 'card-material' ? 'held' : 'invalid');
-  assertOrchestrationIssuerSafe(preflight);
-  projectOrchestrationEvidence(preflight, originalProjection);
-  assertCurrent();
-  const owned = captureNativeRemoteReadModelSnapshot(context);
-  assertCurrent();
-  // Settlement already fences the caller with this exact source restriction.
-  // Pass the caller separately so it does not repeat the full publisher read
-  // inside the restriction that is already surrounding it.
-  // The native token retains the publisher's entire readset. The orchestration
-  // lifetime consumes that token at every boundary and transfers its enclosing
-  // guard to the parent at publication, so no parallel parent copy is needed.
-  const snapshot = await settleNativeRemotePublisherSemantics(owned.token, { ...options, retainCurrent: undefined, assertCurrent: assertCallerCurrent, assertSourceCurrent, assertSourceMethods: backend.assertMethods }, {
-    projectPath: projectOwnedWorkspacePath,
-    projectText: projectOrchestrationText,
-    projectRecordText: projectOrchestrationRecordText,
-    protectFields: async (value, current) => {
-      const redactionSource = captureRedactionSource();
-      const assertRedactionCurrent = () => { current.signal?.throwIfAborted(); current.assertCurrent?.(); redactionSource.assertCurrent(); };
-      assertRedactionCurrent();
-      current.retainCurrent?.(redactionSource.assertCurrent, 'agent.remote-publisher.redaction');
-      // The complete projection is private native data. Own it once; the
-      // publisher restrictions still recheck the original mutable sources.
-      const protectedValue = await protectPersonalOpsData(captureOwnedJson(value), { ...current, assertCurrent: assertRedactionCurrent });
-      assertRedactionCurrent(); return orchestrationProtectedFields(protectedValue);
-    },
-  });
-  assertCurrent();
-  return { kind: 'native', snapshot, token: owned.token };
-}
-
-function orchestrationEntries(sources: ReturnType<typeof orchestrationSources>) {
+function orchestrationEntries(sources: ReturnType<typeof readOrchestrationSources>) {
   const contracts = contractByRunnerId(sources.remote.contracts), artifacts = artifactsByRunnerId(sources.remote.artifacts);
   const outcomes = outcomesByRunnerId(sources.remote.outcomes), workspaces = workspacesByRunnerId(sources.remote.workspaces);
   const workItems = workPlanItemsByAgentId(sources.workItems);
   return (sources.records ?? []).map(record => {
     const id = agentId(record);
-    return { record, originalSources: sources.originalSources, underlying: { contract: contracts.get(id), artifacts: artifacts.get(id) ?? [], outcomes: outcomes.get(id) ?? [], workspaces: workspaces.get(id) ?? [], workItems: workItems.get(id) ?? [] },
-      full: describeAgent(record, true, contracts.get(id), artifacts.get(id) ?? [], outcomes.get(id) ?? [], workspaces.get(id) ?? [], workItems.get(id) ?? []),
-      summary: describeAgent(record, false, contracts.get(id), artifacts.get(id) ?? [], outcomes.get(id) ?? [], workspaces.get(id) ?? [], workItems.get(id) ?? []) };
+    const linked = [contracts.get(id), artifacts.get(id) ?? [], outcomes.get(id) ?? [], workspaces.get(id) ?? [], workItems.get(id) ?? []] as const;
+    return { record, full: () => describeAgent(record, true, ...linked), summary: () => describeAgent(record, false, ...linked) };
   });
-}
-
-type OrchestrationTextPart = { readonly kind: 'text'; readonly text: string } | { readonly kind: 'display-marker'; readonly text: string };
-type OrchestrationField = { readonly path: readonly string[] } & (
-  { readonly kind: 'object' } | { readonly kind: 'array'; readonly length: number }
-  | { readonly kind: 'null' } | { readonly kind: 'undefined' }
-  | { readonly kind: 'number'; readonly value: number } | { readonly kind: 'boolean'; readonly value: boolean }
-  | { readonly kind: 'text'; readonly parts: readonly OrchestrationTextPart[] }
-);
-
-/** Native issuer containment includes complete JSON scalar encodings. */
-function assertOrchestrationIssuerSafe(value: unknown): void {
-  const inspectText = (text: string): void => {
-    const pending = [text];
-    while (pending.length) {
-      const current = pending.pop();
-      if (current === undefined) throw new ToolInputProjectionError('invalid');
-      if (containsIssuerCredential(current)) throw new ToolInputProjectionError('held');
-      for (const match of current.matchAll(/"(?:\\.|[^"\\])*"/g)) {
-        let decoded: unknown;
-        try { decoded = JSON.parse(match[0]); } catch { continue; }
-        if (typeof decoded !== 'string' || decoded.length >= match[0].length) throw new ToolInputProjectionError('held');
-        pending.push(decoded);
-      }
-    }
-  };
-  const visit = (entry: unknown): void => {
-    if (typeof entry === 'string') inspectText(entry);
-    else if (entry !== null && typeof entry === 'object') for (const [key, child] of Object.entries(entry)) { inspectText(key); visit(child); }
-  };
-  visit(capturePersonalOpsData(value));
-}
-
-/** Slash syntax has meaning only for an already owned native filesystem
- * path. Generic text and queries cannot acquire that ownership by spelling. */
-function assertNoUnownedPathMaterial(input: string): void {
-  const pending = [input];
-  while (pending.length) {
-    const text = pending.pop();
-    if (text === undefined) throw new ToolInputProjectionError('invalid');
-    for (const component of text.split(/[\\/]/)) {
-      if (projectSetupSmokeEvidenceFull(component).validationText !== component) throw new ToolInputProjectionError('held');
-    }
-    for (const match of text.matchAll(/"(?:\\.|[^"\\])*"/g)) {
-      let decoded: unknown;
-      try { decoded = JSON.parse(match[0]); } catch { continue; }
-      if (typeof decoded !== 'string' || decoded.length >= match[0].length) throw new ToolInputProjectionError('held');
-      pending.push(decoded);
-    }
-  }
-}
-
-function projectOwnedWorkspacePath(value: string): { readonly displayText: string; readonly validationText: string } {
-  // Quotes, URL/query syntax and multiline declarations do not describe the
-  // producer's simple filesystem component grammar. Refuse before readers.
-  if (/["'?&#\r\n]/.test(value) || /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(value)) throw new ToolInputProjectionError('held');
-  let displayText = '', validationText = '';
-  for (const part of value.split(/([\\/])/)) {
-    if (part === '/' || part === '\\') { displayText += part; validationText += part; continue; }
-    const parsed = projectSetupSmokeEvidenceFull(part);
-    displayText += parsed.displayText; validationText += parsed.validationText;
-  }
-  return { displayText, validationText };
-}
-
-interface OrchestrationOriginalSourceProjection {
-  readonly original: readonly unknown[];
-  readonly selected: ReadonlyMap<number, { readonly display: unknown; readonly validation: unknown }>;
-}
-
-function projectOrchestrationText(value: string): { readonly displayText: string; readonly validationText: string } {
-  const parsed = projectSetupSmokeEvidenceFull(value);
-  assertNoUnownedPathMaterial(parsed.validationText);
-  return parsed;
-}
-
-/** Traverse the complete detached native record without invoking publisher or
- * caller callbacks per leaf. The caller fences this single synchronous read. */
-function projectOrchestrationRecordText(value: unknown): { readonly display: unknown; readonly validation: unknown } {
-  if (typeof value === 'string') {
-    const text = projectOrchestrationText(value);
-    return { display: text.displayText, validation: text.validationText };
-  }
-  if (Array.isArray(value)) {
-    const entries = value.map(projectOrchestrationRecordText);
-    return { display: entries.map(entry => entry.display), validation: entries.map(entry => entry.validation) };
-  }
-  if (value === null || typeof value !== 'object') return { display: value, validation: value };
-  const display: Record<string, unknown> = Object.create(null), validation: Record<string, unknown> = Object.create(null);
-  for (const [key, child] of Object.entries(value)) {
-    const projected = projectOrchestrationRecordText(child);
-    Object.defineProperty(display, key, { value: projected.display, enumerable: true });
-    Object.defineProperty(validation, key, { value: projected.validation, enumerable: true });
-  }
-  return { display, validation };
-}
-
-function projectOrchestrationOriginalSources(
-  sources: readonly unknown[],
-  backend: ReturnType<typeof captureOrchestrationBackend>,
-  assertCurrent: () => void,
-): OrchestrationOriginalSourceProjection {
-  assertCurrent(); assertPersonalOpsDataCurrent(sources, backend.originalSources); assertCurrent();
-  const selected = new Map<number, { readonly display: unknown; readonly validation: unknown }>();
-  for (const source of backend.nativeWorkspaceSources) {
-    assertCurrent();
-    selected.set(source.index, projectNativeRemoteWorkspacePathSource(source.token, projectOwnedWorkspacePath, projectOrchestrationText, assertCurrent));
-    assertCurrent();
-  }
-  assertCurrent(); assertPersonalOpsDataCurrent(sources, backend.originalSources); assertCurrent();
-  return { original: sources, selected };
-}
-
-/** Native prose spans are withheld while their entire surrounding structure
- * remains intact. Unsupported declared fields and key/value pairs must refuse
- * before a generic field or text reader can see their values. */
-function projectOrchestrationEvidence(value: unknown, nativeSources?: OrchestrationOriginalSourceProjection,
-  nativeDisplays: readonly { readonly path: readonly (string | number)[]; readonly displayText: string; readonly validationText: string }[] = []): unknown {
-  const visit = (entry: unknown, path: readonly (string | number)[] = []): { readonly display: unknown; readonly validation: unknown } => {
-    if (nativeSources && path.length === 3 && typeof path[0] === 'number' && path[1] === 'evidence' && path[2] === 'originalSources') {
-      assertPersonalOpsDataCurrent(entry, nativeSources.original);
-      if (!Array.isArray(entry)) throw new ToolInputProjectionError('held');
-      const display: unknown[] = [], validation: unknown[] = [];
-      for (const [index, source] of entry.entries()) {
-        const native = nativeSources.selected.get(index);
-        if (!native) { const parsed = visit(source, [...path, index]); display.push(parsed.display); validation.push(parsed.validation); continue; }
-        if (source === null || typeof source !== 'object' || Array.isArray(source) || !Object.hasOwn(source, 'original')) throw new ToolInputProjectionError('held');
-        const displaySource: Record<string, unknown> = Object.create(null), validationSource: Record<string, unknown> = Object.create(null);
-        for (const [key, child] of Object.entries(source)) {
-          const parsed = key === 'original' ? native : visit(child, [...path, index, key]);
-          Object.defineProperty(displaySource, key, { value: parsed.display, enumerable: true });
-          Object.defineProperty(validationSource, key, { value: parsed.validation, enumerable: true });
-        }
-        display.push(displaySource); validation.push(validationSource);
-      }
-      return { display, validation };
-    }
-    if (typeof entry === 'string') {
-      const native = nativeDisplays.find(reference => reference.path.length === path.length && reference.path.every((part, index) => part === path[index]));
-      if (native) { if (native.displayText !== entry) throw new ToolInputProjectionError('held'); return { display: native.displayText, validation: native.validationText }; }
-      const text = projectOrchestrationText(entry);
-      return { display: text.displayText, validation: text.validationText };
-    }
-    if (Array.isArray(entry)) {
-      const display: unknown[] = [], validation: unknown[] = [];
-      for (const [index, child] of entry.entries()) {
-        const projected = visit(child, [...path, index]);
-        display.push(projected.display); validation.push(projected.validation);
-      }
-      return { display, validation };
-    }
-    if (entry === null || typeof entry !== 'object') return { display: entry, validation: entry };
-    const display: Record<string, unknown> = Object.create(null), validation: Record<string, unknown> = Object.create(null);
-    for (const [key, child] of Object.entries(entry)) {
-      const projected = visit(child, [...path, key]);
-      Object.defineProperty(display, key, { value: projected.display, enumerable: true });
-      Object.defineProperty(validation, key, { value: projected.validation, enumerable: true });
-    }
-    return { display, validation };
-  };
-  const projected = visit(capturePersonalOpsData(value));
-  // Original keys, scalars and object/array associations survive. Only the
-  // parser's exact private prose spans become empty validation holes.
-  snapshotJudgmentInput(projected.validation);
-  return projected.display;
-}
-
-/** Only the actual canonical redactor's captured result enters this renderer.
- * Fixed display markers keep their exact spelling as separate parts. A marker
- * does not certify a slot or distinguish introduced from literal marker text. */
-function orchestrationProtectedFields(protectedValue: unknown): unknown {
-  const fields: OrchestrationField[] = [];
-  const textParts = (text: string): readonly OrchestrationTextPart[] => {
-    const parts: OrchestrationTextPart[] = [];
-    let position = 0;
-    const markers = /<redacted>|\[REDACTED(?:_(?:API_KEY|TOKEN|PROFILE|TEXT|GITHUB_TOKEN|GITLAB_TOKEN|SLACK_TOKEN|AWS_KEY))?\]/g;
-    for (const marker of text.matchAll(markers)) {
-      parts.push({ kind: 'text', text: text.slice(position, marker.index) }, { kind: 'display-marker', text: marker[0] });
-      position = marker.index + marker[0].length;
-    }
-    parts.push({ kind: 'text', text: text.slice(position) });
-    return parts;
-  };
-  const visit = (value: unknown, path: readonly string[]): void => {
-    if (typeof value === 'string') { fields.push({ path, kind: 'text', parts: textParts(value) }); return; }
-    if (value === undefined) { fields.push({ path, kind: 'undefined' }); return; }
-    if (value === null) { fields.push({ path, kind: 'null' }); return; }
-    if (typeof value === 'number') { fields.push({ path, kind: 'number', value }); return; }
-    if (typeof value === 'boolean') { fields.push({ path, kind: 'boolean', value }); return; }
-    if (typeof value !== 'object') throw new ToolInputProjectionError('invalid');
-    if (Array.isArray(value)) {
-      fields.push({ path, kind: 'array', length: value.length });
-      for (const [index, child] of value.entries()) visit(child, [...path, String(index)]);
-    } else {
-      fields.push({ path, kind: 'object' });
-      for (const [key, child] of Object.entries(value)) visit(child, [...path, key]);
-    }
-  };
-  visit(capturePersonalOpsData(protectedValue), []);
-  // This unchanged floor checks every safe segment, path, value and encoded
-  // body. Unsupported or credential-bearing remnants remain held.
-  return snapshotJudgmentInput(fields);
 }
 
 type OrchestrationOutputPath = readonly (string | number)[];
@@ -1213,9 +736,7 @@ const PLAN_ITEM_OUTPUT_ROOTS: readonly OrchestrationOutputPattern[] = [
   ['agents', null, 'managedPlanCard'], ['agent', 'managedPlanCard'], ['candidates', null, 'managedPlanCard'], ['managedExecutionPlan', 'workItems', null],
 ];
 
-/** Explicit native prose locations, independent of any semantic field role.
- * Authored policies, action guidance, evidence requirements and all identities,
- * statuses, routes and other control text retain their original exact values. */
+/** The prose a producer wrote (an agent's task, progress and context, remote and work-plan text); every other string is written by this program. */
 function orchestrationOutputProse(path: OrchestrationOutputPath): boolean {
   const matches = (root: OrchestrationOutputPattern, suffix: OrchestrationOutputPattern): boolean => {
     const pattern = [...root, ...suffix];
@@ -1246,216 +767,47 @@ function orchestrationOutputProse(path: OrchestrationOutputPath): boolean {
     || remoteProse([...remoteRoot, 'workspaceEvidence', null], 'workspace');
 }
 
-/** Native result facts retain their exact ordered schema and all non-prose
- * values. Protected prose still crosses the complete ordinary floor/owner. */
-function assertOrchestrationOutputFacts(original: unknown, protectedValue: unknown, path: OrchestrationOutputPath = []): void {
-  if (typeof original === 'string') {
-    if (typeof protectedValue !== 'string' || (!orchestrationOutputProse(path) && original !== protectedValue)) throw new ToolInputProjectionError('held');
-    return;
-  }
-  if (original === null || typeof original !== 'object') {
-    if (original !== protectedValue) throw new ToolInputProjectionError('held');
-    return;
-  }
-  if (protectedValue === null || typeof protectedValue !== 'object' || Array.isArray(original) !== Array.isArray(protectedValue)) throw new ToolInputProjectionError('held');
-  const originalFields = Object.entries(original), protectedFields = Object.entries(protectedValue);
-  if (Array.isArray(original) && (!Array.isArray(protectedValue) || original.length !== protectedValue.length)) throw new ToolInputProjectionError('held');
-  if (originalFields.length !== protectedFields.length) throw new ToolInputProjectionError('held');
-  for (const [index, [key, child]] of originalFields.entries()) {
-    const field = protectedFields[index];
-    if (!field || field[0] !== key) throw new ToolInputProjectionError('held');
-    assertOrchestrationOutputFacts(child, field[1], [...path, Array.isArray(original) ? index : key]);
-  }
+/**
+ * Mask the producer prose of a finished answer locally (credential patterns,
+ * declared secret values, the account's identity); code-authored routes,
+ * policies and ids pass untouched. No model request, cost linear in the answer.
+ */
+function maskOrchestrationProse<T>(value: T, path: OrchestrationOutputPath = []): T {
+  if (typeof value === 'string') return (orchestrationOutputProse(path) ? redactSensitiveData(value) : value) as T;
+  if (Array.isArray(value)) return value.map((child, index) => maskOrchestrationProse(child, [...path, index])) as T;
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, maskOrchestrationProse(child, [...path, key])])) as T;
 }
 
-function orchestrationDisplayRecord(value: unknown): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new ToolInputProjectionError('held');
-  const record: Record<string, unknown> = Object.create(null);
-  for (const [key, child] of Object.entries(value)) Object.defineProperty(record, key, { value: child, enumerable: true });
-  return record;
-}
-
-/** Project only the native timestamps authored by agentDescriptor above.
- * Keep their exact values private until the complete display has been screened. */
-function orchestrationOutputClocks(value: unknown) {
-  const clocks = new Map<string, number>();
-  const clockPath = (path: OrchestrationOutputPath) => AGENT_OUTPUT_ROOTS.some(root =>
-    path.length === root.length + 1 && root.every((part, index) => part === null ? typeof path[index] === 'number' : part === path[index])
-    && (path.at(-1) === 'startedAt' || path.at(-1) === 'completedAt'));
-  const visit = (entry: unknown, path: OrchestrationOutputPath, restore: boolean): unknown => {
-    const key = JSON.stringify(path);
-    if (restore && clocks.has(key)) {
-      const original = clocks.get(key)!;
-      if (entry !== producerClock(original)) throw new ToolInputProjectionError('held');
-      return original;
-    }
-    if (!restore && typeof entry === 'number' && clockPath(path)) {
-      clocks.set(key, entry); return producerClock(entry);
-    }
-    if (Array.isArray(entry)) return entry.map((child, index) => visit(child, [...path, index], restore));
-    if (entry === null || typeof entry !== 'object') return entry;
-    return Object.fromEntries(Object.entries(entry).map(([field, child]) => [field, visit(child, [...path, field], restore)]));
-  };
-  return { projected: visit(value, [], false), restore(display: unknown) {
-    return clocks.size === 0 ? display : visit(display, [], true);
-  } };
-}
-
-async function protectOrchestrationOutput(value: Record<string, unknown>, options: CatalogRankingOptions, nativeDisplayToken?: object): Promise<Record<string, unknown>> {
-  options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const clocks = orchestrationOutputClocks(capturePersonalOpsData(value));
-  const original = clocks.projected, problem = judgmentInputCardProblem(original);
-  if (problem) throw new ToolInputProjectionError(problem === 'card-material' ? 'held' : 'invalid');
-  assertOrchestrationIssuerSafe(original);
-  const nativeDisplays = nativeDisplayToken ? projectNativeRemoteWorkspaceDisplayReferences(nativeDisplayToken, value, projectOwnedWorkspacePath,
-    () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); }) : [];
-  const projected = projectOrchestrationEvidence(original, undefined, nativeDisplays);
-  options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const redactionSource = captureRedactionSource();
-  const assertCurrent = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); redactionSource.assertCurrent(); };
-  assertCurrent(); options.retainCurrent?.(redactionSource.assertCurrent, 'agent.harness.agent-orchestration.output-redaction'); assertCurrent();
-  const display = orchestrationDisplayRecord(capturePersonalOpsData(await protectPersonalOpsData(captureOwnedJson(projected), { ...options, assertCurrent })));
-  assertCurrent(); assertOrchestrationOutputFacts(original, display); assertCurrent();
-  const displaySnapshot = capturePersonalOpsSnapshot(display);
-  const assertDisplay = () => displaySnapshot.assertCurrent(display);
-  options.retainCurrent?.(assertDisplay, 'agent.harness.agent-orchestration.output');
-  const assertPublication = () => { assertCurrent(); assertDisplay(); };
-  assertPublication();
-  // Screen every returned field, including supplemental plan evidence, while
-  // retaining its exact native association with the separately held display.
-  const result = await withModelReadingSource({ fields: orchestrationProtectedFields(display) }, { ...options, assertCurrent: assertPublication }, async () => display);
-  assertPublication();
-  const restored = orchestrationDisplayRecord(clocks.restore(result));
-  const restoredSnapshot = capturePersonalOpsSnapshot(restored);
-  const assertRestoredSource = () => { assertDisplay(); restoredSnapshot.assertCurrent(restored); redactionSource.assertCurrent(); };
-  const assertRestored = () => { assertPublication(); assertRestoredSource(); };
-  // The parent's readset invokes this restriction. Retaining its caller guard
-  // would make that same readset recursively invoke itself.
-  options.retainCurrent?.(assertRestoredSource, 'agent.harness.agent-orchestration.native-output');
-  assertRestored(); return restored;
-}
-
-function projectOrchestrationEntries(entries: ReturnType<typeof orchestrationEntries>) {
-  return entries.map(entry => ({ description: agentSearchText(entry.record), evidence: {
-    ...entry,
-    record: { ...readObject(capturePersonalOpsData(entry.record)), startedAt: producerClock(entry.record.startedAt), completedAt: producerClock(entry.record.completedAt) },
-    full: { ...entry.full, startedAt: producerClock(entry.full.startedAt), completedAt: producerClock(entry.full.completedAt) },
-    underlying: { ...entry.underlying,
-      contract: entry.underlying.contract ? { ...readObject(capturePersonalOpsData(entry.underlying.contract)), createdAt: producerClock(entry.underlying.contract.createdAt) } : undefined,
-      artifacts: projectOrchestrationArtifactClocks(entry.underlying.artifacts),
-      workItems: entry.underlying.workItems.map(item => ({ ...readObject(capturePersonalOpsData(item)), createdAt: producerClock(item.createdAt), updatedAt: producerClock(item.updatedAt), completedAt: producerClock(item.completedAt) })),
-    },
-  } }));
-}
-
-/** Complete retained originals use the same refusal floor before every output branch. */
-function assertOrchestrationOriginalFloor(entries: ReturnType<typeof orchestrationEntries>, backend: ReturnType<typeof captureOrchestrationBackend>, query = ''): void {
-  const originals = { originalSources: backend.originalSources, entries: projectOrchestrationEntries(entries), descriptions: entries.map(entry => agentSearchText(entry.record)) };
-  const rawProblem = judgmentInputCardProblem(originals);
-  if (rawProblem) throw new ToolInputProjectionError(rawProblem === 'card-material' ? 'held' : 'invalid');
-  assertOrchestrationIssuerSafe({ query, ...originals });
-}
-
-function admitOrchestrationQuery(query: string): void {
-  // Caller text cannot borrow a native path's projection authority, including
-  // when publisher settlement would otherwise read unrelated source evidence.
-  snapshotJudgmentInput(query); assertNoUnownedPathMaterial(query);
-}
-
-async function matchingAgents(entries: ReturnType<typeof orchestrationEntries>, query: string, options: CatalogRankingOptions, backend: ReturnType<typeof captureOrchestrationBackend>, nativeDisplayToken?: object) {
-  options.signal?.throwIfAborted(); options.assertCurrent?.();
-  if (!query) {
-    assertOrchestrationOriginalFloor(entries, backend);
-    if (!options.sourceOwner) throw new ToolInputProjectionError('held');
-    return { matches: entries.map(entry => ({ entry, judgment: undefined })), judgments: [], assertProtectedCurrent: undefined };
-  }
-
-  // Raw input cannot borrow a native display projection. Refuse it before
-  // acquiring a redaction reader, including caller-supplied marker text.
-  admitOrchestrationQuery(query);
-  if (!options.sourceOwner) throw new ToolInputProjectionError('held');
-  assertOrchestrationOriginalFloor(entries, backend, query);
-  const nativeSources = projectOrchestrationOriginalSources(entries[0]?.originalSources ?? backend.originalSources, backend, () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); });
-  const nativeEvidence = projectOrchestrationEntries(entries);
-  const cardProblem = judgmentInputCardProblem(nativeEvidence);
-  if (cardProblem) throw new ToolInputProjectionError(cardProblem === 'card-material' ? 'held' : 'invalid');
-  const nativeDisplays = nativeDisplayToken ? projectNativeRemoteWorkspaceDisplayReferences(nativeDisplayToken, nativeEvidence, projectOwnedWorkspacePath,
-    () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); }) : [];
-  const safeEvidence = projectOrchestrationEvidence(nativeEvidence, nativeSources, nativeDisplays);
-  options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const redactionSource = captureRedactionSource();
-  const assertCurrent = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); redactionSource.assertCurrent(); };
-  assertCurrent();
-  options.retainCurrent?.(redactionSource.assertCurrent, 'agent.harness.agent-orchestration.redaction');
-  assertCurrent();
-  if (!Array.isArray(safeEvidence)) throw new ToolInputProjectionError('held');
-  const sharedOriginals = safeEvidence.length ? readObject(readObject(safeEvidence[0]).evidence).originalSources : [];
-  const separateEvidence = safeEvidence.map(value => {
-    const entry = readObject(value), evidence = readObject(entry.evidence);
-    // These are projections of the same private native capture. Verify their
-    // complete equality before protecting the shared evidence once.
-    assertPersonalOpsDataCurrent(evidence.originalSources, sharedOriginals);
-    const { originalSources: _originals, ...facts } = evidence;
-    return { ...entry, evidence: facts };
-  });
-  const protectedSource = readObject(await protectPersonalOpsData(captureOwnedJson({ originalSources: sharedOriginals, entries: separateEvidence }), { ...options, assertCurrent }));
-  if (!Object.hasOwn(protectedSource, 'originalSources') || !Array.isArray(protectedSource.entries)) throw new ToolInputProjectionError('held');
-  // Every ranking candidate still receives the entire protected original
-  // evidence. Only the repeated privacy work is shared within this operation.
-  const protectedEvidence = protectedSource.entries.map(value => {
-    const entry = readObject(value);
-    return { ...entry, evidence: { ...readObject(entry.evidence), originalSources: protectedSource.originalSources } };
-  });
-  assertCurrent();
-  if (!Array.isArray(protectedEvidence) || protectedEvidence.length !== entries.length) throw new ToolInputProjectionError('held');
-  assertOrchestrationIssuerSafe(protectedEvidence);
-  const fields = protectedEvidence.map(orchestrationProtectedFields);
-  assertCurrent();
-  // Association remains exact native order and identity. Complete protected
-  // descriptions and source records are retained as ordered field evidence.
-  return rankHarnessCatalog(entries.map((entry, index) => ({ index, id: agentId(entry.record), fields: fields[index] })), query,
-    candidate => ({ id: candidate.id, description: 'Visible Agent orchestration record', evidence: { fields: candidate.fields } }),
-    'agent.harness.agent-orchestration', { ...options, assertCurrent, requirePreservedSource: true })
-    .then(result => {
-      assertCurrent();
-      // Ranking preserves this code-owned ordinal through its exact candidate
-      // capture. Return the retained native entry, whose workspace occurrences
-      // remain bound to their producer; equal captured copies have no ownership.
-      const matches = result.matches.map(match => {
-        const index = match.entry.index, entry = entries[index];
-        if (!Number.isSafeInteger(index) || index < 0 || !entry) throw new ToolInputProjectionError('held');
-        return { ...match, entry };
-      });
-      return { ...result, assertProtectedCurrent: assertCurrent, matches };
-    });
+/** Literal first (exact id, then words over id/task/template/status), at most one reading over the best few; descriptions masked first. */
+async function matchingAgents(entries: ReturnType<typeof orchestrationEntries>, query: string, options: CatalogRankingOptions) {
+  options.signal?.throwIfAborted();
+  if (!query) return { matches: entries.map(entry => ({ entry, judgment: undefined })), judgments: [] };
+  const result = await rankHarnessCatalog(entries, query, entry => ({ id: agentId(entry.record), description: redactSensitiveData(agentSearchText(entry.record)) }),
+    'agent.harness.agent-orchestration', { signal: options.signal });
+  return { matches: result.matches.map(({ entry, judgment }) => ({ entry, judgment })), judgments: result.judgments };
 }
 
 export async function agentOrchestrationSummary(context: CommandContext, toolRegistry: ToolRegistry, args: AgentHarnessAgentOrchestrationArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const query = readString(args.query);
-  if (query) admitOrchestrationQuery(query);
-  const backend = captureOrchestrationBackend(context, toolRegistry);
-  const remoteSource = await captureOrchestrationPublisher(context, backend, options, toolRegistry);
-  const sources = orchestrationSources(context, backend, toolRegistry, remoteSource);
-  const { assertCurrent, publish } = retainOrchestrationSources(context, sources, options, backend, toolRegistry);
+  const sources = readOrchestrationSources(context);
   const records = sources.records;
   const toolRegistered = agentToolRegistered(toolRegistry);
   if (!records) {
-    return publish({
+    return {
       status: 'unavailable',
       reason: 'Visible Agent orchestration requires an Agent manager in the runtime.',
       modes: ['agent_orchestration', 'agent_orchestration_agent'],
       toolRegistered,
       policy: 'Read-only orchestration posture. Actual spawn/message/wait/cancel remains on the first-class agent tool.',
-    });
+    };
   }
   const counts = statusCounts(records);
   const includeParameters = args.includeParameters === true;
-  const selected = await matchingAgents(orchestrationEntries(sources), query, { ...options, assertCurrent }, backend, orchestrationWorkspaceDisplays.get(sources));
-  const assertQueryCurrent = selected.assertProtectedCurrent ?? assertCurrent;
-  assertQueryCurrent();
+  const selected = await matchingAgents(orchestrationEntries(sources), query, options);
   const filtered = selected.matches.slice(0, readLimit(args.limit, 100));
-  const result: Record<string, unknown> = {
+  return maskOrchestrationProse({
     status: counts.running > 0 || counts.pending > 0 ? 'attention' : toolRegistered ? 'ready' : 'needs-setup',
     summary: {
       agents: records.length,
@@ -1470,7 +822,7 @@ export async function agentOrchestrationSummary(context: CommandContext, toolReg
       managedPlanStatus: managedPlanStatus(records, toolRegistered),
     },
     managedExecutionPlan: managedExecutionPlan(records, context, toolRegistry, sources.remote, includeParameters, sources.workItems),
-    agents: filtered.map(({ entry, judgment }) => ({ ...(includeParameters ? entry.full : entry.summary), ...(judgment ? { judgment } : {}) })),
+    agents: filtered.map(({ entry, judgment }) => ({ ...(includeParameters ? entry.full() : entry.summary()), ...(judgment ? { judgment } : {}) })),
     judgments: selected.judgments,
     returned: filtered.length,
     total: records.length,
@@ -1486,15 +838,12 @@ export async function agentOrchestrationSummary(context: CommandContext, toolReg
       cancel: 'agent { mode: "cancel" }',
       harness: 'agent_harness mode:"agent_orchestration"',
     },
-    policy: 'Read-only orchestration posture. Agent work must be visible, statused, cancellable, and tied to the user request; hidden fanout is blocked. includeParameters defaults to false for this list (summaries) and to true for a single agent_orchestration_agent view. total counts every visible agent; returned counts the matching agents shown, so returned below total is not by itself a truncation.' + (selected.matches.length > filtered.length ? ` Showing the first ${filtered.length} of ${selected.matches.length} matching agents (limit).` : ''),
-  };
-  const protectedResult = await protectOrchestrationOutput(result, { ...options, assertCurrent: assertQueryCurrent }, orchestrationWorkspaceDisplays.get(sources));
-  assertQueryCurrent(); return publish(protectedResult);
+    policy: 'Read-only orchestration posture. Agent work must be visible, statused, cancellable, and tied to the user request; hidden fanout is blocked. includeParameters defaults to false for this list (summaries) and to true for a single agent_orchestration_agent view. total counts every visible agent; returned counts the matching agents shown, so returned below total is not by itself a truncation. Agent task, progress and remote text are masked for credentials.' + (selected.matches.length > filtered.length ? ` Showing the first ${filtered.length} of ${selected.matches.length} matching agents (limit).` : ''),
+  });
 }
 
 export async function describeAgentOrchestrationAgent(context: CommandContext, args: AgentHarnessAgentOrchestrationArgs, options: CatalogRankingOptions = {}): Promise<AgentOrchestrationResolution> {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const backend = captureOrchestrationBackend(context);
   const lookup = lookupFromArgs(args);
   if (!lookup) {
     return {
@@ -1502,47 +851,24 @@ export async function describeAgentOrchestrationAgent(context: CommandContext, a
       usage: 'agent_orchestration_agent requires agentId, target, or query. Use mode:"agent_orchestration" to inspect visible agents.',
     };
   }
-  if (lookup.source !== 'agentId') admitOrchestrationQuery(lookup.input);
-  const remoteSource = await captureOrchestrationPublisher(context, backend, options);
-  const sources = orchestrationSources(context, backend, undefined, remoteSource);
-  const { assertCurrent, publish } = retainOrchestrationSources(context, sources, options, backend);
-  const records = sources.records;
-  if (!records) {
-    return publish({
-      status: 'missing_lookup',
-      usage: 'Visible Agent orchestration requires an Agent manager in the runtime.',
-    });
-  }
+  const sources = readOrchestrationSources(context);
+  if (!sources.records) return { status: 'missing_lookup', usage: 'Visible Agent orchestration requires an Agent manager in the runtime.' };
   const entries = orchestrationEntries(sources);
+  const full = args.includeParameters !== false;
   const exact = entries.find(({ record }) => agentId(record) === lookup.input);
-  if (exact) {
-    assertCurrent(); assertOrchestrationOriginalFloor(entries, backend); assertCurrent();
-    if (!options.sourceOwner) throw new ToolInputProjectionError('held');
-    const result = await protectOrchestrationOutput({ status: 'found', agent: args.includeParameters !== false ? exact.full : exact.summary },
-      { ...options, assertCurrent }, orchestrationWorkspaceDisplays.get(sources));
-    assertCurrent();
-    if (result.status !== 'found') throw new ToolInputProjectionError('held');
-    return publish({ status: 'found', agent: orchestrationDisplayRecord(result.agent) });
-  }
-  const selected = lookup.source === 'agentId' ? { matches: [], judgments: [], assertProtectedCurrent: undefined }
-    : await matchingAgents(entries, lookup.input, { ...options, assertCurrent }, backend, orchestrationWorkspaceDisplays.get(sources));
-  const assertQueryCurrent = selected.assertProtectedCurrent ?? assertCurrent;
-  assertQueryCurrent();
+  if (exact) return { status: 'found', agent: maskOrchestrationProse((full ? exact.full() : exact.summary()), ['agent']) };
+  const selected = lookup.source === 'agentId' ? { matches: [], judgments: [] } : await matchingAgents(entries, lookup.input, options);
   const matches = selected.matches;
   if (matches.length === 1 && matches[0]!.judgment?.reading.verdict === 'yes' && matches[0]!.judgment?.reading.outcome === 'act') {
-    const result = await protectOrchestrationOutput({ status: 'found', agent: { ...(args.includeParameters !== false ? matches[0]!.entry.full : matches[0]!.entry.summary), judgment: matches[0]!.judgment } }, { ...options, assertCurrent: assertQueryCurrent }, orchestrationWorkspaceDisplays.get(sources));
-    assertQueryCurrent();
-    if (result.status !== 'found') throw new ToolInputProjectionError('held');
-    return publish({ status: 'found', agent: orchestrationDisplayRecord(result.agent) });
+    const match = matches[0]!;
+    return { status: 'found', agent: maskOrchestrationProse({ ...(full ? match.entry.full() : match.entry.summary()), judgment: match.judgment }, ['agent']) };
   }
   if (matches.length > 0) {
-    const result = await protectOrchestrationOutput({ status: 'ambiguous', input: lookup.input, candidates: matches.slice(0, 8).map(({ entry, judgment }) => ({ ...entry.summary, judgment })) }, { ...options, assertCurrent: assertQueryCurrent }, orchestrationWorkspaceDisplays.get(sources));
-    assertQueryCurrent();
-    if (result.status !== 'ambiguous' || result.input !== lookup.input || !Array.isArray(result.candidates)) throw new ToolInputProjectionError('held');
-    return publish({ status: 'ambiguous', input: lookup.input, candidates: result.candidates.map(orchestrationDisplayRecord) });
+    return { status: 'ambiguous', input: lookup.input,
+      candidates: matches.slice(0, 8).map(({ entry, judgment }, index) => maskOrchestrationProse({ ...entry.summary(), judgment }, ['candidates', index])) };
   }
-  return publish({
+  return {
     status: 'missing_lookup',
     usage: `Unknown visible agent ${lookup.input}. Use mode:"agent_orchestration" to inspect visible agents.`,
-  });
+  };
 }

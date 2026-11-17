@@ -1,4 +1,5 @@
 import type { MemoryAddOptions } from '@goodvibes-jev/engine/platform/platform/state';
+import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { AgentPersonaCreateInput, AgentPersonaUpdateInput } from './persona-registry.js';
 import type { AgentSkillCreateInput, AgentSkillUpdateInput } from './skill-registry.js';
 import type { AgentRoutineCreateInput, AgentRoutineUpdateInput } from './routine-registry.js';
@@ -88,6 +89,8 @@ export interface LearningCuratorNativeContext {
     readonly sessionManager?: Pick<SessionManager, 'list' | 'load'> | undefined;
     readonly runtime?: { readonly sessionId: string } | undefined;
   } | undefined;
+  /** `runtime.maxParallelToolCalls` caps the decision readings a curation pass keeps in flight. */
+  readonly platform?: { readonly configManager?: Pick<ConfigManager, 'get'> | undefined } | undefined;
 }
 
 type SessionListEntry = ReturnType<NonNullable<NonNullable<LearningCuratorNativeContext['session']>['sessionManager']>['list']>[number];

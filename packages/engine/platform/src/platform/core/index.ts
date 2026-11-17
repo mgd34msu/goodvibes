@@ -33,3 +33,5 @@ export * from './transcript-events/index.js';
 export { hydrateConversationUsage, isConversationContextAvailable, isConversationUsageAvailable } from './conversation-usage.js';
 
 export { bindVerificationTargets } from './verification/targets.js';
+
+export { DEFAULT_MAX_PARALLEL_TOOL_CALLS, maxParallelToolCalls } from './tool-batch.js';

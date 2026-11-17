@@ -1,7 +1,8 @@
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { readNativeConversationTurnPermit, revalidateNativeConversationTurnPermit, type NativeConversationTurnPermit } from '../workflow/work-ledger/native-intake-client.js';
 import { logger } from '../utils/logger.js';
-import { withChannelExecutionMode } from '../channel-profiles/install-inbound-intake.js';
+import { withChannelExecutionMode, type ChannelIntake } from '../channel-profiles/install-inbound-intake.js';
+import type { ChannelProfileDefaults } from '../channel-profiles/types.js';
 import type { GatePresetName } from '../gate/presets.js';
 import { summarizeError } from '../utils/error-display.js';
 import { sessionsActive } from '../runtime/metrics.js';
@@ -185,6 +186,8 @@ export class SharedSessionBroker {
   private eventPublisher: SharedSessionEventPublisher | null = null;
   private continuationRunner: SharedSessionContinuationRunner | null = null;
   private surfaceReplyBinder: SharedSessionSurfaceReplyBinder | null = null;
+  /** Sender attribution and channel profiles for channel messages; set by host composition. */
+  private channelIntake: ChannelIntake | null = null;
   private surfaceNoticeSender: ((routeId: string, text: string) => void) | null = null;
   private loaded = false;
   /** One load at a time: a second early caller must not clear maps the first already filled. */
@@ -389,6 +392,21 @@ export class SharedSessionBroker {
       if (after?.state === 'queued') return;
       this.capacityWaiting.delete(inputId);
     }
+  }
+
+  /**
+   * Give the broker its channel intake. From then on a message from a channel
+   * surface is attributed to its sender and its channel profile's permission
+   * mode is written with the session it creates, in the same save, before the
+   * message is stored. Null removes it.
+   */
+  setChannelIntake(intake: ChannelIntake | null): void {
+    this.channelIntake = intake;
+  }
+
+  /** The channel profile that applies to an agent spawned for `session`, or null. */
+  channelProfileForSession(session: Pick<SharedSessionRecord, 'id' | 'participants'>): ChannelProfileDefaults | null {
+    return this.channelIntake?.profileForSession(session) ?? null;
   }
 
   /** Host composition binds a channel default once, after trusted profile resolution. */
@@ -650,11 +668,18 @@ export class SharedSessionBroker {
   }
 
   async createSession(input: CreateSharedSessionInput = {}): Promise<SharedSessionRecord> {
+    return this.createSessionRecord(input, undefined);
+  }
+
+  /** Create a session; a channel profile's mode, when given, is written in the same save as the session. */
+  private async createSessionRecord(input: CreateSharedSessionInput, channelMode: GatePresetName | undefined): Promise<SharedSessionRecord> {
     await this.start();
-    const session = createSharedSessionRecord(input);
+    const record = createSharedSessionRecord(input);
     // A caller-chosen id that is already taken names that session: replacing it would reset its counts and status.
-    const taken = input.id ? this.sessions.get(session.id) : undefined;
+    const taken = input.id ? this.sessions.get(record.id) : undefined;
     if (taken) return taken;
+    const session: SharedSessionRecord = channelMode === undefined ? record
+      : { ...record, channelPermissionMode: channelMode, channelPermissionModeRevision: 1 };
     this.sessions.set(session.id, session);
     if (input.routeBinding?.id) {
       await this.routeBindings.patchBinding(input.routeBinding.id, { sessionId: session.id });
@@ -1260,11 +1285,16 @@ export class SharedSessionBroker {
     allowSpawnFallback: boolean,
     onQueued?: (input: SharedSessionInputRecord) => void,
   ): Promise<SharedSessionSubmission> {
+    // Channel intake runs before anything is recorded: the sender's attribution
+    // rides on the message, and the channel profile's mode is written with the
+    // session before the message is stored, so a failed save leaves neither.
+    const prepared = this.channelIntake ? await this.channelIntake.prepare(input) : null;
+    const message = prepared ? { ...input, metadata: prepared.metadata } : input;
     // Concurrent webhook deliveries for one conversation must not both see "no session yet" and each create one.
-    const routeKey = input.routeId
-      ? `route:${input.routeId}`
-      : input.externalId ? `route:${input.surfaceKind ?? ''}|${input.externalId}|${input.threadId ?? ''}` : null;
-    return this.serialized(routeKey, () => this.handleIntentUnlocked(intent, input, allowSpawnFallback, onQueued));
+    const routeKey = message.routeId
+      ? `route:${message.routeId}`
+      : message.externalId ? `route:${message.surfaceKind ?? ''}|${message.externalId}|${message.threadId ?? ''}` : null;
+    return this.serialized(routeKey, () => this.handleIntentUnlocked(intent, message, allowSpawnFallback, onQueued, prepared?.permissionMode));
   }
 
   private async handleIntentUnlocked(
@@ -1272,6 +1302,7 @@ export class SharedSessionBroker {
     input: SubmitSharedSessionMessageInput,
     allowSpawnFallback: boolean,
     onQueued?: (input: SharedSessionInputRecord) => void,
+    channelMode?: GatePresetName,
   ): Promise<SharedSessionSubmission> {
     return handleSharedSessionIntent(
       {
@@ -1279,9 +1310,16 @@ export class SharedSessionBroker {
         messageSender: this.messageSender,
         start: () => this.start(),
         resolveBinding: (i) => this.resolveBinding(i),
-        createSession: (i) => this.createSession(i),
+        createSession: (i) => this.createSessionRecord(i ?? {}, channelMode),
         reopenSession: (sessionId) => this.reopenSession(sessionId),
-        attachParticipantAndRoute: (session, i, binding) => this.attachParticipantAndRoute(session, i, binding),
+        attachParticipantAndRoute: async (session, i, binding) => {
+          const attached = await this.attachParticipantAndRoute(session, i, binding);
+          // A session this channel reaches without a mode (made before the profile
+          // applied, or whose earlier bind failed) is bound now, before the message is stored.
+          if (channelMode === undefined || attached.channelPermissionMode !== undefined || attached.status !== 'active') return attached;
+          await this.bindChannelExecutionMode(attached.id, channelMode);
+          return this.sessions.get(attached.id) ?? attached;
+        },
         appendMessage: (sessionId, i) => this.appendMessage(sessionId, i),
         appendUnpublishedMessage: (sessionId, i) => appendSharedSessionMessage(this.messageStore(), { sessionId, ...i }, MAX_PERSISTED_MESSAGES),
         sessionInputStore: () => this.sessionInputStore(),

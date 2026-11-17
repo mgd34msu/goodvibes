@@ -38,6 +38,7 @@ export {
   channelProfileForSession,
   ChannelInboundIntake,
   type PreparedInboundMessage,
+  type ChannelIntake,
   type InboundIntakeBroker,
   type InboundIntakeEnrichmentDeps,
 } from './install-inbound-intake.js';

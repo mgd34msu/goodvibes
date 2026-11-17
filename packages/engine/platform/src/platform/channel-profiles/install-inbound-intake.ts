@@ -15,18 +15,14 @@
  * - the session's permission mode: the session record's `channelPermissionMode`.
  *   The execution-mode owner is derived from that record on each use.
  *
- * `installInboundIntakeEnrichment` attaches one `ChannelInboundIntake` to the
- * broker's message entry points (submit, follow-up, steer, delegated submit).
+ * `installInboundIntakeEnrichment` gives the broker one `ChannelInboundIntake`.
+ * The broker runs it before it records a channel message (submit, follow-up,
+ * steer, delegated submit) and writes the profile's mode with the session the
+ * message creates, in the same save, so a message is never stored ahead of its
+ * session's mode.
  */
 import type { PrincipalRegistry } from '../principals/index.js';
-import type {
-  SharedSessionRecord,
-  SharedSessionSubmission,
-  SteerSharedSessionMessageInput,
-  SubmitSharedSessionMessageInput,
-} from './../control-plane/session-types.js';
-import type { DelegatedSessionInputBinding, DelegatedSessionSubmission } from '../control-plane/session-broker-delegated.js';
-import type { SharedSessionInputRecord } from '../control-plane/session-intents.js';
+import type { SharedSessionRecord, SubmitSharedSessionMessageInput } from './../control-plane/session-types.js';
 import { withExecutionModeOwner, type ExecutionModeOwner } from '../gate/execution-context.js';
 import type { ChannelPermissionMode, ChannelProfileDefaults } from './types.js';
 import { isSettableGatePresetName } from '../gate/presets.js';
@@ -37,16 +33,20 @@ import type { ChannelPolicyManager } from '../channels/policy-manager.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 
-/** The broker surface intake needs: its message entry points and the session's channel mode. */
+/** What the broker runs on each message before it records it, and reads when it spawns an agent. */
+export interface ChannelIntake {
+  /** The attribution and permission mode for one message; null for a message that is not from a channel surface. */
+  prepare(input: SubmitSharedSessionMessageInput): Promise<PreparedInboundMessage | null>;
+  /** The model/provider profile for a session's originating channel, or null. */
+  profileForSession(session: Pick<SharedSessionRecord, 'id' | 'participants'>): ChannelProfileDefaults | null;
+}
+
+/** The broker surface intake needs: where its intake goes, the profile it reads, and the session's channel mode. */
 export interface InboundIntakeBroker {
-  submitMessage(input: SubmitSharedSessionMessageInput): Promise<SharedSessionSubmission>;
-  followUpMessage?(input: SubmitSharedSessionMessageInput): Promise<SharedSessionSubmission>;
-  steerMessage?(input: SteerSharedSessionMessageInput): Promise<SharedSessionSubmission>;
-  submitDelegatedMessage?(input: SubmitSharedSessionMessageInput,
-    onQueued: (input: SharedSessionInputRecord) => DelegatedSessionInputBinding): Promise<DelegatedSessionSubmission>;
+  setChannelIntake(intake: ChannelIntake | null): void;
+  channelProfileForSession?(session: Pick<SharedSessionRecord, 'id' | 'participants'>): ChannelProfileDefaults | null;
   getSession?(sessionId: string): { readonly status: string; readonly channelPermissionMode?: ChannelPermissionMode | undefined;
     readonly channelPermissionModeRevision?: number | undefined } | null;
-  bindChannelExecutionMode?(sessionId: string, mode: ChannelPermissionMode): Promise<void>;
   setChannelExecutionMode?(sessionId: string, mode: ChannelPermissionMode): Promise<void>;
 }
 
@@ -101,7 +101,7 @@ function profileChannelId(source: { readonly externalId?: string | undefined; re
 }
 
 /** Attribution and profile resolution for channel messages; one per broker. */
-export class ChannelInboundIntake {
+export class ChannelInboundIntake implements ChannelIntake {
   constructor(private readonly deps: InboundIntakeEnrichmentDeps) {
     // Read the bindings at start so a spawn for a queued channel input finds them in memory.
     void deps.channelProfiles.preload?.().catch((error: unknown) => {
@@ -142,12 +142,12 @@ export class ChannelInboundIntake {
   }
 }
 
-// One intake per broker; set by installInboundIntakeEnrichment and read by the spawn path.
-const intakes = new WeakMap<object, ChannelInboundIntake>();
-
 /** The channel profile that applies to an agent spawned for `session`, or null. */
-export function channelProfileForSession(broker: object, session: Pick<SharedSessionRecord, 'id' | 'participants'>): ChannelProfileDefaults | null {
-  return intakes.get(broker)?.profileForSession(session) ?? null;
+export function channelProfileForSession(
+  broker: Pick<InboundIntakeBroker, 'channelProfileForSession'>,
+  session: Pick<SharedSessionRecord, 'id' | 'participants'>,
+): ChannelProfileDefaults | null {
+  return broker.channelProfileForSession?.(session) ?? null;
 }
 
 /**
@@ -164,44 +164,13 @@ export async function enrichInboundSubmitMetadata(
 }
 
 /**
- * Attach channel intake to a broker's message entry points. Installing twice
- * leaves the first installation in place.
+ * Give a broker its channel intake: sender attribution and the channel
+ * profile's mode, applied by the broker itself before it records a channel
+ * message. Installing again replaces the intake.
  */
 export function installInboundIntakeEnrichment(
-  broker: InboundIntakeBroker,
+  broker: Pick<InboundIntakeBroker, 'setChannelIntake'>,
   deps: InboundIntakeEnrichmentDeps,
 ): void {
-  if (intakes.has(broker)) return;
-  const intake = new ChannelInboundIntake(deps);
-  intakes.set(broker, intake);
-
-  // A session created by a channel message is bound to the profile's mode. A
-  // later message that finds the session still without a mode binds it, so a
-  // bind whose save failed on the first message is retried, not forgotten.
-  const bind = async (prepared: PreparedInboundMessage | null, submission: SharedSessionSubmission): Promise<void> => {
-    if (prepared?.permissionMode === undefined) return;
-    const unbound = submission.created || (broker.getSession !== undefined
-      && broker.getSession(submission.session.id)?.channelPermissionMode === undefined);
-    if (unbound) await broker.bindChannelExecutionMode?.(submission.session.id, prepared.permissionMode);
-  };
-  const through = <I extends SubmitSharedSessionMessageInput>(send: (input: I) => Promise<SharedSessionSubmission>) =>
-    async (input: I): Promise<SharedSessionSubmission> => {
-      const prepared = await intake.prepare(input);
-      const submission = await send(prepared ? { ...input, metadata: prepared.metadata } : input);
-      await bind(prepared, submission);
-      return submission;
-    };
-
-  broker.submitMessage = through(broker.submitMessage.bind(broker));
-  if (broker.followUpMessage) broker.followUpMessage = through(broker.followUpMessage.bind(broker));
-  if (broker.steerMessage) broker.steerMessage = through(broker.steerMessage.bind(broker));
-  if (broker.submitDelegatedMessage) {
-    const delegated = broker.submitDelegatedMessage.bind(broker);
-    broker.submitDelegatedMessage = async (input, onQueued) => {
-      const prepared = await intake.prepare(input);
-      const result = await delegated(prepared ? { ...input, metadata: prepared.metadata } : input, onQueued);
-      await bind(prepared, result.submission);
-      return result;
-    };
-  }
+  broker.setChannelIntake(new ChannelInboundIntake(deps));
 }

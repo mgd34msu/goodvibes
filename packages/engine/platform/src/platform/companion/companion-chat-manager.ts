@@ -1064,6 +1064,13 @@ export class CompanionChatManager {
     }
   }
 
+  /** Whether the reply to this question is still owed to storage. */
+  private replyUnsaved(session: InternalSession, userMessageId: string): boolean {
+    const unsaved = session.unsaved;
+    if (!unsaved?.size) return false;
+    return this.transcript(session).some((message) => message.inReplyTo === userMessageId && unsaved.has(message.id));
+  }
+
   /** Add a reply the turn produced to the transcript and save it. */
   private recordReply(session: InternalSession, message: CompanionChatMessage): void {
     const owned = this.normalizeMessage(message);
@@ -1318,7 +1325,10 @@ export class CompanionChatManager {
       // and settle for any exit path that did not run finalizeCancelled
       // (resolve is idempotent, a second call is a no-op).
       if (session.activeTurn === scope.activeTurn) session.activeTurn = null;
-      this.markTurn(session, userMessageId, 'ended');
+      // A reply whose save failed is in memory only: the turn stays marked as
+      // started, so a daemon that stops before the next save of this chat
+      // shows the question as cut off on reload instead of silently unanswered.
+      if (!this.replyUnsaved(session, userMessageId)) this.markTurn(session, userMessageId, 'ended');
       scope.detach();
       scope.settle({ partialPersisted: false });
       // Drain: a queued send (or a steer that jumped the queue) starts now.

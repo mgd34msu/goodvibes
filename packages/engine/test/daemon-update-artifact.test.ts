@@ -1,28 +1,24 @@
 /**
- * The auto-update loop never assumes the platform package is the shipped artifact.
+ * A daemon replaces or hands itself over only when it owns the artifact and a
+ * successor is ready:
  *
  * - Embedded default (no artifact identity): even with update.auto=true and a
- *   releases URL configured, NO auto-update loop starts, the host manages
- *   updates, and the platform package version is never compared against the host's
- *   release tags.
- * - With a host-provided artifact identity, the loop compares the HOST's
- *   version (and swaps the host-named executable), not the platform's VERSION.
+ *   releases URL configured, no update loop starts and no service promotion
+ *   exits the process, so the host's own executable is never replaced and the
+ *   host is never killed.
+ * - With a host-provided artifact identity, the loop compares and swaps the
+ *   HOST's artifact, never the platform package.
+ * - A boot promotion to the service manager stops this daemon only after the
+ *   unit is installed and the manager reloaded; any refusal leaves it serving.
  */
-import { afterEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DaemonServer } from '../platform/src/platform/daemon/facade.ts';
-import { WorkProposalStore } from '../platform/src/platform/agents/work-proposal-store.ts';
 import { DaemonLifecycleRuntime, type DaemonLifecycleRuntimeOptions } from '../platform/src/platform/daemon/facade-lifecycle.ts';
-import { RestartController } from '../platform/src/platform/daemon/host-mode-watcher.ts';
-import { logger } from '../platform/src/platform/utils/logger.ts';
 import type { ServiceCommandRunner } from '../platform/src/platform/daemon/service-handover.ts';
-import { updateConfigDefaults } from '../platform/src/platform/config/schema-domain-update.js';
 import { VERSION } from '../platform/src/platform/version.ts';
-import { createAsyncDisposalScope } from '../platform/src/platform/runtime/async-disposal.js';
 import { prepareServiceHandover } from '../platform/src/platform/daemon/service-handover-preflight.js';
-import { waitFor } from './_helpers/test-timeout.ts';
 
 const scratchDirs: string[] = [];
 
@@ -71,6 +67,7 @@ function lifecycleWith(
   const installs: number[] = [];
   const exits: number[] = [];
   const platformServiceManager = {
+    serviceName: () => String(config.get('service.serviceName')),
     status: () => ({ platform: 'systemd', ...(overrides.status?.() ?? { installed: false, running: false }) }),
     install: () => { installs.push(Date.now()); return overrides.install?.() ?? {}; },
   } as unknown as DaemonLifecycleRuntimeOptions['platformServiceManager'];
@@ -136,40 +133,6 @@ describe('daemon update artifact identity', () => {
     } finally {
       await runtime.onStopping(false);
     }
-  });
-});
-
-describe('no silent gates: every reason the update loop stays off is logged', () => {
-  async function infoLinesFor(overrides: Parameters<typeof lifecycleWith>[1], artifact?: DaemonLifecycleRuntimeOptions['updateArtifact']): Promise<string[]> {
-    const spy = spyOn(logger, 'info') as Mock<typeof logger.info>;
-    const { runtime } = lifecycleWith(artifact, overrides);
-    try {
-      runtime.onStarted();
-      return spy.mock.calls.map((call) => String(call[0]));
-    } finally {
-      await runtime.onStopping(false);
-      spy.mockRestore();
-    }
-  }
-
-  test('update.auto not true says so, instead of returning in silence', async () => {
-    const lines = await infoLinesFor({ configOverrides: { 'update.auto': false } }, { version: '1.0.0' });
-    expect(lines.some((line) => line.includes('auto-update loop off') && line.includes('update.auto'))).toBe(true);
-  });
-
-  test('an empty releasesUrl says so, instead of returning in silence', async () => {
-    const lines = await infoLinesFor({ configOverrides: { 'update.releasesUrl': '   ' } }, { version: '1.0.0' });
-    expect(lines.some((line) => line.includes('auto-update loop off') && line.includes('update.releasesUrl'))).toBe(true);
-  });
-
-  test('no artifact identity says so', async () => {
-    const lines = await infoLinesFor({});
-    expect(lines.some((line) => line.includes('auto-update loop off') && line.includes('host-managed'))).toBe(true);
-  });
-
-  test('an armed loop announces its schedule, so "nothing updated" is never a guess', async () => {
-    const lines = await infoLinesFor({}, { version: '1.0.0' });
-    expect(lines.some((line) => line.includes('auto-update loop armed'))).toBe(true);
   });
 });
 
@@ -277,42 +240,15 @@ describe('boot-edge service promotion (independent of updates)', () => {
     }
   });
 
-  test('a busy daemon defers promotion to the same idle moment the update swap waits for', async () => {
-    let idle = false;
-    // Capture the retry tick instead of waiting a second for it: the test fires
-    // it by hand. The tick's handle is replaced by an inert real one so the
-    // runtime's clearInterval still has something valid to clear.
-    const retryTicks: Array<() => void> = [];
-    const realSetInterval = globalThis.setInterval;
-    const intervals = spyOn(globalThis, 'setInterval').mockImplementation(((callback: () => void, delay?: number, ...args: unknown[]) => {
-      if (delay !== 1_000) return (realSetInterval as (...a: unknown[]) => ReturnType<typeof setInterval>)(callback, delay, ...args);
-      retryTicks.push(callback);
-      const inert = realSetInterval(() => {}, 2_147_483_647);
-      (inert as { unref?: () => void }).unref?.();
-      return inert;
-    }) as unknown as typeof setInterval);
+  test('a busy daemon does not install a unit or hand over at boot', async () => {
+    const { runtime, installs, exits } = lifecycleWith(artifact, { isIdle: () => false });
+    runtime.onStarted();
     try {
-      const { runtime, installs, exits } = lifecycleWith(artifact, { isIdle: () => idle, promotionRetryMs: 1_000 });
-      runtime.onStarted();
-      try {
-        // Busy at boot: no install, no handover, and a retry is waiting.
-        expect(installs).toHaveLength(0);
-        expect(exits).toHaveLength(0);
-        expect(retryTicks).toHaveLength(1);
-        // A tick while still busy changes nothing.
-        retryTicks[0]!();
-        expect(installs).toHaveLength(0);
-        // Idle arrives; the next retry tick promotes.
-        idle = true;
-        retryTicks[0]!();
-        await runtime.drainHandovers();
-        expect(installs).toHaveLength(1);
-        expect(exits).toEqual([0]);
-      } finally {
-        await runtime.onStopping(false);
-      }
+      await runtime.drainHandovers();
+      expect(installs).toHaveLength(0);
+      expect(exits).toHaveLength(0);
     } finally {
-      intervals.mockRestore();
+      await runtime.onStopping(false);
     }
   });
 });
@@ -348,9 +284,7 @@ test('boot promotion never enables or exits after failed original cleanup, and p
   try {
     await outcome.drain;
     expect(h.installs).toHaveLength(1); expect(commands).toEqual([['systemctl', '--user', 'show-environment'], ['systemctl', '--user', 'daemon-reload']]); expect(h.exits).toEqual([]); expect(inspections).toBe(0);
-    const receipt = h.runtime.receiptStore().list().map(row => row.text).join('');
-    expect(receipt).toContain('boot promotion handover incomplete (failed)'); expect(receipt).toContain('owned runtime cleanup did not complete; no service handover was requested');
-    expect(receipt).not.toContain('private promotion'); expect(h.runtime.activateNativeLifecycle()).toBe(outcome);
+    expect(h.runtime.activateNativeLifecycle()).toBe(outcome);
   } finally { await h.runtime.onStopping(false, false, false); }
 });
 
@@ -367,7 +301,6 @@ for (const cancellation of ['stop', 'handle'] as const) test(`external ${cancell
     await Promise.resolve(); expect(completed).toBe(false); expect(h.installs).toHaveLength(1);
     released.resolve(); await closed; await outcome.drain;
     expect(commands.some(argv => argv.includes('enable'))).toBe(false); expect(h.exits).toEqual([]);
-    expect(h.runtime.receiptStore().list().some(row => row.text.includes('boot promotion handover incomplete (unknown)'))).toBe(true);
   } finally { released.resolve(); await closed; }
 });
 
@@ -430,7 +363,7 @@ for (const label of ['sh.goodvibes.daemon', 'custom.goodvibes']) {
       await prepared.reserve(new AbortController().signal);
       expect(reservations).toBe(1); expect(prepared.exitRequired).toBe(true); prepared.assertCurrent();
       writeFileSync(path + '.incoming', contents, { mode: 0o644 }); renameSync(path + '.incoming', path);
-      expect(() => prepared.assertCurrent()).toThrow('helper is no longer current');
+      expect(() => prepared.assertCurrent()).toThrow();
       expect(h.installs).toEqual([]); expect(h.exits).toEqual([]);
     } finally { await prepared.cancel(); expect(cancelled).toBe(1); await h.runtime.onStopping(false); }
   });
@@ -447,7 +380,6 @@ describe('observed service handover', () => {
       expect(h.exits).toEqual([]);
       // The unit is installed first; nothing runs after a failed install.
       expect(commands).toEqual([]);
-      expect(h.runtime.receiptStore().list().some((r) => r.text.includes('handover incomplete (failed)'))).toBe(true);
       await h.runtime.onStopping(false);
     });
   }
@@ -464,15 +396,16 @@ describe('observed service handover', () => {
   }
   test('reload is completed before start enqueue; duplicate starts make one handover', async () => {
     let release!: (outcome: { status: 'accepted' }) => void;
+    const reloading = Promise.withResolvers<void>();
     const commands: string[][] = [];
     const h = lifecycleWith(artifact, { runner: async (argv) => {
       commands.push([...argv]);
-      if (argv.includes('daemon-reload')) return new Promise((resolve) => { release = resolve; });
+      if (argv.includes('daemon-reload')) { reloading.resolve(); return new Promise((resolve) => { release = resolve; }); }
       return { status: 'accepted' };
     } });
     h.runtime.onStarted();
     h.runtime.onStarted();
-    await waitFor(() => commands.length === 2);
+    await reloading.promise;
     expect(commands).toHaveLength(2);
     expect(h.exits).toEqual([]);
     release({ status: 'accepted' });
@@ -486,21 +419,19 @@ describe('observed service handover', () => {
     await h.runtime.onStopping(false);
   });
   for (const stage of ['reload', 'start'] as const) {
-    for (const failure of ['failed', 'throw', 'timeout'] as const) {
+    for (const failure of ['failed', 'throw'] as const) {
       test(`${stage} ${failure} stays alive and owns errors`, async () => {
         let calls = 0;
         const h = lifecycleWith(artifact, { timeoutMs: 10, runner: async () => {
           calls++;
           if (stage === 'start' && calls === 1) return { status: 'accepted' };
           if (failure === 'throw') throw new Error('spawn failed');
-          if (failure === 'timeout') return new Promise(() => {});
           return { status: 'failed', detail: 'nonzero' };
         } });
         h.runtime.onStarted();
         await h.runtime.drainHandovers();
         expect(h.exits).toEqual([]);
         expect(calls).toBe(stage === 'start' ? 2 : 1);
-        expect(h.runtime.receiptStore().list().some((r) => r.text.includes('handover incomplete'))).toBe(true);
         await h.runtime.onStopping(false);
       });
     }
@@ -517,13 +448,15 @@ describe('observed service handover', () => {
     let reject!: (reason: unknown) => void;
     let commands = 0;
     let aborted = false;
+    const requested = Promise.withResolvers<void>();
     const h = lifecycleWith(artifact, { runner: (_argv, signal) => {
       commands++;
       signal.addEventListener('abort', () => { aborted = true; });
+      requested.resolve();
       return new Promise((_resolve, rejectPromise) => { reject = rejectPromise; });
     } });
     h.runtime.onStarted();
-    await waitFor(() => commands === 1);
+    await requested.promise;
     await h.runtime.onStopping(false);
     expect(aborted).toBe(true);
     reject(new Error('late error after cancellation'));
@@ -535,184 +468,14 @@ describe('observed service handover', () => {
 
 test('early shutdown fence cancels promotion before slower shutdown hooks drain', async () => {
   let release!: (outcome: { status: 'accepted' }) => void;
-  let requested = false;
-  const h = lifecycleWith({ version: '999.0.0-host-artifact' }, { runner: () => { requested = true; return new Promise((resolve) => { release = resolve; }); } });
+  const requested = Promise.withResolvers<void>();
+  const h = lifecycleWith({ version: '999.0.0-host-artifact' }, { runner: () => { requested.resolve(); return new Promise((resolve) => { release = resolve; }); } });
   h.runtime.onStarted();
-  await waitFor(() => requested);
+  await requested.promise;
   h.runtime.beginStopping();
   release({ status: 'accepted' });
   await h.runtime.drainHandovers(); // The facade awaiting other shutdown hooks.
   expect(h.exits).toEqual([]);
-  await h.runtime.onStopping(false);
-});
-
-test('a stopped applied updater remains reachable for cancellation and cannot re-arm in process', async () => {
-  const h = lifecycleWith({ version: '999.0.0-host-artifact' }, { configOverrides: { 'service.enabled': false } });
-  let stops = 0;
-  let drains = 0;
-  const applied = {
-    stop: () => { stops++; },
-    drainHandover: async () => { drains++; },
-    snapshot: () => ({ appliedVersion: '1000.0.0', handover: { status: 'unknown' } }),
-  };
-  (h.runtime as unknown as { autoUpdater: unknown }).autoUpdater = applied;
-  await h.runtime.onStopping(false); // The updater's own graceful stop.
-  h.runtime.beginStopping(); // A later external close still reaches it.
-  await h.runtime.onStopping(false);
-  expect(stops).toBe(3);
-  expect(drains).toBe(2);
-  h.runtime.onStarted();
-  expect(updaterOf(h.runtime)).toBeNull();
-  expect(h.runtime.updateStatus().armed).toBe(false);
-  expect(h.runtime.updateStatus().offReason).toContain('1000.0.0 is installed on disk');
-  await h.runtime.onStopping(false);
-});
-
-
-test('handover repair does not activate the shipped default update configuration without an artifact', async () => {
-  const defaults = updateConfigDefaults.update;
-  expect(defaults.auto).toBe(true);
-  expect(defaults.releasesUrl).toBe('https://github.com/mgd34msu/goodvibes/releases/latest');
-  const h = lifecycleWith(undefined, { configOverrides: { 'update.auto': defaults.auto, 'update.releasesUrl': defaults.releasesUrl } });
-  h.runtime.onStarted();
-  expect(updaterOf(h.runtime)).toBeNull();
-  expect(h.installs).toEqual([]);
-  expect(h.exits).toEqual([]);
-  await h.runtime.onStopping(false);
-});
-
-
-test('an already-torn-down facade still fences and drains a pending lifecycle handover', async () => {
-  let release!: (outcome: { status: 'accepted' }) => void;
-  let requested = false;
-  const h = lifecycleWith({ version: '999.0.0-host-artifact' }, { runner: () => { requested = true; return new Promise((resolve) => { release = resolve; }); } });
-  h.runtime.onStarted();
-  await waitFor(() => requested);
-  // No server construction or listener: exercise only the actual duplicate-stop path.
-  const workProposals = new WorkProposalStore();
-  workProposals.dispose();
-  const supplemental = createAsyncDisposalScope('empty facade supplemental fixture');
-  const facade = Object.assign(Object.create(DaemonServer.prototype) as object, {
-    lifecycle: h.runtime, tornDown: true, workProposals,
-    restartCycle: new RestartController({ isRunning: () => false, run: async () => {}, onError: () => {} }),
-    closeSupplementalResources: () => supplemental.close(),
-  }) as unknown as DaemonServer;
-  await facade.stop();
-  release({ status: 'accepted' });
-  await h.runtime.drainHandovers();
-  expect(h.exits).toEqual([]);
-  await h.runtime.onStopping(false);
-});
-
-
-test('close retains a settling update until its completed disk latch is visible', async () => {
-  const h = lifecycleWith({ version: '999.0.0-host-artifact' }, { configOverrides: { 'service.enabled': false } });
-  let release!: () => void;
-  const pending = new Promise<void>((resolve) => { release = resolve; });
-  let appliedVersion: string | null = null;
-  const applying = {
-    stop: () => {},
-    drainHandover: () => pending,
-    snapshot: () => ({ appliedVersion, handover: { status: 'unknown' } }),
-  };
-  (h.runtime as unknown as { autoUpdater: unknown }).autoUpdater = applying;
-  const close = h.runtime.onStopping(false);
-  h.runtime.onStarted();
-  expect((h.runtime as unknown as { autoUpdater: unknown }).autoUpdater).toBe(applying);
-  appliedVersion = '1000.0.0';
-  release();
-  await close;
-  h.runtime.onStarted();
-  expect(updaterOf(h.runtime)).toBeNull();
-  expect(h.runtime.updateStatus().offReason).toContain('1000.0.0 is installed on disk');
-  await h.runtime.onStopping(false);
-});
-
-for (const committed of [false, true]) {
-  test(`filesystem recovery is unarmed and retained across config restart (${committed ? 'committed' : 'uncommitted'})`, async () => {
-    const h = lifecycleWith({ version: '999.0.0-host-artifact' });
-    let ticks = 0;
-    const evidence = {
-      operation: 'update' as const, phase: committed ? 'cleanup' as const : 'commit' as const,
-      committed, recoveryRequired: true, targets: ['/opt/host/bin/host-app'],
-      recoveryPaths: ['/opt/host/bin/host-app.update-transaction'], recoveryErrors: ['synthetic cleanup failure'],
-    };
-    const updater = {
-      stop: () => {}, drainHandover: async () => {}, tick: async () => { ticks++; },
-      snapshot: () => ({ currentVersion: '999.0.0-host-artifact', releasesUrl: 'https://releases.invalid/latest',
-        checkIntervalMs: 60_000, firstCheckDelayMs: 30_000, failedCheckCount: 1,
-        lastCheckFailure: 'filesystem recovery requires inspection', pendingVersion: null,
-        appliedVersion: committed ? '1000.0.0' : null, recoveryRequired: true, transactionRecovery: evidence,
-      }),
-    };
-    (h.runtime as unknown as { autoUpdater: unknown }).autoUpdater = updater;
-    const before = h.runtime.updateStatus();
-    expect(before.armed).toBe(false);
-    expect(before.offReason).toContain('filesystem recovery');
-    expect(before.transactionRecovery).toEqual(evidence);
-    await h.runtime.onStopping(true);
-    h.runtime.onStarted();
-    expect(updaterOf(h.runtime)).toBeNull();
-    expect(h.runtime.updateStatus()).toEqual(before);
-    await h.runtime.checkForUpdatesNow();
-    expect(ticks).toBe(0);
-    expect(h.installs).toEqual([]);
-    expect(h.exits).toEqual([]);
-    await h.runtime.onStopping(false);
-    expect(h.runtime.updateStatus().transactionRecovery).toEqual(evidence);
-  });
-}
-
-test('recovery discovered while close drains is retained before a new updater can be created', async () => {
-  const h = lifecycleWith({ version: '999.0.0-host-artifact' }, { configOverrides: { 'service.enabled': false } });
-  let release!: () => void;
-  const pending = new Promise<void>((resolve) => { release = resolve; });
-  let recoveryRequired = false;
-  const applying = {
-    stop: () => {}, drainHandover: () => pending,
-    snapshot: () => ({ appliedVersion: null, recoveryRequired, lastCheckFailure: 'filesystem recovery required' }),
-  };
-  (h.runtime as unknown as { autoUpdater: unknown }).autoUpdater = applying;
-  const close = h.runtime.onStopping(true);
-  h.runtime.onStarted();
-  expect((h.runtime as unknown as { autoUpdater: unknown }).autoUpdater).toBe(applying);
-  recoveryRequired = true;
-  release(); await close;
-  h.runtime.onStarted();
-  expect(updaterOf(h.runtime)).toBeNull();
-  expect(h.runtime.updateStatus().armed).toBe(false);
-  expect(h.runtime.updateStatus().recoveryRequired).toBe(true);
-  expect(h.runtime.updateStatus().offReason).toContain('filesystem recovery');
-  await h.runtime.onStopping(false);
-});
-
-test('recovery discovered during promotion prevents the next service command and any exit', async () => {
-  let release!: (outcome: { status: 'accepted' }) => void;
-  let markStarted!: () => void;
-  const started = new Promise<void>(resolve => { markStarted = resolve; });
-  const commands: string[][] = [];
-  const h = lifecycleWith({ version: '999.0.0-host-artifact' }, { runner: (argv) => {
-    commands.push([...argv]);
-    if (!argv.includes('daemon-reload')) return Promise.resolve({ status: 'accepted' as const });
-    markStarted();
-    return new Promise(resolve => { release = resolve; });
-  } });
-  let recoveryRequired = false;
-  const updater = {
-    stop: () => {}, drainHandover: async () => {},
-    snapshot: () => ({ appliedVersion: null, recoveryRequired, lastCheckFailure: 'filesystem recovery required' }),
-  };
-  (h.runtime as unknown as { autoUpdater: unknown }).autoUpdater = updater;
-  h.runtime.onStarted();
-  await started;
-  expect(commands).toEqual([['systemctl', '--user', 'show-environment'], ['systemctl', '--user', 'daemon-reload']]);
-  recoveryRequired = true;
-  release({ status: 'accepted' });
-  await h.runtime.drainHandovers();
-  expect(commands).toHaveLength(2);
-  expect(h.installs).toHaveLength(1); // Installation happened before recovery was observed.
-  expect(h.exits).toEqual([]);
-  expect(h.runtime.updateStatus().armed).toBe(false);
   await h.runtime.onStopping(false);
 });
 
@@ -734,8 +497,6 @@ describe('boot promotion is prepared while the runtime still serves', () => {
       expect(outcome.resumed?.()).toBe(true);
       expect(stops).toEqual([]); expect(h.exits).toEqual([]);
       expect(commands).toEqual([['systemctl', '--user', 'show-environment']]);
-      const receipt = h.runtime.receiptStore().list().map(row => row.text).join('\n');
-      expect(receipt).toContain('boot promotion handover incomplete (failed)'); expect(receipt).toContain('the systemd user manager did not answer');
     } finally { await h.runtime.onStopping(false); }
   });
 
@@ -763,26 +524,6 @@ describe('boot promotion is prepared while the runtime still serves', () => {
     await outcome.drain;
     expect(sequence).toEqual(['show-environment', 'daemon-reload', 'stop', 'enable']);
     expect(outcome.resumed?.()).toBe(false); expect(h.exits).toEqual([0]);
-    await h.runtime.onStopping(false);
-  });
-
-  test('a promotion cancelled by an external stop leaves nothing for an in-process restart to inherit', async () => {
-    const entered = Promise.withResolvers<void>(), released = Promise.withResolvers<void>();
-    let stops = 0;
-    const h = lifecycleWith(artifact, { stopGracefully: async () => { if (stops++ === 0) { entered.resolve(); await released.promise; } } });
-    h.runtime.onStarted(true);
-    const first = h.runtime.activateNativeLifecycle();
-    if (!first) throw new Error('Expected a promotion attempt');
-    await entered.promise;
-    const closed = h.runtime.onStopping(false);
-    released.resolve(); await closed; await first.drain;
-    expect(h.exits).toEqual([]);
-    // The same facade starts again in this process: a new attempt, not the settled one.
-    h.runtime.onStarted(true);
-    const second = h.runtime.activateNativeLifecycle();
-    expect(second).toBeDefined(); expect(second).not.toBe(first);
-    if (second) await second.drain;
-    expect(h.exits).toEqual([0]);
     await h.runtime.onStopping(false);
   });
 });

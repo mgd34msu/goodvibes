@@ -21,7 +21,7 @@ import { attachAgentDomain, attachCompactionDomain, attachPermissionDomain, atta
 import { attachPluginDomain, attachMcpDomain } from './domain-bridge-plugin-mcp.js';
 import { type DomainBridgeHelpers, type SpanMap } from './domain-bridge-shared.js';
 import { attachTaskDomain, attachTransportDomain } from './domain-bridge-transport-task.js';
-import { attachToolDomain, attachTurnDomain } from './domain-bridge-turn-tool.js';
+import { attachModelRequestDomain, attachToolDomain, attachTurnDomain } from './domain-bridge-turn-tool.js';
 import { summarizeError } from '../../../utils/error-display.js';
 import { logger } from '../../../utils/logger.js';
 
@@ -43,6 +43,7 @@ export class DomainBridge {
   /** Active spans per domain, keyed by entity ID. */
   private readonly _turnSpans: SpanMap = new Map();
   private readonly _toolSpans: SpanMap = new Map();
+  private readonly _requestSpans: SpanMap = new Map();
   private readonly _pluginSpans: SpanMap = new Map();
   private readonly _mcpSpans: SpanMap = new Map();
   private readonly _transportSpans: SpanMap = new Map();
@@ -70,12 +71,13 @@ export class DomainBridge {
     const unsubs: Array<() => void> = [
       attachTurnDomain({ bus, helpers }, this._turnSpans),
       attachToolDomain({ bus, helpers }, this._toolSpans, this._turnSpans),
+      attachModelRequestDomain({ bus, helpers }, this._requestSpans, this._turnSpans),
       attachPluginDomain({ bus, helpers }, this._pluginSpans),
       attachMcpDomain({ bus, helpers }, this._mcpSpans),
       attachTransportDomain({ bus, helpers }, this._transportSpans),
       attachTaskDomain({ bus, helpers }, this._taskSpans),
       attachAgentDomain({ bus, helpers }, this._agentSpans),
-      attachPermissionDomain({ bus, helpers }, this._permissionSpans),
+      attachPermissionDomain({ bus, helpers }, this._permissionSpans, this._toolSpans),
       attachSessionDomain({ bus, helpers }, this._sessionSpans),
       attachCompactionDomain({ bus, helpers }, this._compactionSpans),
       // Health cascades travel on the session domain outside the typed event union.
@@ -116,7 +118,7 @@ export class DomainBridge {
 
   private _allSpanMaps(): SpanMap[] {
     return [
-      this._turnSpans, this._toolSpans, this._pluginSpans, this._mcpSpans, this._transportSpans, this._taskSpans,
+      this._turnSpans, this._toolSpans, this._requestSpans, this._pluginSpans, this._mcpSpans, this._transportSpans, this._taskSpans,
       this._agentSpans, this._permissionSpans, this._sessionSpans, this._compactionSpans,
     ];
   }

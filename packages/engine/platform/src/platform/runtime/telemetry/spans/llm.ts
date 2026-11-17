@@ -18,8 +18,8 @@ export interface LlmSpanContext {
   readonly model: string;
   /** Trace ID from the parent turn span. */
   readonly traceId: string;
-  /** Parent span ID (the turn span's spanId). */
-  readonly parentSpanId: string;
+  /** Parent span ID (the turn span's spanId); absent when the turn has no open span. */
+  readonly parentSpanId?: string | undefined;
   /** Whether this is a streaming call. */
   readonly streaming?: boolean | undefined;
   /** Number of messages in the request context. */
@@ -66,7 +66,9 @@ export function startLlmSpan(tracer: RuntimeTracer, ctx: LlmSpanContext): Span {
     attrs['llm.message_count'] = ctx.messageCount;
   }
 
-  return tracer.startSpan('llm.call', {
+  // 'llm.request' is the turn's model request; the provider client's own
+  // transport-level span (retries and hand-overs included) is 'llm.call'.
+  return tracer.startSpan('llm.request', {
     traceId: ctx.traceId,
     parentSpanId: ctx.parentSpanId,
     // LLM calls are modelled as CLIENT spans (calling an external service)

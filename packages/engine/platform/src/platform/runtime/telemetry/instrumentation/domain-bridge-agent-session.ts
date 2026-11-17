@@ -101,20 +101,24 @@ export function attachAgentDomain(
   return () => unsubs.forEach((unsub) => unsub());
 }
 
+/** A permission decision is a child of its tool call's span, so a trace shows the wait for approval inside the call. */
 export function attachPermissionDomain(
   { bus, helpers }: DomainBridgeAttachmentInput,
   permissionSpans: SpanMap,
+  toolSpans?: SpanMap,
 ): () => void {
   const unsubs: Array<() => void> = [];
 
   unsubs.push(
     bus.on('GATE_REQUESTED', (env: Env<Extract<GateEvent, { type: 'GATE_REQUESTED' }>>) => {
       helpers.safe(() => {
+        const parent = toolSpans?.get(env.payload.callId);
         const span = startPermissionSpan(helpers.tracer, {
           callId: env.payload.callId,
           tool: env.payload.tool,
           category: env.payload.category,
-          traceId: env.traceId ?? '',
+          traceId: parent?.spanContext.traceId ?? env.traceId ?? '',
+          parentSpanId: parent?.spanContext.spanId,
         });
         trackSpan(permissionSpans, env.payload.callId, span);
       });

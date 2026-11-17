@@ -2,6 +2,7 @@ import type { ToolEvent } from '../../../../events/tools.js';
 import type { TurnEvent } from '../../../../events/turn.js';
 import { endToolSpan, recordToolPhase, startToolSpan, type ToolPhase } from '../spans/tool.js';
 import { endTurnSpan, startTurnSpan } from '../spans/turn.js';
+import { endLlmSpan, startLlmSpan } from '../spans/llm.js';
 import { trackSpan, type DomainBridgeAttachmentInput, type Env, type SpanMap } from './domain-bridge-shared.js';
 
 /** Turn spans are the roots: TURN_SUBMITTED opens one, the turn's terminal event closes it. */
@@ -48,6 +49,61 @@ export function attachTurnDomain(
       });
     }),
   );
+
+  return () => unsubs.forEach((unsub) => unsub());
+}
+
+/**
+ * A turn's model requests are children of its span: LLM_REQUEST_STARTED opens
+ * one (a turn has at most one request in flight), LLM_RESPONSE_RECEIVED closes
+ * it with the token counts, and a turn that ends first closes it as failed.
+ */
+export function attachModelRequestDomain(
+  { bus, helpers }: DomainBridgeAttachmentInput,
+  requestSpans: SpanMap,
+  turnSpans: SpanMap,
+): () => void {
+  const unsubs: Array<() => void> = [];
+
+  unsubs.push(
+    bus.on('LLM_REQUEST_STARTED', (env: Env<Extract<TurnEvent, { type: 'LLM_REQUEST_STARTED' }>>) => {
+      helpers.safe(() => {
+        const parent = turnSpans.get(env.payload.turnId);
+        const span = startLlmSpan(helpers.tracer, {
+          turnId: env.payload.turnId,
+          provider: env.payload.provider,
+          model: env.payload.model,
+          traceId: parent?.spanContext.traceId ?? env.traceId ?? '',
+          parentSpanId: parent?.spanContext.spanId,
+          streaming: true,
+        });
+        trackSpan(requestSpans, env.payload.turnId, span);
+      });
+    }),
+  );
+
+  unsubs.push(
+    bus.on('LLM_RESPONSE_RECEIVED', (env: Env<Extract<TurnEvent, { type: 'LLM_RESPONSE_RECEIVED' }>>) => {
+      helpers.safe(() => {
+        helpers.closeSpan(requestSpans, env.payload.turnId, (span) => endLlmSpan(span, {
+          success: true,
+          tokens: {
+            inputTokens: env.payload.inputTokens,
+            outputTokens: env.payload.outputTokens,
+            cacheReadTokens: env.payload.cacheReadTokens,
+            cacheWriteTokens: env.payload.cacheWriteTokens,
+          },
+        }));
+      });
+    }),
+  );
+
+  const unfinished = (turnId: string, error: string) => helpers.safe(() => {
+    helpers.closeSpan(requestSpans, turnId, (span) => endLlmSpan(span, { success: false, error }));
+  });
+  unsubs.push(bus.on('TURN_ERROR', (env: Env<Extract<TurnEvent, { type: 'TURN_ERROR' }>>) => unfinished(env.payload.turnId, env.payload.error)));
+  unsubs.push(bus.on('TURN_CANCEL', (env: Env<Extract<TurnEvent, { type: 'TURN_CANCEL' }>>) => unfinished(env.payload.turnId, 'cancelled')));
+  unsubs.push(bus.on('TURN_COMPLETED', (env: Env<Extract<TurnEvent, { type: 'TURN_COMPLETED' }>>) => unfinished(env.payload.turnId, 'the turn ended before a response was recorded')));
 
   return () => unsubs.forEach((unsub) => unsub());
 }

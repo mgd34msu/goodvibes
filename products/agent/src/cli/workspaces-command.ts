@@ -1,12 +1,10 @@
 import { resolve } from 'node:path';
 import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { createShellPathService } from '@/runtime/index.ts';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { WorkspaceRegistrationError } from '@goodvibes-jev/engine/platform/platform/workspace';
 import {
   createWorkspaceRegistrationStore,
-  migrateLegacyWorkspaceRegistryIfNeeded,
   normalizeWorkspaceRoot,
   registerWorkspaceForCheckpoints,
 } from '../config/workspace-registration.ts';
@@ -74,13 +72,6 @@ export async function handleWorkspacesCommand(runtime: CliCommandRuntime): Promi
     workingDirectory: runtime.workingDirectory,
     homeDirectory: runtime.homeDirectory,
   });
-
-  // Idempotent, receipt-gated: a no-op after the first successful migration on
-  // this machine, from any entry point. See workspace-registration.ts.
-  const migration = migrateLegacyWorkspaceRegistryIfNeeded(shellPaths);
-  if (migration) {
-    logger.info('Migrated the local workspace registry into the shared registration store', { ...migration });
-  }
 
   const store = createWorkspaceRegistrationStore(shellPaths);
   const [sub = 'list', ...rawRest] = runtime.cli.commandArgs;

@@ -121,7 +121,7 @@ import { createPushService } from './push-composition.js';
 import type { RuntimeEventBus } from '../../runtime/events/index.js';
 import type { FleetEvent } from '../../../events/fleet.js';
 import { controlPlaneStorePath } from '../control-plane-store-paths.js';
-import { legacyWorkspaceRegisterPath, sharedWorkspaceRegisterPath } from '../../workspace/registration/shared-register-path.js';
+import { sharedWorkspaceRegisterPath } from '../../workspace/registration/shared-register-path.js';
 
 export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps, BrowserCompositionDeps {
   readonly triggerSupervisor?: TriggerOperatorSupervisor | undefined;
@@ -464,7 +464,6 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   const workspaceRegistrationStore = openWorkspaceRegistrationStore({
     // SHARED TIER, not surface-scoped, three products read this register. See workspace/registration/shared-register-path.ts.
     path: sharedWorkspaceRegisterPath(deps.shellPaths),
-    fallbackReadPath: legacyWorkspaceRegisterPath(deps.shellPaths),
     homeDir: dirname(daemonStateDir),
     daemonStateDir,
   });

@@ -25,12 +25,8 @@ export type { CheckpointPruneResult } from './checkpoint/pruner.js';
 export {
   SHARED_TIER_DIRECTORY,
   WORKSPACE_REGISTER_FILE,
-  legacyWorkspaceRegisterPath,
-  resolveWorkspaceRegisterReadPath,
   sharedWorkspaceRegisterPath,
 } from './registration/shared-register-path.js';
-export { foldLegacyWorkspaceRegister } from './registration/fold-legacy-register.js';
-export type { FoldLegacyRegisterResult } from './registration/fold-legacy-register.js';
 // The named-path lock for product build/preparation operations and stores: the
 // kernel releases it when its holder's process exits.
 export { acquireCrossProcessLock, CrossProcessLockBusyError, type CrossProcessLockOptions } from './checkpoint/cross-process-lock.js';

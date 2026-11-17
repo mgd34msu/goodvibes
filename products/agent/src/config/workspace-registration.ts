@@ -1,19 +1,14 @@
-import { existsSync, readFileSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { writeStoreJson } from '@/utils/store-file.ts';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
   openWorkspaceRegistrationStore,
-  normalizeLegacyRegisterRows,
   type WorkspaceRegistrationStore,
-  withWorkspaceRegistrationWriteLockSync,
   readWorkspaceRegisterSync,
   readCheckpointEligibilitySync,
   createCheckpointEligibilityChecker,
   broadRootReason,
   type CheckpointEligibility,
   type RegisterWorkspaceResult,
-  type WorkspaceRegisterRead,
   resolveWorkspaceRegistration,
   normalizeWorkspaceRoot,
   probeWorktreeLink,
@@ -22,12 +17,7 @@ import {
   type WorkspaceGitMetadata,
   type WorkspaceResolution,
 } from '@goodvibes-jev/engine/platform/platform/workspace';
-import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.ts';
-import {
-  legacyWorkspaceRegisterPath,
-  resolveWorkspaceRegisterReadPath,
-  sharedWorkspaceRegisterPath,
-} from '@goodvibes-jev/engine/platform/platform/workspace';
+import { sharedWorkspaceRegisterPath } from '@goodvibes-jev/engine/platform/platform/workspace';
 
 export { normalizeWorkspaceRoot } from '@goodvibes-jev/engine/platform/platform/workspace';
 export type {
@@ -92,35 +82,18 @@ export type StoreShellPaths = Pick<ShellPathService, 'resolveUserPath' | 'homeDi
  * surface root, precisely because three products share it: scoping it per
  * surface would give this agent its own register, and workspaces registered
  * here would vanish from the daemon while the daemon's vanished from here.
- *
- * This is a READ resolver, so it falls back to the pre-split location
- * (~/.goodvibes/control-plane/) while that is still where the state is, the
- * daemon's boot fold moves it, and until then an updated agent must not report
- * the operator's registered workspaces as gone. Writes always go to the shared
- * path; see createWorkspaceRegistrationStore below.
  */
 export function sharedWorkspaceRegistrationStorePath(shellPaths: StoreShellPaths): string {
-  return resolveWorkspaceRegisterReadPath(shellPaths, existsSync);
+  return sharedWorkspaceRegisterPath(shellPaths);
 }
 
 /** This process's store over the shared file, for callers that can go async (CLI commands, interactive prompts). */
 export function createWorkspaceRegistrationStore(shellPaths: StoreShellPaths): WorkspaceRegistrationStore {
   return openWorkspaceRegistrationStore({
-    // WRITES go to the shared tier, always; reads fall back to the pre-split
-    // location until the daemon's boot fold has moved it.
     path: sharedWorkspaceRegisterPath(shellPaths),
-    fallbackReadPath: legacyWorkspaceRegisterPath(shellPaths),
     homeDir: shellPaths.homeDirectory,
     daemonStateDir: shellPaths.resolveUserPath(),
   });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 /**
@@ -213,90 +186,6 @@ export function createWorkspaceRegistrationLiveChecker(
   return createCheckpointEligibilityChecker(() => sharedWorkspaceRegistrationStorePath(shellPaths), path);
 }
 
-// ---------------------------------------------------------------------------
-// One-time migration: local per-user registry -> shared store
-// ---------------------------------------------------------------------------
-
-function legacyWorkspaceRegistryPath(shellPaths: StoreShellPaths): string {
-  return shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'checkpoints', 'registered-workspaces.json');
-}
-
-function migrationReceiptPath(shellPaths: StoreShellPaths): string {
-  // This repo's own receipt, not shared state, it rides the agent's surface
-  // root like everything else this product owns.
-  return shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'control-plane', 'workspace-registration-migration-receipt.json');
-}
-
-/**
- * The schema version stamped onto both one-time receipts below, and the
- * completion flag that makes them verifiable.
- *
- * A receipt is the ONLY memory that a one-time migration already ran. Gating on
- * `existsSync` alone accepts a zero-byte or half-written file as proof of
- * completion, which is why these are now parsed instead. See
- * {@link readReceipt} for what each caller does when the parse fails, the two
- * receipts answer that differently, on purpose.
- */
-const RECEIPT_SCHEMA_VERSION = 1;
-
-/** A receipt as it is written: the caller's result plus the fields that make it checkable. */
-type StampedReceipt<T> = T & { readonly schemaVersion: number; readonly completed: true };
-
-function stampReceipt<T extends object>(result: T): StampedReceipt<T> {
-  return { ...result, schemaVersion: RECEIPT_SCHEMA_VERSION, completed: true } as StampedReceipt<T>;
-}
-
-/** How a one-time receipt file read. */
-type ReceiptState =
-  /** No receipt on disk: the migration has not run. */
-  | { readonly kind: 'absent' }
-  /** A parseable receipt that asserts its own completion. */
-  | { readonly kind: 'complete' }
-  /** A file is there, but it does not say the migration finished (empty, torn, wrong shape, older schema). */
-  | { readonly kind: 'damaged'; readonly reason: string };
-
-/**
- * Read a one-time receipt by PARSING it, never by its mere existence.
- *
- * A file that exists may be zero bytes, truncated, or a page of nothing that a
- * filesystem recovered the inode for but not the data. `existsSync` returns
- * true for every one of those, and the migration it guards is then skipped
- * forever. A receipt must positively assert completion: an object carrying a
- * known schema version and `completed: true`.
- *
- * A receipt written before this check existed carries neither field, so it
- * reads as `damaged` rather than `complete`. That is deliberate and the callers
- * handle it, one re-runs (its work is idempotent), the other does not (its
- * work is not), and both say so out loud.
- */
-function readReceipt(path: string): ReceiptState {
-  let raw: string;
-  try {
-    if (!existsSync(path)) return { kind: 'absent' };
-    raw = readFileSync(path, 'utf-8');
-  } catch (error) {
-    return { kind: 'damaged', reason: `unreadable: ${summarizeError(error)}` };
-  }
-  if (raw.trim().length === 0) return { kind: 'damaged', reason: 'empty file (interrupted write)' };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return { kind: 'damaged', reason: 'not parseable JSON (torn write)' };
-  }
-  if (!isRecord(parsed)) return { kind: 'damaged', reason: 'not a JSON object' };
-  if (parsed.completed !== true) return { kind: 'damaged', reason: 'no completion flag (written before receipts were verifiable)' };
-  if (typeof parsed.schemaVersion !== 'number' || !Number.isFinite(parsed.schemaVersion)) {
-    return { kind: 'damaged', reason: 'no usable schema version' };
-  }
-  // A NEWER schema is accepted: a later build already did at least this much,
-  // and a downgrade must not re-run a one-time migration on every boot.
-  if (parsed.schemaVersion < RECEIPT_SCHEMA_VERSION) {
-    return { kind: 'damaged', reason: `older receipt schema (${parsed.schemaVersion} < ${RECEIPT_SCHEMA_VERSION})` };
-  }
-  return { kind: 'complete' };
-}
-
 /**
  * The agent's EXPLICIT checkpoint-registration path: one typed store `add` that
  * registers `root` (the platform's own root-guarded write) AND stamps it
@@ -319,230 +208,6 @@ export async function registerWorkspaceForCheckpoints(
     origin: AGENT_EXPLICIT_REGISTRATION_ORIGIN,
     checkpointEligible: true,
   });
-}
-
-function checkpointEligibilityBackfillReceiptPath(shellPaths: StoreShellPaths): string {
-  // Also this repo's own receipt; surface-scoped for the same reason.
-  return shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'control-plane', 'workspace-checkpoint-eligibility-backfill-receipt.json');
-}
-
-export interface CheckpointEligibilityBackfillResult {
-  readonly sourcePath: string;
-  readonly recordsStamped: number;
-  readonly backfilledAt: string;
-  /** Set when the pass ended without stamping because the shared register is native (v2). */
-  readonly skipped?: string;
-}
-
-/** Why a legacy pass can never act on a native (v2) register, recorded in its receipt. */
-const NATIVE_REGISTER_SKIP = 'the shared register already carries native workspace scopes; legacy boot passes never rewrite it';
-
-/**
- * One-time boot backfill that stamps `checkpointEligible: true` on the shared-
- * store records that came from the agent's OWN explicit registrations, so the
- * eligibility boundary does not retroactively drop workspaces the owner had
- * already opted into checkpoints before this flag existed. It writes the v1
- * document directly (every field of every record preserved) because it runs
- * inside the synchronous createRuntimeServices path where the async typed store
- * cannot be awaited. It takes the store's writer lock and never rewrites a
- * native v2 register.
- *
- * The honest source of "which records were the agent's explicit list" is the
- * legacy per-user registry file (`<surface>/checkpoints/registered-workspaces.json`),
- * written only by `workspaces register` in older builds and never deleted by the
- * migration that imported it. Every root in it is an explicit owner opt-in.
- *
- * Cost on an ordinary start: one receipt read, then one `existsSync` of the
- * legacy file; no lock and no register read unless that file exists. A v2
- * register writes the receipt, since nothing is left this pass could ever do.
- * A damaged receipt re-runs the pass: it only ever sets the flag on the owner's
- * own legacy roots, so repeating it changes nothing.
- */
-export function backfillCheckpointEligibilityIfNeeded(
-  shellPaths: StoreShellPaths,
-): CheckpointEligibilityBackfillResult | null {
-  const receiptPath = checkpointEligibilityBackfillReceiptPath(shellPaths);
-  const receipt = readReceipt(receiptPath);
-  if (receipt.kind === 'complete') return null;
-  const legacyPath = legacyWorkspaceRegistryPath(shellPaths);
-  if (!existsSync(legacyPath)) return null;
-  if (receipt.kind === 'damaged') {
-    logger.warn('Checkpoint-eligibility backfill receipt is not usable, re-running the (idempotent) backfill', {
-      receiptPath,
-      reason: receipt.reason,
-    });
-  }
-  return legacyWorkspaceWrite(shellPaths, (register) => {
-    if (register.version === 2) {
-      const skipped: CheckpointEligibilityBackfillResult = {
-        sourcePath: legacyPath,
-        recordsStamped: 0,
-        backfilledAt: new Date().toISOString(),
-        skipped: NATIVE_REGISTER_SKIP,
-      };
-      writeStoreJson(receiptPath, stampReceipt(skipped));
-      return null;
-    }
-
-    const legacyRoots = new Set<string>();
-    for (const record of readLegacyRegistryRows(legacyPath)) {
-      const root = readString(record.root);
-      if (root) legacyRoots.add(normalizeWorkspaceRoot(root));
-    }
-
-    let stamped = 0;
-    const workspaces = register.workspaces.map((entry) => {
-      const root = normalizeWorkspaceRoot(readString(entry.root));
-      if (!legacyRoots.has(root) || entry.checkpointEligible === true) return entry;
-      stamped += 1;
-      const existingOrigin = readString(entry.origin);
-      return { ...entry, checkpointEligible: true, origin: existingOrigin || AGENT_EXPLICIT_REGISTRATION_ORIGIN };
-    });
-    if (stamped > 0) {
-      writeStoreJson(sharedWorkspaceRegisterPath(shellPaths), { version: 1, workspaces, declines: register.declines });
-    }
-
-    const result: CheckpointEligibilityBackfillResult = {
-      sourcePath: legacyPath,
-      recordsStamped: stamped,
-      backfilledAt: new Date().toISOString(),
-    };
-    writeStoreJson(receiptPath, stampReceipt(result));
-    return result;
-  });
-}
-
-export interface WorkspaceRegistrationMigrationResult {
-  readonly sourcePath: string;
-  readonly recordsMigrated: number;
-  readonly recordsAlreadyPresent: number;
-  readonly migratedAt: string;
-  /** Set when the pass ended without importing because the shared register is native (v2). */
-  readonly skipped?: string;
-}
-
-/**
- * Migrate the local per-user registry into the shared store, exactly once.
- *
- * Runs synchronously (see this module's doc comment on why). Receipt-gated:
- * once written, later calls return null without touching either file again,
- * even if the legacy file is still present and even if the owner later
- * unregisters a migrated root (it must not come back on the next start).
- *
- * Cost on an ordinary start: one receipt read, then one `existsSync` of the
- * legacy file; the writer lock and the register read happen only when there is
- * a legacy file to import. A v2 register writes the receipt and imports
- * nothing: legacy rows are never folded into native scope state. An
- * unparsable legacy file migrates zero records and still writes a receipt.
- *
- * Returns null when nothing was migrated this call; a caller logs only a real
- * migration.
- *
- * A DAMAGED RECEIPT DOES NOT RE-RUN THIS, unlike the backfill above. The legacy
- * file is never deleted, so a second pass would re-add every legacy root,
- * including ones the owner has since unregistered. A damaged receipt is
- * therefore treated as "already migrated", and said at warn level with its
- * path, so an operator can delete it to force the migration deliberately.
- */
-export function migrateLegacyWorkspaceRegistryIfNeeded(
-  shellPaths: StoreShellPaths,
-): WorkspaceRegistrationMigrationResult | null {
-  const receiptPath = migrationReceiptPath(shellPaths);
-  const receipt = readReceipt(receiptPath);
-  if (receipt.kind === 'complete') return null;
-  const legacyPath = legacyWorkspaceRegistryPath(shellPaths);
-  if (!existsSync(legacyPath)) return null;
-  if (receipt.kind === 'damaged') {
-    logger.warn(
-      'Workspace-registry migration receipt is not usable, treating the migration as already done, because repeating it '
-      + 'would re-add legacy roots the owner may have since unregistered. Delete the receipt to force it.',
-      { receiptPath, reason: receipt.reason },
-    );
-    return null;
-  }
-  return legacyWorkspaceWrite(shellPaths, (register) => {
-    // Another process may have finished the migration while this one waited
-    // for the lock; importing again could re-add a root unregistered since.
-    if (readReceipt(receiptPath).kind !== 'absent') return null;
-    if (register.version === 2) {
-      const skipped: WorkspaceRegistrationMigrationResult = {
-        sourcePath: legacyPath,
-        recordsMigrated: 0,
-        recordsAlreadyPresent: 0,
-        migratedAt: new Date().toISOString(),
-        skipped: NATIVE_REGISTER_SKIP,
-      };
-      writeStoreJson(receiptPath, stampReceipt(skipped));
-      return null;
-    }
-
-    // Legacy rows pass the store's one definition of a valid row on the way in.
-    const legacyRecords = normalizeLegacyRegisterRows(readLegacyRegistryRows(legacyPath), []).workspaces;
-    const existingRoots = new Set(register.workspaces.map((entry) => entry.root));
-    // Existing rows are carried through as the store read them.
-    const merged: RegisteredWorkspaceRecord[] = [...register.workspaces];
-    let migrated = 0;
-    let alreadyPresent = 0;
-    for (const record of legacyRecords) {
-      if (existingRoots.has(record.root)) {
-        alreadyPresent += 1;
-        continue;
-      }
-      existingRoots.add(record.root);
-      merged.push(record);
-      migrated += 1;
-    }
-
-    if (migrated > 0) {
-      writeStoreJson(sharedWorkspaceRegisterPath(shellPaths), { version: 1, workspaces: merged, declines: register.declines });
-    }
-
-    const result: WorkspaceRegistrationMigrationResult = {
-      sourcePath: legacyPath,
-      recordsMigrated: migrated,
-      recordsAlreadyPresent: alreadyPresent,
-      migratedAt: new Date().toISOString(),
-    };
-    writeStoreJson(receiptPath, stampReceipt(result));
-    return result;
-  });
-}
-
-/** The `workspaces` rows of the legacy per-user registry; an unparsable file has none. */
-function readLegacyRegistryRows(legacyPath: string): readonly Record<string, unknown>[] {
-  try {
-    const parsed = JSON.parse(readFileSync(legacyPath, 'utf-8')) as unknown;
-    const list = isRecord(parsed) && Array.isArray(parsed.workspaces) ? parsed.workspaces : [];
-    return list.filter(isRecord);
-  } catch {
-    return [];
-  }
-}
-
-type SharedRegister = Extract<WorkspaceRegisterRead, { state: 'ok' }>;
-
-/**
- * Run a legacy boot write under the store's writer lock, against the register
- * as the store itself reads it. An unreadable register is never overwritten:
- * its native history may be unknowable. A busy lock skips this start; the pass
- * runs again at the next one.
- */
-function legacyWorkspaceWrite<T>(shellPaths: StoreShellPaths, write: (register: SharedRegister) => T): T | null {
-  const path = sharedWorkspaceRegisterPath(shellPaths);
-  try {
-    return withWorkspaceRegistrationWriteLockSync(path, () => {
-      const read = readWorkspaceRegisterSync(existsSync(path) ? path : sharedWorkspaceRegistrationStorePath(shellPaths));
-      if (read.state === 'unreadable') {
-        logger.warn('Legacy workspace migration left the shared registry unchanged because it cannot be read', { path, reason: read.reason });
-        return null;
-      }
-      return write(read.state === 'ok' ? read : { state: 'ok', version: 1, workspaces: [], declines: [] });
-    });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'WORKSPACE_REGISTRY_BUSY') throw error;
-    logger.debug('Legacy workspace migration waits for the next start: the shared registry is being written by another process', { path });
-    return null;
-  }
 }
 
 // ---------------------------------------------------------------------------

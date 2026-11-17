@@ -85,8 +85,8 @@ function dedupe<T extends { readonly root: string }>(rows: readonly T[], at: (ro
 }
 
 /**
- * The one definition of a valid legacy (version 1) row, applied wherever legacy
- * rows enter: reading a version 1 register and folding the pre-split copy in.
+ * The one definition of a valid version 1 row, applied when a version 1
+ * register is read.
  * Roots are normalized, a missing or unparseable timestamp reads as the oldest
  * possible (the row predates the field), rows without a root are dropped, and
  * duplicate roots collapse to the later row. A version 1 row never carries a
@@ -287,14 +287,6 @@ export interface WorkspaceRegistrationStoreOptions {
   readonly homeDir: string;
   /** The daemon state directory (~/.goodvibes), refused as a broad root. */
   readonly daemonStateDir: string;
-  /**
-   * A second path to READ from when `path` does not exist yet, the pre-split
-   * location, during the one auto-update cycle before the daemon's boot fold
-   * moves the register into the shared tier. Never written to: a
-   * read-modify-write that started from the fallback still persists to `path`.
-   * See registration/shared-register-path.ts.
-   */
-  readonly fallbackReadPath?: string | undefined;
   /** Injectable worktree-link probe (sync or async); defaults to a real, non-blocking `git rev-parse` probe. */
   readonly probe?: (path: string) => WorkspaceGitMetadata | Promise<WorkspaceGitMetadata>;
 }
@@ -312,8 +304,6 @@ export class WorkspaceRegistrationStore {
   private memoryState: PersistedRegistry | null = null;
   /** Identity (device, inode, size, times) of the last register file confirmed on disk by this store. */
   private durableIdentity: string | null = null;
-  /** Read-only source for the pre-split location; see fallbackReadPath. */
-  private readonly fallbackStore: PersistentStore<PersistedRegistry> | null;
   private readonly homeDir: string;
   private readonly daemonStateDir: string;
   private readonly probe: (path: string) => WorkspaceGitMetadata | Promise<WorkspaceGitMetadata>;
@@ -323,9 +313,6 @@ export class WorkspaceRegistrationStore {
   constructor(options: WorkspaceRegistrationStoreOptions) {
     this.path = options.path;
     this.store = new PersistentStore<PersistedRegistry>(options.path);
-    this.fallbackStore = options.fallbackReadPath
-      ? new PersistentStore<PersistedRegistry>(options.fallbackReadPath)
-      : null;
     this.homeDir = options.homeDir;
     this.daemonStateDir = options.daemonStateDir;
     this.probe = options.probe ?? probeWorktreeLinkAsync;
@@ -362,26 +349,11 @@ export class WorkspaceRegistrationStore {
   }
 
   private async read(): Promise<PersistedRegistry> {
-    const primary = await this.store.load();
-    // A register that has not been folded into the shared tier yet still has to
-    // be visible, or an updated product would report the operator's registered
-    // workspaces as gone until the daemon next booted.
-    if (primary === null && this.fallbackStore !== null) {
-      return validate(await this.fallbackStore.load());
-    }
-    return validate(primary);
+    return validate(await this.store.load());
   }
 
   private async readForMutation(): Promise<PersistedRegistry> {
-    const primary = await this.store.load();
-    if (primary === null && this.fallbackStore !== null) {
-      const fallback = validate(await this.fallbackStore.load());
-      // A vanished authority file must not be reconstituted from a stale copy.
-      // Legacy v1 coverage remains importable, without native incarnations.
-      if (fallback.version === 2) throw new Error('Workspace mutation refuses a native-authority fallback registry.');
-      return fallback;
-    }
-    return validate(primary);
+    return validate(await this.store.load());
   }
 
   private async persist(state: PersistedRegistry): Promise<void> {

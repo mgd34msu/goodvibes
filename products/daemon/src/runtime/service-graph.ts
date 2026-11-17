@@ -7,7 +7,7 @@ import { createNativeWorkSubmissionHost } from '@goodvibes-jev/engine/platform/p
 import { createNativeConversationIntakeHost, createNativeRequirementProposer, type NativeConversationContinuationOwner } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake';
 import { createLocalWorkLedgerReadBinding } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import { prepareGatewayScopePolicyOwner, registerNativeAutomationGatewayMethods, registerWorkLedgerGatewayMethods, registerWorkLedgerImportGatewayMethods, registerNativeWorkExecutionGatewayMethods, registerNativeWorkSubmissionGatewayMethods, registerNativeConversationIntakeGatewayMethods } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { openWorkspaceRegistrationStore, sharedWorkspaceRegisterPath, legacyWorkspaceRegisterPath, WorkspaceSwapManager } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { openWorkspaceRegistrationStore, sharedWorkspaceRegisterPath, WorkspaceSwapManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { GatewayMethodCatalog, controlPlaneStorePath, createOwnerInbox, sessionBrokerPresence } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { resolvePairingWebOrigin } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { attachWsOnlyGatewayVerbHandlers } from '@goodvibes-jev/engine/terminal-shell';
@@ -294,8 +294,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     };
     graph.agentOrchestrator.setDependencies(agentToolDependencies);
     // The same store instance the workspaces.* verbs write through, so this process orders its own readers and writers.
-    const nativeScopes = openWorkspaceRegistrationStore({ path: sharedWorkspaceRegisterPath(shellPaths),
-      fallbackReadPath: legacyWorkspaceRegisterPath(shellPaths), homeDir: homeDirectory,
+    const nativeScopes = openWorkspaceRegistrationStore({ path: sharedWorkspaceRegisterPath(shellPaths), homeDir: homeDirectory,
       daemonStateDir: shellPaths.resolveUserPath() });
     const nativeImport = registerWorkLedgerImportGatewayMethods(gatewayMethods, {
       hostId: workLedgerOwner.importHostId, projectId: projectPlanningProjectId, projectRoot: workingDirectory,

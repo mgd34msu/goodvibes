@@ -191,8 +191,7 @@ export async function importLegacySessionStores(input: {
   }
 
   // Only a change is written: a boot with nothing new leaves the store alone.
-  // A store that does not exist yet is created, so the pre-split sweep that
-  // runs next can tell a duplicate from the only copy.
+  // A store that does not exist yet is created.
   if (state.added.size > 0 || homeSnapshot === null) await homeStore.persist(buildSnapshot(state));
   if (ledger === null || state.folded.size !== ledger.sessionIds.length) {
     await ledgerStore.persist({ version: 1, sessionIds: [...state.folded].sort() });

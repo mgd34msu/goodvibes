@@ -16,11 +16,7 @@ import type { shell as RuntimeShell, bootstrap as RuntimeBootstrap } from '@good
 import { readCheckpointGuardSettings, readCheckpointRegistrationSetting } from '../config/checkpoint-settings.ts';
 import { createAgentResearchSourceOwner } from './research-source-screening.ts';
 import { createClassicProtectedSourceOwner, type ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
-import {
-  backfillCheckpointEligibilityIfNeeded,
-  createWorkspaceRegistrationLiveChecker,
-  migrateLegacyWorkspaceRegistryIfNeeded,
-} from '../config/workspace-registration.ts';
+import { createWorkspaceRegistrationLiveChecker } from '../config/workspace-registration.ts';
 import { FocusTracker } from '@/runtime/index.ts';
 import { ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
 import { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -1807,8 +1803,7 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
   // only re-reads the shared registration JSON file. "Allowed" means
   // `workingDirectory` resolves as COVERED by the shared registration store
   // (platform 1.6.1 platform/workspace/registration, via
-  // config/workspace-registration.ts, the successor to this fork's local
-  // per-user registry, migrated in once below), or the owner has explicitly
+  // config/workspace-registration.ts), or the owner has explicitly
   // opted an unregistered workspace back in via
   // `checkpoints.unregisteredWorkspaces: "guarded"` (config/checkpoint-settings.ts;
   // default "off"). Coverage flows down a registered root's subtree AND
@@ -1817,21 +1812,6 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
   // registered itself. The working directory is fixed for the life of the
   // process (a change applies at the next start); only the registration STATE
   // of this fixed workingDirectory is live.
-  const registrationMigration = migrateLegacyWorkspaceRegistryIfNeeded(shellPaths);
-  if (registrationMigration) {
-    logger.info('Migrated the local workspace registry into the shared registration store', { ...registrationMigration });
-  }
-  // After the import migration (records now in the shared store), stamp the ones
-  // that came from the agent's OWN explicit list as checkpoint-eligible, so the
-  // eligibility boundary below does not retroactively drop workspaces the owner
-  // had already opted into checkpoints. Runs once (receipt-gated); derives the
-  // explicit set from the still-present legacy registry file. Records lacking the
-  // flag (a TUI first-open self-record) stay ineligible, the boundary the owner
-  // ruled stays explicit.
-  const eligibilityBackfill = backfillCheckpointEligibilityIfNeeded(shellPaths);
-  if (eligibilityBackfill && eligibilityBackfill.recordsStamped > 0) {
-    logger.info("Marked the agent's explicitly-registered workspaces checkpoint-eligible", { ...eligibilityBackfill });
-  }
   const checkpointsRegistration = createWorkspaceRegistrationLiveChecker(shellPaths, workingDirectory);
   const checkpointsGuarded = (): boolean => readCheckpointRegistrationSetting(configManager) === 'guarded';
   const checkpointsCurrentlyAllowed = (): boolean => {

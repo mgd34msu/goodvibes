@@ -1,5 +1,4 @@
-import { existsSync } from 'node:fs';
-import { resolveWorkspaceRegisterReadPath } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { sharedWorkspaceRegisterPath } from '@goodvibes-jev/engine/platform/platform/workspace';
 import type { ShellPathService } from '../index.js';
 import {
   createCheckpointEligibilityChecker,
@@ -42,15 +41,10 @@ export type StoreShellPaths = Pick<ShellPathService, 'resolveUserPath' | 'homeDi
  * and writes this same file directly and the platform's gateway writes it, so the
  * register is cross-product state rather than the daemon's own, it lives in
  * the shared tier (~/.goodvibes/shared/), which takes no surface root, so all
- * three resolve one identical path. Until the boot fold has moved it, the
- * resolver falls back to the pre-split location read-only, so this reader never
- * reports an empty register and silently refuses every checkpoint.
+ * three resolve one identical path.
  */
 export function sharedWorkspaceRegistrationStorePath(shellPaths: StoreShellPaths): string {
-  // READ path: the shared tier when it is there, the pre-split location until
-  // the daemon's boot fold has moved it. This is a reader, so the fallback is
-  // read-only and nothing here ever writes to the legacy address.
-  return resolveWorkspaceRegisterReadPath(shellPaths, existsSync);
+  return sharedWorkspaceRegisterPath(shellPaths);
 }
 
 /**

@@ -22,7 +22,7 @@ import { formatProviderModel, getModelIdFromProviderModel, getProviderIdFromMode
 import { readOnboardingCheckMarker } from '../runtime/onboarding/index.ts';
 import { GlobalNetworkTransportInstaller } from '@/runtime/index.ts';
 import { createShellPathService } from '@/runtime/index.ts';
-import { configureActivityLogger, logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { configureActivityLogger } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
   applyRuntimeCommandEndpointFlagOverrides,
   applyRuntimeConfigOverrides,
@@ -46,11 +46,7 @@ import { inspectConnectedHostMetrics } from './connected-host-metrics.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { writeExitingStdoutLine, writeFatalLine } from '../utils/fatal-boot-write.ts';
 import { readCheckpointRegistrationSetting } from '../config/checkpoint-settings.ts';
-import {
-  backfillCheckpointEligibilityIfNeeded,
-  migrateLegacyWorkspaceRegistryIfNeeded,
-  resolveCheckpointEligibilitySync,
-} from '../config/workspace-registration.ts';
+import { resolveCheckpointEligibilitySync } from '../config/workspace-registration.ts';
 import { AgentProfileUsageError, resolveAgentRuntimeProfileHome, resolveSelectedAgentRuntimeProfileHome } from '../agent/runtime-profile.ts';
 
 function readEnvRuntimeUrl(): { readonly source: string; readonly value: string } | null {
@@ -223,11 +219,6 @@ export async function prepareShellCliRuntime(
         })
       : undefined;
     const effectiveOperatorTokenPath = externalRuntime.operatorToken.present ? externalRuntime.operatorToken.path : operatorTokenPath;
-    const registrationMigration = migrateLegacyWorkspaceRegistryIfNeeded(shellPaths);
-    if (registrationMigration) {
-      logger.info('Migrated the local workspace registry into the shared registration store', { ...registrationMigration });
-    }
-    backfillCheckpointEligibilityIfNeeded(shellPaths);
     const checkpoints = {
       // Honest to the checkpoint boundary: a workspace is "registered" for
       // checkpoints only when it is checkpoint-ELIGIBLE (an explicit owner

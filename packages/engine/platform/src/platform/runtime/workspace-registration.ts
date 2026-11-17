@@ -24,7 +24,7 @@
  * resolution says UNKNOWN; a covered or declined path never re-asks.
  */
 import { dirname } from 'node:path';
-import { legacyWorkspaceRegisterPath, sharedWorkspaceRegisterPath } from '../workspace/registration/shared-register-path.js';
+import { sharedWorkspaceRegisterPath } from '../workspace/registration/shared-register-path.js';
 import { broadRootReason } from '../workspace/checkpoint/root-guard.js';
 import {
   openWorkspaceRegistrationStore,
@@ -91,11 +91,8 @@ export class WorkspaceRegistrationManager {
     this.store =
       options.store ??
       openWorkspaceRegistrationStore({
-        // Shared tier, see registration/shared-register-path.ts. Writes go
-        // there; reads fall back to the pre-split path until the daemon's boot
-        // fold has run, so an updated product never reports an empty register.
+        // Shared tier, see registration/shared-register-path.ts.
         path: sharedWorkspaceRegisterPath(shellPaths),
-        fallbackReadPath: legacyWorkspaceRegisterPath(shellPaths),
         homeDir: this.homeDir,
         daemonStateDir: this.daemonStateDir,
       });

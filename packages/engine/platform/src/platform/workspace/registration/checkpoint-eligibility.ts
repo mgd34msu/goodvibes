@@ -38,8 +38,7 @@ export function readCheckpointEligibilitySync(registerPath: string, path: string
  * A repeatable checker for one fixed directory. The git worktree probe (a
  * subprocess) runs once here; each call is one small file read, cheap enough
  * for every turn and agent-run event, so registering a workspace takes effect
- * at the next event. `registerPath` is asked each call because the register can
- * move from its pre-split location to the shared tier while the process runs.
+ * at the next event.
  */
 export function createCheckpointEligibilityChecker(registerPath: () => string, path: string): () => CheckpointEligibility {
   const git = probeWorktreeLink(path);

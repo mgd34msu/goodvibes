@@ -5,10 +5,15 @@
  * same way from either place:
  *
  * - A write the Agent makes for the owner to the owner's own state (profile
- *   and occasions writes, channel drafts and routing, the schedules and jobs
- *   it creates or changes) presents the Agent's delegated credential
- *   (agent-delegation-credential.ts). The host reports it as credential kind
- *   `agent` and judges the call as the Agent acting for the owner.
+ *   and occasions writes, channel drafts and routing, and the schedules and
+ *   jobs it creates or changes through `agent_operator_method`, which sends
+ *   the job revision the host requires of such a call) presents the Agent's
+ *   delegated credential (agent-delegation-credential.ts). The host reports it
+ *   as credential kind `agent` and judges the call as the Agent acting for the
+ *   owner. Only `agentCallConnection` switches a call to that credential.
+ * - The lifecycle controls `agent_operator_action` sends (answer an approval,
+ *   run, pause, resume or delete a schedule) are operator actions on the
+ *   ordinary lane, and present the ordinary credential.
  * - Every other call, every read included, presents the Agent's ordinary
  *   credential for that host, resolved with the Agent's one precedence
  *   (connected-host-client.ts `resolveConnectedHost`): its pairing with the

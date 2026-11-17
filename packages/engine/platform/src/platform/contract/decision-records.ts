@@ -11,7 +11,10 @@
  */
 import type { JsonValue } from '@goodvibes-jev/judgment';
 import type { ContractRun } from './run-context.js';
-import type { ContractDecision, ContractDecisionRecord } from './types.js';
+import type { ContractDecision, ContractDecisionRecord, DeepReadonly } from './types.js';
+
+/** A decision as stored or as a read-only contract view hands it out. */
+type DecisionView = DeepReadonly<ContractDecision>;
 
 type DecideArgs = Parameters<ContractRun['decide']>;
 
@@ -37,19 +40,19 @@ export function receiptRecord(value: object): ContractDecisionRecord {
 }
 
 /** The receipt a decision carries, or undefined when it carries none. */
-export function decisionReceipt(decision: ContractDecision): unknown {
+export function decisionReceipt(decision: DecisionView): unknown {
   if (decision.record !== undefined) return decision.record.kind === 'receipt' ? decision.record.value : undefined;
   try { return JSON.parse(decision.reason) as unknown; } catch { return undefined; }
 }
 
 /** The receipt as text for a model or a person; the sentence when there is no receipt. */
-export function decisionReceiptText(decision: ContractDecision): string {
+export function decisionReceiptText(decision: DecisionView): string {
   const receipt = decisionReceipt(decision);
   return receipt === undefined ? decision.reason : JSON.stringify(receipt);
 }
 
 /** The repair round a `fix-planned` decision scheduled; undefined for any other decision. */
-export function scheduledFix(decision: ContractDecision): { readonly round: number; readonly groupId: string } | undefined {
+export function scheduledFix(decision: DecisionView): { readonly round: number; readonly groupId: string } | undefined {
   if (decision.action !== 'fix-planned') return undefined;
   if (decision.record !== undefined) return decision.record.kind === 'fix-scheduled' ? { round: decision.record.round, groupId: decision.record.groupId } : undefined;
   const legacy = /^round (\d+): group (\S+) with /.exec(decision.reason);
@@ -57,7 +60,7 @@ export function scheduledFix(decision: ContractDecision): { readonly round: numb
 }
 
 /** Whether an `owner-replied` decision amended its target. */
-export function isAmendment(decision: ContractDecision): boolean {
+export function isAmendment(decision: DecisionView): boolean {
   if (decision.action !== 'owner-replied') return false;
   if (decision.record !== undefined) return decision.record.kind === 'amended';
   return decision.reason.startsWith('amended as the owner instructed:');

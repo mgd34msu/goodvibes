@@ -309,6 +309,7 @@ export interface DaemonKnowledgeRouteHandlers extends DaemonKnowledgeRefinementR
   postKnowledgeReviewIssue(id: string, req: Request): MaybeResponse;
   postKnowledgeDecideCandidate(id: string, req: Request): MaybeResponse;
   postKnowledgeRunJob(jobId: string, req: Request): MaybeResponse;
+  postKnowledgeCancelJobRun(runId: string, req: Request): MaybeResponse;
   postKnowledgeLint(req: Request): MaybeResponse;
   postKnowledgeReindex(req: Request): MaybeResponse;
   postKnowledgeSaveSchedule(req: Request): MaybeResponse;

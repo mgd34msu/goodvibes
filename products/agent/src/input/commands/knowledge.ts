@@ -75,7 +75,7 @@ export const knowledgeCommand: SlashCommand = {
   hidden: true,
   usage: '<subcommand> [args]',
   argsHint:
-    'status|ask|search|list|get|map|connectors|ingest-url --yes|ingest-file --yes|ingest-artifact --yes|import-urls --yes|import-bookmarks --yes|import-browser-history --yes|ingest-connector --yes|review-issue --yes|reindex --yes',
+    'status|ask|search|list|get|map|connectors|ingest-url --yes|ingest-file --yes|ingest-artifact --yes|import-urls --yes|import-bookmarks --yes|import-browser-history --yes|ingest-connector --yes|review-issue --yes|reindex --yes|consolidate --yes|cancel-run --yes',
   handler: async (args: string[], context: CommandContext): Promise<void> => {
     if (args.length === 0 && context.openAgentWorkspace) {
       context.openAgentWorkspace('knowledge');
@@ -169,6 +169,11 @@ export const knowledgeCommand: SlashCommand = {
               sameSession();
               return knowledge.jobs.run(id, options);
             },
+            runs: (limit, jobId) => knowledge.jobs.runs(limit, jobId),
+            cancelRun: (runId) => {
+              sameSession();
+              return knowledge.jobs.cancelRun(runId);
+            },
             describeError: (error) => (error instanceof Error ? error.message : String(error)),
             allow(verb, subject, usage) {
               if (confirmation.yes) return true;
@@ -183,7 +188,9 @@ export const knowledgeCommand: SlashCommand = {
                         ? 'review Agent Knowledge issue ' + subject
                         : verb === 'reindex'
                           ? 'reindex Agent Knowledge'
-                          : 'run Agent Knowledge consolidation';
+                          : verb === 'cancel-run'
+                            ? 'cancel Agent Knowledge job run ' + subject
+                            : 'run Agent Knowledge consolidation';
               requireYesFlag(context, description, usage + ' --yes');
               return false;
             },
@@ -438,6 +445,7 @@ export const knowledgeCommand: SlashCommand = {
               '  explain <task...> [--scope <path> ...]',
               '  reindex --yes',
               '  consolidate [light|deep] --yes',
+              '  cancel-run [runId] --yes',
             ].join('\n'),
           );
       }

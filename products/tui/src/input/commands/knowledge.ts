@@ -42,7 +42,7 @@ export const knowledgeCommand: SlashCommand = {
   description: 'Structured knowledge graph: ingest URLs/bookmarks, inspect issues, and build compact prompt packets',
   usage: '<subcommand> [args]',
   argsHint:
-    'status|ask|ingest-url|import-bookmarks|import-urls|list|search|get|queue|review-issue|candidates|reports|schedules|lint|packet|explain|reindex|consolidate',
+    'status|ask|ingest-url|import-bookmarks|import-urls|list|search|get|queue|review-issue|candidates|reports|schedules|lint|packet|explain|reindex|consolidate|cancel-run',
   handler: async (args: string[], context: CommandContext): Promise<void> => {
     const knowledge = requireKnowledgeApi(context);
     if (!knowledge) {
@@ -104,6 +104,8 @@ export const knowledgeCommand: SlashCommand = {
           review: (input) => knowledge.graph.issues.review(input),
           reindex: () => knowledge.status.reindex(),
           run: (id, options) => knowledge.jobs.run(id, options),
+          runs: (limit, jobId) => knowledge.jobs.runs(limit, jobId),
+          cancelRun: (runId) => knowledge.jobs.cancelRun(runId),
           allow: () => true,
           describeError: summarizeError,
         },
@@ -150,6 +152,7 @@ export const knowledgeCommand: SlashCommand = {
             '  explain <task...> [--scope <path> ...]',
             '  reindex',
             '  consolidate [light|deep]',
+            '  cancel-run [runId]',
           ].join('\n'),
         );
     }

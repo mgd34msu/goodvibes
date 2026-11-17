@@ -597,6 +597,18 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     outputSchema: KNOWLEDGE_JOB_RUN_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
+    id: 'knowledge.job-run.cancel',
+    title: 'Cancel Knowledge Job Run',
+    description: 'Stop a queued or running knowledge job run this daemon started: it is settled failed with the cancel reason. A finished run, or one another process owns, is refused with 409 and what to do instead.',
+    category: 'knowledge',
+    scopes: ['write:knowledge'],
+    access: 'admin',
+    http: { method: 'POST', path: '/api/knowledge/job-runs/{runId}/cancel' },
+    events: [runtimeEventId('knowledge')],
+    inputSchema: bodyEnvelopeSchema({ runId: STRING_SCHEMA }, ['runId']),
+    outputSchema: KNOWLEDGE_JOB_RUN_OUTPUT_SCHEMA,
+  }),
+  methodDescriptor({
     id: 'knowledge.lint',
     title: 'Lint Structured Knowledge',
     description: 'Run deterministic knowledge lint checks and return the current issues.',

@@ -4,7 +4,7 @@ import { readFlag, readStringListFlag, readJsonObjectFlag, positionalArgs } from
 import { commandRefusal } from './command-confirmation.js';
 export const KNOWLEDGE_REVIEW_ACTIONS = ['accept', 'reject', 'resolve', 'reopen', 'edit', 'forget'] as const;
 export type KnowledgeReviewAction = (typeof KNOWLEDGE_REVIEW_ACTIONS)[number];
-export type KnowledgeMutationVerb = 'ingest-url' | 'import-bookmarks' | 'import-urls' | 'review-issue' | 'reindex' | 'consolidate';
+export type KnowledgeMutationVerb = 'ingest-url' | 'import-bookmarks' | 'import-urls' | 'review-issue' | 'reindex' | 'consolidate' | 'cancel-run';
 export interface KnowledgeMutationPorts {
   readonly url: KnowledgeApi['ingest']['url'];
   readonly bookmarksFile: KnowledgeApi['ingest']['bookmarksFile'];
@@ -12,6 +12,8 @@ export interface KnowledgeMutationPorts {
   readonly review: KnowledgeApi['graph']['issues']['review'];
   readonly reindex: KnowledgeApi['status']['reindex'];
   readonly run: KnowledgeApi['jobs']['run'];
+  readonly runs: KnowledgeApi['jobs']['runs'];
+  readonly cancelRun: KnowledgeApi['jobs']['cancelRun'];
   readonly sessionId: () => string;
   readonly allow: (verb: KnowledgeMutationVerb, subject: string | undefined, usage: string) => boolean;
   readonly describeError: (error: unknown) => string;
@@ -184,6 +186,23 @@ async function dispatchKnowledgeMutation(
       const jobId = mode === 'deep' ? 'knowledge-deep-consolidation' : 'knowledge-light-consolidation';
       const run = await ports.run(jobId, { mode: 'inline' });
       print(`[knowledge] Consolidation run ${run.id} finished with status ${run.status}.`);
+      break;
+    }
+    case 'cancel-run': {
+      const [runId] = positionalArgs(rest);
+      if (!runId) {
+        // Without an id, the runs that can be cancelled are listed so one can be picked.
+        const active = ports.runs(100).filter((run) => run.status === 'queued' || run.status === 'running');
+        print([
+          active.length === 0 ? '[knowledge] No knowledge job run is queued or running.' : '[knowledge] Knowledge job runs that can be cancelled:',
+          ...active.map((run) => `  ${run.id}${presentation.fieldSeparator}${run.jobId} ${run.status}`),
+          `Usage: /knowledge cancel-run <runId>${presentation.confirmationSuffix}`,
+        ].join('\n'));
+        return true;
+      }
+      if (!ports.allow('cancel-run', runId, '/knowledge cancel-run <runId>')) return true;
+      const run = await ports.cancelRun(runId);
+      print(`[knowledge] Job run ${run.id} (${run.jobId}) cancelled; status ${run.status}${run.error ? `${presentation.fieldSeparator}${run.error}` : ''}.`);
       break;
     }
     default:

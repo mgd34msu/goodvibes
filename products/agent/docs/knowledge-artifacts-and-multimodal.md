@@ -87,6 +87,7 @@ The TUI workspace exposes the common confirmed ingest, issue-review, consolidati
 - `goodvibes-agent knowledge import-browser-history --yes`
 - `/knowledge review-issue <issueId> <accept|reject|resolve|reopen|edit|forget> --yes`
 - `/knowledge consolidate [light|deep] --yes`
+- `/knowledge cancel-run [runId] --yes` (without an id it lists the queued and running job runs)
 - `goodvibes-agent knowledge reindex --yes`
 
 Connected-host ingest and read CLI routes target `/api/goodvibes-agent/knowledge/*`. Workspace and slash-command issue review, packet/explain, consolidation, and reindex flows stay inside the isolated Agent Knowledge service. None of them call default knowledge.

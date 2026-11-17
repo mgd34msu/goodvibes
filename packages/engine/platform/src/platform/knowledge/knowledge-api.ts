@@ -269,6 +269,8 @@ export interface KnowledgeApi {
     get(id: string): ReturnType<KnowledgeService['getJob']>;
     runs(limit?: number, jobId?: string): ReturnType<KnowledgeService['listJobRuns']>;
     run(id: string, input?: RunJobInput): ReturnType<KnowledgeService['runJob']>;
+    /** Stops a queued or running run this process started; a finished run or another process's run is refused with what to do. */
+    cancelRun(runId: string): ReturnType<KnowledgeService['cancelJobRun']>;
     schedules: {
       list(limit?: number): Promise<ReturnType<KnowledgeService['listSchedules']>>;
       get(id: string): Promise<ReturnType<KnowledgeService['getSchedule']>>;
@@ -521,6 +523,7 @@ export function createKnowledgeApi(
       get: (id: string) => knowledgeService.getJob(id),
       runs: (limit: number = 100, jobId?: string) => knowledgeService.listJobRuns(limit, jobId),
       run: (id: string, input: RunJobInput = {}) => knowledgeService.runJob(id, input),
+      cancelRun: (runId: string) => knowledgeService.cancelJobRun(runId),
       schedules: Object.freeze({
         list: (limit = 100) => fresh(async () => knowledgeService.listSchedules(limit)),
         get: (id: string) => fresh(async () => knowledgeService.getSchedule(id)),

@@ -207,6 +207,7 @@ export function createDaemonKnowledgeRouteHandlers(
     postKnowledgeReviewIssue: async (id, request) => handleKnowledgeReviewIssue(context, id, request),
     postKnowledgeDecideCandidate: async (id, request) => handleKnowledgeDecideCandidate(context, id, request),
     postKnowledgeRunJob: async (jobId, request) => handleKnowledgeRunJob(context, jobId, request),
+    postKnowledgeCancelJobRun: async (runId, request) => handleKnowledgeCancelJobRun(context, runId, request),
     postKnowledgeLint: async (request) => {
       const admin = context.requireAdmin(request);
       if (admin) return admin;
@@ -1018,6 +1019,23 @@ async function handleKnowledgeRunJob(context: DaemonKnowledgeRouteContext, jobId
     });
   } catch (error) {
     return isKnowledgeNotFound(error, 'KNOWLEDGE_JOB_NOT_FOUND')
+      ? jsonErrorResponse(error, { status: 404 })
+      : readServiceErrorResponse(error, { fallbackStatus: 400 });
+  }
+}
+
+/** Stops a queued or running job run; a finished run or one another process owns is refused with 409 and what to do. */
+async function handleKnowledgeCancelJobRun(context: DaemonKnowledgeRouteContext, runId: string, request: Request): Promise<Response> {
+  const admin = context.requireAdmin(request);
+  if (admin) return admin;
+  const cancel = context.knowledgeService.cancelJobRun;
+  if (!cancel) {
+    return jsonErrorResponse({ error: 'This daemon cannot cancel knowledge job runs. Wait for the run to finish.', code: 'KNOWLEDGE_JOB_RUN_CANCEL_UNAVAILABLE' }, { status: 501 });
+  }
+  try {
+    return Response.json({ run: await cancel.call(context.knowledgeService, runId) });
+  } catch (error) {
+    return isKnowledgeNotFound(error, 'KNOWLEDGE_JOB_RUN_NOT_FOUND')
       ? jsonErrorResponse(error, { status: 404 })
       : readServiceErrorResponse(error, { fallbackStatus: 400 });
   }

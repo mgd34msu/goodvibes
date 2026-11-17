@@ -328,6 +328,8 @@ async function dispatchOperatorRoutesInner(
   if (knowledgeReportMatch && method === 'GET') return handlers.getKnowledgeReport(safeDecodeURIComponent(knowledgeReportMatch[1]!) );
   const knowledgeSourceExtractionMatch = pathname.match(/^\/api\/knowledge\/sources\/([^/]+)\/extraction$/);
   if (knowledgeSourceExtractionMatch && method === 'GET') return handlers.getKnowledgeSourceExtraction(safeDecodeURIComponent(knowledgeSourceExtractionMatch[1]!), url, req);
+  const knowledgeJobRunCancelMatch = pathname.match(/^\/api\/knowledge\/job-runs\/([^/]+)\/cancel$/);
+  if (knowledgeJobRunCancelMatch && method === 'POST') return handlers.postKnowledgeCancelJobRun(safeDecodeURIComponent(knowledgeJobRunCancelMatch[1]!), req);
   const knowledgeJobRunMatch = pathname.match(/^\/api\/knowledge\/jobs\/([^/]+)\/run$/);
   if (knowledgeJobRunMatch && method === 'POST') return handlers.postKnowledgeRunJob(safeDecodeURIComponent(knowledgeJobRunMatch[1]!), req);
   const knowledgeJobMatch = pathname.match(/^\/api\/knowledge\/jobs\/([^/]+)$/);

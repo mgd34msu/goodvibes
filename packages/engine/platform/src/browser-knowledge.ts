@@ -57,6 +57,7 @@ export function createKnowledgeBrowserRoutes(prefix: string) {
     'knowledge.issue.review': { method: 'POST', path: `${prefix}/issues/{id}/review` },
     'knowledge.issues.list': { method: 'GET', path: `${prefix}/issues` },
     'knowledge.item.get': { method: 'GET', path: `${prefix}/items/{id}` },
+    'knowledge.job-run.cancel': { method: 'POST', path: `${prefix}/job-runs/{runId}/cancel` },
     'knowledge.job-runs.list': { method: 'GET', path: `${prefix}/job-runs` },
     'knowledge.job.get': { method: 'GET', path: `${prefix}/jobs/{jobId}` },
     'knowledge.job.run': { method: 'POST', path: `${prefix}/jobs/{jobId}/run` },

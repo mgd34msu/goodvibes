@@ -541,10 +541,22 @@ export function createInboundMailSetAside(deps: {
   };
 }
 
+/** Matches whose expectation a pass spent before its notice failed; bounds the in-memory map. */
+const MAX_CORRELATED_AWAITING_NOTICE = 256;
+
 /** Build the handler the `DedupingInboundMailSink` wraps. */
 export function createInboundMailIntake(
   deps: InboundMailIntakeDeps,
 ): (message: InboundMailboxMessage) => Promise<void> {
+  /**
+   * Correlation does not wait for the announcement. A message that satisfies
+   * an expectation spends it even when its notice cannot be delivered, so the
+   * workstream waiting for that mail gets it during a notice outage. The
+   * spent match is kept here by message, so the pass that retries the notice
+   * announces the same outcome instead of reading "no expectation" from the
+   * book it already spent. Removed when the message completes.
+   */
+  const correlated = new Map<string, VerificationMatch>();
   return async (message: InboundMailboxMessage): Promise<void> => {
     const now = deps.now();
     const receivedAt = receiptTimestamp(now);
@@ -558,7 +570,8 @@ export function createInboundMailIntake(
 
     // `consume: false`, the grant is NOT spent here. See the ordering note in
     // the file header: it is spent at the very end, once this pass is known to
-    // be completing.
+    // be completing, or, when only the notice route failed, just before the
+    // pass is retried (see `correlated`).
     //
     // On the body-less path the book is NOT ASKED AT ALL. `matchCandidate`
     // gates on the delivery-evidence address, which is a header and therefore
@@ -577,7 +590,12 @@ export function createInboundMailIntake(
       // empty string is the honest value. The Gmail delta carries one.
       body: message.source === 'gmail' ? message.body : '',
     };
-    const match: VerificationMatch = bodiesWithheld
+    // The identity is the message's own, not a shape assumed from one source.
+    const { identity, key } = messageIdentity(message);
+    const correlationKey = JSON.stringify(key);
+    const spentEarlier = correlated.get(correlationKey);
+
+    const match: VerificationMatch = spentEarlier ?? (bodiesWithheld
       ? {
         kind: 'no-expectation',
         reason:
@@ -587,10 +605,7 @@ export function createInboundMailIntake(
           + 'be satisfied on evidence nobody read. No expectation was consulted and none was '
           + 'spent.',
       }
-      : await deps.expectations.matchCandidate(candidate, now, { consume: false });
-
-    // The identity is the message's own, not a shape assumed from one source.
-    const { identity, key } = messageIdentity(message);
+      : await deps.expectations.matchCandidate(candidate, now, { consume: false }));
 
     /** One write of this message's record, at whatever status is known so far. */
     const write = async (
@@ -688,6 +703,19 @@ export function createInboundMailIntake(
             + 'sent as soon as delivery works again.',
           at: receivedAt.iso,
         });
+        // Correlation is done before the retry: the expectation is spent now,
+        // so the agent waiting on it is not held up by the notice route.
+        if (spentEarlier === undefined && match.kind === 'matched') {
+          try {
+            await deps.expectations.consumeMatch(match, candidate);
+            correlated.set(correlationKey, match);
+            while (correlated.size > MAX_CORRELATED_AWAITING_NOTICE) correlated.delete(correlated.keys().next().value!);
+          } catch (error) {
+            note(deps.observer, message, 'post-notice-write-failed',
+              `the matched expectation could not be closed (${summarizeError(error)}); the next pass `
+              + 'matches the message again.', receivedAt.iso);
+          }
+        }
         throw new InboundNoticeTransportError(delivery.error ?? 'delivery-failed');
       } else {
         status = delivery.reason;
@@ -727,8 +755,10 @@ export function createInboundMailIntake(
     // arrives first leaves the window open for the verification itself. A no-op
     // for every outcome that is not a match, and swallowed for the same reason
     // the write above is: a throw here re-announces.
+    correlated.delete(correlationKey);
     try {
-      await deps.expectations.consumeMatch(match, candidate);
+      // Spent already by the pass whose notice failed.
+      if (spentEarlier === undefined) await deps.expectations.consumeMatch(match, candidate);
     } catch (error) {
       note(deps.observer, message, 'post-notice-write-failed',
         `the matched expectation could not be closed (${summarizeError(error)}); it stays open `

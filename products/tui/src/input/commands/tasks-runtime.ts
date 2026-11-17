@@ -17,8 +17,8 @@ import { taskDetailLines } from '@goodvibes-jev/engine/terminal-shell/task-prese
  *
  * Writes do NOT degrade that way. A lifecycle act against a task this terminal
  * does not own is routed to the daemon's verb where one exists (cancel, retry)
- * and refused by name where none does (update, complete, fail, pause and
- * resume have no wire verb). Applying one locally would report success and
+ * and refused by name where none does (start, update, complete, fail, pause
+ * and resume have no wire verb). Applying one locally would report success and
  * change nothing on the process that actually runs the task.
  */
 import type { CommandContext } from '../command-registry.ts';
@@ -31,7 +31,7 @@ import { createTasksRuntimeCommands } from '@goodvibes-jev/engine/terminal-shell
 export const { registerTasksRuntimeCommands } = createTasksRuntimeCommands<CommandContext>({
   description: 'Inspect and control runtime tasks',
   usage:
-    '[list [status|kind] | show <taskId> | output <taskId> | create <kind> <owner> <title...> | update <taskId> <title|description|result> <value...> | complete <taskId> [result] | fail <taskId> <error...> | cancel <taskId> [note] | pause <taskId> [note] | resume <taskId> [note] | retry <taskId> [note]]',
+    '[list [status|kind] | show <taskId> | output <taskId> | create <kind> <owner> <title...> | start <taskId> | update <taskId> <title|description|result> <value...> | complete <taskId> [result] | fail <taskId> <error...> | cancel <taskId> [note] | pause <taskId> [note] | resume <taskId> [note] | retry <taskId> [note]]',
   listTitle: 'Runtime Tasks',
   local: (ctx) => requireOperatorClient(ctx).tasks,
   verbs: (ctx) =>

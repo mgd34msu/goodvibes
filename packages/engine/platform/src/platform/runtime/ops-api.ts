@@ -8,6 +8,8 @@ export interface OpsTaskApi {
   get(taskId: string): RuntimeTask | null;
   running(): readonly RuntimeTask[];
   create(input: TaskCreateParams): RuntimeTask;
+  /** Reports a queued task as running (a paused one is resumed). */
+  start(taskId: string): RuntimeTask;
   update(taskId: string, input: TaskUpdateParams): RuntimeTask;
   complete(taskId: string, result?: unknown): RuntimeTask;
   fail(taskId: string, input: TaskFailParams): RuntimeTask;

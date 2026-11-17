@@ -54,6 +54,9 @@ export function createRuntimeOpsApi(options: RuntimeOpsApiOptions): OpsApi {
       create(input) {
         return options.taskManager.createTask(input);
       },
+      start(taskId) {
+        return options.taskManager.startTask(taskId);
+      },
       update(taskId, input) {
         return options.taskManager.updateTask(taskId, input);
       },

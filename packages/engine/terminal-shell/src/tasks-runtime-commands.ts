@@ -30,8 +30,8 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
   readonly unknown: (id: string) => string;
   readonly unknownSubcommand: (subcommand: string) => string;
 }) {
-  /** The five lifecycle acts the operator contract carries no verb for. */
-  const LOCAL_ONLY_ACTS = new Set(['update', 'complete', 'fail', 'pause', 'resume']);
+  /** The lifecycle acts the operator contract carries no verb for. */
+  const LOCAL_ONLY_ACTS = new Set(['start', 'update', 'complete', 'fail', 'pause', 'resume']);
 
   function refuseDaemonOwnedAct(taskId: string, subcommand: string): string {
     return (
@@ -129,17 +129,17 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
           if (!validKinds.has(kind)) {
             throw commandRefusal(`Unknown task kind: ${kind}`);
           }
-          // Created HERE on purpose: a task this command creates is one this
-          // terminal's loop is expected to drive, so it belongs in the registry
-          // that drives it. Submitting work TO the daemon is what /schedule and
-          // the channel surfaces do.
+          // Created HERE on purpose: a task this command creates is a record the
+          // operator drives in this terminal (start, complete, fail, pause,
+          // resume, cancel, retry). Submitting work TO the daemon is what
+          // /schedule and the channel surfaces do.
           const task = opsApi.tasks.create({
             kind: kind as TaskKind,
             owner,
             title,
             description: title,
           });
-          ctx.print(`Created task ${task.id} (${task.kind}) for ${task.owner}.`);
+          ctx.print(`Created task ${task.id} (${task.kind}) for ${task.owner}; it is queued until /tasks start ${task.id}.`);
           return;
         }
 
@@ -203,6 +203,11 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
             ctx.print(`Updated task ${taskId} field ${field}.`);
             return;
           }
+          if (subcommand === 'start') {
+            const task = opsApi.tasks.start(taskId);
+            ctx.print(`Task ${taskId} is ${task.status}.`);
+            return;
+          }
           if (subcommand === 'complete') {
             opsApi.tasks.complete(taskId, args.slice(2).join(' ').trim() || undefined);
             ctx.print(`Completed task ${taskId}.`);
@@ -214,7 +219,8 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
               throw commandRefusal('Usage: /tasks fail <taskId> <error...>');
             }
             opsApi.tasks.fail(taskId, { error: errorText });
-            throw commandRefusal(`Failed task ${taskId}.`);
+            ctx.print(`Marked task ${taskId} failed.`);
+            return;
           }
           const note = args.slice(2).join(' ').trim() || undefined;
           switch (subcommand) {

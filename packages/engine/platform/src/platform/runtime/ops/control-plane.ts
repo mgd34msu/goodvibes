@@ -15,7 +15,7 @@ import type { RuntimeEventBus } from '../events/index.js';
 import type { RuntimeStore } from '../store/index.js';
 import type { TaskLifecycleState } from '../store/domains/tasks.js';
 import type { AgentLifecycleState } from '../store/domains/agents.js';
-import { canRetry, canTransition } from '../tasks/lifecycle.js';
+import { canRetry, canTransition, describeTaskMoves } from '../tasks/lifecycle.js';
 import {
   emitOpsTaskCancelled,
   emitOpsTaskPaused,
@@ -36,9 +36,10 @@ export class OpsIllegalActionError extends GoodVibesError {
   public readonly action: string;
   public readonly currentState: string;
 
-  public constructor(targetId: string, action: string, currentState: string) {
+  /** @param next - What can be done from `currentState` instead, in words. */
+  public constructor(targetId: string, action: string, currentState: string, next?: string) {
     super(
-      `[OpsControlPlane] Action '${action}' is illegal for ${targetId} in state '${currentState}'`,
+      `[OpsControlPlane] Action '${action}' is illegal for ${targetId} in state '${currentState}'${next ? `; ${next}` : ''}`,
       { code: 'OPS_ILLEGAL_ACTION', category: 'permission', source: 'runtime', recoverable: false },
     );
     this.name = 'OpsIllegalActionError';
@@ -149,7 +150,7 @@ export class OpsControlPlane {
     }
 
     if (!task.cancellable || !canTransition(task.status, 'cancelled')) {
-      const err = new OpsIllegalActionError(taskId, 'cancel', task.status);
+      const err = new OpsIllegalActionError(taskId, 'cancel', task.status, describeTaskMoves(task.status));
       emitOpsTaskCancelled(this._bus, this._makeCtx(taskId), {
         taskId,
         reason: 'ops_cancel',
@@ -192,7 +193,7 @@ export class OpsControlPlane {
     }
 
     if (!canTransition(task.status, 'blocked')) {
-      const err = new OpsIllegalActionError(taskId, 'pause', task.status);
+      const err = new OpsIllegalActionError(taskId, 'pause', task.status, describeTaskMoves(task.status));
       emitOpsTaskPaused(this._bus, this._makeCtx(taskId), {
         taskId,
         reason: 'ops_pause',
@@ -235,7 +236,7 @@ export class OpsControlPlane {
     }
 
     if (task.status !== 'blocked' || !canTransition(task.status, 'running')) {
-      const err = new OpsIllegalActionError(taskId, 'resume', task.status);
+      const err = new OpsIllegalActionError(taskId, 'resume', task.status, describeTaskMoves(task.status));
       emitOpsTaskResumed(this._bus, this._makeCtx(taskId), {
         taskId,
         reason: 'ops_resume',
@@ -247,7 +248,7 @@ export class OpsControlPlane {
     }
 
     this._audited(
-      () => this._taskManager.startTask(taskId),
+      () => this._taskManager.resumeTask(taskId),
       (errorMessage) => emitOpsTaskResumed(this._bus, this._makeCtx(taskId), {
         taskId, reason: 'ops_resume', note, outcome: 'error', errorMessage,
       }),
@@ -280,7 +281,7 @@ export class OpsControlPlane {
     }
 
     if (!canRetry(task.status)) {
-      const err = new OpsIllegalActionError(taskId, 'retry', task.status);
+      const err = new OpsIllegalActionError(taskId, 'retry', task.status, describeTaskMoves(task.status));
       emitOpsTaskRetried(this._bus, this._makeCtx(taskId), {
         taskId,
         reason: 'ops_retry',

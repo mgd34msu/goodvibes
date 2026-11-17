@@ -579,7 +579,7 @@ GoodVibes ships **163** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/tasks` | `/task` | `[list [status\|kind] \| show <taskId> \| output <taskId> \| create <kind> <owner> <title...> \| update <taskId> <title\|description\|result> <value...> \| complete <taskId> [result] \| fail <taskId> <error...> \| cancel <taskId> [note] \| pause <taskId> [note] \| resume <taskId> [note] \| retry <taskId> [note]]` | Inspect and control runtime tasks |
+| `/tasks` | `/task` | `[list [status\|kind] \| show <taskId> \| output <taskId> \| create <kind> <owner> <title...> \| start <taskId> \| update <taskId> <title\|description\|result> <value...> \| complete <taskId> [result] \| fail <taskId> <error...> \| cancel <taskId> [note] \| pause <taskId> [note] \| resume <taskId> [note] \| retry <taskId> [note]]` | Inspect and control runtime tasks |
 
 ## Teamwork
 

@@ -96,7 +96,7 @@ export interface TaskFailParams {
  * - Emit TaskEvents via RuntimeEventBus at each transition
  * - Update RuntimeState.tasks domain via store dispatch
  * - Track parent/child relationships
- * - Support retry policies (re-queue on failure when policy allows)
+ * - Re-queue a failed or cancelled task only on an explicit retry
  */
 export interface TaskManager {
   /**
@@ -108,13 +108,24 @@ export interface TaskManager {
   createTask(params: TaskCreateParams): RuntimeTask;
 
   /**
-   * Transitions a task from 'queued' to 'running'.
+   * Transitions a task from 'queued' to 'running' and stamps its start time.
+   * A 'blocked' task is resumed instead (see resumeTask).
    *
    * @param taskId - The task to start.
    * @returns The updated RuntimeTask.
    * @throws If the task does not exist or cannot transition to 'running'.
    */
   startTask(taskId: string): RuntimeTask;
+
+  /**
+   * Transitions a paused ('blocked') task back to 'running' through its
+   * owner's resume. The start time is kept and no second start is reported.
+   *
+   * @param taskId - The task to resume.
+   * @returns The updated RuntimeTask.
+   * @throws If the task does not exist, is not blocked, or its owner cannot resume it.
+   */
+  resumeTask(taskId: string): RuntimeTask;
 
   /**
    * Transitions a task to 'blocked' (waiting on a dependency or resource).
@@ -137,12 +148,12 @@ export interface TaskManager {
   completeTask(taskId: string, result?: unknown): RuntimeTask;
 
   /**
-   * Transitions a task to 'failed'. If the task has a retry policy with
-   * remaining attempts, re-queues the task instead.
+   * Transitions a task to 'failed'. A retry is a separate, explicit act
+   * (retryTask); a failure never re-queues the task by itself.
    *
    * @param taskId - The task that failed.
    * @param params - Failure details.
-   * @returns The updated RuntimeTask (may be back in 'queued' if retried).
+   * @returns The updated RuntimeTask.
    * @throws If the task does not exist or cannot transition to 'failed'.
    */
   failTask(taskId: string, params: TaskFailParams): RuntimeTask;

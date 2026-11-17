@@ -20,7 +20,7 @@ import '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { createAgentDaemonVerbCaller } from '../../runtime/client/daemon-verbs.ts';
 import { requireOperatorClient, requireShellPaths } from './runtime-services.ts';
 
-const BLOCKED_TASK_MUTATIONS: ReadonlySet<string> = new Set(['create', 'update', 'complete', 'fail', 'cancel', 'pause', 'resume', 'retry']);
+const BLOCKED_TASK_MUTATIONS: ReadonlySet<string> = new Set(['create', 'start', 'update', 'complete', 'fail', 'cancel', 'pause', 'resume', 'retry']);
 
 function printTaskMutationBlocked(print: (text: string) => void, subcommand: string): void {
   print(

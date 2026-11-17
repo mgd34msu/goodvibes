@@ -4,13 +4,17 @@
  * Implements the task lifecycle state machine:
  *
  * ```
- * queued → running
+ * queued → running | completed | failed | cancelled
  * running → blocked | completed | failed | cancelled | queued (retry re-queue)
- * blocked → running | cancelled | failed
+ * blocked → running | cancelled | failed | queued (retry re-queue)
  * completed → (terminal)
- * failed → (terminal)
- * cancelled → (terminal)
+ * failed → (terminal; an explicit retry re-queues it)
+ * cancelled → (terminal; an explicit retry re-queues it)
  * ```
+ *
+ * A queued task may finish without a running report in between: its owner can
+ * end the work before the start is seen, and a task recorded by hand is
+ * finished by hand.
  */
 import type { TaskLifecycleState } from '../store/domains/tasks.js';
 import { defineLifecycle } from '../../utils/lifecycle-machine.js';
@@ -19,7 +23,7 @@ import { defineLifecycle } from '../../utils/lifecycle-machine.js';
  * The task lifecycle. Terminal states have no outbound transitions.
  */
 export const taskLifecycle = defineLifecycle<TaskLifecycleState>('task', {
-  queued: ['running', 'cancelled'],
+  queued: ['running', 'completed', 'failed', 'cancelled'],
   running: ['blocked', 'completed', 'failed', 'cancelled', 'queued'], // queued = retry re-queue
   blocked: ['running', 'cancelled', 'failed', 'queued'], // queued = retry re-queue (failTask with a retry policy)
   completed: [],
@@ -42,21 +46,27 @@ export function canRetry(status: TaskLifecycleState): boolean {
 }
 
 /**
- * Whether a runtime task record may be moved from `from` to `to` by a bridge
- * that mirrors an external runner (agent, process, ACP, scheduler, daemon
- * agent sync). Wider than the table in exactly three declared ways:
+ * Whether the task store accepts moving a record from `from` to `to`. Wider
+ * than the table in exactly two declared ways:
  *   - an explicit retry (failed/cancelled -> queued, see {@link canRetry});
  *   - a non-terminal state may be re-asserted (the same status reported again,
  *     which carries a patch such as progress); a terminal one may not, so a
- *     finished task is never re-stamped;
- *   - a task still `queued` may be reported finished (completed/failed) with
- *     no running report in between, since the runner can end before it is seen.
+ *     finished task is never re-stamped.
  */
 export function canMirror(from: TaskLifecycleState, to: TaskLifecycleState): boolean {
   if (taskLifecycle.can(from, to)) return true;
   if (to === 'queued' && canRetry(from)) return true;
-  if (from === to) return !taskLifecycle.isTerminal(from);
-  return from === 'queued' && (to === 'completed' || to === 'failed');
+  return from === to && !taskLifecycle.isTerminal(from);
+}
+
+/**
+ * The acts open to a task in `status`, in words, for a refusal to name: the
+ * moves the table allows, plus retry where it applies.
+ */
+export function describeTaskMoves(status: TaskLifecycleState): string {
+  const moves: string[] = [...taskLifecycle.next(status)];
+  if (canRetry(status)) moves.push('queued (retry)');
+  return moves.length === 0 ? `a ${status} task cannot be moved` : `from ${status} it can become ${moves.join(', ')}`;
 }
 
 /**
@@ -90,7 +100,7 @@ export function canTransition(
  * @example
  * ```ts
  * getValidTransitions('running');
- * // => ['blocked', 'completed', 'failed', 'cancelled']
+ * // => ['blocked', 'completed', 'failed', 'cancelled', 'queued']
  *
  * getValidTransitions('completed');
  * // => []

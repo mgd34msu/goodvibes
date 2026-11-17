@@ -29,7 +29,7 @@ import type {
   TaskCancelParams,
   TaskFailParams,
 } from './types.js';
-import { canRetry, canTransition } from './lifecycle.js';
+import { canRetry, canTransition, describeTaskMoves } from './lifecycle.js';
 import {
   emitTaskCreated,
   emitTaskStarted,
@@ -58,8 +58,8 @@ export class TaskTransitionError extends GoodVibesError {
     to: TaskLifecycleState
   ) {
     super(
-      `[TaskManager] Invalid transition ${from} → ${to} for task ${taskId}`,
-      { code: 'TASK_TRANSITION_ERROR', category: 'internal', source: 'runtime', recoverable: false },
+      `[TaskManager] Task ${taskId} is ${from} and cannot become ${to}; ${describeTaskMoves(from)}.`,
+      { code: 'TASK_TRANSITION_ERROR', category: 'bad_request', source: 'runtime', recoverable: false },
     );
     this.name = 'TaskTransitionError';
     this.taskId = taskId;
@@ -115,6 +115,18 @@ export interface TaskController {
 /** Finds the controller for a task from what the row records (its kind and owner). */
 export type TaskControllerResolver = (task: RuntimeTask) => TaskController | undefined;
 
+/**
+ * A task recorded through this manager's createTask has no runner behind it:
+ * the row is the whole record and the operator drives it, so every verb is
+ * bookkeeping on the row.
+ */
+const RECORD_ONLY_CONTROLLER: TaskController = {
+  cancel: () => undefined,
+  pause: () => undefined,
+  resume: () => undefined,
+  retry: () => undefined,
+};
+
 /** Thrown when a verb is asked of a task whose owner does not implement it. */
 export class TaskVerbUnsupportedError extends GoodVibesError {
   declare readonly code: 'TASK_VERB_UNSUPPORTED';
@@ -149,6 +161,8 @@ export class UnifiedTaskManager implements TaskManager {
   private readonly _sessionId: string;
   private readonly _featureFlags: FeatureFlagReader;
   private readonly _controllers: TaskControllerResolver;
+  /** Ids of the tasks createTask recorded; see RECORD_ONLY_CONTROLLER. */
+  private readonly _recordOnly = new Set<string>();
 
   /**
    * @param store - The Zustand runtime store to dispatch state updates to.
@@ -173,7 +187,8 @@ export class UnifiedTaskManager implements TaskManager {
 
   /** The owner's implementation of `verb` for `task`, or a refusal naming why the row is unchanged. */
   private _requireVerb<V extends TaskVerb>(task: RuntimeTask, verb: V): NonNullable<TaskController[V]> {
-    const action = this._controllers(task)?.[verb];
+    const controller = this._controllers(task) ?? (this._recordOnly.has(task.id) ? RECORD_ONLY_CONTROLLER : undefined);
+    const action = controller?.[verb];
     if (!action) throw new TaskVerbUnsupportedError(task, verb);
     return action as NonNullable<TaskController[V]>;
   }
@@ -223,6 +238,7 @@ export class UnifiedTaskManager implements TaskManager {
 
     // Persist to store
     this._dispatchCreated(task);
+    this._recordOnly.add(id);
 
     // Emit event
     emitTaskCreated(this._bus, this._makeCtx(id), {
@@ -234,15 +250,11 @@ export class UnifiedTaskManager implements TaskManager {
     return task;
   }
 
-  /** Queued → running is the owner reporting a start; blocked → running is a resume its owner must perform. */
+  /** Queued → running: the owner reporting a start. A paused task is resumed instead (resumeTask). */
   public startTask(taskId: string): RuntimeTask {
     this._requireEnabled('start runtime task');
     const task = this._requireTask(taskId);
-    this._requireTransition(task, 'running');
-    if (task.status === 'blocked') {
-      const resume = this._requireVerb(task, 'resume');
-      this._runVerb(() => resume());
-    }
+    if (task.status === 'blocked') return this.resumeTask(taskId);
 
     const updated = this._applyTransition(task, 'running', {
       startedAt: Date.now(),
@@ -252,9 +264,22 @@ export class UnifiedTaskManager implements TaskManager {
     return updated;
   }
 
+  /** Blocked → running, performed by the task's owner; the task keeps its start time. */
+  public resumeTask(taskId: string): RuntimeTask {
+    this._requireEnabled('resume runtime task');
+    const task = this._requireTask(taskId);
+    // Checked before the owner acts, so a refused move never reaches the owner.
+    this._requireTransition(task, 'running');
+    if (task.status !== 'blocked') throw new TaskTransitionError(task.id, task.status, 'running');
+    const resume = this._requireVerb(task, 'resume');
+    this._runVerb(() => resume());
+    return this._applyTransition(task, 'running', {});
+  }
+
   public blockTask(taskId: string, reason: string): RuntimeTask {
     this._requireEnabled('block runtime task');
     const task = this._requireTask(taskId);
+    // Checked before the owner acts, so a refused move never reaches the owner.
     this._requireTransition(task, 'blocked');
     const pause = this._requireVerb(task, 'pause');
     this._runVerb(() => pause());
@@ -268,7 +293,6 @@ export class UnifiedTaskManager implements TaskManager {
   public completeTask(taskId: string, result?: unknown): RuntimeTask {
     this._requireEnabled('complete runtime task');
     const task = this._requireTask(taskId);
-    this._requireTransition(task, 'completed');
 
     const now = Date.now();
     const durationMs = task.startedAt !== undefined ? now - task.startedAt : 0;
@@ -285,7 +309,6 @@ export class UnifiedTaskManager implements TaskManager {
   public failTask(taskId: string, params: TaskFailParams): RuntimeTask {
     this._requireEnabled('fail runtime task');
     const task = this._requireTask(taskId);
-    this._requireTransition(task, 'failed');
 
     const now = Date.now();
     const durationMs = task.startedAt !== undefined ? now - task.startedAt : 0;
@@ -315,6 +338,7 @@ export class UnifiedTaskManager implements TaskManager {
       throw new TaskNotCancellableError(taskId);
     }
 
+    // Checked before the owner acts, so a refused move never reaches the owner.
     this._requireTransition(task, 'cancelled');
     const cancel = this._requireVerb(task, 'cancel');
     this._runVerb(() => cancel(params?.reason));
@@ -425,7 +449,9 @@ export class UnifiedTaskManager implements TaskManager {
   }
 
   /**
-   * Validates a transition is permitted; throws TaskTransitionError otherwise.
+   * Refuses a move the table does not allow. Only the verbs that make the
+   * owner act call it; a plain report goes straight to the store, which
+   * refuses a move by the same table (see _applyTransition).
    */
   private _requireTransition(
     task: RuntimeTask,

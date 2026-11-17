@@ -3,6 +3,8 @@ import { installCatalogModelFacts } from './model-catalog-facts.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { LLMProvider, ProviderRuntimeMetadata, ProviderRuntimeMetadataDeps, RegistrableProvider } from './interface.js';
 import { ProviderNotFoundError } from './provider-not-found-error.js';
+import { snapshotRuntimeMetadataDeps } from './runtime-metadata.js';
+import { resolveProviderConfiguredStatus, type ProviderConfiguredStatus } from './configured-status.js';
 import { join } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { ProviderCapabilityRegistry, type ProviderCapability, type RequestProfile, type RouteExplanation } from './capabilities.js';
@@ -60,6 +62,16 @@ export type {
  * ProviderRegistry, manages LLM provider instances and model selection.
  * Lazily instantiates providers on first use.
  */
+/** Model registry and catalog lookups by id, for pricing. */
+interface PricingIndex {
+  readonly registry: readonly ModelDefinition[];
+  readonly catalog: readonly CatalogModel[];
+  readonly definitions: ReadonlyMap<string, ModelDefinition>;
+  readonly definitionsById: ReadonlyMap<string, ModelDefinition>;
+  readonly catalogById: ReadonlyMap<string, readonly CatalogModel[]>;
+  readonly catalogProviderIds: ReadonlySet<string>;
+}
+
 export class ProviderRegistry {
   private providers: Map<string, LLMProvider> = new Map();
   private currentModelRegistryKey: string;
@@ -543,10 +555,47 @@ export class ProviderRegistry {
     throw new ProviderNotFoundError(name, [...this.providers.keys()].sort());
   }
 
-  async describeRuntime(name: string): Promise<ProviderRuntimeMetadata | null> {
+  /**
+   * A provider's runtime metadata. A listing passes one `runtimeMetadataSnapshot()`
+   * to every call so the stores are read once for all providers.
+   */
+  async describeRuntime(name: string, deps: ProviderRuntimeMetadataDeps = this.runtimeMetadataDeps): Promise<ProviderRuntimeMetadata | null> {
     const provider = this.getRegistered(name);
     if (!provider.describeRuntime) return null;
-    return await provider.describeRuntime(this.runtimeMetadataDeps);
+    return await provider.describeRuntime(deps);
+  }
+
+  /** One reading of the secret, service and subscription stores, shared by every provider of one listing. */
+  runtimeMetadataSnapshot(): ProviderRuntimeMetadataDeps {
+    return snapshotRuntimeMetadataDeps(this.runtimeMetadataDeps);
+  }
+
+  /**
+   * Whether each provider is set up and by what means: the one answer for the
+   * model picker, the current-model read and the model switch. The stores are
+   * read once for the whole list.
+   */
+  async describeConfiguredProviders(providerIds: readonly string[]): Promise<ReadonlyMap<string, ProviderConfiguredStatus>> {
+    const snapshot = this.runtimeMetadataSnapshot();
+    const configuredIds = new Set(this.getConfiguredProviderIds());
+    const storedKeys = new Set((await snapshot.secretsManager.listDetailed())
+      .filter((record) => record.source !== 'env').map((record) => record.key));
+    const entries = await Promise.all([...new Set(providerIds)].map(async (providerId) => {
+      let runtime: ProviderRuntimeMetadata | null | undefined;
+      try {
+        runtime = await this.describeRuntime(providerId, snapshot);
+      } catch (error) {
+        // Not registered (a catalog-only provider) or its metadata failed: judged by the environment and the stores.
+        if (!(error instanceof ProviderNotFoundError)) {
+          logger.warn('[providers] Failed to read provider runtime metadata', { providerId, error: summarizeError(error) });
+        }
+        runtime = undefined;
+      }
+      return [providerId, resolveProviderConfiguredStatus({
+        providerId, runtime, storedKeys, selfConfigured: configuredIds.has(providerId),
+      })] as const;
+    }));
+    return new Map(entries);
   }
 
   /** Return the provider responsible for a model, a registryKey, or a bare id resolved via the shared resolver. */
@@ -610,19 +659,52 @@ export class ProviderRegistry {
    * Manual prices are read live on every call, no restart.
    */
   resolveModelPricing(modelRef: string, providerId?: string): ResolvedModelPricing {
+    const index = this.pricingIndex();
     return resolveModelPricingFromDeps(buildRegistryModelPricingDeps({
       getManualPrices: () => this.configManager.get('pricing.modelPrices'),
       findModelPricing: (provider, modelId) =>
-        this.getModelRegistry().find((def) => def.id === modelId && (!provider || def.provider === provider))?.pricing ?? null,
+        (provider ? index.definitions.get(`${provider}\u0000${modelId}`) : index.definitionsById.get(modelId))?.pricing ?? null,
       openRouterPricing: (modelId) => {
         const served = this.modelLimitsService.getPricingForModel(modelId, 'openrouter');
         return served ? { ...served, fetchedAt: this.modelLimitsService.getPricingFetchedAt() ?? undefined } : null;
       },
       gatewayPricing: (provider, modelId) => this.gatewayPricing.getPricing(provider, modelId),
       getCatalog: () => this.pricingCatalog ?? { fetchedAt: 0, models: this.catalogModels },
+      catalogEntriesById: (modelId) => index.catalogById.get(modelId) ?? [],
       providerAliases: CATALOG_PROVIDER_NAME_ALIASES,
-      isKnownProviderId: (id) => this.providers.has(id) || this.catalogModels.some((model) => model.providerId === id),
+      isKnownProviderId: (id) => this.providers.has(id) || index.catalogProviderIds.has(id),
     }), modelRef, providerId);
+  }
+
+  /**
+   * Lookups by id over the model registry and the catalog, built once per
+   * registry or catalog change, so pricing a listing of models is one map read
+   * per model instead of a pass over the whole catalog.
+   */
+  private _pricingIndex: PricingIndex | null = null;
+
+  private pricingIndex(): PricingIndex {
+    const registry = this.getModelRegistry();
+    const catalog = this.catalogModels;
+    const current = this._pricingIndex;
+    if (current && current.registry === registry && current.catalog === catalog) return current;
+    const definitions = new Map<string, ModelDefinition>();
+    const definitionsById = new Map<string, ModelDefinition>();
+    // First definition wins, as the linear find it replaces did.
+    for (const def of registry) {
+      const key = `${def.provider}\u0000${def.id}`;
+      if (!definitions.has(key)) definitions.set(key, def);
+      if (!definitionsById.has(def.id)) definitionsById.set(def.id, def);
+    }
+    const catalogById = new Map<string, CatalogModel[]>();
+    const catalogProviderIds = new Set<string>();
+    for (const model of catalog) {
+      const list = catalogById.get(model.id);
+      if (list) list.push(model); else catalogById.set(model.id, [model]);
+      catalogProviderIds.add(model.providerId);
+    }
+    this._pricingIndex = { registry, catalog, definitions, definitionsById, catalogById, catalogProviderIds };
+    return this._pricingIndex;
   }
 
   getContextWindowForModel(modelDef: ModelDefinition): number {

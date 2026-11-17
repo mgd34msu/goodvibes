@@ -211,6 +211,8 @@ export interface ModelPricingDeps {
   readonly getProviderServedPricing: (providerId: string, modelId: string) => ProviderServedPricing | null;
   /** The models.dev catalog snapshot. */
   readonly getCatalog: () => { readonly fetchedAt: number; readonly models: readonly CatalogModel[] } | null;
+  /** The catalog's entries for one model id, from an index; absent, the catalog is scanned. */
+  readonly catalogEntriesById?: ((modelId: string) => readonly CatalogModel[]) | undefined;
   /** True when an engine provider ID and a catalog provider id name the same provider (alias-aware, e.g. gemini/google). */
   readonly providerMatchesCatalogId: (providerId: string, catalogProviderId: string) => boolean;
   /** True when this provider id names a registered provider (used to parse `provider:model` refs). */
@@ -240,7 +242,7 @@ function catalogEntriesFor(
 ): CatalogModel[] {
   const catalog = deps.getCatalog();
   if (!catalog) return [];
-  const byId = catalog.models.filter((model) => model.id === modelId);
+  const byId = deps.catalogEntriesById ? [...deps.catalogEntriesById(modelId)] : catalog.models.filter((model) => model.id === modelId);
   if (!providerId) return byId;
   return byId.filter((model) => deps.providerMatchesCatalogId(providerId, model.providerId));
 }
@@ -331,6 +333,7 @@ export interface RegistryModelPricingInput {
   readonly openRouterPricing: (modelId: string) => ProviderServedPricing | null;
   readonly gatewayPricing: (providerId: string, modelId: string) => ProviderServedPricing | null;
   readonly getCatalog: ModelPricingDeps['getCatalog'];
+  readonly catalogEntriesById?: ModelPricingDeps['catalogEntriesById'];
   readonly providerAliases: Readonly<Record<string, string>>;
   readonly isKnownProviderId: (providerId: string) => boolean;
 }
@@ -343,6 +346,7 @@ export function buildRegistryModelPricingDeps(input: RegistryModelPricingInput):
     getProviderServedPricing: (provider, modelId) =>
       provider === 'openrouter' ? input.openRouterPricing(modelId) : input.gatewayPricing(provider, modelId),
     getCatalog: input.getCatalog,
+    ...(input.catalogEntriesById ? { catalogEntriesById: input.catalogEntriesById } : {}),
     // Both sides are read through the one alias table, the same rule the catalog facts use.
     providerMatchesCatalogId: (provider, catalogId) =>
       (input.providerAliases[provider] ?? provider) === (input.providerAliases[catalogId] ?? catalogId),

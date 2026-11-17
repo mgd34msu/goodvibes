@@ -1,5 +1,5 @@
 import { modelFamilyReadings, type ModelFamily } from './model-family.js';
-import type { ProviderAuthRouteDescriptor, ProviderRuntimeMetadata } from './interface.js';
+import type { ProviderAuthRouteDescriptor, ProviderRuntimeMetadata, ProviderRuntimeMetadataDeps } from './interface.js';
 import type { ModelDefinition, ProviderRegistry } from './registry.js';
 import type { LLMProvider } from './interface.js';
 
@@ -118,10 +118,15 @@ function withConfiguredFromRoutes(runtime: ProviderRuntimeMetadata): ProviderRun
   return usable ? { ...runtime, auth: { ...auth, configured: true } } : runtime;
 }
 
+/** The registry methods a snapshot reads; a listing also takes one reading of the stores for all providers when offered. */
+type SnapshotRegistry = Pick<ProviderRegistry, 'getRegistered' | 'getCurrentModel' | 'listModels' | 'resolveModelPricing' | 'describeRuntime'>
+  & { readonly runtimeMetadataSnapshot?: (() => ProviderRuntimeMetadataDeps) | undefined };
+
 async function buildSnapshotForProvider(
-  providerRegistry: Pick<ProviderRegistry, 'getRegistered' | 'getCurrentModel' | 'listModels' | 'resolveModelPricing' | 'describeRuntime'>,
+  providerRegistry: SnapshotRegistry,
   providerId: string,
   options: ProviderRuntimeSnapshotOptions = {},
+  storesSnapshot?: ProviderRuntimeMetadataDeps,
 ): Promise<ProviderRuntimeSnapshot | null> {
   const enrichFamilies = options.modelFamilyEnrichment !== 'none';
   let provider: LLMProvider;
@@ -132,7 +137,7 @@ async function buildSnapshotForProvider(
   }
   // Absence of metadata is unknown auth, not a declaration that no auth is needed.
   const runtime = provider.describeRuntime
-    ? await providerRegistry.describeRuntime(providerId)
+    ? await (storesSnapshot ? providerRegistry.describeRuntime(providerId, storesSnapshot) : providerRegistry.describeRuntime(providerId))
     : {
         models: { models: provider.models },
         usage: { streaming: true, toolCalling: true, parallelTools: false },
@@ -165,10 +170,11 @@ async function buildSnapshotForProvider(
 }
 
 export async function listProviderRuntimeSnapshots(
-  providerRegistry: Pick<ProviderRegistry, 'listProviders' | 'getRegistered' | 'getCurrentModel' | 'listModels' | 'resolveModelPricing' | 'describeRuntime'>,
+  providerRegistry: SnapshotRegistry & Pick<ProviderRegistry, 'listProviders'>,
   options: ProviderRuntimeSnapshotOptions = {},
 ): Promise<readonly ProviderRuntimeSnapshot[]> {
-  const snapshots = await Promise.all(providerRegistry.listProviders().map((provider) => buildSnapshotForProvider(providerRegistry, provider.name, options)));
+  const stores = providerRegistry.runtimeMetadataSnapshot?.();
+  const snapshots = await Promise.all(providerRegistry.listProviders().map((provider) => buildSnapshotForProvider(providerRegistry, provider.name, options, stores)));
   return snapshots.filter((snapshot): snapshot is ProviderRuntimeSnapshot => snapshot != null);
 }
 

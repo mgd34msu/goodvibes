@@ -585,7 +585,6 @@ export class DaemonHttpRouter {
       configManager: context.configManager,
       runtimeBus: context.runtimeBus,
       parseJsonBody,
-      secretsManager: context.secretsManager,
     };
     const gateway = context.controlPlaneGateway;
     const chatManager = context.companionChatManager;

@@ -21,7 +21,7 @@ import { assertSecurityReadSource, captureSecurityReadBindings, captureSecurityR
  * }
  */
 
-import { readFileSync } from 'fs';
+import { readFileSync, statSync } from 'fs';
 import { SecretsManager, captureSecretsReadSource } from './secrets.js';
 import {
   describeSecretRef,
@@ -160,7 +160,31 @@ function projectEntryRefusal(entry: unknown): string | null {
   return null;
 }
 
+/** Parsed services files, valid while the file keeps the identity it was read with. */
+const servicesFileCache = new Map<string, { readonly identity: string; readonly read: ServicesFileRead }>();
+
+/**
+ * One `stat` per read; the file is read and parsed again only when its
+ * identity moved, so the several lookups of one listing parse it once.
+ */
 function readServicesFile(filePath: string): ServicesFileRead {
+  let identity: string;
+  try {
+    const stat = statSync(filePath, { bigint: true });
+    identity = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+  } catch (err) {
+    servicesFileCache.delete(filePath);
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { services: {}, problem: null };
+    return parseServicesFile(filePath);
+  }
+  const cached = servicesFileCache.get(filePath);
+  if (cached && cached.identity === identity) return cached.read;
+  const read = parseServicesFile(filePath);
+  servicesFileCache.set(filePath, { identity, read });
+  return read;
+}
+
+function parseServicesFile(filePath: string): ServicesFileRead {
   let raw: string;
   try {
     raw = readFileSync(filePath, 'utf-8');
@@ -234,7 +258,8 @@ export class ServiceRegistry {
    * Return all registered service configs.
    */
   getAll(): Record<string, ServiceConfig> {
-    const own = this.servicesFilePath ? readServicesFile(this.servicesFilePath).services : {};
+    // A copy: the parsed file is kept for the next read.
+    const own = this.servicesFilePath ? { ...readServicesFile(this.servicesFilePath).services } : {};
     if (!this.projectServicesFilePath) return own;
     const merged: Record<string, ServiceConfig> = {};
     for (const [name, entry] of Object.entries(readServicesFile(this.projectServicesFilePath).services)) {

@@ -17,6 +17,41 @@ export interface StandardProviderAuthOptions {
  * uppercase, runs of non-alphanumerics to a single underscore, `_API_KEY`
  * suffix. `abacusai` derives `ABACUSAI_API_KEY`.
  */
+/**
+ * One reading of the stores for a whole listing: every provider's
+ * `describeRuntime` asks the same questions (which keys are stored, which
+ * services exist, which subscriptions), so a listing answers each once and
+ * hands the same answers to every provider.
+ */
+export function snapshotRuntimeMetadataDeps(deps: ProviderRuntimeMetadataDeps): ProviderRuntimeMetadataDeps {
+  let listed: ReturnType<ProviderRuntimeMetadataDeps['secretsManager']['listDetailed']> | undefined;
+  const values = new Map<string, Promise<string | null>>();
+  let services: ReturnType<ProviderRuntimeMetadataDeps['serviceRegistry']['getAll']> | undefined;
+  const inspections = new Map<string, ReturnType<ProviderRuntimeMetadataDeps['serviceRegistry']['inspect']>>();
+  const subscriptions = new Map<string, ReturnType<ProviderRuntimeMetadataDeps['subscriptionManager']['get']>>();
+  const pending = new Map<string, ReturnType<ProviderRuntimeMetadataDeps['subscriptionManager']['getPending']>>();
+  const once = <K, V>(map: Map<K, V>, key: K, read: () => V): V => {
+    if (map.has(key)) return map.get(key)!;
+    const value = read();
+    map.set(key, value);
+    return value;
+  };
+  return {
+    secretsManager: {
+      listDetailed: () => (listed ??= deps.secretsManager.listDetailed()),
+      get: (key: string) => once(values, key, () => deps.secretsManager.get(key)),
+    },
+    serviceRegistry: {
+      getAll: () => (services ??= deps.serviceRegistry.getAll()),
+      inspect: (name: string) => once(inspections, name, () => deps.serviceRegistry.inspect(name)),
+    },
+    subscriptionManager: {
+      get: (provider: string) => once(subscriptions, provider, () => deps.subscriptionManager.get(provider)),
+      getPending: (provider: string) => once(pending, provider, () => deps.subscriptionManager.getPending(provider)),
+    },
+  };
+}
+
 export function deriveProviderApiKeyEnvVar(providerId: string): string {
   const stem = providerId.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   return `${stem}_API_KEY`;

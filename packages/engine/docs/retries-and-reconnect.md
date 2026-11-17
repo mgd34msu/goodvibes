@@ -55,7 +55,7 @@ The delay restarts from `baseDelayMs` once a connection delivers a real event: t
 
 ## WebSocket reconnect
 
-WebSocket reconnect is controlled through `realtime.webSocketReconnect`:
+WebSocket reconnect is controlled through `realtime.webSocketReconnect`. The delay restarts from `baseDelayMs` only after a socket stayed authenticated for 30 seconds, the same window as the SSE stream: a daemon or proxy that accepts the auth frame and then cuts the socket keeps the backoff growing instead of reconnecting every 500 ms.
 
 ```ts
 const platformClient = createReactNativeGoodVibesPlatform({

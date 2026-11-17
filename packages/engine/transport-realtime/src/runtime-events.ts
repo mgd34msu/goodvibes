@@ -100,6 +100,14 @@ type TimeoutHandle = ReturnType<typeof setTimeout> & { unref?: () => void };
  */
 export const DEFAULT_WS_MAX_ATTEMPTS = Number.POSITIVE_INFINITY;
 
+/**
+ * A socket that stayed authenticated this long was healthy, so its drop starts
+ * a fresh reconnect budget. An accepted auth frame alone does not: a daemon or
+ * proxy that accepts it and then cuts the socket would otherwise restart the
+ * backoff at its shortest delay forever. The same window as the SSE stream.
+ */
+const WS_CONNECTION_STABILITY_MS = 30_000;
+
 
 function getSocketOpenState(WebSocketImpl: typeof WebSocket): number {
   return typeof WebSocketImpl.OPEN === 'number' ? WebSocketImpl.OPEN : 1;
@@ -440,6 +448,8 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
     let connectionAbort = new AbortController();
     let flushing = false;
     let authenticated = false;
+    // When the daemon accepted this socket's auth frame (undefined: not authenticated).
+    let authenticatedAt: number | undefined;
     // Set by connect() when it resolved the token to build the socket with.
     let connectToken: string | null | undefined;
     const getAuthToken = normalizeAuthToken(token ?? undefined);
@@ -473,6 +483,7 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
     const closeSocket = () => {
       if (!socket) return;
       authenticated = false;
+      authenticatedAt = undefined;
       connectionAbort.abort();
       assembler.reset();
       // clear any pending reconnect timer so close() cannot schedule
@@ -663,10 +674,10 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
         }
         if (frame.type === 'auth' && frame.ok === true && socket) {
           // Connected means the daemon accepted the credential, so a stale token reads
-          // connecting then failed, never connected. It is also the proof the
-          // connection works, which starts a fresh reconnect budget.
+          // connecting then failed, never connected. The reconnect budget starts afresh
+          // only once the socket has stayed up for the stability window (see onClose).
           authenticated = true;
-          reconnectAttempt = 0;
+          authenticatedAt = Date.now();
           emitConnectionState('connected');
           options.onOpen?.();
           sendSubscriptionChanges(socket);
@@ -720,6 +731,9 @@ export function createWebSocketConnector<TEvent extends RuntimeEventRecord = Run
       // the expression `event.wasClean === true` correctly falls back to reconnecting
       // for any ambiguous close, never suppresses reconnect incorrectly.
       const isCleanClose = event.wasClean === true && event.code === 1000;
+      // A socket that stayed authenticated through the stability window was healthy:
+      // its drop is a new outage, so the backoff starts again from the first attempt.
+      if (authenticatedAt !== undefined && Date.now() - authenticatedAt >= WS_CONNECTION_STABILITY_MS) reconnectAttempt = 0;
       if (!stopped && !isCleanClose) {
         // Abnormal close, surface error and schedule reconnect.
         // The raw close reason is forwarded so TRANSPORT_RECONNECT_ATTEMPT

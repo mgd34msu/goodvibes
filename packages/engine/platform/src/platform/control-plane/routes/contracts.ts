@@ -9,7 +9,7 @@
  */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
-import { formatRefusal, RefusalError } from '@goodvibes-jev/engine/errors';
+import { DecisionModelsDisabledError, formatRefusal, RefusalError } from '@goodvibes-jev/engine/errors';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireString } from './invocation-params.js';
 import { ContractOperatorError, projectContractOperatorView, type ContractOperatorService } from '../../contract/operator-service.js';
@@ -57,6 +57,10 @@ function toGatewayVerbError(error: unknown): never {
   }
   if (error instanceof RefusalError && error.refusal.code === 'IDEMPOTENCY_KEY_REUSED') {
     throw new GatewayVerbError(formatRefusal(error.refusal), error.refusal.code, error.refusal.status ?? 409, 'idempotencyKey');
+  }
+  // Decision models are off (Classic): a setting the owner chose, not a daemon fault.
+  if (error instanceof DecisionModelsDisabledError) {
+    throw new GatewayVerbError(`${error.message} Turn decision models on (judgment.policy) to plan and judge contracts, or delegate with an agent outside a contract.`, 'DECISION_MODELS_DISABLED', 409);
   }
   throw error;
 }

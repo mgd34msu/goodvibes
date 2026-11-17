@@ -16,8 +16,9 @@
  *   is retried with a fresh agent, up to `contract.transportRetryLimit`; the
  *   wait is the provider's Retry-After when it gave one, otherwise
  *   `contract.transportRetryDelayMs` doubled for each retry already spent
- *   (at most a minute). Anything else fails the unit and the contract
- *   (`transport` for a transient fault past the limit, `other` otherwise).
+ *   (at most a minute). Anything else fails the unit (`transport` for a
+ *   transient fault past the limit, `other` otherwise): the unit waits on the
+ *   owner to retry or cancel when it can, else the contract fails with it.
  * - Cancelled by anyone but the runner: an operator stopped a member, which
  *   stops the whole contract.
  * - Silent past `contract.heartbeatTimeoutMs`: the agent is killed and the unit
@@ -76,6 +77,12 @@ export interface UnitFailureDeps {
   readonly cancelContract: (run: ContractRun, reason: string) => void;
   /** Requeues the unit's work item for a fresh agent (brief plus "Previous checks", then `firstTurn` when given). */
   readonly requeueUnit: (run: ContractRun, unit: ContractUnit, reason: string, purpose: SpawnPurpose, firstTurn?: string) => void;
+  /**
+   * Asks the owner to retry or cancel a failed unit instead of failing the
+   * contract (escalation.ts `pauseFailedUnit`); false when the contract cannot
+   * wait on it, and the unit and the contract fail.
+   */
+  readonly pauseFailedUnit?: ((run: ContractRun, unit: ContractUnit, reason: string) => boolean) | undefined;
 }
 
 /**
@@ -88,7 +95,11 @@ const RELEASED: ReadonlySet<ContractUnit['status']> = new Set(['fixing', 'awaiti
 export interface UnitFailureHandling {
   /** The watchdog found an agent silent past the timeout. */
   onSilent(agent: WatchedAgent, silentMs: number): void;
-  /** Fails one unit and, with it, the contract; a failed attempt of a best-of-N unit fails alone and is never a candidate. */
+  /**
+   * Fails one unit. A unit of an agent-run contract waits on the owner (retry or
+   * cancel) when it can; otherwise the contract fails with it. A failed attempt of
+   * a best-of-N unit fails alone and is never a candidate.
+   */
   failUnit(run: ContractRun, unit: ContractUnit, kind: ContractFailureKind, reason: string): void;
   /**
    * An agent's execution drained: when its record ended but no terminal event
@@ -137,6 +148,11 @@ export function createUnitFailureHandling(deps: UnitFailureDeps): UnitFailureHan
 
   function failUnit(run: ContractRun, unit: ContractUnit, kind: ContractFailureKind, reason: string, decisionIds: readonly string[] = []): void {
     if (run.terminal) return;
+    // The work already done is kept and the owner decides: one failed unit no longer throws away every unit that passed.
+    if (unit.attemptOf === undefined && !isTerminalUnitStatus(unit.status) && deps.pauseFailedUnit?.(run, unit, reason) === true) {
+      run.decide('failed', unit.id, `${reason}; waiting for the owner to retry or cancel`, decisionIds);
+      return;
+    }
     if (!isTerminalUnitStatus(unit.status)) {
       unit.failureReason = reason;
       run.releaseHold(unit);

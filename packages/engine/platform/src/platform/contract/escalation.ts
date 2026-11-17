@@ -23,6 +23,7 @@ import { ownerPick } from './batteries/owner-pick.js';
 import { ownerReply } from './batteries/owner-reply.js';
 import { readForbidsWriting, REQUEST_SHAPE_SITE, saysNoAtAct, saysYesAtAct } from './batteries/request-shape.js';
 import { acceptAttempt, assertAttemptTakeable } from './best-of-n.js';
+import { engineItem } from './group-runner.js';
 import { emptyJudgmentUsage, meteredPort, type DecidedCheck } from './check.js';
 import { amendTarget } from './amendment.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
@@ -122,6 +123,21 @@ export function buildFailurePauseQuestion(contract: Contract, unit: Pick<Contrac
     'The work done so far is kept in the project tree. Nothing was approved and no criterion changed.',
     'Reply "retry" to run the turn again with a fresh set of attempts, or "cancel" to stop the contract. No other answer is accepted.',
   ].join('\n');
+}
+
+/** The question a failed unit asks (`pauseFailedUnit`), built in code. */
+export function buildUnitFailureQuestion(contract: Contract, unit: Pick<ContractUnit, 'id' | 'title'>, reason: string): string {
+  return [
+    `Contract ${contract.id} is paused: unit ${unit.id} ("${titleOf(unit.title)}") failed.`,
+    `What failed: ${titleOf(reason).slice(0, 400)}`,
+    'The work the other units finished is kept, and the units that wait on this one are held, not skipped. Nothing was approved and no criterion changed.',
+    'Reply "retry" to run the unit again with a fresh agent (its dependents then run as usual), or "cancel" to stop the contract. No other answer is accepted.',
+  ].join('\n');
+}
+
+/** Whether an escalation is the retry-or-cancel question of a failed unit of an agent-run contract. */
+function isUnitFailurePause(run: ContractRun, escalation: Pick<Escalation, 'failurePause' | 'scope'>): boolean {
+  return escalation.failurePause === true && escalation.scope === 'unit' && run.contract.nativeSource === undefined && run.contract.sessionMode !== true;
 }
 
 export type { OwnerReplyAction };
@@ -338,6 +354,18 @@ export interface Escalations {
    */
   pauseForOwnerRetry(run: ContractRun, input: FailurePauseInput): Escalation;
   /**
+   * A unit of an agent-run contract failed: instead of ending the contract, the
+   * unit waits on the owner (awaiting-owner; the finished work kept, its
+   * dependents held, not skipped) with one question, retry or cancel. Retry
+   * gives the unit a fresh agent (an item the engine already failed is reset, so
+   * its dependents wait on it again); cancel stops the contract. Null when the
+   * contract cannot wait on it: native or session-mode work, a best-of-N unit or
+   * attempt (the attempt selection decides those), a contract or unit in a state
+   * that cannot move to the owner. Asking again for a unit already asked returns
+   * the open question.
+   */
+  pauseFailedUnit(run: ContractRun, unit: ContractUnit, reason: string): Escalation | null;
+  /**
    * An operator picked a unit's attempt through `fleet.attempts.pick`: the
    * unit's open `attempts-undecided` escalation closes, and the attempt is
    * taken as the owner's pick would be. The caller has checked that the
@@ -455,6 +483,30 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     context.ownerProgress(run);
     // A restart must find the question still open.
     context.checkpoint?.(run);
+    return escalation;
+  }
+
+  /** Contract statuses a failed unit can pause from, and unit statuses that can move to the owner. */
+  const PAUSABLE_CONTRACT: ReadonlySet<ContractStatus> = new Set(['running', 'judging', 'fixing', 'awaiting-owner']);
+  const PAUSABLE_UNIT: ReadonlySet<ContractUnit['status']> = new Set(['running', 'checking', 'held', 'nudged', 'fixing']);
+
+  function pauseFailedUnit(run: ContractRun, unit: ContractUnit, reason: string): Escalation | null {
+    const { contract } = run;
+    if (run.terminal || contract.nativeSource !== undefined || contract.sessionMode === true) return null;
+    if (unit.attemptOf !== undefined || unit.attemptUnits !== undefined) return null;
+    const asked = open(run).find((escalation) => escalation.failurePause === true && escalation.scope === 'unit' && escalation.targetId === unit.id);
+    if (asked !== undefined) return asked;
+    if (!PAUSABLE_CONTRACT.has(contract.status) || !PAUSABLE_UNIT.has(unit.status)) return null;
+    // A retry needs the unit's work item: one missing from the engine (a lost snapshot) cannot run again.
+    const item = engineItem(run, unit.id);
+    if (item === undefined || item.state === 'passed') return null;
+    unit.failureReason = reason;
+    const escalation = raise(run, {
+      scope: 'unit', targetId: unit.id, reason: 'owner-decision-needed', unmetCriterionIds: [], decisionIds: [],
+      question: buildUnitFailureQuestion(contract, unit, reason), retryOrCancel: true,
+    });
+    // A restart must find the question still open; the debounced write follows if this one fails.
+    try { context.checkpoint?.(run); } catch { /* the contract is held and its write is scheduled */ }
     return escalation;
   }
 
@@ -684,10 +736,11 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
   /** Retry runs the turn (or the publication) again; cancel stops the contract. Any other answer leaves the question open. */
   function replyToFailurePause(run: ContractRun, escalation: Escalation, text: string): OwnerReplyOutcome {
     const publication = isPublicationPause(escalation);
-    if (!publication && (run.contract.nativeSource === undefined || run.contract.sessionMode !== true)) throw new OwnerReplyRefusedError(`${escalation.id} is not a failure pause of a native session contract`, 'unsupported');
+    const unitFailure = isUnitFailurePause(run, escalation);
+    if (!publication && !unitFailure && (run.contract.nativeSource === undefined || run.contract.sessionMode !== true)) throw new OwnerReplyRefusedError(`${escalation.id} is not a failure pause of a native session contract`, 'unsupported');
     const answer = readFailurePauseAnswer(text);
     if (answer === undefined) {
-      throw new OwnerReplyRefusedError(`"${titleOf(text)}" is not an answer to ${escalation.id}: it only accepts ${FAILURE_PAUSE_ANSWERS.map((word) => `"${word}"`).join(' or ')} ("retry" runs the turn again, "cancel" stops the contract), and nothing here approves the work; the question is still open`, 'not-an-answer');
+      throw new OwnerReplyRefusedError(`"${titleOf(text)}" is not an answer to ${escalation.id}: it only accepts ${FAILURE_PAUSE_ANSWERS.map((word) => `"${word}"`).join(' or ')} ("retry" runs the failed work again, "cancel" stops the contract), and nothing here approves the work; the question is still open`, 'not-an-answer');
     }
     const { contract } = run;
     if (publication && answer === 'retry') {
@@ -700,6 +753,21 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     }
     const reading: OwnerReplyReading = answer === 'cancel' ? 'reject' : 'amend';
     const action: OwnerReplyAction = answer === 'cancel' ? 'stopped' : 'amended';
+    if (unitFailure && answer === 'retry') {
+      const unit = run.unit(escalation.targetId);
+      if (unit === undefined || unit.status !== 'awaiting-owner') throw new OwnerReplyRefusedError(`unit ${escalation.targetId} no longer waits on ${escalation.id}`, 'not-open');
+      escalation.reply = { text, reading, outcome: 'act', decisionId: undefined };
+      escalation.resolvedAt = run.env.now();
+      unit.failureReason = undefined;
+      unit.transportRetries = 0;
+      run.decide('owner-replied', unit.id, `${escalation.id}: retry, unit ${unit.id} runs again with a fresh agent`);
+      run.emit({ type: 'CONTRACT_OWNER_REPLIED', contractId: run.id, escalationId: escalation.id, reading, outcome: 'act', action });
+      resume(run);
+      context.groups().requeueUnit(run, unit, 'run again at the owner\'s request after it failed', 'fresh-unit');
+      context.ownerProgress(run);
+      try { context.checkpoint?.(run); } catch { /* the contract is held and its write is scheduled */ }
+      return { escalationId: escalation.id, reading, outcome: 'act', action };
+    }
     if (answer === 'retry') {
       // The contract moves first; a refused move leaves the question open.
       const unit = run.unit(escalation.targetId);
@@ -714,7 +782,10 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     run.emit({ type: 'CONTRACT_OWNER_REPLIED', contractId: run.id, escalationId: escalation.id, reading, outcome: 'act', action });
     if (answer === 'cancel') {
       contract.failureKind = 'owner-rejected';
-      run.control.cancel(publication ? 'stopped by the owner after its checked result could not be published' : 'stopped by the owner after its turn kept failing');
+      const unitReason = unitFailure ? run.unit(escalation.targetId)?.failureReason : undefined;
+      run.control.cancel(publication ? 'stopped by the owner after its checked result could not be published'
+        : unitFailure ? `stopped by the owner after unit ${escalation.targetId} failed${unitReason === undefined ? '' : `: ${unitReason}`}`
+          : 'stopped by the owner after its turn kept failing');
     } else {
       context.ownerProgress(run);
       context.checkpoint?.(run);
@@ -813,7 +884,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     await acceptAttempt(run, unitId, attemptId, 'picked by the operator (fleet.attempts.pick)');
   }
 
-  return { raise, unitAwaitsOwner, attemptsUndecided, pauseForOwnerRetry, reply, operatorPick };
+  return { raise, unitAwaitsOwner, attemptsUndecided, pauseForOwnerRetry, pauseFailedUnit, reply, operatorPick };
 }
 
 /** Criteria of a target that read unmet, and those that read unshown, by id. */

@@ -471,7 +471,10 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
       run.decidePreSpawn(unit, { kind: 'spawn', task, route: unit.route });
       return;
     }
-    if (!engine.requeueItem(unit.id, reason, task, unit.route)) deps.failUnit(run, unit, 'other', `unit ${unit.id} could not be given a fresh agent (${reason})`);
+    // An item the engine already failed (its dependents skipped) is reset instead: its dependents wait on it again.
+    if (!engine.requeueItem(unit.id, reason, task, unit.route) && !engine.retryItem(unit.id, task, unit.route)) {
+      deps.failUnit(run, unit, 'other', `unit ${unit.id} could not be given a fresh agent (${reason})`);
+    }
   }
 
   function resumeEngine(run: ContractRun): number {

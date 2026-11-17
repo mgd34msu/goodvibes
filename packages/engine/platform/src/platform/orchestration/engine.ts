@@ -147,8 +147,11 @@ export interface OrchestrationEngine {
   kill(itemId: string): boolean;
   /** Replace/clear a workstream's budget ceiling and re-tick (the 'blocked-budget' recovery path). */
   updateBudget(workstreamId: string, ceiling: BudgetCeiling | undefined): boolean;
-  /** Reset a terminally-FAILED item to re-run from its first phase (the failed-dependency recovery path); re-ticks immediately. */
-  retryItem(itemId: string): boolean;
+  /**
+   * Reset a terminally-FAILED item to re-run from its first phase (the failed-dependency recovery path); re-ticks immediately.
+   * `task` and `route`, when given, replace the item's task and model for the next agent, as requeueItem's do.
+   */
+  retryItem(itemId: string, task?: string, route?: UnitRoute): boolean;
   getPhaseResults(workstreamId: string): readonly PhaseResult[];
   /** Best-of-N: held-merge groups awaiting a winner pick (one workstream's, or the one group named). */
   listHeldMergeGroups(workstreamId?: string, groupId?: string): Promise<HeldMergeGroup[]>;
@@ -800,13 +803,15 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
    * usage RETAINED, monotone). A KEPT worktree is reused; a removed one is
    * recreated at the next claim.
    */
-  function retryItem(itemId: string): boolean {
+  function retryItem(itemId: string, task?: string, route?: UnitRoute): boolean {
     const found = findItemAndWorkstream(itemId);
     if (!found) return false;
     const { workstream, item } = found;
     if (item.state !== 'failed') return false;
     const first = firstPhase(workstream);
     if (!first) return false;
+    if (task !== undefined && task.trim().length > 0) item.task = task;
+    if (route !== undefined) Object.assign(item, { route });
     if (activeItems.has(item)) requeuedInFlight.add(item);
     item.state = 'pending';
     item.currentPhaseId = first.id;

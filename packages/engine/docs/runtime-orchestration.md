@@ -237,9 +237,17 @@ detaches and restarts. Another caller's contract reads as `CONTRACT_NOT_FOUND`
 principals own is refused with `SESSION_NOT_OWNED` (403). `contracts.remove` deletes an ended contract's
 record (`CONTRACT_NOT_ENDED`, 409, while it runs; `CONTRACT_NATIVE`, 409, for
 native work, whose record its native execution keeps).
+A unit that fails (its agent failed past the transport retries, went silent
+twice, or its work item failed) no longer ends the contract: the contract
+waits on its owner with one question, `retry` or `cancel`, the other units'
+work kept and the units depending on the failed one held rather than skipped.
+`retry` gives the unit a fresh agent (a work item the engine already failed is
+reset, so its dependents wait on it again); `cancel` stops the contract. Native
+work, session-mode contracts and best-of-N units keep their own failure rules.
 `contracts.retryUnit` runs one unit of a running contract again: a working
-unit gets a fresh agent, a passed unit whose commit failed has its changes
-committed again, and anything else is refused with the reason. A contract whose
+unit gets a fresh agent, a failed unit is retried as if the owner had replied
+`retry`, a passed unit whose commit failed has its changes committed again,
+and anything else is refused with the reason. A contract whose
 budget is used up waits rather than failing (its status line says so);
 `contracts.budget` sets a new ceiling and the waiting unit starts.
 `contracts.dispatch` starts the work in a hosted session made for it, so its

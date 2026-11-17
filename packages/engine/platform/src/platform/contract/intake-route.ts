@@ -88,9 +88,9 @@ export function describeIntake(outcome: Exclude<TurnIntakeOutcome, { kind: 'turn
   if (outcome.kind === 'started') {
     return `[Contract] Contract ${outcome.contractId} took this request; its answer arrives when every acceptance criterion is checked and met.`;
   }
-  // A failed-turn question is answered "retry" or "cancel", not read as approval, so it says what was done.
+  // A failed-work question (a turn, a unit, a publication) is answered "retry" or "cancel", not read as approval, so it says what was done.
   if (outcome.failurePause === true) {
-    return `[Contract] Your answer to contract ${outcome.contractId} (${outcome.outcome.escalationId}) was taken as ${outcome.outcome.action === 'stopped' ? 'cancel: the contract is cancelled' : 'retry: the turn is retrying'}.`;
+    return `[Contract] Your answer to contract ${outcome.contractId} (${outcome.outcome.escalationId}) was taken as ${outcome.outcome.action === 'stopped' ? 'cancel: the contract is cancelled' : 'retry: the failed work runs again'}.`;
   }
   const next = outcome.outcome.nextEscalationId === undefined ? '' : ` It asks again (${outcome.outcome.nextEscalationId}).`;
   return `[Contract] Your reply to contract ${outcome.contractId} (${outcome.outcome.escalationId}) was read as ${outcome.outcome.reading}: ${outcome.outcome.action}.${next}`;

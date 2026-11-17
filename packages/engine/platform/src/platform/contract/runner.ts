@@ -507,7 +507,9 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     let count = 0;
     for (const id of admitted) {
       const contract = runs.get(id)?.contract;
-      const paused = contract?.status === 'awaiting-owner' && contract.escalations.some((item) => item.resolvedAt === undefined && item.failurePause === true);
+      // A failed unit's question does not free the slot: the contract's other units go on working.
+      const paused = contract?.status === 'awaiting-owner' && contract.escalations.some((item) => item.resolvedAt === undefined && item.failurePause === true
+        && (item.scope !== 'unit' || contract.sessionMode === true));
       if (!paused) count++;
     }
     return count;
@@ -747,6 +749,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     failContract: (run, kind, reason) => fail(run, kind, reason),
     cancelContract: (run, reason) => cancelRun(run, reason),
     requeueUnit: (run, unit, reason, purpose, firstTurn) => groups.requeueUnit(run, unit, reason, purpose, firstTurn),
+    pauseFailedUnit: (run, unit, reason) => ownSteps.pauseFailedUnit(run, unit, reason) !== null,
   });
 
   // ── The cap and queue ──────────────────────────────────────────
@@ -1719,9 +1722,23 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       if (unit.status === 'passed' || unit.status === 'held-merge') {
         const itemId = unit.attemptUnits === undefined ? unit.id : unit.attemptSelection?.pickedId;
         const commit = itemId === undefined || run.engine === null ? null : await run.engine.retryItemCommit(itemId);
-        if (commit === null) return refused(`unit ${unit.id} passed and its work is recorded; there is nothing to retry`);
-        if (commit.status === 'failed') return refused(`unit ${unit.id}'s commit failed again: ${commit.reason ?? 'no reason given'}; its changes are still in the working tree`);
-        return { outcome: 'committed', reason: commit.status === 'committed' ? `unit ${unit.id}'s changes were committed (${commit.hash ?? 'no hash'})` : `unit ${unit.id} had nothing left to commit` };
+        if (commit === null) {
+          return refused(itemId === undefined
+            ? `unit ${unit.id} waits for one of its attempts to be picked; there is no commit to retry`
+            : unit.status === 'held-merge'
+              ? `unit ${unit.id} passed and its work is committed; it is waiting for its branch to merge, so there is no commit to retry`
+              : `unit ${unit.id} passed and its work is recorded; there is nothing to retry`);
+        }
+        if (commit.status === 'failed') return refused(`unit ${unit.id}'s commit failed again: ${commit.reason ?? 'no reason given'}; its changes are still uncommitted in its working tree and its branch is not merged until the commit lands`);
+        const merged = run.contract.isolation === 'worktree' ? '; its branch was handed to the merge' : '';
+        return { outcome: 'committed', reason: commit.status === 'committed' ? `unit ${unit.id}'s changes were committed (${commit.hash ?? 'no hash'})${merged}` : `unit ${unit.id} had nothing left to commit${merged}` };
+      }
+      // A failed unit waits on its owner's retry-or-cancel question: retrying it is answering "retry".
+      const failurePause = run.contract.escalations.find((item) => item.resolvedAt === undefined && item.failurePause === true && item.scope === 'unit' && item.targetId === unit.id);
+      if (failurePause !== undefined) {
+        try { await steps.reply(run, failurePause.id, 'retry'); }
+        catch (error) { if (error instanceof OwnerReplyRefusedError) return refused(error.message); throw error; }
+        return { outcome: 'restarted', reason: `unit ${unit.id} failed and starts again with a fresh agent; the units waiting on it run once it passes` };
       }
       if (isTerminalUnitStatus(unit.status)) return refused(`unit ${unit.id} is ${unit.status}; the contract ended with it, so start a new contract for the remaining work`);
       if (unit.status === 'pending' || unit.status === 'blocked') return refused(`unit ${unit.id} has not started yet (${unit.status}); it starts once what it waits on is done`);

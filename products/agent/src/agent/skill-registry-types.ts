@@ -82,6 +82,8 @@ export interface AgentSkillUpdateInput {
   readonly triggers?: readonly string[];
   readonly tags?: readonly string[];
   readonly requirements?: readonly AgentSkillRequirement[];
+  /** Applied in the same write as the field edit. */
+  readonly enabled?: boolean;
   readonly provenance?: string;
 }
 
@@ -89,6 +91,8 @@ export interface AgentSkillBundleUpdateInput {
   readonly name?: string;
   readonly description?: string;
   readonly skillIds?: readonly string[];
+  /** Applied in the same write as the field edit. */
+  readonly enabled?: boolean;
   readonly provenance?: string;
 }
 

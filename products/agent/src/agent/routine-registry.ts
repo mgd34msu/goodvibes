@@ -57,6 +57,8 @@ export interface AgentRoutineUpdateInput {
   readonly triggers?: readonly string[];
   readonly tags?: readonly string[];
   readonly requirements?: readonly AgentRoutineRequirement[];
+  /** Applied in the same write as the field edit. */
+  readonly enabled?: boolean;
   readonly provenance?: string;
 }
 
@@ -281,6 +283,7 @@ export class AgentRoutineRegistry {
         triggers: input.triggers === undefined ? existing.triggers : normalizeList(input.triggers),
         tags: input.tags === undefined ? existing.tags : normalizeList(input.tags),
         requirements,
+        enabled: input.enabled ?? existing.enabled,
         provenance: input.provenance === undefined ? existing.provenance : input.provenance.trim() || existing.provenance,
         ...freshReviewPatch(),
         updatedAt: nowIso(),

@@ -20,20 +20,6 @@ export interface AgentWorkspaceLearnedBehaviorResult {
   readonly name: string;
 }
 
-/**
- * Runs the second write of a two-write save (an edited skill or routine, then its enabled
- * flag; their registries' update takes no enabled value yet). When the second write fails the
- * edit is already on disk; the error says so, which stops a retry from repeating it.
- */
-export function runFollowUpWrite(saved: string, followUp: string, write: () => void): void {
-  try {
-    write();
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`${saved} was saved, but ${followUp} failed: ${reason}. Open it from the list to finish; do not create it again.`, { cause: error });
-  }
-}
-
 export function createAgentWorkspaceLearnedBehavior(
   shellPaths: ShellPathService,
   input: AgentWorkspaceLearnedBehaviorInput,

@@ -109,58 +109,36 @@ function memoryRecordFromSnapshot(snapshot: Record<string, unknown>): MemoryReco
   };
 }
 
+/**
+ * Puts back the review state a snapshot recorded and nothing else: content and
+ * provenance stay as they are now, so an edit made after the stale mark survives.
+ * Returns the state that was restored.
+ */
 async function restoreReviewState(
   shellPaths: ShellPathService,
   memory: ConsolidationMemory,
   domain: AgentLearningConsolidationDomain,
   id: string,
   snapshot: Record<string, unknown>,
-): Promise<void> {
+): Promise<string> {
   const reviewState = stringField(snapshot, 'reviewState') ?? 'fresh';
   const staleReason = stringField(snapshot, 'staleReason') ?? 'Restored by learning curator rollback.';
   if (domain === 'memory') {
     const confidence = typeof snapshot.confidence === 'number' ? snapshot.confidence : undefined;
-    const reviewed = await memory.updateReview(id, { state: reviewState === 'stale' || reviewState === 'reviewed' || reviewState === 'contradicted' ? reviewState : 'fresh', confidence, staleReason, reviewedBy: 'agent' });
+    const state = reviewState === 'stale' || reviewState === 'reviewed' || reviewState === 'contradicted' ? reviewState : 'fresh';
+    const reviewed = await memory.updateReview(id, { state, confidence, staleReason, reviewedBy: 'agent' });
     if (!reviewed) throw new Error(`Unknown Agent-local memory ${id}`);
-    return;
+    return state;
   }
-  if (reviewState === 'reviewed') {
-    if (domain === 'persona') AgentPersonaRegistry.fromShellPaths(shellPaths).markReviewed(id);
-    else if (domain === 'skill') AgentSkillRegistry.fromShellPaths(shellPaths).markReviewed(id);
-    else AgentRoutineRegistry.fromShellPaths(shellPaths).markReviewed(id);
-    return;
-  }
-  if (reviewState === 'stale') {
-    if (domain === 'persona') AgentPersonaRegistry.fromShellPaths(shellPaths).markStale(id, staleReason);
-    else if (domain === 'skill') AgentSkillRegistry.fromShellPaths(shellPaths).markStale(id, staleReason);
-    else AgentRoutineRegistry.fromShellPaths(shellPaths).markStale(id, staleReason);
-    return;
-  }
-  if (domain === 'persona') {
-    AgentPersonaRegistry.fromShellPaths(shellPaths).update(id, {
-      description: stringField(snapshot, 'description'),
-      body: stringField(snapshot, 'body'),
-      tags: arrayField(snapshot, 'tags'),
-      triggers: arrayField(snapshot, 'triggers'),
-      provenance: 'rollback-learning-curator-consolidation',
-    });
-  } else if (domain === 'skill') {
-    AgentSkillRegistry.fromShellPaths(shellPaths).update(id, {
-      description: stringField(snapshot, 'description'),
-      procedure: stringField(snapshot, 'procedure'),
-      tags: arrayField(snapshot, 'tags'),
-      triggers: arrayField(snapshot, 'triggers'),
-      provenance: 'rollback-learning-curator-consolidation',
-    });
-  } else {
-    AgentRoutineRegistry.fromShellPaths(shellPaths).update(id, {
-      description: stringField(snapshot, 'description'),
-      steps: stringField(snapshot, 'steps'),
-      tags: arrayField(snapshot, 'tags'),
-      triggers: arrayField(snapshot, 'triggers'),
-      provenance: 'rollback-learning-curator-consolidation',
-    });
-  }
+  const registry: { markReviewed(id: string): unknown; markStale(id: string, reason: string): unknown; update(id: string, input: Record<string, never>): unknown } =
+    domain === 'persona' ? AgentPersonaRegistry.fromShellPaths(shellPaths)
+      : domain === 'skill' ? AgentSkillRegistry.fromShellPaths(shellPaths)
+        : AgentRoutineRegistry.fromShellPaths(shellPaths);
+  if (reviewState === 'reviewed') { registry.markReviewed(id); return 'reviewed'; }
+  if (reviewState === 'stale') { registry.markStale(id, staleReason); return 'stale'; }
+  // An update with no fields is the registry's "mark fresh": it clears the review mark and keeps every field.
+  registry.update(id, {});
+  return 'fresh';
 }
 
 async function restoreSurvivor(
@@ -194,7 +172,7 @@ async function restoreSurvivor(
     description: stringField(snapshot, 'description') ?? '',
     tags: arrayField(snapshot, 'tags'),
     triggers: arrayField(snapshot, 'triggers'),
-  });
+  }, stringField(snapshot, 'provenance'));
   await restoreReviewState(shellPaths, memory, receipt.domain, receipt.survivorId, snapshot);
   return cloneRecord(await getRecord(shellPaths, memory, receipt.domain, receipt.survivorId));
 }
@@ -254,18 +232,13 @@ function recreateArguments(receipt: LearningConsolidationReceipt, snapshot: Reco
   };
 }
 
-async function currentLocalIds(shellPaths: ShellPathService, memory: ConsolidationMemory, domain: AgentLearningConsolidationDomain): Promise<Set<string>> {
-  if (domain === 'memory') return new Set((await memory.list()).map((record) => record.id));
-  if (domain === 'persona') return new Set(AgentPersonaRegistry.fromShellPaths(shellPaths).list().map((record) => record.id));
-  if (domain === 'skill') return new Set(AgentSkillRegistry.fromShellPaths(shellPaths).list().map((record) => record.id));
-  return new Set(AgentRoutineRegistry.fromShellPaths(shellPaths).list().map((record) => record.id));
-}
-
-function currentLocalNames(shellPaths: ShellPathService, domain: AgentLearningConsolidationDomain): Set<string> {
-  if (domain === 'memory') return new Set();
-  if (domain === 'persona') return new Set(AgentPersonaRegistry.fromShellPaths(shellPaths).list().map((record) => record.name.toLowerCase()));
-  if (domain === 'skill') return new Set(AgentSkillRegistry.fromShellPaths(shellPaths).list().map((record) => record.name.toLowerCase()));
-  return new Set(AgentRoutineRegistry.fromShellPaths(shellPaths).list().map((record) => record.name.toLowerCase()));
+/** The ids and names in use now: one read of the domain's store. */
+async function currentLocalOccupancy(shellPaths: ShellPathService, memory: ConsolidationMemory, domain: AgentLearningConsolidationDomain): Promise<{ ids: Set<string>; names: Set<string> }> {
+  if (domain === 'memory') return { ids: new Set((await memory.list()).map((record) => record.id)), names: new Set() };
+  const records: readonly { readonly id: string; readonly name: string }[] = domain === 'persona' ? AgentPersonaRegistry.fromShellPaths(shellPaths).list()
+    : domain === 'skill' ? AgentSkillRegistry.fromShellPaths(shellPaths).list()
+      : AgentRoutineRegistry.fromShellPaths(shellPaths).list();
+  return { ids: new Set(records.map((record) => record.id)), names: new Set(records.map((record) => record.name.toLowerCase())) };
 }
 
 async function recreateGuidance(
@@ -274,8 +247,7 @@ async function recreateGuidance(
   receipt: LearningConsolidationReceipt,
 ): Promise<Record<string, unknown> | null> {
   if (receipt.phase !== 'delete') return null;
-  const occupiedIds = await currentLocalIds(shellPaths, memory, receipt.domain);
-  const occupiedNames = currentLocalNames(shellPaths, receipt.domain);
+  const { ids: occupiedIds, names: occupiedNames } = await currentLocalOccupancy(shellPaths, memory, receipt.domain);
   const records = receipt.beforeDuplicates.map((snapshot) => {
     const previousId = stringField(snapshot, 'id') ?? '(unknown)';
     const name = stringField(snapshot, 'name') ?? stringField(snapshot, 'summary') ?? previousId;
@@ -321,11 +293,8 @@ async function recreateGuidance(
   };
 }
 
-async function receiptSummary(
-  receipt: LearningConsolidationReceipt,
-  context?: { readonly shellPaths: ShellPathService; readonly memory: ConsolidationMemory },
-): Promise<Record<string, unknown>> {
-  const deleteRecovery = context ? await recreateGuidance(context.shellPaths, context.memory, receipt) : null;
+/** Ids, phase, date and routes: no store is read. Recovery guidance is asked for by receiptId. */
+function receiptSummary(receipt: LearningConsolidationReceipt): Record<string, unknown> {
   return {
     receiptId: receipt.id,
     createdAt: receipt.createdAt,
@@ -340,7 +309,7 @@ async function receiptSummary(
     recreateRoute: receipt.phase === 'delete'
       ? `agent_learning_consolidation mode:"recreate" receiptId:"${receipt.id}" `
       : null,
-    ...(deleteRecovery ? { deleteRecovery } : {}),
+    ...(receipt.phase === 'delete' ? { recoveryRoute: `agent_learning_consolidation mode:"receipts" receiptId:"${receipt.id}"` } : {}),
   };
 }
 
@@ -439,7 +408,7 @@ async function applyStale(
     judgmentDecisionIds: candidate.judgmentDecisionIds,
     survivorId: plan.survivorId,
     duplicateIds: plan.duplicateIds,
-    receipt: await receiptSummary(receipt),
+    receipt: receiptSummary(receipt),
     afterDuplicates,
     next: 'Re-run the curator and delete only after current recorded effect admission approves deleting the stale duplicates.',
   };
@@ -497,7 +466,7 @@ async function applyDelete(
     judgmentDecisionIds: candidate.judgmentDecisionIds,
     survivorId: plan.survivorId,
     deletedDuplicateIds: plan.duplicateIds,
-    receipt: await receiptSummary(receipt, { shellPaths, memory }),
+    receipt: receiptSummary(receipt),
     recreateGuidance: await recreateGuidance(shellPaths, memory, receipt),
     next: 'Deletion is intentionally last. The receipt stores deleted record snapshots and exposes a separate admitted recreate route when exact ids are still safe.',
   };
@@ -572,7 +541,7 @@ async function applyRecreate(
       recreatedIds: memoryRecords.map((entry) => entry.id),
       exactIdsPreserved: true,
       importResult,
-      receipt: await receiptSummary(receipt, { shellPaths, memory }),
+      receipt: receiptSummary(receipt),
       next: 'Inspect recreated memory records, then re-run the learning curator before applying another consolidation phase.',
     };
   }
@@ -666,7 +635,7 @@ async function applyRecreate(
     recreatedIds: recreated.map((record) => stringField(record, 'id')).filter(Boolean),
     exactIdsPreserved: true,
     recreatedRecords: recreated,
-    receipt: await receiptSummary(receipt, { shellPaths, memory }),
+    receipt: receiptSummary(receipt),
     next: 'Inspect recreated records, then re-run the learning curator before applying another consolidation phase.',
   };
 }
@@ -726,7 +695,7 @@ async function applyRollback(
     return {
       status: 'applied',
       phase: 'rollback',
-      rollbackOf: await receiptSummary(receipt),
+      rollbackOf: receiptSummary(receipt),
       restoredSurvivor,
       ...recordRollback(),
       next: 'Re-run the learning curator and inspect the candidate before applying another consolidation phase.',
@@ -737,15 +706,18 @@ async function applyRollback(
   const gone = await Promise.all(restorable.map(async ({ id }) => { try { await getRecord(shellPaths, memory, receipt.domain, id); return false; } catch { return true; } }));
   const missing = restorable.filter((_entry, index) => gone[index]).map(({ id }) => id);
   if (missing.length > 0) throw new Error(`Rollback refused: ${missing.join(', ')} no longer exist (deleted since). Nothing was restored; use mode:"recreate" with the delete receipt if one exists.`);
+  const restored: { readonly id: string; readonly reviewState: string }[] = [];
   for (const { id, snapshot } of restorable) {
     beforeWrite();
-    await restoreReviewState(shellPaths, memory, receipt.domain, id, snapshot);
+    restored.push({ id, reviewState: await restoreReviewState(shellPaths, memory, receipt.domain, id, snapshot) });
   }
   return {
     status: 'applied',
     phase: 'rollback',
-    rollbackOf: await receiptSummary(receipt),
+    rollbackOf: receiptSummary(receipt),
     restoredDuplicateIds: restorable.map(({ id }) => id),
+    restored: 'review state only; content and provenance were left as they are now',
+    restoredReviewStates: restored,
     ...recordRollback(),
     next: 'Re-run the learning curator and inspect the candidate before applying another consolidation phase.',
   };
@@ -786,7 +758,7 @@ export function createAgentLearningConsolidationTool(shellPaths: ShellPathServic
           },
           receiptId: {
             type: 'string',
-            description: 'Receipt id for rollback.',
+            description: 'Receipt id for rollback or recreate; with mode receipts, shows that receipt with its recreate guidance.',
           },
           limit: {
             type: 'number',
@@ -869,10 +841,17 @@ export function createAgentLearningConsolidationTool(shellPaths: ShellPathServic
           // receipt file holds far more: without them, "here are the receipts"
           // reads as the whole rollback history when it is the newest slice.
           const stored = readReceiptFile(shellPaths).receipts;
+          const wanted = readString(args.receiptId);
+          if (wanted) {
+            const receipt = stored.find((entry) => entry.id === wanted);
+            if (!receipt) return failure(`Unknown learning consolidation receipt ${wanted}. List them with mode:"receipts".`);
+            const deleteRecovery = await recreateGuidance(shellPaths, memory, receipt);
+            return output({ status: 'receipt', receipt: receiptSummary(receipt), ...(deleteRecovery ? { deleteRecovery } : {}) });
+          }
           const page = stored.slice(0, readLimit(args.limit, 20));
           return output({
             status: 'receipts',
-            receipts: await Promise.all(page.map((receipt) => receiptSummary(receipt, { shellPaths, memory }))),
+            receipts: page.map(receiptSummary),
             returned: page.length,
             total: stored.length,
             ...(page.length < stored.length

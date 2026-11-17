@@ -44,6 +44,25 @@ function isAction(value: unknown): value is AgentLocalRegistryAction {
   return typeof value === 'string' && ACTIONS.includes(value as AgentLocalRegistryAction);
 }
 
+/** No such record is a failure in every domain; the text names how to find a real id. */
+function unknownRecord(kind: string, domain: AgentLocalRegistryDomain, args: AgentLocalRegistryToolArgs): Error {
+  return new Error(`Unknown Agent-local ${kind} ${readString(args.id)}. Nothing was changed; find ids with domain:"${domain}" action:"list" or action:"search".`);
+}
+
+/**
+ * A field edit carries `enabled` in the same registry write. `enabled` alone is
+ * the registry's own enable/disable, which leaves the review state as it is.
+ */
+function updateOrSetEnabled<R>(
+  fieldsGiven: boolean,
+  enabled: unknown,
+  update: (enabled: boolean | undefined) => R,
+  setEnabled: (enabled: boolean) => R,
+): R {
+  const flag = typeof enabled === 'boolean' ? enabled : undefined;
+  return fieldsGiven || flag === undefined ? update(flag) : setEnabled(flag);
+}
+
 function formatNote(note: AgentNoteRecord): string {
   const tags = note.tags.length > 0 ? ` tags ${note.tags.join(', ')}` : '';
   const sourceUrl = note.sourceUrl ? ` source ${note.sourceUrl}` : '';
@@ -62,7 +81,7 @@ function handleNote(shellPaths: ShellPathService, action: AgentLocalRegistryActi
   if (action === 'search') return listNotes(registry.search(readString(args.query)), 'Agent-local notes search');
   if (action === 'get') {
     const note = registry.get(requireId(args));
-    if (!note) return `Unknown Agent-local note ${readString(args.id)}`;
+    if (!note) throw unknownRecord('note', 'note', args);
     return [
       formatNote(note),
       `created ${note.createdAt}`,
@@ -178,7 +197,7 @@ function handlePersona(shellPaths: ShellPathService, action: AgentLocalRegistryA
   if (action === 'search') return listPersonas(registry, registry.search(readString(args.query)), 'Agent-local personas search');
   if (action === 'get') {
     const persona = registry.get(requireId(args));
-    if (!persona) return `Unknown Agent-local persona ${readString(args.id)}`;
+    if (!persona) throw unknownRecord('persona', 'persona', args);
     return [
       formatPersona(persona, registry.snapshot().activePersonaId),
       `origin ${formatAgentRecordOrigin(persona.source, persona.provenance)}`,
@@ -270,7 +289,7 @@ function handleSkill(shellPaths: ShellPathService, action: AgentLocalRegistryAct
   if (action === 'search') return listSkills(registry.search(readString(args.query)), 'Agent-local skills search');
   if (action === 'get') {
     const skill = registry.get(requireId(args));
-    if (!skill) return `Unknown Agent-local skill ${readString(args.id)}`;
+    if (!skill) throw unknownRecord('skill', 'skill', args);
     return [
       formatSkill(skill),
       `origin ${formatAgentRecordOrigin(skill.source, skill.provenance)}`,
@@ -307,7 +326,8 @@ function handleSkill(shellPaths: ShellPathService, action: AgentLocalRegistryAct
       args.requiresEnv, args.requiresCommands].some((value) => value !== undefined) ? 'fresh' : registry.get(id)?.reviewState);
     requireUpdateFields('skill', { name: args.name, description: args.description, procedure: args.procedure, triggers: args.triggers, tags: args.tags,
       requiresEnv: args.requiresEnv, requiresCommands: args.requiresCommands, enabled: typeof args.enabled === 'boolean' ? args.enabled : undefined });
-    const skill = registry.update(id, {
+    const fieldsGiven = [args.name, args.description, args.procedure, args.triggers, args.tags, args.requiresEnv, args.requiresCommands].some((value) => value !== undefined);
+    const skill = updateOrSetEnabled(fieldsGiven, args.enabled, (enabled) => registry.update(id, {
       name: readString(args.name) || undefined,
       description: readString(args.description) || undefined,
       procedure: readString(args.procedure) || undefined,
@@ -315,8 +335,8 @@ function handleSkill(shellPaths: ShellPathService, action: AgentLocalRegistryAct
       tags: args.tags === undefined ? undefined : readStringList(args.tags),
       requirements: buildAgentLocalRequirements(args.requiresEnv, args.requiresCommands, registry.get(id)?.requirements),
       provenance: readString(args.provenance) || AGENT_TOOL_PROVENANCE,
-    });
-    if (typeof args.enabled === 'boolean') registry.setEnabled(skill.id, args.enabled);
+      enabled,
+    }), (enabled) => registry.setEnabled(id, enabled));
     return [
       'Updated Agent-local skill',
       `  id ${skill.id}`,
@@ -364,7 +384,7 @@ function handleSkillBundle(shellPaths: ShellPathService, action: AgentLocalRegis
   if (action === 'search') return listSkillBundles(registry.searchBundles(readString(args.query)), 'Agent-local skill bundles search');
   if (action === 'get') {
     const bundle = registry.getBundle(requireId(args));
-    if (!bundle) return `Unknown Agent-local skill bundle ${readString(args.id)}`;
+    if (!bundle) throw unknownRecord('skill bundle', 'skill_bundle', args);
     return [
       formatSkillBundle(bundle),
       `origin ${formatAgentRecordOrigin(bundle.source, bundle.provenance)}`,
@@ -394,13 +414,14 @@ function handleSkillBundle(shellPaths: ShellPathService, action: AgentLocalRegis
     if (args.enabled === true) assertActorMayEnable('model', 'skill bundle', id,
       [args.name, args.description, args.skillIds, args.skills].some((value) => value !== undefined) ? 'fresh' : registry.getBundle(id)?.reviewState);
     requireUpdateFields('skill bundle', { name: args.name, description: args.description, skillIds: args.skillIds ?? args.skills, enabled: typeof args.enabled === 'boolean' ? args.enabled : undefined });
-    const bundle = registry.updateBundle(id, {
+    const fieldsGiven = [args.name, args.description, args.skillIds, args.skills].some((value) => value !== undefined);
+    const bundle = updateOrSetEnabled(fieldsGiven, args.enabled, (enabled) => registry.updateBundle(id, {
       name: readString(args.name) || undefined,
       description: readString(args.description) || undefined,
       skillIds: args.skillIds === undefined && args.skills === undefined ? undefined : readStringList(args.skillIds ?? args.skills),
       provenance: readString(args.provenance) || AGENT_TOOL_PROVENANCE,
-    });
-    if (typeof args.enabled === 'boolean') registry.setBundleEnabled(bundle.id, args.enabled);
+      enabled,
+    }), (enabled) => registry.setBundleEnabled(id, enabled));
     return [
       'Updated Agent-local skill bundle',
       `  id ${bundle.id}`,
@@ -448,7 +469,7 @@ function handleRoutine(shellPaths: ShellPathService, action: AgentLocalRegistryA
   if (action === 'search') return listRoutines(registry.search(readString(args.query)), 'Agent-local routines search');
   if (action === 'get') {
     const routine = registry.get(requireId(args));
-    if (!routine) return `Unknown Agent-local routine ${readString(args.id)}`;
+    if (!routine) throw unknownRecord('routine', 'routine', args);
     return [
       formatRoutine(routine),
       `origin ${formatAgentRecordOrigin(routine.source, routine.provenance)}`,
@@ -483,7 +504,8 @@ function handleRoutine(shellPaths: ShellPathService, action: AgentLocalRegistryA
       args.requiresEnv, args.requiresCommands].some((value) => value !== undefined) ? 'fresh' : registry.get(id)?.reviewState);
     requireUpdateFields('routine', { name: args.name, description: args.description, steps: args.steps, triggers: args.triggers, tags: args.tags,
       requiresEnv: args.requiresEnv, requiresCommands: args.requiresCommands, enabled: typeof args.enabled === 'boolean' ? args.enabled : undefined });
-    const routine = registry.update(id, {
+    const fieldsGiven = [args.name, args.description, args.steps, args.triggers, args.tags, args.requiresEnv, args.requiresCommands].some((value) => value !== undefined);
+    const routine = updateOrSetEnabled(fieldsGiven, args.enabled, (enabled) => registry.update(id, {
       name: readString(args.name) || undefined,
       description: readString(args.description) || undefined,
       steps: readString(args.steps) || undefined,
@@ -491,8 +513,8 @@ function handleRoutine(shellPaths: ShellPathService, action: AgentLocalRegistryA
       tags: args.tags === undefined ? undefined : readStringList(args.tags),
       requirements: buildAgentLocalRequirements(args.requiresEnv, args.requiresCommands, registry.get(id)?.requirements),
       provenance: readString(args.provenance) || AGENT_TOOL_PROVENANCE,
-    });
-    if (typeof args.enabled === 'boolean') registry.setEnabled(routine.id, args.enabled);
+      enabled,
+    }), (enabled) => registry.setEnabled(id, enabled));
     return [
       'Updated Agent-local routine',
       `  id ${routine.id}`,

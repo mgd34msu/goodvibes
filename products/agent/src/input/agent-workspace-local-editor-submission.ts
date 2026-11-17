@@ -4,7 +4,7 @@ import { AgentPersonaRegistry } from '../agent/persona-registry.ts';
 import { AgentRoutineRegistry } from '../agent/routine-registry.ts';
 import { createAgentRuntimeProfile, type AgentRuntimeProfileInfo } from '../agent/runtime-profile.ts';
 import { AgentSkillRegistry } from '../agent/skill-registry.ts';
-import { createAgentWorkspaceLearnedBehavior, runFollowUpWrite } from './agent-workspace-learned-behavior.ts';
+import { createAgentWorkspaceLearnedBehavior } from './agent-workspace-learned-behavior.ts';
 import { buildAgentWorkspaceRequirements } from './agent-workspace-requirements.ts';
 import { isEnabledValue, splitList } from './agent-workspace-editors.ts';
 import type { AgentWorkspaceLocalEditor, AgentWorkspaceLocalEditorKind } from './agent-workspace-types.ts';
@@ -137,10 +137,9 @@ function submitSkillEditor(
       triggers: splitList(field('triggers')),
       tags: splitList(field('tags')),
       requirements: buildAgentWorkspaceRequirements(field),
+      enabled: isEnabledValue(field('enabled')),
       provenance: 'Workspace',
     });
-    const enabled = isEnabledValue(field('enabled'));
-    if (updated.enabled !== enabled) runFollowUpWrite(`Skill "${updated.name}" (the edit)`, 'applying the enabled setting', () => registry.setEnabled(updated.id, enabled));
     finish('skill', updated.id, updated.name, 'Updated');
     return;
   }
@@ -173,10 +172,9 @@ function submitRoutineEditor(
       triggers: splitList(field('triggers')),
       tags: splitList(field('tags')),
       requirements: buildAgentWorkspaceRequirements(field),
+      enabled: isEnabledValue(field('enabled')),
       provenance: 'Workspace',
     });
-    const enabled = isEnabledValue(field('enabled'));
-    if (updated.enabled !== enabled) runFollowUpWrite(`Routine "${updated.name}" (the edit)`, 'applying the enabled setting', () => registry.setEnabled(updated.id, enabled));
     finish('routine', updated.id, updated.name, 'Updated');
     return;
   }

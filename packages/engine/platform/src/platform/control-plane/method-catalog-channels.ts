@@ -624,7 +624,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
     id: 'channels.inbox.list',
     title: 'List Channel Inbox',
     description:
-      'Return the merged inbound message feed (Slack DMs, Discord messages, email threads) from the host\'s synced provider mirror, newest first. Read-only; no provider write. Every known provider reports its own state in `providers`, including the unconfigured and the failing ones, so a short list is never ambiguous, and `partial` is true whenever a configured provider\'s items are missing because its last sync failed. Page with ?limit and ?cursor (opaque, from nextCursor); ?since=<cursor> returns only items committed after a previous answer\'s `cursor` watermark (the store\'s commit sequence, not a time); ?provider=<id> narrows to one provider.',
+      'Return the merged inbound message feed (Slack DMs, Discord messages, email threads) from the host\'s synced provider mirror, newest first. Read-only; no provider write. Every known provider reports its own state in `providers`, including the unconfigured and the failing ones, so a short list is never ambiguous, and `partial` is true whenever a configured provider\'s items are missing because its last sync failed. Page with ?limit and ?cursor (opaque, from nextCursor); ?since=<cursor> returns only items committed after a previous answer\'s `cursor` watermark (the store\'s commit sequence, not a time); ?provider=<id> narrows to one provider. Each provider with triage says in `triage` whether new messages are being labelled and, when not, why and what turns it on; channels.inbox.triage labels a page now.',
     category: 'channels',
     scopes: ['read:channels'],
     http: { method: 'GET', path: '/api/channels/inbox' },
@@ -691,6 +691,37 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
       refused: NUMBER_SCHEMA,
       failed: NUMBER_SCHEMA,
     }, ['results', 'applied', 'refused', 'failed']),
+  }),
+  methodDescriptor({
+    id: 'channels.inbox.triage',
+    title: 'Triage Inbox Now',
+    description:
+      'Score a page of one provider\'s stored inbox now: each message gets a spam / priority / normal label from the decision model on the account\'s privacy-screening route (labels otherwise come after each poll, so this is for a backlog or a re-check). `provider` is required (slack, discord or email); page with `limit` (at most 100) and `cursor` (nextCursor from channels.inbox.list or an earlier answer). `dryRun: true` returns the readings without storing them. Returns one receipt per message: `settled` with its label and score, or `held` / `unavailable` / `withheld` with why nothing was settled. When triage is off for the account the call is refused with the reason and what turns it on; channels.inbox.list reports the same state on each provider as `triage`.',
+    category: 'channels',
+    scopes: ['write:channels'],
+    access: 'admin',
+    http: { method: 'POST', path: '/api/channels/inbox/triage' },
+    inputSchema: bodyEnvelopeSchema({
+      provider: STRING_SCHEMA,
+      limit: NUMBER_SCHEMA,
+      cursor: STRING_SCHEMA,
+      dryRun: BOOLEAN_SCHEMA,
+    }, ['provider']),
+    outputSchema: objectSchema({
+      receipts: arraySchema(objectSchema({
+        id: STRING_SCHEMA,
+        status: STRING_SCHEMA,
+        label: STRING_SCHEMA,
+        score: NUMBER_SCHEMA,
+        tags: arraySchema(STRING_SCHEMA),
+        reason: STRING_SCHEMA,
+        battery: STRING_SCHEMA,
+        batteryVersion: NUMBER_SCHEMA,
+      }, ['id', 'status'], { additionalProperties: true })),
+      total: NUMBER_SCHEMA,
+      hasMore: BOOLEAN_SCHEMA,
+      nextCursor: STRING_SCHEMA,
+    }, ['receipts', 'total', 'hasMore']),
   }),
   methodDescriptor({
     id: 'channels.routing.list',

@@ -40,7 +40,7 @@ export const AGENT_HARNESS_MODES = [
   'unified_inbox',
   'channel_drafts', 'channel_draft_save', 'channel_draft_send',
   'channel_routing', 'channel_routing_assign', 'channel_routing_remove',
-  'inbox_labels_apply',
+  'inbox_labels_apply', 'inbox_triage',
 ] as const;
 
 const BACKGROUND_PROCESS_ACTION_VALUES = [
@@ -347,7 +347,7 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
   },
   limit: {
     type: 'number',
-    description: 'Maximum catalog entries to return. settings, workspace_actions and operator_methods page 50 rows by default, at most 100.',
+    description: 'Maximum catalog entries to return. settings, workspace_actions and operator_methods page 50 rows by default, at most 100. inbox_triage: messages to label, at most 100.',
   },
   offset: {
     type: 'number',
@@ -446,5 +446,17 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
     type: 'array',
     items: { type: 'string' },
     description: 'Labels for inbox_labels_apply: GoodVibes/Spam, GoodVibes/Priority or GoodVibes/Normal (writing one takes the other two off), or a custom label name.',
+  },
+  provider: {
+    type: 'string',
+    description: 'Inbox account for inbox_triage: slack, discord or email.',
+  },
+  cursor: {
+    type: 'string',
+    description: 'Page cursor for inbox_triage: nextCursor from channels.inbox.list or an earlier inbox_triage answer.',
+  },
+  dryRun: {
+    type: 'boolean',
+    description: 'inbox_triage: return the readings without storing them.',
   },
 } as const;

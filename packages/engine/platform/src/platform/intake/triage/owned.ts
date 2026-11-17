@@ -10,7 +10,7 @@ import { HandlerError } from '../../control-plane/host-handlers.js';
 import { acquireCrossProcessLock } from '../../state/durable-file-io.js';
 import { isClassicOperation } from '../../runtime/decision-policy.js';
 import { aggregateInbox, normalizeInboxQuery, type InboxListInput } from '../aggregator.js';
-import { createOwnedInboxSource, registerCompositeInboxSurface, type InboxSurfaceContext,
+import { createOwnedInboxSource, registerCompositeInboxSurface, type InboxSurfaceContext, type InboxTriageResult, type InboxTriageState,
   type OwnedInboxSource, type RegisterInboxSurfaceOptions } from '../registration.js';
 import { previewInboxTriage, triageMirrorRows } from './pipeline.js';
 import type { TriagePreview, TriageReceipt } from './types.js';
@@ -48,16 +48,8 @@ export interface OwnedTriagedInboxOptions extends Omit<RegisterInboxSurfaceOptio
   /** Rows scored per model request (one request per batch). */
   readonly batchSize?: number;
 }
-export interface OwnedInboxTriageResult {
-  readonly receipts: readonly (TriageReceipt | TriagePreview)[];
-  readonly total: number;
-  readonly hasMore: boolean;
-  readonly nextCursor?: string;
-}
-/** Whether new rows of this account are being labelled, and if not, why and what turns it on. */
-export type InboxTriageState =
-  | { readonly state: 'on' }
-  | { readonly state: 'off'; readonly reason: string; readonly next: readonly string[] };
+export type OwnedInboxTriageResult = InboxTriageResult;
+export type { InboxTriageState };
 export interface OwnedTriagedInboxSource extends OwnedInboxSource {
   /** Score a selected page now, at most 100 rows; `dryRun` returns the reading without storing it. */
   runInboxTriage(query?: InboxListInput, operation?: { readonly signal?: AbortSignal; readonly dryRun?: boolean }): Promise<OwnedInboxTriageResult>;

@@ -12,12 +12,13 @@ import { InboxCursorStore } from './cursor-store.js';
 import { InboundPoller } from './poller.js';
 import { aggregateInbox, normalizeInboxQuery, type InboxListInput, type InboxListOutput } from './aggregator.js';
 import type { InboundProviderAdapter } from './provider-adapter.js';
-import type { TriageReceiptScope } from './triage/types.js';
+import type { TriagePreview, TriageReceipt, TriageReceiptScope } from './triage/types.js';
 import type { IntakeLogger } from './context.js';
 import { composeInboxReads, type InboxReadSource } from './composite.js';
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 
 export const INBOX_LIST_METHOD_ID = 'channels.inbox.list';
+export const INBOX_TRIAGE_METHOD_ID = 'channels.inbox.triage';
 
 // Detect a gate awaiting its enclosing legacy wrapper as well as its source.
 const enclosingRetirements = new WeakMap<() => Promise<void>, Promise<void>>();
@@ -78,12 +79,41 @@ export interface OwnedInboxRead extends InboxReadSource {
   release(): void;
 }
 
+/** Whether new rows of an account are being labelled, and if not, why and what turns it on. */
+export type InboxTriageState =
+  | { readonly state: 'on' }
+  | { readonly state: 'off'; readonly reason: string; readonly next: readonly string[] };
+
+/** One explicit triage pass over a page of an account's stored inbox. */
+export interface InboxTriageResult {
+  readonly receipts: readonly (TriageReceipt | TriagePreview)[];
+  readonly total: number;
+  readonly hasMore: boolean;
+  readonly nextCursor?: string;
+}
+
 /** One independent account store/poller lifetime; never owns a catalog binding. */
 export interface OwnedInboxSource extends InboxSurfaceRegistration {
   readonly providerIds: readonly string[];
   /** This account's mirror, for the owner's own work on it (triage). Not a read path for callers. */
   readonly mirror?: InboxCursorStore;
   acquireRead(requireFinalProof?: boolean): Promise<OwnedInboxRead>;
+  /** Present on an account with triage: score a selected page now; `dryRun` returns the reading without storing it. */
+  readonly runInboxTriage?: (query?: InboxListInput, operation?: { readonly signal?: AbortSignal; readonly dryRun?: boolean }) => Promise<InboxTriageResult>;
+  /** Present on an account with triage: in memory, no I/O. */
+  readonly triageState?: () => InboxTriageState;
+}
+
+/** The triage state as the inbox list reports it on each provider. */
+function triageStatus(state: InboxTriageState): NonNullable<InboxListOutput['providers'][number]['triage']> {
+  return state.state === 'on' ? { state: 'on' } : { state: 'off', reason: state.reason, next: [...state.next] };
+}
+
+interface InboxTriageBody {
+  readonly provider?: unknown;
+  readonly limit?: unknown;
+  readonly cursor?: unknown;
+  readonly dryRun?: unknown;
 }
 
 function scopeUnavailable(): HandlerError {
@@ -324,6 +354,12 @@ export function registerCompositeInboxSurface(
         for (const source of included) reads.push(await source.acquireRead(requireFinalProof));
         for (const read of reads) read.assertCurrent();
         const result = aggregateInbox(!requireFinalProof && reads.length === 1 ? reads[0]!.sources : composeInboxReads(reads), query);
+        // Whether each account labels its messages, so "not scored yet" is told apart from "triage is off, and why".
+        for (const source of included) {
+          const triage = source.triageState?.();
+          if (!triage) continue;
+          for (const status of result.providers) if (source.providerIds.includes(status.provider)) status.triage = triageStatus(triage);
+        }
         const validations = await Promise.allSettled(reads.map(read => read.validate()));
         for (const validation of validations) if (validation.status === 'rejected') throw validation.reason;
         if (closed) throw stopped();
@@ -336,6 +372,36 @@ export function registerCompositeInboxSurface(
     void work.then(() => active.delete(work), () => active.delete(work));
     return work;
   });
+  // The explicit pass: score a page of one account's stored inbox now (labels otherwise come after each poll).
+  const triageDescriptor = owned.some(source => source.runInboxTriage) && !ctx.catalog.hasHandler(INBOX_TRIAGE_METHOD_ID)
+    ? ctx.catalog.get(INBOX_TRIAGE_METHOD_ID) : undefined;
+  const unregisterTriage = triageDescriptor ? registerCatalogHandler<InboxTriageBody, InboxTriageResult>(ctx.catalog, INBOX_TRIAGE_METHOD_ID, invocation => {
+    if (closed) return Promise.reject(stopped());
+    const work = (async () => {
+      await ready;
+      if (closed) throw stopped();
+      const body = invocation.body ?? {};
+      const provider = typeof body.provider === 'string' ? body.provider.trim() : '';
+      if (!provider) throw new HandlerError(`provider is required; pass one of ${[...providers].join(', ') || '(no inbox account is set up)'}`, 'INVALID_ARGUMENT', 400, 'provider');
+      if (body.dryRun !== undefined && typeof body.dryRun !== 'boolean') throw new HandlerError('dryRun must be true or false', 'INVALID_ARGUMENT', 400, 'dryRun');
+      if (body.limit !== undefined && (typeof body.limit !== 'number' || !Number.isFinite(body.limit))) throw new HandlerError('limit must be a number from 1 to 100', 'INVALID_ARGUMENT', 400, 'limit');
+      if (body.cursor !== undefined && typeof body.cursor !== 'string') throw new HandlerError('cursor must be a nextCursor value from an earlier answer', 'INVALID_ARGUMENT', 400, 'cursor');
+      const source = owned.find(entry => entry.providerIds.includes(provider));
+      if (!source) {
+        throw new HandlerError(`No ${provider} inbox account is set up on this host; pass one of ${[...providers].join(', ') || '(none set up)'}`, 'INBOX_PROVIDER_UNKNOWN', 404, 'provider');
+      }
+      if (!source.runInboxTriage) {
+        throw new HandlerError(`The ${provider} inbox account on this host does not label its messages; set up privacy screening for it, then try again`, 'INBOX_TRIAGE_AUTHORITY_UNAVAILABLE', 503);
+      }
+      const query: InboxListInput = { provider, ...(typeof body.limit === 'number' ? { limit: body.limit } : {}),
+        ...(typeof body.cursor === 'string' ? { cursor: body.cursor } : {}) };
+      const signal = invocation.context.signal;
+      return source.runInboxTriage(query, { ...(signal ? { signal } : {}), ...(body.dryRun === true ? { dryRun: true } : {}) });
+    })();
+    active.add(work);
+    void work.then(() => active.delete(work), () => active.delete(work));
+    return work;
+  }) : undefined;
   const close = (): Promise<void> => {
     if (closing) return closing;
     closed = true;
@@ -345,6 +411,10 @@ export function registerCompositeInboxSurface(
     const errors: unknown[] = [];
     try { unregister(); } catch (error) { errors.push(error); }
     try { ctx.catalog.register(descriptor, undefined, { replace: true }); } catch (error) { errors.push(error); }
+    if (unregisterTriage && triageDescriptor) {
+      try { unregisterTriage(); } catch (error) { errors.push(error); }
+      try { ctx.catalog.register(triageDescriptor, undefined, { replace: true }); } catch (error) { errors.push(error); }
+    }
     void Promise.allSettled([ready, ...active]).then(() => {
       if (errors.length) reject(new AggregateError(errors, 'Inbox surface did not close cleanly')); else resolve();
     });

@@ -74,7 +74,7 @@ import { countHarnessSettingCatalog, formatHarnessError, resolveEffectiveHarness
 import { harnessSettingsCatalog, isHarnessSettingsQuery } from './agent-harness-settings-catalog.ts';
 import { assistantCockpitRouteMap } from '../agent/assistant-cockpit.ts';
 import { isAgentHarnessRemoteMode, remoteCatalogStatus, runRemoteMode } from './agent-harness-remote.ts';
-import { channelDraftSaveHandoff, channelDraftSendHandoff, channelDraftsSummary, channelRoutingAssignHandoff, channelRoutingRemoveHandoff, channelRoutingSummary, inboxLabelsApplyHandoff, unifiedInboxSummary } from './agent-harness-comms.ts';
+import { channelDraftSaveHandoff, channelDraftSendHandoff, channelDraftsSummary, channelRoutingAssignHandoff, channelRoutingRemoveHandoff, channelRoutingSummary, inboxLabelsApplyHandoff, inboxTriageHandoff, unifiedInboxSummary } from './agent-harness-comms.ts';
 
 function isMode(value: unknown): value is AgentHarnessMode {
   return typeof value === 'string' && AGENT_HARNESS_MODES.includes(value as AgentHarnessMode);
@@ -841,6 +841,10 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
         }
         if (dispatchMode === 'inbox_labels_apply') {
           const result = await inboxLabelsApplyHandoff(deps.commandContext, rawArgs, options);
+          return typeof result === 'string' ? error(result) : effectOutput(result);
+        }
+        if (dispatchMode === 'inbox_triage') {
+          const result = await inboxTriageHandoff(deps.commandContext, rawArgs, options);
           return typeof result === 'string' ? error(result) : effectOutput(result);
         }
         return error(`Unhandled agent_harness mode: ${dispatchMode}`);

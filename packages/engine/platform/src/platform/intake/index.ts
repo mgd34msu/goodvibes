@@ -37,7 +37,7 @@ export type {
   InboxListOutput, InboxListQuery, InboxAggregatorSources,
 } from './aggregator.js';
 
-export { INBOX_LIST_METHOD_ID, registerInboxSurface, createOwnedInboxSource, registerCompositeInboxSurface } from './registration.js';
+export { INBOX_LIST_METHOD_ID, INBOX_TRIAGE_METHOD_ID, registerInboxSurface, createOwnedInboxSource, registerCompositeInboxSurface } from './registration.js';
 export type {
   InboxPollingControl, InboxSurfaceContext, RegisterInboxSurfaceOptions, InboxSurfaceRegistration,
   OwnedInboxReadLease, OwnedInboxRead, OwnedInboxSource,

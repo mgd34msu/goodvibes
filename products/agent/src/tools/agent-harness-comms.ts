@@ -844,3 +844,72 @@ export async function inboxLabelsApplyHandoff(
       : 'Every label is on its message at the provider.',
   };
 }
+
+// ---------------------------------------------------------------------------
+// INBOX, inbox_triage (effect)
+// ---------------------------------------------------------------------------
+
+/** The daemon method that labels a page of one provider's stored inbox now. */
+export const INBOX_TRIAGE_METHOD = 'channels.inbox.triage';
+
+/**
+ * Label a page of one provider's stored inbox now (spam / priority / normal),
+ * through the daemon, which holds the accounts and the screening route the
+ * model call goes through. `dryRun` returns the readings without storing them.
+ * When triage is off for the account the daemon says why and what turns it on.
+ */
+export async function inboxTriageHandoff(
+  context: CommandContext,
+  args: Record<string, unknown>,
+  options?: Parameters<Tool['execute']>[1],
+): Promise<EffectResult | string> {
+  const confirmationError = requireConfirmedAction(args, options, 'Inbox triage');
+  if (confirmationError) return confirmationError;
+  const provider = readString(args.provider)?.trim();
+  if (!provider) return 'inbox_triage requires provider: slack, discord or email (the inbox account to label).';
+  if (args.limit !== undefined && (typeof args.limit !== 'number' || !Number.isFinite(args.limit) || args.limit < 1 || args.limit > 100)) {
+    return 'inbox_triage takes limit from 1 to 100.';
+  }
+  const cursor = readString(args.cursor)?.trim();
+  const dryRun = args.dryRun === true;
+  const invoke = commsDaemonInvoke(context);
+  if (!invoke) {
+    return {
+      mode: 'inbox_triage',
+      status: 'unavailable',
+      done: false,
+      error: 'No daemon connection in this shell; the daemon holds the inbox accounts, so triage can only run there. Nothing was labelled.',
+    };
+  }
+  const result = await invoke(INBOX_TRIAGE_METHOD, {
+    provider,
+    ...(typeof args.limit === 'number' ? { limit: Math.floor(args.limit) } : {}),
+    ...(cursor ? { cursor } : {}),
+    ...(dryRun ? { dryRun: true } : {}),
+  }, { signal: options?.signal, explicitUserRequest: false });
+  if (!result.ok) {
+    return {
+      mode: 'inbox_triage',
+      status: 'not_applied',
+      done: false,
+      error: result.error,
+      ...(result.applied === undefined ? {} : { applied: result.applied }),
+    };
+  }
+  const body = result.body && typeof result.body === 'object' ? result.body as Record<string, unknown> : {};
+  const receipts = Array.isArray(body.receipts) ? body.receipts : [];
+  const settled = receipts.filter(receipt => receipt && typeof receipt === 'object' && (receipt as Record<string, unknown>).status === 'settled').length;
+  return {
+    mode: 'inbox_triage',
+    status: settled === receipts.length ? 'applied' : settled > 0 ? 'partial' : 'not_applied',
+    done: settled === receipts.length,
+    dryRun,
+    settled,
+    unsettled: receipts.length - settled,
+    receipts,
+    ...(body.hasMore === true && typeof body.nextCursor === 'string' ? { nextCursor: body.nextCursor } : {}),
+    policy: dryRun
+      ? 'Readings only: nothing was stored. Run again without dryRun to keep the labels.'
+      : 'Settled labels are stored beside their messages and shown by every inbox read; a held, unavailable or withheld message is scored again after a later poll. Labels stay in GoodVibes until inbox_labels_apply writes them to the provider.',
+  };
+}

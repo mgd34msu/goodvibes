@@ -103,6 +103,8 @@ export interface ChannelInboxProviderStatus {
   mailboxScope?: string;
   /** Messages the last sync passed because their content cannot be proven complete, with the reason. */
   skippedMessages?: readonly { readonly uid: number; readonly reason: string }[];
+  /** Whether this account labels its messages; `off` says why and what turns it on. Absent for an account without triage. */
+  triage?: { readonly state: 'on' | 'off'; readonly reason?: string; readonly next?: readonly string[] };
 }
 
 /** platform `channels.inbox.list` output. */

@@ -93,6 +93,11 @@ export const CHANNEL_INBOX_PROVIDER_STATUS_SCHEMA = objectSchema({
   mailboxScope: STRING_SCHEMA,
   /** Messages the last sync passed without publishing because their content cannot be proven complete. */
   skippedMessages: arraySchema(objectSchema({ uid: NUMBER_SCHEMA, reason: STRING_SCHEMA }, ['uid', 'reason'])),
+  /**
+   * Whether this account labels its messages (`on` | `off`); when `off`, the
+   * reason and the steps that turn it on. Absent for an account without triage.
+   */
+  triage: objectSchema({ state: STRING_SCHEMA, reason: STRING_SCHEMA, next: arraySchema(STRING_SCHEMA) }, ['state']),
 }, ['provider', 'state', 'itemCount', 'storedCount']);
 
 export const CHANNEL_ROUTING_RULE_SCHEMA = objectSchema({

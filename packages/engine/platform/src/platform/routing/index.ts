@@ -118,16 +118,11 @@ export {
   type RouteReadinessLevel,
   type RouteReadinessReading,
 } from './model-readiness.js';
-export { personalOpsLaneMember, personalOpsToolLane, personalOpsSampleField, personalOpsResultField } from './batteries/personal-ops.js';
-
-export { localServingStatus, localResourcePressure, localServingSchemaStatus } from './batteries/local-model-diagnostics.js';
-
 export { remotePublisherOutcomeKind, remotePublisherSchemaStatus } from './batteries/remote-publisher.js';
 
-export { memoryRouteRole, memoryCredentialState, memoryLiveStatus, memoryReceiptMember, memorySchemaCertified, memoryProviderSelect } from './batteries/memory-provider.js';
+export { memoryProviderSelect } from './batteries/memory-provider.js';
 
 export { localBenchmarkPrompt } from './batteries/local-benchmark-prompt.js';
 
 export { readCommandDiscovery, type CommandDiscoveryEntry, type CommandDiscoveryRequest, type CommandDiscoveryReading } from './command-discovery.js';
-export { declaredClassicModelStack, declaredClassicBoolean, declaredClassicServingStatus, declaredClassicResourcePressure,
-  type ClassicModelStack, type ClassicServingStatus, type ClassicResourcePressure } from './classic-model-facts.js';
+export { declaredClassicModelStack, type ClassicModelStack } from './classic-model-facts.js';

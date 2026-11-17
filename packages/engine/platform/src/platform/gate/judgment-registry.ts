@@ -96,12 +96,6 @@ registry.register(sourceScreeningVerification);
 import { researchReferenceParameterRole } from '../security/source-screening/reference.js';
 registry.register(researchReferenceParameterRole);
 
-import { personalOpsLaneMember, personalOpsSampleField, personalOpsToolLane, personalOpsResultField } from '../routing/batteries/personal-ops.js';
-registry.register(personalOpsLaneMember);
-registry.register(personalOpsToolLane);
-registry.register(personalOpsSampleField);
-registry.register(personalOpsResultField);
-
 import { remotePublisherOutcomeKind, remotePublisherSchemaStatus } from '../routing/batteries/remote-publisher.js';
 registry.register(remotePublisherSchemaStatus);
 registry.register(remotePublisherOutcomeKind);

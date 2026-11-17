@@ -38,7 +38,7 @@
  * stop at rather than reconcile with.
  */
 import { sanitizeNoticeField } from '../security/notice-text.js';
-import { pageDecimalMark, parseDiscountMinorUnits, parseMinorUnits, parseQuantity } from './money-parsing.js';
+import { foreignCurrencySign, pageDecimalMark, parseDiscountMinorUnits, parseMinorUnits, parseQuantity } from './money-parsing.js';
 import { parseCurrencyCode } from './types.js';
 import type { CartLine } from './cart.js';
 import type { CurrencyCode, MinorUnits, ShippingOption } from './types.js';
@@ -118,14 +118,19 @@ function fail(field: string, reason: string): ExtractionResult {
  * text is read the same way.
  */
 export function readingDecimalMark(raw: RawCheckoutReading, currency: CurrencyCode | string): ReturnType<typeof pageDecimalMark> {
-  return pageDecimalMark([
+  return pageDecimalMark(readingAmounts(raw), currency);
+}
+
+/** Every amount a reading holds, as the page wrote it. */
+function readingAmounts(raw: RawCheckoutReading): string[] {
+  return [
     ...raw.lines.map(line => line.unitPrice),
     ...(raw.tax === null ? [] : [raw.tax]),
     ...raw.fees.map(fee => fee.amount),
     ...(raw.discounts ?? []).map(discount => discount.amount),
     ...raw.shippingOptions.map(option => option.cost),
     ...(raw.statedTotal === null ? [] : [raw.statedTotal]),
-  ], currency);
+  ];
 }
 
 /**
@@ -150,6 +155,18 @@ export function extractCheckout(
 
   if (raw.lines.length === 0) {
     return fail('lines', 'Refused: I could not read a single line item off this checkout.');
+  }
+
+  // A sign is a currency the page stated as surely as a code is: "€99.00" is
+  // not 99.00 of the budget's currency, so it is refused as "EUR 99.00" is.
+  for (const amount of readingAmounts(raw)) {
+    if (typeof amount !== 'string') continue;
+    const sign = foreignCurrencySign(amount, currency);
+    if (sign !== null) {
+      return fail('currency', `Refused: this checkout writes its prices with "${sign}", which is not a sign of ${currency}`
+        + `${raw.currency === null || raw.currency.trim().length === 0 ? ', the currency your spending limits are counted in' : ''}. `
+        + 'I do not read a price in another currency as if it were this one.');
+    }
   }
 
   // In a three-decimal currency "1.234" is a price of 1.234 or of 1234; the

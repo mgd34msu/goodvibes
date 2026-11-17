@@ -102,6 +102,51 @@ export function parseRequestedMaximum(raw: string, currency: CurrencyCode): Mino
 /** Characters a page may put around a number that carry no numeric meaning. */
 const CURRENCY_ORNAMENT = /[\p{Sc}\s   ]/gu;
 
+/** Every currency sign on a page, in any script. */
+const CURRENCY_SIGN = /\p{Sc}/gu;
+
+/**
+ * The currencies each sign is written for. A sign shared by several (the
+ * dollar, the pound, the yen, the rupee) belongs to each of them; a sign not
+ * listed here (the cent sign, a historic or unknown sign) belongs to none, so
+ * an amount carrying it is refused rather than read in whatever currency the
+ * caller assumed.
+ */
+const SIGN_CURRENCIES: ReadonlyMap<string, ReadonlySet<string>> = (() => {
+  const dollar = ['USD', 'CAD', 'AUD', 'NZD', 'SGD', 'HKD', 'TWD', 'MXN', 'ARS', 'CLP', 'COP', 'UYU', 'CUP', 'DOP',
+    'BSD', 'BBD', 'BZD', 'BMD', 'BND', 'KYD', 'FJD', 'GYD', 'JMD', 'LRD', 'NAD', 'SBD', 'SRD', 'TTD', 'XCD', 'ZWL'];
+  const pound = ['GBP', 'GIP', 'FKP', 'SHP', 'EGP', 'SSP', 'SYP'];
+  const yen = ['JPY', 'CNY'];
+  const won = ['KRW', 'KPW'];
+  const rupee = ['PKR', 'LKR', 'NPR', 'MUR', 'SCR'];
+  const rial = ['SAR', 'IRR', 'OMR', 'QAR', 'YER'];
+  const entries: [string, readonly string[]][] = [
+    ['$', dollar], ['＄', dollar], ['﹩', dollar],
+    ['£', pound], ['￡', pound],
+    ['¥', yen], ['￥', yen],
+    ['₩', won], ['￦', won],
+    ['₨', rupee], ['﷼', rial],
+    ['€', ['EUR']], ['₹', ['INR']], ['₽', ['RUB']], ['₺', ['TRY']], ['₪', ['ILS']], ['₱', ['PHP']],
+    ['฿', ['THB']], ['₫', ['VND']], ['₴', ['UAH']], ['₦', ['NGN']], ['₡', ['CRC']], ['₲', ['PYG']],
+    ['₵', ['GHS']], ['₸', ['KZT']], ['₼', ['AZN']], ['₾', ['GEL']], ['₭', ['LAK']], ['₮', ['MNT']],
+    ['៛', ['KHR']], ['֏', ['AMD']], ['৳', ['BDT']],
+  ];
+  return new Map(entries.map(([sign, codes]) => [sign, new Set(codes)]));
+})();
+
+/**
+ * The first currency sign in `raw` that is not written for `currency`, or
+ * null when every sign there (or none) is. "€99.00" read in USD names "€":
+ * the page priced it in another currency, and its number is not dollars.
+ */
+export function foreignCurrencySign(raw: string, currency: CurrencyCode | string): string | null {
+  const code = currency.trim().toUpperCase();
+  for (const [sign] of raw.matchAll(CURRENCY_SIGN)) {
+    if (SIGN_CURRENCIES.get(sign)?.has(code) !== true) return sign;
+  }
+  return null;
+}
+
 /** The character a page writes between whole units and the fraction. */
 export type DecimalMark = '.' | ',';
 
@@ -115,6 +160,9 @@ const THREE_DIGIT_SPLIT = /^\d{1,3}[.,]\d{3}$/;
  * something besides the number.
  */
 function amountNumeral(raw: string, currency: string): string | null {
+  // A sign written for another currency is refused, as another ISO code is:
+  // the number is not in this currency.
+  if (foreignCurrencySign(raw, currency) !== null) return null;
   // Strip currency symbols, the ISO code itself, and every flavour of space.
   // Nothing here removes a digit or a separator, so the grammar still sees the
   // full layout the page chose.

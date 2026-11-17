@@ -1,24 +1,16 @@
-import { ArtifactStore, type ArtifactCreateInput, type ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import { lstatSync } from 'node:fs';
+import type { ArtifactCreateInput, ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { judgmentInputCardProblem, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { assertCurrentToolEffect, assertCurrentToolExecution, assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolNativeReferencesCapture, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { assertCurrentToolEffect, assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolNativeReferencesCapture } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { containsIssuerCredential } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CommandContext } from '../input/command-registry.ts';
-import { captureAgentExportPath } from './agent-artifact-effect.ts';
 import { SETUP_SMOKE_EVIDENCE_FIELD_DEFINITIONS, redactSetupSmokeEvidence, redactSetupSmokeEvidenceFull } from './agent-harness-setup-smoke.ts';
 import type { SetupSmokeArtifactStore, SetupSmokeEvidenceField } from './agent-harness-setup-posture-types.ts';
 
 type ExecutionOptions = Parameters<Tool['execute']>[1];
 interface Capture {
-  readonly name: 'agent_harness' | 'setup';
-  readonly context: CommandContext;
-  readonly args: Record<string, unknown>;
   readonly evidence: readonly SetupSmokeEvidenceField[];
   readonly store: SetupSmokeArtifactStore | undefined;
-  readonly create: SetupSmokeArtifactStore['create'];
-  readonly assertCurrent: () => void;
-  rawFields: Readonly<Record<string, unknown>> | undefined;
   released: boolean;
 }
 const captures = new WeakMap<object, Capture>();
@@ -37,7 +29,14 @@ function evidenceParts(text: string): readonly Record<string, string>[] {
   return parts;
 }
 
-/** This source owner runs before ordinary argument privacy capture. */
+/**
+ * The one capture of pasted setup smoke output, on the tool call that saves it
+ * (`setup action:"smoke"` or `agent_harness mode:"run_setup_smoke"`). It runs
+ * before ordinary argument capture: the pasted text is redacted once, card and
+ * issuer-credential material is refused, the approver is shown the redacted
+ * text, and only placeholders stay in the arguments. The artifact store owns
+ * the path it writes to.
+ */
 export function createSetupSmokeReferenceCapture(context?: CommandContext,
   selectSetupSmoke?: (args: Readonly<Record<string, unknown>>) => boolean): NonNullable<ToolInputProjector['captureNativeReferences']> {
   const name = selectSetupSmoke ? 'setup' : 'agent_harness';
@@ -51,24 +50,9 @@ export function createSetupSmokeReferenceCapture(context?: CommandContext,
     const selected = SETUP_SMOKE_EVIDENCE_FIELD_DEFINITIONS.filter(field => typeof rawFields[field.id] === 'string');
     if (!selected.length) return undefined;
     const signal = request.signal;
-    request.assertCurrent(); request.signal?.throwIfAborted();
-    // Inspect the entire source, including content after the artifact display cap
-    // and cards appearing after an earlier credential. This creates no grant.
+    request.assertCurrent(); signal?.throwIfAborted();
+    // The whole pasted text is inspected, including content past the saved cut.
     if (judgmentInputCardProblem(request.args, request.name)) throw new ToolInputProjectionError('held');
-    const platform = context.platform;
-    const workspace = context.workspace;
-    const config = platform.configManager;
-    const incarnation = config.getConfigurationIncarnation();
-    const paths = workspace?.shellPaths;
-    const physicalHome = paths ? captureAgentExportPath(paths.homeDirectory, paths.homeDirectory) : undefined;
-    const physicalWorkspace = paths ? captureAgentExportPath(paths.workingDirectory, paths.workingDirectory) : undefined;
-    const store = (platform as { readonly artifactStore?: SetupSmokeArtifactStore }).artifactStore;
-    const create = store?.create;
-    // Only the platform's own store has a directory to watch; a custom store keeps its identity alone.
-    const nativeStore = store instanceof ArtifactStore ? store : undefined;
-    const storeRoot = nativeStore?.storagePath;
-    const physicalStore = storeRoot ? captureAgentExportPath(storeRoot, storeRoot) : undefined;
-    if (storeRoot && lstatSync(storeRoot).isSymbolicLink()) throw new ToolInputProjectionError('held');
     const safeFields = { ...rawFields };
     const evidence: SetupSmokeEvidenceField[] = [];
     const subjects = selected.map(definition => {
@@ -83,30 +67,18 @@ export function createSetupSmokeReferenceCapture(context?: CommandContext,
     const safeArgs = { ...request.args, fields: safeFields, nativeReferenceSubjects: {
       kind: 'setup-smoke-evidence', purpose: 'Save redacted user-run setup smoke evidence as a local artifact.', evidence: subjects,
     } };
-    // Complete safe text, every unselected caller field, and each reference still
-    // cross the ordinary unchanged credential/card floor and fresh admission.
+    // The safe text and every other caller field still cross the ordinary credential and card floor.
     snapshotJudgmentInput(safeArgs, request.name);
     const token = Object.freeze({});
-    const capture: Capture = { name, context, args: safeArgs, evidence: Object.freeze(evidence), store, create,
-      rawFields, released: false,
-      assertCurrent() {
-        signal?.throwIfAborted();
-        physicalHome?.assertCurrent(); physicalWorkspace?.assertCurrent();
-        physicalStore?.assertCurrent();
-        if (nativeStore && (nativeStore.storagePath !== storeRoot
-          || (storeRoot && lstatSync(storeRoot).isSymbolicLink()))) throw new ToolInputProjectionError('stale');
-        if (capture.released || context.platform !== platform || context.workspace !== workspace
-          || workspace?.shellPaths !== paths || platform.configManager !== config
-          || config.getConfigurationIncarnation() !== incarnation
-          || (platform as { readonly artifactStore?: unknown }).artifactStore !== store) throw new ToolInputProjectionError('stale');
-      },
-    };
-    capture.assertCurrent(); captures.set(token, capture);
-    const retire = () => { capture.released = true; capture.rawFields = undefined; captures.delete(token); };
+    const store = (context.platform as { readonly artifactStore?: SetupSmokeArtifactStore }).artifactStore;
+    const capture: Capture = { evidence: Object.freeze(evidence), store, released: false };
+    const assertCurrent = () => { signal?.throwIfAborted(); if (capture.released) throw new ToolInputProjectionError('stale'); };
+    captures.set(token, capture);
+    const retire = () => { capture.released = true; captures.delete(token); };
     signal?.addEventListener('abort', retire, { once: true });
     const release = async () => { signal?.removeEventListener('abort', retire); retire(); };
     return { args: safeArgs, fields: [], paths: selected.map(field => ['fields', field.id]),
-      assertCurrent: capture.assertCurrent, executionContext: token, release } satisfies ToolNativeReferencesCapture;
+      assertCurrent, executionContext: token, release } satisfies ToolNativeReferencesCapture;
   };
 }
 
@@ -116,63 +88,29 @@ export interface SetupSmokeNativeEvidence {
   readonly createArtifact: ((input: ArtifactCreateInput) => Promise<ArtifactDescriptor>) | undefined;
 }
 
-/** Opaque strings and copied options cannot resolve the one-use native source. */
-export function resolveSetupSmokeNativeEvidence(args: Record<string, unknown>, options: ExecutionOptions, context: CommandContext): SetupSmokeNativeEvidence {
+/**
+ * The redacted evidence of this call's capture. Saving one local artifact is a
+ * write: the call's own gate admission for `write` is the authority.
+ */
+export function resolveSetupSmokeNativeEvidence(args: Record<string, unknown>, options: ExecutionOptions, _context?: CommandContext): SetupSmokeNativeEvidence {
   const token = options?.inputProjectionContext;
-  const capture = token && captures.get(token);
+  const capture = token ? captures.get(token) : undefined;
   const assertCurrent = () => {
     options?.signal?.throwIfAborted();
-    if (!assertCurrentToolEffect(args, options, 'write') || !assertCurrentToolEffect(args, options, 'send')) throw new ToolInputProjectionError('held');
-    if (capture) {
-      if (!token || capture.context !== context) throw new ToolInputProjectionError('held');
-      assertProjectionExecution(token, args); capture.assertCurrent();
-    }
+    if (!assertCurrentToolEffect(args, options, 'write')) throw new ToolInputProjectionError('held');
+    if (capture && token) { assertProjectionExecution(token, args); if (capture.released) throw new ToolInputProjectionError('stale'); }
   };
   assertCurrent();
   if (!capture) {
-    // No selected output requires no private source and cannot save references.
+    // Fields that name no known evidence id, or carry a non-string value, are the caller's mistake.
     if (args.fields && Object.keys(args.fields as object).length) {
-      // Fields that name no known evidence id, or carry a non-string value, are the
-      // caller's mistake, not a hold by the host; say so.
       const given = args.fields as Readonly<Record<string, unknown>>;
       const usable = SETUP_SMOKE_EVIDENCE_FIELD_DEFINITIONS.some(field => typeof given[field.id] === 'string');
       throw new ToolInputProjectionError(usable ? 'held' : 'invalid');
     }
     return { fields: [], assertCurrent, createArtifact: undefined };
   }
-  return { fields: capture.evidence, assertCurrent, createArtifact: capture.create && capture.store
-    ? async input => {
-      assertCurrent();
-      const result = await capture.create!.call(capture.store, input, { signal: options?.signal, assertCurrent });
-      assertCurrent();
-      return result;
-    } : undefined };
-}
-
-/** Transfer only the live parent's private source into a freshly admitted child. */
-export async function executeNestedSetupSmoke(registry: ToolRegistry, callId: string, args: Record<string, unknown>,
-  options: ExecutionOptions, childArgs: Record<string, unknown>, context: CommandContext) {
-  const ownership = resolveSetupSmokeNativeEvidence(args, options, context);
-  const token = options?.inputProjectionContext;
-  const capture = token && captures.get(token);
-  if (childArgs.mode !== 'run_setup_smoke' || childArgs.setupItemId !== 'install-smoke'
-    || childArgs.fields !== args.fields || (capture && (capture.name !== 'setup' || !capture.rawFields
-      || !Object.isFrozen(capture.rawFields)))) throw new ToolInputProjectionError('held');
-  const fields = capture?.rawFields;
-  ownership.assertCurrent();
-  // Child execution has its own async invocation context. The registry retains
-  // the exact parent admission; this additional restriction owns only its
-  // execution lifetime and private source, without impersonating the child.
-  const assertSource = () => {
-    if (!assertCurrentToolExecution(args, options)) throw new ToolInputProjectionError('held');
-    if (capture) {
-      if (!token || captures.get(token) !== capture || capture.rawFields !== fields) throw new ToolInputProjectionError('stale');
-      assertProjectionExecution(token, args); capture.assertCurrent();
-    }
-  };
-  const result = await registry.executeNested(callId, 'agent_harness', {
-    ...childArgs, ...(fields ? { fields } : {}),
-  }, options, { assertCurrent: assertSource });
-  ownership.assertCurrent();
-  return result;
+  const store = capture.store, create = store?.create;
+  return { fields: capture.evidence, assertCurrent, createArtifact: create
+    ? async input => { assertCurrent(); return create.call(store, input, { signal: options?.signal }); } : undefined };
 }

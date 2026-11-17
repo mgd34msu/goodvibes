@@ -2,7 +2,9 @@ import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { randomUUID } from 'node:crypto';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
-import { createSetupSmokeReferenceCapture, executeNestedSetupSmoke } from './agent-setup-smoke-reference.ts';
+import { createSetupSmokeReferenceCapture, resolveSetupSmokeNativeEvidence } from './agent-setup-smoke-reference.ts';
+import { runSetupInstallSmoke } from './agent-harness-setup-posture.ts';
+import { effectOutput, output, requireConfirmedAction } from './agent-harness-tool-utils.ts';
 import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 type AgentSetupAction =
@@ -188,18 +190,18 @@ export function createAgentSetupTool(deps: AgentSetupToolDeps): Tool {
         return run('agent_harness', setupItemArgs({ ...args, setupItemId: itemLookup(args) || 'install-smoke' }));
       }
       if (action === 'smoke') {
-        const childArgs = {
-          mode: 'run_setup_smoke',
-          setupItemId: itemLookup(args) || 'install-smoke',
-          ...compactArgs({
-            fields: args.fields,
-            includeParameters: args.includeParameters,
-          }),
-          ...confirmedArgs(args),
-        };
-        return childArgs.setupItemId === 'install-smoke'
-          ? executeNestedSetupSmoke(deps.toolRegistry, randomUUID(), rawArgs as Record<string, unknown>, options, childArgs, deps.commandContext)
-          : run('agent_harness', childArgs);
+        const setupItemId = itemLookup(args) || 'install-smoke';
+        if (setupItemId !== 'install-smoke') return error('setup action:"smoke" supports setupItemId:"install-smoke" only.');
+        // This call saves the evidence itself, from its own one capture of the pasted text; it is a local write.
+        const refusal = requireConfirmedAction(rawArgs as Record<string, unknown>, options, 'Save setup evidence');
+        if (refusal) return error(refusal);
+        const ownership = resolveSetupSmokeNativeEvidence(rawArgs as Record<string, unknown>, options);
+        const result = await runSetupInstallSmoke(deps.commandContext, compactArgs({
+          setupItemId, includeParameters: args.includeParameters, explicitUserRequest: args.explicitUserRequest,
+        }), ownership, options?.signal);
+        ownership.assertCurrent();
+        // The evidence snapshot is the effect: a blocked plan is still a saved result.
+        return result.status === 'missing_smoke_plan' ? effectOutput(result) : output(result);
       }
       if (action === 'finish') {
         return run('agent_harness', {

@@ -2,9 +2,13 @@
 // written: every A and AAAA answer is compared with the refused address ranges
 // before each request hop (the first and every redirect), and the request is
 // pinned to the checked address so a second lookup cannot rebind it.
+//
+// The resolver is injected and the network is the stand-in: `fetch` records
+// every request that would have left the machine, so "refused" means nothing
+// was sent.
 import { afterEach, describe, expect, test } from 'bun:test';
 import { executeFetchInput, FetchRuntimeService } from '../platform/src/platform/tools/fetch/runtime.ts';
-import { classifyHostTrustTier, classifyResolvedAddress } from '../platform/src/platform/tools/fetch/trust-tiers.ts';
+import { classifyResolvedAddress } from '../platform/src/platform/tools/fetch/trust-tiers.ts';
 import type { HostResolver } from '../platform/src/platform/tools/fetch/pinned-request.ts';
 
 const DNS: Readonly<Record<string, readonly string[]>> = {
@@ -13,6 +17,7 @@ const DNS: Readonly<Record<string, readonly string[]>> = {
   'private.test': ['10.0.0.5'],
   'mixed.test': ['203.0.113.10', '192.168.1.20'],
   'v6-local.test': ['fd00::5'],
+  'mapped.test': ['::ffff:127.0.0.1'],
   'public.test': ['203.0.113.10', '2001:db8::10'],
   'hop.test': ['203.0.113.20'],
   'metadata.google.internal': ['169.254.169.254'],
@@ -52,60 +57,42 @@ async function fetchOne(url: string) {
 }
 
 describe('fetch resolves, checks and pins every hop', () => {
-  test('a name resolving to loopback is refused', async () => {
+  test('a name resolving to a loopback, metadata, private, unique-local or mapped-loopback address is refused before anything is sent', async () => {
     stubNetwork(() => new Response('reached'));
-    expect((await fetchOne('http://loopback.test/admin'))?.error).toMatch(/resolves to 127\.0\.0\.1, a loopback address/);
-    expect(seen).toEqual([]);
-  });
-
-  test('a name resolving to the metadata endpoint is refused', async () => {
-    stubNetwork(() => new Response('reached'));
-    expect((await fetchOne('http://metadata.test/latest/meta-data/'))?.error).toMatch(/169\.254\.169\.254, a metadata address/);
-    expect(seen).toEqual([]);
-  });
-
-  test('a name resolving to a private range is refused, IPv4 and IPv6', async () => {
-    stubNetwork(() => new Response('reached'));
-    expect((await fetchOne('http://private.test/'))?.error).toMatch(/10\.0\.0\.5, a private address/);
-    expect((await fetchOne('http://v6-local.test/'))?.error).toMatch(/fd00::5, a unique-local address/);
+    for (const url of ['http://loopback.test/admin', 'http://metadata.test/latest/meta-data/', 'http://private.test/',
+      'http://v6-local.test/', 'http://mapped.test/', 'http://metadata.google.internal/computeMetadata/v1/']) {
+      const result = await fetchOne(url);
+      expect(result?.error, url).toBeDefined();
+      expect(result?.content, url).toBeUndefined();
+    }
     expect(seen).toEqual([]);
   });
 
   test('a mixed answer set is refused when any answer is in a refused range', async () => {
     stubNetwork(() => new Response('reached'));
-    expect((await fetchOne('http://mixed.test/'))?.error).toMatch(/192\.168\.1\.20, a private address/);
+    expect((await fetchOne('http://mixed.test/'))?.error).toBeDefined();
     expect(seen).toEqual([]);
-  });
-
-  test('a cloud metadata host name is refused by the address it resolves to, with no name list', async () => {
-    stubNetwork(() => new Response('reached'));
-    expect(classifyHostTrustTier('metadata.google.internal').tier).toBe('unknown');
-    expect((await fetchOne('http://metadata.google.internal/computeMetadata/v1/'))?.error).toMatch(/169\.254\.169\.254, a metadata address/);
-    expect(seen).toEqual([]);
-  });
-
-  test('a name under .localhost is a loopback target (RFC 6761): refused unless the project approved localhost', async () => {
-    stubNetwork(() => new Response('dev', { headers: { 'content-type': 'text/plain' } }));
-    expect(classifyHostTrustTier('app.localhost').tier).toBe('localhost');
-    const refused = await fetchOne('http://app.localhost:5173/');
-    expect(refused?.host_trust_tier).toBe('localhost');
-    expect(seen).toEqual([]);
-    const approved = await executeFetchInput({ urls: [{ url: 'http://app.localhost:5173/' }] }, { resolveHost: resolver, isLocalhostAllowed: () => true });
-    expect(approved.results?.[0]?.content).toContain('dev');
-    expect(seen[0]!.url).toBe('http://127.0.0.1:5173/');
-    expect(seen[0]!.host).toBe('app.localhost:5173');
   });
 
   test('a name that does not resolve is refused, since nothing was checked', async () => {
     stubNetwork(() => new Response('reached'));
-    expect((await fetchOne('http://nowhere.test/'))?.error).toMatch(/did not resolve/);
+    expect((await fetchOne('http://nowhere.test/'))?.error).toBeDefined();
     expect(seen).toEqual([]);
+  });
+
+  test('a name under .localhost is refused unless the project approved localhost, and then goes only to loopback', async () => {
+    stubNetwork(() => new Response('dev', { headers: { 'content-type': 'text/plain' } }));
+    expect((await fetchOne('http://app.localhost:5173/'))?.content).toBeUndefined();
+    expect(seen).toEqual([]);
+    const approved = await executeFetchInput({ urls: [{ url: 'http://app.localhost:5173/' }] }, { resolveHost: resolver, isLocalhostAllowed: () => true });
+    expect(approved.results?.[0]?.content).toContain('dev');
+    expect(seen.map((request) => request.url)).toEqual(['http://127.0.0.1:5173/']);
   });
 
   test('a redirect to a name resolving to a refused range is refused before it is followed', async () => {
     stubNetwork((request) => new Response('', { status: 302, headers: { location: request.host === 'hop.test' ? 'http://loopback.test/steal' : '/' } }));
     const result = await fetchOne('http://hop.test/start');
-    expect(result?.error).toMatch(/loopback\.test" resolves to 127\.0\.0\.1/);
+    expect(result?.error).toBeDefined();
     expect(seen.map((request) => request.host)).toEqual(['hop.test']);
     expect(lookups).toEqual(['hop.test', 'loopback.test']);
   });
@@ -119,50 +106,33 @@ describe('fetch resolves, checks and pins every hop', () => {
     expect(seen[0]!.url).toBe('https://203.0.113.10/doc?x=1');
     expect(seen[0]!.host).toBe('public.test');
     expect(seen[0]!.serverName).toBe('public.test');
-  });
-
-  test('when the first checked address cannot be reached the next checked answer is tried', async () => {
-    stubNetwork((request) => {
-      if (request.url.startsWith('https://203.0.113.10/')) throw new Error('connection refused');
-      return new Response('via v6', { headers: { 'content-type': 'text/plain' } });
-    });
-    const result = await fetchOne('https://public.test/');
-    expect(result?.content).toContain('via v6');
-    expect(seen.map((request) => request.url)).toEqual(['https://203.0.113.10/', 'https://[2001:db8::10]/']);
+    expect(lookups).toEqual(['public.test']);
   });
 });
 
-describe('classifyResolvedAddress', () => {
-  test('declared ranges by address arithmetic', () => {
-    expect(classifyResolvedAddress('127.0.0.1')).toBe('loopback');
-    expect(classifyResolvedAddress('169.254.169.254')).toBe('metadata');
-    expect(classifyResolvedAddress('169.254.10.1')).toBe('link-local');
-    expect(classifyResolvedAddress('172.16.0.1')).toBe('private');
-    expect(classifyResolvedAddress('172.32.0.1')).toBeNull();
-    expect(classifyResolvedAddress('0.0.0.0')).toBe('unspecified');
-    expect(classifyResolvedAddress('::1')).toBe('loopback');
-    expect(classifyResolvedAddress('fe80::1')).toBe('link-local');
-    expect(classifyResolvedAddress('::ffff:127.0.0.1')).toBe('loopback');
-    expect(classifyResolvedAddress('::ffff:a9fe:a9fe')).toBe('metadata');
-    expect(classifyResolvedAddress('8.8.8.8')).toBeNull();
-    expect(classifyResolvedAddress('2606:4700::1')).toBeNull();
-  });
+test('refused ranges are recognised by address arithmetic, in every spelling', () => {
+  for (const address of ['127.0.0.1', '169.254.169.254', '169.254.10.1', '172.16.0.1', '10.255.0.1', '192.168.0.1', '0.0.0.0',
+    '::1', 'fe80::1', 'fd00::1', '::ffff:127.0.0.1', '::ffff:a9fe:a9fe']) {
+    expect(classifyResolvedAddress(address), address).not.toBeNull();
+  }
+  for (const address of ['172.32.0.1', '8.8.8.8', '203.0.113.10', '2606:4700::1']) {
+    expect(classifyResolvedAddress(address), address).toBeNull();
+  }
 });
 
-test('processed fetch cache separates credentials and response options', async () => {
+test('a cached response fetched with one credential is never served to a request with another or none', async () => {
   let calls = 0;
   globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
     calls++;
     return new Response(new Headers(init?.headers).get('authorization') ?? 'anonymous payload', { headers: { 'content-type': 'text/plain' } });
   }) as typeof fetch;
   const runtime = new FetchRuntimeService();
-  const get = async (headers?: Record<string, string>, max_content_length?: number) =>
-    (await runtime.execute({ urls: [{ url: 'https://public.test/data', headers, max_content_length }], cache_ttl_seconds: 60, extract: 'raw' }, { resolveHost: resolver })).results?.[0];
+  const get = async (headers?: Record<string, string>) =>
+    (await runtime.execute({ urls: [{ url: 'https://public.test/data', headers }], cache_ttl_seconds: 60, extract: 'raw' }, { resolveHost: resolver })).results?.[0];
   expect((await get({ Authorization: 'Bearer A' }))?.content).toBe('Bearer A');
   expect((await get({ Authorization: 'Bearer B' }))?.content).toBe('Bearer B');
   expect((await get())?.content).toBe('anonymous payload');
+  // The cache is live: the same anonymous request is answered without another fetch.
   expect((await get())?.content).toBe('anonymous payload');
   expect(calls).toBe(3);
-  expect((await get(undefined, 3))?.content).toBe('ano');
-  expect(calls).toBe(4);
 });

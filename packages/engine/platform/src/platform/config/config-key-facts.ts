@@ -158,6 +158,54 @@ const PINNED_NETWORK: readonly string[] = [
 /** An enum value that hands a decision the owner would make to code or a model. */
 const becomes = (value: string): ((prev: unknown, next: unknown) => boolean) => (prev, next) => next === value && prev !== value;
 
+/** A number as a settings write may carry it: a number, or a string of one. */
+function amountOf(value: unknown): number | undefined {
+  const parsed = typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+/** A switch as a settings write may carry it: a boolean, or the word true or false. */
+function flagOf(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value;
+  const word = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return word === 'true' ? true : word === 'false' ? false : undefined;
+}
+
+// Payments: spending beyond what the owner set is his decision alone, so any
+// change that lets more be bought without asking him counts as loosening.
+// An unknown previous money limit is read as the shipped 0, the strictest.
+/** A money limit: a higher amount lets more be bought without asking. */
+function raisesLimit(loosening: string): Loosening {
+  return {
+    loosening,
+    loosens: (prev, next) => {
+      const proposed = amountOf(next);
+      if (proposed === undefined) return changes(prev, next);
+      return proposed > (amountOf(prev) ?? 0);
+    },
+  };
+}
+/** A threshold or window a purchase must clear: a lower one lets more through unasked. */
+function lowersThreshold(loosening: string): Loosening {
+  return {
+    loosening,
+    loosens: (prev, next) => {
+      const proposed = amountOf(next), baseline = amountOf(prev);
+      if (proposed === undefined || baseline === undefined) return changes(prev, next);
+      return proposed < baseline;
+    },
+  };
+}
+const flagTurnsOn = (prev: unknown, next: unknown): boolean => flagOf(next) === true && flagOf(prev) !== true;
+const flagTurnsOff = (prev: unknown, next: unknown): boolean => flagOf(next) === false && flagOf(prev) !== false;
+/** A comma-separated list where an added entry lets more through. */
+function addsToList(loosening: string): Loosening {
+  return { loosening, loosens: PRIVATE_HOSTS.loosens };
+}
+/** A comma-separated list where a removed entry lets more through. */
+function removesFromList(loosening: string): Loosening {
+  return { loosening, loosens: BLOCKED_HOSTS.loosens };
+}
+
 const EXACT_LOOSENING = new Map<string, Loosening>();
 const PREFIX_LOOSENING: Array<readonly [string, Loosening]> = [];
 
@@ -182,6 +230,22 @@ declareLoosening('permissions.commandParser', { loosening: 'stop parsing shell c
 for (const key of [...PINNED_NETWORK, ...PINNED_SAFETY_GATE]) declareLoosening(key, PINNED);
 // Each names a program the host runs or a token variable it hands over when a secret reference resolves.
 declareLoosening('storage.secretProviders.', { loosening: 'change the program or token a password manager runs with', loosens: changes });
+declareLoosening('payments.enabled', { loosening: 'turn payments on', loosens: flagTurnsOn });
+declareLoosening('payments.confirmEveryPurchase', { loosening: 'stop asking you before every purchase', loosens: flagTurnsOff });
+declareLoosening('payments.defaultCardId', {
+  loosening: 'choose the card a purchase is paid with',
+  loosens: (prev, next) => typeof next === 'string' && next.trim() !== '' && changes(prev, next),
+});
+declareLoosening('payments.cvvHandling', { loosening: 'keep the card code so purchases complete while you are away', loosens: becomes('stored') });
+declareLoosening('payments.budget.perPurchaseCeilingEnabled', { loosening: 'turn the per-purchase spending ceiling off', loosens: flagTurnsOff });
+declareLoosening('payments.budget.overageToleranceEnabled', { loosening: 'let purchases draw on the overage tolerance', loosens: flagTurnsOn });
+declareLoosening('payments.budget.', raisesLimit('raise a spending limit'));
+declareLoosening('payments.windows.vetoMinutes', lowersThreshold('shorten the time you have to stop a purchase'));
+declareLoosening('payments.majorRetailersAdditional', addsToList('add a shop that buys without asking you'));
+declareLoosening('payments.majorRetailersExcluded', removesFromList('let an excluded shop buy without asking you'));
+declareLoosening('payments.ebayMinSellerFeedbackCount', lowersThreshold('lower the eBay seller feedback a purchase needs'));
+declareLoosening('payments.ebayMinSellerPositivePercent', lowersThreshold('lower the eBay seller rating a purchase needs'));
+declareLoosening('payments.notifyChannels', addsToList('let another channel answer purchase approvals'));
 
 function looseningFor(key: string): Loosening | undefined {
   const exact = EXACT_LOOSENING.get(key);

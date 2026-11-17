@@ -288,9 +288,16 @@ export function changesMcpTrust(toolName: string, args: Record<string, unknown>)
   return toolName === 'mcp' && (args.mode === 'set-trust' || args.mode === 'set-role' || args.mode === 'approve-quarantine');
 }
 
-/** The owner-only kind a call is, from its tool, mode and arguments; undefined when it is none. */
+/** Facts about a call the caller read from its owners, beyond the tool, mode and arguments. */
+export interface OwnerOnlyCallFacts {
+  /** The call writes a setting, and the key's declared loosening rule says this change loosens it (config-key-facts.ts). */
+  readonly loosensSetting?: boolean | undefined;
+}
+
+/** The owner-only kind a call is, from its tool, mode, arguments and the facts its caller read; undefined when it is none. */
 export function recognizeOwnerOnly(toolName: string, args: Record<string, unknown>,
-  definition?: Pick<ToolDefinition, 'dangerous'> | undefined): OwnerOnlyKind | undefined {
+  definition?: Pick<ToolDefinition, 'dangerous'> | undefined, facts: OwnerOnlyCallFacts = {}): OwnerOnlyKind | undefined {
   if (definition?.dangerous === true || changesMcpTrust(toolName, args)) return 'grant-access';
+  if (facts.loosensSetting === true) return 'loosen-security';
   return undefined;
 }

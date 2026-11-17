@@ -11,7 +11,10 @@ import { getProcessUntrustedContentLedger } from '../security/untrusted-content.
 import { assertAutonomousData, captureCurrentAutonomousChoices, captureCurrentAutonomousSourceFrame, type AutonomousToolChoices, type AutonomousToolRevision, type AutonomousToolSource, autonomousSourceEvidence, decideAutonomousTool } from './autonomous.js';
 import { AutonomousChoiceProjectionOwner, type AutonomousChoiceProjection } from './autonomous-input-projection.js';
 import type { PreparedToolCall, ToolRegistry, ToolExecutionEffect } from '../tools/registry.js';
-import { assertProjectionCurrent, projectionFunction, projectionProperty, ToolInputProjectionError, type ToolPreparedSettingsMutation } from '../tools/input-projection.js';
+import { assertProjectionCurrent, projectionFunction, projectionProperty, ToolInputProjectionError, type ToolOwnedAdmissionEvidence, type ToolPreparedSettingsMutation } from '../tools/input-projection.js';
+import { configKeyFacts } from '../config/config-key-facts.js';
+import { DEFAULT_CONFIG, type ConfigKey } from '../config/schema.js';
+import { readDotPath } from '../config/shared-config-tier.js';
 import { bindTurnHookDispatcher, type TurnHookOwner } from '../hooks/turn-ownership.js';
 import { getConfigSnapshot, isAutoApproveEnabled } from '../config/index.js';
 import type { PermissionsToolConfig } from '../config/schema.js';
@@ -233,6 +236,57 @@ function ownerOnlySessionKey(kind: OwnerOnlyKind, key: string): string {
   return `owner-only:${kind}|${key}`;
 }
 
+/** A settings projector's stand-in for a value it could not see (a daemon-owned key, a credential's posture). */
+function unseenPrevious(value: unknown): boolean {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const marker = value as Readonly<Record<string, unknown>>;
+  return marker['unavailable'] === true || marker['redacted'] === true;
+}
+
+/**
+ * Whether a settings write loosens what one of its keys protects, by the key's
+ * declared loosening rule (config-key-facts.ts): raising a spending limit,
+ * turning the sandbox off, a looser permission mode. The prepared write's own
+ * facts are read when the registry holds them (every key it changes, the
+ * normalized value, the value it replaces); otherwise the engine settings
+ * tool's arguments. A previous value the write could not see is read from this
+ * process's settings. Cost per call: nothing for any other tool; one facts
+ * lookup and one compare per key written.
+ */
+function settingsWriteLoosens(toolName: string, args: Record<string, unknown>,
+  evidence: ToolOwnedAdmissionEvidence | undefined, current: (key: string) => unknown): boolean {
+  const writes: Array<{ readonly key: string; readonly next: unknown; readonly previous?: unknown }> = [];
+  if (evidence?.kind === 'agent-settings') {
+    const effect = evidence.effect;
+    const seen = new Set<string>();
+    // One setting carries its value (and what it replaces) at the top; a plan
+    // or an import lists every change under `effects`, a daemon import under `remote.effects`.
+    if (Object.hasOwn(effect, 'value')) {
+      const previous = effect['previous'];
+      writes.push({ key: evidence.key, next: effect['value'], ...(Object.hasOwn(effect, 'previous') && !unseenPrevious(previous) ? { previous } : {}) });
+      seen.add(evidence.key);
+    }
+    const remote = effect['remote'];
+    const lists = [effect['effects'], remote && typeof remote === 'object' ? (remote as Readonly<Record<string, unknown>>)['effects'] : undefined];
+    for (const list of lists) {
+      if (!Array.isArray(list)) continue;
+      for (const change of list as unknown[]) {
+        if (!change || typeof change !== 'object') continue;
+        const { key, value } = change as { readonly key?: unknown; readonly value?: unknown };
+        if (typeof key !== 'string' || seen.has(key)) continue;
+        seen.add(key);
+        writes.push({ key, next: value });
+      }
+    }
+  } else if (toolName === 'goodvibes_settings' && typeof args.key === 'string' && (args.mode === 'set' || args.mode === 'reset')) {
+    const key = args.key.trim();
+    writes.push({ key, next: args.mode === 'set' ? args.value : readDotPath(DEFAULT_CONFIG, key).value });
+  }
+  return writes.some(({ key, next, ...rest }) => {
+    const loosens = configKeyFacts(key).loosens;
+    return loosens !== undefined && loosens('previous' in rest ? rest.previous : current(key), next);
+  });
+}
 
 export interface PermissionConfigReader {
   /** Settle already-visible owner disk generations before capturing authority. Never called from a retained currentness check. */
@@ -250,6 +304,11 @@ export interface PermissionConfigReader {
   isDecisionModelReady?(): boolean;
   getSnapshot(): PermissionConfigSnapshot;
   getWorkingDirectory(): string | null;
+  /**
+   * One setting's current value, for the loosening rule of a settings write
+   * (undefined when unknown; the rule then reads the strictest baseline).
+   */
+  getSetting?(key: string): unknown;
   /**
    * The `telemetry.decisionOtlp*` keys, as the exporter's own config shape.
    *
@@ -320,6 +379,9 @@ export function createPermissionConfigReader(
       ? () => ({ permissions: permissionSnapshot().permissions })
       : () => getConfigSnapshot(configManager),
     getWorkingDirectory: () => configManager.getWorkingDirectory(),
+    getSetting: (key) => {
+      try { return configManager.get(key as ConfigKey); } catch { return undefined; }
+    },
     // Read per decision, not captured: switching export on is a live change.
     getDecisionOtlpConfig: () => readDecisionOtlpConfig(configManager),
   };
@@ -879,7 +941,7 @@ export class PermissionManager {
     const effectSurface = capturedAuthority.surface;
     const effectWriteDenied = mode !== 'yolo' && permissions.tools?.write === 'deny';
     const owner = { frame: capturedAuthority, assertCurrent };
-    const ownerOnly = recognizeOwnerOnly(toolName, args, definition);
+    const ownerOnly = recognizeOwnerOnly(toolName, args, definition, this.settingsFacts(toolName, args, admissionEvidence));
     const subjects = callSubjects(args, definition);
     const durable = mode === 'yolo' ? null : await this.rememberedDecision(this.getApprovalKey(toolName, args, options.hookOwner?.sessionId), toolName, args, { signal, assertCurrent }, owner, ownerOnly, subjects);
     const policy = mode !== 'yolo' && capturedAuthority.policyEnabled
@@ -1380,7 +1442,7 @@ export class PermissionManager {
     await this.fireHook('Pre:permission:request', 'Pre', 'permission', 'request', { callId, toolName, category, analysis }, hookOwner);
     assertCurrent();
     this.policyRuntimeState.recordPermissionRequest({ callId, tool: toolName, category, analysis });
-    const ownerOnly = recognizeOwnerOnly(toolName, args, definition);
+    const ownerOnly = recognizeOwnerOnly(toolName, args, definition, this.settingsFacts(toolName, args));
     let policy: PermissionCheckResult | null = null;
     let remembered: RememberedDecision | null = null;
     let landed: RememberedDecision | null = null;
@@ -1433,7 +1495,7 @@ export class PermissionManager {
     const mode = this.getMode();
     const category = this.getCategory(toolName, captured, definition);
     const config = this.configReader.getSnapshot();
-    const ownerOnly = recognizeOwnerOnly(toolName, captured, definition);
+    const ownerOnly = recognizeOwnerOnly(toolName, captured, definition, this.settingsFacts(toolName, captured));
     const subjects = callSubjects(captured, definition);
     const options = signal ? { signal } : {};
     const remembered = mode === 'yolo' ? null
@@ -1445,6 +1507,11 @@ export class PermissionManager {
       untrustedRead: (this.gate.ledger ?? getProcessUntrustedContentLedger()).ingestedThisTurn().length > 0,
     }));
     return { mode, category, decided };
+  }
+
+  /** Whether this call is a settings write that loosens its key, for the owner-only list. */
+  private settingsFacts(toolName: string, args: Record<string, unknown>, evidence?: ToolOwnedAdmissionEvidence): { readonly loosensSetting: boolean } {
+    return { loosensSetting: settingsWriteLoosens(toolName, args, evidence, key => this.configReader.getSetting?.(key)) };
   }
 
   /** Explicit session decisions, then current durable rules with their own scope. */

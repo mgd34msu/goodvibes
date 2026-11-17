@@ -5,8 +5,10 @@
  * credential), and a secret-bearing key given a literal or another key's
  * secret (which would send one service's credential to another). The settings
  * tool's input projector calls this once, before any effect is prepared.
- * Every other write, payments limits included, goes on to the normal admission,
- * which allows a change the owner asked for in the turn.
+ * Every other write, payments settings included, goes on to the normal
+ * admission; one its key declares as loosening (a higher spending limit, the
+ * per-purchase ceiling off, see config/config-key-facts.ts) is put to the owner
+ * there, as an owner-only change (permissions/manager.ts `settingsWriteLoosens`).
  */
 import { CREDENTIAL_DESTINATION_KEYS } from '../../config/credential-destination-keys.js';
 import { daemonSecretKeyFor } from '../../config/daemon-secret-keys.js';

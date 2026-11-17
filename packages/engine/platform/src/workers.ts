@@ -433,8 +433,10 @@ function goodVibesWorkerRuntime(): GoodVibesWorkerRuntime {
           : 'nothing was queued; the daily queue budget reservation could not be given back and stays counted until midnight UTC',
         next: [
           'Send the request again',
-          'Post /batch/jobs to send the job straight to the daemon without the queue',
-          'Check the queue and R2 bindings in the Cloudflare dashboard',
+          message.type === 'batch.tick'
+            ? 'Post /batch/tick to run the tick on the daemon without the queue'
+            : 'Post /batch/jobs to send the job straight to the daemon without the queue',
+          r2Body ? 'Check the queue and R2 bindings in the Cloudflare dashboard' : 'Check the queue binding in the Cloudflare dashboard',
         ],
       }, 503);
     }

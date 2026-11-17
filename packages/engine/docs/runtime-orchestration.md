@@ -441,8 +441,8 @@ The runner reads `contract.*` (`config/schema-domain-contract.ts`,
 | --- | --- | --- |
 | `contract.autoCommit` | `true` | Commit the deliverable when it passes |
 | `contract.commitScope` | `scoped` | `off`, `scoped` (the contract's changes only) or `all` |
-| `contract.gates` | typecheck, lint and build, all off | Quality gate commands run at each completion check; each runs only once you enable it (`enabled: true`). Any gate, `test` included, passes or fails on its command's exit code; under `bun test` its assertion counts are recorded too. A list with a gate that cannot run (missing name or command, a wrong option, a name used twice, an enabled gate with an empty command) is refused when saved, and a contract reports it when it starts |
-| `contract.gateTimeoutMs` | `900000` (15 minutes) | Timeout per gate; a gate past it is stopped and reported unverified; `0` waits until it finishes or is cancelled |
+| `contract.gates` | typecheck, lint and build, all off | Quality gate commands run at each completion check; each runs only once you enable it (`enabled: true`). Any gate, `test` included, passes or fails on its command's exit code; under `bun test` its assertion counts are recorded too. A list with a gate that cannot run (missing name or command, a wrong option, a name used twice, an enabled gate with an empty command) is refused when saved, and a contract reports it when it starts. A gate named `test`, enabled or not, is also the command `/test` runs |
+| `contract.gateTimeoutMs` | `900000` (15 minutes) | Timeout per gate, and for a `/test` run; a gate past it is stopped and reported unverified; `0` waits until it finishes or is cancelled |
 | `contract.acceptanceStakes` | `high` | Which declared pass band the judges use: `high` or `critical` |
 | `contract.midRunChecks` | `true` | Check a unit after turns that write, edit or run commands, once a criterion already reads met (before that nothing can regress) |
 | `contract.evidenceNudgeLimit` | `0` (no limit) | Unsettled checks before the owner is asked; with `0` the owner is not asked on this count, and `contract.stallLimit` still applies |

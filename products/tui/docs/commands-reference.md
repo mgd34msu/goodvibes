@@ -591,7 +591,7 @@ GoodVibes ships **163** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/test` | None | `[pattern]` | Run the project test script and show pass/fail results |
+| `/test` | None | `[pattern]` | Run the project's test command and show pass/fail results: the `contract.gates` entry named `test` when there is one, else the package.json `test` script through the project's package manager (`bun run test`, `npm test --`, `pnpm run test`, `yarn run test`), with the pattern passed on. Time limit `contract.gateTimeoutMs` (`0` for none); Esc or Ctrl-C stops it, and closing the terminal kills it. With no test command it says what to add; a command the shell cannot start is reported as not started, not as failed tests |
 
 ## Voice & TTS
 

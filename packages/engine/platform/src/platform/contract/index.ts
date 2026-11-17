@@ -207,7 +207,8 @@ export type { UnitWatchdog, UnitWatchdogDeps, WatchedAgent } from './watchdog.js
 export { TRANSPORT_RETRY_SITE, createUnitFailureHandling } from './unit-failures.js';
 export type { UnitFailureDeps, UnitFailureHandling } from './unit-failures.js';
 export { CONTRACT_EVENT_SOURCE, contractEmitterContext, contractTraceId, emitContractEvent } from './events.js';
-export { executeGateCommand, failedGates, getSkippedGateReason, loadPackageScripts, runContractGates } from './gates.js';
+export { executeGateCommand, failedGates, getSkippedGateReason, loadPackageScripts, projectTestCommandMissing, resolveProjectTestCommand, runContractGates } from './gates.js';
+export type { ProjectTestCommand } from './gates.js';
 export type { QualityGate, QualityGateResult, RunContractGatesOptions } from './gates.js';
 export { parseUnitCompletionReport, verifyUnitClaims } from './claims.js';
 export type { ClaimVerificationKind, ClaimVerificationResult, UnitCompletionReport } from './claims.js';

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { sanitizeSessionName } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { createHerdrSessionReporter } from '@goodvibes-jev/engine/terminal-shell';
 import { CommandReadings } from './input/commands/command-readings.ts';
+import { TestRuns } from './input/commands/test-runtime.ts';
 import { wireHostPairingShell } from './shell/host-pairing-shell.ts';
 import type { HostPairingController } from './shell/host-pairing-controller.ts';
 import { isConversationUsageAvailable, isConversationContextAvailable } from './core/conversation-usage.ts';
@@ -469,6 +470,9 @@ async function main() {
   );
   commandContext.commandReadings = commandReadings;
   unsubs.push(() => commandReadings.dispose());
+  const testRuns = new TestRuns();
+  commandContext.testRuns = testRuns;
+  unsubs.push(() => testRuns.dispose());
 
   // In-terminal (OSC 9) notifier (approval-wait/turn-end/agent-blocked); writes
   // are restore-gated so no escape sequence lands after the shell resumes.
@@ -644,7 +648,8 @@ async function main() {
   );
   const cancelGeneration = (): boolean => {
     shellPassthrough.cancelRunning();
-    return cancelTurn();
+    const stoppedTest = testRuns.cancel();
+    return cancelTurn() || stoppedTest;
   };
 
   const jumpToBookmark = (key: string) => {

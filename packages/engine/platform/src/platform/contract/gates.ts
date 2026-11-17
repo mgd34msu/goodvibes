@@ -14,7 +14,8 @@ import { join } from 'node:path';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
-import { CONTRACT_CONFIG_DEFAULTS, getContractGateTimeoutMs, getEnabledContractGates, type ContractConfigReader } from './config.js';
+import { declaredPackageManager, PACKAGE_MANAGER_LOCKFILES } from '../utils/project-test-runner.js';
+import { CONTRACT_CONFIG_DEFAULTS, getContractGates, getContractGateTimeoutMs, getEnabledContractGates, type ContractConfigReader } from './config.js';
 import { emitContractEvent } from './events.js';
 import { captureGateInput, type GateSourceInputIdentity } from './gate-input.js';
 import { bunTestCommand, junitCompletion, protocolCompletion, type GateCompletion } from './gate-receipts.js';
@@ -161,6 +162,63 @@ export async function loadPackageScripts(cwd: string): Promise<Record<string, st
   } catch {
     return {};
   }
+}
+
+/** Single-quote a word for a `/bin/sh -c` line; an embedded quote becomes `'\''`. */
+function shellWord(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/** This project's test command and where it came from (named to the owner). */
+export interface ProjectTestCommand {
+  readonly command: string;
+  readonly source: string;
+}
+
+/**
+ * The one definition of "this project's test command", for `/test` and anyone
+ * else running the project's tests outside a contract check: the
+ * `contract.gates` entry named `test` (its command, whether or not checks run
+ * it), else the package.json `test` script run through the package manager
+ * the project declares, so `node_modules/.bin` is on PATH and `pretest` and
+ * `posttest` run. `args` are passed to the command, each quoted. Null when
+ * neither exists; `projectTestCommandMissing` says what to set.
+ */
+export async function resolveProjectTestCommand(
+  cwd: string,
+  configManager: ContractConfigReader,
+  args: readonly string[] = [],
+): Promise<ProjectTestCommand | null> {
+  const tail = args.length > 0 ? ` ${args.map(shellWord).join(' ')}` : '';
+  const configured = getContractGates(configManager).find((gate) => gate.name === 'test' && gate.command.trim() !== '');
+  if (configured) return { command: `${configured.command.trim()}${tail}`, source: 'the contract.gates entry named test' };
+  const pkgPath = join(cwd, 'package.json');
+  if (!existsSync(pkgPath)) return null;
+  let manifest: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(await Bun.file(pkgPath).text());
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    manifest = parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const scripts = manifest.scripts;
+  const script = scripts !== null && typeof scripts === 'object' && !Array.isArray(scripts) ? (scripts as Record<string, unknown>).test : undefined;
+  if (typeof script !== 'string' || script.trim() === '') return null;
+  const lockfiles = PACKAGE_MANAGER_LOCKFILES.map(([file]) => file).filter((file) => existsSync(join(cwd, file)));
+  const manager = declaredPackageManager(manifest, lockfiles) ?? 'npm';
+  // npm alone needs `--` to hand arguments to the script rather than keep them.
+  const command = manager === 'npm' ? `npm test${tail ? ` --${tail}` : ''}` : `${manager} run test${tail}`;
+  return { command, source: `the package.json test script, run with ${manager}` };
+}
+
+/** Why there is no test command for `cwd`, and the two ways to give it one. */
+export function projectTestCommandMissing(cwd: string): string {
+  const hasManifest = existsSync(join(cwd, 'package.json'));
+  return `No test command for ${cwd}: ${hasManifest ? 'package.json has no test script' : 'there is no package.json'} `
+    + 'and the contract.gates setting has no gate named test. Add a test script to package.json, or add '
+    + '{"name": "test", "command": "<your test command>", "enabled": false} to contract.gates in your settings '
+    + '(enabled: true also runs it at each contract check).';
 }
 
 const ESLINT_CONFIGS = [

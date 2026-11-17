@@ -91,6 +91,8 @@ export interface CommandUiActions extends TerminalCommandUiActions<import('./mod
   cancelPendingRecovery?: () => boolean;
   /** Pending command readings (schedule phrase, gist upload, teamwork listing); revoked by Escape, a new submission, session changes and shutdown. */
   commandReadings?: import('./commands/command-readings.ts').CommandReadings;
+  /** The running /test, stopped by Esc and Ctrl-C (the cancel path) and killed when the terminal closes. */
+  testRuns?: import('./commands/test-runtime.ts').TestRuns;
   /**
    * Cancel JUST the currently-running tool call (the live transcript row),
    * leaving the turn to continue, the local-session equivalent of the

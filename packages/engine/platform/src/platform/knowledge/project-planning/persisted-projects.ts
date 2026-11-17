@@ -3,11 +3,11 @@
  * Returned IDs are ordinary data; this module cannot authorize a project.
  */
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
-import { lstatSync, readlinkSync } from 'node:fs';
+import { closeSync, constants, lstatSync, openSync, readSync, readlinkSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import { inspectNativePlanningProjectImage } from '../../state/sqlite-store.js';
+import { inspectPlanningProjectsFile } from '../../state/sqlite-store.js';
 import { captureExistingDirectory } from '../../utils/atomic-json-store.js';
-import { fileObservationIdentity, readFileObservation } from '../../utils/file-observation.js';
+import { fileObservationIdentity } from '../../utils/file-observation.js';
 export interface PersistedPlanningProjects {
   readonly exists: boolean;
   readonly projectIds: readonly string[];
@@ -42,6 +42,11 @@ function selectedPath(path: string, visited = new Set<string>()): { readonly pat
     if (physical === null ? actual !== undefined : actual === undefined || fileObservationIdentity(absolute) !== physical) throw new PlanningProjectInspectionError(); };
   current(); return Object.freeze({ path: absent.length === 0 ? join(directory.canonical, basename(absolute)) : absolute, assertCurrent: () => current(), assertInitialImage: () => current(true) });
 }
+function sqliteHeader(path: string): string {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try { const header = Buffer.alloc(16); return header.subarray(0, readSync(fd, header, 0, 16, 0)).toString('binary'); }
+  finally { closeSync(fd); }
+}
 /** This leaf accepts an exact native-selected path and only fixed SQL. Its
  * caller must retain the actual configured workspace/store family separately.
  */
@@ -51,8 +56,9 @@ export async function inspectPersistedPlanningProjects(path: string, assertOwner
   const initial = () => { owner(); selected.assertInitialImage(); };
   current(); const leaf = lstatSync(selected.path, { throwIfNoEntry: false });
   if (!leaf) return Object.freeze({ exists: false, projectIds: Object.freeze([]), assertCurrent: current, assertInitialImage: initial });
-  const source = readFileObservation(selected.path); current();
-  if (source.bytes.subarray(0, 16).toString('binary') !== 'SQLite format 3\0') throw new PlanningProjectInspectionError();
-  const projectIds = await inspectNativePlanningProjectImage(source.bytes, current); current();
+  if (sqliteHeader(selected.path) !== 'SQLite format 3\0') throw new PlanningProjectInspectionError(); current();
+  // The file itself, not a byte copy: the knowledge store keeps it in WAL mode,
+  // which a deserialized image refuses, and committed WAL content counts.
+  const projectIds = inspectPlanningProjectsFile(selected.path); current();
   return Object.freeze({ exists: true, projectIds, assertCurrent: current, assertInitialImage: initial });
 }

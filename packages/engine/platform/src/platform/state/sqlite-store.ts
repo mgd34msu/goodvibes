@@ -271,24 +271,16 @@ export function captureSQLiteActivationPublication(store: SQLiteStore, nodeId: s
   return check;
 }
 
-/** Project ids recorded in a knowledge database image (a byte copy of the file). */
-export function inspectNativePlanningProjectImage(data: Uint8Array, assertCurrent: () => void): Promise<readonly string[]> {
-  assertSynchronous(assertCurrent, 'SQLiteStore: the owner check must be synchronous');
-  const image = bunDatabase().deserialize(data, true);
-  try {
-    const ids = queryPersistedPlanningProjects(statementDatabase(image));
-    assertSynchronous(assertCurrent, 'SQLiteStore: the owner check must be synchronous');
-    return Promise.resolve(ids);
-  } catch (error) { return Promise.reject(error); }
-  finally { image.close(); }
-}
-
-/** Open a knowledge file that no store in this process holds, read from it, close it. Never creates the file. */
+/**
+ * Open a knowledge file that no store in this process holds, read from it, close it. Never creates the file.
+ * Read-only on purpose: a read-write handle that is the file's last connection
+ * checkpoints the WAL into the main file on close, which rewrites the file the
+ * caller is holding steady (and a WAL-mode file cannot be read from a byte copy).
+ */
 function withFileDatabase<T>(path: string, read: (db: SqlDatabase) => T): T {
-  const db = new (bunDatabase())(path, { create: false });
+  const db = new (bunDatabase())(path, { readonly: true });
   try {
     db.run('PRAGMA busy_timeout = 5000');
-    db.run('PRAGMA query_only = 1');
     return read(statementDatabase(db));
   } finally { db.close(); }
 }

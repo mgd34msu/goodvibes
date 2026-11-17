@@ -316,6 +316,8 @@ export class DaemonHttpRouter {
         runtimeBus: context.runtimeBus,
         runtimeStore: context.runtimeStore,
         includeRawPrompts: () => this.getConfigValue('telemetry.includeRawPrompts') === true,
+        // The snapshot's pending approvals are the broker's; read when a snapshot is asked for.
+        listApprovals: () => context.approvalBroker.listApprovals(Number.MAX_SAFE_INTEGER),
       })
       : null;
   }

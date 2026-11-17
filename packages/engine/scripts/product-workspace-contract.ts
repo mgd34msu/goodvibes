@@ -280,7 +280,8 @@ export function inspectProductWorkspaces(root: string, definitions: readonly Pro
       const files = productFiles(directory);
       const projects = productProjects(files);
       findings.push(...typeCoverage(directory, files, projects));
-      if (!files.some((file) => /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(file) && readFileSync(file, 'utf8').trim().length > 0)) findings.push(`${definition.path}: no actual test source`);
+      // A product's proofs are default-suite test files or, for the web UI, its browser journeys (`*.e2e.ts`).
+      if (!files.some((file) => /\.(?:test|spec|e2e)\.[cm]?[jt]sx?$/.test(file) && readFileSync(file, 'utf8').trim().length > 0)) findings.push(`${definition.path}: no actual test source`);
       findings.push(...entrypointFindings(directory, manifest, scripts).map((finding) => `${definition.path}: ${finding}`));
       findings.push(...importFindings(root, definition, files));
       products.push(productWorkspace(definition, scripts, projects));

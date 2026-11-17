@@ -31,11 +31,13 @@ export function parseMcpToolRuleEdit(text: string): McpToolRuleEdit | null {
 /**
  * Keep one tool's rule from Settings -> MCP, the owner's own screen: the rule
  * is written with the server's entry in its MCP config file and applied at
- * once (an allow only in the owner's global file). `done` gets the line to
- * show and the refreshed rows once the write and reload finish.
+ * once (an allow only in the owner's global file). `clear` removes whatever
+ * rule is set for the tool, as /mcp clear does: the kept rule and this
+ * session's denial. `done` gets the line to show and the refreshed rows once
+ * the write and reload finish.
  */
 export function keepMcpToolRuleFromSettings(
-  mcpRegistry: Pick<McpRegistry, 'storeServerToolRule' | 'listServerSecurity'>,
+  mcpRegistry: Pick<McpRegistry, 'storeServerToolRule' | 'listServerSecurity' | 'clearServerToolDenial'>,
   serverName: string,
   edit: McpToolRuleEdit,
   done: (message: string, entries: McpEntry[]) => void,
@@ -43,13 +45,24 @@ export function keepMcpToolRuleFromSettings(
   mcpRegistry.storeServerToolRule(serverName, edit.tool, edit.rule).then(
     (result) => {
       const where = `${result.scope} MCP config ${result.path}`;
+      if (edit.rule === 'clear') {
+        let sessionLifted = false;
+        try { sessionLifted = mcpRegistry.clearServerToolDenial(serverName, edit.tool); }
+        catch (error) {
+          done(`${serverName} tool ${edit.tool}: ${result.changed ? `the kept rule is cleared in ${where}, but ` : ''}this session's denial was not lifted: ${summarizeError(error)}`, buildMcpEntries(mcpRegistry));
+          return;
+        }
+        const removed = [...(result.changed ? [`the rule kept in ${where}`] : []), ...(sessionLifted ? ['the denial set for this session'] : [])];
+        done(removed.length > 0
+          ? `${serverName} tool ${edit.tool}: removed ${removed.join(' and ')}; its trust mode and scope decide each call again.`
+          : `${serverName} tool ${edit.tool}: nothing changed; no rule was kept for it in ${where} and it was not denied for this session.`, buildMcpEntries(mcpRegistry));
+        return;
+      }
       const message = !result.changed
-        ? `${serverName} tool ${edit.tool}: nothing changed; ${edit.rule === 'clear' ? 'no rule was kept for it' : `it was already ${edit.rule === 'allow' ? 'allowed' : 'denied'}`} in ${where}.`
+        ? `${serverName} tool ${edit.tool}: nothing changed; it was already ${edit.rule === 'allow' ? 'allowed' : 'denied'} in ${where}.`
         : edit.rule === 'deny'
           ? `${serverName} tool ${edit.tool} is denied, kept in ${where}: every call to it is refused, after a restart too.`
-          : edit.rule === 'allow'
-            ? `${serverName} tool ${edit.tool} is allowed past the server's path and host scope, kept in ${where}. A blocked server, a quarantined schema or a denial still refuses it.`
-            : `${serverName} tool ${edit.tool}: the kept rule is cleared in ${where}; its trust mode and scope decide each call again.`;
+          : `${serverName} tool ${edit.tool} is allowed past the server's path and host scope, kept in ${where}. A blocked server, a quarantined schema or a denial still refuses it.`;
       done(message, buildMcpEntries(mcpRegistry));
     },
     (error: unknown) => done(`${serverName} tool ${edit.tool} not changed: ${summarizeError(error)}`, buildMcpEntries(mcpRegistry)),

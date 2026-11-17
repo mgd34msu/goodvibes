@@ -579,7 +579,7 @@ export class SettingsModal extends TerminalSettingsModalState<
         return this._applyTrustMode(entry, 'allow-all');
       }
 
-      // `deny <tool>`, `allow <tool>` or `clear <tool>`: a per-tool rule kept in the server's MCP config. This screen is the owner's own.
+      // `deny <tool>`, `allow <tool>` or `clear <tool>`: a per-tool rule kept in the server's MCP config (clear also lifts this session's denial). This screen is the owner's own.
       const toolEdit = parseMcpToolRuleEdit(this.editBuffer);
       if (toolEdit) {
         const registry = this.mcpRegistry;

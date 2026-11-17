@@ -51,9 +51,9 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
     '/mcp add <name> <command|https-url> ...; options: --scope project|global, --role <role>, --trust constrained|ask-on-risk|blocked, --env KEY=VALUE (command servers), --header Name=Value (url servers), --path <path>, --host <host>';
   const MCP_TRUST_COMMAND_USAGE = '/mcp trust <server> <constrained|ask-on-risk|blocked|config>';
   const MCP_ROLE_COMMAND_USAGE = '/mcp role <server> <general|docs|filesystem|git|database|browser|automation|ops|remote|config>';
-  const MCP_DENY_COMMAND_USAGE = '/mcp deny <server> <tool> [--keep|config]  (this session only; --keep keeps it in the server\'s MCP config past a restart; config lifts this session\'s denial)';
+  const MCP_DENY_COMMAND_USAGE = '/mcp deny <server> <tool> [--keep]  (this session only; --keep keeps it in the server\'s MCP config past a restart; /mcp clear lifts it)';
   const MCP_ALLOW_COMMAND_USAGE = '/mcp allow <server> <tool>  (kept in your global MCP config; lets the tool past the server\'s path and host scope; asks once)';
-  const MCP_CLEAR_COMMAND_USAGE = '/mcp clear <server> <tool>  (drops the allow or denial kept in the server\'s MCP config; asks once)';
+  const MCP_CLEAR_COMMAND_USAGE = '/mcp clear <server> <tool>  (removes the rule set for the tool: this session\'s denial and the allow or denial kept in the server\'s MCP config; asks once)';
   interface ParsedMcpAddArgs {
     readonly scope: McpConfigScope;
     readonly server: McpServerConfig;
@@ -249,9 +249,9 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
       aliases: [],
       // Env values and request headers carry credentials; the input history keeps neither.
       secretArgs: { flags: ['--env', '--header'] },
-      description: 'Manage MCP servers and their tools; /mcp deny lasts this session, deny --keep, allow and clear are kept in the MCP config',
+      description: 'Manage MCP servers and their tools; /mcp deny lasts this session, deny --keep and allow are kept in the MCP config, clear removes either',
       ...(policy.hidden ? { hidden: true } : {}),
-      usage: '[servers|review|tools [<server>]|config|add|remove|reload|auth-review|repair [server]|trust|role|deny <server> <tool> [--keep|config]|allow <server> <tool>|clear <server> <tool>]',
+      usage: '[servers|review|tools [<server>]|config|add|remove|reload|auth-review|repair [server]|trust|role|deny <server> <tool> [--keep]|allow <server> <tool>|clear <server> <tool>]',
       argsHint: '[servers|review|tools|config|add|remove]',
       async handler(args, ctx) {
         const print = (message: string) => ctx.print(message);
@@ -285,8 +285,12 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
         const keptRule = (serverName: string, toolName: string): 'allow' | 'deny' | undefined =>
           listServerSecurity().find((server) => server.name === serverName)?.toolRules
             ?.find((rule) => rule.source === 'stored' && rule.toolName === toolName)?.rule;
-        /** Keep (or clear) one tool's rule with the server's entry in its MCP config file and say what holds now. */
-        const storeToolRule = async (serverName: string, toolName: string, rule: McpToolRule): Promise<void> => {
+        /** True when this session denies the tool (set with /mcp deny, lifted with /mcp clear). */
+        const sessionDenied = (serverName: string, toolName: string): boolean =>
+          listServerSecurity().find((server) => server.name === serverName)?.toolRules
+            ?.some((entry) => entry.source === 'session' && entry.toolName === toolName) === true;
+        /** Keep one tool's allow or denial with the server's entry in its MCP config file and say what holds now. */
+        const storeToolRule = async (serverName: string, toolName: string, rule: Exclude<McpToolRule, 'clear'>): Promise<void> => {
           if (!mcpApi.storeServerToolRule) {
             refuse(`MCP tool ${toolName} not changed: this runtime cannot keep a per-tool rule.`, rule === 'deny' ? `Use /mcp deny ${serverName} ${toolName} to deny it for this session.` : undefined);
           }
@@ -298,22 +302,52 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
           }
           ctx.renderRequest();
           const where = `${result.scope} MCP config ${result.path}`;
-          const sessionDenied = listServerSecurity().find((server) => server.name === serverName)?.toolRules
-            ?.some((entry) => entry.source === 'session' && entry.toolName === toolName) === true;
-          const sessionNoteText = sessionDenied ? ` This session's denial of it still applies until \`/mcp deny ${serverName} ${toolName} config\`.` : '';
+          const sessionNoteText = sessionDenied(serverName, toolName) ? ` This session's denial of it still applies until a restart or \`/mcp clear ${serverName} ${toolName}\`, which removes the kept rule too.` : '';
           if (!result.changed) {
-            print(rule === 'clear'
-              ? `No rule is kept for ${toolName} on ${serverName} in ${where}; nothing changed.${sessionNoteText}`
-              : `${serverName} tool ${toolName} is already ${rule === 'allow' ? 'allowed' : 'denied'} in ${where}; nothing changed.${sessionNoteText}`);
+            print(`${serverName} tool ${toolName} is already ${rule === 'allow' ? 'allowed' : 'denied'} in ${where}; nothing changed.${sessionNoteText}`);
             return;
           }
           if (rule === 'deny') {
             print(`Denied MCP tool ${toolName} on ${serverName}, kept in ${where}: every call to it is refused, whatever the server's trust mode and scope allow, after a restart too. \`/mcp clear ${serverName} ${toolName}\` lifts it.`);
-          } else if (rule === 'allow') {
-            print(`Allowed MCP tool ${toolName} on ${serverName}, kept in ${where}: calls to it pass the server's path and host scope. A blocked server, a quarantined schema or a denial of the tool still refuses it. \`/mcp clear ${serverName} ${toolName}\` removes the allow.${sessionNoteText}`);
           } else {
-            print(`Cleared the rule kept for ${toolName} on ${serverName} in ${where}; its trust mode and scope decide each call again.${sessionNoteText}`);
+            print(`Allowed MCP tool ${toolName} on ${serverName}, kept in ${where}: calls to it pass the server's path and host scope. A blocked server, a quarantined schema or a denial of the tool still refuses it. \`/mcp clear ${serverName} ${toolName}\` removes the allow.${sessionNoteText}`);
           }
+        };
+        /**
+         * Remove whatever rule is set for one tool: the denial set for this
+         * session and the allow or denial kept in the server's MCP config. Says
+         * which it removed and what decides the tool's calls now.
+         */
+        const clearToolRules = async (serverName: string, toolName: string): Promise<void> => {
+          const removed: string[] = [];
+          const deniedNow = sessionDenied(serverName, toolName);
+          if (deniedNow && !mcpApi.clearServerToolDenial) {
+            refuse(`MCP tool ${toolName} not changed: this runtime cannot lift a denial set for this session.`, 'A restart ends it.');
+          }
+          if (mcpApi.storeServerToolRule) {
+            let result: McpStoredToolRuleResult;
+            try {
+              result = await mcpApi.storeServerToolRule(serverName, toolName, 'clear', requireShellPaths(ctx));
+            } catch (error) {
+              refuse(`MCP tool ${toolName} on ${serverName} not changed: ${summarizeError(error)}`);
+            }
+            if (result.changed) removed.push(`the rule kept in ${result.scope} MCP config ${result.path}`);
+          } else if (keptRule(serverName, toolName) !== undefined) {
+            refuse(`MCP tool ${toolName} not changed: this runtime cannot change a kept per-tool rule.`, 'Edit the server\'s entry in its MCP config file.');
+          }
+          if (deniedNow && mcpApi.clearServerToolDenial) {
+            try {
+              if (mcpApi.clearServerToolDenial(serverName, toolName)) removed.push('the denial set for this session');
+            } catch (error) {
+              refuse(`MCP tool ${toolName} on ${serverName}: ${removed.length > 0 ? `${removed.join(' and ')} was removed, but ` : ''}this session's denial was not lifted: ${summarizeError(error)}`);
+            }
+          }
+          ctx.renderRequest();
+          const trust = listServerSecurity().find((server) => server.name === serverName)?.trustMode;
+          const now = `its trust mode${trust ? ` (${formatMcpTrustMode(trust)})` : ''} and scope decide each call.`;
+          print(removed.length > 0
+            ? `Removed ${removed.join(' and ')} for ${toolName} on ${serverName}; ${now}`
+            : `No rule is set for ${toolName} on ${serverName}, for this session or kept in its MCP config; nothing changed. ${now.charAt(0).toUpperCase()}${now.slice(1)}`);
         };
         // A --yes typed out of habit is dropped and never read as a server
         // argument; only tokens after -- are passed on as typed.
@@ -500,35 +534,19 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
           const serverName = commandArgs[1];
           const toolName = commandArgs[2];
           const tail = commandArgs[3];
-          if (!serverName || !toolName || (tail !== undefined && tail !== 'config' && tail !== '--keep') || commandArgs.length > 4) refuse(`Usage: ${MCP_DENY_COMMAND_USAGE}`);
+          if (!serverName || !toolName || (tail !== undefined && tail !== '--keep') || commandArgs.length > 4) refuse(`Usage: ${MCP_DENY_COMMAND_USAGE}`);
           if (!knownServer(serverName, `tool ${toolName}`)) return;
           if (tail === '--keep') {
             await storeToolRule(serverName, toolName, 'deny');
             return;
           }
-          if (!mcpApi.denyServerTool || !mcpApi.clearServerToolDenial) refuse(`MCP tool ${toolName} not changed: this runtime cannot deny a single tool.`, `Use /mcp trust ${serverName} blocked to refuse the whole server.`);
-          if (tail === 'config') {
-            let cleared: boolean;
-            try {
-              cleared = mcpApi.clearServerToolDenial(serverName, toolName);
-            } catch (error) {
-              refuse(`MCP tool ${toolName} not changed: ${summarizeError(error)}`);
-            }
-            const kept = keptRule(serverName, toolName);
-            const after = kept === 'deny'
-              ? `a denial kept in its MCP config still refuses it (/mcp clear ${serverName} ${toolName} lifts that).`
-              : 'its trust mode and scope decide each call.';
-            print(cleared
-              ? `${serverName} tool ${toolName} is no longer denied for this session; ${after}`
-              : `${serverName} tool ${toolName} was not denied this session; ${after}`);
-            return;
-          }
+          if (!mcpApi.denyServerTool) refuse(`MCP tool ${toolName} not changed: this runtime cannot deny a single tool.`, `Use /mcp trust ${serverName} blocked to refuse the whole server.`);
           try {
             mcpApi.denyServerTool(serverName, toolName);
           } catch (error) {
             refuse(`MCP tool ${toolName} not denied: ${summarizeError(error)}`);
           }
-          print(`Denied MCP tool ${toolName} on ${serverName} for this session only: every call to it is refused, whatever the server's trust mode, scope and kept rules allow, until \`/mcp deny ${serverName} ${toolName} config\` or a restart. Add --keep to keep the denial in its MCP config past a restart.`);
+          print(`Denied MCP tool ${toolName} on ${serverName} for this session only: every call to it is refused, whatever the server's trust mode, scope and kept rules allow, until \`/mcp clear ${serverName} ${toolName}\` or a restart. Add --keep to keep the denial in its MCP config past a restart.`);
           return;
         }
         if (subcommand === 'allow' || subcommand === 'clear') {
@@ -540,7 +558,8 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
             refuse(`/mcp ${subcommand} ${serverName} ${toolName} is the owner's own act: it loosens what an MCP server may do. Nothing was changed.`, `Ask the owner to type /mcp ${subcommand} ${serverName} ${toolName}, or to set it in Settings.`);
           }
           if (!knownServer(serverName, `tool ${toolName}`)) return;
-          await storeToolRule(serverName, toolName, subcommand);
+          if (subcommand === 'allow') await storeToolRule(serverName, toolName, 'allow');
+          else await clearToolRules(serverName, toolName);
           return;
         }
         if (subcommand === 'add') {
@@ -734,7 +753,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
         `Use Settings -> MCP for allow-all decisions; ${wording.commandPolicy}`,
       );
       lines.push('Use /settings -> MCP to explicitly enable allow-all for a server.');
-      lines.push('Per-tool rules: /mcp deny <server> <tool> for this session (--keep keeps it in the MCP config); /mcp allow <server> <tool> and /mcp clear <server> <tool> are kept in the MCP config and ask once.');
+      lines.push('Per-tool rules: /mcp deny <server> <tool> for this session (--keep keeps it in the MCP config); /mcp allow <server> <tool> is kept in the MCP config; /mcp clear <server> <tool> removes the tool\'s rule, this session\'s or kept. Allow and clear ask once.');
     }
     if (recovering.length > 0) {
       lines.push('');

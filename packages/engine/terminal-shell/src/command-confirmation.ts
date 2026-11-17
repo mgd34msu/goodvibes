@@ -193,8 +193,8 @@ export const SHARED_COMMAND_CONFIRMATIONS: Readonly<Partial<Record<string, Share
     const server = words[0];
     if (!server) return undefined;
     const tool = words[1];
-    // A kept per-tool allow, or dropping a kept rule (which may lift a denial), loosens what a server
-    // may do: the owner's own act. A model-run line is refused here, before any question is put.
+    // A kept per-tool allow, or clearing a tool's rules (which lifts any denial of it), loosens what a
+    // server may do: the owner's own act. A model-run line is refused here, before any question is put.
     if ((args[0] === 'allow' || args[0] === 'clear') && tool) {
       if (context.invokedByModel === true) {
         throw commandRefusal(`/mcp ${args[0]} ${server} ${tool} is the owner's own act: it loosens what an MCP server may do. Nothing was changed.`,
@@ -207,17 +207,10 @@ export const SHARED_COMMAND_CONFIRMATIONS: Readonly<Partial<Record<string, Share
             confirmLabel: 'Allow',
           }
         : {
-            title: `Drop the rule kept for ${tool} on ${server}?`,
-            detail: `The allow or denial kept for ${tool} in ${server}'s MCP config is removed; its trust mode and scope decide each call again. A denial set for this session stays.`,
+            title: `Clear the rules for ${tool} on ${server}?`,
+            detail: `This session's denial of ${tool} and the allow or denial kept for it in ${server}'s MCP config are removed; its trust mode and scope decide each call again.`,
             confirmLabel: 'Clear',
           };
-    }
-    if (args[0] === 'deny' && tool && words[2] === 'config') {
-      return {
-        title: `Lift this session's denial of ${tool} on ${server}?`,
-        detail: `Calls to ${tool} are no longer refused for this session; a denial kept in ${server}'s MCP config still applies.`,
-        confirmLabel: 'Lift',
-      };
     }
     // Loosening security is the owner's call: a looser trust mode, or lifting a quarantine.
     if (args[0] === 'trust' && (words[1] === 'ask-on-risk' || words[1] === 'config')) {

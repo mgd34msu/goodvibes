@@ -144,7 +144,7 @@ function sameToolRules(a: McpServerConfig, b: McpServerConfig): boolean {
 const TOOL_RULE_NOTES = {
   storedAllow: 'allowed in your MCP config, past the server\'s path and host scope',
   storedDeny: 'denied in the server\'s MCP config; lift it in /mcp or Settings',
-  sessionDeny: 'denied by the owner for this session; /mcp deny <server> <tool> config lifts it',
+  sessionDeny: 'denied by the owner for this session; /mcp clear <server> <tool> lifts it',
 } as const;
 
 /** Servers connected at once while applying a configuration. */

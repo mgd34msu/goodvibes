@@ -144,7 +144,7 @@ export function McpToolRules() {
   return (
     <SettingsBlock
       title="MCP tool rules"
-      description="Deny one tool of an MCP server, or allow it past the server's path and host scope. Rules here are kept with the server's entry in its MCP config; a denial set with /mcp deny in a terminal app lasts that app's session."
+      description="Deny one tool of an MCP server, or allow it past the server's path and host scope. Rules here are kept with the server's entry in its MCP config; a denial set with /mcp deny in a terminal app lasts that app's session, or until /mcp clear there."
       actions={<IconButton label="Refresh MCP tool rules" icon={<RefreshCw />} onClick={refetch} />}
       testId="mcp-tool-rules"
     >

@@ -79,7 +79,7 @@ export function commitEditValue(ctx: CommitEditContext): boolean {
       return true;
     }
 
-    // `deny <tool>`, `allow <tool>` or `clear <tool>`: a per-tool rule kept in the server's MCP config. This screen is the owner's own.
+    // `deny <tool>`, `allow <tool>` or `clear <tool>`: a per-tool rule kept in the server's MCP config (clear also lifts this session's denial). This screen is the owner's own.
     const toolEdit = parseMcpToolRuleEdit(ctx.editBuffer);
     if (toolEdit) {
       ctx.rejectEdit?.(`Keeping ${toolEdit.rule} ${toolEdit.tool} for ${entry.name}...`);

@@ -8,6 +8,8 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { CONFIG_SCHEMA, DEFAULT_CONFIG } from '@goodvibes-jev/engine/platform/platform/config';
+import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/pairing/companion-token';
+import { verificationDaemonHome } from '@goodvibes-jev/engine/terminal-shell/verification-primitives';
 
 export type HomeFileOwner = 'tui' | 'daemon' | 'foreign-goodvibes-product' | 'unknown-root';
 
@@ -233,7 +235,7 @@ function collectPermissionFindings(homeDir: string): HomeAuditFinding[] {
   const sensitiveFiles = [
     join(homeDir, 'tui', 'secrets.enc'),
     join(homeDir, 'tui', 'auth-users.json'),
-    join(homeDir, 'daemon', 'operator-tokens.json'),
+    operatorTokenPath(verificationDaemonHome(homeDir)),
     join(homeDir, 'daemon', '.goodvibes', 'daemon', 'operator-tokens.json'),
     join(homeDir, 'daemon', '.goodvibes', 'tui', 'auth-users.json'),
     join(homeDir, 'daemon', '.goodvibes', 'tui', 'auth-bootstrap.txt'),

@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
+import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
+import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/pairing/companion-token';
 export type LiveVerificationStatus = 'pass' | 'warn' | 'fail' | 'skip';
 export interface LiveVerificationCheck {
   id: string;
@@ -299,14 +301,23 @@ export function writeVerificationReportFiles<Report>(report: Report, outputDir: 
 }
 
 /**
+ * The daemon home a verifier of the `.goodvibes` tree `homeDir` reads: the tree's
+ * own `daemon` directory, unless GOODVIBES_DAEMON_HOME relocates it, which
+ * `resolveGoodVibesDaemonHome` resolves exactly as the daemon does.
+ */
+export function verificationDaemonHome(homeDir: string, env: NodeJS.ProcessEnv = process.env): string {
+  return env['GOODVIBES_DAEMON_HOME']?.trim() ? resolveGoodVibesDaemonHome(homeDir, env) : join(homeDir, 'daemon');
+}
+
+/**
  * Read-only verifier discovery. Product-specific environment precedence is supplied explicitly;
- * `tokenPath` overrides the default `<home>/daemon/operator-tokens.json`.
+ * `tokenPath` overrides the live operator token file of the daemon home (see verificationDaemonHome).
  */
 export function readVerificationHostToken(
   homeDir: string,
   envKeys: readonly string[],
   readJson: (path: string) => unknown,
-  tokenPath: string = join(homeDir, 'daemon', 'operator-tokens.json'),
+  tokenPath: string = operatorTokenPath(verificationDaemonHome(homeDir)),
 ): string | undefined {
   for (const key of envKeys) if (process.env[key]) return process.env[key];
   if (!existsSync(tokenPath)) return undefined;

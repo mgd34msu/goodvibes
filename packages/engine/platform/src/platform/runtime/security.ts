@@ -10,7 +10,6 @@ export {
   PermissionSimulator,
   PolicyRegistry,
   PolicyRuntimeState,
-  buildDefaultPolicySimulationScenarios,
   buildPermissionRuleSuggestions,
   buildPolicyPreflightReview,
   createPermissionEvaluator,
@@ -18,7 +17,6 @@ export {
   createUnsignedBundle,
   lintPolicyConfig,
   loadPolicyBundle,
-  runPolicySimulationScenarios,
 } from './permissions/index.js';
 export type {
   DivergenceDashboardSnapshot,

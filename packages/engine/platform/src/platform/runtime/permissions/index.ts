@@ -36,7 +36,6 @@ export type {
 } from './decision-otlp.js';
 export { runSafetyChecks } from './safety-checks.js';
 export { PermissionSimulator, SimulationEnforcementError } from './simulation.js';
-export { buildDefaultPolicySimulationScenarios, runPolicySimulationScenarios } from './simulation-scenarios.js';
 export { lintPolicyConfig } from './lint.js';
 export { buildPolicyPreflightReview } from './preflight.js';
 export { buildPermissionRuleSuggestions } from './rule-suggestions.js';

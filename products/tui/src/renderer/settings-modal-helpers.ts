@@ -198,7 +198,7 @@ export const SETTING_LABELS: Partial<Record<string, string>> = {
   'helper.globalProvider': SHARED_SETTING_LABELS['helper.globalProvider'],
   'helper.globalModel': SHARED_SETTING_LABELS['helper.globalModel'],
   // Control Plane
-  'controlPlane.enabled': 'CP Enabled',
+  'controlPlane.enabled': 'CP Serves Other Machines',
   'controlPlane.hostMode': 'CP Host Mode',
   'controlPlane.host': 'CP Host',
   'controlPlane.port': 'CP Port',

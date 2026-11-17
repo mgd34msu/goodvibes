@@ -5,7 +5,7 @@ import { cliCommandRefusal } from '@goodvibes-jev/engine/terminal-shell/cli-outp
 import '@goodvibes-jev/engine/platform/platform/sessions';
 import 'node:fs';
 import { join } from 'node:path';
-import { createRuntimeSecretsManager, resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
+import { createRuntimeSecretsManager, resolveDaemonEnabled, resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import '@goodvibes-jev/engine/platform/platform/config';
 import '@goodvibes-jev/engine/platform/platform/config';
@@ -40,7 +40,10 @@ import {
 } from './management-utils.ts';
 
 export interface ControlPlaneStatusResult {
+  /** controlPlane.enabled: whether machines other than this one are served. */
   readonly enabled: unknown;
+  /** daemon.enabled: the control plane serves this machine whenever the daemon runs. */
+  readonly daemonEnabled: boolean;
   readonly hostMode: string;
   readonly configuredHost: string;
   readonly host: string;
@@ -61,6 +64,7 @@ export interface ControlPlaneStatusResult {
 export async function buildControlPlaneStatusResult(runtime: CliCommandRuntime): Promise<ControlPlaneStatusResult> {
   const binding = resolveRuntimeEndpointBinding(runtime.configManager, 'controlPlane');
   const enabled = runtime.configManager.get('controlPlane.enabled');
+  const daemonEnabled = resolveDaemonEnabled(runtime.configManager);
   // Never TCP-probe the fallback endpoint of an unrecognized hostMode, a
   // probe asserts a binding that does not exist. Not-probed is its own state
   // (undefined), NEVER coerced to a definite false: a daemon launched with
@@ -78,17 +82,19 @@ export async function buildControlPlaneStatusResult(runtime: CliCommandRuntime):
     issues.push(
       `controlPlane.hostMode '${binding.hostMode}' is not a recognized mode (local|network|custom); the daemon cannot bind until it is corrected.`,
     );
-  if (enabled === true && binding.recognized && !reachable)
-    issues.push(`Control plane is enabled but not reachable on ${binding.host}:${binding.port}.`);
-  if (enabled === true && service.enabled !== true) issues.push('Control plane is enabled but service mode is off.');
-  if (enabled === true && service.autostart !== true) issues.push('Control plane is enabled but service autostart is off.');
-  if (enabled === true && service.restartOnFailure !== true) issues.push('Control plane is enabled but service restart-on-failure is off.');
+  if (daemonEnabled && binding.recognized && !reachable)
+    issues.push(`The daemon is on but its control plane is not reachable on ${binding.host}:${binding.port}.`);
+  if (enabled === true && !daemonEnabled) issues.push('controlPlane.enabled serves other machines, but daemon.enabled is off, so nothing is served.');
+  if (enabled === true && service.enabled !== true) issues.push('Other machines are served (controlPlane.enabled) but service mode is off.');
+  if (enabled === true && service.autostart !== true) issues.push('Other machines are served (controlPlane.enabled) but service autostart is off.');
+  if (enabled === true && service.restartOnFailure !== true) issues.push('Other machines are served (controlPlane.enabled) but service restart-on-failure is off.');
   if (isNetworkFacing(enabled, binding) && !auth.userStorePresent)
     issues.push('Network-facing control plane has no local auth user store.');
   if (isNetworkFacing(enabled, binding) && auth.bootstrapCredentialPresent)
     issues.push('Network-facing control plane still has a bootstrap credential file.');
   return {
     enabled,
+    daemonEnabled,
     ...binding,
     posture: classifyBindPosture(binding),
     reachable,
@@ -103,6 +109,7 @@ export function formatControlPlaneStatus(runtime: CliCommandRuntime, value: Cont
     value,
     [
       'GoodVibes control-plane status',
+      `  serves this machine: ${yesNo(value.daemonEnabled)} (daemon.enabled)`,
       `  serves other machines: ${yesNo(value.enabled)} (controlPlane.enabled)`,
       `  bind: ${formatRuntimeEndpointBinding(value)}`,
       `  bind posture: ${value.recognized ? value.posture.label : 'unknown (unrecognized host mode)'}`,

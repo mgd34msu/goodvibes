@@ -108,11 +108,17 @@ type EndpointDefinition = {
   readonly id: RuntimeEndpointId;
   readonly label: string;
   readonly enabledKey: Parameters<ConfigManager['get']>[0];
+  readonly isEnabled?: ((config: Pick<ConfigManager, 'get'>) => boolean) | undefined;
+  readonly servesOtherMachinesKey?: Parameters<ConfigManager['get']>[0] | undefined;
 };
 
-/** The endpoints the daemon binds a socket for. */
+/**
+ * The endpoints the daemon binds a socket for. The control plane listens for
+ * this machine whenever the daemon runs; controlPlane.enabled only says whether
+ * other machines are served too (daemon/http/listener-admission.ts).
+ */
 const LISTENING_ENDPOINTS: readonly EndpointDefinition[] = [
-  { id: 'controlPlane', label: 'control plane', enabledKey: 'controlPlane.enabled' },
+  { id: 'controlPlane', label: 'control plane', enabledKey: 'daemon.enabled', isEnabled: resolveDaemonEnabled, servesOtherMachinesKey: 'controlPlane.enabled' },
   { id: 'httpListener', label: 'HTTP listener', enabledKey: 'danger.httpListener' },
 ];
 /** Nothing listens on web.host:web.port: the control-plane listener serves the web bundle, so web is reachable when it is. */
@@ -470,7 +476,7 @@ export function formatCliServicePosture(posture: CliServicePosture, json = false
     'Endpoints:',
     ...posture.endpoints.map(
       (endpoint) =>
-        `  ${endpoint.label}: enabled=${yesNo(endpoint.enabled)} ${formatRuntimeEndpointBinding(endpoint.binding)} posture=${endpoint.binding.recognized ? endpoint.bindPosture.label : 'unknown'}${endpoint.reachable === undefined ? '' : ` reachable=${yesNo(endpoint.reachable)}`}`,
+        `  ${endpoint.label}: enabled=${yesNo(endpoint.enabled)}${endpoint.servesOtherMachines === undefined ? '' : ` servesOtherMachines=${yesNo(endpoint.servesOtherMachines)}`} ${formatRuntimeEndpointBinding(endpoint.binding)} posture=${endpoint.binding.recognized ? endpoint.bindPosture.label : 'unknown'}${endpoint.reachable === undefined ? '' : ` reachable=${yesNo(endpoint.reachable)}`}`,
     ),
     '',
     posture.issues.length === 0 ? 'Readiness: ready' : 'Readiness: needs attention',

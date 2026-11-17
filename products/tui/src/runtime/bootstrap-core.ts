@@ -425,13 +425,14 @@ export async function initializeBootstrapCore(
   // smart-ref setter on systemMessageRouterRef auto-flushes the buffer when
   // the router attaches, so the message will appear in the conversation on startup.
   {
-    const cpEnabled = Boolean(configManager.get('controlPlane.enabled'));
+    // controlPlane.enabled: other machines are served (only then can traffic cross the network).
+    const cpServesOtherMachines = Boolean(configManager.get('controlPlane.enabled'));
     const cpHostMode = String(configManager.get('controlPlane.hostMode') ?? 'local');
     const cpTlsMode = String(configManager.get('controlPlane.tls.mode') ?? 'off');
     const hlEnabled = Boolean(configManager.get('danger.httpListener'));
     const hlHostMode = String(configManager.get('httpListener.hostMode') ?? 'local');
     const hlTlsMode = String(configManager.get('httpListener.tls.mode') ?? 'off');
-    const cpNetworkPlaintext = cpEnabled && cpHostMode !== 'local' && cpTlsMode === 'off';
+    const cpNetworkPlaintext = cpServesOtherMachines && cpHostMode !== 'local' && cpTlsMode === 'off';
     const hlNetworkPlaintext = hlEnabled && hlHostMode !== 'local' && hlTlsMode === 'off';
     if (cpNetworkPlaintext || hlNetworkPlaintext) {
       const affected: string[] = [];

@@ -1,4 +1,5 @@
 import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import { ensureNtfyTopics, resolveGoodVibesNtfyTopics } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { enableFeatureFlags, getMissingSurfaceFeatureFlags, getServerSurfaceFeatureFlags, surfaceFeatureGateSettingsKeys } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
@@ -174,8 +175,10 @@ async function surfacesCommand(runtime: CliCommandRuntime): Promise<{ readonly o
         if (controlPlaneError) return refuse(controlPlaneError);
         reached.push('controlPlane');
       }
+      // control-plane on: serve other machines (the daemon must run for that);
+      // off: serve only this machine. The daemon itself stays as it is.
       config.setDynamic('controlPlane.enabled', enabled);
-      config.setDynamic('daemon.enabled', enabled);
+      if (enabled) config.setDynamic('daemon.enabled', true);
     }
     else {
       if (enabled) {
@@ -221,6 +224,9 @@ async function surfacesCommand(runtime: CliCommandRuntime): Promise<{ readonly o
     } else if (resolved.kind === 'external') {
       lines.push(...sharedSettingsLeftOn(config, resolved.id));
     } else {
+      if (resolved.kind === 'endpoint' && resolved.endpoint === 'controlPlane') {
+        lines.push('  The daemon keeps serving this machine; requests from other machines are refused.');
+      }
       lines.push('  Its network settings are left as they are; run `goodvibes surfaces list` to see them.');
     }
     return { output: lines.join('\n'), exitCode: 0 };
@@ -275,8 +281,12 @@ async function surfacesCommand(runtime: CliCommandRuntime): Promise<{ readonly o
       readinessIssues.push(`${endpointLabel}.hostMode '${endpointBinding.hostMode}' is not a recognized mode (local|network|custom); the daemon cannot bind this endpoint until it is corrected.`);
     }
   }
-  if (shouldProbeControlPlane && endpointTarget !== 'web' && controlPlane.recognized && config.get('controlPlane.enabled') === true && !controlPlaneReachable) {
-    readinessIssues.push(`Control plane is enabled but not reachable on ${controlPlane.host}:${controlPlane.port}.`);
+  // The daemon's control plane serves this machine whenever the daemon runs;
+  // controlPlane.enabled only adds other machines, so reachability is checked
+  // whenever the daemon is on.
+  const daemonEnabled = resolveDaemonEnabled(config);
+  if (shouldProbeControlPlane && endpointTarget !== 'web' && controlPlane.recognized && daemonEnabled && !controlPlaneReachable) {
+    readinessIssues.push(`The daemon is on but its control plane is not reachable on ${controlPlane.host}:${controlPlane.port}.`);
   }
   if (endpointTarget === 'web' && includeProbe && config.get('web.enabled') === true && controlPlane.recognized && !controlPlaneReachable) {
     readinessIssues.push(`Web is enabled but the control plane that serves it is not reachable on ${controlPlane.host}:${controlPlane.port}.`);
@@ -298,7 +308,8 @@ async function surfacesCommand(runtime: CliCommandRuntime): Promise<{ readonly o
   }
   const value = {
     controlPlane: {
-      enabled: config.get('controlPlane.enabled'),
+      enabled: daemonEnabled,
+      servesOtherMachines: daemonEnabled && config.get('controlPlane.enabled') === true,
       hostMode: controlPlane.hostMode,
       configuredHost: controlPlane.configuredHost,
       host: controlPlane.host,
@@ -331,7 +342,10 @@ async function surfacesCommand(runtime: CliCommandRuntime): Promise<{ readonly o
   const reachableText = (reachable: boolean | undefined): string => includeProbe && reachable !== undefined ? ` reachable=${yesNo(reachable)}` : '';
   const output = formatJsonOrText(runtime.cli)(value, [
     'GoodVibes surfaces',
-    ...(shows('controlPlane') ? [`  control-plane: ${yesNo(value.controlPlane.enabled)} (${formatRuntimeEndpointBinding(value.controlPlane)})${reachableText(value.controlPlane.reachable)}`] : []),
+    ...(shows('controlPlane') ? [
+      `  control-plane: ${yesNo(value.controlPlane.enabled)} (${formatRuntimeEndpointBinding(value.controlPlane)})${reachableText(value.controlPlane.reachable)}`,
+      `    serves other machines: ${yesNo(value.controlPlane.servesOtherMachines)} (controlPlane.enabled)`,
+    ] : []),
     ...(shows('web') ? [`  web: ${yesNo(value.web.enabled)} (${formatRuntimeEndpointBinding(value.web)})${reachableText(value.web.reachable)}`] : []),
     ...(shows('httpListener') ? [`  http-listener: ${yesNo(value.httpListener.enabled)} (${formatRuntimeEndpointBinding(value.httpListener)})${reachableText(value.httpListener.reachable)}`] : []),
     ...(endpointTarget ? [] : ['', 'External surfaces:']),

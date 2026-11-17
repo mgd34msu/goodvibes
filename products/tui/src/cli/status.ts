@@ -139,7 +139,8 @@ export interface CliStatusSnapshot {
     readonly lifecycle?: CliServicePosture;
   };
   readonly surfaces: {
-    readonly controlPlane: ReturnType<typeof resolveRuntimeEndpointBinding> & { readonly enabled: unknown };
+    /** `enabled`: the daemon listens (for this machine at least); `servesOtherMachines`: controlPlane.enabled. */
+    readonly controlPlane: ReturnType<typeof resolveRuntimeEndpointBinding> & { readonly enabled: unknown; readonly servesOtherMachines: boolean };
     readonly httpListener: ReturnType<typeof resolveRuntimeEndpointBinding> & { readonly enabled: unknown };
     readonly web: ReturnType<typeof resolveRuntimeEndpointBinding> & { readonly enabled: unknown };
   };
@@ -163,6 +164,7 @@ export interface CliStatusSnapshot {
 export interface CliExposureSurface {
   readonly id: RuntimeEndpointId;
   readonly label: string;
+  /** The surface listens. The control plane listens for this machine whenever the daemon runs. */
   readonly enabled: boolean;
   /** Bind envelope, e.g. "network 0.0.0.0:3421". */
   readonly bind: string;
@@ -285,10 +287,20 @@ function surfaceOriginAllowlist(id: RuntimeEndpointId, config: Pick<ConfigManage
   return `CORS on, allowlist: ${origins.join(', ')}`;
 }
 
-const EXPOSURE_SURFACES: readonly { readonly id: RuntimeEndpointId; readonly label: string; readonly enabledKey: string }[] = [
-  { id: 'controlPlane', label: 'controlPlane', enabledKey: 'controlPlane.enabled' },
-  { id: 'httpListener', label: 'httpListener', enabledKey: 'danger.httpListener' },
-  { id: 'web', label: 'web', enabledKey: 'web.enabled' },
+/**
+ * `enabled`: the surface listens. `exposedKey`: the setting that lets machines
+ * other than this one in; the control plane serves this machine whenever the
+ * daemon runs and others only with controlPlane.enabled.
+ */
+const EXPOSURE_SURFACES: readonly {
+  readonly id: RuntimeEndpointId;
+  readonly label: string;
+  readonly enabled: (config: CliStatusOptions['configManager']) => boolean;
+  readonly exposedKey: string;
+}[] = [
+  { id: 'controlPlane', label: 'controlPlane', enabled: (config) => resolveDaemonEnabled(config), exposedKey: 'controlPlane.enabled' },
+  { id: 'httpListener', label: 'httpListener', enabled: (config) => config.get('danger.httpListener') === true, exposedKey: 'danger.httpListener' },
+  { id: 'web', label: 'web', enabled: (config) => config.get('web.enabled') === true, exposedKey: 'web.enabled' },
 ];
 
 /**
@@ -299,9 +311,9 @@ const EXPOSURE_SURFACES: readonly { readonly id: RuntimeEndpointId; readonly lab
 export function buildCliExposureReport(options: CliStatusOptions): readonly CliExposureSurface[] {
   const config = options.configManager;
   return EXPOSURE_SURFACES.map((surface): CliExposureSurface => {
-    const enabled = config.get(surface.enabledKey as never) === true;
+    const enabled = surface.enabled(config);
     const binding = resolveRuntimeEndpointBinding(config, surface.id);
-    const networkFacing = isNetworkFacing(enabled, binding);
+    const networkFacing = isNetworkFacing(enabled && config.get(surface.exposedKey as never) === true, binding);
     return {
       id: surface.id,
       label: surface.label,
@@ -349,16 +361,17 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
   const daemonEnabled = resolveDaemonEnabled(config);
   const listenerEnabled = config.get('danger.httpListener') === true;
   const webEnabled = config.get('web.enabled') === true;
-  const controlPlaneEnabled = config.get('controlPlane.enabled') === true;
+  // controlPlane.enabled: whether other machines are served; the daemon serves this one whenever it runs.
+  const controlPlaneServesOthers = daemonEnabled && config.get('controlPlane.enabled') === true;
   const controlPlaneBinding = resolveRuntimeEndpointBinding(config, 'controlPlane');
   const httpListenerBinding = resolveRuntimeEndpointBinding(config, 'httpListener');
   const webBinding = resolveRuntimeEndpointBinding(config, 'web');
   const permissionMode = config.get('permissions.mode');
   const secretPolicy = config.get('storage.secretPolicy');
   const marker = effectiveMarker(options.onboardingMarker);
-  const serverBackedEnabled = daemonEnabled || controlPlaneEnabled || listenerEnabled || webEnabled;
+  const serverBackedEnabled = daemonEnabled || listenerEnabled || webEnabled;
   const networkFacingSurfaces = [
-    ['control plane', controlPlaneEnabled, controlPlaneBinding],
+    ['control plane', controlPlaneServesOthers, controlPlaneBinding],
     ['HTTP listener', listenerEnabled, httpListenerBinding],
     ['web surface', webEnabled, webBinding],
   ].filter(([, enabled, binding]) => isNetworkFacing(enabled, binding as typeof controlPlaneBinding));
@@ -480,7 +493,7 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
   }
 
   if (
-    isNetworkFacing(controlPlaneEnabled, controlPlaneBinding) &&
+    isNetworkFacing(controlPlaneServesOthers, controlPlaneBinding) &&
     config.get('controlPlane.cors.enabled') === true &&
     parseAllowedOrigins(config.get('controlPlane.cors.allowedOrigins')).includes('*')
   ) {
@@ -570,7 +583,14 @@ export function buildCliStatusSnapshot(options: CliStatusOptions): CliStatusSnap
       localUsers: options.auth ?? null,
     },
     service: common.service,
-    surfaces: common.endpoints,
+    surfaces: {
+      ...common.endpoints,
+      controlPlane: {
+        ...common.endpoints.controlPlane,
+        enabled: resolveDaemonEnabled(config),
+        servesOtherMachines: resolveDaemonEnabled(config) && config.get('controlPlane.enabled') === true,
+      },
+    },
     onboarding: common.onboarding,
     workspace: options.workspace ?? null,
     sandbox: options.sandbox ?? null,
@@ -643,6 +663,7 @@ export function renderCliStatus(options: CliStatusOptions): string {
     '',
     'Surfaces:',
     bindLine('controlPlane', controlPlaneEnabled, controlPlaneBinding),
+    `    servesOtherMachines: ${yesNo(snapshot.surfaces.controlPlane.servesOtherMachines)} (controlPlane.enabled)`,
     bindLine('httpListener', listenerEnabled, httpListenerBinding),
     bindLine('web', webEnabled, webBinding),
     '',

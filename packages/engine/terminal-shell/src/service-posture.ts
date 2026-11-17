@@ -19,6 +19,8 @@ export interface CliServiceEndpointPosture {
   readonly binding: RuntimeEndpointBinding;
   readonly bindPosture: ReturnType<typeof classifyBindPosture>;
   readonly networkFacing: boolean;
+  /** For an endpoint that always serves this machine while it runs: whether other machines are served too. */
+  readonly servesOtherMachines?: boolean;
   readonly reachable?: boolean;
 }
 
@@ -157,6 +159,18 @@ export async function readServiceEndpoints(
     readonly id: RuntimeEndpointId;
     readonly label: string;
     readonly enabledKey: Parameters<ConfigManager['get']>[0];
+    /**
+     * Whether the endpoint listens, when one setting does not say it alone (the
+     * control plane listens whenever the daemon runs: `resolveDaemonEnabled`).
+     * Absent: `enabledKey` is true.
+     */
+    readonly isEnabled?: ((config: Pick<ConfigManager, 'get'>) => boolean) | undefined;
+    /**
+     * The setting that says whether other machines are served too, for an
+     * endpoint that serves this machine whenever it listens
+     * (`controlPlane.enabled`). Only that makes it network-facing.
+     */
+    readonly servesOtherMachinesKey?: Parameters<ConfigManager['get']>[0] | undefined;
   }[],
   options: {
     readonly probe: boolean | undefined;
@@ -168,7 +182,10 @@ export async function readServiceEndpoints(
   options.assertCurrent();
   const endpoints = await Promise.all(
     definitions.map(async (endpoint) => {
-      const enabled = runtime.configManager.get(endpoint.enabledKey) === true;
+      const enabled = endpoint.isEnabled ? endpoint.isEnabled(runtime.configManager) : runtime.configManager.get(endpoint.enabledKey) === true;
+      const servesOtherMachines = endpoint.servesOtherMachinesKey === undefined
+        ? undefined
+        : enabled && runtime.configManager.get(endpoint.servesOtherMachinesKey) === true;
       const binding = resolveRuntimeEndpointBinding(runtime.configManager, endpoint.id);
       const result: CliServiceEndpointPosture = {
         id: endpoint.id,
@@ -176,7 +193,8 @@ export async function readServiceEndpoints(
         enabled,
         binding,
         bindPosture: classifyBindPosture(binding),
-        networkFacing: isNetworkFacing(enabled, binding),
+        networkFacing: isNetworkFacing(servesOtherMachines ?? enabled, binding),
+        ...(servesOtherMachines === undefined ? {} : { servesOtherMachines }),
         ...(options.probe && enabled && binding.recognized && options.mayProbe(binding)
           ? { reachable: await options.probeTcp(binding.host, binding.port) }
           : {}),

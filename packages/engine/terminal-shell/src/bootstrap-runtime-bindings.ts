@@ -1,4 +1,5 @@
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ProviderRegistry, BenchmarkStore } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { RouteBindingManager, SurfaceRegistry } from '@goodvibes-jev/engine/platform/platform/channels';
 import type { WatcherRegistry } from '@goodvibes-jev/engine/platform/platform/watchers';
@@ -27,7 +28,9 @@ export function seedTerminalControlPlane(
   dispatch: DomainDispatch,
   config: Pick<ConfigManager, 'get'>,
 ): void {
-  const enabled = Boolean(config.get('controlPlane.enabled'));
+  // The control plane serves this machine whenever the daemon runs;
+  // controlPlane.enabled only says whether other machines are served too.
+  const enabled = resolveDaemonEnabled(config);
   // The address is the one the platform would bind; nothing has started yet, so the state is not running until the gateway reports it.
   const binding = resolveRuntimeEndpointBinding(config, 'controlPlane');
   dispatch.syncControlPlaneState(

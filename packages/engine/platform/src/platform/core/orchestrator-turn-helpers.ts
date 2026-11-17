@@ -227,7 +227,7 @@ type ToolResponseOutcomeArgs = {
   contractSession?: ContractSessionTurn | undefined;
 };
 
-export async function handleToolResponseOutcome(args: ToolResponseOutcomeArgs): Promise<{ continueLoop: boolean; results: ToolResult[] }> {
+export async function handleToolResponseOutcome(args: ToolResponseOutcomeArgs): Promise<{ results: ToolResult[] }> {
   return withDelegationRequest({ request: args.userText, signal: args.inputProjection?.signal, assertCurrent: args.inputProjection?.assertCurrent }, () => withCompletionRepairContext(args.completionRepair, async () => {
     const originalCalls = attachAuthoritativeTaskToAgentCalls(captureToolInputCalls(args.response.toolCalls), args.userText);
     const batch = args.toolRegistry ? await projectToolInputBatch(args.toolRegistry, originalCalls, args.inputProjection) : undefined;
@@ -238,7 +238,7 @@ export async function handleToolResponseOutcome(args: ToolResponseOutcomeArgs): 
   }));
 }
 
-async function handleOwnedToolResponseOutcome(args: ToolResponseOutcomeArgs): Promise<{ continueLoop: boolean; results: ToolResult[] }> {
+async function handleOwnedToolResponseOutcome(args: ToolResponseOutcomeArgs): Promise<{ results: ToolResult[] }> {
   const toolCalls = args.response.toolCalls;
   const content = args.response.content;
   args.conversation.addAssistantMessage(content, {
@@ -284,7 +284,7 @@ async function handleOwnedToolResponseOutcome(args: ToolResponseOutcomeArgs): Pr
     // Every additional assignment must pass normal tool admission and appear
     // in the retained delegation evidence; no hidden plan-based spawns here.
     args.requestRender();
-    return { continueLoop: true, results };
+    return { results };
   }
 
   // A request to the model only: it no longer adds a transcript line after every tool round.
@@ -293,7 +293,7 @@ async function handleOwnedToolResponseOutcome(args: ToolResponseOutcomeArgs): Pr
       'Keep the work plan current: set finished items to done and started ones to in_progress with the `work_plan` tool.', { once: true, append: true });
   }
 
-  return { continueLoop: true, results };
+  return { results };
 }
 
 type FinalResponseOutcomeArgs = {

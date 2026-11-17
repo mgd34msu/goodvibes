@@ -97,17 +97,22 @@ breaker.recordSuccess(); // resets counter to 0
 
 Default thresholds: warn at 5 consecutive failures, break at 10.
 
-In a sub-agent's turn loop the warning is shown to the model. At the break
-the model gets one final reply, with any tool call in it left unrun, to report
-what it was trying to do; that reply is kept as the agent's output and the run
-ends failed with the `circuit_breaker` reason.
+Every turn runs through the one turn loop (`runTurn`, `core/turn-loop.ts`):
+the main session, sub-agents, contract units and the companion chat apply the
+same rules. From the warning on, the model is told on its next request to
+change its approach, and the person sees a notice. At the break the model gets
+one final reply, with any tool call in it left unrun, to report what it was
+trying to do. A sub-agent keeps that reply as its output and its run ends
+failed with the `circuit_breaker` reason; the main session's turn ends with a
+`tool_loop_circuit_breaker` error after the reply is shown.
 
 Successful calls cannot loop forever either. When one call has run 8 times in
-the sub-agent's last 20 calls with the same arguments and the same result each
-time, the run stops the same way, one final reply and then failed, with the
-`repeated_call` reason and a message naming the tool. This is decided from the
-run's own call history; no model is asked. Fewer repeats only add a notice to
-the model.
+the turn's last 20 calls with the same arguments and the same result each
+time, the turn stops the same way, one final reply and then failed, with the
+`repeated_call` reason for a sub-agent and a message naming the tool. This is
+decided from the turn's own call history; no model is asked. From 3 identical
+calls a reading of whether they are stuck may add a request to the model to
+review its history or take a different action.
 
 ---
 

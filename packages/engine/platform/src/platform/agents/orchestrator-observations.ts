@@ -105,39 +105,13 @@ export async function prepareProjectFramework(context: AgentOrchestratorRunConte
 /** Failure reason of a run ended because one call kept returning the same result. */
 export const REPEATED_CALL = 'repeated_call' as const;
 
-/**
- * A call executed `threshold` or more times in the retained window with the
- * same arguments and a byte-identical result each time: a loop no turn of the
- * run can get out of, decided from the run's own history with no model. Only
- * a signature seen `threshold` times has its results compared, so an ordinary
- * turn costs one pass over at most the retained window.
- */
-export function findIdenticalRepeat(history: readonly RetainedToolObservation[], threshold: number): { readonly toolName: string; readonly count: number } | undefined {
-  const bySignature = new Map<string, RetainedToolObservation[]>();
-  for (const entry of history) {
-    const group = bySignature.get(entry.signature);
-    if (group) group.push(entry); else bySignature.set(entry.signature, [entry]);
-  }
-  for (const [signature, group] of bySignature) {
-    if (group.length < threshold) continue;
-    const counts = new Map<string, number>();
-    for (const entry of group) {
-      const key = JSON.stringify(entry.result) ?? 'undefined';
-      const count = (counts.get(key) ?? 0) + 1;
-      if (count >= threshold) return { toolName: signature.slice(0, signature.indexOf('::')), count };
-      counts.set(key, count);
-    }
-  }
-  return undefined;
-}
-
-/** Whether the repeated calls in the run's own history look stuck; undefined when no reading settled. */
-export async function readRepeatedCalls(history: readonly RetainedToolObservation[], context: AgentOrchestratorRunContext, record: AgentRecord, repeatedSignature = history[0]?.signature): Promise<{ readonly stuck: boolean } | undefined> {
+/** Whether repeated calls in a turn's own history look stuck; undefined when no reading settled. Any turn's repeat rule reads it (`runTurn`). */
+export async function readRepeatStuck(history: readonly RetainedToolObservation[], repeatedSignature: string | undefined, signal: AbortSignal | undefined): Promise<{ readonly stuck: boolean } | undefined> {
   if (isClassicOperation()) return undefined;
   try {
     assertJudgmentInput({ calls: history, repeatedSignature });
     const state = captureOwnedJson({ calls: history, repeatedSignature });
-    const authority = captureJudgmentPort('agents.repeat-stuck', { signal: context.getCancellationSignal?.(record.id) });
+    const authority = captureJudgmentPort('agents.repeat-stuck', { signal });
     const run = await repeatStuck.run(checkedPort(authority.port), state as never, { site: 'agents.repeat-stuck', signal: authority.signal });
     const reading = run.readings.stuck;
     if (reading.outcome !== 'act' || (reading.verdict !== 'yes' && reading.verdict !== 'no')) return undefined;
@@ -146,7 +120,7 @@ export async function readRepeatedCalls(history: readonly RetainedToolObservatio
     return Object.freeze({ stuck });
   } catch (error) {
     activateClassicFallback(error);
-    context.getCancellationSignal?.(record.id)?.throwIfAborted();
+    signal?.throwIfAborted();
     return undefined;
   }
 }

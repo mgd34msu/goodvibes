@@ -13,15 +13,6 @@ import { SecretsManager } from './secrets.js';
 import { API_KEY_PROVIDER_IDS, getBuiltinProviderEnvVars } from './provider-credential-catalog.js';
 
 /**
- * Providers whose credential is a plain API key: the catalog's one list
- * (`API_KEY_PROVIDER_IDS`), so a provider added there is read here and in the
- * daemon's credential status without a second edit. Providers the catalog
- * lists for other credential kinds (cloud IAM, project ids) are left out on
- * purpose: an access-key id is not an API key.
- */
-const API_KEY_PROVIDERS: readonly string[] = API_KEY_PROVIDER_IDS;
-
-/**
  * The Bedrock providers take one stored credential, the bearer token. The
  * access key id and secret are only useful as a pair read from the environment
  * (the provider picks request signing from both), and a profile name is not a
@@ -36,7 +27,9 @@ const BEDROCK_BEARER_TOKEN_ENV = 'AWS_BEARER_TOKEN_BEDROCK';
  */
 export function getConfiguredApiKeys(): Record<string, string> {
   const keys: Record<string, string> = {};
-  for (const prov of API_KEY_PROVIDERS) {
+  // Providers whose credential is a plain API key, from the catalog's one list; providers it lists
+  // for other credential kinds (cloud IAM, project ids) are left out on purpose.
+  for (const prov of API_KEY_PROVIDER_IDS) {
     for (const envVar of getBuiltinProviderEnvVars(prov)) {
       const value = process.env[envVar];
       if (value) {
@@ -65,7 +58,7 @@ export function getConfiguredApiKeys(): Record<string, string> {
 export async function resolveApiKeys(
   secrets: Pick<SecretsManager, 'get'> & Partial<Pick<SecretsManager, 'list'>>,
 ): Promise<Record<string, string>> {
-  const mapping = API_KEY_PROVIDERS.map((prov) => ({ prov, envVars: getBuiltinProviderEnvVars(prov) }));
+  const mapping = API_KEY_PROVIDER_IDS.map((prov) => ({ prov, envVars: getBuiltinProviderEnvVars(prov) }));
   // One pass over the stores names every stored key; only those are read, so
   // a resolve costs one read of each store plus one per stored provider key,
   // not one per store for each of the hundred-odd variable names.

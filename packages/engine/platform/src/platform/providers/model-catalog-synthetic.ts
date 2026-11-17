@@ -7,7 +7,6 @@ import type { ContextWindowProvenance } from './registry-types.js';
 import { type ReasoningEffortSpec, parseReasoningOptions } from './reasoning-effort.js';
 import { documentedReasoningEffortSpec, resolveReasoningEffortSpec } from './reasoning-effort-families.js';
 import type { SyntheticBackend, CanonicalModel, SyntheticTier } from './synthetic.js';
-import { ModelIdentityResolver, type IdentityCandidate, type IdentityQuery } from '../routing/model-identity.js';
 
 export interface MinimalModelDefinition {
   id: string;
@@ -54,45 +53,6 @@ function isKeyedByEnvironment(_providerId: string, model: CatalogModel): boolean
 }
 
 const registryKeyOf = (model: CatalogModel): string => `${model.providerId}:${model.id}`;
-
-/** Join callable provider offerings only through their published canonical model IDs. */
-export class SyntheticIdentities {
-  readonly #resolver: ModelIdentityResolver;
-  #candidatesFrom: readonly CatalogModel[] | undefined;
-  #candidates: readonly IdentityCandidate[] = [];
-
-  constructor(options: { readonly models: () => readonly CatalogModel[] }) {
-    this.#resolver = new ModelIdentityResolver({
-      candidates: () => {
-        const models = options.models();
-        if (models !== this.#candidatesFrom) {
-          this.#candidatesFrom = models;
-          // Identity is a catalog fact; whether an offering can be called is decided where groups are built.
-          this.#candidates = models
-            .filter((model) => model.canonicalModelId)
-            .map((model) => ({ key: registryKeyOf(model), id: model.id, name: model.name, provider: model.providerId,
-              canonicalModelId: model.canonicalModelId }));
-        }
-        return this.#candidates;
-      },
-    });
-  }
-
-  static query(model: CatalogModel): IdentityQuery {
-    return { id: model.id, name: model.name, provider: model.providerId, canonicalModelId: model.canonicalModelId, otherProviderThan: model.providerId };
-  }
-
-  /** The registry key of another offering of the published model, or null. */
-  known(model: CatalogModel): string | null {
-    if (!model.canonicalModelId) return null;
-    return this.#resolver.known(SyntheticIdentities.query(model));
-  }
-
-  /** Compatibility entrypoint: canonical joins require no asynchronous readings. */
-  async readAll(_models: readonly CatalogModel[], _site = 'providers.synthetic.identity'): Promise<number> {
-    return 0;
-  }
-}
 
 /**
  * Group callable provider offerings with the same published model identity

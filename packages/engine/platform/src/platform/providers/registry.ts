@@ -121,7 +121,7 @@ export class ProviderRegistry {
   private catalogModels: CatalogModel[] = [];
   private pricingCatalog: PricingCatalog | null = null;
   private syntheticCanonicalModels: CanonicalModel[] = [];
-  private readonly routingReadings = new RegistryRoutingReadings({ root: () => this.getPersistenceRoot(), models: () => this.catalogModels });
+  private readonly routingReadings = new RegistryRoutingReadings({ root: () => this.getPersistenceRoot() });
   private _cachedModelRegistry: ModelDefinition[] | null = null;
   private _modelRegistryRevision = 0;
   /** Persisted per-model context-window overrides; lazy-constructed (needs persistence root). */

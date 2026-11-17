@@ -93,7 +93,6 @@ export { loadCustomProviders } from './custom-loader.js';
 export { LMStudioProvider } from './lm-studio.js';
 export { LlamaCppProvider } from './llama-cpp.js';
 export {
-  DEFAULT_CONTEXT_WINDOW,
   LocalContextIngestionService,
   resolveContextWindow,
 } from './local-context-ingestion.js';
@@ -141,7 +140,6 @@ export {
 export {
   buildSyntheticCanonicalModels,
   nameToSlug,
-  SyntheticIdentities,
 } from './model-catalog-synthetic.js';
 export { OpenAICodexProvider } from './openai-codex.js';
 export { OpenAICompatProvider } from './openai-compat.js';

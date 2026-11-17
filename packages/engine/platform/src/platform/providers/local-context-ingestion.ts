@@ -60,13 +60,6 @@ export interface ResolvedContextWindow {
 // ---------------------------------------------------------------------------
 
 /**
- * Kept for importers of the old name: the window used when neither the API nor
- * the config provides a value is the one fallback, `FALLBACK_CONTEXT_WINDOW`,
- * the same figure a remote model nobody measured is budgeted at.
- */
-export const DEFAULT_CONTEXT_WINDOW = FALLBACK_CONTEXT_WINDOW;
-
-/**
  * Grace period between ingestion attempts for the same provider.
  * Prevents hammering a slow or offline local server.
  */

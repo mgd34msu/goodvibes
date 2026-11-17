@@ -328,7 +328,6 @@ export {
   getSyntheticModelDefinitions,
   getSyntheticModelInfo,
   nameToSlug,
-  SyntheticIdentities,
 } from './model-catalog-synthetic.js';
 export {
   diffCatalogs,

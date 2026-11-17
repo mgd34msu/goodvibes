@@ -42,22 +42,6 @@
       "text": "export declare class ContractError extends GoodVibesError { static [Symbol.hasInstance](value: unknown): boolean; constructor(message: string, options?: GoodVibesErrorOptions); }"
     },
     {
-      "name": "ContractRegexReadingContext",
-      "kind": "interface",
-      "required": [
-        "assertCurrent",
-        "kind",
-        "methodId",
-        "outputSchema"
-      ],
-      "text": "export interface ContractRegexReadingContext { readonly kind: 'operator' | 'peer'; readonly methodId: string; readonly outputSchema: Readonly<Record<string, unknown>>; readonly signal?: AbortSignal | undefined; readonly assertCurrent: () => void; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; } ;; Readonly = type Readonly<T> = { readonly [P in keyof T]: T[P]; }; ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
-    },
-    {
-      "name": "ContractRegexReadingFactory",
-      "kind": "type",
-      "text": "export type ContractRegexReadingFactory = (context: ContractRegexReadingContext) => RegexReadingCapability;"
-    },
-    {
       "name": "DECISION_MODEL_POLICIES",
       "kind": "const",
       "text": "DECISION_MODEL_POLICIES: readonly [\"Default - On\", \"Preferred\", \"Classic - Off\"]"
@@ -357,15 +341,6 @@
       "text": "export interface RegexMatch { readonly captures: readonly (string | undefined)[]; readonly index: number; readonly lastIndex: number; readonly groups?: Readonly<Record<string, string | undefined>> | undefined; readonly indices?: readonly (readonly [number, number] | undefined)[] | undefined; } ;; via Readonly = type Readonly<T> = { readonly [P in keyof T]: T[P]; }; ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
     },
     {
-      "name": "RegexReadingCapability",
-      "kind": "interface",
-      "required": [
-        "assertCurrent",
-        "signal"
-      ],
-      "text": "export interface RegexReadingCapability { readonly signal: AbortSignal; readonly assertCurrent: () => void; } ;; via AbortSignal = interface AbortSignal extends EventTarget { readonly aborted: boolean; onabort: ((this: AbortSignal, ev: Event) => any) | null; readonly reason: any; throwIfAborted(): void; addEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void; addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void; removeEventListener<K extends keyof AbortSignalEventMap>(type: K, listener: (this: AbortSignal, ev: AbortSignalEventMap[K]) => any, options?: boolean | EventListenerOptions): void; removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void; }"
-    },
-    {
       "name": "SharedRegexTester",
       "kind": "interface",
       "required": [
@@ -512,6 +487,11 @@
       "text": "export declare function installJudgmentPort(port: JudgmentPort | undefined, options?: { readonly alongside?: boolean | undefined; }): JudgmentPort | undefined; ;; via JudgmentPort = export interface JudgmentPort { readonly model: string; ask<const Q extends Questions>(request: JudgmentRequest<Q>): Promise<JudgmentResult<Q>>; readonly recorder?: DecisionRecorder; readonly health?: () => readonly JudgmentEndpointHealth[]; readonly decisionDeadlineMs?: number | undefined; readonly revision?: (() => number) | undefined; }"
     },
     {
+      "name": "installJudgmentRuntimeScope",
+      "kind": "function",
+      "text": "export declare function installJudgmentRuntimeScope(read: (() => JudgmentPort | undefined) | undefined): void; ;; via JudgmentPort = export interface JudgmentPort { readonly model: string; ask<const Q extends Questions>(request: JudgmentRequest<Q>): Promise<JudgmentResult<Q>>; readonly recorder?: DecisionRecorder; readonly health?: () => readonly JudgmentEndpointHealth[]; readonly decisionDeadlineMs?: number | undefined; readonly revision?: (() => number) | undefined; }"
+    },
+    {
       "name": "isErrorCode",
       "kind": "function",
       "text": "export declare function isErrorCode<C extends EngineErrorCode>(err: { readonly code?: EngineErrorCode | (string & {}) | undefined; }, code: C): err is { readonly code: C; };"
@@ -590,6 +570,11 @@
       "name": "settleCategory",
       "kind": "function",
       "text": "export declare function settleCategory(fixed: DaemonErrorCategory | undefined, status: number | undefined, fromProvider: boolean, failure: FailureConclusions | undefined): DaemonErrorCategory;"
+    },
+    {
+      "name": "statedRetryable",
+      "kind": "function",
+      "text": "export declare function statedRetryable(error: unknown): boolean | undefined;"
     },
     {
       "name": "structuralFailureConclusions",

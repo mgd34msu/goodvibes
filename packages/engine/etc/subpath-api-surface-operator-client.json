@@ -28,7 +28,7 @@
     {
       "name": "OperatorApiClientOptions",
       "kind": "interface",
-      "text": "export interface OperatorApiClientOptions extends HttpTransportOptions, Pick<OperatorRemoteClientOptions, 'regexReading' | 'getRegexReading'> { readonly validateResponses?: boolean | undefined; }"
+      "text": "export interface OperatorApiClientOptions extends HttpTransportOptions { readonly validateResponses?: boolean | undefined; }"
     },
     {
       "name": "OperatorInvokeOptions",
@@ -64,7 +64,7 @@
     {
       "name": "OperatorRemoteClientOptions",
       "kind": "interface",
-      "text": "export interface OperatorRemoteClientOptions { readonly getResponseSchema?: ((methodId: string) => ContractInvokeOptions['responseSchema']) | undefined; readonly validateResponses?: boolean | undefined; readonly regexReading?: RegexReadingCapability | undefined; readonly getRegexReading?: ContractRegexReadingFactory | undefined; } ;; via ContractInvokeOptions = export interface ContractInvokeOptions { readonly signal?: AbortSignal | undefined; readonly headers?: HeadersInit | undefined; readonly idempotencyKey?: string | undefined; readonly responseSchema?: ZodType | undefined; } ;; ContractRegexReadingFactory = export type ContractRegexReadingFactory = (context: ContractRegexReadingContext) => RegexReadingCapability; ;; RegexReadingCapability = export interface RegexReadingCapability { readonly signal: AbortSignal; readonly assertCurrent: () => void; }"
+      "text": "export interface OperatorRemoteClientOptions { readonly getResponseSchema?: ((methodId: string) => ContractInvokeOptions['responseSchema']) | undefined; readonly validateResponses?: boolean | undefined; } ;; via ContractInvokeOptions = export interface ContractInvokeOptions { readonly signal?: AbortSignal | undefined; readonly headers?: HeadersInit | undefined; readonly idempotencyKey?: string | undefined; readonly responseSchema?: ZodType | undefined; }"
     },
     {
       "name": "OperatorRemoteClientStreamOptions",
@@ -111,7 +111,7 @@
     {
       "name": "OperatorApiClientOptions",
       "kind": "interface",
-      "text": "export interface OperatorApiClientOptions extends HttpTransportOptions, Pick<OperatorRemoteClientOptions, 'regexReading' | 'getRegexReading'> { readonly validateResponses?: boolean | undefined; } ;; via OperatorRemoteClientOptions = export interface OperatorRemoteClientOptions { readonly getResponseSchema?: ((methodId: string) => ContractInvokeOptions['responseSchema']) | undefined; readonly validateResponses?: boolean | undefined; readonly regexReading?: RegexReadingCapability | undefined; readonly getRegexReading?: ContractRegexReadingFactory | undefined; }"
+      "text": "export interface OperatorApiClientOptions extends HttpTransportOptions { readonly validateResponses?: boolean | undefined; }"
     },
     {
       "name": "OperatorInvokeOptions",
@@ -174,7 +174,7 @@
     {
       "name": "OperatorRemoteClientOptions",
       "kind": "interface",
-      "text": "export interface OperatorRemoteClientOptions { readonly getResponseSchema?: ((methodId: string) => ContractInvokeOptions['responseSchema']) | undefined; readonly validateResponses?: boolean | undefined; readonly regexReading?: RegexReadingCapability | undefined; readonly getRegexReading?: ContractRegexReadingFactory | undefined; } ;; via ContractInvokeOptions = export interface ContractInvokeOptions { readonly signal?: AbortSignal | undefined; readonly headers?: HeadersInit | undefined; readonly idempotencyKey?: string | undefined; readonly responseSchema?: ZodType | undefined; } ;; ContractRegexReadingFactory = export type ContractRegexReadingFactory = (context: ContractRegexReadingContext) => RegexReadingCapability; ;; RegexReadingCapability = export interface RegexReadingCapability { readonly signal: AbortSignal; readonly assertCurrent: () => void; }"
+      "text": "export interface OperatorRemoteClientOptions { readonly getResponseSchema?: ((methodId: string) => ContractInvokeOptions['responseSchema']) | undefined; readonly validateResponses?: boolean | undefined; } ;; via ContractInvokeOptions = export interface ContractInvokeOptions { readonly signal?: AbortSignal | undefined; readonly headers?: HeadersInit | undefined; readonly idempotencyKey?: string | undefined; readonly responseSchema?: ZodType | undefined; }"
     },
     {
       "name": "OperatorRemoteClientStreamOptions",

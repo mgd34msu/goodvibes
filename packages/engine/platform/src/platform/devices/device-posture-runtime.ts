@@ -254,7 +254,11 @@ function createDispatcher(transport: DevicePeerTransport, actor: string): Device
         return { ok: false, error: 'The device returned a result this contract does not recognise.', workId: work.id };
       }
       if (result.capabilityId !== input.capabilityId) {
-        return { ok: false, error: `The device answered for ${result.capabilityId}, not the ${input.capabilityId} that was requested.`, workId: work.id };
+        return {
+          ok: false,
+          error: `The device answered for ${result.capabilityId}, not the ${input.capabilityId} that was requested, so its answer was not used. Retry the request; if it happens again, update the companion app on that device.`,
+          workId: work.id,
+        };
       }
       if (!result.ok) {
         return { ok: false, error: result.error ?? 'The device declined or failed the request.', workId: work.id };

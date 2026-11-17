@@ -585,7 +585,7 @@ release_install_claims() {
     [ ! -e "$_claim_reference" ] && [ ! -L "$_claim_reference" ] || return 1
   done
   install_claim_directories_current || return 1
-  rm -f "${INSTALL_CLAIM_OWNER:?}/swap-journal" || return 1
+  rm -f "${INSTALL_CLAIM_OWNER:?}/swap-journal" "${INSTALL_CLAIM_OWNER:?}/swap-journal.committed" || return 1
   rmdir "$INSTALL_CLAIM_OWNER" || return 1
   [ ! -e "$INSTALL_CLAIM_OWNER" ] && [ ! -L "$INSTALL_CLAIM_OWNER" ] || return 1
   INSTALL_CLAIM_OWNER=""
@@ -691,8 +691,21 @@ $INSTALL_DIR/goodvibes-daemon-$PLATFORM_SUFFIX$_stale_companion.previous"
   IFS=$_stale_old_ifs
 }
 
+# The swap finished. Record that on disk before any backup is deleted: the journal is renamed
+# (one atomic step) to swap-journal.committed beside the claims, so a run killed outright while
+# committing is finished by the next run (recover_abandoned_install_claims), never rolled back
+# half way into programs from two releases. The renamed journal is the one committed from.
+mark_install_swap_committed() {
+  [ -n "$INSTALL_JOURNAL" ] && [ -n "$INSTALL_CLAIM_OWNER" ] || return 1
+  _committed_journal="$INSTALL_CLAIM_OWNER/swap-journal.committed"
+  mv -f "$INSTALL_JOURNAL" "$_committed_journal" || return 1
+  INSTALL_JOURNAL=$_committed_journal
+  INSTALL_SWAP_FINISHED=1
+}
+
 # The swap finished: the previous bytes are no longer needed, and a superseded published
 # directory (queued as "O") can now go, because nothing can roll back to it any more.
+# Safe to repeat: a run interrupted here, or the run that finds it abandoned, commits again.
 commit_install_journal() {
   [ -n "$INSTALL_JOURNAL" ] && [ -f "$INSTALL_JOURNAL" ] || return 0
   while IFS= read -r _journal_line; do
@@ -762,6 +775,13 @@ cleanup_release_install() {
   trap '' INT TERM HUP
   trap - EXIT
   if [ -n "$INSTALL_CLAIM_OWNER" ]; then
+    # A journal already renamed to committed means every program was replaced, even when the
+    # signal came between the rename and the flag: finish the commit, never undo it.
+    if [ "$INSTALL_SWAP_FINISHED" = 0 ] && [ -f "$INSTALL_CLAIM_OWNER/swap-journal.committed" ]; then
+      INSTALL_JOURNAL="$INSTALL_CLAIM_OWNER/swap-journal.committed"
+      INSTALL_SWAP_FINISHED=1
+    fi
+    if [ "$INSTALL_SWAP_FINISHED" = 1 ]; then commit_install_journal; fi
     if [ "$INSTALL_SWAP_BEGUN" = 0 ] || [ "$INSTALL_SWAP_FINISHED" = 1 ]; then
       if ! release_install_claims; then
         say "install.sh: this run's installation claims in $INSTALL_CLAIM_DIR changed while it ran, so they were left in place. Re-run the installer once no other goodvibes install or update is running; it releases claims whose process is gone." >&2
@@ -806,16 +826,51 @@ install_claim_owner_running() {
   [ $(( $(date +%s) - _owner_elapsed )) -le $(( _owner_started_ms / 1000 + 5 )) ]
 }
 
+# Release a dead owner's claim by taking it, never by deleting the shared path: another installer, or the
+# native updater reclaiming the same dead claim, may have put its own live claim there since the owner was
+# judged dead. One rename moves whatever is at the path into this run's private claim directory; the moved
+# file is then checked against the claim judged dead ($2 = ref: the same file as reference $3; $2 = id: the
+# file identity $3). A different claim is put back without replacing anything there now, and the run stops.
+take_abandoned_install_claim() {
+  _taken_claim="$INSTALL_CLAIM_OWNER/abandoned.${1##*/}"
+  rm -f "$_taken_claim"
+  if ! mv "$1" "$_taken_claim" 2>/dev/null; then
+    # Gone already: another run released it first. Anything else is a claim this run cannot move.
+    if [ ! -e "$1" ] && [ ! -L "$1" ]; then return 0; fi
+    fail INSTALL_E117 "The installation claim $1 could not be released; nothing was changed. If no goodvibes install or update is running, remove it and re-run the installer: rm -rf -- $(shadow_quote "$1")"
+  fi
+  case "$2" in
+    ref) [ ! -L "$_taken_claim" ] && [ "$_taken_claim" -ef "$3" ] && _taken_same=1 || _taken_same=0 ;;
+    *) [ "$(install_claim_file_identity "$_taken_claim")" = "$3" ] && _taken_same=1 || _taken_same=0 ;;
+  esac
+  if [ "$_taken_same" = 1 ]; then
+    rm -f "$_taken_claim"
+    return 0
+  fi
+  _taken_pid=$(install_claim_pid "$_taken_claim")
+  if ln "$_taken_claim" "$1" 2>/dev/null; then
+    rm -f "$_taken_claim"
+    fail INSTALL_E118 "Another goodvibes update or install (process ${_taken_pid:-unknown}) claimed $1 while this run was releasing a claim left by a process that is gone; its claim was left in place and nothing was changed. Wait for it to finish, then re-run the installer."
+  fi
+  fail INSTALL_E118 "Another goodvibes update or install (process ${_taken_pid:-unknown}) claimed $1 while this run was releasing a claim left by a process that is gone, and a third claim took the path before its claim could be put back; nothing was changed. Its claim is at $_taken_claim: once no goodvibes install or update is running, remove it and re-run the installer."
+}
+
 # A claim whose process is gone was left by an install or update that was killed outright (SIGKILL, power
 # loss, out of memory). An install.sh run keeps its swap journal in its private claim directory: undo that
-# swap exactly as its EXIT trap would have, release its claims, and continue. Any other claim of a dead
-# process is released when no partial file remains beside the program. A live owner is refused with its pid.
+# swap exactly as its EXIT trap would have, or, when the run had already replaced every program and renamed
+# its journal to swap-journal.committed, finish its commit (drop the backups it left); then release its
+# claims and continue. Any other claim of a dead process is released when no partial file remains beside
+# the program. A live owner is refused with its pid.
 recover_abandoned_install_claims() {
   for _abandoned_product in goodvibes-daemon goodvibes goodvibes-agent; do
     _abandoned_claim="$INSTALL_CLAIM_DIR/$_abandoned_product.update-transaction"
     [ -e "$_abandoned_claim" ] || [ -L "$_abandoned_claim" ] || continue
     _abandoned_pid=''
-    if [ -f "$_abandoned_claim" ] && [ ! -L "$_abandoned_claim" ]; then _abandoned_pid=$(install_claim_pid "$_abandoned_claim"); fi
+    _abandoned_identity=''
+    if [ -f "$_abandoned_claim" ] && [ ! -L "$_abandoned_claim" ]; then
+      _abandoned_identity=$(install_claim_file_identity "$_abandoned_claim") || _abandoned_identity=''
+      _abandoned_pid=$(install_claim_pid "$_abandoned_claim")
+    fi
     [ -n "$_abandoned_pid" ] || fail INSTALL_E117 "The installation claim $_abandoned_claim cannot be read, so its owner is unknown; nothing was changed. If no goodvibes install or update is running, remove it and re-run the installer: rm -rf -- $(shadow_quote "$_abandoned_claim")"
     if install_claim_owner_running "$_abandoned_claim" "$_abandoned_pid"; then
       fail INSTALL_E118 "Another goodvibes update or install (process $_abandoned_pid) is replacing programs in $INSTALL_CLAIM_DIR and holds $_abandoned_claim; nothing was changed. Wait for it to finish, then re-run the installer."
@@ -826,22 +881,30 @@ recover_abandoned_install_claims() {
       if [ "$_abandoned_dir/$_abandoned_product" -ef "$_abandoned_claim" ]; then _abandoned_owner=$_abandoned_dir; break; fi
     done
     if [ -n "$_abandoned_owner" ]; then
-      if [ -s "$_abandoned_owner/swap-journal" ]; then
-        _abandoned_own_journal=$INSTALL_JOURNAL
+      _abandoned_outcome='restored the programs it had replaced'
+      _abandoned_own_journal=$INSTALL_JOURNAL
+      if [ -f "$_abandoned_owner/swap-journal.committed" ]; then
+        # It had replaced every program: keep them, and drop the backups its commit had not reached.
+        INSTALL_JOURNAL="$_abandoned_owner/swap-journal.committed"
+        commit_install_journal
+        _abandoned_outcome='it had replaced every program, so the new ones were kept and its leftover backups removed'
+      elif [ -s "$_abandoned_owner/swap-journal" ]; then
         INSTALL_JOURNAL="$_abandoned_owner/swap-journal"
         if ! rollback_install_swap; then
           INSTALL_JOURNAL=$_abandoned_own_journal
           fail INSTALL_E119 "An installation interrupted earlier (process $_abandoned_pid, no longer running) could not be undone automatically; nothing else was changed. Its journal $_abandoned_owner/swap-journal lists each replaced file (R: put back <file>.goodvibes-previous) and each new file (N: remove it). Once those are done, release its claims and re-run the installer: rm -rf -- $(shadow_quote "$_abandoned_owner") $(shadow_quote "$INSTALL_CLAIM_DIR")/*.update-transaction"
         fi
-        INSTALL_JOURNAL=$_abandoned_own_journal
+      else
+        _abandoned_outcome='it had replaced nothing'
       fi
+      INSTALL_JOURNAL=$_abandoned_own_journal
       for _abandoned_released in goodvibes-daemon goodvibes goodvibes-agent; do
         if [ "$_abandoned_owner/$_abandoned_released" -ef "$INSTALL_CLAIM_DIR/$_abandoned_released.update-transaction" ]; then
-          rm -f "${INSTALL_CLAIM_DIR:?}/${_abandoned_released:?}.update-transaction"
+          take_abandoned_install_claim "$INSTALL_CLAIM_DIR/$_abandoned_released.update-transaction" ref "$_abandoned_owner/$_abandoned_released"
         fi
       done
       rm -rf "${_abandoned_owner:?}"
-      say "  recovered  an installation interrupted earlier (process $_abandoned_pid is gone): restored the programs it had replaced and released its claims"
+      say "  recovered  an installation interrupted earlier (process $_abandoned_pid is gone): $_abandoned_outcome; its claims were released"
       continue
     fi
     _abandoned_partial=''
@@ -854,7 +917,8 @@ recover_abandoned_install_claims() {
     done
     [ -z "$_abandoned_partial" ] || fail INSTALL_E120 "An update or install that is no longer running (process $_abandoned_pid) left $_abandoned_claim with partial files beside the program; nothing was changed:$_abandoned_partial
 If $INSTALL_CLAIM_DIR/$_abandoned_product is missing, put its saved copy back first: mv -f <file>.update-previous <file>. Then remove the partial files and the claim, and re-run the installer."
-    rm -f "${_abandoned_claim:?}"
+    [ -n "$_abandoned_identity" ] || fail INSTALL_E117 "The installation claim $_abandoned_claim cannot be read, so its owner is unknown; nothing was changed. If no goodvibes install or update is running, remove it and re-run the installer: rm -rf -- $(shadow_quote "$_abandoned_claim")"
+    take_abandoned_install_claim "$_abandoned_claim" id "$_abandoned_identity"
     say "  released   $_abandoned_claim (process $_abandoned_pid is gone and no partial file remains beside the program)"
   done
 }
@@ -3886,7 +3950,7 @@ main() {
   # All program and companion writes are complete before a service may start
   # the new cohort. Startup must not see our own in-flight update claims.
   discard_stale_previous_cohort
-  INSTALL_SWAP_FINISHED=1
+  mark_install_swap_committed || fail INSTALL_E124 "Every program was replaced, but the swap journal in $INSTALL_CLAIM_OWNER could not be marked finished, so the previous programs are being put back."
   commit_install_journal
   release_install_claims || fail INSTALL_E116 "Suite files were installed, but this run's transaction claims in $INSTALL_CLAIM_DIR changed, so services were not started. Re-run the installer once no other goodvibes install or update is running; it releases claims whose process is gone."
 

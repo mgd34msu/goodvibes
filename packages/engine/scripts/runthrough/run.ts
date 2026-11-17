@@ -77,6 +77,8 @@ async function worker(): Promise<void> {
     const err = await new Response(child.stderr).text();
     const code = await child.exited;
     results.push({ task, code, ms: Math.round(performance.now() - t0) });
+    // Twenty-four homes do not fit a scratch quota: a policy run keeps each journey's result file, not its home.
+    if (policies) rmSync(join(task.dir, task.name.split('-')[0]!), { recursive: true, force: true });
     process.stdout.write(out.split('\n').filter((line) => /^(PASS|FAIL)/.test(line)).map((line) => `${task.label}${line}\n`).join(''));
     if (code !== 0 && !/^(PASS|FAIL) /m.test(out)) process.stdout.write(`${task.label}FAIL ${task.name}: exited ${code} ${err.slice(-400)}\n`);
   }

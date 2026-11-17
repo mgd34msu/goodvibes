@@ -35,7 +35,7 @@ These are the package-facing docs for the GoodVibes Agent `3.2.x` release line.
 
 The main Agent model reaches Agent-controlled product surfaces through Agent-owned tools. The full tool catalog, action values, and confirmation rules live in [Tools and commands](tools-and-commands.md); this baseline names the families so a reader knows what exists before opening that page.
 
-- `setup` walks the first-run path, covering status, single-item lookup, checkpoint inspect/save/clear, connected-host token repair, setup smoke, onboarding finish, and GoodVibes settings import, all through the existing setup gates.
+- `setup` walks the first-run path, covering status, single-item lookup, checkpoint inspect/save/clear, connected-host token repair, setup smoke checklist and evidence, onboarding finish, and GoodVibes settings import, all through the existing setup gates.
 - `models` reads provider/model route readiness, provider and subscription posture, and the hardware-scored local model cookbook, and runs confirmed local server smoke checks.
 - `settings` lists, gets, sets, and resets Agent settings, and previews or applies shared GoodVibes settings import behind redacted confirmation gates.
 - `agent_harness` is the deep inspection surface. It serves the same assistant cockpit shown in TUI Home, searchable mode discovery, the workspace/command/keybinding/tool catalogs, channel and setup posture, the visible autonomy queue with live records and log tails, execution and delegation posture, service and connected-host posture, and operator/audit release artifacts.

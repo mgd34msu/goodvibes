@@ -58,7 +58,7 @@ Composer markers: a line that starts with `!` runs the rest as a shell command a
 | `agent_work_plan` | Keep the visible Agent-local work plan current and dispatch approved plan items to visible agents with confirmation and receipts. |
 | `agent_operator_briefing` | Read native reported/verification counts, historical legacy planning, approvals, automation, schedules, and capacity posture. |
 | `schedule` | List, create, edit, run, pause, resume, and delete connected schedules through existing confirmation gates. |
-| `setup` | Inspect first-run setup, choose the next safe setup repair route, show one setup row, inspect/save/clear checkpoints, repair token auth, run setup smoke, finish onboarding, and import GoodVibes settings through existing gates. |
+| `setup` | Inspect first-run setup, choose the next safe setup repair route, show one setup row, inspect/save/clear checkpoints, repair token auth, read the setup smoke checklist or save its evidence, finish onboarding, and import GoodVibes settings through existing gates. |
 | `security` | Read security posture/findings and explain why one model action is allowed, denied, or needs confirmation. |
 | `vibe` | Inspect VIBE.md status/show, create project/global VIBE.md, or import VIBE.md as an Agent-local persona through existing gates. |
 | `browser` | Drive a real web browser: open pages, take an element snapshot, click, type, select, scroll, wait, read the page text, extract data by selector or ref, screenshot, and manage tabs. Provisions its own browser on first use and keeps sign-ins in a saved profile. It runs no caller-supplied script in a page: `extract` names the fields it wants, so a page cannot be made to transmit anything. |

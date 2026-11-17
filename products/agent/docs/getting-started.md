@@ -59,8 +59,8 @@ The workspace opens into a set of operator areas. Each area below names what it 
   - GoodVibes settings import preview/apply
   - read-only setup repair decisions
   - token-safe install smoke checks
-  - confirmed setup smoke execution with saved redacted evidence artifacts and Home/setup latest-result plus history/trend surfacing
-  - setup readiness that can auto-advance connected-host service/auth/install-smoke/browser-PWA rows from saved durable artifacts, live platform/daemon setup receipt read models, or ordered setup receipt event streams with secret-looking receipt text redacted and schema/version/provenance/publication/cursor evidence surfaced for certified receipts
+  - setup smoke: `setup action:"smoke"` without fields returns the checklist with no approval; with the user-run output in `fields` it saves one redacted evidence artifact (write admission). Evidence with every user-run check recorded is `passed`, and the install-smoke row reads ready
+  - setup readiness from the Agent's own checks: the host probe and auth check (run only for the rows that report them), saved smoke evidence, and the Agent Knowledge readiness from the last `host action:"status"`
   - confirmed onboarding finish marker write
   - route-level provider-health-backed model readiness scores
   - Model Routing readiness and benchmark-evidence actions

@@ -1,4 +1,4 @@
-import { readTriggerOperatorStatus, readTriggerMigrationResult } from '@goodvibes-jev/engine/platform/platform/triggers/browser';
+import { readTriggerOperatorStatus } from '@goodvibes-jev/engine/platform/platform/triggers/browser';
 import { readFeatureRestartStatus, type FeatureRestartStatus } from './feature-restart-status';
 import {
   createBrowserKnowledgePlatform,
@@ -1645,12 +1645,10 @@ export const client = {
       },
     },
     // watchers.stop: the fleet-node stop action for a watcher (fleet is a live-process
-    // reader, not a watcher-authoring surface), plus the trigger migration verbs.
+    // reader, not a watcher-authoring surface), plus the trigger supervisor status read.
     watchers: {
       triggers: {
         status: async () => readTriggerOperatorStatus(await requestJson('/api/control-plane/methods/watchers.triggers.status/invoke', { method: 'POST', body: { body: {} } })),
-        migrate: async (input: { readonly olderInstancesClosed: true; readonly confirm: true }) =>
-          readTriggerMigrationResult(await requestJson('/api/control-plane/methods/watchers.triggers.migrate/invoke', { method: 'POST', body: { body: input } })),
       },
       stop: (watcherId: string): Promise<WatcherActionResult> => invokeOperator('watchers.stop', { watcherId }),
     },

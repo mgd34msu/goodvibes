@@ -106,8 +106,7 @@ export class TriggerManager {
 
   constructor(options: TriggerManagerOptions) {
     this.options = { ...options };
-    const previous = options.previousStorePath;
-    this.store = new TriggerStore(options.storePath, previous === undefined ? [] : typeof previous === 'string' ? [previous] : previous);
+    this.store = new TriggerStore(options.storePath);
     // Released only after admitted work has drained, so an action that finishes during shutdown is still saved.
     this.work = new TriggerManagerWork(() => { this.loaded = false; this.store.release(); });
     const initial = typeof options.config === 'function' ? options.config() : options.config;

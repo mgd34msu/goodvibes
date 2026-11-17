@@ -339,12 +339,10 @@ history reports that completion was not observed; the action is not automaticall
 repeated. This is an admission rule, not a guarantee of exactly-once external
 effects after a network or process failure.
 
-## Recover supervised triggers after an upgrade
+## Inspect supervised triggers
 
-Condition, stream and process-exit triggers belong to each surface’s native trigger supervisor. They are separate from workflow event triggers. An older saved runnable trigger file remains stopped until an operator explicitly migrates it; inspection does not claim execution ownership.
+Condition, stream and process-exit triggers belong to each surface’s native trigger supervisor. They are separate from workflow event triggers.
 
-In the TUI, `/triggers status` reads the selected paired daemon’s ownership and affected trigger summaries. In Agent, it reads that Agent runtime’s local supervisor. After closing every older GoodVibes instance using the corresponding state, run `/triggers migrate` and choose **I closed all older GoodVibes instances — migrate triggers**. The explicit command `/triggers migrate --older-instances-closed` makes the same statement directly. Model-invoked commands cannot provide this acknowledgement.
+In the TUI and Agent, `/triggers status` reads the selected paired daemon’s ownership and trigger summaries. In the WebUI, open **Settings → General → Advanced → Supervised triggers**. The administrative operator method is `watchers.triggers.status` (`read:watchers`); it reads the daemon supervisor, not the workflow event-trigger manager, and never claims execution ownership.
 
-For daemon-owned triggers, open **Settings → General → Advanced → Supervised trigger recovery** in the WebUI. Review the affected records, select the acknowledgement checkbox only after closing older instances, then confirm **Migrate triggers**. The administrative operator methods are `watchers.triggers.status` (`read:watchers`) and `watchers.triggers.migrate` (`write:watchers`, `confirm: true`, `olderInstancesClosed: true`). Both inspect and mutate the original daemon supervisor, not the workflow event-trigger manager.
-
-The acknowledgement is your statement, not an operating-system liveness proof. Another execution owner remains read-only: close that process and reopen the owning surface instead of trying to force ownership. A newer saved format requires an updated installation; unreadable or changed original storage requires checking the selected surface and storage permissions. Failed recovery preserves saved state and reports the applicable refusal.
+Another execution owner remains read-only: close that process and this one takes over on its next supervision tick. A newer saved format requires an updated installation; unreadable storage is named, with its cause, in the daemon log.

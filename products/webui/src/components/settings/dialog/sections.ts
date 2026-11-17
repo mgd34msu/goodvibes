@@ -201,10 +201,10 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
     id: 'all',
     label: 'Advanced',
     page: 'general',
-    description: 'Supervised trigger recovery and every other daemon setting.',
+    description: 'Supervised triggers and every other daemon setting.',
     namespaces: [],
-    keywords: ['triggers', 'supervision', 'migration', 'all settings', 'config', 'key', 'schema'],
-    items: ['Supervised trigger recovery'],
+    keywords: ['triggers', 'supervision', 'all settings', 'config', 'key', 'schema'],
+    items: ['Supervised triggers'],
   },
   {
     id: 'about',

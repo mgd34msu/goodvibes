@@ -3,7 +3,7 @@ import { logger } from '../utils/logger.js';
 import type { TriggerManager } from './manager.js';
 import { StoreSchemaDowngradeError } from '../state/store-versioning.js';
 import { TriggerStoreOwnershipError } from './store.js';
-import { TRIGGER_OPERATOR_MESSAGES, type TriggerOperatorFailureKind, type TriggerOperatorStatus, type TriggerMigrationResult } from './operator-view.js';
+import { TRIGGER_OPERATOR_MESSAGES, type TriggerOperatorFailureKind, type TriggerOperatorStatus } from './operator-view.js';
 export type TriggerOperatorSupervisor = Pick<TriggerManager, 'inspectRecords' | 'executionOwnership'>;
 export class TriggerOperatorError extends Error {
   override readonly name = 'TriggerOperatorError';
@@ -23,22 +23,10 @@ export function triggerOperatorStatus(supervisor: TriggerOperatorSupervisor): Tr
     const records = supervisor.inspectRecords().map(record => Object.freeze({ id: record.definition.id,
       label: record.definition.label, kind: record.definition.spec.kind, state: record.state }));
     const ownership = supervisor.executionOwnership;
-    return Object.freeze({ ownership, migrationRequired: false, records: Object.freeze(records),
+    return Object.freeze({ ownership, records: Object.freeze(records),
       message: ownership === 'other-process' ? TRIGGER_OPERATOR_MESSAGES['other-process']
         : ownership === 'local' ? 'This process supervises these triggers.'
         : records.length === 0 ? 'No triggers are stored for this surface.'
         : 'No process supervises these triggers yet. They start when watchers.triggers.enabled is true.' });
-  } catch (error) { translate(error); }
-}
-/**
- * Earlier trigger state is imported when the trigger database is created, so
- * there is never a migration to request; this answers that, with the status.
- */
-export function migrateOperatorTriggers(supervisor: TriggerOperatorSupervisor, input: { readonly olderInstancesClosed: true }): TriggerMigrationResult {
-  try {
-    void input;
-    const status = triggerOperatorStatus(supervisor);
-    if (status.ownership === 'other-process') throw new TriggerOperatorError('other-process');
-    throw new TriggerOperatorError('not-required');
   } catch (error) { translate(error); }
 }

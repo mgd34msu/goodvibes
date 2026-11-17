@@ -59,7 +59,6 @@ export function createTriggerSupervisor(deps: TriggerSupervisorDeps): TriggerMan
   const { configManager, processManager } = deps;
   const manager = new TriggerManager({
     storePath: deps.resolveStorePath('triggers.db'),
-    previousStorePath: [deps.resolveStorePath('triggers-v2.json'), deps.resolveStorePath('triggers.json')],
     config: () => readTriggerConfig(configManager),
     actions: createTriggerActionExecutor({ agents: deps.agents, processManager }),
     processHost: createProcessManagerTriggerHost(processManager),

@@ -14,29 +14,9 @@
  * different command than the one they approved.
  */
 
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { validateArgv } from './validation.js';
 import type { ActionGrantAction, TriggerActionGrant, TriggerApprovedAction } from './types.js';
-
-/**
- * Canonical digest input. Covers everything that decides what actually runs,
- * the executable, its arguments and its working directory. The description and
- * timestamps are deliberately excluded so a typo fix in prose does not
- * invalidate a grant, while any change to the command does.
- */
-function canonicalGrant(grant: Pick<TriggerActionGrant, 'command' | 'args' | 'cwd'>): string {
-  return JSON.stringify({
-    command: grant.command,
-    args: [...grant.args],
-    cwd: grant.cwd ?? null,
-  });
-}
-
-/** Published checksum representation for reading earlier saved grants only.
- * Fresh grants and their fire-time checks use approvedAction plus revision. */
-export function computeGrantDigest(grant: Pick<TriggerActionGrant, 'command' | 'args' | 'cwd'>): string {
-  return createHash('sha256').update(canonicalGrant(grant)).digest('hex');
-}
 
 const GRANT_REVISION = /^grant-revision-v1:[0-9a-p]{32}$/;
 function validApproval(approval: TriggerApprovedAction): boolean {
@@ -77,8 +57,7 @@ export function createActionGrant(input: RegisterGrantInput, previous?: TriggerA
   const now = input.now ?? Date.now();
   const base = { command, args: Object.freeze([...args]), ...(input.cwd !== undefined ? { cwd: input.cwd } : {}) };
   // Reconfirming only description/attribution must not invalidate existing
-  // pinned triggers. A changed action receives a new revision. Earlier saved
-  // grants retain their original pin rather than silently re-pinning history.
+  // pinned triggers. A changed action receives a new revision.
   const retained = previous?.id === input.id && sameAction(base, previous)
     && verifyRegisteredGrant([previous], previous.id, previous.digest).ok ? previous : undefined;
   const approvedAction = retained ? retained.approvedAction : Object.freeze({ version: 1 as const,
@@ -118,13 +97,7 @@ function verifyRegisteredGrant(
     validateArgv(grant.command, grant.args, 'grant');
     if (grant.cwd !== undefined && typeof grant.cwd !== 'string') throw new Error('Invalid grant directory');
     const approval = grant.approvedAction;
-    if (approval !== undefined) {
-      matches = GRANT_REVISION.test(grant.digest) && validApproval(approval) && sameAction(grant, approval);
-    } else if (/^[0-9a-f]{64}$/.test(grant.digest)) {
-      // Only an actually registered earlier record reaches this compatibility
-      // check. Fresh revision-shaped records cannot fall back to a checksum.
-      matches = computeGrantDigest(grant) === grant.digest;
-    }
+    matches = approval !== undefined && GRANT_REVISION.test(grant.digest) && validApproval(approval) && sameAction(grant, approval);
   } catch { /* Malformed saved approval is a refusal, never an executable grant. */ }
   if (!matches) {
     return {
@@ -151,8 +124,7 @@ export function captureRegisteredGrantAction(grants: readonly TriggerActionGrant
 }
 
 /** Fire uses the independently retained trigger pin, never the grant's own
- * local copy as authority for changed bytes. Actual older SHA pins retain their
- * original content binding without synthesizing a new approved snapshot. */
+ * local copy as authority for changed bytes. */
 export function verifyGrant(grants: readonly TriggerActionGrant[], grantId: string, pinnedDigest: string,
   approvedAction?: TriggerApprovedAction): GrantVerification {
   const verified = verifyRegisteredGrant(grants, grantId, pinnedDigest);

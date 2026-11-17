@@ -10,7 +10,6 @@
  */
 
 import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
-import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibility.js';
 import type { TriggerProcessHost } from './process-triggers.js';
 import type { ProbeIo } from './probes.js';
 import { DEFAULT_RETENTION, type TriggerRetentionPolicy } from './store.js';
@@ -69,12 +68,8 @@ export interface TriggerManagerConfig {
 }
 
 export interface TriggerManagerOptions {
-  /** The trigger database (`…/triggers.db`); a path to an earlier `.json` store means the database beside it. */
+  /** The trigger database (`…/triggers.db`). */
   readonly storePath: string;
-  /** Earlier JSON stores, read once when the database is created and never written. */
-  readonly previousStorePath?: string | readonly string[] | undefined;
-  /** @deprecated Ignored: the database is a new file no earlier reader opens. */
-  readonly nativeDataWriter?: NativeDataWriteOwner | undefined;
   /**
    * A snapshot, or a function read on every access. Hosts pass the function
    * form so `watchers.triggers.enabled` is genuinely runtime-toggleable: with

@@ -261,8 +261,8 @@ export interface TriggerActionGrant {
   readonly confirmedAt: number;
   readonly confirmedBy: string;
   readonly digest: string;
-  /** Fresh grants retain only fields already present above. The opaque digest
-   * is a revision, not a content checksum. Absent only on earlier saved grants. */
+  /** The approved action the opaque digest revision stands for; the digest is
+   * a revision, not a content checksum. A grant without one never fires. */
   readonly approvedAction?: TriggerApprovedAction;
 }
 

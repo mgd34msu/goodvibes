@@ -24,8 +24,8 @@
  *      its report.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { basename } from 'node:path';
 import type { Database } from 'bun:sqlite';
 import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 import { openSqliteFile, type SqliteFile } from '../state/sqlite-file.js';
@@ -73,58 +73,16 @@ export const DEFAULT_RETENTION: TriggerRetentionPolicy = {
 
 const REPORT_HISTORY = 50;
 
-/**
- * The database beside a configured store path. Earlier releases kept the
- * family in `triggers-v2.json` (and before that `triggers.json`); a host that
- * still names one of those gets `triggers.db` in the same directory, and the
- * JSON file is read once, when the database is created.
- */
-export function triggerDatabasePath(storePath: string): string {
-  return storePath.endsWith('.db') ? storePath : join(dirname(storePath), 'triggers.db');
-}
-
-/** Trigger rows from an earlier JSON store, or none when the file is absent or unreadable. */
-function readLegacyStore(path: string): { readonly triggers: readonly TriggerRecord[]; readonly grants: readonly TriggerActionGrant[] } {
-  if (!path.endsWith('.json') || !existsSync(path)) return { triggers: [], grants: [] };
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as { triggers?: unknown; grants?: unknown };
-    const rows = Array.isArray(parsed.triggers) ? parsed.triggers as unknown[] : [];
-    // The first release spelled the platform-tool probe `sdk-tool`.
-    const triggers = rows.map((row) => {
-      const probe = (row as { definition?: { spec?: { probe?: { kind?: unknown } } } })?.definition?.spec?.probe;
-      if (probe?.kind !== 'sdk-tool') return row;
-      const record = row as TriggerRecord;
-      return { ...record, definition: { ...record.definition, spec: { ...record.definition.spec, probe: { ...probe, kind: 'platform-tool' } } } };
-    }).filter(isTriggerRecord);
-    const grants = (Array.isArray(parsed.grants) ? parsed.grants as unknown[] : []).filter(isTriggerGrant);
-    return { triggers, grants };
-  } catch {
-    return { triggers: [], grants: [] };
-  }
-}
-
 function encodeState(record: TriggerRecord): string {
   const { definition: _definition, ...state } = record;
   return JSON.stringify(state);
 }
 
-function createSchema(db: Database, legacyPaths: readonly string[]): void {
+function createSchema(db: Database): void {
   db.run('CREATE TABLE triggers (id TEXT PRIMARY KEY, definition TEXT NOT NULL, state TEXT NOT NULL, updated_at INTEGER NOT NULL)');
   db.run('CREATE TABLE grants (id TEXT PRIMARY KEY, body TEXT NOT NULL)');
   db.run('CREATE TABLE events (seq INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, body TEXT NOT NULL)');
   db.run('CREATE TABLE reports (seq INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT NOT NULL)');
-  // An earlier JSON store is imported once, as the database is created; the file itself is left where it is.
-  const seen = new Set<string>();
-  for (const path of legacyPaths) {
-    const legacy = readLegacyStore(path);
-    for (const record of legacy.triggers) {
-      if (seen.has(record.definition.id)) continue;
-      seen.add(record.definition.id);
-      db.query('INSERT INTO triggers (id, definition, state, updated_at) VALUES (?, ?, ?, ?)')
-        .run(record.definition.id, JSON.stringify(record.definition), encodeState(record), record.updatedAt);
-    }
-    for (const grant of legacy.grants) db.query('INSERT OR IGNORE INTO grants (id, body) VALUES (?, ?)').run(grant.id, JSON.stringify(grant));
-  }
 }
 
 export interface TriggerStoreContents {
@@ -138,23 +96,16 @@ export interface TriggerStoreContents {
 /** The trigger family's rows and the lock that makes one process their supervisor. */
 export class TriggerStore {
   readonly path: string;
-  private readonly legacyPaths: readonly string[];
   private file: SqliteFile | null = null;
   private lock: HeldProcessLock | null = null;
 
-  /** `previousPaths` are earlier JSON stores to import when the database is created. */
-  constructor(storePath: string, previousPaths: readonly string[] = []) {
-    this.path = triggerDatabasePath(storePath);
-    this.legacyPaths = [...new Set([...(storePath === this.path ? [] : [storePath]), ...previousPaths])];
+  constructor(storePath: string) {
+    this.path = storePath;
   }
 
-  /** True when anything is stored: the database exists, or an earlier JSON store holds triggers or grants to import. */
+  /** True when anything is stored: the database exists. */
   hasData(): boolean {
-    if (existsSync(this.path)) return true;
-    return this.legacyPaths.some((path) => {
-      const legacy = readLegacyStore(path);
-      return legacy.triggers.length > 0 || legacy.grants.length > 0;
-    });
+    return existsSync(this.path);
   }
 
   /** Whether this process holds the supervisor lock. */
@@ -179,7 +130,7 @@ export class TriggerStore {
     try {
       this.file = openSqliteFile(this.path, {
         name: `trigger store (${basename(this.path)})`,
-        migrations: [{ toVersion: 1, up: (db) => { createSchema(db, this.legacyPaths); } }],
+        migrations: [{ toVersion: 1, up: createSchema }],
       });
     } catch (error) {
       throw new TriggerStoreError(this.path, 'open', error);

@@ -285,9 +285,8 @@ export class PluginManager {
     }
 
     // Build the record off to the side and publish it only once it is on disk,
-    // so a refused write leaves the live tier as it was. An accepted publisher key stays.
-    const publisherKey = this.trustStore.getRecord(name)?.publisherKey;
-    const record = { ...new PluginTrustStore().setTier(name, tier, { note }), ...(publisherKey ? { publisherKey } : {}) };
+    // so a refused write leaves the live tier as it was.
+    const record = new PluginTrustStore().setTier(name, tier, { note });
     const failure = this.commitState(() => { this.state.trust[name] = record; }, this.undoTrust(name));
     if (failure) return { ok: false, error: `Trust tier for '${name}' was not saved, ${failure}` };
     this.trustStore.importRecords({ [name]: record });
@@ -317,16 +316,14 @@ export class PluginManager {
       signature?: string | undefined;
     };
 
-    const publisherKey = publicKey ?? this.trustStore.getRecord(name)?.publisherKey;
-    const result = new PluginTrustStore().trustSigned(name, manifest, publisherKey);
+    const result = new PluginTrustStore().trustSigned(name, manifest, publicKey);
     if (!result.ok) {
-      return { ok: false, error: publisherKey ? result.reason : `${result.reason}; accept the publisher's key with /plugin trust-key ${name} <public-key.pem>` };
+      return { ok: false, error: result.reason };
     }
 
-    const record = { ...result.record, ...(publisherKey ? { publisherKey } : {}) };
-    const failure = this.commitState(() => { this.state.trust[name] = record; }, this.undoTrust(name));
+    const failure = this.commitState(() => { this.state.trust[name] = result.record; }, this.undoTrust(name));
     if (failure) return { ok: false, error: `Trust tier for '${name}' was not saved, ${failure}` };
-    this.trustStore.importRecords({ [name]: record });
+    this.trustStore.importRecords({ [name]: result.record });
     this.notifySubscribers();
     const restarting = this.restartAfterTrustChange(name);
     return { ok: true, fingerprint: result.record.signatureFingerprint, ...(restarting ? { restarting } : {}) };
@@ -371,32 +368,10 @@ export class PluginManager {
       signature?: string | undefined;
     };
 
-    const publisherKey = publicKey ?? this.trustStore.getRecord(name)?.publisherKey;
-    const result = this.trustStore.verify(manifest, publisherKey);
-    return { ok: result.valid, ...result,
-      ...(!result.valid && !publisherKey ? { reason: `${result.reason}; accept the publisher's key with /plugin trust-key ${name} <public-key.pem>` } : {}) };
+    const result = this.trustStore.verify(manifest, publicKey);
+    return { ok: result.valid, ...result };
   }
 
-  /**
-   * Accept a publisher's Ed25519 public key for a plugin: kept with its trust
-   * record, and used by `verify` and `trustSigned`. The tier does not change.
-   */
-  setPublisherKey(name: string, pem: string): { ok: true; valid: boolean; reason?: string | undefined } | { ok: false; error: string } {
-    if (this.closed) return { ok: false, error: 'Plugin manager is closed' };
-    if (!this.findDiscoveredPlugin(name)) return { ok: false, error: this.notFoundError(name) };
-    const key = readEd25519PublicKey(pem);
-    if (!key.ok) return { ok: false, error: `Key not accepted: ${key.reason}` };
-    const prior = this.trustStore.getRecord(name);
-    const record: PluginTrustRecord = prior
-      ? { ...prior, publisherKey: key.pem, updatedAt: Date.now() }
-      : { pluginName: name, tier: 'untrusted', updatedAt: Date.now(), grantedBy: 'operator', publisherKey: key.pem };
-    const failure = this.commitState(() => { this.state.trust[name] = record; }, this.undoTrust(name));
-    if (failure) return { ok: false, error: `The key for '${name}' was not saved, ${failure}` };
-    this.trustStore.importRecords({ [name]: record });
-    this.notifySubscribers();
-    const check = this.verify(name);
-    return { ok: true, valid: check.valid, ...(check.valid ? {} : { reason: check.reason }) };
-  }
 
   /**
    * capabilities, Return the capability information for a plugin.

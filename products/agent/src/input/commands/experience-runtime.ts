@@ -8,7 +8,7 @@ import 'node:fs';
 import 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths, requireVoiceSetup } from './runtime-services.ts';
-import { requireYesFlag } from './confirmation.ts';
+import { commandRefusal, requireYesFlag } from './confirmation.ts';
 import { handleApprovalOperatorAction } from './operator-actions-runtime.ts';
 import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
 import {
@@ -123,8 +123,7 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
       }
       return;
     }
-    ctx.print('Usage: /voice wake [status|setup --yes]');
-    return;
+    throw commandRefusal('Usage: /voice wake [status|setup --yes]');
   },
   async provision(sub, _args, ctx, _shellPaths, yes) {
     if (sub === 'status') {

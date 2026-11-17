@@ -12,12 +12,6 @@ import { forwardHarnessCatalogCall, harnessCatalogExecutionGuard, harnessCatalog
 import { describeCommandPolicy } from './agent-harness-metadata.ts';
 import { commandVerbPolicy, ownerOnlyVerbRefusal } from '../input/commands/command-verbs.ts';
 
-/** Verbs of otherwise state-changing commands that only show records; the first argument is the verb, absent means the default. */
-const READ_ONLY_COMMAND_VERBS: Readonly<Record<string, { readonly verbs: ReadonlySet<string>; readonly fallback: string }>> = {
-  tasks: { verbs: new Set(['list', 'show', 'output']), fallback: 'list' },
-  approval: { verbs: new Set(['matrix', 'review']), fallback: 'matrix' },
-};
-
 function invocationArgsFromLookup(lookup: CommandDetailLookup): readonly string[] {
   return lookup.resolvedBy === 'description' ? [] : lookup.parsedArgs;
 }
@@ -61,13 +55,10 @@ export async function runCommand(deps: AgentHarnessToolDeps, args: Record<string
     assertCommandMethods();
     options.signal?.throwIfAborted(); options.assertCurrent?.();
     // A command that declares its verbs (command-verbs.ts) says which admission
-    // each needs; the others are read from the command policy table.
+    // each needs; a command without a declaration is read from the command policy table.
     const verb = commandVerbPolicy(registry.get(name), commandArgs);
     const policy = describeCommandPolicy(name);
-    // These work-import verbs are host-owned reads. Every mutation keeps the
-    // original invocation floor as well as the command's own host authority.
-    const read = verb ? verb.effect === 'read' : policy.effect === 'read-only' || name === 'work-import' && ['preview', 'status'].includes(commandArgs[0] ?? '')
-      || (READ_ONLY_COMMAND_VERBS[name]?.verbs.has((commandArgs[0] ?? READ_ONLY_COMMAND_VERBS[name]!.fallback).toLowerCase()) ?? false);
+    const read = verb ? verb.effect === 'read' : policy.effect === 'read-only';
     const effect = verb ? (verb.effect === 'local-write' ? 'write' : 'send')
       : ['local-state', 'ui-navigation', 'session-lifecycle'].includes(policy.effect) ? 'write' : 'send';
     if (!read && !harnessCatalogInvocationAuthority(args, executionOptions, effect)) throw new ToolInputProjectionError('held');

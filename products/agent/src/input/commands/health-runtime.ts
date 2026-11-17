@@ -26,6 +26,7 @@ import {
   requireSubscriptionManager,
   requireSessionMemoryStore,
 } from './runtime-services.ts';
+import { commandRefusal } from './confirmation.ts';
 
 async function loadProviderAccountSnapshot(ctx: CommandContext) {
   return await buildProviderAccountSnapshot({
@@ -104,8 +105,7 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
       if (sub === 'diagnose' || !HEALTH_SUBCOMMANDS.has(sub)) {
         const symptom = (sub === 'diagnose' ? args.slice(1) : args).join(' ');
         if (!symptom.trim()) {
-          ctx.print('Usage: /doctor <symptom>, for example /doctor stuck turn');
-          return;
+          throw commandRefusal('Usage: /doctor <symptom>, for example /doctor stuck turn');
         }
         ctx.print(formatDoctorReport(await requireReadModels(ctx).doctor.diagnose(symptom)).join('\n'));
         return;

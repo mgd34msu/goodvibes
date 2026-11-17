@@ -26,7 +26,8 @@ import type { CommandRegistry } from '../command-registry.ts';
 import { getSessionUntrustedContentLedger } from '../../trust/untrusted-content.ts';
 import { describeSenderClaim, type DisplayedSenderConfidence } from '../../agent/untrusted-content.ts';
 import type { CommandContext } from '../command-registry.ts';
-import { requireYesFlag, stripYesFlag } from './confirmation.ts';
+import { readRefusal } from '@goodvibes-jev/engine/errors';
+import { commandRefusal, requireYesFlag, stripYesFlag } from './confirmation.ts';
 import { EmailService } from '@goodvibes-jev/engine/platform/platform/email';
 import { nodeEmailTransport } from '@goodvibes-jev/engine/platform/platform/email/node';
 import { requireSecretsManager } from './runtime-services.ts';
@@ -233,15 +234,13 @@ async function handleSet(
   const rawValue = rawArgs.slice(1).join(' ');
 
   if (!rawKey) {
-    ctx.print(`Usage: /email set <field> <value> [--yes]\nFields: ${MAILBOX_FIELD_LIST} (password needs --yes)`);
-    return;
+    throw commandRefusal(`Usage: /email set <field> <value> [--yes]\nFields: ${MAILBOX_FIELD_LIST} (password needs --yes)`);
   }
 
   // Accepts `imap.host`, `surfaces.email.imap.host`, and the older `imapHost`.
   const field = resolveMailboxField(rawKey);
   if (field === null) {
-    ctx.print(`Unknown mailbox field: ${rawKey}\nFields: ${MAILBOX_FIELD_LIST} (password needs --yes)`);
-    return;
+    throw commandRefusal(`Unknown mailbox field: ${rawKey}\nFields: ${MAILBOX_FIELD_LIST} (password needs --yes)`);
   }
   const configKey = MAILBOX_FIELDS[field];
 
@@ -249,8 +248,7 @@ async function handleSet(
   // one, so it is never typed into the command line or kept in input history.
   const maskedPasswordEntry = field === 'password' && rawValue === '' && ctx.beginConcealedInput !== undefined;
   if (rawValue === '' && !maskedPasswordEntry) {
-    ctx.print(`Usage: /email set ${configKey} <value>\nValue is required.`);
-    return;
+    throw commandRefusal(`Usage: /email set ${configKey} <value>\nValue is required.`);
   }
 
   const cm = ctx.platform.configManager as unknown as {
@@ -336,8 +334,7 @@ async function handleSend(
 
   const sendArgs = parseSendArgs(remaining);
   if (!sendArgs) {
-    ctx.print('Usage: /email send <to> <subject words...> [-- <body words...>] --yes\nRecipient and subject are required.');
-    return;
+    throw commandRefusal('Usage: /email send <to> <subject words...> [-- <body words...>] --yes\nRecipient and subject are required.');
   }
 
   const { to, subject, body } = sendArgs;
@@ -424,11 +421,12 @@ export function registerEmailRuntimeCommands(registry: CommandRegistry): void {
           return;
         }
 
-        ctx.print('Usage: /email status | config | set <key> <value> [--yes] | check [n] | send <to> <subject...> [-- <body...>] --yes');
+        throw commandRefusal('Usage: /email status | config | set <key> <value> [--yes] | check [n] | send <to> <subject...> [-- <body...>] --yes');
       } catch (err) {
         // MIN-3: print config/validation errors as plain language, never a raw exception
+        if (readRefusal(err)) throw err;
         const msg = err instanceof Error ? err.message : String(err);
-        ctx.print(`Email error: ${msg}`);
+        throw commandRefusal(`Email error: ${msg}`, undefined, 'COMMAND_FAILED');
       }
     },
   }, EMAIL_VERBS));

@@ -29,6 +29,7 @@ import {
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { resolveCommandFilePath } from './agent-local-library-args.ts';
 import { getMemorySpine as findMemorySpine } from './recall-query.ts';
+import { commandRefusal } from './confirmation.ts';
 
 /** Relative to the project working directory, inside the project's own control directory. */
 const MEMORY_PROJECTION_DIR_DEFAULT = '.goodvibes/memory/projection';
@@ -57,8 +58,7 @@ function getMemorySpine(context: CommandContext): ReturnType<typeof findMemorySp
 /** True (after printing why) when the model ran a verb that only the owner may start. */
 function refuseWhenModelRun(verb: string, effect: string, context: CommandContext): boolean {
   if (context.invokedByModel !== true) return false;
-  context.print(`Refused: /memory files ${verb} ${effect}, so it only counts when you type it yourself. Nothing was changed. /memory files sync and review are open to the model.`);
-  return true;
+  throw commandRefusal(`Refused: /memory files ${verb} ${effect}, so it only counts when you type it yourself. Nothing was changed. /memory files sync and review are open to the model.`);
 }
 
 export async function handleRecallFilesSync(args: string[], context: CommandContext): Promise<void> {

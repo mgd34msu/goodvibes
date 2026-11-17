@@ -6,6 +6,7 @@ import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/r
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { VALID_CLASSES, VALID_SCOPES, isValidClass, isValidScope, readRecallFlags, resolveConfinedBundlePath, type RecallFlagKind } from './recall-shared.js';
 import { afterMemory, mutationArguments, type RecallQueryContext } from './recall-query.js';
+import { commandRefusal } from './command-confirmation.js';
 function isMemoryBundle(value: unknown): value is MemoryBundle {
   if (typeof value !== 'object' || value === null) return false;
   const bundle = value as Record<string, unknown>;
@@ -72,10 +73,7 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
       return;
     }
     if (!parsed.yes) {
-      context.print(
-        `Refusing to export durable memory bundle to ${pathArg} without --yes.\nUsage: /${presentation.command} export <path> [--scope <scope>] [--cls <class>] --yes`,
-      );
-      return;
+      throw commandRefusal(`Refusing to export durable memory bundle to ${pathArg} without --yes.\nUsage: /${presentation.command} export <path> [--scope <scope>] [--cls <class>] --yes`);
     }
     const filter: MemorySearchFilter = {};
     const scope = flags.values.get('--scope');
@@ -118,10 +116,7 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
       return;
     }
     if (!parsed.yes) {
-      context.print(
-        `Refusing to import durable memory bundle from ${pathArg} without --yes.\nUsage: /${presentation.command} import <path> --yes`,
-      );
-      return;
+      throw commandRefusal(`Refusing to import durable memory bundle from ${pathArg} without --yes.\nUsage: /${presentation.command} import <path> --yes`);
     }
     const targetPath = bundlePath(pathArg, context);
     if (targetPath === undefined) return;
@@ -165,10 +160,7 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
       return;
     }
     if (!parsed.yes) {
-      context.print(
-        `Refusing to export memory handoff bundle to ${pathArg} without --yes.\nUsage: /${presentation.command} handoff-export <path> [--scope <scope>] --yes`,
-      );
-      return;
+      throw commandRefusal(`Refusing to export memory handoff bundle to ${pathArg} without --yes.\nUsage: /${presentation.command} handoff-export <path> [--scope <scope>] --yes`);
     }
     const scopeRaw = flags.values.get('--scope') ?? 'team';
     if (!isValidScope(scopeRaw)) {

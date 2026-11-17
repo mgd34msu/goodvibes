@@ -3,7 +3,7 @@ import type { CliCommandRuntime } from '../../cli/management.ts';
 import { handleBundleCommand } from '../../cli/bundle-command.ts';
 import { parseGoodVibesCli } from '../../cli/parser.ts';
 import { requireShellPaths } from './runtime-services.ts';
-import { requireYesFlag, stripYesFlag } from './confirmation.ts';
+import { commandRefusal, requireYesFlag, stripYesFlag } from './confirmation.ts';
 
 function bundleUsageFor(subcommand: string | undefined): string {
   if (subcommand === 'export') return '/bundle export [path] --yes';
@@ -51,8 +51,7 @@ export function registerSupportBundleRuntimeCommands(registry: CommandRegistry):
       try {
         result = await handleBundleCommand(runtime);
       } catch (error) {
-        ctx.print(`Could not complete bundle operation: ${error instanceof Error ? error.message : String(error)}`);
-        return;
+        throw commandRefusal(`Could not complete bundle operation: ${error instanceof Error ? error.message : String(error)}`);
       }
       ctx.print(result.output);
     },

@@ -39,6 +39,7 @@ import type { CommandContext } from '../command-registry.ts';
 import { requireShellPaths } from './runtime-services.ts';
 import { executeConfirmedOperatorAction } from './operator-actions-runtime.ts';
 import { runRoutineSchedulePromotion } from './routines-runtime.ts';
+import { commandRefusal } from './confirmation.ts';
 
 function formatNextRun(nextRunAt?: number): string {
   return nextRunAt ? new Date(nextRunAt).toLocaleString() : 'n/a';
@@ -59,8 +60,7 @@ async function printScheduleList(ctx: CommandContext): Promise<void> {
   const connection = resolveAgentConnectedHostConnection(ctx.platform.configManager, shellPaths.homeDirectory);
   const fetched = await fetchLiveSchedules(connection);
   if (!fetched.ok) {
-    ctx.print(`Could not reach the connected host for schedules: ${fetched.error ?? 'unknown error'}`);
-    return;
+    throw commandRefusal(`Could not reach the connected host for schedules: ${fetched.error ?? 'unknown error'}`);
   }
   if (fetched.schedules.length === 0) {
     ctx.print(
@@ -119,8 +119,7 @@ async function promoteRoutineSchedule(args: readonly string[], ctx: CommandConte
   const shellPaths = requireShellPaths(ctx);
   const routine = AgentRoutineRegistry.fromShellPaths(shellPaths).get(parsed.routineId ?? '');
   if (!routine) {
-    ctx.print(`Unknown Agent routine ${parsed.routineId ?? ''}`);
-    return;
+    throw commandRefusal(`Unknown Agent routine ${parsed.routineId ?? ''}`);
   }
   await runRoutineSchedulePromotion(ctx, routine, parsed);
 }
@@ -212,8 +211,7 @@ export function registerScheduleRuntimeCommands(registry: CommandRegistry): void
       if (sub === 'receipt') {
         const id = args[1];
         if (!id) {
-          ctx.print('Usage: /schedule receipt <receipt-id>');
-          return;
+          throw commandRefusal('Usage: /schedule receipt <receipt-id>');
         }
         const receipt = RoutineScheduleReceiptStore.fromShellPaths(requireShellPaths(ctx)).get(id);
         ctx.print(receipt ? formatRoutineScheduleReceipt(receipt) : `Unknown routine schedule receipt ${id}`);
@@ -228,8 +226,7 @@ export function registerScheduleRuntimeCommands(registry: CommandRegistry): void
       if (sub === 'run' || sub === 'enable' || sub === 'disable' || sub === 'delete' || sub === 'remove') {
         const scheduleId = args[1] ?? '';
         if (!scheduleId) {
-          ctx.print(`Usage: /schedule ${sub} <schedule-id> --yes`);
-          return;
+          throw commandRefusal(`Usage: /schedule ${sub} <schedule-id> --yes`);
         }
         const action = sub === 'run'
           ? 'automation.schedules.run'

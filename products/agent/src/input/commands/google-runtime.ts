@@ -47,6 +47,7 @@ import {
 } from './google-connection-actions.ts';
 import type { GoogleProgressPort, GoogleSetupPath, GoogleSetupStepSpec, GoogleStepResult } from '@goodvibes-jev/engine/platform/platform/google';
 import { getOutwardApprovalStore, listRefusedOutwardActions, takeRefusedOutwardAction, type PendingOutwardAction } from '../../trust/outward-approvals.ts';
+import { commandRefusal } from './confirmation.ts';
 
 const USAGE = [
   'Usage: /google <subcommand>',
@@ -122,8 +123,7 @@ function consentAnnouncer(ctx: CommandContext): (url: string) => void {
 async function runSetup(args: readonly string[], ctx: CommandContext): Promise<void> {
   const path = parsePath(args);
   if (path === null) {
-    ctx.print('Unknown setup path. Use /google setup --path app-password|oauth|existing-client. Nothing was run.');
-    return;
+    throw commandRefusal('Unknown setup path. Use /google setup --path app-password|oauth|existing-client. Nothing was run.');
   }
   const report = await runGoogleSetup(path, ctx, progressPort(ctx));
   ctx.print(renderGoogleSetupReport(report));

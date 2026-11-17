@@ -9,7 +9,7 @@ import type { CommandContext, CommandRegistry, SlashCommand } from '../command-r
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import '@goodvibes-jev/engine/platform/platform/utils';
 import '@goodvibes-jev/engine/platform/platform/utils';
-import { requireYesFlag, stripYesFlag } from './confirmation.ts';
+import { commandRefusal, requireYesFlag, stripYesFlag } from './confirmation.ts';
 import { handleContextWindowSubcommand } from './context-window.ts';
 import { isAgentHostSettingKey } from '../../config/host-settings.ts';
 import {
@@ -149,8 +149,7 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
       if (sub === 'get' || sub === 'show') {
         const key = commandArgs[1];
         if (!key) {
-          ctx.print('Usage: /settings get <key>');
-          return;
+          throw commandRefusal('Usage: /settings get <key>');
         }
         ctx.print(formatHarnessSetting(await getEffectiveHarnessSetting(ctx.platform.configManager, key)));
         return;
@@ -160,8 +159,7 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
         const key = commandArgs[1];
         const rawValue = commandArgs.slice(2).join(' ');
         if (!key || rawValue.length === 0) {
-          ctx.print('Usage: /settings set <key> <value> --yes');
-          return;
+          throw commandRefusal('Usage: /settings set <key> <value> --yes');
         }
         if (!parsed.yes) {
           requireYesFlag(ctx, `set setting ${key}`, '/settings set <key> <value> --yes');
@@ -184,8 +182,7 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
       if (sub === 'reset') {
         const key = commandArgs[1];
         if (!key) {
-          ctx.print('Usage: /settings reset <key> --yes');
-          return;
+          throw commandRefusal('Usage: /settings reset <key> --yes');
         }
         if (!parsed.yes) {
           requireYesFlag(ctx, `reset setting ${key}`, '/settings reset <key> --yes');

@@ -14,14 +14,15 @@ import {
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { parseAgentLocalLibraryArgs } from './agent-local-library-args.ts';
 import { requireShellPaths } from './runtime-services.ts';
+import { commandRefusal } from './confirmation.ts';
+import { readRefusal } from '@goodvibes-jev/engine/errors';
 
 const VIBE_VALUE_FLAGS = ['name', 'description'] as const;
 
-function printError(ctx: CommandContext, error: unknown): void {
-  ctx.print([
-    'Error',
-    `  message ${error instanceof Error ? error.message : String(error)}`,
-  ].join('\n'));
+/** A failed step is the command's failed result: a refusal passes through, anything else is reported as failed. */
+function printError(_ctx: CommandContext, error: unknown): never {
+  if (readRefusal(error)) throw error;
+  throw commandRefusal(`Error: ${error instanceof Error ? error.message : String(error)}`, undefined, 'COMMAND_FAILED');
 }
 
 function usage(): string {
@@ -111,8 +112,7 @@ export function registerVibeRuntimeCommands(registry: CommandRegistry): void {
             return;
           }
           if (ctx.invokedByModel === true && parsed.flags.has('review')) {
-            ctx.print('Refused: marking a persona reviewed is the owner\'s decision that its text may reach the prompt, so it only counts when you type it yourself. This came from the model running a command, which is the route content that was just read would use. Nothing was imported; rerun without --review, then review it yourself with /personas review <id>.');
-            return;
+            throw commandRefusal('Refused: marking a persona reviewed is the owner\'s decision that its text may reach the prompt, so it only counts when you type it yourself. This came from the model running a command, which is the route content that was just read would use. Nothing was imported; rerun without --review, then review it yourself with /personas review <id>.');
           }
           const personaRegistry = AgentPersonaRegistry.fromShellPaths(shellPaths);
           const persona = personaRegistry.create({

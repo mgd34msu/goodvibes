@@ -9,6 +9,8 @@ import type { TaskKind } from '@goodvibes-jev/engine/platform/platform/runtime/s
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { sortUnionTasks } from './task-presentation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
+import { commandRefusal } from './command-confirmation.js';
+import { readRefusal } from '@goodvibes-jev/engine/errors';
 /** Rows `/tasks list` prints; the header total and a trailing line say how many more exist. */
 const TASK_LIST_ROWS = 20;
 interface TaskCommandContext {
@@ -77,8 +79,7 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
         if (subcommand === 'show') {
           const taskId = args[1];
           if (!taskId) {
-            ctx.print('Usage: /tasks show <taskId>');
-            return;
+            throw commandRefusal('Usage: /tasks show <taskId>');
           }
           const { found, daemonUnavailable } = await tasksClient.lookup(taskId);
           if (!found) {
@@ -92,8 +93,7 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
         if (subcommand === 'output') {
           const taskId = args[1];
           if (!taskId) {
-            ctx.print('Usage: /tasks output <taskId>');
-            return;
+            throw commandRefusal('Usage: /tasks output <taskId>');
           }
           const { found, daemonUnavailable } = await tasksClient.lookup(taskId);
           if (!found) {
@@ -122,13 +122,11 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
           const owner = args[2];
           const title = args.slice(3).join(' ').trim();
           if (!kind || !owner || !title) {
-            ctx.print('Usage: /tasks create <kind> <owner> <title...>');
-            return;
+            throw commandRefusal('Usage: /tasks create <kind> <owner> <title...>');
           }
           const validKinds = new Set(['exec', 'agent', 'acp', 'scheduler', 'daemon', 'mcp', 'plugin', 'integration']);
           if (!validKinds.has(kind)) {
-            ctx.print(`Unknown task kind: ${kind}`);
-            return;
+            throw commandRefusal(`Unknown task kind: ${kind}`);
           }
           // Created HERE on purpose: a task this command creates is one this
           // terminal's loop is expected to drive, so it belongs in the registry
@@ -194,8 +192,7 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
             const field = args[2];
             const value = args.slice(3).join(' ').trim();
             if (!field || !value) {
-              ctx.print('Usage: /tasks update <taskId> <title|description|result> <value...>');
-              return;
+              throw commandRefusal('Usage: /tasks update <taskId> <title|description|result> <value...>');
             }
             if (field !== 'title' && field !== 'description' && field !== 'result') {
               ctx.print(`Unsupported task update field: ${field}`);
@@ -213,12 +210,10 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
           if (subcommand === 'fail') {
             const errorText = args.slice(2).join(' ').trim();
             if (!errorText) {
-              ctx.print('Usage: /tasks fail <taskId> <error...>');
-              return;
+              throw commandRefusal('Usage: /tasks fail <taskId> <error...>');
             }
             opsApi.tasks.fail(taskId, { error: errorText });
-            ctx.print(`Failed task ${taskId}.`);
-            return;
+            throw commandRefusal(`Failed task ${taskId}.`);
           }
           const note = args.slice(2).join(' ').trim() || undefined;
           switch (subcommand) {
@@ -243,7 +238,8 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
               return;
           }
         } catch (error) {
-          ctx.print(summarizeError(error));
+          if (readRefusal(error)) throw error;
+          throw commandRefusal(summarizeError(error), undefined, 'COMMAND_FAILED');
         }
       },
     });

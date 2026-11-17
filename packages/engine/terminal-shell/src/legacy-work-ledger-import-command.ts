@@ -1,6 +1,7 @@
 import type { LegacyImportOperatorSession } from './legacy-work-ledger-import-operator.js';
 import type { LegacyImportEntry } from './legacy-work-ledger-import-journal.js';
 import { legacyMigrationPreparationRevision, projectLegacyImportWorks } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
+import { commandRefusal } from './command-confirmation.js';
 interface Context { print(text: string): void }
 interface Registry<T extends Context> { register(command: { name: string; description: string; usage: string; argsHint: string; handler(args: string[], context: T): Promise<void> }): void }
 const quote = (value: string): string => JSON.stringify(value).replace(/[\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`);
@@ -24,7 +25,7 @@ export function registerLegacyImportCommands<T extends Context>(registry: Regist
       const action = args[0];
       const initial = action === 'preview' || action === 'status' || action === 'submit';
       const retained = action === 'reconsider' || action === 'recover' || action === 'cancel' || action === 'restart';
-      if ((!initial && !retained) || args.length < 2 || args.length > (initial ? 2 : 3) || args.slice(1).some(arg => !arg.trim() || arg.startsWith('--'))) { context.print(`Usage: /work-import ${usage}. The host decides whether an import is admitted; payload flags cannot authorize an import.`); return; }
+      if ((!initial && !retained) || args.length < 2 || args.length > (initial ? 2 : 3) || args.slice(1).some(arg => !arg.trim() || arg.startsWith('--'))) { throw commandRefusal(`Usage: /work-import ${usage}. The host decides whether an import is admitted; payload flags cannot authorize an import.`); }
       const project = args[1]!;
       let session: LegacyImportOperatorSession | undefined;
       try {

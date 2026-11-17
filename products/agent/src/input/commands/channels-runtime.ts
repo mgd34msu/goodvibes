@@ -16,7 +16,8 @@ import {
   readAgentChannelDeliveryReceipts,
   recordAgentChannelDeliveryReceipt,
 } from '../../agent/channel-delivery-receipts.ts';
-import { requireYesFlag, stripYesFlag } from './confirmation.ts';
+import { readRefusal } from '@goodvibes-jev/engine/errors';
+import { commandRefusal, requireYesFlag, stripYesFlag } from './confirmation.ts';
 
 type ChannelFilter = 'all' | 'ready' | 'attention';
 type JsonRecord = Record<string, unknown>;
@@ -421,13 +422,11 @@ export function registerChannelsRuntimeCommands(registry: CommandRegistry): void
       if (subcommand === 'show') {
         const channelId = args[1]?.trim().toLowerCase();
         if (!channelId) {
-          ctx.print('Usage: /channels show <id>');
-          return;
+          throw commandRefusal('Usage: /channels show <id>');
         }
         const channel = channels.find((entry) => entry.id.toLowerCase() === channelId || entry.label.toLowerCase() === channelId);
         if (!channel) {
-          ctx.print(`Unknown channel ${channelId}\nUse /channels list to see available channel ids.`);
-          return;
+          throw commandRefusal(`Unknown channel ${channelId}\nUse /channels list to see available channel ids.`);
         }
         printChannelDetail(ctx.print, channel);
         return;
@@ -478,7 +477,8 @@ export function registerChannelsRuntimeCommands(registry: CommandRegistry): void
           }
           ctx.print(lines.join('\n'));
         } catch (error) {
-          ctx.print(`[channels] Send failed ${error instanceof Error ? error.message : String(error)}`);
+          if (readRefusal(error)) throw error;
+          throw commandRefusal(`[channels] Send failed ${error instanceof Error ? error.message : String(error)}`, undefined, 'COMMAND_FAILED');
         }
         return;
       }
@@ -501,8 +501,7 @@ export function registerChannelsRuntimeCommands(registry: CommandRegistry): void
       if (subcommand === 'doctor' || subcommand === 'setup') {
         const channelId = args[1]?.trim().toLowerCase();
         if (!channelId) {
-          ctx.print(`Usage: /channels ${subcommand} <id>`);
-          return;
+          throw commandRefusal(`Usage: /channels ${subcommand} <id>`);
         }
         if (subcommand === 'doctor') {
           await printReadOnlyChannelRead(ctx, 'Channel doctor', 'channels.doctor.get', { surface: channelId }, (body) => formatChannelDoctor(channelId, body));
@@ -512,7 +511,7 @@ export function registerChannelsRuntimeCommands(registry: CommandRegistry): void
         return;
       }
 
-      ctx.print('Usage: /channels [list|readiness|ready|attention|triage [limit]|guide [id]|show <id>|deliveries [limit]|send --channel <id> --message <text> --yes|accounts|policies|status|doctor <id>|setup <id>|telegram-cursor]');
+      throw commandRefusal('Usage: /channels [list|readiness|ready|attention|triage [limit]|guide [id]|show <id>|deliveries [limit]|send --channel <id> --message <text> --yes|accounts|policies|status|doctor <id>|setup <id>|telegram-cursor]');
     },
   });
 }

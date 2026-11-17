@@ -9,7 +9,7 @@ import {
 } from '../../agent/operator-actions.ts';
 import { resolveAgentConnectedHostConnection } from '../../agent/routine-schedule-promotion.ts';
 import { requireShellPaths } from './runtime-services.ts';
-import { stripYesFlag } from './confirmation.ts';
+import { commandRefusal, stripYesFlag } from './confirmation.ts';
 
 interface OperatorActionOptionParse {
   readonly note?: string;
@@ -67,18 +67,15 @@ export async function executeConfirmedOperatorAction(
     remember: options.remember,
   });
   if (!request.ok) {
-    ctx.print(request.error);
-    return;
+    throw commandRefusal(request.error, undefined, 'USAGE');
   }
   const requestSummary = `/${action} ${targetId}`;
-  if (!parsed.yes) {
-    ctx.print(`${formatOperatorActionPreview(request, requestSummary)}\nUsage: ${usage}`);
-    return;
-  }
+  if (!parsed.yes) throw commandRefusal(formatOperatorActionPreview(request, requestSummary), `Usage: ${usage}`, 'CONFIRMATION_REQUIRED');
   const shellPaths = requireShellPaths(ctx);
   const connection = resolveAgentConnectedHostConnection(ctx.platform.configManager, shellPaths.homeDirectory);
   const result = await postOperatorAction(connection, request);
-  ctx.print(result.ok ? formatOperatorActionSuccess(connection.baseUrl, result) : formatOperatorActionFailure(result));
+  if (!result.ok) throw commandRefusal(formatOperatorActionFailure(result), undefined, 'COMMAND_FAILED');
+  ctx.print(formatOperatorActionSuccess(connection.baseUrl, result));
 }
 
 function approvalActionFromSubcommand(sub: string): OperatorActionId | null {
@@ -114,8 +111,7 @@ export async function handleApprovalOperatorAction(args: readonly string[], ctx:
   const approvalId = args[1] ?? '';
   const usage = `/approval ${sub} <approval-id> [--note <text>] [--remember|--no-remember] --yes`;
   if (!approvalId) {
-    ctx.print(`Usage: ${usage}`);
-    return true;
+    throw commandRefusal(`Usage: ${usage}`);
   }
   await executeConfirmedOperatorAction(ctx, action, 'approvalId', approvalId, args.slice(2), usage);
   return true;
@@ -136,8 +132,7 @@ export function registerOperatorActionRuntimeCommands(registry: CommandRegistry)
       const mapping = automationActionFromParts(scope, verb);
       const usage = '/automation job <run|pause|resume> <job-id> --yes | /automation run <cancel|retry> <run-id> --yes | /automation schedule <run|enable|disable|delete> <schedule-id> --yes';
       if (!mapping || !targetId) {
-        ctx.print(`Usage: ${usage}`);
-        return;
+        throw commandRefusal(`Usage: ${usage}`);
       }
       await executeConfirmedOperatorAction(ctx, mapping.action, mapping.targetField, targetId, args.slice(3), usage);
     },

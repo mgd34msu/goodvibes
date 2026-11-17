@@ -4,6 +4,8 @@ import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '../../age
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { parseAgentLocalLibraryArgs, type ParsedAgentLocalLibraryArgs } from './agent-local-library-args.ts';
 import { requireShellPaths } from './runtime-services.ts';
+import { commandRefusal } from './confirmation.ts';
+import { readRefusal } from '@goodvibes-jev/engine/errors';
 
 const PERSONA_VALUE_FLAGS = ['name', 'description', 'body', 'tags', 'triggers'] as const;
 
@@ -113,13 +115,11 @@ async function importDiscoveredPersona(args: readonly string[], ctx: CommandCont
   const parsed = parsePersonaArgs(args);
   const name = parsed.rest.join(' ').trim();
   if (!name) {
-    ctx.print('Usage: /personas import-discovered <name> [--use] --yes');
-    return;
+    throw commandRefusal('Usage: /personas import-discovered <name> [--use] --yes');
   }
   const discovered = findDiscoveredPersona(await discoverPersonas(requireShellPaths(ctx)), name);
   if (!discovered) {
-    ctx.print(`Unknown discovered Agent persona ${name}\nRun /personas discover to inspect available persona files.`);
-    return;
+    throw commandRefusal(`Unknown discovered Agent persona ${name}\nRun /personas discover to inspect available persona files.`);
   }
   if (!parsed.yes) {
     ctx.print([
@@ -152,11 +152,10 @@ function requiredFlag(flags: ReadonlyMap<string, string>, key: string): string {
   return value;
 }
 
-function printError(ctx: CommandContext, error: unknown): void {
-  ctx.print([
-    'Error',
-    `  message ${error instanceof Error ? error.message : String(error)}`,
-  ].join('\n'));
+/** A failed step is the command's failed result: a refusal passes through, anything else is reported as failed. */
+function printError(_ctx: CommandContext, error: unknown): never {
+  if (readRefusal(error)) throw error;
+  throw commandRefusal(`Error: ${error instanceof Error ? error.message : String(error)}`, undefined, 'COMMAND_FAILED');
 }
 
 export function registerPersonasRuntimeCommands(registry: CommandRegistry): void {
@@ -190,8 +189,7 @@ export function registerPersonasRuntimeCommands(registry: CommandRegistry): void
         if (sub === 'show') {
           const id = args[1];
           if (!id) {
-            ctx.print('Usage: /personas show <id>');
-            return;
+            throw commandRefusal('Usage: /personas show <id>');
           }
           const snapshot = registryStore.snapshot();
           const persona = registryStore.get(id);
@@ -216,8 +214,7 @@ export function registerPersonasRuntimeCommands(registry: CommandRegistry): void
         if (sub === 'update') {
           const id = args[1];
           if (!id) {
-            ctx.print('Usage: /personas update <id> [--name ...] [--description ...] [--body ...]');
-            return;
+            throw commandRefusal('Usage: /personas update <id> [--name ...] [--description ...] [--body ...]');
           }
           const parsed = parsePersonaArgs(args.slice(2));
           const updated = registryStore.update(id, {
@@ -234,8 +231,7 @@ export function registerPersonasRuntimeCommands(registry: CommandRegistry): void
         if (sub === 'use') {
           const id = args[1];
           if (!id) {
-            ctx.print('Usage: /personas use <id>');
-            return;
+            throw commandRefusal('Usage: /personas use <id>');
           }
           const persona = registryStore.setActive(id);
           ctx.print(`Active Agent persona: ${persona.name}\n${formatPersonaReceipt('Active Agent persona', persona)}`);
@@ -254,12 +250,10 @@ export function registerPersonasRuntimeCommands(registry: CommandRegistry): void
         if (sub === 'review') {
           const id = args[1];
           if (!id) {
-            ctx.print('Usage: /personas review <id>');
-            return;
+            throw commandRefusal('Usage: /personas review <id>');
           }
           if (ctx.invokedByModel === true) {
-            ctx.print('Refused: marking a persona reviewed is the owner\'s decision that its text may reach the prompt, so it only counts when you type it yourself. This came from the model running a command, which is the route content that was just read would use.');
-            return;
+            throw commandRefusal('Refused: marking a persona reviewed is the owner\'s decision that its text may reach the prompt, so it only counts when you type it yourself. This came from the model running a command, which is the route content that was just read would use.');
           }
           const persona = registryStore.markReviewed(id);
           ctx.print(formatPersonaReceipt('Reviewed Agent persona', persona));
@@ -268,8 +262,7 @@ export function registerPersonasRuntimeCommands(registry: CommandRegistry): void
         if (sub === 'stale') {
           const id = args[1];
           if (!id) {
-            ctx.print('Usage: /personas stale <id> <reason...>');
-            return;
+            throw commandRefusal('Usage: /personas stale <id> <reason...>');
           }
           const persona = registryStore.markStale(id, args.slice(2).join(' '));
           ctx.print(formatPersonaReceipt('Marked Agent persona stale', persona));
@@ -279,18 +272,16 @@ export function registerPersonasRuntimeCommands(registry: CommandRegistry): void
           const parsed = parsePersonaArgs(args.slice(1));
           const id = parsed.rest[0];
           if (!id) {
-            ctx.print('Usage: /personas delete <id> --yes');
-            return;
+            throw commandRefusal('Usage: /personas delete <id> --yes');
           }
           if (!parsed.yes) {
-            ctx.print(`Refusing to delete Agent persona ${id} without --yes.`);
-            return;
+            throw commandRefusal(`Refusing to delete Agent persona ${id} without --yes.`);
           }
           const removed = registryStore.deletePersona(id);
           ctx.print(formatPersonaReceipt('Deleted Agent persona', removed));
           return;
         }
-        ctx.print('Usage: /personas [list|discover|import-discovered|search <query>|show <id>|create|update|use|active|clear|review|stale|delete]');
+        throw commandRefusal('Usage: /personas [list|discover|import-discovered|search <query>|show <id>|create|update|use|active|clear|review|stale|delete]');
       } catch (error) {
         printError(ctx, error);
       }

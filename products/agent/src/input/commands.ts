@@ -52,6 +52,7 @@ import { registerCalendarRuntimeCommands } from './commands/calendar-runtime.ts'
 import { registerGoogleRuntimeCommands } from './commands/google-runtime.ts';
 import { registerUpdateCommand } from './commands/update-runtime.ts';
 import { registerPaymentCardCommands } from './commands/payment-card-intake.ts';
+import { declareCommandVerbs, SHARED_COMMAND_VERBS } from './commands/command-verbs.ts';
 
 function registerAgentMemoryCommand(registry: CommandRegistry): void {
   registry.register({
@@ -127,4 +128,10 @@ export function registerBuiltinCommands(registry: CommandRegistry): void {
 
   // ── /knowledge ───────────────────────────────────────────────────────────
   registry.register(knowledgeCommand);
+
+  // Shared commands state which of their verbs only read; the model's command runner reads it.
+  for (const [name, verbs] of Object.entries(SHARED_COMMAND_VERBS)) {
+    const command = registry.get(name);
+    if (command) declareCommandVerbs(command, verbs);
+  }
 }

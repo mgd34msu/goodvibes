@@ -19,8 +19,9 @@ import {
 } from '../../agent/runtime-profile.ts';
 import { formatAgentRecordSource } from '../../agent/record-labels.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { requireYesFlag, stripYesFlag } from './confirmation.ts';
+import { commandRefusal, requireYesFlag, stripYesFlag } from './confirmation.ts';
 import { requireShellPaths } from './runtime-services.ts';
+import { readRefusal } from '@goodvibes-jev/engine/errors';
 
 function parseFlag(args: readonly string[], name: string): string | undefined {
   const index = args.indexOf(name);
@@ -162,8 +163,7 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
         if (sub === 'show' || sub === 'path' || sub === 'home') {
           const name = commandArgs[1];
           if (!name) {
-            ctx.print('Usage: /agent-profile show <name>');
-            return;
+            throw commandRefusal('Usage: /agent-profile show <name>');
           }
           ctx.print(renderProfileDetail(homeDirectory, name));
           return;
@@ -208,8 +208,7 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
         if (sub === 'use' || sub === 'select' || sub === 'switch') {
           const name = commandArgs[1];
           if (!name) {
-            ctx.print('Usage: /agent-profile use <name> --yes');
-            return;
+            throw commandRefusal('Usage: /agent-profile use <name> --yes');
           }
           if (!parsed.yes) {
             requireYesFlag(ctx, `set default Agent profile ${name}`, '/agent-profile use <name> --yes');
@@ -235,8 +234,7 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
           if (mode === 'show' || mode === 'preview') {
             const templateId = commandArgs[2];
             if (!templateId) {
-              ctx.print('Usage: /agent-profile template show <id>');
-              return;
+              throw commandRefusal('Usage: /agent-profile template show <id>');
             }
             ctx.print(renderTemplatePreview(homeDirectory, templateId));
             return;
@@ -245,8 +243,7 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
             const templateId = commandArgs[2];
             const pathArg = commandArgs[3];
             if (!templateId || !pathArg) {
-              ctx.print('Usage: /agent-profile template export <id> <path> [--include-vibe] --yes');
-              return;
+              throw commandRefusal('Usage: /agent-profile template export <id> <path> [--include-vibe] --yes');
             }
             if (!parsed.yes) {
               requireYesFlag(ctx, `export Agent starter template ${templateId}`, '/agent-profile template export <id> <path> [--include-vibe] --yes');
@@ -269,8 +266,7 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
           if (mode === 'import') {
             const pathArg = commandArgs[2];
             if (!pathArg) {
-              ctx.print('Usage: /agent-profile template import <path> [--replace] --yes');
-              return;
+              throw commandRefusal('Usage: /agent-profile template import <path> [--replace] --yes');
             }
             if (!parsed.yes) {
               requireYesFlag(ctx, 'import Agent starter template', '/agent-profile template import <path> [--replace] --yes');
@@ -284,8 +280,7 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
           if (mode === 'from-discovered' || mode === 'import-discovered') {
             const templateId = commandArgs[2];
             if (!templateId) {
-              ctx.print('Usage: /agent-profile template from-discovered <id> [--name <name>] [--description <summary>] [--persona <name>] [--skills all|name,name] [--routines all|name,name] [--include-vibe] [--replace] --yes');
-              return;
+              throw commandRefusal('Usage: /agent-profile template from-discovered <id> [--name <name>] [--description <summary>] [--persona <name>] [--skills all|name,name] [--routines all|name,name] [--include-vibe] [--replace] --yes');
             }
             if (!parsed.yes) {
               requireYesFlag(ctx, `create Agent starter template ${templateId} from discovered behavior`, '/agent-profile template from-discovered <id> --yes');
@@ -311,16 +306,14 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
             ].filter(Boolean).join('\n'));
             return;
           }
-          ctx.print('Usage: /agent-profile template [show <id>|export <id> <path> [--include-vibe] --yes|import <path> --yes|from-discovered <id> --yes]');
-          return;
+          throw commandRefusal('Usage: /agent-profile template [show <id>|export <id> <path> [--include-vibe] --yes|import <path> --yes|from-discovered <id> --yes]');
         }
 
         if (sub === 'create') {
           const name = commandArgs[1];
           const templateId = parseFlag(commandArgs, '--template') ?? parseFlag(commandArgs, '--starter');
           if (!name) {
-            ctx.print('Usage: /agent-profile create <name> [--template <id>] --yes');
-            return;
+            throw commandRefusal('Usage: /agent-profile create <name> [--template <id>] --yes');
           }
           if (!parsed.yes) {
             requireYesFlag(ctx, `create Agent profile ${name}`, '/agent-profile create <name> [--template <id>] --yes');
@@ -343,8 +336,7 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
         if (sub === 'create-from-discovered' || sub === 'create-discovered') {
           const profileName = commandArgs[1];
           if (!profileName) {
-            ctx.print('Usage: /agent-profile create-from-discovered <name> [--template-id <id>] [--profile-name <display>] [--description <summary>] [--persona <name>] [--skills all|name,name] [--routines all|name,name] [--include-vibe] [--replace] --yes');
-            return;
+            throw commandRefusal('Usage: /agent-profile create-from-discovered <name> [--template-id <id>] [--profile-name <display>] [--description <summary>] [--persona <name>] [--skills all|name,name] [--routines all|name,name] [--include-vibe] [--replace] --yes');
           }
           if (!parsed.yes) {
             requireYesFlag(ctx, `create Agent profile ${profileName} from discovered behavior`, '/agent-profile create-from-discovered <name> --yes');
@@ -377,8 +369,7 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
         if (sub === 'delete') {
           const name = commandArgs[1];
           if (!name) {
-            ctx.print('Usage: /agent-profile delete <name> --yes');
-            return;
+            throw commandRefusal('Usage: /agent-profile delete <name> --yes');
           }
           if (!parsed.yes) {
             requireYesFlag(ctx, `delete Agent profile ${name}`, '/agent-profile delete <name> --yes');
@@ -388,12 +379,10 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
           return;
         }
 
-        ctx.print('Usage: /agent-profile [list|show <name>|default [<name>|clear] --yes|use <name> --yes|templates|guide|template show <id>|template export <id> <path> [--include-vibe] --yes|template import <path> [--replace] --yes|create <name> [--template <id>] --yes|create-from-discovered <name> [--include-vibe] --yes|delete <name> --yes]');
+        throw commandRefusal('Usage: /agent-profile [list|show <name>|default [<name>|clear] --yes|use <name> --yes|templates|guide|template show <id>|template export <id> <path> [--include-vibe] --yes|template import <path> [--replace] --yes|create <name> [--template <id>] --yes|create-from-discovered <name> [--include-vibe] --yes|delete <name> --yes]');
       } catch (error) {
-        ctx.print([
-          'Error',
-          `  message ${error instanceof Error ? error.message : String(error)}`,
-        ].join('\n'));
+        if (readRefusal(error)) throw error;
+        throw commandRefusal(`Error: ${error instanceof Error ? error.message : String(error)}`, undefined, 'COMMAND_FAILED');
       }
     },
   });

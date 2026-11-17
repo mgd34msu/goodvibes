@@ -10,6 +10,7 @@ import {
   type RecallFlagKind,
 } from './recall-shared.js';
 import { afterMemory, mutationArguments, type RecallQueryContext } from './recall-query.js';
+import { commandRefusal } from './command-confirmation.js';
 const REVIEW_FLAGS: Readonly<Record<string, RecallFlagKind>> = { '--confidence': 'word', '--by': 'text', '--reason': 'text' };
 const EXPLAIN_FLAGS: Readonly<Record<string, RecallFlagKind>> = { '--scope': 'words' };
 const QUEUE_FLAGS: Readonly<Record<string, RecallFlagKind>> = { '--scope': 'word' };
@@ -155,10 +156,7 @@ export function createRecallReviewCommands<Context extends RecallQueryContext>(
       return;
     }
     if (!parsed.yes) {
-      context.print(
-        `Refusing to promote durable memory record ${id} to ${scope} scope without --yes.\nUsage: /${presentation.command} promote <id> <scope> --yes`,
-      );
-      return;
+      throw commandRefusal(`Refusing to promote durable memory record ${id} to ${scope} scope without --yes.\nUsage: /${presentation.command} promote <id> <scope> --yes`);
     }
     return afterMemory(memory.update(id, { scope }), (record) => {
       if (!record) {

@@ -1,7 +1,7 @@
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ShellModeManagerService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { requireYesFlag, stripYesFlag } from './command-confirmation.js';
+import { commandRefusal, requireYesFlag, stripYesFlag } from './command-confirmation.js';
 import type { TerminalSlashCommand } from './command-registry.js';
 interface InteractionModeContext {
   readonly ops: { readonly modeManager?: ShellModeManagerService | null | undefined };
@@ -93,8 +93,7 @@ export function createInteractionModeCommand<Context extends InteractionModeCont
         const domain = commandArgs[1];
         const verbosity = commandArgs[2];
         if (!domain || !verbosity) {
-          ctx.print('Usage: /mode set-domain <domain> <minimal|normal|verbose>' + (policy.confirmMutations ? ' --yes' : ''));
-          return;
+          throw commandRefusal('Usage: /mode set-domain <domain> <minimal|normal|verbose>' + (policy.confirmMutations ? ' --yes' : ''));
         }
         if (verbosity !== 'minimal' && verbosity !== 'normal' && verbosity !== 'verbose') {
           ctx.print(policy.invalidVerbosity(verbosity));

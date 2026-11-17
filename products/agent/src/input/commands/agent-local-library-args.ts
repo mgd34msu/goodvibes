@@ -1,5 +1,6 @@
 import type { CommandContext } from '../command-registry.ts';
 import { requireShellPaths } from './runtime-services.ts';
+import { commandRefusal } from './confirmation.ts';
 
 export interface ParsedAgentLocalLibraryArgs {
   readonly rest: readonly string[];
@@ -64,8 +65,7 @@ export function resolveCommandFilePath(ctx: CommandContext, raw: string, purpose
   const shellPaths = requireShellPaths(ctx);
   const resolved = shellPaths.resolveWorkspacePath(raw);
   if (ctx.invokedByModel === true && !shellPaths.isWithinWorkingDirectory(resolved)) {
-    ctx.print(`Refused: ${raw} is outside the workspace (${shellPaths.workingDirectory}). A command run by the model can ${purpose} only inside the workspace; the owner can type the command with that path.`);
-    return null;
+    throw commandRefusal(`Refused: ${raw} is outside the workspace (${shellPaths.workingDirectory}). A command run by the model can ${purpose} only inside the workspace; the owner can type the command with that path.`);
   }
   return resolved;
 }

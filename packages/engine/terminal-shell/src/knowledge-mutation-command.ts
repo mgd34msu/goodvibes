@@ -1,5 +1,7 @@
 import type { KnowledgeApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { readRefusal } from '@goodvibes-jev/engine/errors';
 import { readFlag, readStringListFlag, readJsonObjectFlag, positionalArgs } from './command-arguments.js';
+import { commandRefusal } from './command-confirmation.js';
 export const KNOWLEDGE_REVIEW_ACTIONS = ['accept', 'reject', 'resolve', 'reopen', 'edit', 'forget'] as const;
 export type KnowledgeReviewAction = (typeof KNOWLEDGE_REVIEW_ACTIONS)[number];
 export type KnowledgeMutationVerb = 'ingest-url' | 'import-bookmarks' | 'import-urls' | 'review-issue' | 'reindex' | 'consolidate';
@@ -22,10 +24,8 @@ export function printKnowledgeIngestResult(
 ): void {
   const subject = source.canonicalUri ?? source.sourceUri ?? fallbackSubject;
   if (source.status === 'failed') {
-    print(`[knowledge] Ingest failed ${source.id} ${subject}`);
-    print(`  reason: ${source.crawlError ?? 'no reason recorded'}`);
-    print('  the source is stored with status failed; no content was added to knowledge');
-    return;
+    throw commandRefusal(`[knowledge] Ingest failed ${source.id} ${subject}: ${source.crawlError ?? 'no reason recorded'}. The source is stored with status failed; no content was added to knowledge`,
+      undefined, 'COMMAND_FAILED');
   }
   print(`[knowledge] Ingested ${source.id} ${subject}`);
 }
@@ -46,9 +46,9 @@ export async function handleKnowledgeMutationCommand(
   try {
     return await dispatchKnowledgeMutation(sub, rest, print, ports, presentation);
   } catch (error) {
-    // Every verb reports a failure the same way instead of some printing and some throwing.
-    print(`[knowledge] ${ports.describeError(error)}`);
-    return true;
+    // Every verb reports a failure the same way: as the command's failed result, never as printed text.
+    if (readRefusal(error)) throw error;
+    throw commandRefusal(`[knowledge] ${ports.describeError(error)}`, undefined, 'COMMAND_FAILED');
   }
 }
 async function dispatchKnowledgeMutation(
@@ -91,8 +91,7 @@ async function dispatchKnowledgeMutation(
     case 'import-bookmarks': {
       const [path] = positionalArgs(rest);
       if (!path) {
-        print('[knowledge] Usage: /knowledge import-bookmarks <path>' + presentation.confirmationSuffix);
-        return true;
+        throw commandRefusal('[knowledge] Usage: /knowledge import-bookmarks <path>' + presentation.confirmationSuffix);
       }
       if (!ports.allow('import-bookmarks', path, '/knowledge import-bookmarks <path>')) return true;
       const result = await ports.bookmarksFile({ path, sessionId: ports.sessionId() });
@@ -105,8 +104,7 @@ async function dispatchKnowledgeMutation(
     case 'import-urls': {
       const [path] = positionalArgs(rest);
       if (!path) {
-        print('[knowledge] Usage: /knowledge import-urls <path>' + presentation.confirmationSuffix);
-        return true;
+        throw commandRefusal('[knowledge] Usage: /knowledge import-urls <path>' + presentation.confirmationSuffix);
       }
       if (!ports.allow('import-urls', path, '/knowledge import-urls <path>')) return true;
       const result = await ports.urlsFile({ path, sessionId: ports.sessionId() });
@@ -130,10 +128,7 @@ async function dispatchKnowledgeMutation(
       if (!ports.allow('review-issue', issueId, '/knowledge review-issue <issueId> <action> [--reviewer <name>] [--value <json-object>]'))
         return true;
       const value = readJsonObjectFlag(rest, '--value');
-      if (value === null) {
-        print('[knowledge] --value must be a JSON object.');
-        return true;
-      }
+      if (value === null) throw commandRefusal('[knowledge] --value must be a JSON object.', undefined, 'USAGE');
       try {
         const result = await ports.review({
           issueId,
@@ -158,7 +153,7 @@ async function dispatchKnowledgeMutation(
           ].join('\n'),
         );
       } catch (error) {
-        print(`[knowledge] ${ports.describeError(error)}`);
+        throw commandRefusal(`[knowledge] ${ports.describeError(error)}`, undefined, 'COMMAND_FAILED');
       }
       break;
     }
@@ -184,8 +179,7 @@ async function dispatchKnowledgeMutation(
       if (!ports.allow('consolidate', undefined, '/knowledge consolidate [light|deep]')) return true;
       const mode = (positionalArgs(rest)[0] ?? 'light').toLowerCase();
       if (mode !== 'light' && mode !== 'deep') {
-        print(`[knowledge] Unknown consolidation mode "${mode}". Usage: /knowledge consolidate [light|deep]. Nothing was run.`);
-        return true;
+        throw commandRefusal(`[knowledge] Unknown consolidation mode "${mode}". Nothing was run.`, 'Usage: /knowledge consolidate [light|deep]', 'USAGE');
       }
       const jobId = mode === 'deep' ? 'knowledge-deep-consolidation' : 'knowledge-light-consolidation';
       const run = await ports.run(jobId, { mode: 'inline' });

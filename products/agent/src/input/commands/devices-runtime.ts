@@ -5,7 +5,7 @@ import {
   deviceCapabilityConfirmation,
   runDeviceCapabilitySubcommand,
 } from '@goodvibes-jev/engine/terminal-shell/device-capabilities-command';
-import { requireYesFlag, stripYesFlag } from './confirmation.ts';
+import { commandRefusal, requireYesFlag, stripYesFlag } from './confirmation.ts';
 
 /**
  * Register /devices: the phones paired with the daemon as device nodes, the
@@ -30,7 +30,7 @@ export function registerDevicesRuntimeCommands(registry: CommandRegistry): void 
         return;
       }
       if (await runDeviceCapabilitySubcommand(line, ctx.platform.devices, (message) => ctx.print(message))) return;
-      ctx.print(`Unknown /devices subcommand: ${line[0]}. Use: ${DEVICE_CAPABILITY_USAGE}`);
+      throw commandRefusal(`Unknown /devices subcommand: ${line[0]}. Use: ${DEVICE_CAPABILITY_USAGE}`);
     },
   });
 }

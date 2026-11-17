@@ -27,6 +27,8 @@ import {
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { parseAgentLocalLibraryArgs, type ParsedAgentLocalLibraryArgs } from './agent-local-library-args.ts';
 import { requireShellPaths } from './runtime-services.ts';
+import { commandRefusal } from './confirmation.ts';
+import { readRefusal } from '@goodvibes-jev/engine/errors';
 
 const ROUTINE_VALUE_FLAGS = ['name', 'description', 'steps', 'tags', 'triggers', 'requires-env', 'requires-command', 'requires-commands'] as const;
 
@@ -158,24 +160,21 @@ function frontmatterAnyList(routine: DiscoveredRoutineRecord, keys: readonly str
   return [];
 }
 
-function printError(ctx: CommandContext, error: unknown): void {
-  ctx.print([
-    'Error',
-    `  message ${error instanceof Error ? error.message : String(error)}`,
-  ].join('\n'));
+/** A failed step is the command's failed result: a refusal passes through, anything else is reported as failed. */
+function printError(_ctx: CommandContext, error: unknown): never {
+  if (readRefusal(error)) throw error;
+  throw commandRefusal(`Error: ${error instanceof Error ? error.message : String(error)}`, undefined, 'COMMAND_FAILED');
 }
 
 async function importDiscoveredRoutine(args: readonly string[], ctx: CommandContext, routineRegistry: AgentRoutineRegistry): Promise<void> {
   const parsed = parseRoutineArgs(args);
   const name = parsed.rest.join(' ').trim();
   if (!name) {
-    ctx.print('Usage: /routines import-discovered <name> [--enabled] --yes');
-    return;
+    throw commandRefusal('Usage: /routines import-discovered <name> [--enabled] --yes');
   }
   const discovered = findDiscoveredRoutine(await discoverRoutines(requireShellPaths(ctx)), name);
   if (!discovered) {
-    ctx.print(`Unknown discovered Agent routine ${name}\nRun /routines discover to inspect available routine files.`);
-    return;
+    throw commandRefusal(`Unknown discovered Agent routine ${name}\nRun /routines discover to inspect available routine files.`);
   }
   if (!parsed.yes) {
     ctx.print([
@@ -284,8 +283,7 @@ async function promoteRoutine(args: readonly string[], routineRegistry: AgentRou
   }
   const routine = routineRegistry.get(parsed.routineId ?? '');
   if (!routine) {
-    ctx.print(`Unknown Agent routine: ${parsed.routineId ?? ''}`);
-    return;
+    throw commandRefusal(`Unknown Agent routine: ${parsed.routineId ?? ''}`);
   }
   await runRoutineSchedulePromotion(ctx, routine, parsed);
 }
@@ -324,8 +322,7 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
     if (sub === 'show') {
       const id = args[1];
       if (!id) {
-        ctx.print('Usage: /routines show <id>');
-        return;
+        throw commandRefusal('Usage: /routines show <id>');
       }
       const routine = routineRegistry.get(id);
       ctx.print(routine ? renderRoutine(routine) : `Unknown Agent routine: ${id}`);
@@ -345,8 +342,7 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
     if (sub === 'receipt') {
       const id = args[1];
       if (!id) {
-        ctx.print('Usage: /routines receipt <receipt-id>');
-        return;
+        throw commandRefusal('Usage: /routines receipt <receipt-id>');
       }
       const receipt = receiptStoreFromContext(ctx).get(id);
       ctx.print(receipt ? formatRoutineScheduleReceipt(receipt) : `Unknown routine schedule receipt ${id}`);
@@ -375,8 +371,7 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
     if (sub === 'update') {
       const id = args[1];
       if (!id) {
-        ctx.print('Usage: /routines update <id> [--name ...] [--description ...] [--steps ...]');
-        return;
+        throw commandRefusal('Usage: /routines update <id> [--name ...] [--description ...] [--steps ...]');
       }
       const parsed = parseRoutineArgs(args.slice(2));
       const existing = routineRegistry.get(id);
@@ -405,8 +400,7 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
     if (sub === 'enable' || sub === 'disable') {
       const id = args[1];
       if (!id) {
-        ctx.print(`Usage: /routines ${sub} <id>`);
-        return;
+        throw commandRefusal(`Usage: /routines ${sub} <id>`);
       }
       if (sub === 'enable' && ctx.invokedByModel === true && routineRegistry.get(id)?.reviewState !== 'reviewed') {
         ctx.print(`Not enabled: Agent routine ${id} has not been reviewed, and only the owner typing the command can enable an unreviewed routine. Next: ask the owner to run /routines show ${id}, then /routines review ${id}.`);
@@ -419,13 +413,11 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
     if (sub === 'start' || sub === 'run') {
       const id = args[1];
       if (!id) {
-        ctx.print(`Usage: /routines ${sub} <id>`);
-        return;
+        throw commandRefusal(`Usage: /routines ${sub} <id>`);
       }
       const found = routineRegistry.get(id);
       if (!found) {
-        ctx.print(`Unknown Agent routine ${id}. List them with /routines list.`);
-        return;
+        throw commandRefusal(`Unknown Agent routine ${id}. List them with /routines list.`);
       }
       const readiness = evaluateAgentRoutineReadiness(found);
       const readinessLine = `  readiness: ${readiness.ready ? 'ready' : `needs setup (${readiness.missing.map(formatAgentSkillRequirement).join(', ')})`}`;
@@ -467,8 +459,7 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
     if (sub === 'review') {
       const id = args[1];
       if (!id) {
-        ctx.print('Usage: /routines review <id>');
-        return;
+        throw commandRefusal('Usage: /routines review <id>');
       }
       if (ctx.invokedByModel === true) {
         ctx.print(`Not reviewed: Agent routine ${id} is unchanged. Marking a routine reviewed is the owner's decision that its steps may run, and this request came from the model, the route content it just read could steer. Next: ask the owner to run /routines review ${id}.`);
@@ -481,8 +472,7 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
     if (sub === 'stale') {
       const id = args[1];
       if (!id) {
-        ctx.print('Usage: /routines stale <id> <reason...>');
-        return;
+        throw commandRefusal('Usage: /routines stale <id> <reason...>');
       }
       const routine = routineRegistry.markStale(id, args.slice(2).join(' '));
       ctx.print(formatRoutineReceipt('Marked Agent routine stale', routine));
@@ -496,18 +486,16 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
       const parsed = parseRoutineArgs(args.slice(1));
       const id = parsed.rest[0];
       if (!id) {
-        ctx.print('Usage: /routines delete <id> --yes');
-        return;
+        throw commandRefusal('Usage: /routines delete <id> --yes');
       }
       if (!parsed.yes) {
-        ctx.print(`Refusing to delete Agent routine ${id} without --yes.`);
-        return;
+        throw commandRefusal(`Refusing to delete Agent routine ${id} without --yes.`);
       }
       const removed = routineRegistry.deleteRoutine(id);
       ctx.print(formatRoutineReceipt('Deleted Agent routine', removed));
       return;
     }
-    ctx.print('Usage: /routines [list|enabled|attention|discover|import-discovered|search|show|receipts|reconcile|receipt|create|update|enable|disable|start|review|stale|promote|delete]');
+    throw commandRefusal('Usage: /routines [list|enabled|attention|discover|import-discovered|search|show|receipts|reconcile|receipt|create|update|enable|disable|start|review|stale|promote|delete]');
   } catch (error) {
     printError(ctx, error);
   }

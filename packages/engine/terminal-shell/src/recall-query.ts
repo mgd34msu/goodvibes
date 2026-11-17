@@ -1,6 +1,7 @@
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { MemoryRecord, MemorySearchFilter, MemoryLink } from '@goodvibes-jev/engine/platform/platform/state';
 import { VALID_CLASSES, VALID_SCOPES, isValidClass, isValidScope, readRecallFlags, temporalStatusLabel, type RecallFlagKind } from './recall-shared.js';
+import { commandRefusal } from './command-confirmation.js';
 export interface RecallQueryContext {
   readonly print: (message: string) => void;
   /** True when a model, not the owner at the keyboard, is running the command. */
@@ -256,8 +257,7 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
       return;
     }
     if (!parsed.yes) {
-      context.print(`Refusing to link memory records ${fromId} and ${toId} without --yes.\nUsage: ${usage}`);
-      return;
+      throw commandRefusal(`Refusing to link memory records ${fromId} and ${toId} without --yes.\nUsage: ${usage}`);
     }
     const link = await memory.link(fromId, toId, relation);
     if (!link) {
@@ -277,8 +277,7 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
       return;
     }
     if (!parsed.yes) {
-      context.print(`Refusing to delete durable memory record ${id} without --yes.\nUsage: ${usage}`);
-      return;
+      throw commandRefusal(`Refusing to delete durable memory record ${id} without --yes.\nUsage: ${usage}`);
     }
     return afterMemory(memory.delete(id), (removed) => {
       if (!removed) {

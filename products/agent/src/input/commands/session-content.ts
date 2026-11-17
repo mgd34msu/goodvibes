@@ -53,8 +53,7 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
     argsHint: '<name>',
     async handler(args, ctx) {
       if (!args[0]) {
-        ctx.print('Usage: /load <session-name>\nRun /sessions to list available sessions.');
-        return;
+        throw commandRefusal('Usage: /load <session-name>\nRun /sessions to list available sessions.');
       }
       const sessionManager = requireSessionManager(ctx);
       try {
@@ -85,8 +84,7 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
     argsHint: '',
     handler(args, ctx) {
       if (args.length > 0) {
-        ctx.print('Usage: /undo\n  Removes the last conversation turn. Use execution action:"recovery" for local file edit undo.');
-        return;
+        throw commandRefusal('Usage: /undo\n  Removes the last conversation turn. Use execution action:"recovery" for local file edit undo.');
       }
       if (ctx.isGenerating?.()) {
         ctx.print('A turn is still running. Stop it with Esc or let it finish, then /undo.');
@@ -109,8 +107,7 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
     argsHint: '',
     handler(args, ctx) {
       if (args.length > 0) {
-        ctx.print('Usage: /redo\n  Restores the last undone conversation turn. Use execution action:"recovery" for local file edit redo.');
-        return;
+        throw commandRefusal('Usage: /redo\n  Restores the last undone conversation turn. Use execution action:"recovery" for local file edit redo.');
       }
       if (ctx.isGenerating?.()) {
         ctx.print('A turn is still running. Stop it with Esc or let it finish, then /redo.');
@@ -132,6 +129,7 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
 }
 
 import { createSessionContentCommands } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
+import { commandRefusal } from './confirmation.ts';
 const contentCommands = createSessionContentCommands<CommandContext, ReturnType<typeof getCurrentConversationMessages>[number]>({
   paths: requireShellPaths,
   capture: getCurrentConversationMessages,

@@ -3,7 +3,7 @@ import { dirname } from 'node:path';
 import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { TerminalSlashCommand } from './command-registry.js';
-import { requireYesFlag, stripYesFlag } from './command-confirmation.js';
+import { commandRefusal, requireYesFlag, stripYesFlag } from './command-confirmation.js';
 import { switchAlwaysSpeak } from './tts-runtime-commands.js';
 import { inspectVoiceBundle, isVoiceBundleKey, readVoiceBundle, type VoiceBundle } from './voice-settings-review.js';
 interface ExperienceContext {
@@ -40,8 +40,7 @@ export function createApprovalMatrixCommand<Context extends ExperienceContext>(p
         const kind = (args[1] ?? '').toLowerCase(),
           entry = policy.matrix.find(([id]) => id === kind);
         if (!entry) {
-          ctx.print('Usage: /approval review <' + policy.matrix.map(([id]) => id).join('|') + '>');
-          return;
+          throw commandRefusal('Usage: /approval review <' + policy.matrix.map(([id]) => id).join('|') + '>');
         }
         ctx.print(['Approval Review: ' + entry[0], '  ' + entry[1], policy.related].join('\n'));
         return;
@@ -108,8 +107,7 @@ export function createVoiceExperienceCommand<Context extends ExperienceContext>(
             path = commandArgs[2];
           if (mode === 'export' || mode === 'inspect' || mode === 'import') {
             if (!path) {
-              ctx.print(`Usage: /voice bundle ${mode} <path>${mode !== 'inspect' && policy.confirmMutations ? ' --yes' : ''}`);
-              return;
+              throw commandRefusal(`Usage: /voice bundle ${mode} <path>${mode !== 'inspect' && policy.confirmMutations ? ' --yes' : ''}`);
             }
             const target = shellPaths.resolveWorkspacePath(path);
             if (mode === 'export') {

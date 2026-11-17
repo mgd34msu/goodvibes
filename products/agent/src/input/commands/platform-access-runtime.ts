@@ -7,7 +7,7 @@ import '@goodvibes-jev/engine/platform/platform/config';
 import '@/runtime/index.ts';
 import { formatAgentRecordSource } from '../../agent/record-labels.ts';
 import { requireSecretsManager, requireServiceRegistry, requireShellPaths, requireSubscriptionManager } from './runtime-services.ts';
-import { stripYesFlag } from './confirmation.ts';
+import { commandRefusal, stripYesFlag } from './confirmation.ts';
 
 interface AuthReviewBundle {
   readonly version: 1;
@@ -78,7 +78,7 @@ export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry)
         })
       )
         return;
-      ctx.print('Usage: /auth [review|show <provider>|bundle export <path> --yes|bundle inspect <path>]');
+      throw commandRefusal('Usage: /auth [review|show <provider>|bundle export <path> --yes|bundle inspect <path>]');
     },
   });
 }

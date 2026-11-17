@@ -1,6 +1,7 @@
 import { previewAgentHostPairing, unpairAgentHost } from '../../runtime/agent-host-pairing.ts';
 import { formatSetupPairing } from '../../runtime/setup-pairing-presentation.ts';
 import { isDirectOwnerCommandContext, type CommandRegistry } from '../command-registry.ts';
+import { commandRefusal } from './confirmation.ts';
 
 export function registerOnboardingRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
@@ -12,7 +13,7 @@ export function registerOnboardingRuntimeCommands(registry: CommandRegistry): vo
     async handler(args, ctx) {
       if (args[0] === 'unpair') {
         // Forgetting the credential cuts this Agent off from the host: the owner's own keystrokes only.
-        if (args.length > 1) { ctx.print('Usage: /setup unpair'); return; }
+        if (args.length > 1) { throw commandRefusal('Usage: /setup unpair'); }
         if (!isDirectOwnerCommandContext(ctx, 'setup')) {
           ctx.print('Unpairing requires the owner to type /setup unpair in the live Agent terminal. Nothing was forgotten.');
           return;
@@ -32,8 +33,7 @@ export function registerOnboardingRuntimeCommands(registry: CommandRegistry): vo
           if (arg === '--name' && !named && args[index + 1] && !args[index + 1]!.startsWith('--')) {
             named = true; name = args[++index]!; continue;
           }
-          ctx.print('Usage: /setup pair [--name <device-name>] [--apply]. --yes and inline confirmation are unsupported; apply requires fresh owner-terminal confirmation.');
-          return;
+          throw commandRefusal('Usage: /setup pair [--name <device-name>] [--apply]. --yes and inline confirmation are unsupported; apply requires fresh owner-terminal confirmation.');
         }
         if (apply && (!isDirectOwnerCommandContext(ctx, 'setup') || !ctx.beginSetupPairing)) {
           ctx.print('Pairing --apply requires the owner to type /setup pair --apply in the live Agent terminal. Model, harness and nested commands cannot grant persistent administrative access.');

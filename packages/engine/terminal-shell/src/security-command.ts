@@ -2,6 +2,7 @@ import { buildMcpAttackPathReview } from '@goodvibes-jev/engine/platform/platfor
 import type { ApiTokenAuditor } from '@goodvibes-jev/engine/platform/platform/security';
 import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
 import type { TerminalSlashCommand } from './command-registry.js';
+import { commandRefusal } from './command-confirmation.js';
 type AttackPathInput = Parameters<typeof buildMcpAttackPathReview>[0];
 /** Security reads and presentation share a flow; each shell supplies its available views and sources. */
 export function createSecurityCommand<Context extends { print(text: string): void }>(
@@ -37,8 +38,7 @@ export function createSecurityCommand<Context extends { print(text: string): voi
       if (presentation.beforeRead(args, ctx)) return;
       const subcommand = args[0]?.toLowerCase() ?? 'review';
       if (subcommand !== 'review' && subcommand !== 'attack-paths' && subcommand !== 'tokens') {
-        ctx.print(`Unknown /security subcommand: ${args[0]}\nUsage: /security [review | attack-paths | tokens]`);
-        return;
+        throw commandRefusal(`Unknown /security subcommand: ${args[0]}\nUsage: /security [review | attack-paths | tokens]`);
       }
       // Each view reads only its own sources, so a session without policy
       // state still lists tokens and attack paths.

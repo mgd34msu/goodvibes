@@ -19,6 +19,8 @@ import {
   runCalendarDisconnect,
   sourceLabel,
 } from './calendar-connect-runtime.ts';
+import { commandRefusal } from './confirmation.ts';
+import { readRefusal } from '@goodvibes-jev/engine/errors';
 
 /** Today's local calendar date, 'YYYY-MM-DD', the convention stored wall-clock times use. */
 function todayIsoDate(): string {
@@ -58,11 +60,10 @@ function registryFromContext(ctx: CommandContext): AgentCalendarRegistry {
   return AgentCalendarRegistry.fromShellPaths(requireShellPaths(ctx));
 }
 
-function printError(ctx: CommandContext, error: unknown): void {
-  ctx.print([
-    'Error',
-    `  message ${error instanceof Error ? error.message : String(error)}`,
-  ].join('\n'));
+/** A failed step is the command's failed result: a refusal passes through, anything else is reported as failed. */
+function printError(_ctx: CommandContext, error: unknown): never {
+  if (readRefusal(error)) throw error;
+  throw commandRefusal(`Error: ${error instanceof Error ? error.message : String(error)}`, undefined, 'COMMAND_FAILED');
 }
 
 function formatEventLine(e: { readonly id: string; readonly title: string; readonly start: string; readonly end?: string; readonly allDay: boolean; readonly location?: string }): string {
@@ -158,8 +159,7 @@ export async function runCalendarRuntimeCommand(args: readonly string[], ctx: Co
       const parsed = parseCalendarArgs(args.slice(1));
       const filePath = parsed.rest[0] ?? parsed.flags.get('path');
       if (!filePath) {
-        ctx.print('Usage: /calendar import <path-to-ics> [--yes]');
-        return;
+        throw commandRefusal('Usage: /calendar import <path-to-ics> [--yes]');
       }
       const sourcePath = resolveCommandFilePath(ctx, filePath, 'read');
       if (sourcePath === null) return;
@@ -235,8 +235,7 @@ export async function runCalendarRuntimeCommand(args: readonly string[], ctx: Co
       const title = parsed.flags.get('title')?.trim() ?? parsed.rest.join(' ').trim();
       const start = parsed.flags.get('start')?.trim();
       if (!title || !start) {
-        ctx.print('Usage: /calendar add --title <title> --start <ISO-date-or-datetime> [--end <ISO>] [--location <loc>] [--notes <notes>] --yes');
-        return;
+        throw commandRefusal('Usage: /calendar add --title <title> --start <ISO-date-or-datetime> [--end <ISO>] [--location <loc>] [--notes <notes>] --yes');
       }
       if (!parsed.yes) {
         ctx.print([
@@ -272,19 +271,16 @@ export async function runCalendarRuntimeCommand(args: readonly string[], ctx: Co
       const parsed = parseCalendarArgs(args.slice(1));
       const id = parsed.rest[0];
       if (!id) {
-        ctx.print('Usage: /calendar delete <id> --yes');
-        return;
+        throw commandRefusal('Usage: /calendar delete <id> --yes');
       }
       if (id.startsWith('sub:')) {
         const subName = id.split(':')[1] ?? 'a subscription';
-        ctx.print(`Cannot delete ${id}: it is a read-only event from the '${subName}' subscription. Edit it in the source calendar, or run /calendar unsubscribe ${subName} --yes to remove the whole feed.`);
-        return;
+        throw commandRefusal(`Cannot delete ${id}: it is a read-only event from the '${subName}' subscription. Edit it in the source calendar, or run /calendar unsubscribe ${subName} --yes to remove the whole feed.`);
       }
       if (!parsed.yes) {
         const event = registry.get(id);
         if (!event) {
-          ctx.print(`Unknown calendar event ${id}`);
-          return;
+          throw commandRefusal(`Unknown calendar event ${id}`);
         }
         ctx.print([
           `Delete calendar event preview`,

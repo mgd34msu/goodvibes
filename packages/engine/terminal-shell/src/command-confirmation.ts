@@ -1,3 +1,22 @@
+import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+
+/**
+ * What a slash command throws when it did not do what was asked: an unknown id,
+ * a missing argument, a refusal, a failed step. The terminal prints it as
+ * "reason. next"; the model's command runner reports it as a failed call with
+ * the same reason and next step. A handler that returns did what it says.
+ */
+export function commandRefusal(text: string, next?: string, code?: string): RefusalError {
+  const trimmed = text.trim();
+  const usage = /^Usage:/i.test(trimmed);
+  return new RefusalError(refusal({
+    code: code ?? (usage ? 'USAGE' : 'COMMAND_REFUSED'),
+    state: 'not done',
+    reason: trimmed.replace(/^(Refused|Error):\s*/i, ''),
+    next: next ? [next] : [],
+  }));
+}
+
 export interface CommandConfirmationContext {
   readonly print: (message: string) => void;
 }
@@ -20,9 +39,9 @@ export function stripYesFlag(args: readonly string[]): ConfirmationArgs {
   return { rest, yes };
 }
 
-export function requireYesFlag(ctx: CommandConfirmationContext, action: string, usage: string): boolean {
-  ctx.print(`Refusing to ${action} without --yes.\nUsage: ${usage}`);
-  return false;
+/** Refuses a line that needs `--yes`: nothing was done, and the usage says how to confirm it. */
+export function requireYesFlag(_ctx: CommandConfirmationContext, action: string, usage: string): never {
+  throw commandRefusal(`Refusing to ${action} without --yes.`, `Usage: ${usage}`, 'CONFIRMATION_REQUIRED');
 }
 
 /**
@@ -83,14 +102,12 @@ export function withOwnerConfirmation<Context extends ConfirmationHost, Command 
         return;
       }
       if (!context.confirm) {
-        context.print(`${question.title.replace(/\?$/, '')}: not done. ${question.detail}\nThis surface cannot ask; type the same line with --yes to confirm it.`);
-        return;
+        throw commandRefusal(`${question.title.replace(/\?$/, '')}: not done. ${question.detail}`,
+          context.invokedByModel === true ? 'Ask the owner to type the same line with --yes.' : 'This surface cannot ask; type the same line with --yes to confirm it.',
+          'CONFIRMATION_REQUIRED');
       }
       const answered = await context.confirm({ title: question.title, body: question.detail, confirmLabel: question.confirmLabel, tone: 'danger' });
-      if (!answered) {
-        context.print(`/${command.name}: cancelled; nothing was changed.`);
-        return;
-      }
+      if (!answered) throw commandRefusal(`/${command.name}: cancelled; nothing was changed.`, undefined, 'CANCELLED');
       await handler([...rest], context);
     },
   };

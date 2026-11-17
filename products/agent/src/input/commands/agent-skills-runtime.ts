@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { RefusalError } from '@goodvibes-jev/engine/errors';
+import { RefusalError, readRefusal } from '@goodvibes-jev/engine/errors';
 import {
   AgentSkillRegistry,
   buildAgentSkillRequirements,
@@ -16,6 +16,7 @@ import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { parseAgentLocalLibraryArgs, resolveCommandFilePath, type ParsedAgentLocalLibraryArgs } from './agent-local-library-args.ts';
 import { requireShellPaths } from './runtime-services.ts';
 import { assertActorMayEnable, assertActorMayMarkReviewed, type RegistryActor } from '../../agent/review-authority.ts';
+import { commandRefusal } from './confirmation.ts';
 
 const SKILL_VALUE_FLAGS = ['name', 'description', 'procedure', 'tags', 'triggers', 'requires-env', 'requires-command', 'requires-commands', 'skills'] as const;
 
@@ -150,13 +151,11 @@ async function importDiscoveredSkill(args: readonly string[], ctx: CommandContex
   const parsed = parseSkillArgs(args);
   const name = parsed.rest.join(' ').trim();
   if (!name) {
-    ctx.print('Usage: /skills import-discovered <name> [--enabled] --yes\n  Note: discovered skills import disabled unless --enabled; review then enable via /skills enable <name>.');
-    return;
+    throw commandRefusal('Usage: /skills import-discovered <name> [--enabled] --yes\n  Note: discovered skills import disabled unless --enabled; review then enable via /skills enable <name>.');
   }
   const discovered = findDiscoveredSkill(await discoverSkills(requireShellPaths(ctx)), name);
   if (!discovered) {
-    ctx.print(`Unknown discovered Agent skill ${name}\nRun /skills discover to inspect available skill files.`);
-    return;
+    throw commandRefusal(`Unknown discovered Agent skill ${name}\nRun /skills discover to inspect available skill files.`);
   }
   if (!parsed.yes) {
     ctx.print([
@@ -260,11 +259,10 @@ function renderBundle(bundle: AgentSkillBundleRecord, registry: AgentSkillRegist
   ].filter(Boolean).join('\n');
 }
 
-function printError(ctx: CommandContext, error: unknown): void {
-  ctx.print([
-    'Error',
-    `  message ${error instanceof Error ? error.message : String(error)}`,
-  ].join('\n'));
+/** A failed step is the command's failed result: a refusal passes through, anything else is reported as failed. */
+function printError(_ctx: CommandContext, error: unknown): never {
+  if (readRefusal(error)) throw error;
+  throw commandRefusal(`Error: ${error instanceof Error ? error.message : String(error)}`, undefined, 'COMMAND_FAILED');
 }
 
 function runBundleCommand(args: readonly string[], ctx: CommandContext, skillRegistry: AgentSkillRegistry): void {
@@ -292,8 +290,7 @@ function runBundleCommand(args: readonly string[], ctx: CommandContext, skillReg
   if (sub === 'show') {
     const id = args[1];
     if (!id) {
-      ctx.print('Usage: /skills bundle show <id>');
-      return;
+      throw commandRefusal('Usage: /skills bundle show <id>');
     }
     const bundle = skillRegistry.getBundle(id);
     ctx.print(bundle ? renderBundle(bundle, skillRegistry) : `Unknown Agent skill bundle ${id}`);
@@ -316,8 +313,7 @@ function runBundleCommand(args: readonly string[], ctx: CommandContext, skillReg
   if (sub === 'update') {
     const id = args[1];
     if (!id) {
-      ctx.print('Usage: /skills bundle update <id> [--name ...] [--description ...] [--skills id,id]');
-      return;
+      throw commandRefusal('Usage: /skills bundle update <id> [--name ...] [--description ...] [--skills id,id]');
     }
     const parsed = parseSkillArgs(args.slice(2));
     const updated = skillRegistry.updateBundle(id, {
@@ -332,8 +328,7 @@ function runBundleCommand(args: readonly string[], ctx: CommandContext, skillReg
   if (sub === 'enable' || sub === 'disable') {
     const id = args[1];
     if (!id) {
-      ctx.print(`Usage: /skills bundle ${sub} <id>`);
-      return;
+      throw commandRefusal(`Usage: /skills bundle ${sub} <id>`);
     }
     if (sub === 'enable') assertActorMayEnable(actorOf(ctx), 'skill bundle', id, skillRegistry.getBundle(id)?.reviewState);
     const bundle = skillRegistry.setBundleEnabled(id, sub === 'enable');
@@ -343,8 +338,7 @@ function runBundleCommand(args: readonly string[], ctx: CommandContext, skillReg
   if (sub === 'review') {
     const id = args[1];
     if (!id) {
-      ctx.print('Usage: /skills bundle review <id>');
-      return;
+      throw commandRefusal('Usage: /skills bundle review <id>');
     }
     assertActorMayMarkReviewed(actorOf(ctx), 'skill bundle', id);
     const bundle = skillRegistry.markBundleReviewed(id);
@@ -354,8 +348,7 @@ function runBundleCommand(args: readonly string[], ctx: CommandContext, skillReg
   if (sub === 'stale') {
     const id = args[1];
     if (!id) {
-      ctx.print('Usage: /skills bundle stale <id> <reason...>');
-      return;
+      throw commandRefusal('Usage: /skills bundle stale <id> <reason...>');
     }
     const bundle = skillRegistry.markBundleStale(id, args.slice(2).join(' '));
     ctx.print(formatSkillReceipt('Marked Agent skill bundle stale', bundle));
@@ -365,18 +358,16 @@ function runBundleCommand(args: readonly string[], ctx: CommandContext, skillReg
     const parsed = parseSkillArgs(args.slice(1));
     const id = parsed.rest[0];
     if (!id) {
-      ctx.print('Usage: /skills bundle delete <id> --yes');
-      return;
+      throw commandRefusal('Usage: /skills bundle delete <id> --yes');
     }
     if (!parsed.yes) {
-      ctx.print(`Refusing to delete Agent skill bundle ${id} without --yes.`);
-      return;
+      throw commandRefusal(`Refusing to delete Agent skill bundle ${id} without --yes.`);
     }
     const removed = skillRegistry.deleteBundle(id);
     ctx.print(formatSkillReceipt('Deleted Agent skill bundle', removed));
     return;
   }
-  ctx.print('Usage: /skills bundle [list|enabled|attention|search|show|create|update|enable|disable|review|stale|delete]');
+  throw commandRefusal('Usage: /skills bundle [list|enabled|attention|search|show|create|update|enable|disable|review|stale|delete]');
 }
 
 export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx: CommandContext): Promise<void> {
@@ -403,8 +394,7 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
       const parsed = parseSkillArgs(args.slice(1));
       const filePath = parsed.rest[0];
       if (!filePath) {
-        ctx.print('Usage: /skills import-standard <path/to/SKILL.md> --yes');
-        return;
+        throw commandRefusal('Usage: /skills import-standard <path/to/SKILL.md> --yes');
       }
       if (!parsed.yes) {
         ctx.print([
@@ -431,14 +421,12 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
       const skillId = parsed.rest[0];
       const destDir = parsed.rest[1];
       if (!skillId || !destDir) {
-        ctx.print('Usage: /skills export-standard <id> <dest-directory> [--overwrite] --yes');
-        return;
+        throw commandRefusal('Usage: /skills export-standard <id> <dest-directory> [--overwrite] --yes');
       }
       if (!parsed.yes) {
         const skill = skillRegistry.get(skillId);
         if (!skill) {
-          ctx.print(`Unknown Agent skill ${skillId}`);
-          return;
+          throw commandRefusal(`Unknown Agent skill ${skillId}`);
         }
         ctx.print([
           'Agent skill standard export preview',
@@ -476,8 +464,7 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
     if (sub === 'show') {
       const id = args[1];
       if (!id) {
-        ctx.print('Usage: /skills show <id>');
-        return;
+        throw commandRefusal('Usage: /skills show <id>');
       }
       const skill = skillRegistry.get(id);
       ctx.print(skill ? renderSkill(skill) : `Unknown Agent skill ${id}`);
@@ -507,8 +494,7 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
     if (sub === 'update') {
       const id = args[1];
       if (!id) {
-        ctx.print('Usage: /skills update <id> [--name ...] [--description ...] [--procedure ...]');
-        return;
+        throw commandRefusal('Usage: /skills update <id> [--name ...] [--description ...] [--procedure ...]');
       }
       const parsed = parseSkillArgs(args.slice(2));
       const updated = skillRegistry.update(id, {
@@ -534,8 +520,7 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
     if (sub === 'enable' || sub === 'disable') {
       const id = args[1];
       if (!id) {
-        ctx.print(`Usage: /skills ${sub} <id>`);
-        return;
+        throw commandRefusal(`Usage: /skills ${sub} <id>`);
       }
       if (sub === 'enable') assertActorMayEnable(actorOf(ctx), 'skill', id, skillRegistry.get(id)?.reviewState);
       const skill = skillRegistry.setEnabled(id, sub === 'enable');
@@ -545,8 +530,7 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
     if (sub === 'review') {
       const id = args[1];
       if (!id) {
-        ctx.print('Usage: /skills review <id>');
-        return;
+        throw commandRefusal('Usage: /skills review <id>');
       }
       assertActorMayMarkReviewed(actorOf(ctx), 'skill', id);
       const skill = skillRegistry.markReviewed(id);
@@ -556,8 +540,7 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
     if (sub === 'stale') {
       const id = args[1];
       if (!id) {
-        ctx.print('Usage: /skills stale <id> <reason...>');
-        return;
+        throw commandRefusal('Usage: /skills stale <id> <reason...>');
       }
       const skill = skillRegistry.markStale(id, args.slice(2).join(' '));
       ctx.print(formatSkillReceipt('Marked Agent skill stale', skill));
@@ -567,18 +550,16 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
       const parsed = parseSkillArgs(args.slice(1));
       const id = parsed.rest[0];
       if (!id) {
-        ctx.print('Usage: /skills delete <id> --yes');
-        return;
+        throw commandRefusal('Usage: /skills delete <id> --yes');
       }
       if (!parsed.yes) {
-        ctx.print(`Refusing to delete Agent skill ${id} without --yes.`);
-        return;
+        throw commandRefusal(`Refusing to delete Agent skill ${id} without --yes.`);
       }
       const removed = skillRegistry.deleteSkill(id);
       ctx.print(formatSkillReceipt('Deleted Agent skill', removed));
       return;
     }
-    ctx.print('Usage: /skills [list|enabled|attention|discover|import-discovered|search|show|create|update|enable|disable|review|stale|delete|bundle]');
+    throw commandRefusal('Usage: /skills [list|enabled|attention|discover|import-discovered|search|show|create|update|enable|disable|review|stale|delete|bundle]');
   } catch (error) {
     // A refusal is the command's result (state, reason, next step), not a printed error.
     if (error instanceof RefusalError) throw error;

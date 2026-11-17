@@ -16,6 +16,7 @@ import type { CalendarProviderId, DeviceCodeFlowStart, EventWindow, MergedCalend
 import type { CommandContext } from '../command-registry.ts';
 import { requireSecretsManager } from './runtime-services.ts';
 import { CalendarOAuthService, type CalendarConfigReader, type CalendarSecretSlice, type ConnectResult } from '../../agent/calendar/calendar-oauth-service.ts';
+import { commandRefusal } from './confirmation.ts';
 
 /** Factory seam: production builds the real service from context; tests inject a fake. */
 export type CalendarServiceFactory = (ctx: CommandContext) => CalendarOAuthService;
@@ -136,8 +137,7 @@ export async function runCalendarConnect(
   if (codeIndex >= 0) {
     const pasted = args.slice(codeIndex + 1).join(' ').trim();
     if (!pasted) {
-      ctx.print(`Usage: /calendar connect ${word} --code <address the browser landed on, or the code>`);
-      return;
+      throw commandRefusal(`Usage: /calendar connect ${word} --code <address the browser landed on, or the code>`);
     }
     const completed = await service.completePastedCode(provider, pasted);
     printConnectResult(ctx, label, completed);
@@ -186,8 +186,7 @@ export async function runCalendarDisconnect(
 ): Promise<void> {
   const provider = normalizeProvider(args[1]);
   if (!provider) {
-    ctx.print('Usage: /calendar disconnect <google|outlook>');
-    return;
+    throw commandRefusal('Usage: /calendar disconnect <google|outlook>');
   }
   const label = PROVIDER_LABEL[provider];
   const service = factory(ctx);

@@ -15,6 +15,7 @@ import './confirmation.ts';
 import { readConversationMessageSnapshots } from '../../core/conversation-message-snapshot.ts';
 import { copySessionSidecars } from '../../core/session-resume-core.ts';
 import { loadSavedSessionIntoLive } from './session-load.ts';
+import { commandRefusal } from './confirmation.ts';
 
 function formatSessionFailure(action: string, error: unknown): string {
   return [`Failed to ${action}`, `  error ${summarizeError(error)}`].join('\n');
@@ -125,8 +126,7 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
       const force = args.includes('--force');
       const target = args.slice(1).filter((arg) => arg !== '--force').join(' ').trim();
       if (!target) {
-        ctx.print('Usage: /session resume <session-id-or-name> [--force]');
-        return true;
+        throw commandRefusal('Usage: /session resume <session-id-or-name> [--force]');
       }
       // An exact id reads one meta line; only a title or prefix lists the directory.
       const candidates = resolveSessionTarget(sm, target);

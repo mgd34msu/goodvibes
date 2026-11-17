@@ -5,6 +5,7 @@ import { isOwnerOperatorPrincipal } from './native/native-paired-principal.js';
 import type { PaymentWindowCommandContext, PaymentWindowCommandPolicy } from './payment-window-command.js';
 import { stripDangerousAnsi } from './ansi-sanitize.js';
 import type { TerminalSlashCommand } from './command-registry.js';
+import { commandRefusal } from './command-confirmation.js';
 const display = (value: string) => stripDangerousAnsi(value).replace(/\x1b\[[0-9;]*m/g, '').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
 
 /** Client terminals read the selected daemon's trigger supervisor through its
@@ -15,7 +16,7 @@ export function registerRemoteTriggerSupervisorCommand<Context extends PaymentWi
 ): void {
   registry.register({ name: 'triggers', description: 'Inspect the selected daemon’s supervised triggers',
     usage: '[status]', argsHint: 'status', async handler(args, context) {
-      if (args.length > 1 || (args[0] ?? 'status') !== 'status') { context.print('Usage: /triggers [status]'); return; }
+      if (args.length > 1 || (args[0] ?? 'status') !== 'status') { throw commandRefusal('Usage: /triggers [status]'); }
       const abort = new AbortController();
       let connection: RetainedOperatorConnection;
       try { connection = new RetainedOperatorConnection({ owner: () => policy.owner(context), home: () => policy.home(context),

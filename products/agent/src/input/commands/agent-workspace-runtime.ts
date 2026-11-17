@@ -3,6 +3,7 @@ import '../../runtime/native-conversation-intake.ts';
 import { nativeWorkExecutionLines } from '@goodvibes-jev/engine/terminal-shell/native';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { AGENT_WORKSPACE_CATEGORY_IDS } from '../agent-workspace-types.ts';
+import { commandRefusal } from './confirmation.ts';
 
 const AGENT_WORKSPACE_ARGS_HINT = `${AGENT_WORKSPACE_CATEGORY_IDS.join('|')}|connected-host`;
 
@@ -38,8 +39,7 @@ export function registerAgentWorkspaceRuntimeCommands(registry: CommandRegistry)
       if (await handleNativeSubmissionCommand(args, (text) => ctx.print(text), submission)) return;
       if (action === 'start' || action === 'status' || action === 'cancel' || action === 'resume') {
         if (args.length !== 2) {
-          ctx.print('Usage: /work start|status|cancel|resume <work-id>');
-          return;
+          throw commandRefusal('Usage: /work start|status|cancel|resume <work-id>');
         }
         if (!ctx.nativeWorkLedger?.execute) {
           ctx.print('Native execution controls are unavailable on this host.');
@@ -62,8 +62,7 @@ export function registerAgentWorkspaceRuntimeCommands(registry: CommandRegistry)
         return;
       }
       if (args.length > 1) {
-        ctx.print('Usage: /work [daemon-project-id] | start|status|cancel|resume <work-id>');
-        return;
+        throw commandRefusal('Usage: /work [daemon-project-id] | start|status|cancel|resume <work-id>');
       }
       if (args[0]) ctx.nativeWorkLedger?.selectProject(args[0]);
       openAgentWorkspace(ctx, 'work');

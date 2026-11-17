@@ -3,6 +3,7 @@ import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { SharedSessionParticipant } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { AgentDelegationRegistry, type AgentDelegationRecord } from '../../agent/delegation-registry.ts';
+import { commandRefusal } from './confirmation.ts';
 
 interface DelegationCommandInput {
   readonly task: string;
@@ -279,12 +280,11 @@ export function registerDelegationRuntimeCommands(registry: CommandRegistry): vo
       ].join('\n'));
     } catch (error) {
       const cleanup = createdSessionId ? await discardUndeliveredSession(ctx, createdSessionId) : '';
-      ctx.print([
+      throw commandRefusal([
         'Delegation failed; the task was not handed off.',
         `  error ${summarizeError(error)}`,
         ...(cleanup ? [cleanup] : []),
-        '  next retry /delegate with the same task, or open GoodVibes TUI in the target workspace and paste it there.',
-      ].join('\n'));
+      ].join('\n'), 'Retry /delegate with the same task, or open GoodVibes TUI in the target workspace and paste it there.', 'COMMAND_FAILED');
     }
   };
 

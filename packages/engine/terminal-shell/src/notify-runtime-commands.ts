@@ -2,7 +2,7 @@ import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/conf
 import type { NotificationDeadLetter, NotificationDeadLetterSource, WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { classifyHostTrustTier, extractHostname } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { TerminalCommandRegistry } from './command-registry.js';
-import { requireYesFlag, stripYesFlag } from './command-confirmation.js';
+import { commandRefusal, requireYesFlag, stripYesFlag } from './command-confirmation.js';
 interface NotifyContext {
   readonly platform: { readonly configManager: Pick<ConfigManager, 'getCategory' | 'mergeCategory'> };
   print(message: string): void;
@@ -78,8 +78,7 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
         if (sub === 'add') {
           const url = commandArgs[1];
           if (!url) {
-            ctx.print(`Usage: /notify add <url>${suffix}\nExample: /notify add https://ntfy.sh/my-topic${suffix}`);
-            return;
+            throw commandRefusal(`Usage: /notify add <url>${suffix}\nExample: /notify add https://ntfy.sh/my-topic${suffix}`);
           }
           if (!parsed.yes) {
             requireYesFlag(ctx, `add webhook notification URL ${shownUrl(url)}`, `/notify add <url>${suffix}`);
@@ -117,8 +116,7 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
         if (sub === 'remove') {
           const given = commandArgs[1];
           if (!given) {
-            ctx.print(`Usage: /notify remove <n|url>${suffix}  (n is the number /notify list shows)`);
-            return;
+            throw commandRefusal(`Usage: /notify remove <n|url>${suffix}  (n is the number /notify list shows)`);
           }
           // The list number names a stored URL without printing its secret topic to remove it.
           const position = /^\d+$/.test(given) ? Number(given) : undefined;
@@ -133,8 +131,7 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
           }
           const next = urls.filter((u) => u !== url);
           if (next.length === urls.length) {
-            ctx.print(`Not found: ${shownUrl(url)}. /notify list shows the stored URLs by number.`);
-            return;
+            throw commandRefusal(`Not found: ${shownUrl(url)}. /notify list shows the stored URLs by number.`);
           }
           ctx.platform.configManager.mergeCategory('notifications', { webhookUrls: next });
           notifier.setUrls(next);
@@ -179,8 +176,7 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
         if (policy.allowSend && sub === 'send') {
           const message = commandArgs.slice(1).join(' ').trim();
           if (!message) {
-            ctx.print(`Usage: /notify send <message>${suffix}`);
-            return;
+            throw commandRefusal(`Usage: /notify send <message>${suffix}`);
           }
           if (!parsed.yes) {
             requireYesFlag(ctx, 'send a notification to configured webhook targets', `/notify send <message>${suffix}`);
@@ -223,8 +219,7 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
           }
           const which = commandArgs[1];
           if (!which) {
-            ctx.print(`Usage: /notify resend <id|all>${suffix}\nList them with /notify failed.`);
-            return;
+            throw commandRefusal(`Usage: /notify resend <id|all>${suffix}\nList them with /notify failed.`);
           }
           const ids = which === 'all'
             ? entries.map((entry) => entry.id)

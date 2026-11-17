@@ -9,7 +9,8 @@ import { formatProviderModel } from '@goodvibes-jev/engine/platform/platform/pro
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import type { ConcealedInputRequest } from './concealed-input.js';
-import { requireYesFlag, stripYesFlag } from './command-confirmation.js';
+import { commandRefusal, requireYesFlag, stripYesFlag } from './command-confirmation.js';
+import { readRefusal } from '@goodvibes-jev/engine/errors';
 
 export interface LocalProviderCommandContext {
   readonly print: (message: string) => void;
@@ -160,12 +161,9 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
       // Exclusive create: a second add of the same name cannot overwrite the first.
       await writeFile(file, JSON.stringify(config, null, 2), { encoding: 'utf-8', flag: 'wx' });
     } catch (error) {
-      context.print(
-        (error as NodeJS.ErrnoException).code === 'EEXIST'
-          ? `Provider '${name}' already exists at ${file}\nRemove it first with: /provider remove ${name}${confirmationSuffix}`
-          : `Error writing provider file: ${summarizeError(error)}`,
-      );
-      return;
+      throw (error as NodeJS.ErrnoException).code === 'EEXIST'
+        ? commandRefusal(`Provider '${name}' already exists at ${file}`, `Remove it first with: /provider remove ${name}${confirmationSuffix}`)
+        : commandRefusal(`Error writing provider file: ${summarizeError(error)}`, undefined, 'COMMAND_FAILED');
     }
     // The key is stored last, so a failed write leaves no key without a provider; a failed
     // store takes the provider file back out so the two never disagree.
@@ -174,8 +172,7 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
         await storeProviderKey(services.requireSecretsManager(context), name, apiKey);
       } catch (error) {
         await unlink(file).catch(() => undefined);
-        context.print(`Could not store the key for '${name}': ${summarizeError(error)}. The provider was not added.`);
-        return;
+        throw commandRefusal(`Could not store the key for '${name}': ${summarizeError(error)}. The provider was not added.`);
       }
     }
     const modelLines = ids.length
@@ -209,16 +206,14 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
           const apiKey = policy.allowInlineKey ? commandArgs[3] : undefined;
           const usage = `/provider add <name> <baseURL>${policy.allowInlineKey ? ' [apiKey]' : ''}${confirmationSuffix}`;
           if (!name || !baseURL) {
-            context.print(`Usage: ${usage}\nExample: /provider add my-server http://192.168.0.85:8001/v1${confirmationSuffix}`);
-            return;
+            throw commandRefusal(`Usage: ${usage}\nExample: /provider add my-server http://192.168.0.85:8001/v1${confirmationSuffix}`);
           }
           if (!parsed.yes) {
             requireYesFlag(context, `add custom provider ${name}`, usage);
             return;
           }
           if (!validProviderName(name)) {
-            context.print('Error: Provider name must contain only letters, numbers, hyphens, and underscores.');
-            return;
+            throw commandRefusal('Error: Provider name must contain only letters, numbers, hyphens, and underscores.');
           }
           let endpoint: URL;
           try {
@@ -226,8 +221,7 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
             if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password)
               throw new Error('invalid endpoint');
           } catch {
-            context.print('Error: Use an http:// or https:// provider endpoint without embedded credentials.');
-            return;
+            throw commandRefusal('Error: Use an http:// or https:// provider endpoint without embedded credentials.');
           }
           const directory = paths.resolveUserPath(policy.surfaceRoot, 'providers');
           const file = join(directory, `${name}.json`);
@@ -258,16 +252,14 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
           const name = commandArgs[1];
           const usage = `/provider remove <name>${confirmationSuffix}`;
           if (!name) {
-            context.print(`Usage: ${usage}`);
-            return;
+            throw commandRefusal(`Usage: ${usage}`);
           }
           if (!parsed.yes) {
             requireYesFlag(context, `remove custom provider ${name}`, usage);
             return;
           }
           if (!validProviderName(name)) {
-            context.print('Error: Provider name must contain only letters, numbers, hyphens, and underscores.');
-            return;
+            throw commandRefusal('Error: Provider name must contain only letters, numbers, hyphens, and underscores.');
           }
           const file = paths.resolveUserPath(policy.surfaceRoot, 'providers', `${name}.json`);
           if (!existsSync(file)) {
@@ -277,18 +269,15 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
           try {
             await unlink(file);
           } catch (error) {
-            context.print(`Error removing provider file: ${summarizeError(error)}`);
-            return;
+            throw commandRefusal(`Error removing provider file: ${summarizeError(error)}`);
           }
           // The key belongs to this provider alone (an add refuses a name that maps to a key slot in use).
           const keyName = customProviderKeyName(name);
           try {
             await services.requireSecretsManager(context).delete(keyName, { scope: 'daemon' });
           } catch (error) {
-            context.print(
-              `Provider '${name}' removed, but its stored API key ${keyName} could not be deleted: ${summarizeError(error)}. Delete it with /secrets delete ${keyName}.`,
-            );
-            return;
+            throw commandRefusal(`Provider '${name}' removed, but its stored API key ${keyName} could not be deleted: ${summarizeError(error)}`,
+              `Delete it with /secrets delete ${keyName}`, 'PARTIALLY_DONE');
           }
           context.print(`Provider '${name}' and its stored API key ${keyName} (if any) removed. The file watcher will deregister it shortly.`);
           return;
@@ -315,8 +304,7 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
           const models = await api.listModels({ providerId: provider, selectableOnly: true });
           const match = models[0];
           if (!match) {
-            context.print(`Unknown provider: ${provider}. Available: ${api.listProviderIds().join(', ')}`);
-            return;
+            throw commandRefusal(`Unknown provider: ${provider}. Available: ${api.listProviderIds().join(', ')}`);
           }
           const registryKey = requestedModel ? formatProviderModel(provider, requestedModel) : match.registryKey;
           const selected = await api.selectModel(registryKey);
@@ -327,7 +315,8 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
             context.print(`Switched to provider: ${selected.providerId} (model: ${selected.modelId})`);
           });
         } catch (error) {
-          context.print(`Error: ${summarizeError(error)}`);
+          if (readRefusal(error)) throw error;
+          throw commandRefusal(`Error: ${summarizeError(error)}`, undefined, 'COMMAND_FAILED');
         }
       },
     });

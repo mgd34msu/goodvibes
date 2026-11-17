@@ -3,7 +3,7 @@ import 'node:fs';
 import 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireReadModels, requireSecretsManager, requireServiceRegistry, requireShellPaths } from './runtime-services.ts';
-import { requireYesFlag, stripYesFlag } from './confirmation.ts';
+import { commandRefusal, requireYesFlag, stripYesFlag } from './confirmation.ts';
 
 const { buildTrustReviewBundle, formatTrustReview, inspectTrustBundle } = createTrustReviewTools<CommandContext>({
   listSecrets: (ctx) => requireSecretsManager(ctx).list(),
@@ -42,7 +42,7 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
         })
       )
         return;
-      ctx.print('Usage: /trust [review|bundle export <path> --yes|bundle inspect <path>]');
+      throw commandRefusal('Usage: /trust [review|bundle export <path> --yes|bundle inspect <path>]');
     },
   });
 }

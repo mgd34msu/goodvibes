@@ -86,6 +86,18 @@ export function withCommandVerbs(command: SlashCommand, verbs: CommandVerbs): Sl
   return declared;
 }
 
+/**
+ * Declare the verbs of a command registered elsewhere (a shared terminal-shell
+ * factory), without wrapping it. Only for commands with no owner-only verb:
+ * the wrapper in withCommandVerbs is what refuses those.
+ */
+export function declareCommandVerbs(command: SlashCommand, verbs: CommandVerbs): void {
+  if (Object.values(verbs.verbs).some((entry) => typeof entry !== 'function' && entry.ownerOnly) || verbs.otherwise.ownerOnly) {
+    throw new Error(`/${command.name} declares an owner-only verb; register it with withCommandVerbs so the verb is refused for the model.`);
+  }
+  declarations.set(command, { name: command.name, verbs });
+}
+
 export const READ_VERB: CommandVerbPolicy = Object.freeze({ effect: 'read', ownerOnly: false });
 export const LOCAL_WRITE_VERB: CommandVerbPolicy = Object.freeze({ effect: 'local-write', ownerOnly: false });
 export const OUTWARD_VERB: CommandVerbPolicy = Object.freeze({ effect: 'outward', ownerOnly: false });
@@ -94,3 +106,13 @@ export const CREDENTIAL_VERB: CommandVerbPolicy = Object.freeze({ effect: 'crede
 export function ownerOnlyVerb(effect: CommandVerbEffect, because: string): CommandVerbPolicy {
   return Object.freeze({ effect, ownerOnly: true, because });
 }
+
+/**
+ * Shared commands whose verbs read state: the model runs those reads with no
+ * admission, every other verb of theirs reaches the connected host.
+ */
+export const SHARED_COMMAND_VERBS: Readonly<Record<string, CommandVerbs>> = {
+  tasks: { defaultVerb: 'list', verbs: { list: READ_VERB, show: READ_VERB, output: READ_VERB }, otherwise: OUTWARD_VERB },
+  approval: { defaultVerb: 'matrix', verbs: { matrix: READ_VERB, review: READ_VERB }, otherwise: OUTWARD_VERB },
+  'work-import': { defaultVerb: '', verbs: { preview: READ_VERB, status: READ_VERB }, otherwise: OUTWARD_VERB },
+};

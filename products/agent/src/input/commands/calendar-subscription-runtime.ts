@@ -10,6 +10,7 @@ import type { CommandContext } from '../command-registry.ts';
 import { parseAgentLocalLibraryArgs } from './agent-local-library-args.ts';
 import { requireShellPaths } from './runtime-services.ts';
 import { getSessionUntrustedContentLedger } from '../../trust/untrusted-content.ts';
+import { commandRefusal } from './confirmation.ts';
 
 /**
  * External-calendar SUBSCRIPTION verbs for /calendar, the no-OAuth read path.
@@ -133,8 +134,7 @@ export async function runCalendarSubscriptionCommand(
 function requireRegistry(ctx: CommandContext, fetcher: FeedFetcher | undefined, action: string): CalendarSubscriptionRegistry | null {
   const registry = subscriptionRegistryForWrite(ctx, fetcher);
   if (!registry) {
-    ctx.print(`Cannot ${action}: no secret manager is available in this runtime, and feed URLs are stored only as secrets.`);
-    return null;
+    throw commandRefusal(`Cannot ${action}: no secret manager is available in this runtime, and feed URLs are stored only as secrets.`);
   }
   return registry;
 }
@@ -143,8 +143,7 @@ async function handleSubscribe(args: readonly string[], ctx: CommandContext, fet
   const parsed = parseArgs(args);
   const url = parsed.rest[0] ?? parsed.flags.get('url');
   if (!url) {
-    ctx.print('Usage: /calendar subscribe <ics-url> [--name <name>] [--every <minutes>] [--allow-private-host] [--yes]');
-    return;
+    throw commandRefusal('Usage: /calendar subscribe <ics-url> [--name <name>] [--every <minutes>] [--allow-private-host] [--yes]');
   }
   const requestedName = parsed.flags.get('name')?.trim() || undefined;
   const everyMin = parsed.flags.has('every') ? Math.max(15, parseInt(parsed.flags.get('every') ?? '', 10) || 60) : undefined;
@@ -197,8 +196,7 @@ async function handleUnsubscribe(args: readonly string[], ctx: CommandContext, f
   const parsed = parseArgs(args);
   const name = parsed.rest.join(' ').trim() || parsed.flags.get('name')?.trim();
   if (!name) {
-    ctx.print('Usage: /calendar unsubscribe <name> [--yes]');
-    return;
+    throw commandRefusal('Usage: /calendar unsubscribe <name> [--yes]');
   }
   const registry = requireRegistry(ctx, fetcher, 'unsubscribe');
   if (!registry) return;

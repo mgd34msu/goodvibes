@@ -9,6 +9,7 @@ import {
   NETWORK_SCAN_DISABLE_COMMAND,
   NETWORK_SCAN_ENABLE_COMMAND,
 } from '../../runtime/lan-scan-consent.ts';
+import { commandRefusal } from './confirmation.ts';
 
 function statusText(storePath: string, decision: ReturnType<typeof loadLanScanConsent>): string {
   if (!decision || decision.decision === 'declined') {
@@ -72,7 +73,7 @@ export function registerNetworkScanRuntimeCommands(registry: CommandRegistry): v
         return;
       }
 
-      ctx.print(`Usage: /network-scan [on|off|status]\n${statusText(storePath, loadLanScanConsent(shellPaths, GOODVIBES_AGENT_SURFACE_ROOT))}`);
+      throw commandRefusal(`Usage: /network-scan [on|off|status]\n${statusText(storePath, loadLanScanConsent(shellPaths, GOODVIBES_AGENT_SURFACE_ROOT))}`);
     },
   });
 }

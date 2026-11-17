@@ -71,7 +71,7 @@ import {
 } from '@goodvibes-jev/engine/platform/platform/state';
 import { createApprovalDerivedHandlers } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import { FeatureAnnouncementStore, featureAnnouncementsPath } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
-import { createNotificationDispatcher, startNotificationFlush, wireRuntimeNotificationBridge, wireMemoryPressureNotice } from './notification-dispatch.ts';
+import { createNotificationDispatcher, wireRuntimeNotificationBridge, wireMemoryPressureNotice } from './notification-dispatch.ts';
 import { createDurabilityServices } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import { MemorySpineClient, createLocalMemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
@@ -751,11 +751,10 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     contextAccountingHolder,
   });
 
-  // Give the panel_only notification target a live producer.
+  // Runtime events and memory pressure become notification-history entries.
   const notificationDispatcher = createNotificationDispatcher(configManager);
   wireRuntimeNotificationBridge(options.runtimeBus, notificationDispatcher);
   wireMemoryPressureNotice(options.runtimeBus, notificationDispatcher);
-  disposalScope.registry.add('notification flush', startNotificationFlush(notificationDispatcher));
 
   const stopRequests = createRuntimeStopRequests(disposalScope.registry, {
     homeGraphService: { dispose: () => { homeGraphClosing = homeGraphService.dispose(); return homeGraphClosing; } },

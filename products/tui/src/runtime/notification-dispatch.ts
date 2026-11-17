@@ -1,15 +1,13 @@
 /**
  * Notification dispatch: routes domain notifications into the shared feed.
  *
- * The platform's NotificationRouter decides where each domain notification goes
- * (conversation / status_bar / panel_only) and collapses bursts and batches.
- * This module builds the router, records every routed notification (whatever
- * its target, including burst-collapsed and held ones) into the shared feed, and
- * bridges the runtime event bus so real domain events become notifications. The
- * feed is the one consumer of every target: each decision is one history entry,
- * and a warning or critical one also shows as a toast. The feed folds a
- * notification and the conversation notice restating the same runtime event
- * (same event key) into one entry.
+ * Every notification is recorded in the shared feed (the notification
+ * history); the platform's NotificationRouter decides only how loudly it is
+ * shown (a toast now, or the history alone) and which collapse group it joins.
+ * This module builds the router, records every routed notification, and
+ * bridges the runtime event bus so real domain events become notifications.
+ * The feed folds a notification and the conversation notice restating the
+ * same runtime event (same event key) into one entry.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -23,14 +21,12 @@ import { runtimeEventKey } from '@goodvibes-jev/engine/platform/platform/runtime
 
 export interface NotificationDispatcher {
   /**
-   * Route a notification; every decision lands in the feed (warning and
-   * critical ones also toast). `eventKey` names the runtime event it came from (the platform's
-   * runtimeEventKey), so the feed keeps one entry when the same event also
-   * arrives as a conversation notice. Returns the decision.
+   * Route a notification and record it in the feed; the decision says whether
+   * it also toasts. `eventKey` names the runtime event it came from (the
+   * platform's runtimeEventKey), so the feed keeps one entry when the same event
+   * also arrives as a conversation notice. Returns the decision.
    */
   dispatch(notification: Notification, eventKey?: string): RoutingDecision;
-  /** Surface batch-held notifications (call on a timer / when quiet-typing ends). */
-  flush(): void;
   /**
    * Whether the person is typing right now and the print level allows holding
    * routine notifications meanwhile. Read at each notification; a held one
@@ -45,7 +41,7 @@ export interface NotificationDispatcher {
  * Deliberately a curated set of user-relevant, completion/attention-shaped
  * domains, not every domain, so the notifications modal reflects meaningful operational
  * activity rather than raw event churn. The router's per-domain verbosity and
- * burst/batch policies still collapse floods within these.
+ * collapse policy still keep floods within these to one entry.
  */
 export const NOTIFICATION_BRIDGE_DOMAINS: readonly RuntimeEventDomain[] = [
   'agents',
@@ -138,23 +134,8 @@ export function createNotificationDispatcher(
   configManager: Pick<ConfigManager, 'get'>,
   feed: NotificationFeed = getSharedNotificationFeed(),
 ): NotificationDispatcher {
-  const router = createNotificationRouter(undefined, undefined, configManager);
-  /** Event keys of notifications the router is holding in a batch, for when the batch is flushed. */
-  const heldEventKeys = new WeakMap<Notification, string>();
-  /** Notifications already in the feed, so a periodic flush does not count a batch head twice. */
-  const recorded = new WeakSet<Notification>();
+  const router = createNotificationRouter(configManager);
   let typing: () => boolean = () => false;
-  const recordInFeed = (notification: Notification, decision: RoutingDecision, eventKey: string | undefined): void => {
-    // A notification held back from the screen (quiet while typing, a quiet
-    // mode) is still something that happened: it goes to the history, where it
-    // can be read later, rather than being dropped. Nothing flushes the held
-    // ones, so this is the only place they would ever surface. conversation
-    // and status_bar decisions have no other consumer in the terminal: the feed entry is what shows them (a toast at warning and
-    // critical) and keeps them. The feed keeps only panel-bound entries, so
-    // every decision is handed to it as one, with its reason and batch key.
-    feed.record(notification, decision.target === 'panel_only' ? decision : { ...decision, target: 'panel_only' }, eventKey);
-    recorded.add(notification);
-  };
   return {
     router,
     setTypingProbe(probe) {
@@ -163,60 +144,12 @@ export function createNotificationDispatcher(
     dispatch(notification, eventKey) {
       router.setQuietWhileTyping(typing());
       const decision = router.route(notification);
-      if (eventKey) heldEventKeys.set(notification, eventKey);
-      recordInFeed(notification, decision, eventKey);
+      // A notification held off the screen (quiet while typing, a quiet print
+      // level, a collapsed repeat) is still something that happened: it is kept
+      // in the history, where it can be read later.
+      feed.record(notification, decision, eventKey);
       return decision;
     },
-    flush() {
-      for (const { notification } of router.flush()) {
-        if (recorded.has(notification)) continue;
-        // A flushed batch head surfaces as a batch-collapsed feed entry; the
-        // feed folds all sharing this batch key into one running-count row.
-        feed.record(notification, {
-          target: 'panel_only',
-          reasonCode: 'batch_window_collapsed',
-          batchKey: `${notification.domain}:${notification.level}`,
-        }, heldEventKeys.get(notification));
-      }
-    },
-  };
-}
-
-/** How often held batch notifications are surfaced: the router's batch window. */
-export const NOTIFICATION_FLUSH_INTERVAL_MS = 2_000;
-
-/** The timer functions the flush loop uses; injectable so a test can drive ticks. */
-export interface NotificationFlushScheduler {
-  readonly setInterval: (handler: () => void, ms: number) => unknown;
-  readonly clearInterval: (handle: unknown) => void;
-}
-
-const SYSTEM_SCHEDULER: NotificationFlushScheduler = {
-  setInterval: (handler, ms) => {
-    const handle = setInterval(handler, ms);
-    // A pending flush must not keep the process alive.
-    handle.unref();
-    return handle;
-  },
-  clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
-};
-
-/**
- * Surface batch-held notifications on a timer: the router queues a collapsed
- * burst until flushed, and nothing else flushes it, so the "N more" row would
- * never appear. Returns a function that stops the timer.
- */
-export function startNotificationFlush(
-  dispatcher: Pick<NotificationDispatcher, 'flush'>,
-  scheduler: NotificationFlushScheduler = SYSTEM_SCHEDULER,
-  intervalMs: number = NOTIFICATION_FLUSH_INTERVAL_MS,
-): () => void {
-  const handle = scheduler.setInterval(() => dispatcher.flush(), intervalMs);
-  let stopped = false;
-  return () => {
-    if (stopped) return;
-    stopped = true;
-    scheduler.clearInterval(handle);
   };
 }
 

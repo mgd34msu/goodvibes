@@ -1,27 +1,13 @@
 /**
- * NotificationFeed, the read-model behind the `panel_only` notification
- * target.
+ * NotificationFeed, the notification history: every routed notification and
+ * every conversation system notice is kept here, and the Notifications modal
+ * shows it. The routing decision says only how loudly an entry is shown: a
+ * `toast` decision also shows on screen (warning and critical by level, info
+ * when its domain is verbose), a `history` one is kept here only.
  *
- * The platform's NotificationRouter (`@/runtime/index.ts` -> platform runtime `ui`
- * barrel) can route a notification's `RoutingDecision.target` to
- * `'panel_only'`, meaning: don't surface this in the conversation or the
- * status bar, but it must still reach a real, visible place. Before this
- * file, nothing in this repo consumed that target outside of tests, a
- * view-routed notification (including every burst- or batch-collapsed one)
- * had nowhere to go. This feed is that place: a caller holding a routed
- * `Notification` + `RoutingDecision` pair calls `record()`, and the
- * Notifications modal (input/notifications-modal.ts) shows whatever has
- * accumulated; warning and critical entries also toast.
- *
- * Collapsed groups (reasonCode `burst_collapsed` / `batch_window_collapsed`)
- * are tracked by their `batchKey` and accumulate an honest running count
- * instead of rendering one row per suppressed duplicate.
- *
- * Production wiring, something in the running app actually calling
- * `record()` with live notifications, rides the platform round that turns on
- * adaptive notification suppression by default; this feed and its modal are
- * the render target that work lands on, built ahead of it so the target is
- * never missing when that switch flips.
+ * A collapse group (the router's `batchKey`: one domain, level and title in
+ * one window) is one entry with an honest running count instead of one row per
+ * repeat.
  */
 import type { Notification, RoutingDecision } from './types.js';
 import { logger } from '../../utils/logger.js';
@@ -48,8 +34,10 @@ export interface NotificationFeedEntry {
     readonly subject?: string | undefined;
     /**
      * Whether this entry toasts: 'always' for a system notice (every one shows
-     * as a toast), 'never' for one restored from a saved session (it already
-     * happened), absent for a routed notification (warning and critical toast).
+     * as a toast) and for an info notification routed to toast, 'never' for one
+     * restored from a saved session (it already happened) and for a notification
+     * routed to the history only, absent for a routed warning or critical one
+     * (its level decides).
      */
     readonly toast?: ('always' | 'never') | undefined;
     /** Every occurrence in this row came from saved history; separate from this update's toast policy. */
@@ -119,11 +107,12 @@ export function groupTitle(domain: string): string {
 const MAX_ENTRIES = 2000;
 /** Rotate collapsed groups so retained occurrence identities are bounded by 2000 × 100. */
 const MAX_GROUP_OCCURRENCES = 100;
-/** Reason codes whose notifications fold into one running-count entry per batch key, rather than one entry per occurrence. */
-const COLLAPSING_REASON_CODES: ReadonlySet<RoutingDecision['reasonCode']> = new Set([
-    'burst_collapsed',
-    'batch_window_collapsed',
-]);
+/** The toast field a routed notification's entry takes from its decision. */
+function toastOf(notification: Notification, decision: RoutingDecision): NotificationFeedEntry['toast'] {
+    if (decision.presence === 'history')
+        return 'never';
+    return notification.level === 'warning' || notification.level === 'critical' ? undefined : 'always';
+}
 export class NotificationFeed {
     private readonly entries = new Map<string, NotificationFeedEntry>();
     /** Insertion order of `entries` keys (oldest first), for bounded eviction. */
@@ -151,18 +140,11 @@ export class NotificationFeed {
     private readonly groupMembers = new Map<string, Set<string | symbol>>();
     /** One retained diagnostic per occurrence in a bounded collapsed group. */
     private readonly groupDetails = new Map<string, Map<string | symbol, string>>();
-    /**
-     * Record a routed notification. Only notifications actually targeted at
-     * `panel_only` are kept, a caller passing anything else is a mistake (the
-     * router sent it elsewhere), so it's dropped rather than shown in the
-     * wrong place.
-     */
+    /** Record a routed notification; its decision says whether it also toasts. */
     record(notification: Notification, decision: RoutingDecision, eventKey?: string | undefined): void {
-        if (decision.target !== 'panel_only')
-            return;
         if (eventKey && this.foldEvent(eventKey, { level: notification.level, body: notification.body, timestamp: notification.timestamp, fromNotice: false, restored: false }))
             return;
-        const collapsing = COLLAPSING_REASON_CODES.has(decision.reasonCode) && Boolean(decision.batchKey);
+        const collapsing = Boolean(decision.batchKey);
         const key = collapsing ? this.groupKey(decision.batchKey!)
             : eventKey ? `event:${eventKey}` : `single:${notification.id}`;
         const previous = collapsing ? this.entries.get(key) : undefined;
@@ -177,9 +159,9 @@ export class NotificationFeed {
             details.set(eventKey ?? Symbol('keyless detail'), notification.body);
             this.groupDetails.set(key, details);
         }
-        // A collapsed group folds every notification of one domain and level, of
-        // any kind. Its title names the group, never just its latest member, and
-        // the body counts each kind, so the number shown is what it says it is.
+        // A collapsed group folds the notifications of one domain, level and
+        // title. Should a group ever hold more than one title, its title names the
+        // group, never just its latest member, and the body counts each kind.
         let title = notification.title;
         let body = notification.body;
         if (collapsing) {
@@ -203,6 +185,8 @@ export class NotificationFeed {
             reasonCode: decision.reasonCode,
             collapsedCount: previousCount + 1,
             subject: subjectOf(notification),
+            // A group entry follows its latest member: a member held in the history stops it toasting.
+            toast: toastOf(notification, decision),
         };
         this.store(key, entry);
         if (eventKey)

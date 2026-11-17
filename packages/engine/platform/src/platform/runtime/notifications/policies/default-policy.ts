@@ -1,45 +1,38 @@
 /**
- * Default routing policy, maps notification level + domain verbosity to a
- * NotificationTarget. This is the base layer; other policies (quiet-typing,
- * batch) layer on top.
+ * Default routing policy, maps notification level + domain verbosity to how
+ * loudly it is shown. This is the base layer; the quiet-typing, mode-context
+ * and collapse policies can only quieten it.
  */
 
 import type {
   DomainVerbosity,
   NotificationLevel,
-  NotificationTarget,
+  NotificationPresence,
 } from '../types.js';
 
 /**
- * Apply the default level-based routing rule.
+ * Apply the default level-based rule.
  *
- * Rules:
- * - `critical` → always `conversation`
- * - `warning`  → `conversation` if verbosity is `normal` or `verbose`, else `status_bar`
- * - `info`     → `panel_only` unless verbosity is `verbose` (then `status_bar`)
- * - `debug`    → always `panel_only`
- *
- * @param level     - Notification severity level.
- * @param verbosity - Per-domain verbosity setting.
- * @returns The base routing target before suppression/batch policies apply.
+ * - `critical` → always `toast`
+ * - `warning`  → `toast` if verbosity is `normal` or `verbose`, else `history`
+ * - `info`     → `toast` only when verbosity is `verbose`, else `history`
+ * - `debug`    → always `history`
  */
 export function applyDefaultPolicy(
   level: NotificationLevel,
   verbosity: DomainVerbosity
-): NotificationTarget {
+): NotificationPresence {
   switch (level) {
     case 'critical':
-      return 'conversation';
+      return 'toast';
 
     case 'warning':
-      return verbosity === 'normal' || verbosity === 'verbose'
-        ? 'conversation'
-        : 'status_bar';
+      return verbosity === 'normal' || verbosity === 'verbose' ? 'toast' : 'history';
 
     case 'info':
-      return verbosity === 'verbose' ? 'status_bar' : 'panel_only';
+      return verbosity === 'verbose' ? 'toast' : 'history';
 
     case 'debug':
-      return 'panel_only';
+      return 'history';
   }
 }

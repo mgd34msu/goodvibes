@@ -59,14 +59,10 @@ export type {
   Notification,
   NotificationLevel,
   NotificationTag,
-  NotificationTarget,
+  NotificationPresence,
   DomainVerbosity,
   RoutingDecision,
 } from './notifications/types.js';
-export {
-  applyModeContextPolicy,
-  BurstPolicy,
-} from './notifications/policies/index.js';
 
 export { createUiReadModels } from './ui-read-models.js';
 export type { UiReadModels, UiReadModelOptions } from './ui-read-models.js';

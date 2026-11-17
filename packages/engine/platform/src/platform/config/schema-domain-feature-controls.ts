@@ -142,31 +142,15 @@ export const featureControlSettings: ConfigSetting[] = [
     type: 'boolean',
     default: true,
     description:
-      'Adaptive notification suppression: in quiet/minimal mode, operational churn is filtered before reaching the conversation or status bar, and rapid domain:level floods collapse into panel-only groups with a burst_collapsed reason code rendered by the notifications panel. Critical, milestone, and alert notifications are always exempt. Turn off to keep only the base delivery policies.',
-  },
-  {
-    key: 'notifications.burstWindowMs',
-    type: 'number',
-    default: 1_000,
-    description:
-      'Observation window (ms) for the adaptive-suppression burst detector: rapid domain:level notifications arriving within this window count toward the burst threshold. Applied at NotificationRouter construction.',
-    ...intRange(1, 60 * 60 * 1000),
+      'Adaptive notification suppression: past notifications.burstThreshold notifications of one kind (same domain, level and title) in one collapse window, the rest are counted into that kind\'s notification-history entry without a toast. Critical, milestone, and alert notifications are always exempt. Turn off to let every one toast as its level and the print level allow. Read when the app starts.',
   },
   {
     key: 'notifications.burstThreshold',
     type: 'number',
     default: 3,
     description:
-      'Number of notifications for one domain:level group within the burst window that trips adaptive suppression, collapsing further ones to panel_only with a burst_collapsed reason. Critical/milestone/alert notifications are always exempt.',
+      'How many notifications with the same domain, level and title toast within one collapse window while notifications.adaptiveSuppression is on; later ones in that window are counted into the same notification-history entry without a toast. The window follows the print level (behavior.hitlMode: 5 s quiet, 2 s balanced, 0.5 s operator) and runs from the first notification, so a steady trickle cannot keep one open. Critical, milestone and alert notifications never collapse. Read when the app starts.',
     ...intRange(1, 10_000),
-  },
-  {
-    key: 'notifications.burstCooldownMs',
-    type: 'number',
-    default: 3_000,
-    description:
-      'Cooldown (ms) after a domain:level group trips the burst detector before it can trip again. Applied at NotificationRouter construction.',
-    ...intRange(0, 60 * 60 * 1000),
   },
   {
     key: 'notifications.pushApproval',

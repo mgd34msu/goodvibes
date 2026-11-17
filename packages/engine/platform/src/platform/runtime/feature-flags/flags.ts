@@ -409,13 +409,10 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     id: 'adaptive-notification-suppression',
     name: 'Adaptive Notification Suppression',
     description:
-      'Enables mode-context and burst-detection policies in the NotificationRouter. '
-      + 'In quiet/minimal mode, operational churn is suppressed before reaching the '
-      + 'conversation or status bar. Burst detection collapses rapid domain:level '
-      + 'floods into panel_only with a burst_collapsed reason code. '
-      + 'On by default now that collapsed groups have a visible home: the notifications '
-      + 'panel renders burst-collapsed groups with their reason codes. '
-      + 'Disable to revert to base default + quiet-typing + batch-window policies only.',
+      'Holds repeats off the screen: past notifications.burstThreshold notifications '
+      + 'of one kind (same domain, level and title) in one collapse window, the rest '
+      + 'are counted into that kind\'s notification-history entry without a toast. '
+      + 'Disable to let every one toast as its level and the print level allow.',
     defaultState: 'enabled',
     tier: 3,
     runtimeToggleable: true,

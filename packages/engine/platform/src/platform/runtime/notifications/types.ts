@@ -1,26 +1,24 @@
 /**
- * Notification system types, core interfaces for the conversation noise
- * routing model. Operational noise is routed to dedicated
- * panels; the main conversation receives only critical failures, milestones,
- * and condensed summaries.
+ * Notification system types. Every routed notification is kept in the
+ * notification history; the routing decision chooses only how loudly it is
+ * shown: on screen now (a toast), or in the history alone.
  */
 
 /** Severity level of a notification. Controls routing priority. */
 export type NotificationLevel = 'critical' | 'warning' | 'info' | 'debug';
 
 /**
- * Surface target for a routed notification.
- * - `conversation`, inline in the main conversation (high-signal only)
- * - `status_bar`  , ephemeral status bar display
- * - `panel_only`  , routed only to a dedicated panel
+ * How loudly a routed notification is shown. Both are kept in the history.
+ * - `toast`  , also shown on screen now
+ * - `history`, kept in the history only (read later with /notifications)
  */
-export type NotificationTarget = 'conversation' | 'status_bar' | 'panel_only';
+export type NotificationPresence = 'toast' | 'history';
 
 /**
  * Per-domain verbosity setting.
- * - `minimal`, only critical notifications surface above panel_only
- * - `normal` , warnings surface to conversation/status_bar
- * - `verbose`, info notifications also surface above panel_only
+ * - `minimal`, only critical notifications toast
+ * - `normal` , warnings and critical notifications toast
+ * - `verbose`, info notifications also toast
  */
 export type DomainVerbosity = 'minimal' | 'normal' | 'verbose';
 
@@ -32,25 +30,19 @@ export type DomainVerbosity = 'minimal' | 'normal' | 'verbose';
  *
  * - `allowed`               , notification was not suppressed (delivered normally)
  * - `quiet_while_typing`    , suppressed because the user is actively typing
- * - `mode_context_minimal`  , suppressed by the mode-context policy (quiet/minimal mode)
- * - `mode_context_normal`   , suppressed by the mode-context policy (normal mode, operational info)
- * - `burst_collapsed`       , collapsed into an existing burst batch group
- * - `batch_window_collapsed`, collapsed by the rolling batch-window policy
+ * - `batch_window_collapsed`, one more of the same notification inside its collapse window, past the number shown
  * - `domain_verbosity_low`  , domain verbosity set below the notification level
  */
 export type RoutingReasonCode =
   | 'allowed'
   | 'quiet_while_typing'
-  | 'mode_context_minimal'
-  | 'mode_context_normal'
-  | 'burst_collapsed'
   | 'batch_window_collapsed'
   | 'domain_verbosity_low';
 
 /**
  * Semantic tag classifying a notification's operational role.
  *
- * Used by the burst and mode-context policies to distinguish high-signal
+ * Used by the collapse policy to distinguish high-signal
  * events from operational churn:
  * - `operational`, routine progress / heartbeat events (most suppressible)
  * - `milestone`  , meaningful completion or state-change events
@@ -87,7 +79,7 @@ export interface Notification {
   body?: string | undefined;
   /** Unix timestamp in milliseconds when the notification was created. */
   timestamp: number;
-  /** Panel ID that should display this notification when routed to panel_only. */
+  /** The view this notification is about, opened from its history entry. */
   panelId?: string | undefined;
   /** Optional action (e.g. jump to panel) presented alongside the notification. */
   action?: NotificationAction | undefined;
@@ -99,20 +91,22 @@ export interface Notification {
 }
 
 /**
- * The result of routing a single notification.
- * Contains the target surface and optional metadata about batching/suppression.
+ * The result of routing a single notification: how loudly it is shown, and
+ * the collapse group it belongs to.
  */
 export interface RoutingDecision {
-  /** The surface where this notification should be delivered. */
-  target: NotificationTarget;
+  /** Whether it is shown on screen now or only kept in the history. */
+  presence: NotificationPresence;
   /**
-   * Batch group key when this notification has been collapsed into a batch.
-   * Consumers should coalesce all notifications sharing the same batchKey.
+   * The collapse group: every notification with the same domain, level and
+   * title inside one collapse window. Consumers keep one entry per group with
+   * a running count. Absent for a notification that never collapses
+   * (critical, milestone, alert).
    */
   batchKey?: string | undefined;
   /**
-   * When set, this notification was suppressed and should not be displayed.
-   * The string value describes the suppression reason (e.g. 'quiet_while_typing').
+   * When set, this notification was held off the screen (it is still kept in
+   * the history). The string names the reason (e.g. 'quiet_while_typing').
    */
   suppressed?: string | undefined;
   /**
@@ -130,13 +124,8 @@ export interface RoutedNotification {
   decision: RoutingDecision;
 }
 
-/**
- * Per-domain routing configuration, merging domain verbosity with any
- * domain-specific panel target overrides.
- */
+/** Per-domain routing configuration. */
 export interface DomainConfig {
   /** Verbosity level controlling how aggressively noise is suppressed. */
   verbosity: DomainVerbosity;
-  /** Override the default panel target for panel_only notifications. */
-  defaultPanelId?: string | undefined;
 }

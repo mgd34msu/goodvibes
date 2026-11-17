@@ -40,6 +40,14 @@ export const RETIRED_SETTINGS: readonly RetiredSetting[] = [
     instead: 'Nothing read it: the Google refresh token is kept only in the secret store, where setup puts it.',
   },
   {
+    key: 'notifications.burstWindowMs',
+    instead: 'Notifications collapse in one window that follows the print level (behavior.hitlMode: 5 s quiet, 2 s balanced, 0.5 s operator); notifications.burstThreshold says how many of a kind toast per window.',
+  },
+  {
+    key: 'notifications.burstCooldownMs',
+    instead: 'A collapse window now ends a fixed time after its first notification, so there is no cooldown; the window follows the print level (behavior.hitlMode).',
+  },
+  {
     key: 'email.enabled',
     instead: 'The mailbox is on once surfaces.email has a host, an account and a password; there is no separate switch.',
   },

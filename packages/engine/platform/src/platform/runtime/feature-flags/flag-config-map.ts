@@ -59,11 +59,7 @@ export const FEATURE_FLAG_CONFIG: Readonly<Record<string, FeatureFlagConfigAssoc
   'hitl-ux-modes': { configCategories: ['behavior'], configKeys: ['behavior.hitlMode'] },
   'adaptive-notification-suppression': {
     configCategories: ['notifications'],
-    configKeys: [
-      'notifications.burstWindowMs',
-      'notifications.burstThreshold',
-      'notifications.burstCooldownMs',
-    ],
+    configKeys: ['notifications.burstThreshold'],
   },
 
   // ── Runtime / tasks / lifecycle ──────────────────────────────────────────

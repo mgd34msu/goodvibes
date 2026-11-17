@@ -8,17 +8,10 @@ import type { TriggersConfig } from './schema-domain-triggers.js';
  */
 export interface NotificationsConfig {
   webhookUrls: string[];
-  /**
-   * Adaptive suppression of operational churn: quiet/minimal-mode filtering and
-   * burst collapse into panel-only groups with reason codes. Default true.
-   */
+  /** Repeats past burstThreshold in one collapse window go to the history without a toast. Default true. */
   adaptiveSuppression: boolean;
-  /** Burst-detection observation window (ms) for adaptive suppression. */
-  burstWindowMs: number;
-  /** Event count within the burst window that trips collapse to panel_only. */
+  /** Notifications with the same domain, level and title that toast per collapse window. */
   burstThreshold: number;
-  /** Cooldown (ms) after a burst before a domain:level group can trip again. */
-  burstCooldownMs: number;
   /** Device-push fan-out for pending approvals. ON by default; a toggle to silence, never a working prerequisite. */
   pushApproval: boolean;
   /** Device-push fan-out for fleet nodes blocked on the operator. ON by default. */

@@ -1,48 +1,22 @@
 /**
- * Quiet-while-typing policy, suppresses non-critical notifications when
- * the user is actively composing input, preventing distracting UI churn
- * mid-keystroke.
+ * Quiet-while-typing policy, keeps non-critical notifications off the screen
+ * while the user is composing input, so nothing pops up mid-keystroke. They
+ * are still kept in the history.
  */
 
-import type { NotificationLevel, NotificationTarget } from '../types.js';
+import type { NotificationLevel, NotificationPresence } from '../types.js';
 
 /**
- * Levels that are immune to quiet-while-typing suppression.
- * Critical notifications always surface regardless of typing state.
- */
-const UNSUPPRESSABLE_LEVELS = new Set<NotificationLevel>(['critical']);
-
-/**
- * Determines if a notification at the given level and target should be
- * suppressed while the user is actively typing.
+ * Whether a notification that would toast is held in the history instead
+ * because the user is typing. Critical notifications always toast.
  *
- * - `critical`, never suppressed
- * - `warning` / `info` / `debug`, suppressed when quiet mode is active
- *   AND the resolved target would surface above `panel_only`
- *
- * @param level         - Notification severity level.
- * @param target        - The target resolved by prior policies.
- * @param quietEnabled  - Whether quiet-while-typing mode is currently active.
- * @returns Suppression reason string if suppressed, undefined otherwise.
+ * @returns The suppression reason when held, undefined otherwise.
  */
 export function applyQuietTypingPolicy(
   level: NotificationLevel,
-  target: NotificationTarget,
+  presence: NotificationPresence,
   quietEnabled: boolean
 ): string | undefined {
-  if (!quietEnabled) {
-    return undefined;
-  }
-
-  if (UNSUPPRESSABLE_LEVELS.has(level)) {
-    return undefined;
-  }
-
-  // Only suppress notifications that would appear above panel_only.
-  // panel_only notifications are already panel-scoped; suppressing them is a no-op.
-  if (target === 'panel_only') {
-    return undefined;
-  }
-
+  if (!quietEnabled || level === 'critical' || presence === 'history') return undefined;
   return 'quiet_while_typing';
 }

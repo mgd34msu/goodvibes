@@ -2,13 +2,16 @@
 // Red when: The restore stops taking its safety checkpoint before it rewrites the tree, or removes a file no checkpoint held (an ignored .env).
 // Proves: A checkpoint stages or commits in the owner's own repository.
 // Red when: The side repository's git calls lose their GIT_DIR and land in the owner's index, refs or HEAD.
+// Proves: A client's hunk revert names a path outside the project and the daemon writes there.
+// Red when: The hunk revert's path check stops refusing a path that, as written or through a link inside the project, leads out of the workspace root.
 
 import { afterEach, expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { WorkspaceCheckpointManager } from '../platform/src/platform/workspace/checkpoint/manager.ts';
+import { applyHunkRevert, HunkRevertConflictError } from '../platform/src/platform/workspace/hunk-revert.ts';
 
 const roots: string[] = [];
 const managers: WorkspaceCheckpointManager[] = [];
@@ -77,4 +80,22 @@ test('a checkpoint leaves the owner\'s index, refs and HEAD as they were', async
   expect(checkpoint).not.toBeNull();
   expect((await manager.list()).map((entry) => entry.id)).toContain(checkpoint!.id);
   expect(owner()).toEqual(before);
+});
+
+test('a hunk revert writes nothing outside the project, by .. or through a link; the same hunk inside is reverted', async () => {
+  const { repo, manager } = ownerRepository();
+  const elsewhere = mkdtempSync(join(tmpdir(), 'gv-hunk-outside-'));
+  roots.push(elsewhere);
+  const outside = join(elsewhere, 'outside.txt');
+  writeFileSync(outside, 'keep\nadded\n');
+  symlinkSync(outside, join(repo, 'link.txt'));
+  writeFileSync(join(repo, 'inside.txt'), 'keep\nadded\n');
+  const hunk = '@@ -1,1 +1,2 @@\n keep\n+added\n';
+  for (const path of [relative(repo, outside), 'link.txt']) {
+    const refused = await applyHunkRevert(manager, path, hunk).then(() => 'written', (error: unknown) => error instanceof HunkRevertConflictError ? 'refused' : String(error));
+    expect(`${path}: ${refused}`).toBe(`${path}: refused`);
+  }
+  expect(readFileSync(outside, 'utf8')).toBe('keep\nadded\n');
+  await applyHunkRevert(manager, 'inside.txt', hunk);
+  expect(readFileSync(join(repo, 'inside.txt'), 'utf8')).toBe('keep\n');
 });

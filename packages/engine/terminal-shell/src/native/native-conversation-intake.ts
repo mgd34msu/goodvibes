@@ -127,6 +127,8 @@ type IntakePhase =
     | 'journal-read' | 'journal-save' | 'journal-confirm' | 'journal-claim' | 'journal-execution' | 'journal-hosted-source' | 'journal-remove';
 const isJournalPhase = (phase: IntakePhase): boolean => phase.startsWith('journal-');
 const terminal = (result: NativeConversationIntakeResult) => ['turn', 'work', 'blocked', 'refused', 'cancelled'].includes(result.kind);
+/** A hosted turn the host will not run again: completed, cancelled, or failed without a retry. */
+const hostedTurnEnded = (turn: Exclude<NativeHostedTurnLookup, { kind: 'not-found' }>) => turn.state === 'completed' || turn.state === 'cancelled' || (turn.state === 'failed' && turn.failure?.retryable !== true);
 const sameCommand = (left: NativeConversationIntakeCaptureRequest, right: NativeConversationIntakeCaptureRequest) => JSON.stringify(left) === JSON.stringify(right);
 /** Persist exact input first. Interrupted processing requires an explicit resume. */
 export class NativeConversationIntakeControls implements NativeConversationIntakeActions {
@@ -278,12 +280,21 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 await selected.journal.confirm(scope, command!);
                 confirmed = true;
             };
-            /** The input is settled for this client: its record has nothing left to protect. */
+            /**
+             * The input is settled for this client: its record has nothing left to protect. A remove that
+             * fails is said on the result and nothing else changes: the next input's save replaces the record.
+             */
+            let removeFailed = false;
             const settled = async () => {
                 if (!selected.journal.remove || !command)
                     return;
                 phase = 'journal-remove';
-                await selected.journal.remove(scope, command);
+                try {
+                    await selected.journal.remove(scope, command);
+                }
+                catch {
+                    removeFailed = true;
+                }
             };
             const preserveHostedSource = async () => {
                 if (delivery !== 'hosted' || !observedSource)
@@ -316,7 +327,9 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 };
                 if (action !== 'cancel') {
                     const found = await observe('status');
-                    if (action === 'status' || !('kind' in found))
+                    // A turn that failed before any effect is started again with the same input (the host allows it).
+                    const restartable = !('kind' in found) && found.state === 'failed' && found.failure?.retryable === true;
+                    if (action === 'status' || (!('kind' in found) && !restartable))
                         return found;
                 }
                 await preserveHostedSource();
@@ -343,7 +356,9 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                     const hostedTurn = await hosted('status', result);
                     if (!current())
                         return;
-                    if ('kind' in hostedTurn || !['completed', 'cancelled'].includes(hostedTurn.state))
+                    if (!('kind' in hostedTurn) && hostedTurn.state === 'failed' && hostedTurn.failure?.retryable === true)
+                        return { status: 'recorded', message: `Your previous message failed on the host before changing anything${hostedTurn.failure?.summary ? ` (${hostedTurn.failure.summary})` : ''}. Send it again with /work intake-retry, or drop it with /work intake-cancel. This new message was not sent.`, request: request(), result, hostedTurn, hostedCurrent, nextStep: 'retry', notSent: true };
+                    if ('kind' in hostedTurn || !hostedTurnEnded(hostedTurn))
                         return { status: 'recorded', message: 'Your previous message is still running on the host. Check it with /work intake-status, or stop it with /work intake-cancel. This new message was not sent.', request: request(), result, hostedTurn, hostedCurrent, nextStep: 'inspect', notSent: true };
                     if (options?.delivery === 'hosted' && nextContinuation === undefined && hostedTurn.sessionId)
                         nextContinuation = hostedTurn.sessionId;
@@ -362,7 +377,7 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 if (delivery !== options?.delivery && execution.snapshot && !['terminal', 'cancelled'].includes(execution.snapshot.recovery))
                     return { status: 'recorded', message: 'Your previous message became work that is still running. Follow it in /work; the next message can be sent once that work has ended. This new message was not sent.', request: request(), result, execution, nextStep: 'inspect', notSent: true };
                 if (!execution.snapshot)
-                    return { status: 'recorded', message: 'Your previous message became work whose start was never confirmed. Start it with /work intake-retry. This new message was not sent.', request: request(), result, execution, nextStep: 'retry', notSent: true };
+                    return { status: 'recorded', message: 'Your previous message became work whose start was never confirmed. Start it with /work intake-retry, or drop this message with /work intake-cancel (the work stays in /work). This new message was not sent.', request: request(), result, execution, nextStep: 'retry', notSent: true };
             }
             const unsaved = !result && command !== undefined && retained !== undefined && !retained.persisted && sameCommand(command, retained.command) && stored?.command.requestId !== command.requestId;
             if (mode === 'submit') {
@@ -511,8 +526,9 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 hostedTurn = await hosted(mode === 'status' ? 'status' : mode === 'cancel' ? 'cancel' : 'request', result);
                 if (!current())
                     return;
-                // A hosted turn that finished or was cancelled is the host's to show; nothing here can run it again.
-                if (!('kind' in hostedTurn) && ['completed', 'cancelled'].includes(hostedTurn.state)) {
+                // A hosted turn that ended is the host's to show; nothing here can run it again. A retryable
+                // failure keeps its record for /work intake-retry until the person drops it.
+                if (!('kind' in hostedTurn) && (hostedTurnEnded(hostedTurn) || (mode === 'cancel' && hostedTurn.state === 'failed'))) {
                     await settled();
                     if (!current())
                         return;
@@ -549,6 +565,13 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                     execution = await inspectNativeConversationExecution(binding.execution, selected.projectId, intent, controller.signal);
                     if (!current())
                         return;
+                    // Work is never cancelled from intake: dropping the message drops only its record, and the
+                    // work stays in the ledger, where /work starts or cancels it.
+                    if (mode === 'cancel') {
+                        await settled();
+                        if (!current())
+                            return;
+                    }
                 }
             }
             const turnPermit = turnReady ? binding.client.bindTurn(result) : undefined;
@@ -558,15 +581,16 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 }
                 catch { /* the next save under this binding replaces the record */ }
             };
-            return { status: 'recorded', message: hostedTurn ? (result.sourceRef.classic ? 'Owner-authorized Classic conversation recorded for host-owned delivery; no decision-model receipt.' : 'Native conversational decision recorded for host-owned delivery.') : describeResult(result, turnReady, Boolean(stored?.dispatch)), request: request(), result, ...(hostedTurn ? { hostedTurn, hostedCurrent } : {}), ...(execution ? { execution } : {}), ...(turnReady ? { turnReady: true, turnPermit, releaseTurnClaim: releaseClaim, finishTurn } : {}) };
+            const message = mode === 'cancel' && result.kind === 'work'
+                ? 'This message already became work, so it was not cancelled here; its intake record was dropped and the work stays in /work, where it can be started or cancelled.'
+                : hostedTurn ? (result.sourceRef.classic ? 'Owner-authorized Classic conversation recorded for host-owned delivery; no decision-model receipt.' : 'Native conversational decision recorded for host-owned delivery.') : describeResult(result, turnReady, Boolean(stored?.dispatch));
+            return { status: 'recorded', message: removeFailed ? `${message} Its journal record could not be removed now; the next input replaces it.` : message, request: request(), result, ...(hostedTurn ? { hostedTurn, hostedCurrent } : {}), ...(execution ? { execution } : {}), ...(turnReady ? { turnReady: true, turnPermit, releaseTurnClaim: releaseClaim, finishTurn } : {}) };
         }
         catch (error) {
             if (!current())
                 return;
             const cause = nativeIntakeFailureCause(error);
-            return { status: command ? 'unknown' : 'unavailable', cause, request: request(), message: phase === 'journal-remove'
-                    ? 'The input is settled on the host, but its journal record could not be removed now. Nothing else was sent; the next input replaces it.'
-                    : isJournalPhase(phase)
+            return { status: command ? 'unknown' : 'unavailable', cause, request: request(), message: isJournalPhase(phase)
                     ? 'The durable intake journal could not be confirmed. No further request or ordinary turn was sent. The visible original input and dispatch claim are preserved.'
                     : !command && cause === 'principal'
                     ? 'This terminal is not paired with the connected host, so nothing was sent to it. Pair it (/setup pair in the Agent, /host pair in the terminal app) to use it.'

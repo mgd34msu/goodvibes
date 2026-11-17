@@ -51,5 +51,12 @@ export function nativeHostedTurnLines(result: NativeHostedTurnLookup): string[] 
         lines.push('Inspect the original hosted session; ambiguous dispatch will not be replayed.');
     if (result.state === 'cancelled')
         lines.push('This original hosted turn is cancelled. Effects already performed are not undone.');
+    if (result.state === 'failed') {
+        if (result.failure)
+            lines.push(`What failed: ${result.failure.summary}`);
+        lines.push(result.failure?.retryable
+            ? 'Nothing was changed. Send the same message again with /work intake-retry, or drop it with /work intake-cancel.'
+            : 'It will not be run again. Send a new message to continue; the session takes the next one.');
+    }
     return lines;
 }

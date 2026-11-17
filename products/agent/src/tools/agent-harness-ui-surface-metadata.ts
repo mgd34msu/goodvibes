@@ -328,6 +328,7 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
         if (!openedForTarget) return notOpened(surface, `The ${target} model picker did not open (the runtime declined it). Nothing was changed.`);
         return opened(surface, { target, openedForTarget });
       }
+      if (target && target !== 'main') return notOpened(surface, `This shell has no ${target} model picker, only the main one. Nothing was opened. Set the ${target} model with ${settingsActions('set')}, or omit target for the main model.`);
       if (!context.openModelPicker) return routeUnavailable(surface);
       context.openModelPicker();
       return opened(surface, { target: 'main' });
@@ -352,6 +353,7 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
         if (!context.openProviderModelPickerWithTarget(target)) return notOpened(surface, `The ${target} provider picker did not open (the runtime declined it). Nothing was changed.`);
         return opened(surface, { target });
       }
+      if (target && target !== 'main') return notOpened(surface, `This shell has no ${target} provider picker, only the main one. Nothing was opened. Set the ${target} route with ${settingsActions('set')}, or omit target for the main route.`);
       if (!context.openProviderPicker) return routeUnavailable(surface);
       context.openProviderPicker();
       return opened(surface, { target: 'main' });

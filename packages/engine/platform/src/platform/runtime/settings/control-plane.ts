@@ -4,7 +4,10 @@ import { CONFIG_SCHEMA } from '../../config/index.js';
 import type { ConfigKey } from '../../config/index.js';
 import { ProfileManager } from '../../profiles/manager.js';
 import type { ManagedSettingsBundle } from '../sandbox/types.js';
+import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
+import { ConfigError } from '../../types/errors.js';
 import {
+  SECRET_LITERAL_PLACEHOLDER,
   assertNoCredentialLiterals,
   configSnapshot,
   isCredentialLiteral,
@@ -451,6 +454,12 @@ function applyStagedManagedBundleLocked(
   return { rollbackToken, appliedCount: restoredKeys.length, remainingCount: remainingChanges.length };
 }
 
+/**
+ * Roll back one managed apply; answers how many settings were restored. A
+ * credential that held plain text before the apply was never recorded, so it
+ * keeps the managed value: after everything else is rolled back and saved,
+ * the call throws naming those settings and what to do.
+ */
 export function rollbackManagedApply(configManager: ConfigManager, token: string): number {
   const configDir = getConfigControlPlaneDir(configManager);
   return withStoreLock(configDir, () => rollbackManagedApplyLocked(configManager, token, configDir));
@@ -478,8 +487,13 @@ function rollbackManagedApplyLocked(configManager: ConfigManager, token: string,
     ...store.managedLocks.filter((entry) => !releasedKeys.includes(entry.key)),
     ...(record.replacedLocks ?? []),
   ].sort((a, b) => a.key.localeCompare(b.key));
+  const notRestorable: ConfigKey[] = [];
   for (const key of record.restoredKeys) {
     const previousValue = record.previousValues[key]!;
+    if (isSecretBearingConfigKey(key) && previousValue === SECRET_LITERAL_PLACEHOLDER) {
+      notRestorable.push(key);
+      continue;
+    }
     if (previousValue !== undefined) {
       configManager.setDynamic(key, structuredClone(previousValue), { bypassManagedLock: true });
       restored++;
@@ -500,9 +514,12 @@ function rollbackManagedApplyLocked(configManager: ConfigManager, token: string,
       direction: 'rollback',
       path: record.path,
       timestamp: Date.now(),
-      detail: `${restored} managed settings rolled back from ${record.profileName}`,
+      detail: `${restored} managed settings rolled back from ${record.profileName}${notRestorable.length > 0 ? `; ${notRestorable.join(', ')} kept the managed value (the earlier plain-text credential was not recorded)` : ''}`,
     }],
   })), configDir);
+  if (notRestorable.length > 0) {
+    throw new ConfigError(`Managed rollback ${token} restored ${restored} setting(s), but ${notRestorable.join(', ')} kept the value the apply set: before the apply ${notRestorable.length > 1 ? 'they' : 'it'} held a plain-text credential, which is never recorded. Set ${notRestorable.length > 1 ? 'each' : 'it'} to a goodvibes://secrets/ reference to change it.`);
+  }
   return restored;
 }
 

@@ -147,6 +147,21 @@ export function createHostedSessionCreateHandler(service: HostedSessionVerbServi
         'originSurface',
       );
     }
+    // An Agent session's operator tools reach this daemon with the Agent's
+    // credentials for it (its pairing, or the daemon's own operator
+    // credential), which carry full operator authority. Only a creator that
+    // already holds that authority may start one, so a narrowed credential
+    // cannot borrow it through the session.
+    if (originSurface === 'agent' && invocation.context.admin !== true) {
+      throw new GatewayVerbError(
+        'Not created: a GoodVibes Agent session acts on this daemon with full operator authority, and this credential does not hold it. '
+          + 'Create the session with an admin credential (the owner\'s operator token, an admin sign-in or a full pairing), '
+          + 'use the GoodVibes Agent itself, or omit originSurface for a plain hosted session.',
+        'HOSTED_SURFACE_FORBIDDEN',
+        403,
+        'originSurface',
+      );
+    }
     try {
       const session = await service.create({
         workspaceRoot: requireString(params, 'workspaceRoot'),

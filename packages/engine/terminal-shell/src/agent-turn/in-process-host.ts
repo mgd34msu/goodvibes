@@ -11,7 +11,9 @@
  *
  * The credentials are the ones the Agent presents to a daemon on the same
  * machine, with the Agent's one precedence, so every call is admitted and
- * judged as it is in the Agent's own process:
+ * judged as it is in the Agent's own process. Both ordinary credentials carry
+ * full operator authority, which is why the daemon creates an Agent session
+ * only for a caller that holds admin (sessions.hosted.create):
  * - an ordinary call carries the Agent's pairing with this daemon when there is
  *   one (credential kind `device-token`), otherwise the daemon's operator
  *   credential (credential kind `local`, as the Agent's operator token file

@@ -68,7 +68,10 @@ Unknown or ambiguous models are refused. `clientId` attaches the creating client
 restarts and must be `agent`, `tui` or `webui`; any other value is refused
 before the session is created. A session created for `agent` (the Agent's routed
 turns, its channel hand-offs, the web UI's GoodVibes Agent choice, or any client
-that names it) answers as the GoodVibes Agent: each model request gets the Agent's
+that names it and holds admin) answers as the GoodVibes Agent. Its operator tools
+act on this daemon with full operator authority, so a caller without admin (a
+non-admin sign-in, or a pairing with a narrowed scope list) is refused with
+`HOSTED_SURFACE_FORBIDDEN` and nothing is created. In such a session each model request gets the Agent's
 prompt (its operator policy and capture rules, VIBE, project context, persona,
 reviewed skills, routines and memory, read from the same `~/.goodvibes/agent`
 stores the Agent uses) and the session has the Agent's `profile`, `occasions`,

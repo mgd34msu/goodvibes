@@ -54,6 +54,7 @@ export function captureCheckoutRecord(value: unknown): InFlightCheckout | null {
   if (row['recoveryNotifiedAtMs'] !== undefined && !timestamp(row['recoveryNotifiedAtMs'])) return null;
   if (row['windowDeadlineMs'] !== undefined && !timestamp(row['windowDeadlineMs'])) return null;
   if (row['windowKind'] !== undefined && row['windowKind'] !== 'approval' && row['windowKind'] !== 'veto') return null;
+  if (row['windowHeldReply'] !== undefined && (row['windowHeldReply'] !== true || row['windowKind'] !== 'approval')) return null;
   if (Object.hasOwn(row, 'windowNotice') && (typeof row['windowNotice'] !== 'string'
     || !row['windowNotice'].trim() || row['windowNotice'].length > 16_384)) return null;
   const deliveries = row['windowDeliveries'];

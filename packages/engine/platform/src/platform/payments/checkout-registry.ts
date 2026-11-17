@@ -116,6 +116,12 @@ export interface InFlightCheckout {
   readonly windowKind?: 'approval' | 'veto' | undefined;
   /** Exact rendered notice sent for this quote. Storage alone grants no act. */
   readonly windowNotice?: string | undefined;
+  /**
+   * Set on an approval window that follows a veto reply which was not a
+   * go-ahead. A restart resumes it as that approval (silence denies) instead
+   * of opening a new veto window.
+   */
+  readonly windowHeldReply?: true | undefined;
 }
 
 /**

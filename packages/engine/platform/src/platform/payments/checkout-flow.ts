@@ -812,7 +812,12 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     aboveRequestedMaximum: exceedsRequestedMaximum,
     merchantIsMajor: merchantVerdict.isMajor,
   });
-  if (resumption && resumption.checkpoint.record.windowKind !== windowKind) {
+  // A veto reply that was not a go-ahead turned this window into an explicit
+  // approval (silence denies). A restart during that follow-up resumes it as
+  // the approval it is: it is never downgraded back to a veto where silence buys.
+  const resumedHeldReply = resumption !== undefined && windowKind === 'veto'
+    && resumption.checkpoint.record.windowKind === 'approval' && resumption.checkpoint.record.windowHeldReply === true;
+  if (resumption && resumption.checkpoint.record.windowKind !== windowKind && !resumedHeldReply) {
     await release(); return { kind: 'reprice', reading };
   }
   if (resumption) {
@@ -836,7 +841,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
    * windows' silence rules are opposite and stay in their own state machines.
    */
   type WindowAnswer = Awaited<ReturnType<PaymentNotifier['awaitAnswer']>>;
-  const runWindow = async (kind: 'approval' | 'veto', message: string, minutes: number, restored: boolean)
+  const runWindow = async (kind: 'approval' | 'veto', message: string, minutes: number, restored: boolean, heldReply = false)
     : Promise<{ readonly done: CheckoutOutcome } | { readonly deliveries: readonly ChannelDelivery[]; readonly answer: WindowAnswer | undefined }> => {
     if (!addressStillCurrent()) { await releaseUnlessStopped(); return { done: refused('no-shipping-address', 'The stored address changed before the purchase notice.') }; }
     let reception: PaymentNoticeWindow | undefined;
@@ -874,7 +879,10 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
       addressCurrent();
       if (typeof deadlineMs !== 'number' || !Number.isSafeInteger(deadlineMs) || deadlineMs < 0) throw new CheckoutOwnershipError();
       // Persisted so a restart can apply the delivery-keyed recovery rules.
-      const checkpoint = await registry.advance(request.purchaseId, 'awaiting-window', { windowDeliveries: deliveries, windowDeadlineMs: deadlineMs, windowKind: kind, windowNotice: message }, now());
+      const checkpoint = await registry.advance(request.purchaseId, 'awaiting-window', {
+        windowDeliveries: deliveries, windowDeadlineMs: deadlineMs, windowKind: kind, windowNotice: message,
+        windowHeldReply: kind === 'approval' && heldReply ? true : undefined,
+      }, now());
       if (!deliveries.some((entry) => entry.delivered)) return { deliveries, answer: undefined };
       await deps.retainWindowCheckpoint?.({ record: checkpoint, reading, terms: expectedTerms });
       addressCurrent();
@@ -889,8 +897,8 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   };
 
   /** The approval window's state machine over one run of `runWindow`. SILENCE DENIES. */
-  const awaitApproval = async (message: string, restored: boolean): Promise<{ readonly done: CheckoutOutcome } | { readonly state: ApprovalState }> => {
-    const run = await runWindow('approval', message, deps.approvalMinutes, restored);
+  const awaitApproval = async (message: string, restored: boolean, heldReply = false): Promise<{ readonly done: CheckoutOutcome } | { readonly state: ApprovalState }> => {
+    const run = await runWindow('approval', message, deps.approvalMinutes, restored, heldReply);
     if ('done' in run) return run;
     let state = advanceApproval('pending-dispatch', { kind: 'dispatched', deliveries: run.deliveries });
     if (state !== 'awaiting-approval' || run.answer === undefined) return { state };
@@ -970,25 +978,32 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   } else {
     // WITHIN BUDGET AND RECOURSE ESTABLISHED. Silence PROCEEDS. Undeliverable
     // PROCEEDS.
-    const message = resumption?.checkpoint.record.windowNotice ?? renderPurchaseNotice({
-      facts,
-      mode: 'veto',
-      expiresInMinutes: deps.vetoMinutes,
-      merchantReason: merchantVerdict.reason,
-    });
-    const run = await runWindow('veto', message, deps.vetoMinutes, resumption !== undefined);
-    if ('done' in run) return run.done;
-    let state: VetoState = advanceVeto('pending-dispatch', { kind: 'dispatched', deliveries: run.deliveries });
-    if (state === 'open' && run.answer !== undefined) {
-      if (run.answer === null) {
-        state = advanceVeto(state, { kind: 'deadline' });
-      } else {
-        answeredBy = run.answer.channel;
-        state = advanceVeto(state, run.answer.answer === 'object' || run.answer.answer === 'deny'
-          ? { kind: 'object', channel: run.answer.channel }
-          : run.answer.answer === 'not-understood'
-            ? { kind: 'not-understood', channel: run.answer.channel }
-            : { kind: 'acknowledge', channel: run.answer.channel });
+    let state: VetoState;
+    if (resumedHeldReply) {
+      // The veto window already ended on a reply that was not a go-ahead; only
+      // its follow-up approval is resumed below.
+      state = 'held-reply-not-understood';
+    } else {
+      const message = resumption?.checkpoint.record.windowNotice ?? renderPurchaseNotice({
+        facts,
+        mode: 'veto',
+        expiresInMinutes: deps.vetoMinutes,
+        merchantReason: merchantVerdict.reason,
+      });
+      const run = await runWindow('veto', message, deps.vetoMinutes, resumption !== undefined);
+      if ('done' in run) return run.done;
+      state = advanceVeto('pending-dispatch', { kind: 'dispatched', deliveries: run.deliveries });
+      if (state === 'open' && run.answer !== undefined) {
+        if (run.answer === null) {
+          state = advanceVeto(state, { kind: 'deadline' });
+        } else {
+          answeredBy = run.answer.channel;
+          state = advanceVeto(state, run.answer.answer === 'object' || run.answer.answer === 'deny'
+            ? { kind: 'object', channel: run.answer.channel }
+            : run.answer.answer === 'not-understood'
+              ? { kind: 'not-understood', channel: run.answer.channel }
+              : { kind: 'acknowledge', channel: run.answer.channel });
+        }
       }
     }
     windowOutcome = state;
@@ -1006,9 +1021,12 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
       // The owner answered in time with something that was not a go-ahead.
       // That is never silence: the timer is stopped and the same purchase is
       // put to them as an explicit approval, where silence means no.
-      const followUp = 'I did not take your reply as a go-ahead, so nothing is bought unless you say yes.\n\n'
-        + renderPurchaseNotice({ facts, mode: 'approval', expiresInMinutes: deps.approvalMinutes, merchantReason: merchantVerdict.reason });
-      const approval = await awaitApproval(followUp, false);
+      // Journalled as an approval marked as this follow-up, so a restart
+      // resumes it with the same notice and the same silence-denies rule.
+      const followUp = (resumedHeldReply ? resumption?.checkpoint.record.windowNotice : undefined)
+        ?? 'I did not take your reply as a go-ahead, so nothing is bought unless you say yes.\n\n'
+          + renderPurchaseNotice({ facts, mode: 'approval', expiresInMinutes: deps.approvalMinutes, merchantReason: merchantVerdict.reason });
+      const approval = await awaitApproval(followUp, resumedHeldReply, true);
       if ('done' in approval) return approval.done;
       windowOutcome = `${state}:${approval.state}`;
       if (approval.state !== 'approved') {

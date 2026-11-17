@@ -83,6 +83,7 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
   usage:
     '[review|status|setup --yes|enable|disable|wake status|wake setup --yes [yes]|bundle export <path> --yes|bundle inspect <path>|bundle import <path> --yes]',
   help: 'Usage: /voice [review|status|setup --yes|enable|disable|wake status|wake setup --yes [yes]|bundle export <path> --yes|bundle inspect <path>|bundle import <path> --yes]',
+  confirmMutations: true,
   reportFailure: true,
   paths: requireShellPaths,
   async wake(args, ctx, _shellPaths, yes) {

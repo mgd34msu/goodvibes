@@ -84,8 +84,7 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
           }
           const { found, daemonUnavailable } = await tasksClient.lookup(taskId);
           if (!found) {
-            ctx.print(missingTaskMessage(taskId, daemonUnavailable));
-            return;
+            throw commandRefusal(missingTaskMessage(taskId, daemonUnavailable));
           }
           ctx.print(policy.detail(ctx, found).join('\n'));
           return;
@@ -98,8 +97,7 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
           }
           const { found, daemonUnavailable } = await tasksClient.lookup(taskId);
           if (!found) {
-            ctx.print(missingTaskMessage(taskId, daemonUnavailable));
-            return;
+            throw commandRefusal(missingTaskMessage(taskId, daemonUnavailable));
           }
           const { task } = found;
           const payload =
@@ -114,8 +112,7 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
 
         // Read-only surfaces never obtain a mutation API or dispatch a remote write.
         if (!policy.mutations) {
-          ctx.print(policy.unknownSubcommand(subcommand));
-          return;
+          throw commandRefusal(policy.unknownSubcommand(subcommand));
         }
         if (subcommand === 'create') {
           const opsApi = policy.mutations(ctx);
@@ -158,14 +155,12 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
         // does not exist, that reports success and changes nothing.
         const { found, daemonUnavailable } = await tasksClient.lookup(taskId);
         if (!found) {
-          ctx.print(missingTaskMessage(taskId, daemonUnavailable));
-          return;
+          throw commandRefusal(missingTaskMessage(taskId, daemonUnavailable));
         }
 
         if (found.origin === 'daemon') {
           if (LOCAL_ONLY_ACTS.has(subcommand)) {
-            ctx.print(refuseDaemonOwnedAct(taskId, subcommand));
-            return;
+            throw commandRefusal(refuseDaemonOwnedAct(taskId, subcommand));
           }
           try {
             switch (subcommand) {
@@ -178,12 +173,11 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
                 ctx.print(`Re-queued task ${taskId} on the daemon.`);
                 return;
               default:
-                ctx.print(policy.unknownSubcommand(subcommand));
-                return;
+                throw commandRefusal(policy.unknownSubcommand(subcommand));
             }
           } catch (error) {
-            ctx.print(summarizeError(error));
-            return;
+            if (readRefusal(error)) throw error;
+            throw commandRefusal(summarizeError(error));
           }
         }
 
@@ -196,8 +190,7 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
               throw commandRefusal('Usage: /tasks update <taskId> <title|description|result> <value...>');
             }
             if (field !== 'title' && field !== 'description' && field !== 'result') {
-              ctx.print(`Unsupported task update field: ${field}`);
-              return;
+              throw commandRefusal(`Unsupported task update field: ${field}`);
             }
             opsApi.tasks.update(taskId, field === 'result' ? { result: value } : { [field]: value });
             ctx.print(`Updated task ${taskId} field ${field}.`);
@@ -241,8 +234,7 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
               ctx.print(`Re-queued task ${taskId}.`);
               return;
             default:
-              ctx.print(policy.unknownSubcommand(subcommand));
-              return;
+              throw commandRefusal(policy.unknownSubcommand(subcommand));
           }
         } catch (error) {
           if (readRefusal(error)) throw error;

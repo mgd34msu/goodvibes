@@ -230,6 +230,7 @@ const interactionModeCommand = createInteractionModeCommand<CommandContext>({
   description: 'Set how much the app prints: quiet, balanced or operator',
   usage: '[quiet|balanced|operator|show|set-domain <domain> <verbosity>]',
   argsHint: '[level|show|set-domain]',
+  confirmMutations: false,
   help:
     'Usage: /mode [quiet|balanced|operator|show|set-domain <domain> <verbosity>]\n' +
     '  /mode                          show the print level\n' +

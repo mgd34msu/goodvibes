@@ -105,6 +105,7 @@ const localActions = createLocalCommandActions<CommandContext>(requireProviderAp
 const secretsCommand = createSecretsCommand<CommandContext>(requireSecretsManager, {
   description: 'Manage hierarchy-aware secrets, external secret refs, and secure/plaintext storage policy controls',
   hidden: true,
+  confirmMutations: true,
   concealedEntry: true,
   writeScope: resolveCredentialWriteScope,
   deleteScope: resolveCredentialDeleteScope,

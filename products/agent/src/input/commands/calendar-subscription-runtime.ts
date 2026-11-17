@@ -161,8 +161,7 @@ async function handleSubscribe(args: readonly string[], ctx: CommandContext, fet
   if (!parsed.yes) {
     const check = await registry.validate(url, requestedName, hostOptions);
     if (!check.ok) {
-      ctx.print([`Subscription preview failed at the ${check.stage} stage.`, `  ${check.detail}`].join('\n'));
-      return;
+      throw commandRefusal([`Subscription preview failed at the ${check.stage} stage.`, `  ${check.detail}`].join('\n'));
     }
     const intervalMin = Math.round((refreshIntervalMs ?? 60 * 60_000) / 60_000);
     ctx.print([
@@ -206,8 +205,7 @@ async function handleUnsubscribe(args: readonly string[], ctx: CommandContext, f
   }
   const report = await registry.unsubscribeWithReport(name);
   if (!report.removed) {
-    ctx.print(`No subscription named '${name}'.`);
-    return;
+    throw commandRefusal(`No subscription named '${name}'.`);
   }
   // The feed URL is a read capability for the whole calendar, so a copy the secret store would not delete is named, not hidden.
   if (report.secret === 'failed') {

@@ -117,8 +117,7 @@ function printDelegationStatus(ctx: CommandContext, query: string | undefined): 
   }
   const entry = store.find(query);
   if (!entry) {
-    ctx.print(`No recorded delegation has a session id matching ${query}. Run /delegate status to list them; to delegate a task that starts with the word status, put -- before it.`);
-    return;
+    throw commandRefusal(`No recorded delegation has a session id matching ${query}. Run /delegate status to list them; to delegate a task that starts with the word status, put -- before it.`);
   }
   const sessions = ctx.clients?.operator?.sessions;
   if (!sessions) {

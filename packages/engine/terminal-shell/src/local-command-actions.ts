@@ -199,7 +199,8 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
             ctx.print(policy.imageFailure('Live model discovery failed', summarizeError(e)));
           }
         }
-        if (!catalogOk || !benchmarksOk || !limitsOk || !discoveryOk) ctx.print(policy.partialRefresh);
+        // Each step above printed what it did; a step that failed makes the refresh a refusal.
+        if (!catalogOk || !benchmarksOk || !limitsOk || !discoveryOk) throw commandRefusal(policy.partialRefresh);
       },
     } satisfies TerminalSlashCommand<Context>,
     pin: {

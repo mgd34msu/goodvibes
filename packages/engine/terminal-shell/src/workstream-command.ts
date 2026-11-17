@@ -8,6 +8,7 @@
 import { isTerminalContractStatus } from '@goodvibes-jev/engine/platform/platform/contract/types';
 import type { ContractOperatorService, ContractView } from '@goodvibes-jev/engine/platform/platform/contract';
 import type { WorkstreamDraft, WorkstreamDraftService } from '@goodvibes-jev/engine/platform/platform/orchestration';
+import { commandRefusal } from './command-confirmation.js';
 
 export const WORKSTREAM_SHARED_USAGE = [
   'list | status <id> | cancel <id> | reply <id> <question-id> <answer>',
@@ -100,7 +101,7 @@ export async function runWorkstreamCommand(action: string, args: readonly string
     if (!drafts) { print('Workstream plans are not available in this session.'); return true; }
     if (action === 'propose') {
       const goal = args.join(' ').trim();
-      if (!goal) { print('Usage: /workstream propose <goal>'); return true; }
+      if (!goal) throw commandRefusal('Usage: /workstream propose <goal>');
       print('Planning the workstream; nothing runs until you approve and launch it.');
       print(renderWorkstreamDraft(await drafts.proposeDraft(goal)));
       return true;
@@ -121,24 +122,24 @@ export async function runWorkstreamCommand(action: string, args: readonly string
       case 'show': print(renderWorkstreamDraft(draft)); return true;
       case 'retask': {
         const goal = args.slice(1).join(' ').trim();
-        if (!goal) { print('Usage: /workstream retask <draft> <goal>'); return true; }
+        if (!goal) throw commandRefusal('Usage: /workstream retask <draft> <goal>');
         print('Planning the workstream again from the new goal.');
         edited(await drafts.editDraft(draft.id, goal));
         return true;
       }
       case 'edit': {
         const brief = args.slice(2).join(' ').trim();
-        if (!args[1] || !brief) { print('Usage: /workstream edit <draft> <item> <brief>'); return true; }
+        if (!args[1] || !brief) throw commandRefusal('Usage: /workstream edit <draft> <item> <brief>');
         edited(drafts.editItem(draft.id, args[1], brief));
         return true;
       }
       case 'drop':
-        if (!args[1]) { print('Usage: /workstream drop <draft> <item>'); return true; }
+        if (!args[1]) throw commandRefusal('Usage: /workstream drop <draft> <item>');
         edited(drafts.removeItem(draft.id, args[1]));
         return true;
       case 'move': {
         const position = Number(args[2]);
-        if (!args[1] || !Number.isInteger(position)) { print('Usage: /workstream move <draft> <item> <position>'); return true; }
+        if (!args[1] || !Number.isInteger(position)) throw commandRefusal('Usage: /workstream move <draft> <item> <position>');
         edited(drafts.moveItem(draft.id, args[1], position));
         return true;
       }
@@ -174,14 +175,15 @@ export async function runWorkstreamCommand(action: string, args: readonly string
     return true;
   }
   if (action === 'retry') {
-    if (!args[1]) { print(`Usage: /workstream retry <id> <unit>; units: ${contract.units.map(unit => `${unit.id} (${unit.status})`).join(', ') || 'none planned yet'}`); return true; }
+    if (!args[1]) throw commandRefusal(`Usage: /workstream retry <id> <unit>; units: ${contract.units.map(unit => `${unit.id} (${unit.status})`).join(', ') || 'none planned yet'}`);
     const outcome = await service.retryUnit(contract.id, args[1]);
-    print(outcome.outcome === 'refused' ? `Not retried: ${outcome.reason}.` : `${outcome.reason[0]!.toUpperCase()}${outcome.reason.slice(1)}.`);
+    if (outcome.outcome === 'refused') throw commandRefusal(`Not retried: ${outcome.reason}.`);
+    print(`${outcome.reason[0]!.toUpperCase()}${outcome.reason.slice(1)}.`);
     return true;
   }
   if (action === 'budget') {
     const dollars = Number(args[1]);
-    if (!args[1] || !Number.isFinite(dollars) || dollars < 0) { print('Usage: /workstream budget <id> <dollars>'); return true; }
+    if (!args[1] || !Number.isFinite(dollars) || dollars < 0) throw commandRefusal('Usage: /workstream budget <id> <dollars>');
     const { budget } = service.raiseBudget(contract.id, { ...contract.budget, maxCostUsd: dollars });
     print(`Workstream ${contract.id} budget is now ${budgetText(budget)}.`);
     const current = service.get(contract.id);
@@ -190,7 +192,7 @@ export async function runWorkstreamCommand(action: string, args: readonly string
   }
   const escalationId = args[1];
   const answer = args.slice(2).join(' ').trim();
-  if (!escalationId || !answer) { print('Usage: /workstream reply <id> <question-id> <answer>'); return true; }
+  if (!escalationId || !answer) throw commandRefusal('Usage: /workstream reply <id> <question-id> <answer>');
   const asked = contract.escalations.find(entry => entry.id === escalationId && entry.resolvedAt === undefined);
   if (isTerminalContractStatus(contract.status) || asked === undefined) {
     print('That owner question is no longer open. Inspect /workstream status before answering.');

@@ -88,19 +88,16 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
           try {
             target = new URL(url);
           } catch {
-            ctx.print(`Nothing was added: that is not a URL. Give the full address, for example https://ntfy.sh/my-topic.`);
-            return;
+            throw commandRefusal(`Nothing was added: that is not a URL. Give the full address, for example https://ntfy.sh/my-topic.`);
           }
           if (target.protocol !== 'http:' && target.protocol !== 'https:') {
-            ctx.print(`Nothing was added: ${target.protocol} addresses cannot be delivered to; use an http or https webhook URL.`);
-            return;
+            throw commandRefusal(`Nothing was added: ${target.protocol} addresses cannot be delivered to; use an http or https webhook URL.`);
           }
           // Delivery refuses these hosts, so a stored URL for one would only ever fail silently.
           const hostname = extractHostname(url);
           const trust = hostname === null ? null : classifyHostTrustTier(hostname);
           if (trust !== null && (trust.tier === 'blocked' || trust.tier === 'localhost')) {
-            ctx.print(`Nothing was added: delivery never sends to ${shownUrl(url)} (${trust.reason}). Use a public http or https webhook URL.`);
-            return;
+            throw commandRefusal(`Nothing was added: delivery never sends to ${shownUrl(url)} (${trust.reason}). Use a public http or https webhook URL.`);
           }
           if (urls.includes(url)) {
             ctx.print(`Already configured: ${shownUrl(url)}`);
@@ -122,8 +119,7 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
           const position = /^\d+$/.test(given) ? Number(given) : undefined;
           const url = position !== undefined ? urls[position - 1] : given;
           if (url === undefined) {
-            ctx.print(`No webhook has the number ${given}; /notify list shows ${urls.length === 0 ? 'none configured' : `1 to ${urls.length}`}.`);
-            return;
+            throw commandRefusal(`No webhook has the number ${given}; /notify list shows ${urls.length === 0 ? 'none configured' : `1 to ${urls.length}`}.`);
           }
           if (!parsed.yes) {
             requireYesFlag(ctx, `remove webhook notification URL ${shownUrl(url)}`, `/notify remove <n|url>${suffix}`);
@@ -221,7 +217,8 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
             ? entries.map((entry) => entry.id)
             : entries.filter((entry) => entry.id === which || shortDeadLetterId(entry.id) === which).map((entry) => entry.id);
           if (ids.length === 0) {
-            ctx.print(which === 'all' ? 'No failed notifications.' : `No failed notification has the id ${which}. List them with /notify failed.`);
+            if (which !== 'all') throw commandRefusal(`No failed notification has the id ${which}.`, 'List them with /notify failed.');
+            ctx.print('No failed notifications.');
             return;
           }
           if (!parsed.yes) {

@@ -444,8 +444,7 @@ export function registerChannelsRuntimeCommands(registry: CommandRegistry): void
         try {
           preview = buildAgentChannelDeliveryPreview(parsed);
         } catch (error) {
-          ctx.print(`[channels] ${error instanceof Error ? error.message : String(error)}`);
-          return;
+          throw commandRefusal(`[channels] ${error instanceof Error ? error.message : String(error)}`);
         }
         if (!parsed.yes) {
           ctx.print(formatAgentChannelDeliveryPreview(preview, router.listStrategies().length));

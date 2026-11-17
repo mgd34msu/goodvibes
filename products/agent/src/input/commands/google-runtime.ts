@@ -50,6 +50,7 @@ import {
 import type { GoogleProgressPort, GoogleSetupPath, GoogleSetupStepSpec, GoogleStepResult } from '@goodvibes-jev/engine/platform/platform/google';
 import { getOutwardApprovalStore, listRefusedOutwardActions, takeRefusedOutwardAction, type PendingOutwardAction } from '@goodvibes-jev/engine/terminal-shell/agent-turn/outward-approvals';
 import { commandRefusal } from './confirmation.ts';
+import { readRefusal } from '@goodvibes-jev/engine/errors';
 
 const USAGE = [
   'Usage: /google <subcommand>',
@@ -142,8 +143,8 @@ async function setAccount(args: readonly string[], ctx: CommandContext): Promise
     await routeConfigWrite(ctx.platform.configManager, GOOGLE_CONFIG_KEYS.emailUsername, address, { homeDir });
     await routeConfigWrite(ctx.platform.configManager, GOOGLE_CONFIG_KEYS.emailFromAddress, address, { homeDir });
   } catch (error) {
-    ctx.print(`Gmail address not set: ${summarizeError(error)}`);
-    return;
+    if (readRefusal(error)) throw error;
+    throw commandRefusal(`Gmail address not set: ${summarizeError(error)}`);
   }
   ctx.print(`Gmail address set to ${address}. Continue with: /google connect`);
 }
@@ -168,8 +169,7 @@ async function setCalendarAddress(args: readonly string[], ctx: CommandContext, 
   requireSecretsManager(ctx);
   const registry = subscriptionRegistryForWrite(ctx, fetcher);
   if (registry === null) {
-    ctx.print('Nothing was stored: no secret manager is available, and the feed address is stored only as a secret.');
-    return;
+    throw commandRefusal('Nothing was stored: no secret manager is available, and the feed address is stored only as a secret.');
   }
   const checked = await registry.validate(url, GOOGLE_CALENDAR_SUBSCRIPTION_NAME);
   if (!checked.ok) {
@@ -345,7 +345,8 @@ export async function runGoogleCommand(args: readonly string[], ctx: CommandCont
     }
     ctx.print(USAGE);
   } catch (error) {
-    ctx.print(`Google setup could not run: ${error instanceof Error ? error.message : String(error)}`);
+    if (readRefusal(error)) throw error;
+    throw commandRefusal(`Google setup could not run: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 

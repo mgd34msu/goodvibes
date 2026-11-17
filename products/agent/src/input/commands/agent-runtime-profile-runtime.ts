@@ -378,7 +378,8 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
           if (!name) {
             throw commandRefusal('Usage: /agent-profile delete <name>');
           }
-          ctx.print(deleteAgentRuntimeProfile(homeDirectory, name) ? `Agent profile deleted: ${name}` : `Agent profile not found ${name}`);
+          if (!deleteAgentRuntimeProfile(homeDirectory, name)) throw commandRefusal(`Agent profile not found ${name}`, 'Use /agent-profile list to see saved profiles.');
+          ctx.print(`Agent profile deleted: ${name}`);
           return;
         }
 

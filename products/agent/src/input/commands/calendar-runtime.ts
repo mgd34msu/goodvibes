@@ -164,8 +164,7 @@ export async function runCalendarRuntimeCommand(args: readonly string[], ctx: Co
       const sourcePath = resolveCommandFilePath(ctx, filePath, 'read');
       if (sourcePath === null) return;
       if (!existsSync(sourcePath)) {
-        ctx.print(`File not found: ${sourcePath}`);
-        return;
+        throw commandRefusal(`File not found: ${sourcePath}`);
       }
       const content = readFileSync(sourcePath, 'utf-8');
       if (!parsed.yes) {

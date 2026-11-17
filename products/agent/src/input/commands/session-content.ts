@@ -71,7 +71,7 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
           ].join('\n'),
         );
       } catch (e) {
-        ctx.print(formatSessionFailure('load session', e));
+        throw commandRefusal(formatSessionFailure('load session', e));
       }
     },
   });

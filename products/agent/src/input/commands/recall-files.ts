@@ -91,7 +91,7 @@ export async function handleRecallFilesSync(args: string[], context: CommandCont
         ? '  nothing to commit (no file was written)'
         : '  not committed (the directory is unchanged or git did not run)');
   } catch (error) {
-    context.print(`[memory] Projection sync failed: ${summarizeError(error)}`);
+    throw commandRefusal(`[memory] Projection sync failed: ${summarizeError(error)}`);
   }
 }
 

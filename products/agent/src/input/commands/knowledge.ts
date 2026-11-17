@@ -3,9 +3,10 @@ import { handleKnowledgeReadCommand } from '@goodvibes-jev/engine/terminal-shell
 import { readKnowledgeAskArguments } from '@goodvibes-jev/engine/terminal-shell/command-arguments';
 import { readFlag, readStringListFlag, readPositiveIntFlag, positionalArgs } from '@goodvibes-jev/engine/terminal-shell/command-arguments';
 import type { CommandContext, SlashCommand } from '../command-registry.ts';
-import { requireYesFlag, stripYesFlag } from './confirmation.ts';
+import { commandRefusal, requireYesFlag, stripYesFlag } from './confirmation.ts';
 import { parseBrowserImportScope } from './knowledge-browser-flags.ts';
 import { formatKnowledgeMap, renderKnowledgeAskResult } from './knowledge-format.ts';
+import { readRefusal } from '@goodvibes-jev/engine/errors';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -450,7 +451,8 @@ export const knowledgeCommand: SlashCommand = {
           );
       }
     } catch (error) {
-      print(`[knowledge] ${error instanceof Error ? error.message : String(error)}`);
+      if (readRefusal(error)) throw error;
+      throw commandRefusal(`[knowledge] ${error instanceof Error ? error.message : String(error)}`);
     }
   },
 };

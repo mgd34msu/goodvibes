@@ -67,7 +67,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "display.theme",
     "type": "enum",
     "default": "goodvibes",
-    "description": "Color theme name, the color palette (e.g. vaporwave). Independent of display.themeMode, which controls light/dark appearance.",
+    "description": "Color theme name, the color palette (e.g. goodvibes-neon). Independent of display.themeMode, which controls light/dark appearance.",
     "enumValues": [
       "goodvibes",
       "goodvibes-neon",
@@ -80,8 +80,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
       "rosepine",
       "solarized",
       "github",
-      "system",
-      "vaporwave"
+      "system"
     ]
   },
   {
@@ -220,7 +219,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "provider.optimizerMode",
     "type": "enum",
     "default": "off",
-    "description": "Provider routing optimizer: off (optimizer inactive, default), manual (optimizer active but never auto-routes), auto (selects the best capable provider per request via capability contracts), or pinned (force one model, see provider.optimizerPinnedModel). Runtime /provider commands and pin/unpin still override for the session.",
+    "description": "Provider routing optimizer: off (optimizer inactive, default), manual (optimizer active but never auto-routes), auto (selects the best capable provider per request via capability contracts), or pinned (force one model, see provider.optimizerPinnedModel). Applies at once from any settings path; /provider-opt commands write this setting.",
     "enumValues": [
       "off",
       "manual",
@@ -232,7 +231,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "provider.optimizerPinnedModel",
     "type": "string",
     "default": "",
-    "description": "Provider-qualified model id (e.g. anthropic:claude-sonnet-4) pinned by the provider optimizer at startup when provider.optimizerMode is \"pinned\". Empty leaves the optimizer unpinned (falls back to manual)."
+    "description": "Provider-qualified model id (e.g. anthropic:claude-sonnet-4) the provider optimizer routes to while provider.optimizerMode is \"pinned\"; a change applies at once. Empty leaves the optimizer unpinned (falls back to manual)."
   },
   {
     "key": "behavior.autoCompactThreshold",
@@ -362,7 +361,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "permissions.mode",
     "type": "enum",
     "default": "jev-decides",
-    "description": "Who decides what ordinary work does not settle. ask-me: you are asked about dangerous actions and owner-only decisions. jev-decides (default): Jev, the decision model, decides judgment calls and you are asked only owner-only decisions; with no working decision model it behaves as ask-me. just-vibes: does as much as it can without interrupting you; Jev decides judgment calls when a decision model works, and anything that needs you is held and listed at the end. yolo: runs every action without safety denials (containment, secret storage and payment limits still apply). plan is a separate read-only planning posture.",
+    "description": "Who decides what ordinary work does not settle. ask-me: you are asked about dangerous actions and owner-only decisions. jev-decides (default): Jev, the decision model, decides judgment calls and you are asked only owner-only decisions; with no working decision model it behaves as ask-me, and while it is only the default (not chosen) it also does until a calibration run has measured Jev's decisions on the configured decision model. just-vibes: does as much as it can without interrupting you; Jev decides judgment calls when a decision model works, and anything that needs you is held and listed at the end. yolo: runs every action without safety denials (containment, secret storage and payment limits still apply). plan is a separate read-only planning posture.",
     "enumValues": [
       "ask-me",
       "jev-decides",
@@ -1054,7 +1053,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "hostedSessions.routeConversationTurns",
     "type": "boolean",
     "default": false,
-    "description": "Only goodvibes-agent reads this; the terminal product (goodvibes) always runs turns in its own process. Off (the default): the agent's conversation turns run in the agent process, with the agent's own prompt, persona, skills, memory and tools; work that must outlive the terminal goes to the daemon through /work, channels and schedules. On: with a connected daemon reachable, the first message of a conversation creates a daemon-hosted session rooted at this surface's working directory and every later message is steered into it, so the turn survives this process closing; that hosted turn runs with the daemon's own prompt and tool set, not the agent's. With no connected daemon reachable the turn runs locally regardless, and the transcript says so in one line naming the reason."
+    "description": "Only goodvibes-agent reads this; the terminal product (goodvibes) always runs turns in its own process. Off (the default): the agent's conversation turns run in the agent process, with the agent's own prompt, persona, skills, memory and tools; work that must outlive the terminal goes to the daemon through /work, channels and schedules. On: with a connected daemon reachable, the first message of a conversation creates a daemon-hosted session rooted at this surface's working directory and every later message is steered into it, so the turn survives this process closing; that hosted turn is still an Agent turn, with the agent's operator policy, persona, skills, routines, memory and its profile, occasions, artifact, document, research-run, research-source, review-packet, media, notify and work-plan tools, while the agent tools that run only in this process are named to the model and refused there. With no connected daemon reachable the turn runs locally regardless, and the transcript says so in one line naming the reason."
   },
   {
     "key": "atRest.redactionEnabled",
@@ -1066,14 +1065,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "atRest.retentionMaxAgeDays",
     "type": "number",
     "default": 30,
-    "description": "Age cap (days) for the on-disk transcript journal and execution-ledger files. Files older than this are pruned at the retention enforcement point (the journal prunes on each new agent session; the ledger prunes on each export). Generous by default; bounded so the files cannot grow without limit.",
+    "description": "Age cap (days) for the append-only files: per-agent transcript journals, the execution ledger, the activity log, crash logs and crash-recovery snapshots. Files older than this are pruned at start and every six hours (the journal also prunes on each new agent session; the ledger on each export). Saved conversations are never pruned by it. Generous by default; bounded so the files cannot grow without limit.",
     "validationHint": "integer in [1, 365]"
   },
   {
     "key": "atRest.retentionMaxTotalMb",
     "type": "number",
     "default": 512,
-    "description": "Total-size cap (MB) across the on-disk transcript journal / execution-ledger file set. When exceeded, the retention enforcement point deletes oldest-first (rotated backups before freshly-written active files) until under budget.",
+    "description": "Total-size cap (MB) for each of the append-only file sets named under atRest.retentionMaxAgeDays (transcript journals, execution ledger, activity log, crash logs, crash-recovery snapshots). When exceeded, the oldest are deleted first (rotated backups before freshly-written active files) until under budget. Saved conversations are never deleted by it.",
     "validationHint": "integer in [1, 1048576]"
   },
   {
@@ -2035,6 +2034,13 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "validationHint": "integer in [10, 3600]"
   },
   {
+    "key": "cluster.nodeName",
+    "type": "string",
+    "default": "",
+    "description": "A name for THIS machine in the group's member list (`cluster nodes` and the web UI), such as \"desktop\" or \"laptop\", so you can tell the machines apart when removing one or reading which machine holds a surface. Up to 48 characters. Empty, the default, shows \"machine\" and the first 8 characters of its node id; the hostname is never used, because the member list replicates and the group is advertised on the network. Kept on this machine only. Other machines record the name this machine had when it created or joined the group. Applies after the daemon restarts.",
+    "validationHint": "up to 48 characters"
+  },
+  {
     "key": "surfaces.hostedInboxScreening",
     "type": "enum",
     "default": "disabled",
@@ -2088,6 +2094,12 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "validationHint": "a Slack user ID such as U012ABCDEF, or empty to keep the inbox unconfigured"
   },
   {
+    "key": "surfaces.slack.inboxTagging",
+    "type": "boolean",
+    "default": false,
+    "description": "Write triage labels (GoodVibes/Spam, Priority, Normal) back to Slack as reactions on the inbox messages they label. Off: labels stay in GoodVibes and channels.inbox.applyLabels refuses for this account."
+  },
+  {
     "key": "surfaces.discord.enabled",
     "type": "boolean",
     "default": false,
@@ -2124,6 +2136,12 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "default": "",
     "description": "Comma-separated explicit bot-readable one-to-one DM channel IDs for protected inbox reads (1–200 unique IDs); group DMs and inferred historical discovery are unsupported",
     "validationHint": "1-200 unique Discord snowflake IDs separated by commas (at most 4300 characters), or empty"
+  },
+  {
+    "key": "surfaces.discord.inboxTagging",
+    "type": "boolean",
+    "default": false,
+    "description": "Write triage labels (GoodVibes/Spam, Priority, Normal) back to Discord as reactions (or forum tags) on the inbox messages they label. Off: labels stay in GoodVibes and channels.inbox.applyLabels refuses for this account."
   },
   {
     "key": "surfaces.discord.defaultChannelId",
@@ -2716,6 +2734,12 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "description": "Mailbox password or app password. Stored in the daemon secret tier, never in config"
   },
   {
+    "key": "surfaces.email.inboxTagging",
+    "type": "boolean",
+    "default": false,
+    "description": "Write triage labels (GoodVibes/Spam, Priority, Normal) back to the mailbox as IMAP keywords on the messages they label. Off: labels stay in GoodVibes and channels.inbox.applyLabels refuses for this account."
+  },
+  {
     "key": "surfaces.email.imap.host",
     "type": "string",
     "default": "",
@@ -3126,8 +3150,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   {
     "key": "service.serviceName",
     "type": "string",
-    "default": "goodvibes",
-    "description": "Service name used for host integration and install scripts. An unset value resolves per platform: goodvibes on Linux and Windows, sh.goodvibes.daemon on macOS (the launchd label)."
+    "default": "",
+    "description": "Name of the daemon's service unit, used by the installer, the daemon's and the terminal apps' service commands and onboarding alike. Empty (the default) uses the installer's name: goodvibes-jev on Linux and Windows (goodvibes when a unit an earlier build installed under that name is present and none holds goodvibes-jev), sh.goodvibes.daemon on macOS (the launchd label)."
   },
   {
     "key": "service.logPath",
@@ -3724,6 +3748,16 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "description": "Prune old checkpoints automatically after each new one and once at start. Off, old checkpoints are pruned only when asked"
   },
   {
+    "key": "checkpoints.unregisteredWorkspaces",
+    "type": "enum",
+    "default": "off",
+    "description": "Checkpoints in a workspace that is not registered (Agent and daemon; the terminal app checkpoints any workspace). off: automatic and explicit checkpoints are refused there until it is registered (`goodvibes-agent workspaces register`). guarded: they are taken there too, under the root and size guards above. A project settings file cannot change it",
+    "enumValues": [
+      "off",
+      "guarded"
+    ]
+  },
+  {
     "key": "daemon.enabled",
     "type": "boolean",
     "default": true,
@@ -3829,19 +3863,19 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "helper.enabled",
     "type": "boolean",
     "default": false,
-    "description": "Enable helper model routing for grunt-work tasks"
+    "description": "Send supporting work (compaction and resume summaries, session titles) to the helper route below; off, it stays on the main model (titles on the tool LLM)"
   },
   {
     "key": "helper.globalProvider",
     "type": "string",
     "default": "",
-    "description": "Provider for the global helper model (empty = disabled)"
+    "description": "Provider for the global helper model (empty = the tool LLM when enabled, else the main model)"
   },
   {
     "key": "helper.globalModel",
     "type": "string",
     "default": "",
-    "description": "Model ID for the global helper model (empty = disabled)"
+    "description": "Model ID for the global helper model (empty = the tool LLM when enabled, else the main model)"
   },
   {
     "key": "behavior.suggestAlternativeOnProviderFail",
@@ -3882,7 +3916,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "contract.gateTimeoutMs",
     "type": "number",
     "default": 900000,
-    "description": "Timeout in ms for each quality gate command (default 15 minutes); a gate past it is stopped and reported unverified; 0 runs until completion or cancellation",
+    "description": "Timeout in ms for each quality gate command and for a /test run (default 15 minutes); a gate past it is stopped and reported unverified; 0 runs until completion or cancellation",
     "validationHint": "integer in [0, 2147483647]"
   },
   {
@@ -4506,12 +4540,6 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "description": "The OAuth consent screen's last-known publishing status (\"testing\" or \"in-production\"), cached after being read from the Cloud Console since it cannot be probed any other way. An app left in \"Testing\" is issued refresh tokens that expire after seven days; moving it to \"In production\" (self-certified, no Google review needed) removes that expiry. Empty until a setup or verification run has read it."
   },
   {
-    "key": "google.credentials.migratedFrom",
-    "type": "string",
-    "default": "",
-    "description": "Marker recording that a legacy on-disk Google credential (from before credentials lived in the encrypted secret store) was already migrated in, so migration is not repeated on every start. Names where it came from; holds no credential value itself."
-  },
-  {
     "key": "cluster.peers",
     "type": "object",
     "default": [],
@@ -5026,7 +5054,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "policy-as-code",
     "name": "Policy-as-Code",
-    "description": "Enables the versioned policy bundle registry with promote/rollback semantics. Requires simulation evidence (divergence gate passing) before enforcement. Exposes /policy load, /policy simulate, /policy diff, /policy promote, and /policy rollback commands. Divergence trends visible by command class/prefix via the diagnostics panel.",
+    "description": "Enables the versioned policy bundle registry with promote/rollback semantics. Before enforcement, /policy simulate shows the rule diff and the calls this installation recorded that the bundle would decide differently, and /policy promote --yes confirms them. Exposes /policy load, /policy simulate, /policy diff, /policy promote, and /policy rollback commands.",
     "domain": "policy",
     "enablement": {
       "key": "policy.registryEnabled",
@@ -5242,7 +5270,8 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "surfaces.slack.appToken",
       "surfaces.slack.defaultChannel",
       "surfaces.slack.workspaceId",
-      "surfaces.slack.inboxUserId"
+      "surfaces.slack.inboxUserId",
+      "surfaces.slack.inboxTagging"
     ],
     "restartRequired": false,
     "defaultEnabled": true
@@ -5262,7 +5291,8 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "surfaces.discord.botToken",
       "surfaces.discord.applicationId",
       "surfaces.discord.defaultChannelId",
-      "surfaces.discord.guildId"
+      "surfaces.discord.guildId",
+      "surfaces.discord.inboxTagging"
     ],
     "restartRequired": false,
     "defaultEnabled": true

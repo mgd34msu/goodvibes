@@ -52,7 +52,7 @@
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                 },
                 "fileIndex": {
                   "type": "integer",
@@ -126,7 +126,7 @@
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                 },
                 "fileIndex": {
                   "type": "integer",
@@ -3679,6 +3679,15 @@
                           },
                           "definitionAfter": {
                             "type": "string"
+                          },
+                          "root": {
+                            "type": "string"
+                          },
+                          "scope": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
                           }
                         },
                         "required": [
@@ -4556,6 +4565,15 @@
                           },
                           "definitionAfter": {
                             "type": "string"
+                          },
+                          "root": {
+                            "type": "string"
+                          },
+                          "scope": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
                           }
                         },
                         "required": [
@@ -5848,6 +5866,15 @@
                                 },
                                 "definitionAfter": {
                                   "type": "string"
+                                },
+                                "root": {
+                                  "type": "string"
+                                },
+                                "scope": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
                                 }
                               },
                               "required": [
@@ -7137,6 +7164,15 @@
                     },
                     "definitionAfter": {
                       "type": "string"
+                    },
+                    "root": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [

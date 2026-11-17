@@ -29,13 +29,14 @@ export const DAEMON_OWNED_CONFIG_PREFIXES: readonly string[] = [
   "cluster.",
   "profile.",
   "occasions.",
-  "email.",
   "calendar.",
   "google.",
   "judgment.",
   "push.",
   "cloudflare.",
-  "voice.local."
+  "worktree.",
+  "voice.local.",
+  "storage.secretProviders."
 ] as const;
 
 export const DAEMON_OWNED_CONFIG_KEYS: readonly string[] = [
@@ -46,5 +47,8 @@ export const DAEMON_OWNED_CONFIG_KEYS: readonly string[] = [
 export const DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS: readonly string[] = [
   "conversationGate.gatedSurfaces",
   "cluster.peers",
-  "cluster.groupMaterial"
+  "cluster.groupMaterial",
+  "google.oauth.refreshToken",
+  "email.passwordRef",
+  "email.smtpPasswordRef"
 ] as const;

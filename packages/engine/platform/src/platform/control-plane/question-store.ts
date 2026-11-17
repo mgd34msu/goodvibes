@@ -424,7 +424,7 @@ export class QuestionStore implements RevisionSource {
   #startWatching(file: SqliteFile): void {
     if (this.#versions !== null || this.#changeListeners.size === 0) return;
     this.#announcedRevision = file.revision();
-    this.#versions = new Map([...this.#entries()].map(([id, entry]) => [id, storedEntryVersion(entry)]));
+    this.#versions = new Map([...this.#entries()].map(([id, entry]): [string, string] => [id, storedEntryVersion(entry)]));
     if (this.#path === ':memory:') return;
     const wal = `${this.#path}-wal`;
     const onChange = (): void => this.#schedule();

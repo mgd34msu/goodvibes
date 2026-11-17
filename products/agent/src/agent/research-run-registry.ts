@@ -186,9 +186,9 @@ function boundedProgress(value: unknown, fallback = 0): number {
 }
 
 function checkpointId(at: string, count: number): string {
-  // Native identifiers must not turn clock digits into apparent card material
-  // when the complete checkpoint enters protected semantic evidence.
-  const instant = at.replace(/[^0-9]/g, '').slice(0, 14).replace(/[0-9]/g, digit => String.fromCharCode(97 + Number(digit)));
+  // The clock digits stay readable; the card screen skips a digit run that
+  // hangs off a word by `-`, as `cp-` does here.
+  const instant = at.replace(/[^0-9]/g, '').slice(0, 14);
   return `cp-${instant}-${(count + 1).toString(36)}`;
 }
 

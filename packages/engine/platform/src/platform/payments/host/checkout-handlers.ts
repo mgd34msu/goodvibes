@@ -26,9 +26,9 @@ import { PurchaseReconciliations } from './purchase-reconciliation.js';
  *
  * ── Why these verbs are local wrappers, not the platform's own route ────────
  *
- * `registerPaymentsGatewayMethods`'s own `createPaymentsCheckoutBeginHandler`
- * calls `service.beginCheckout(input)` with no
- * invocation context at all. Admission here needs `context.explicitUserRequest`
+ * The context-free `createPaymentsCheckoutBeginHandler` in routes/payments.ts
+ * (driven only by the live payments proof) calls `service.beginCheckout(input)`
+ * with no invocation context at all. Admission here needs `context.explicitUserRequest`
  * and the paired principal, which only reach a handler attached through this
  * daemon's own `registerCatalogHandlers` (register.ts). So the verbs are
  * attached there as local wrappers, reading the same wire shapes

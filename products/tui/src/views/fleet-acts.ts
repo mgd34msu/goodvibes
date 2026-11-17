@@ -34,6 +34,10 @@ import {
   type FleetGraphSnapshot,
   type FleetHeldMergeGroup,
 } from './fleet-gateway.ts';
+import { FIX_SESSION_CHORD_LABEL } from '../shell/retry-affordance.ts';
+
+/** How long a failed task-graph fetch is shown as failed before a fleet reading tries it again. */
+const GRAPH_RETRY_MS = 5_000;
 
 /** The Changes-preview surface the pick act reuses: show a diff, ask over it, close it. */
 export interface FleetDiffSurface {
@@ -159,10 +163,11 @@ export class FleetActs {
   /**
    * Per-workstream-node graph snapshot, with the group state it was fetched for
    * (`key`): a node whose group moved is fetched again. `snapshot: null` is a
-   * call that failed for that state; an unreachable daemon stores nothing, so
-   * the next paint after it comes up fetches.
+   * call that failed for that state (a daemon not up yet answers that way); it
+   * is shown as failed and tried again on the next fleet reading after
+   * GRAPH_RETRY_MS, so the graph appears once the daemon comes up.
    */
-  private readonly graphCache = new Map<string, { readonly key: string; readonly snapshot: FleetGraphSnapshot | null }>();
+  private readonly graphCache = new Map<string, { readonly key: string; readonly snapshot: FleetGraphSnapshot | null; readonly failedAt?: number }>();
   private readonly graphInFlight = new Map<string, string>();
 
   public constructor(private readonly deps: FleetActsDeps) {}
@@ -313,23 +318,27 @@ export class FleetActs {
    * Fetch the task graph (fleet.graph.get) for a selected workstream row so the
    * in-view detail can render its edges/pool posture WITHOUT opening /graph.
    * One fetch per change of the group's state (the node's state and its units'
-   * statuses), never one per frame; an unreachable daemon is not remembered, so
-   * the row fetches once it comes up. A no-op for any non-workstream node.
+   * statuses), never one per frame; a failed fetch is tried again on a later
+   * fleet reading (change, tick or key) once GRAPH_RETRY_MS has passed, so a
+   * daemon that was not up yet does not leave the row without a graph. A no-op
+   * for any non-workstream node.
    */
   public ensureGraphFor(node: ProcessNode): void {
     const workstreamId = contractGroupTarget(node);
     if (workstreamId === null) return;
     const key = graphStateKey(node);
-    if (this.graphCache.get(node.id)?.key === key || this.graphInFlight.get(node.id) === key) return;
+    if (this.graphInFlight.get(node.id) === key) return;
+    const cached = this.graphCache.get(node.id);
+    if (cached?.key === key && (cached.failedAt === undefined || Date.now() - cached.failedAt < GRAPH_RETRY_MS)) return;
     const resolution = this.deps.resolveGateway();
     if (!resolution.available) return;
     this.graphInFlight.set(node.id, key);
     void resolution.gateway.getGraph(workstreamId)
-      .then((snapshot) => snapshot, () => null)
-      .then((snapshot) => {
+      .then((snapshot) => ({ snapshot }), () => ({ snapshot: null, failedAt: Date.now() }))
+      .then((outcome) => {
         if (this.graphInFlight.get(node.id) !== key) return;
         this.graphInFlight.delete(node.id);
-        this.graphCache.set(node.id, { key, snapshot });
+        this.graphCache.set(node.id, { key, ...outcome });
         this.deps.markDirty();
       });
   }
@@ -483,7 +492,7 @@ export class FleetActs {
     try {
       const result = await gateway.resolveConflict(itemId);
       const files = result.files.length > 0 ? ` over ${result.files.length} conflicted file(s)` : '';
-      this.deps.notify(`[Fleet] Conflict resolution session started for ${shortId(itemId)}${files}; press j to jump to it.`);
+      this.deps.notify(`[Fleet] Conflict resolution session started for ${shortId(itemId)}${files}; ${FIX_SESSION_CHORD_LABEL} opens it.`);
       // Reuse the CI fix-session machinery: hand the STAMPED session id to the
       // shared one-key jump affordance. The kept tree is reclaimed by the platform on
       // a successful re-merge, and the flagged row clears on the next snapshot.

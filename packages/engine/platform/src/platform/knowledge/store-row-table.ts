@@ -160,6 +160,23 @@ export class KnowledgeRowTable<T extends object> implements Map<string, T> {
     return this;
   }
 
+  /** The stored record, or `value` bound as `set` binds it (nothing is written). */
+  getOrInsert(key: string, value: T): T {
+    const existing = this.get(key);
+    if (existing !== undefined) return existing;
+    this.set(key, value);
+    return value;
+  }
+
+  /** The stored record, or the computed one bound as `set` binds it (nothing is written). */
+  getOrInsertComputed(key: string, compute: (key: string) => T): T {
+    const existing = this.get(key);
+    if (existing !== undefined) return existing;
+    const value = compute(key);
+    this.set(key, value);
+    return value;
+  }
+
   /** Forgets the decoded record; the caller deleted the row. */
   delete(key: string): boolean {
     this.#scanEpoch = -1;
@@ -371,6 +388,16 @@ export class KnowledgeNodeRevisionRows implements Map<string, KnowledgeNodeRevis
   /** Revisions are written as rows by the node writers; nothing to do here. */
   set(_nodeId: string, _records: KnowledgeNodeRevisionRecord[]): this {
     return this;
+  }
+
+  /** The node's revisions, or `records` when it has none (revisions are written by the node writers). */
+  getOrInsert(nodeId: string, records: KnowledgeNodeRevisionRecord[]): KnowledgeNodeRevisionRecord[] {
+    return this.get(nodeId) ?? records;
+  }
+
+  /** The node's revisions, or the computed list when it has none (nothing is written). */
+  getOrInsertComputed(nodeId: string, compute: (nodeId: string) => KnowledgeNodeRevisionRecord[]): KnowledgeNodeRevisionRecord[] {
+    return this.get(nodeId) ?? compute(nodeId);
   }
 
   delete(nodeId: string): boolean {

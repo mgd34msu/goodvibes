@@ -306,7 +306,7 @@ export function createSchema(db: Pick<SqlDatabase, 'run'> & Partial<Pick<SqlData
   `);
   const exec = db.exec;
   if (exec) {
-    const native = { run: (sql: string) => db.run(sql), exec: (sql: string, params?: Parameters<SqlDatabase['exec']>[1], config?: Parameters<SqlDatabase['exec']>[2]) => exec.call(db, sql, params, config) };
+    const native = { run: (sql: string) => db.run(sql), exec: (sql: string, params?: Parameters<SqlDatabase['exec']>[1]) => exec.call(db, sql, params) };
     createKnowledgeRowRevisions(native);
     createKnowledgeNodeContentRevisions(native);
     createKnowledgeNodeActivationCache(native);

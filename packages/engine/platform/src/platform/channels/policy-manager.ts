@@ -528,6 +528,8 @@ export class ChannelPolicyManager {
       await this.persist();
     }
     logger.info('Channel owner claim accepted', { surface: policy.surface, userId });
+    // A sender admitted to a surface that already had an owner leaves the other held senders waiting.
+    if (policy.ownerId) return;
     // The surface has an owner now; the other senders' claims are moot.
     for (const other of this.ownerInbox?.listNow({ kinds: ['claim'], status: 'open' }) ?? []) {
       if (other.key?.startsWith(`${CLAIM_KEY_PREFIX}${policy.surface}:`)) {
@@ -552,14 +554,19 @@ export class ChannelPolicyManager {
     const name = typeof input.metadata?.['displayName'] === 'string' ? ` (${String(input.metadata['displayName']).slice(0, 60)})` : '';
     const shownId = userId.slice(0, 80);
     const where = input.conversationKind === 'direct' ? 'a direct message' : `a ${normalizeConversationKind(input)} message`;
+    // A surface that already answers someone holds a new sender for the owner instead of ignoring them unseen.
+    const hasOwner = decision.reason === 'user-not-allowlisted';
     try {
       inbox.postNow({
         kind: 'claim',
         key,
-        title: `Make ${shownId}${name} the owner of ${input.surface}?`,
-        detail: `${where} arrived on ${input.surface} from ${shownId}${name}, and ${input.surface} has no owner yet, so it was not answered. `
-          + 'Accept to make this sender the owner: the surface then answers them, and only them until you add others with the allowlist edit. '
-          + 'Decline if this is not you. For a shared channel, set the surface policy open instead.',
+        title: hasOwner ? `Let ${shownId}${name} reach you on ${input.surface}?` : `Make ${shownId}${name} the owner of ${input.surface}?`,
+        detail: hasOwner
+          ? `${where} arrived on ${input.surface} from ${shownId}${name}, who is not on its allowlist, so it was not answered. `
+            + 'Accept to add this sender to the allowlist: the surface answers their next message. Decline if you do not know them; they are not asked about again.'
+          : `${where} arrived on ${input.surface} from ${shownId}${name}, and ${input.surface} has no owner yet, so it was not answered. `
+            + 'Accept to make this sender the owner: the surface then answers them, and only them until you add others with the allowlist edit. '
+            + 'Decline if this is not you. For a shared channel, set the surface policy open instead.',
         options: ['accept', 'decline'],
         askedBy: `${input.surface} channel`,
         metadata: {
@@ -703,7 +710,7 @@ export class ChannelPolicyManager {
     await this.start();
     const decision = this.decisionFor(input, options.decided);
     if (options.admit === false) return decision;
-    if (decision.reason === 'owner-claim-pending') this.raiseOwnerClaim(input, decision);
+    if (decision.reason === 'owner-claim-pending' || decision.reason === 'user-not-allowlisted') this.raiseOwnerClaim(input, decision);
     // Source-scoped callers may refuse fresh denials without retaining text.
     if (!decision.allowed && options.recordDenied === false) return decision;
     const { allowed, policy, matchedGroupPolicy } = decision;
@@ -762,7 +769,7 @@ export class ChannelPolicyManager {
   async recordDeniedIngress(input: ChannelIngressPolicyInput, decided?: ChannelPolicyDecision): Promise<ChannelPolicyDecision> {
     await this.start();
     const decision = this.decisionFor(input, decided);
-    if (decision.reason === 'owner-claim-pending') this.raiseOwnerClaim(input, decision);
+    if (decision.reason === 'owner-claim-pending' || decision.reason === 'user-not-allowlisted') this.raiseOwnerClaim(input, decision);
     if (!decision.allowed) this.recordIngressAudit(input, decision, false);
     return decision;
   }

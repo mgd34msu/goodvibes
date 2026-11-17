@@ -173,7 +173,7 @@ export async function applySuiteUpdate(options: SuiteUpdateOptions): Promise<Sui
     selected();
     for (const [index, archive] of manifest.archives.entries()) {
       selected();
-      prepared.push(prepareNativeUpdateDirectory(archive.selection.path, archive.bytes, {
+      prepared.push(await prepareNativeUpdateDirectory(archive.selection.path, archive.bytes, {
         stripComponents: 1, expectedRoot: archive.selection.archiveRoot, requiredFiles: archive.selection.requiredFiles, assertCurrent: current,
         retainedTarget: directories[index]!.original, sourceVersion: plan.version,
       }));

@@ -149,8 +149,12 @@ export class FleetActs {
       && `${data.contract.id}:${data.unit.groupId}` === workstreamId
       ? { data, selection } : null;
   }
-  /** Live observed-agent steer composer: the row being steered + its draft. Drill-in only. */
-  private observedSteer: { readonly nodeId: string; draft: string; failure?: string } | null = null;
+  /**
+   * Live observed-agent steer composer: the row being steered, its draft, and
+   * whether Enter is pressed in the session after the text (Tab toggles it).
+   * Drill-in only.
+   */
+  private observedSteer: { readonly nodeId: string; draft: string; submit: boolean; failure?: string } | null = null;
   private observedSteerSending = false;
   /**
    * Per-workstream-node graph snapshot, with the group state it was fetched for
@@ -208,6 +212,16 @@ export class FleetActs {
     return this.observedSteer?.failure ?? null;
   }
 
+  /** True when the open composer presses Enter in the session after typing the text. */
+  public observedSteerSubmits(): boolean {
+    return this.observedSteer?.submit === true;
+  }
+
+  /** True while a steer waits for the daemon, which first asks the owner to approve it. */
+  public observedSteerPending(): boolean {
+    return this.observedSteerSending;
+  }
+
   /**
    * Open the drill-in steer composer for an observed foreign-agent row. A row
    * with a live tmux channel opens an input; a channel-less row keeps NO input
@@ -220,7 +234,7 @@ export class FleetActs {
       this.deps.notify(`Cannot steer this ${observedKindLabel(node.observed.externalKind)} session: ${channel.reason}.`);
       return true;
     }
-    this.observedSteer = { nodeId: node.id, draft: '' };
+    this.observedSteer = { nodeId: node.id, draft: '', submit: false };
     this.deps.markDirty();
     return true;
   }
@@ -230,6 +244,7 @@ export class FleetActs {
     if (!this.observedSteer) return false;
     if (isViewSearchCancel(key)) { this.observedSteer = null; this.deps.markDirty(); return true; }
     if (isViewSearchCommit(key)) { void this.submitObservedSteer(); return true; }
+    if (key === 'tab') { this.observedSteer.submit = !this.observedSteer.submit; this.deps.markDirty(); return true; }
     if (isViewSearchBackspace(key)) { this.observedSteer.draft = this.observedSteer.draft.slice(0, -1); this.deps.markDirty(); return true; }
     if (key.length === 1 && (isViewSearchPrintable(key) || key === '\r' || key === '\n')) {
       this.observedSteer.draft = appendSteerText(this.observedSteer.draft, key);
@@ -241,9 +256,10 @@ export class FleetActs {
 
   /**
    * Drive fleet.observed.steer over the daemon; the row's own channel routes the
-   * send-keys server-side. The composer closes only once the steer was queued:
-   * an unreachable daemon, a refusal or a failed call keeps the draft with the
-   * reason, so Enter sends it again and Esc abandons it.
+   * send-keys server-side. The daemon asks the owner first, so the call can
+   * wait; the view says so meanwhile. The composer closes only once the steer
+   * was queued: an unreachable daemon, a refusal or a failed call keeps the
+   * draft with the reason, so Enter sends it again and Esc abandons it.
    */
   private async submitObservedSteer(): Promise<void> {
     const steer = this.observedSteer;
@@ -259,10 +275,20 @@ export class FleetActs {
     }
     const gateway = resolution.gateway;
     this.observedSteerSending = true;
+    this.deps.markDirty();
+    const submit = steer.submit;
     let failure: string | null;
+    let submitted = submit;
     try {
-      const result = await gateway.steerObserved({ id: steer.nodeId, text });
-      failure = result.queued ? null : `Steer not sent: the foreign session refused it (${result.reason ?? 'it exposes no channel'}). Enter sends it again, Esc drops it.`;
+      const result = await gateway.steerObserved({ id: steer.nodeId, text, ...(submit ? { submit: true } : {}) });
+      if (result.queued) {
+        failure = null;
+        submitted = result.submitted ?? submit;
+      } else if (result.declined === true) {
+        failure = `Steer not sent: the owner did not approve it${result.reason ? ` (${result.reason})` : ''}. Enter asks again, Esc drops it.`;
+      } else {
+        failure = `Steer not sent: ${result.reason ?? 'the session exposes no channel'}. Enter sends it again, Esc drops it.`;
+      }
     } catch (err) {
       failure = `Steer not sent: ${summarizeError(err)}. Enter sends it again, Esc drops it.`;
     } finally {
@@ -275,7 +301,9 @@ export class FleetActs {
       return;
     }
     if (this.observedSteer === steer) this.observedSteer = null;
-    this.deps.notify('[Fleet] Steer delivered to the foreign session (tmux send-keys).');
+    this.deps.notify(submitted
+      ? '[Fleet] Typed into the foreign session and pressed Enter.'
+      : '[Fleet] Typed into the foreign session; press Enter there to submit it.');
     this.deps.markDirty();
   }
 

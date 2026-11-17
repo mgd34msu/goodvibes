@@ -59,8 +59,12 @@ export interface FleetGateway {
   discardWorktree(path: string): Promise<FleetWorktreeDiscardReceipt>;
   /** Fetch the task graph (nodes/edges/pool) for one workstream, the observability graph view. */
   getGraph(workstreamId: string): Promise<FleetGraphSnapshot>;
-  /** Steer an observed foreign agent over its own channel (tmux send-keys); the daemon honestly refuses a channel-less row. */
-  steerObserved(input: { readonly id: string; readonly text: string }): Promise<FleetObservedSteerResult>;
+  /**
+   * Type into an observed foreign agent over its own channel (tmux send-keys),
+   * pressing Enter after only when `submit` is true. The daemon asks the owner
+   * first and honestly refuses a channel-less row.
+   */
+  steerObserved(input: { readonly id: string; readonly text: string; readonly submit?: boolean }): Promise<FleetObservedSteerResult>;
   /** Route a spawned session through the shared one-key jump/attach affordance. */
   armFixSessionAttach(sessionId: string): void;
 }

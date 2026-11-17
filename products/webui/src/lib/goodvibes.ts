@@ -1539,10 +1539,15 @@ export const client = {
       // family as fleet.attempts.* above. Callers must gate this on
       // node.observed.steer.kind === 'tmux' first, a 'none' channel means there is
       // nothing to steer, and the daemon's own honest reason should render instead
-      // of ever calling this.
+      // of ever calling this. The text is only typed unless `submit` is true, and the
+      // call waits while the owner is asked to approve it.
       observed: {
-        steer: (id: string, text: string) =>
-          invokeGatewayMethod<'fleet.observed.steer', FleetObservedSteerResult>('fleet.observed.steer', { id, text }),
+        steer: (id: string, text: string, options?: { submit?: boolean }) =>
+          invokeGatewayMethod<'fleet.observed.steer', FleetObservedSteerResult>('fleet.observed.steer', {
+            id,
+            text,
+            ...(options?.submit === true ? { submit: true } : {}),
+          }),
       },
     },
     checkpoints: {

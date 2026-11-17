@@ -197,9 +197,12 @@ export const FLEET_OBSERVED_STEER_INPUT_SCHEMA = objectSchema({
 
 export const FLEET_OBSERVED_STEER_OUTPUT_SCHEMA = objectSchema({
   // queued:true, the text (and Enter, when submitted) reached the pane;
-  // queued:false carries the honest reason (declined, no channel, or a
-  // send-keys failure) and nothing was sent.
+  // submitted says whether Enter was sent. queued:false carries the honest
+  // reason (declined, no channel, or a send-keys failure) and nothing was
+  // sent; declined:true when the owner said no.
   queued: BOOLEAN_SCHEMA,
+  submitted: BOOLEAN_SCHEMA,
+  declined: BOOLEAN_SCHEMA,
   messageId: STRING_SCHEMA,
   reason: STRING_SCHEMA,
 }, ['queued']);

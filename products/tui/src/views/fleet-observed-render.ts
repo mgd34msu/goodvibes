@@ -117,7 +117,7 @@ export function renderObservedDetailLines(node: ObservedNode, width: number, pal
   if (observed.steer.kind === 'tmux') {
     if (steerDraft !== null) {
       lines.push(buildSearchInputLine(width, ' send ', `${steerDraft}_`, C, { active: true, bg: C.inputBg, valueColor: C.info }));
-      lines.push(buildViewLine(width, [['       ', C.label], ['Enter: send  Esc: cancel', C.dim]]));
+      lines.push(buildViewLine(width, [['       ', C.label], ['Enter: send  Tab: press Enter there too (off by default)  Esc: cancel', C.dim]]));
     } else {
       lines.push(buildViewLine(width, [['       ', C.label], ['s: steer this session', C.dim]]));
     }

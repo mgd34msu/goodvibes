@@ -39,6 +39,7 @@ import { PriceSourceNote } from '../../components/pricing/PriceSourceNote';
 import { DetailPane, DetailSection, Disclosure, Facts } from '../../components/data-view/DataView';
 import { Button } from '../../components/ui/Button';
 import { Field, Textarea } from '../../components/ui/Field';
+import { Checkbox } from '../../components/ui/Checkbox';
 import { Row, RowList } from '../../components/ui/Row';
 import { StatusDot } from '../../components/ui/StatusDot';
 import { FleetSessionActions } from '../fleet/FleetSessionActions';
@@ -60,14 +61,25 @@ export interface ProcessDetailProps {
 function ObservedSteer({ node, observed }: { node: FleetProcessNode; observed: NonNullable<FleetProcessNode['observed']> }) {
   const { toast } = useToast();
   const [draft, setDraft] = useState('');
+  const [submit, setSubmit] = useState(false);
   const steer = useMutation({
-    mutationFn: (text: string) => platformClient.operator.fleet.observed.steer(node.id, text),
-    onSuccess: (result) => {
+    mutationFn: (input: { text: string; submit: boolean }) =>
+      platformClient.operator.fleet.observed.steer(node.id, input.text, { submit: input.submit }),
+    onSuccess: (result, input) => {
       if (result.queued) {
-        toast({ title: 'Sent', description: 'Message delivered over the external session’s channel.', tone: 'success' });
+        const submitted = result.submitted ?? input.submit;
+        toast({
+          title: submitted ? 'Sent and submitted' : 'Typed into the session',
+          description: submitted
+            ? 'The text was typed into the session and Enter was pressed.'
+            : 'The text is waiting in the session; press Enter there to submit it.',
+          tone: 'success',
+        });
         setDraft('');
+      } else if (result.declined === true) {
+        toast({ title: 'Not approved', description: result.reason ?? 'The owner did not approve typing into this session; nothing was sent.', tone: 'warning' });
       } else {
-        toast({ title: 'Not delivered', description: result.reason ?? 'The daemon could not deliver this message.', tone: 'danger' });
+        toast({ title: 'Not sent', description: result.reason ?? 'The daemon could not type into this session; nothing was sent.', tone: 'danger' });
       }
     },
     onError: (error: unknown) => {
@@ -94,22 +106,30 @@ function ObservedSteer({ node, observed }: { node: FleetProcessNode; observed: N
           onSubmit={(event) => {
             event.preventDefault();
             const trimmed = draft.trim();
-            if (trimmed) steer.mutate(trimmed);
+            if (trimmed) steer.mutate({ text: trimmed, submit });
           }}
         >
-          <Field label={`Send to this session (tmux pane ${observed.steer.paneId})`}>
+          <Field label={`Type into this session (tmux pane ${observed.steer.paneId})`}>
             <Textarea
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
-              placeholder="Message to send over this session's terminal"
+              placeholder="Text to type into this session's terminal"
               rows={2}
             />
           </Field>
+          <Checkbox checked={submit} onChange={setSubmit} disabled={steer.isPending}>
+            Submit with Enter (also answers any prompt waiting there)
+          </Checkbox>
           <div>
             <Button type="submit" icon={<SendHorizontal aria-hidden="true" />} disabled={steer.isPending || !draft.trim()}>
-              {steer.isPending ? 'Sending…' : 'Send'}
+              {steer.isPending ? 'Waiting for approval…' : submit ? 'Send and submit' : 'Type'}
             </Button>
           </div>
+          {steer.isPending && (
+            <p className="work-prose" role="status">
+              Typing into a session GoodVibes did not start needs the owner&apos;s approval; answer it in Approvals.
+            </p>
+          )}
         </form>
       ) : (
         <p className="work-prose" role="note">{observed.steer.reason}</p>

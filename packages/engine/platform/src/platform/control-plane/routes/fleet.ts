@@ -263,13 +263,17 @@ export function createFleetObservedSteerHandler(
       });
       const decision = await raised.decision;
       if (!decision.approved) {
-        return { queued: false, reason: `nothing was sent: the owner did not approve typing into ${node.label}${decision.reason ? ` (${decision.reason})` : ''}` };
+        return {
+          queued: false,
+          declined: true,
+          reason: `nothing was sent: the owner did not approve typing into ${node.label}${decision.reason ? ` (${decision.reason})` : ''}`,
+        };
       }
       if (decision.rememberTier !== undefined || decision.remember === true) grantedSessions.add(id);
     }
     const result = registry.steer(id, text, { submit });
     return result.queued
-      ? { queued: true, messageId: result.messageId }
+      ? { queued: true, submitted: submit, messageId: result.messageId }
       : { queued: false, reason: result.reason };
   };
 }

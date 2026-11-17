@@ -777,7 +777,9 @@ export class AgentsModal implements SurfaceModal {
 
   private hints(level: 'list' | 'full' | 'picker'): KitHint[] {
     if (this.steer) return [['⏎', 'send'], ['esc', 'cancel']];
-    if (this.deps.acts?.observedSteerActive()) return [['⏎', 'send to the session'], ['esc', 'cancel']];
+    if (this.deps.acts?.observedSteerActive()) {
+      return [['⏎', this.deps.acts.observedSteerSubmits() ? 'type and press Enter there' : 'type only'], ['tab', 'submit on/off'], ['esc', 'cancel']];
+    }
     if (level === 'picker') return [['↑↓', 'choose'], ['⏎', this.deps.acts?.pickModeActive() ? 'pick (asks first)' : 'next'], ['esc', 'back']];
     if (this.filtering) return [['⏎', 'done'], ['esc', 'stop filtering']];
     if (level === 'full') {
@@ -816,7 +818,10 @@ export class AgentsModal implements SurfaceModal {
     const input = this.steer
       ? { label: this.steer.id === HOSTED_ID ? 'say: ' : `steer ${this.findNode(this.steer.id)?.label ?? ''}: `, draft: this.steer.draft }
       : this.deps.acts?.observedSteerActive() && this.selectedNode()
-        ? { label: 'steer the foreign session: ', draft: this.deps.acts.observedSteerDraftFor(this.selectedNode()!.id) ?? '' }
+        ? {
+          label: this.deps.acts.observedSteerSubmits() ? 'type and submit in the foreign session: ' : 'type into the foreign session: ',
+          draft: this.deps.acts.observedSteerDraftFor(this.selectedNode()!.id) ?? '',
+        }
         : null;
     const pick = this.deps.acts?.pickView() ?? null;
     const spawn = this.deps.spawn?.spawnView() ?? null;
@@ -831,9 +836,11 @@ export class AgentsModal implements SurfaceModal {
           : this.view === 'archived' ? ['archive'] : [],
       sub: level === 'list' ? this.sub() : '',
       hints: this.hints(level),
-      status: this.deps.acts?.observedSteerActive() && this.deps.acts.observedSteerFailure()
-        ? { text: this.deps.acts.observedSteerFailure()!, tone: 'error' }
-        : this.renderedStatus(),
+      status: this.deps.acts?.observedSteerActive() && this.deps.acts.observedSteerPending()
+        ? { text: 'Waiting for the owner to approve typing into this session…', tone: 'warning' }
+        : this.deps.acts?.observedSteerActive() && this.deps.acts.observedSteerFailure()
+          ? { text: this.deps.acts.observedSteerFailure()!, tone: 'error' }
+          : this.renderedStatus(),
       input,
       filter: { query: this.query, active: this.filtering, count: this.query ? `${shown} of ${total}` : `${total} shown` },
       rows: level === 'list' ? this.listRows() : [],

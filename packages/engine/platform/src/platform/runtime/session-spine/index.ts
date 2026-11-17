@@ -47,6 +47,7 @@ export {
   createSessionSpineRestProbe,
   extractSessionSpineReceipts,
   createSessionSpineReceiptConsumer,
+  createSessionSpineReceiptAcknowledger,
 } from './rest-transport.js';
 export type {
   SessionSpineRestConnection,

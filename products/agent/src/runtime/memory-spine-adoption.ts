@@ -43,8 +43,9 @@ export interface MemorySpineAdoptionOptions {
    * Called exactly on the transition INTO adoption (reachable AND not yet
    * active), i.e. once per (re)attach to a daemon, at boot and again whenever a
    * daemon reappears after a loss. The agent wires this to the single
-   * `?receipts=consume` /status read the daemon delivers its one-shot honesty
-   * receipts to (see services.consumeDaemonReceipts / daemon-receipts.ts):
+   * `?receipts=peek` /status read the daemon returns its honesty receipts to,
+   * each acknowledged once shown (see services.consumeDaemonReceipts /
+   * daemon-receipts.ts):
    * reusing the existing adoption edge instead of inventing a second signal, per
    * the same reuse this reconciler already documents for reachability. Best
    * effort, its rejection is swallowed here so a failed receipt read can never

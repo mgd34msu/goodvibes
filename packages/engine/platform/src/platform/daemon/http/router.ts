@@ -700,7 +700,6 @@ export class DaemonHttpRouter {
         // The daemon hands these over after the router exists, so each is read when /status runs.
         get authToken() { return context.authToken(); },
         get buildVersion() { return statusProviders().buildVersion; },
-        get collectReceipts() { return statusProviders().collectReceipts; },
         get peekReceipts() { return statusProviders().peekReceipts; },
         get acknowledgeReceipts() { return statusProviders().acknowledgeReceipts; },
         get collectClusterStatus() { return statusProviders().collectClusterStatus; },

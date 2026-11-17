@@ -111,15 +111,15 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   methodDescriptor({
     id: 'control.status',
     title: 'Daemon Status',
-    description: 'Return daemon status and version. THREE version fields, because there are two versions and they are not the same number: `buildVersion` is the running artifact\'s own release version, what a person installed, and what the auto-update loop compares against release tags, and `platformVersion` is the platform build it is composed from. `version` carries the build version and exists because every client already reads it; on an embedded daemon that ships no artifact of its own, all three are the platform build. Pass receipts=peek to also receive undelivered daemon receipts (update/crash/migration notices) without consuming them, then receipts=ack&ids=<id>,<id> once they are shown, so a response lost in transit is offered again. receipts=consume still receives and marks them delivered in one read, so each receipt goes to at most one consuming reader and a lost response is not replayed. Without the flag no receipts are returned or consumed, so identity probes and keepalives never eat them.',
+    description: 'Return daemon status and version. THREE version fields, because there are two versions and they are not the same number: `buildVersion` is the running artifact\'s own release version, what a person installed, and what the auto-update loop compares against release tags, and `platformVersion` is the platform build it is composed from. `version` carries the build version and exists because every client already reads it; on an embedded daemon that ships no artifact of its own, all three are the platform build. Pass receipts=peek to also receive undelivered daemon receipts (update/crash/migration notices) without consuming them, then receipts=ack&ids=<id>,<id> once they are shown, so a response lost in transit is offered again. Without the flag no receipts are returned or marked, so identity probes and keepalives never take them.',
     category: 'control-plane',
     scopes: ['read:control-plane'],
     http: { method: 'GET', path: '/status' },
     inputSchema: objectSchema({
       receipts: {
         type: 'string',
-        enum: ['consume', 'peek', 'ack'],
-        description: 'Omit for a read that never touches receipts. "peek" returns undelivered daemon receipts without marking them; "ack" (with ids) marks exactly those delivered; "consume" returns and marks them delivered in one read.',
+        enum: ['peek', 'ack'],
+        description: 'Omit for a read that never touches receipts. "peek" returns undelivered daemon receipts without marking them; "ack" (with ids) marks exactly those delivered, once the reader has shown them.',
       },
       ids: {
         type: 'string',

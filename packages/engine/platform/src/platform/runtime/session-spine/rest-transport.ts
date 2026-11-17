@@ -310,32 +310,51 @@ async function readStatusBody(
   }
 }
 
+/** The daemon takes at most this many ids per `receipts=ack` read. */
+const RECEIPT_ACK_BATCH = 100;
+
+/** The daemon's undelivered receipts, left undelivered (`receipts=peek`). */
+async function peekReceipts(
+  connection: SessionSpineRestConnection,
+  timeoutMs: number,
+): Promise<readonly DaemonReceipt[]> {
+  return extractSessionSpineReceipts(await readStatusBody(connection, { receipts: 'peek' }, timeoutMs));
+}
+
+/** Marks exactly these receipts delivered (`receipts=ack`); a lost ack only means they are offered again. */
+async function acknowledgeReceipts(
+  connection: SessionSpineRestConnection,
+  ids: readonly string[],
+  timeoutMs: number,
+): Promise<void> {
+  for (let index = 0; index < ids.length; index += RECEIPT_ACK_BATCH) {
+    await readStatusBody(connection, { receipts: 'ack', ids: ids.slice(index, index + RECEIPT_ACK_BATCH).join(',') }, timeoutMs);
+  }
+}
+
 /**
  * Reads the daemon's undelivered receipts without losing them to a dropped
  * response: `receipts=peek` leaves them undelivered, and only after the body
- * has been parsed does `receipts=ack` mark exactly those delivered. A daemon
- * that predates peek omits the `receipts` key, so that case falls back to the
- * destructive `receipts=consume` read.
+ * has been parsed does `receipts=ack` mark exactly those delivered.
  */
 async function defaultConsumeReceipts(
   connection: SessionSpineRestConnection,
   timeoutMs: number,
 ): Promise<readonly DaemonReceipt[]> {
-  const peeked = await readStatusBody(connection, { receipts: 'peek' }, timeoutMs);
-  if (peeked === null) return [];
-  if (!isRecord(peeked) || !Array.isArray(peeked.receipts)) {
-    return extractSessionSpineReceipts(await readStatusBody(connection, { receipts: 'consume' }, timeoutMs));
-  }
-  const receipts = extractSessionSpineReceipts(peeked);
-  if (receipts.length > 0) {
-    await readStatusBody(connection, { receipts: 'ack', ids: receipts.map((receipt) => receipt.id).join(',') }, timeoutMs);
-  }
+  const receipts = await peekReceipts(connection, timeoutMs);
+  if (receipts.length > 0) await acknowledgeReceipts(connection, receipts.map((receipt) => receipt.id), timeoutMs);
   return receipts;
 }
 
 export interface SessionSpineReceiptConsumerOptions {
   readonly resolveConnection: () => SessionSpineRestConnection;
   readonly consumeTimeoutMs?: number;
+  /**
+   * False when the caller acknowledges each receipt itself once it is on
+   * screen ({@link createSessionSpineReceiptAcknowledger}); the read then only
+   * peeks. Default true: what was parsed is acknowledged at once.
+   */
+  readonly acknowledgeOnRead?: boolean;
   /** Override for tests; default does a short GET {baseUrl}/status?receipts=peek, then acknowledges what it parsed. */
   readonly consumeImpl?: (
     connection: SessionSpineRestConnection,
@@ -353,6 +372,26 @@ export function createSessionSpineReceiptConsumer(
   options: SessionSpineReceiptConsumerOptions,
 ): () => Promise<readonly DaemonReceipt[]> {
   const consumeTimeoutMs = options.consumeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
-  const consumeImpl = options.consumeImpl ?? defaultConsumeReceipts;
+  const consumeImpl = options.consumeImpl ?? (options.acknowledgeOnRead === false ? peekReceipts : defaultConsumeReceipts);
   return () => consumeImpl(options.resolveConnection(), consumeTimeoutMs);
+}
+
+/**
+ * Acknowledges receipts a surface has put on screen, so the daemon delivers
+ * each one only after somebody saw it. Never throws: a failed ack leaves the
+ * receipt with the daemon, which offers it again on the next attach.
+ */
+export function createSessionSpineReceiptAcknowledger(options: {
+  readonly resolveConnection: () => SessionSpineRestConnection;
+  readonly timeoutMs?: number;
+}): (ids: readonly string[]) => Promise<void> {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
+  return async (ids) => {
+    if (ids.length === 0) return;
+    try {
+      await acknowledgeReceipts(options.resolveConnection(), ids, timeoutMs);
+    } catch {
+      // Left undelivered; the daemon offers it again.
+    }
+  };
 }

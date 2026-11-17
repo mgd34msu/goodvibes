@@ -92,18 +92,12 @@ export interface ControlRouteContext {
   readonly requireAuthenticatedSession: (req: Request) => { username: string; roles: readonly string[] } | null;
   readonly login?: ((req: Request) => Promise<Response> | Response) | undefined;
   /**
-   * Undelivered daemon receipts ("updated from X to Y at HH:MM",
-   * "restarted after a crash at HH:MM"). Invoked ONLY when a /status reader
-   * explicitly opts in with `?receipts=consume`; the provider marks the
-   * returned receipts delivered, so consumption stays exactly-once across
-   * consuming readers. A plain /status read (identity probe, keepalive,
-   * version poll) neither receives nor consumes receipts.
-   */
-  readonly collectReceipts?: (() => readonly { id: string; text: string; at: number }[]) | undefined;
-  /**
-   * The same receipts, left undelivered. `?receipts=peek` returns them so a
-   * reader whose response is lost can ask again; the reader then names what it
-   * received with `?receipts=ack&ids=<id>,<id>` ({@link acknowledgeReceipts}).
+   * Undelivered daemon receipts ("updated from X to Y at 2026-11-15 03:12",
+   * "restarted after a crash at ..."), left undelivered. Returned only to a
+   * /status reader that opts in with `?receipts=peek`, so a reader whose
+   * response is lost can ask again; the reader names what it showed with
+   * `?receipts=ack&ids=<id>,<id>` ({@link acknowledgeReceipts}). A plain
+   * /status read (identity probe, keepalive, version poll) never touches them.
    */
   readonly peekReceipts?: (() => readonly { id: string; text: string; at: number }[]) | undefined;
   readonly acknowledgeReceipts?: ((ids: readonly string[]) => void) | undefined;
@@ -229,14 +223,12 @@ export function createDaemonControlRouteHandlers(
     getStatus: (req) => {
       const principal = context.resolveAuthenticatedPrincipal(req);
       if (!principal) return authenticationRequiredResponse();
-      // Receipt consumption is explicit: only a reader that passes
-      // ?receipts=consume receives undelivered receipts (and marks them
-      // delivered, exactly once). Every other /status read is
-      // receipt-neutral, so an identity probe or keepalive that parses only
-      // status/version can never eat a receipt before a rendering surface.
+      // Receipts reach only a reader that passes ?receipts=peek, and are
+      // delivered only when it acknowledges what it showed (?receipts=ack).
+      // Every other /status read is receipt-neutral, so an identity probe or
+      // keepalive can never take a receipt from a rendering surface.
       const searchParams = new URL(req.url).searchParams;
       const receiptsMode = searchParams.get('receipts');
-      const consumeReceipts = receiptsMode === 'consume';
       const peekReceipts = receiptsMode === 'peek' && context.peekReceipts !== undefined;
       if (receiptsMode === 'ack' && context.acknowledgeReceipts) {
         // A reader confirms what it received; only then are those receipts
@@ -263,7 +255,6 @@ export function createDaemonControlRouteHandlers(
         version: buildVersion ?? context.version,
         buildVersion: buildVersion ?? context.version,
         platformVersion: context.version,
-        ...(consumeReceipts && context.collectReceipts ? { receipts: context.collectReceipts() } : {}),
         ...(peekReceipts && context.peekReceipts ? { receipts: context.peekReceipts() } : {}),
         ...(context.collectClusterStatus ? { cluster: context.collectClusterStatus() } : {}),
       }, floorHeader ? { headers: floorHeader } : undefined);

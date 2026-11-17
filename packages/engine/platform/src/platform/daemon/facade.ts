@@ -407,7 +407,6 @@ export class DaemonServer {
     registerRelayGatewayMethods(this.runtimeServices.gatewayMethods, () => this.relayReachability);
     this.httpRouter.setDaemonStatusProviders({
       // Update/crash receipts, and which node currently reads the inbox.
-      collectReceipts: () => this.collectDaemonReceipts(),
       peekReceipts: () => this.peekDaemonReceipts(),
       acknowledgeReceipts: (ids) => this.acknowledgeDaemonReceipts(ids),
       collectClusterStatus: () => this.clusterCoordinator.status(),
@@ -1270,11 +1269,6 @@ export class DaemonServer {
     // for the process that takes over.
     if (!forHandover) releaseDaemonActivityLog(this.configManager);
     if (runtimeCloseFailures.length > 0) throw new AggregateError(runtimeCloseFailures, 'Daemon runtime services cleanup failed');
-  }
-
-  /** Undelivered daemon receipts for the /status payload (marked delivered once served). */
-  collectDaemonReceipts(): readonly { id: string; text: string; at: number }[] {
-    return this.lifecycle?.collectReceipts() ?? [];
   }
 
   /** Undelivered receipts for a `?receipts=peek` read; nothing is marked delivered. */

@@ -42,9 +42,7 @@ export interface DaemonStatusProviders {
    * see ControlRouteContext.buildVersion in daemon-api/src/control-routes.ts.
    */
   readonly buildVersion?: (() => string | null) | undefined;
-  /** Undelivered daemon receipts (update, crash-restart, migration notices). */
-  readonly collectReceipts?: (() => readonly { id: string; text: string; at: number }[]) | undefined;
-  /** The same receipts as {@link collectReceipts}, left undelivered until acknowledged. */
+  /** Undelivered daemon receipts (update, crash-restart, migration notices), left undelivered until acknowledged. */
   readonly peekReceipts?: (() => readonly { id: string; text: string; at: number }[]) | undefined;
   /** Marks receipts a reader has confirmed it received as delivered. */
   readonly acknowledgeReceipts?: ((ids: readonly string[]) => void) | undefined;

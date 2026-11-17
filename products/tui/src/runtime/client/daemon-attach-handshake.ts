@@ -16,9 +16,8 @@
  *  - The minimum CLIENT build the daemon accepts. Below it the guard latches
  *    and the continuation runner stops taking shared-session work.
  *  - Its undelivered receipts (update applied, restarted after a crash,
- *    settings migrated), read from `/status?receipts=consume` where delivery is
- *    destructive, so the read that consumed them is the read that renders
- *    them.
+ *    settings migrated), read with `/status?receipts=peek` and acknowledged
+ *    once parsed, so the read that takes them is the read that renders them.
  *
  * Every one of those is decided from the same response, which is why this is
  * one function and not three callers each making their own read.
@@ -162,7 +161,7 @@ export function createDaemonAttachHandshake(deps: DaemonAttachHandshakeDeps): Da
       const verdict = daemonBuildFloor.evaluate(answer.statusPayload, daemonStatus.baseUrl);
       const notice = daemonBuildFloor.noticeFor(verdict);
       if (notice) deps.notify(notice);
-      // The read consumed these receipts at the daemon, so this is the only
+      // The read acknowledged these receipts at the daemon, so this is the only
       // place they can still be shown. They render before recording or adopting
       // so a throw there cannot lose them.
       for (const receipt of answer.notices) deps.notify(receipt);

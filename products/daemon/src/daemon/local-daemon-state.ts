@@ -11,9 +11,10 @@
  *   <control-plane config dir>/control-plane/daemon-receipts.json
  *
  * They are READ here and never written, and the receipts are never marked
- * delivered, `/status?receipts=consume` hands each receipt to the first
- * consuming reader exactly once, and a status command that quietly consumed
- * them would take them away from the surface they were written for.
+ * delivered: a receipt is delivered only when a surface that showed it
+ * acknowledges it (`/status?receipts=peek`, then `?receipts=ack`), and a status
+ * command that quietly marked them would take them away from the surface they
+ * were written for.
  *
  * Which is also why this is honestly local-only: a `status --host other-box`
  * has no access to that box's filesystem, and these lines are reported as

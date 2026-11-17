@@ -8,7 +8,7 @@ import { drainOwned } from '@goodvibes-jev/judgment/decisions';
  *
  * Kept beside facade.ts so the facade only carries thin lifecycle hooks:
  * onStarted() after the server is accepting, onStopping() during an
- * orderly stop, and collectReceipts() for the /status payload.
+ * orderly stop, and peekReceipts()/acknowledgeReceipts() for the /status payload.
  */
 import { join } from 'node:path';
 import { assertNativeReaderCompatible, parseNativeReaderCapabilities, NativeDataCompatibilityError } from '../runtime/native-reader-compatibility.js';
@@ -309,21 +309,9 @@ export class DaemonLifecycleRuntime {
   }
 
   /**
-   * Undelivered receipts and announcements, marked delivered as they are
-   * returned. Only for a reader that renders them in the same process (the
-   * embedded daemon's terminal); a reader across the wire peeks and
-   * acknowledges instead ({@link peekReceipts}, {@link acknowledgeReceipts}).
-   */
-  collectReceipts(): readonly { id: string; text: string; at: number }[] {
-    const receipts = this.peekReceipts();
-    if (receipts.length > 0) this.acknowledgeReceipts(receipts.map((receipt) => receipt.id));
-    return receipts;
-  }
-
-  /**
-   * The same receipts and announcements as {@link collectReceipts}, left
-   * undelivered. A reader that loses the response can ask again; it names what
-   * it received through {@link acknowledgeReceipts}.
+   * Undelivered receipts and announcements, left undelivered. A reader that
+   * loses the response can ask again; it names what it showed through
+   * {@link acknowledgeReceipts}.
    */
   peekReceipts(): readonly { id: string; text: string; at: number }[] {
     const receipts = this.receiptStore().peekUndelivered().map(({ id, text, at }) => ({ id, text, at }));

@@ -36,7 +36,7 @@ import { runHostedContinuation } from './continuation-spawn.ts';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { CacheRegistry, PauseController, type MemoryGovernor } from '@goodvibes-jev/engine/platform/platform/runtime/memory';
 import type { PermissionManager } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { AGENT_SPINE_PARTICIPANT, SessionSpineClient, createSessionSpineRestProbe, createSessionSpineRestTransport, createSessionSpineReceiptConsumer } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
+import { AGENT_SPINE_PARTICIPANT, SessionSpineClient, createSessionSpineRestProbe, createSessionSpineRestTransport, createSessionSpineReceiptAcknowledger, createSessionSpineReceiptConsumer } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import { createSpineConnectionResolver } from './session-spine-rest-transport.ts';
 import { MemorySpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import type { MemoryTransport } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
@@ -451,12 +451,13 @@ export interface RuntimeServices extends Omit<PlatformRuntimeServices,
    */
   readonly daemonReceiptFeed: AgentDaemonReceiptFeed;
   /**
-   * Performs ONE receipt-consuming /status read (`?receipts=consume`) and pushes
-   * whatever the daemon delivered into {@link daemonReceiptFeed}. A current
-   * daemon delivers its one-shot honesty receipts only to a consuming read (a
-   * plain liveness /status read is receipt-neutral), so bootstrap invokes this
-   * exactly once per attach, see the memory-spine adoption reconciler's
-   * `onAttach`. Best-effort: it never throws and yields nothing on failure.
+   * Performs ONE receipt-reading /status read (`?receipts=peek`) and pushes
+   * what the daemon returned into {@link daemonReceiptFeed}, which acknowledges
+   * each receipt (`?receipts=ack`) once it is on screen, so a receipt this
+   * Agent never showed stays with the daemon. A plain liveness /status read is
+   * receipt-neutral, so bootstrap invokes this exactly once per attach, see the
+   * memory-spine adoption reconciler's `onAttach`. Best-effort: it never throws
+   * and yields nothing on failure.
    */
   readonly consumeDaemonReceipts: () => Promise<void>;
   /**
@@ -872,8 +873,10 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
         // degrades to an offline queue while the local broker keeps rendering.
         const spineResolveConnection = createSpineConnectionResolver(configManager, homeDirectory);
         const daemonReceiptFeed = new AgentDaemonReceiptFeed();
-        // The daemon's one-shot receipts reach only a `?receipts=consume` read, run once per attach.
-        const spineReceiptConsumer = createSessionSpineReceiptConsumer({ resolveConnection: spineResolveConnection });
+        // The daemon's receipts reach only a `?receipts=peek` read, run once per attach; each is
+        // acknowledged by the feed once it is on screen.
+        const spineReceiptConsumer = createSessionSpineReceiptConsumer({ resolveConnection: spineResolveConnection, acknowledgeOnRead: false });
+        const spineReceiptAcknowledger = createSessionSpineReceiptAcknowledger({ resolveConnection: spineResolveConnection });
         // A daemon too old for a verb this build depends on is told once per attach, in the same feed.
         const daemonBuildGuard = new DaemonBuildGuard({
           floor: AGENT_DAEMON_BUILD_FLOOR,
@@ -892,6 +895,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
         let forwardKeepAwakeOnAttach: () => Promise<void> = () => Promise.resolve();
         const consumeDaemonReceipts = createDaemonReceiptConsumption({
           consumeReceipts: spineReceiptConsumer,
+          acknowledgeReceipts: spineReceiptAcknowledger,
           feed: daemonReceiptFeed,
           afterAttach: () => forwardKeepAwakeOnAttach(),
         });

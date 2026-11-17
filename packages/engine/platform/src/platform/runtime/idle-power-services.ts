@@ -68,23 +68,40 @@ export interface IdlePowerServices {
 }
 
 /**
- * Count memory use for every turn on `bus`, so decay ranks memories the same
- * way in every product. Costs one decision-model request per completed turn
- * that carried memories (none with decision models off: the injections are
- * counted unassessed), and one counter update per turn.
+ * The envelope source of a turn event the process's own Orchestrator emitted
+ * (core/orchestrator-runtime.ts createEmitterContext). A relay of another
+ * process's turn (the Agent's hosted-turn bus bridge) carries its own source.
+ */
+const ORCHESTRATOR_SOURCE = 'orchestrator';
+
+/**
+ * Count memory use for every turn this process ran, so decay ranks memories
+ * the same way in every product. A turn is counted where it ran: a relayed
+ * turn end (a client showing a turn its daemon ran) is not this process's, and
+ * the tracker counts one turn id once. Costs one decision-model request per
+ * completed turn that carried memories, after the turn's result is out and
+ * bounded by the decision deadline; none with decision models off. A new
+ * turn abandons a reading still in flight; shutdown abandons all.
  */
 function followTurnMemoryUsage(bus: RuntimeEventBus, tracker: MemoryUsageTracker): () => void {
+  const ran = (envelope: { readonly source?: string | undefined }): boolean => envelope.source === ORCHESTRATOR_SOURCE;
   const unsubscribes = [
-    bus.on<Extract<TurnEvent, { type: 'TURN_COMPLETED' }>>('TURN_COMPLETED', ({ payload }) => {
+    bus.on<Extract<TurnEvent, { type: 'TURN_SUBMITTED' }>>('TURN_SUBMITTED', () => tracker.dropPendingReadings()),
+    bus.on<Extract<TurnEvent, { type: 'TURN_COMPLETED' }>>('TURN_COMPLETED', (envelope) => {
+      if (!ran(envelope)) return;
+      const { payload } = envelope;
       tracker.onComposed(payload.turnId, payload.metadata?.memory?.recordIds ?? []);
       void tracker.onTurnCompleted(payload.turnId, payload.response).catch((error: unknown) => {
-        logger.debug('Memory usage reading failed', { error: summarizeError(error) });
+        logger.debug('Memory usage counters were not written', { error: summarizeError(error) });
       });
     }),
-    bus.on<Extract<TurnEvent, { type: 'TURN_ERROR' }>>('TURN_ERROR', ({ payload }) => tracker.onTurnAborted(payload.turnId)),
-    bus.on<Extract<TurnEvent, { type: 'TURN_CANCEL' }>>('TURN_CANCEL', ({ payload }) => tracker.onTurnAborted(payload.turnId)),
+    bus.on<Extract<TurnEvent, { type: 'TURN_ERROR' }>>('TURN_ERROR', (envelope) => { if (ran(envelope)) tracker.onTurnAborted(envelope.payload.turnId); }),
+    bus.on<Extract<TurnEvent, { type: 'TURN_CANCEL' }>>('TURN_CANCEL', (envelope) => { if (ran(envelope)) tracker.onTurnAborted(envelope.payload.turnId); }),
   ];
-  return () => { for (const unsubscribe of unsubscribes.splice(0)) unsubscribe(); };
+  return () => {
+    for (const unsubscribe of unsubscribes.splice(0)) unsubscribe();
+    tracker.dispose();
+  };
 }
 
 /** Construct (and start) the idle-consolidation scheduler, power manager, and live-turn holder. */

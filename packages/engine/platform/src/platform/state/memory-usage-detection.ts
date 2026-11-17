@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard, DEFAULT_DECISION_DEADLINE_MS } from '@goodvibes-jev/judgment/decisions';
 /**
  * memory-usage-detection.ts, reference detection and the per-turn usage
  * tracker every product shares.
@@ -90,11 +90,15 @@ async function detectDecisionReferencedMemoryIds(responseText: string, records: 
   // Any past the cap stay unassessed rather than costing a second request.
   const read = input.records.slice(0, MAX_READ_PER_TURN);
   const owner = captureJudgmentPort(SITE, { ...options, assertCurrent: current, prepareResultCapture: prepareJudgmentResult });
+  // Bounded by the one decision deadline (judgment.decisionDeadlineMs): a missed
+  // deadline counts toward the target's cooldown, and the caller's fallback
+  // counts the injections unassessed.
+  const deadline = AbortSignal.timeout(owner.port.decisionDeadlineMs ?? DEFAULT_DECISION_DEADLINE_MS);
   const { ranked } = await memoryUsage.rerank(
     owner.port,
     input.responseText,
     read.map((record) => ({ id: record.id, content: { summary: record.summary, ...(record.detail === undefined ? {} : { detail: record.detail }) } })),
-    { site: SITE, signal: owner.signal, beforeAttempt: owner.assertCurrent },
+    { site: SITE, signal: AbortSignal.any([owner.signal, deadline]), beforeAttempt: owner.assertCurrent },
   );
   owner.assertCurrent();
   const readings = new Map(ranked.map((entry) => [entry.id, entry.reading]));
@@ -121,30 +125,58 @@ export interface MemoryUsageRecordSource {
  * aborted turn still counts its injections, unassessed, and invents no use.
  * Any product that injects memories and sees its turns end feeds it the same
  * way, so the counters on the record mean the same thing everywhere.
+ *
+ * A turn is counted once: a turn id that already ended is remembered (the last
+ * SETTLED_TURNS of them), so a second delivery of its end, or a late
+ * composition for it, changes nothing. The reading runs after the turn's
+ * result is out and never holds a turn: `dropPendingReadings` (a new turn
+ * started) and `dispose` (shutdown) abandon it, and the injections are then
+ * counted unassessed, with no retry.
  */
+const SETTLED_TURNS = 512;
+
 export class MemoryUsageTracker {
   private readonly injectedByTurn = new Map<string, { readonly ids: Set<string>; readonly controller: AbortController; started: boolean }>();
+  private readonly settledTurns = new Set<string>();
+  private disposed = false;
 
   public constructor(private readonly memory: MemoryUsageRecordSource) {}
 
+  private settle(turnId: string): void {
+    this.settledTurns.add(turnId);
+    if (this.settledTurns.size > SETTLED_TURNS) {
+      const oldest = this.settledTurns.values().next();
+      if (!oldest.done) this.settledTurns.delete(oldest.value);
+    }
+  }
+
   /** At prompt composition. Without a turn id (a follow-up) the injection is counted at once, unassessed. */
   public onComposed(turnId: string | null, injectedIds: readonly string[]): void {
+    if (this.disposed) return;
     const ids = injectedIds.filter((id) => id.trim());
     if (ids.length === 0) return;
     if (!turnId) {
       void this.memory.recordUsage({ injected: ids }).catch(() => { /* counters are instrumentation only */ });
       return;
     }
+    if (this.settledTurns.has(turnId)) return;
     const turn = this.injectedByTurn.get(turnId);
     if (turn && !turn.started) { for (const id of ids) turn.ids.add(id); return; }
     this.injectedByTurn.set(turnId, { ids: new Set(ids), controller: new AbortController(), started: false });
   }
 
-  /** At turn completion: one reading of which injected memories the output used, one counter update. */
+  /**
+   * At turn completion: one reading of which injected memories the output
+   * used, one counter update. Any failure of the reading (no model, missed
+   * deadline, an abandoned reading) is the fallback: the injections counted
+   * unassessed, which never makes a memory decay.
+   */
   public async onTurnCompleted(turnId: string, response: string): Promise<void> {
+    if (this.disposed || this.settledTurns.has(turnId)) return;
     const turn = this.injectedByTurn.get(turnId);
     if (!turn || turn.started) return;
     turn.started = true;
+    this.settle(turnId);
     const records = [...turn.ids].flatMap((id) => {
       const record = this.memory.get(id);
       return record ? [{ id: record.id, summary: record.summary, detail: record.detail }] : [];
@@ -157,22 +189,36 @@ export class MemoryUsageTracker {
     try {
       const result = await detectReferencedMemoryIds(response, records, { signal: turn.controller.signal, assertCurrent });
       change = { injected: [...turn.ids], assessed: result.assessed, referenced: result.referenced };
-    } catch (error) {
-      // A turn aborted while its use was being read: counted, unassessed, and not an error.
-      if (!turn.controller.signal.aborted) throw error;
+    } catch {
+      // The fallback: counted, unassessed. Not retried.
     } finally {
       if (this.injectedByTurn.get(turnId) === turn) this.injectedByTurn.delete(turnId);
       turn.controller.abort();
-      await this.memory.recordUsage(change);
     }
+    if (this.disposed) return;
+    await this.memory.recordUsage(change);
   }
 
   /** At turn error/cancel: count the injections, unassessed, without crediting a reference. */
   public onTurnAborted(turnId: string): void {
+    if (this.settledTurns.has(turnId)) return;
+    this.settle(turnId);
     const turn = this.injectedByTurn.get(turnId);
     if (!turn) return;
     this.injectedByTurn.delete(turnId);
     turn.controller.abort();
-    if (!turn.started) void this.memory.recordUsage({ injected: [...turn.ids] }).catch(() => { /* counters are instrumentation only */ });
+    if (!turn.started && !this.disposed) void this.memory.recordUsage({ injected: [...turn.ids] }).catch(() => { /* counters are instrumentation only */ });
+  }
+
+  /** A new turn started: abandon every reading still in flight, so none competes with it for the decision model. */
+  public dropPendingReadings(): void {
+    for (const turn of this.injectedByTurn.values()) if (turn.started) turn.controller.abort();
+  }
+
+  /** Shutdown: abandon every reading and keep nothing. */
+  public dispose(): void {
+    this.disposed = true;
+    for (const turn of this.injectedByTurn.values()) turn.controller.abort();
+    this.injectedByTurn.clear();
   }
 }

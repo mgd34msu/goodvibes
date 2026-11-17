@@ -31,6 +31,12 @@ delivery strategy selection, and reply rendering and delivery. That shared
 ownership is what keeps a new surface from needing its own copy of routing,
 delivery, or reply logic.
 
+A message that arrives while every agent slot (`fleet.maxSize`) is taken is
+accepted and queued, not refused: the sender is told it waits, the provider is
+answered as delivered so it does not send the message again, and the message
+starts, oldest first, as soon as an agent ends. A message still waiting when
+the daemon restarts is started after the restart.
+
 ## Home Assistant
 
 The Home Assistant surface is configured from onboarding or Settings > Surfaces. The TUI stores the platform config keys and controls auto-start; the platform daemon owns the actual Home Assistant API/tool surface, callback verification, account metadata, and channel actions.

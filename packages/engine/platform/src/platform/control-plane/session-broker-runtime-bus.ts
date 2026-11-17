@@ -17,6 +17,8 @@ export class SharedSessionRuntimeBusBridge {
     bus: RuntimeEventBus,
     sessionResolver: (agentId: string) => string | null,
     completeAgent: SharedSessionAgentCompletion,
+    /** Any agent ended, of any session or none: an agent slot is free. */
+    agentEnded: () => void = () => {},
   ): () => void {
     if (this.busAttached) {
       logger.warn('[SharedSessionBroker] attachRuntimeBus called more than once, ignoring duplicate call', {});
@@ -27,6 +29,7 @@ export class SharedSessionRuntimeBusBridge {
       'AGENT_COMPLETED',
       (envelope) => {
         if (typeof envelope.payload?.agentId !== 'string') return;
+        agentEnded();
         const sessionId = sessionResolver(envelope.payload.agentId);
         if (!sessionId) return;
         completeAgent(
@@ -43,6 +46,7 @@ export class SharedSessionRuntimeBusBridge {
       'AGENT_FAILED',
       (envelope) => {
         if (typeof envelope.payload?.agentId !== 'string') return;
+        agentEnded();
         const sessionId = sessionResolver(envelope.payload.agentId);
         if (!sessionId) return;
         completeAgent(
@@ -59,6 +63,7 @@ export class SharedSessionRuntimeBusBridge {
       'AGENT_CANCELLED',
       (envelope) => {
         if (typeof envelope.payload?.agentId !== 'string') return;
+        agentEnded();
         const sessionId = sessionResolver(envelope.payload.agentId);
         if (!sessionId) return;
         completeAgent(

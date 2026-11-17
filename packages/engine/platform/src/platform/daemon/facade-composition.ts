@@ -916,8 +916,13 @@ export function configureDaemonSessionContinuation(options: {
           ? await gateSurfaceSpawn(gateDeps, origin, conversationalInput, label, sessionId)
           : options.trySpawnAgent({ ...conversationalInput, ...continuationContractOptions(input) }, label, sessionId);
       if (spawned instanceof Response) {
+        // The fleet is full: the input waits, queued, for the next agent to end.
+        if (spawned.status === 429) return { disposition: 'capacity', reason: 'every agent slot is taken' };
         if (spawned.status === 202) {
           const result: unknown = await spawned.clone().json();
+          if (result && typeof result === 'object' && 'outcome' in result && result.outcome === 'waiting-for-capacity') {
+            return { disposition: 'capacity', reason: 'every agent slot is taken' };
+          }
           if (result && typeof result === 'object' && 'outcome' in result && result.outcome === 'work-proposed'
             && 'proposalId' in result && typeof result.proposalId === 'string') {
             const proposal = gateDeps?.workProposals?.listPending().find(entry => entry.id === result.proposalId);

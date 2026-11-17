@@ -383,7 +383,8 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
       try {
         const spawned = await bound({ sessionId, task: input.body, input });
         // Explicit native outcomes never use null as an ambiguous acknowledgment.
-        if (spawned?.disposition === 'held' || spawned?.disposition === 'unknown') continue;
+        // A full fleet keeps the input queued for the next tick, like a held reading.
+        if (spawned?.disposition === 'held' || spawned?.disposition === 'unknown' || spawned?.disposition === 'capacity') continue;
         if (spawned?.disposition === 'transferred') {
           if (!spawned.requestId.trim()) continue;
           claim = { kind: 'consumed' };

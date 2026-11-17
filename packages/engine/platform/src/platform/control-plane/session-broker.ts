@@ -118,6 +118,8 @@ function attachedFacts(session: SharedSessionRecord): string {
 
 /** How long a started-but-unbound agent holds back a session's other messages if nothing ends the claim. */
 const SPAWN_IN_FLIGHT_MS = 30_000;
+/** Input metadata marking a message that waits for a free agent; it survives a restart with the row. */
+const WAITING_FOR_CAPACITY_KEY = 'waitingForCapacitySince';
 
 /**
  * Every session, message and input change replaces a map entry (records are
@@ -185,6 +187,14 @@ export class SharedSessionBroker {
   private readonly followUpsRunning = new Set<string>();
   /** Sessions with an agent being started: session id to the time the claim lapses if nothing ends it. */
   private readonly spawnsInFlight = new Map<string, number>();
+  /**
+   * Messages accepted while every agent slot was taken, oldest first: input id
+   * to session id. Each row stays `queued` and is started, in this order, when
+   * an agent ends; the transport that delivered it has already been answered.
+   */
+  private readonly capacityWaiting = new Map<string, string>();
+  private capacityDrain: Promise<void> | null = null;
+  private capacityDrainAgain = false;
   /** Tail of the work queued per route or session key; see `serialized`. */
   private readonly serialChains = new Map<string, Promise<void>>();
   private _gcInterval: ReturnType<typeof setInterval> | null = null;
@@ -302,12 +312,88 @@ export class SharedSessionBroker {
       bus,
       sessionResolver,
       (sessionId, agentId, body, metadata) => this.completeAgent(sessionId, agentId, body, metadata),
+      () => this.scheduleCapacityDrain(),
     );
   }
 
   setContinuationRunner(runner: SharedSessionContinuationRunner | null): void {
     this.continuationRunner = runner === null ? null
       : input => withChannelExecutionMode(this, input.sessionId, () => runner(input));
+    // Messages a previous run accepted while the fleet was full start now.
+    if (runner !== null) this.scheduleCapacityDrain();
+  }
+
+  /**
+   * Keep a message that could not start because every agent slot is taken.
+   * The row stays `queued` (marked, so the mark survives a restart) and is
+   * started when an agent ends, in arrival order. Returns `held` the first
+   * time, `already` when it was waiting, null when the row is not a queued
+   * input of this session.
+   */
+  async holdForCapacity(sessionId: string, inputId: string): Promise<'held' | 'already' | null> {
+    await this.start();
+    const row = this.inputs.get(sessionId)?.find((entry) => entry.id === inputId);
+    if (!row || row.state !== 'queued') return null;
+    if (this.capacityWaiting.has(inputId)) return 'already';
+    this.capacityWaiting.set(inputId, sessionId);
+    if (typeof row.metadata[WAITING_FOR_CAPACITY_KEY] !== 'number') {
+      updateSharedSessionInput(this.sessionInputStore(), sessionId, inputId, (current) => ({
+        ...current, metadata: { ...current.metadata, [WAITING_FOR_CAPACITY_KEY]: Date.now() },
+      }));
+      await this.persist();
+    }
+    logger.info('A message is waiting for a free agent', { sessionId, inputId, waiting: this.capacityWaiting.size });
+    return 'held';
+  }
+
+  /** An agent ended: start waiting messages once the manager has released its slot. */
+  private scheduleCapacityDrain(): void {
+    if (this.capacityWaiting.size === 0) return;
+    const timer = setTimeout(() => {
+      void this.drainCapacityWaiting().catch((error: unknown) => {
+        logger.warn('Messages waiting for a free agent could not be started', { error: summarizeError(error) });
+      });
+    }, 0);
+    (timer as unknown as { unref?: () => void }).unref?.();
+  }
+
+  private drainCapacityWaiting(): Promise<void> {
+    if (this.capacityDrain) { this.capacityDrainAgain = true; return this.capacityDrain; }
+    this.capacityDrain = (async () => {
+      try {
+        do {
+          this.capacityDrainAgain = false;
+          await this.startWaitingForCapacity();
+        } while (this.capacityDrainAgain);
+      } finally {
+        this.capacityDrain = null;
+      }
+    })();
+    return this.capacityDrain;
+  }
+
+  private async startWaitingForCapacity(): Promise<void> {
+    await this.start();
+    for (const [inputId, sessionId] of [...this.capacityWaiting]) {
+      const row = this.inputs.get(sessionId)?.find((entry) => entry.id === inputId);
+      const session = this.sessions.get(sessionId);
+      if (!row || row.state !== 'queued' || !session || session.status !== 'active') {
+        this.capacityWaiting.delete(inputId);
+        continue;
+      }
+      // A session busy with another agent takes this message when that agent ends.
+      if (session.activeAgentId || this.hasSpawnInFlight(sessionId) || this.followUpsRunning.has(inputId)) continue;
+      this.followUpsRunning.add(inputId);
+      try {
+        await this.runFollowUp(sessionId, row);
+      } finally {
+        this.followUpsRunning.delete(inputId);
+      }
+      const after = this.inputs.get(sessionId)?.find((entry) => entry.id === inputId);
+      // Still queued: the fleet is still full; the next agent to end tries again.
+      if (after?.state === 'queued') return;
+      this.capacityWaiting.delete(inputId);
+    }
   }
 
   /** Host composition binds a channel default once, after trusted profile resolution. */
@@ -420,6 +506,13 @@ export class SharedSessionBroker {
     for (const sessionId of reconcileSessionBrokerBoot(this.sessions, this.inputs)) {
       this.refreshPendingInputCount(sessionId);
     }
+    // Messages accepted while the fleet was full are still owed an agent.
+    this.capacityWaiting.clear();
+    const waiting = [...this.inputs.entries()].flatMap(([sessionId, bucket]) => bucket
+      .filter((entry) => entry.state === 'queued' && typeof entry.metadata[WAITING_FOR_CAPACITY_KEY] === 'number')
+      .map((entry) => ({ sessionId, entry })));
+    waiting.sort((a, b) => (a.entry.metadata[WAITING_FOR_CAPACITY_KEY] as number) - (b.entry.metadata[WAITING_FOR_CAPACITY_KEY] as number));
+    for (const { sessionId, entry } of waiting) this.capacityWaiting.set(entry.id, sessionId);
     // Sessions a dead process left active are closed by the first sweep one
     // heartbeat window after this load (gcSweep): heartbeats are not written
     // to disk, so the stored times cannot tell a live surface from a dead one.
@@ -435,6 +528,7 @@ export class SharedSessionBroker {
     await this.persist();
     // Loaded only once the load fully succeeded: a failed first write is retried by the next start().
     this.loaded = true;
+    if (this.continuationRunner) this.scheduleCapacityDrain();
   }
 
   /** Run `work` after everything already queued under `key`; a different key never waits. */
@@ -860,6 +954,8 @@ export class SharedSessionBroker {
       this.publishInputLifecycleEvent(`session-input-${finalized.state}`, finalized, { agentId });
     }
     const continuation = await this.runQueuedFollowUp(sessionId);
+    // This session is free now: a message of its own that waited for an agent can start.
+    this.scheduleCapacityDrain();
     return {
       session: this.sessions.get(sessionId)!,
       ...(continuation?.input ? { continuedInput: continuation.input } : {}),
@@ -985,8 +1081,10 @@ export class SharedSessionBroker {
     const row = this.inputs.get(held.sessionId)?.find((entry) => entry.id === held.inputId);
     if (!session || !row) { index.delete(key); return null; }
     const stored = this.messages.get(held.sessionId)?.find((entry) => entry.id === row.causationId);
+    // A message waiting for a free agent is held, not stalled: a redelivery must not start it twice.
     const stalled = row.state === 'queued' && row.intent === 'submit' && !isDelegatedSessionInput(row)
-      && Date.now() - row.updatedAt >= SPAWN_IN_FLIGHT_MS && !this.hasSpawnInFlight(held.sessionId);
+      && Date.now() - row.updatedAt >= SPAWN_IN_FLIGHT_MS && !this.hasSpawnInFlight(held.sessionId)
+      && !this.capacityWaiting.has(row.id);
     if ((row.state === 'failed' || stalled) && stored && session.status === 'active') {
       return { kind: 'retry', sessionId: held.sessionId, userMessage: stored, ...(stalled ? { input: row } : {}) };
     }
@@ -1316,6 +1414,11 @@ export class SharedSessionBroker {
       // A refused start (fleet full, spawn policy) will not retry by itself: a row left queued reads as busy forever.
       logger.warn('A queued follow-up could not be started', { sessionId, inputId: next.id, error: summarizeError(error) });
       await this.failInput(sessionId, next.id, `The follow-up was not started: ${summarizeError(error)}. Send it again to retry.`);
+      return null;
+    }
+    if (spawned?.disposition === 'capacity') {
+      // Not a refusal: the message waits, queued, for the next agent to end.
+      await this.holdForCapacity(sessionId, next.id);
       return null;
     }
     if (spawned?.disposition === 'transferred') {

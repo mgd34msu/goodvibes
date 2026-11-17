@@ -49,10 +49,6 @@ import { isLoopbackHost } from '../../utils/reachable-base-url.js';
 const POLL_TIMEOUT_SECONDS = 25;
 /** Backoff floor and ceiling for transient failures. */
 const BACKOFF_MIN_MS = 1_000;
-/** How many times one update whose processor answered 429/5xx is fetched again before it is skipped as a poison update. */
-const UPDATE_RETRY_LIMIT = 5;
-/** Longest wait honoured from a processor's Retry-After. */
-const UPDATE_RETRY_MAX_MS = 60_000;
 const BACKOFF_MAX_MS = 60_000;
 /**
  * Extra random delay added to a conflict retry, so two consumers of one token
@@ -185,9 +181,9 @@ export function describeWebhookUrlProblem(rawUrl: string): string | null {
 }
 
 /**
- * Tells the sender of an update that was skipped after its last retry why
- * nothing started, with the reason the processor gave. A failed notice is
- * logged; the skip itself already reached the owner through the processing health.
+ * Tells the sender of an update that could not be processed why nothing
+ * started, with the reason the processor gave. A failed notice is logged; the
+ * skip itself already reached the owner through the processing health.
  */
 async function notifySkippedSender(api: TelegramBotApi, scope: TelegramReceiveScope, response: Response): Promise<void> {
   let reason = `HTTP ${response.status}`;
@@ -198,7 +194,7 @@ async function notifySkippedSender(api: TelegramBotApi, scope: TelegramReceiveSc
   } catch {
     // The status is the reason when the answer carried no readable error.
   }
-  const text = `Your message was not taken after ${UPDATE_RETRY_LIMIT} tries (${reason}), so nothing was started. Send it again in a few minutes.`;
+  const text = `Your message could not be taken (${reason}), so nothing was started. Send it again in a few minutes.`;
   try {
     await api.sendMessage({ chatId: scope.conversationId, text, threadId: scope.threadId });
   } catch (error) {
@@ -247,8 +243,6 @@ export class TelegramIngressSupervisor {
   private webhookDeliveryFailure: string | null = null;
   /** Polls that came back, counted so a rebuilt receiver resets its backoff once it works again. */
   private completedPolls = 0;
-  /** Times each update was fetched again after the processor answered 429/5xx; cleared once it is handled. */
-  private readonly updateRetries = new Map<number, number>();
   /** The token the latest start() resolved, compared when a secret changes. */
   private startedToken: string | null = null;
 
@@ -849,7 +843,6 @@ export class TelegramIngressSupervisor {
           this.setStatus('receiving', 'polling',
             `long-polling Telegram getUpdates for bot ${api.botId} (no public URL required)`, true);
         }
-        let retryAfterMs: number | null = null;
         if (updates.length > 0) {
           // Each update's offset is saved as soon as it is processed, so a
           // restart part-way through a batch never replays the updates already
@@ -861,14 +854,11 @@ export class TelegramIngressSupervisor {
               if (this.stopped || this.abort?.signal !== lifetime) throw new Error('Telegram polling owner retired');
             });
           };
-          retryAfterMs = await this.dispatchBatch(updates, api, persist, offset, sourceAccount, receiveProgress);
+          await this.dispatchBatch(updates, api, persist, offset, sourceAccount, receiveProgress);
         }
         cursor.assertCurrent();
         this.deps.telegramSourceAccounts?.prunePaymentReceiveSpans?.();
         if (startedAtMs !== undefined) receiveProgress?.completeRequest(startedAtMs, updates.length === 0);
-        // The processor asked to be tried again later (at capacity, or failing): the
-        // update was not confirmed, so wait before fetching it again.
-        if (retryAfterMs !== null) await this.delay(retryAfterMs);
       } catch (error) {
         if (this.stopped || lifetime.aborted || (error instanceof Error && error.name === 'AbortError')) return;
         // A receive span that would not save, the payment reply archive or the
@@ -1118,12 +1108,13 @@ export class TelegramIngressSupervisor {
    * confirmation offset past each one as soon as its processing returned, so a
    * crash or stop mid-batch replays only the update that was in flight.
    *
-   * A 429 or 5xx answer is the processor asking for a retry (the fleet is at
-   * capacity, a dependency is down): over a webhook Telegram redelivers the
-   * update, so here the offset is NOT advanced past it. Returns how long to wait
-   * before fetching it again, or null when the batch was fully handled. An
-   * update that keeps failing is skipped after UPDATE_RETRY_LIMIT tries, as
-   * every poison update is, so one bad message cannot wedge the cursor.
+   * An update's job ends when the session broker has accepted it: a message
+   * that arrives while every agent is busy is queued there and started when
+   * one ends, so the processor answers it as accepted. An update the processor
+   * could not handle is not fetched again: running the whole pipeline again
+   * would store the message twice and hold every other chat behind it. It is
+   * skipped, the owner sees it in the processing health, and the sender is
+   * told nothing started.
    */
   private async dispatchBatch(
     updates: readonly TelegramUpdate[],
@@ -1132,7 +1123,7 @@ export class TelegramIngressSupervisor {
     current: number | undefined,
     sourceAccount?: TelegramSourceAccountLease,
     receiveProgress?: TelegramPollingReceiveProgress,
-  ): Promise<number | null> {
+  ): Promise<void> {
     let offset = current;
     const context = this.deps.buildSurfaceAdapterContext();
     for (const update of updates) {
@@ -1149,17 +1140,10 @@ export class TelegramIngressSupervisor {
         });
         const outcome = ingressOutcome(response);
         if (outcome === 'failed' && updateId !== null) {
-          const attempts = (this.updateRetries.get(updateId) ?? 0) + 1;
-          if (attempts < UPDATE_RETRY_LIMIT) {
-            this.updateRetries.set(updateId, attempts);
-            const dictated = Number(response.headers.get('retry-after'));
-            return Math.min(UPDATE_RETRY_MAX_MS, Number.isFinite(dictated) && dictated > 0 ? dictated * 1_000 : BACKOFF_MIN_MS * 2 ** (attempts - 1));
-          }
-          this.updateRetries.delete(updateId);
           receiveProgress?.gap(scope);
-          this.processing.recordFailure(`Telegram update was refused ${UPDATE_RETRY_LIMIT} times (HTTP ${response.status}) and was skipped`, { updateId });
-          // The last try is the end of this message: the sender, who passed the channel
-          // policy to get this far, is told why nothing started instead of hearing nothing.
+          this.processing.recordFailure(`Telegram update could not be processed (HTTP ${response.status}) and was skipped`, { updateId });
+          // The sender, who passed the channel policy to get this far, is told
+          // why nothing started instead of hearing nothing.
           if (scope) await notifySkippedSender(api, scope, response);
         } else {
           if (!response.ok) receiveProgress?.gap(scope);
@@ -1176,12 +1160,10 @@ export class TelegramIngressSupervisor {
         this.processing.recordFailure(summarizeError(error), { updateId });
       }
       if (updateId !== null) {
-        this.updateRetries.delete(updateId);
         offset = Math.max(offset ?? 0, updateId + 1);
         persist(offset);
       }
     }
-    return null;
   }
 
   /**

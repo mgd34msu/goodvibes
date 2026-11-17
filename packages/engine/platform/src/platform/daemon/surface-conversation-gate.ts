@@ -75,7 +75,7 @@ export interface ConversationGateDeps {
   readonly configManager: ConversationGateConfigReader;
   readonly routeBindings: Pick<RouteBindingManager, 'getBinding' | 'resolve'>;
   readonly sessionBroker: Pick<SharedSessionBroker, 'getSession' | 'bindAgent'>
-    & Partial<Pick<SharedSessionBroker, 'getInputs' | 'failInput' | 'beginSpawn'>>;
+    & Partial<Pick<SharedSessionBroker, 'getInputs' | 'failInput' | 'beginSpawn' | 'holdForCapacity'>>;
   readonly trySpawnAgent: (input: SpawnInput, logLabel?: string, sessionId?: string) => AgentRecord | Response;
   readonly queueSurfaceReplyFromBinding: (
     binding: AutomationRouteBinding | undefined,
@@ -271,7 +271,15 @@ export async function settleUnstartedWork(
   await failHeldInput(deps, null, proposal.sessionId, reason, proposal.inputId);
 }
 
-/** Spawn through the shared path; a refusal closes the message's row, since no agent will answer it. */
+/** What the sender is told when the message waits for a free agent. */
+export const WAITING_FOR_CAPACITY_NOTICE = 'All agents are busy right now. Your message is queued and will be answered as soon as one is free.';
+
+/**
+ * Spawn through the shared path. A full fleet is not a refusal: the message's
+ * row stays queued with the session broker, which starts it when an agent
+ * ends, and the transport is answered as accepted so it does not deliver the
+ * message again. Any other refusal closes the row, since no agent will answer it.
+ */
 async function spawnOrSettle(
   deps: ConversationGateDeps,
   origin: SurfaceIngressOrigin | null,
@@ -280,9 +288,20 @@ async function spawnOrSettle(
   sessionId: string | undefined,
 ): Promise<AgentRecord | Response> {
   const spawned = deps.trySpawnAgent(input, logLabel, sessionId);
-  if (spawned instanceof Response) {
-    await failHeldInput(deps, origin, sessionId, `The message was not acted on: the agent could not be started (HTTP ${spawned.status}). Send it again.`);
+  if (!(spawned instanceof Response)) return spawned;
+  const held = spawned.status === 429 && sessionId ? findHeldInput(deps, origin, sessionId) : undefined;
+  const waiting = held && sessionId ? await deps.sessionBroker.holdForCapacity?.(sessionId, held.id) : null;
+  if (held && waiting) {
+    if (waiting === 'held') {
+      void deps.deliverSurfaceNotice?.(resolveOriginBinding(deps, origin, sessionId), WAITING_FOR_CAPACITY_NOTICE)
+        .catch((error: unknown) => logger.debug('The queued-message notice was not delivered', { sessionId, error: summarizeError(error) }));
+    }
+    return Response.json({
+      ok: true, acknowledged: true, queued: true, outcome: 'waiting-for-capacity',
+      sessionId, inputId: held.id, message: WAITING_FOR_CAPACITY_NOTICE,
+    }, { status: 202 });
   }
+  await failHeldInput(deps, origin, sessionId, `The message was not acted on: the agent could not be started (HTTP ${spawned.status}). Send it again.`);
   return spawned;
 }
 

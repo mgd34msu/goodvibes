@@ -247,6 +247,7 @@ export function gateAnswerText(outcome: string): string {
     case 'work-proposed': return 'This reads as work, so I proposed it instead of starting it. Answer the proposal to start it.';
     case 'work-proposal-undelivered': return 'The work proposal could not be shown here, so nothing was started. Send the request again.';
     case 'work-proposal-expired': return 'The work proposal expired before it could be answered. Send the request again.';
+    case 'waiting-for-capacity': return 'All agents are busy right now. Your message is queued and will be answered as soon as one is free.';
     default: return 'Received; nothing was started.';
   }
 }

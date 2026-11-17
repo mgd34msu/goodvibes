@@ -90,6 +90,8 @@ export interface SharedSessionContinuationResult { readonly agentId: string; rea
 export type SharedSessionContinuationOutcome =
   | SharedSessionContinuationResult
   | { readonly disposition: 'held' | 'unknown'; readonly reason: string; readonly agentId?: never }
+  /** Every agent slot is taken: the input stays queued and starts when an agent ends. */
+  | { readonly disposition: 'capacity'; readonly reason: string; readonly agentId?: never }
   | { readonly disposition: 'transferred'; readonly requestId: string; readonly inputConsumed?: true; readonly agentId?: never };
 
 export type SharedSessionContinuationRunner = (

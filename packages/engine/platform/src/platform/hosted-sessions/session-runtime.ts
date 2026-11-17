@@ -30,7 +30,7 @@ import { HostedSessionUnavailableError } from './errors.js';
 import type { HostedWorkspaceFloor } from './workspace-floor.js';
 import { createContractIntake } from '../contract/intake-route.js';
 import { observeSessionContracts } from './session-contracts.js';
-import type { HostedSurfaceTools, HostedSurfaceTurn } from './surface-turn.js';
+import type { HostedDaemonRequestPath, HostedSurfaceTools, HostedSurfaceTurn } from './surface-turn.js';
 import { askingQuestions, type QuestionAsker } from '../agents/agent-owner-questions.js';
 import { watchSessionAnswers, type SessionAnswerWatch } from '../agents/agent-inlets.js';
 import { callingAgentId } from '../agents/calling-agent.js';
@@ -138,6 +138,8 @@ export interface HostedSessionRuntimeOptions {
    * platform tools and `systemPrompt` as it is.
    */
   readonly surfaceTurn?: HostedSurfaceTurn | undefined;
+  /** The daemon's own request path, handed to the surface turn's tools. */
+  readonly daemonRequests?: HostedDaemonRequestPath | undefined;
 }
 
 /** The engine's side of a session's contracts. */
@@ -312,7 +314,8 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
   const surfaceTurn = options.surfaceTurn;
   let surfaceTools: HostedSurfaceTools | undefined;
   try {
-    surfaceTools = surfaceTurn?.registerTools({ registry: toolRegistry, sessionId, workspaceRoot: options.workspaceRoot, floor: options.floor, providerRegistry });
+    surfaceTools = surfaceTurn?.registerTools({ registry: toolRegistry, sessionId, workspaceRoot: options.workspaceRoot, floor: options.floor, providerRegistry,
+      ...(options.daemonRequests ? { daemonRequests: options.daemonRequests } : {}) });
   } catch (error) {
     // Nothing else holds this session yet: release what was composed so far.
     answers?.dispose();

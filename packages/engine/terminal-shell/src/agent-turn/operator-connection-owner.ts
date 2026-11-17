@@ -4,8 +4,9 @@ import { lstatSync } from 'node:fs';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { connectedHostOperatorTokenPath } from './connected-host-auth.js';
 import { agentHostPairingStorePath } from './connected-host-pairing-store.js';
-import { resolveConnectedHost, type ConnectedHostSource, type ConnectedHostUnavailable } from './connected-host-client.js';
-import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
+import { resolveConnectedHost, type ConnectedHostConfigReader as AgentConnectedHostConfigReader, type ConnectedHostSource, type ConnectedHostUnavailable } from './connected-host-client.js';
+import type { AgentInProcessHost } from './in-process-host.js';
+import { agentDelegationStorePath } from './agent-delegation-credential.js';
 
 /** File identity, size and change time; `absent` when there is no file, `symlink` for a link. One `lstat`. */
 function credentialStamp(path: string): string {
@@ -21,6 +22,8 @@ function credentialStamp(path: string): string {
 function credentialFile(source: ConnectedHostSource | undefined, homeDirectory: string): string | undefined {
   if (source === 'pairing') return agentHostPairingStorePath(homeDirectory);
   if (source === 'operator-file') return connectedHostOperatorTokenPath(homeDirectory);
+  // The daemon hosting this turn: the Agent's credential for it is kept in the delegation store.
+  if (source === 'in-process') return agentDelegationStorePath(homeDirectory);
   return undefined;
 }
 
@@ -31,6 +34,8 @@ export interface CapturedOperatorConnection {
   readonly tokenPath: string;
   readonly source?: ConnectedHostSource;
   readonly unavailable?: ConnectedHostUnavailable;
+  /** How the request reaches the host: absent, the network; in a daemon-hosted turn, the daemon's own request path. */
+  readonly fetch?: typeof fetch | undefined;
   /**
    * The caller's own check, then one `lstat` of the credential file compared
    * with the one this connection was resolved from. Run it once, immediately
@@ -46,9 +51,9 @@ export interface CapturedOperatorConnection {
  * admission; its check only restricts the current invocation.
  */
 export function captureOperatorConnection(shellPaths: Pick<ShellPathService, 'homeDirectory'>, reader: AgentConnectedHostConfigReader,
-  assertInvocation: () => void): CapturedOperatorConnection {
+  assertInvocation: () => void, inProcess?: AgentInProcessHost): CapturedOperatorConnection {
   const home = shellPaths.homeDirectory;
-  const resolved = resolveConnectedHost({ configManager: reader, homeDirectory: home });
+  const resolved = resolveConnectedHost({ configManager: reader, homeDirectory: home, ...(inProcess ? { inProcess } : {}) });
   const file = resolved.token ? credentialFile(resolved.source, home) : undefined;
   const stamp = file === undefined ? undefined : credentialStamp(file);
   return {
@@ -57,6 +62,7 @@ export function captureOperatorConnection(shellPaths: Pick<ShellPathService, 'ho
     tokenPath: resolved.credential,
     ...(resolved.source === undefined ? {} : { source: resolved.source }),
     ...(resolved.unavailable === undefined ? {} : { unavailable: resolved.unavailable }),
+    ...(resolved.fetch === undefined ? {} : { fetch: resolved.fetch }),
     assertCurrent: () => {
       assertInvocation();
       if (stamp === 'symlink') {

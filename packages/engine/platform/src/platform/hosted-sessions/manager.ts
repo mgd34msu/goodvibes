@@ -61,7 +61,7 @@ import { resolveHostedModelDefinition } from './model-route.js';
 import { createHostedSessionRuntime, newHostedSessionId, type HostedSessionContractSink, type HostedSessionRuntime } from './session-runtime.js';
 import type { HostedContractRunners } from '../contract/operator-service.js';
 import { HostedWorkspaceFloors, type HostedWorkspaceFloorFactory, type HostedWorkspaceFloorLease } from './workspace-floor.js';
-import type { HostedSurfaceTurn, HostedSurfaceTurns } from './surface-turn.js';
+import type { HostedDaemonRequestPath, HostedSurfaceTurn, HostedSurfaceTurns } from './surface-turn.js';
 import { hostedLifecycleCallbacks } from './lifecycle-callbacks.js';
 import { HostedSessionStore, type HostedSessionLoadReport } from './store.js';
 import { HostedSessionSpineIntake, type HostedSessionSpine } from './spine-intake.js';
@@ -218,6 +218,7 @@ export class HostedSessionManager {
   private readonly now: () => number;
   private publisher: HostedSessionEventPublisher | null = null;
   private alerter: ((text: string) => void) | null = null;
+  private requestPath: HostedDaemonRequestPath | null = null;
   private busUnsubscribers: (() => void)[] = [];
   private disposed = false;
   private disposal: Promise<void> | null = null;
@@ -251,14 +252,20 @@ export class HostedSessionManager {
   }
 
   /** The product turn a session created for `originSurface` runs as, spread into its runtime options. */
-  private surfaceTurnFor(originSurface: string | undefined): { readonly surfaceTurn?: HostedSurfaceTurn } {
+  private surfaceTurnFor(originSurface: string | undefined): { readonly surfaceTurn?: HostedSurfaceTurn; readonly daemonRequests?: HostedDaemonRequestPath } {
     const turn = originSurface ? this.options.surfaceTurns?.[originSurface] : undefined;
-    return turn ? { surfaceTurn: turn } : {};
+    if (!turn) return {};
+    return this.requestPath ? { surfaceTurn: turn, daemonRequests: this.requestPath } : { surfaceTurn: turn };
   }
 
   /** Where an incident nobody is attached to see goes. Wired by the daemon. */
   setOwnerAlerter(alerter: ((text: string) => void) | null): void {
     this.alerter = alerter;
+  }
+
+  /** The daemon's own request path, handed to a surface turn's tools. Wired by the daemon before sessions are restored. */
+  setRequestPath(path: HostedDaemonRequestPath | null): void {
+    this.requestPath = path;
   }
 
   /** The configured attachment lease, clamped. Read live, never cached. */

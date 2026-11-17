@@ -23,6 +23,19 @@ import type { HostedWorkspaceFloor } from './workspace-floor.js';
 /** The provider registry a session's requests use: the floor's, with the session's own model selection. */
 export type HostedSessionProviderRegistry = HostedWorkspaceFloor['services']['providerRegistry'];
 
+/**
+ * The host's own request path, for a surface whose tools call the daemon's
+ * operator routes: a request served here takes the same authentication,
+ * access gate and handlers as one that arrived over the network, without a
+ * socket. The surface's tools present their own credential on it.
+ */
+export interface HostedDaemonRequestPath {
+  /** Serves one request through the daemon's own request path. */
+  serve(request: Request): Promise<Response>;
+  /** The daemon's operator credential, read live; null when it has none. */
+  operatorToken(): string | null;
+}
+
 /** What a surface's tools are registered with, once per composed session. */
 export interface HostedSurfaceToolsInput {
   /** The session's own registry; the platform tools are already in it. */
@@ -33,6 +46,8 @@ export interface HostedSurfaceToolsInput {
   /** The workspace floor the session runs on. */
   readonly floor: HostedWorkspaceFloor;
   readonly providerRegistry: HostedSessionProviderRegistry;
+  /** The daemon's own request path; absent where the host serves no requests. */
+  readonly daemonRequests?: HostedDaemonRequestPath | undefined;
 }
 
 /** What a surface's system prompt is composed from, once per model request. */

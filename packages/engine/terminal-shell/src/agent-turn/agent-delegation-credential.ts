@@ -54,6 +54,21 @@ export function agentDelegationStorePath(homeDirectory: string): string {
 }
 
 /**
+ * The delegated credential kept for a host, without making one: one read of
+ * the store. `missing` when none is kept yet; `unavailable` with the reason
+ * when the store cannot be read safely.
+ */
+export function storedDelegatedCredential(homeDirectory: string, baseUrl: string):
+  { readonly status: 'paired'; readonly token: string; readonly tokenId: string }
+  | { readonly status: 'missing' }
+  | { readonly status: 'unavailable'; readonly reason: string } {
+  const stored = store.readHostPairing(homeDirectory, baseUrl);
+  if (stored.status === 'paired') return { status: 'paired', token: stored.token, tokenId: stored.tokenId };
+  if (stored.status === 'unavailable') return { status: 'unavailable', reason: stored.reason };
+  return { status: 'missing' };
+}
+
+/**
  * The connection to use for a call this Agent makes on the owner's behalf:
  * the same host, the Agent's delegated credential. Throws an error naming the
  * state and the next step when the credential cannot be had; nothing is sent
@@ -123,7 +138,8 @@ async function mintDelegation(connection: CapturedOperatorConnection, homeDirect
   let response: Response;
   try {
     // `pairing.tokens.create` has no route of its own in the operator contract.
-    response = await fetch(`${host}/api/control-plane/methods/pairing.tokens.create/invoke`, {
+    // The connection's own transport: the network, or the daemon's request path in a turn it hosts.
+    response = await (connection.fetch ?? fetch)(`${host}/api/control-plane/methods/pairing.tokens.create/invoke`, {
       method: 'POST', redirect: 'error',
       headers: { authorization: `Bearer ${connection.token}`, 'content-type': 'application/json' },
       body: JSON.stringify({ body: { name: attempt.name, attemptId: attempt.attemptId, client: 'agent' } }),

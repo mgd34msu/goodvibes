@@ -39,8 +39,10 @@ import {
 } from './connected-host-auth.js';
 import { agentHostPairingStorePath } from './connected-host-pairing-store.js';
 import { assertSafeOperatorPathValue, findOperatorContractMethod, findOperatorHttpBinding, READ_ONLY_HTTP_METHODS } from './operator-contract-routes.js';
+import type { AgentInProcessHost } from './in-process-host.js';
 
-export type ConnectedHostSource = ConnectedHostCredentialSource;
+/** Where the credential came from; `in-process` is the daemon hosting this Agent turn itself (in-process-host.ts). */
+export type ConnectedHostSource = ConnectedHostCredentialSource | 'in-process';
 
 /** How long a read may wait for the host before the call ends as a timeout. */
 export const CONNECTED_HOST_READ_DEADLINE_MS = 15_000;
@@ -86,6 +88,12 @@ export interface ConnectedHostConnection {
   readonly unavailable?: ConnectedHostUnavailable;
   /** A pairing binds its token to a principal the host should report back. */
   readonly expectedPrincipalId?: string;
+  /**
+   * How a request reaches the host. Absent: the network. For the daemon
+   * hosting this turn itself, its own request path, which presents the
+   * Agent's own credential for that daemon (in-process-host.ts).
+   */
+  readonly fetch?: typeof fetch | undefined;
 }
 
 export interface ConnectedHostConfigReader {
@@ -100,6 +108,11 @@ export interface ConnectedHostSelection {
    * paired principal (the work import) passes `['pairing']`; the default is all.
    */
   readonly accept?: readonly ConnectedHostSource[];
+  /**
+   * The daemon hosting this Agent turn: when present it is the connected host,
+   * reached in process, and no dial setting or credential file is read.
+   */
+  readonly inProcess?: AgentInProcessHost | undefined;
 }
 
 export type HostFailureKind =
@@ -273,6 +286,7 @@ function dialSettingValue(value: unknown): boolean | string | number | undefined
  * as `token: null` with the reason and the next step in `unavailable`.
  */
 export function resolveConnectedHost(selection: ConnectedHostSelection): ConnectedHostConnection {
+  if (selection.inProcess) return selection.inProcess.connection();
   const { configManager } = selection;
   const baseUrl = connectedHostBaseUrl(configManager.get('controlPlane.host'), configManager.get('controlPlane.port'));
   if (!resolveConnectedHostDialEnabled({ get: key => dialSettingValue(configManager.get(key)) })) {
@@ -616,7 +630,7 @@ export function createConnectedHost(
       });
     }
 
-    const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+    const fetchImpl = resolved.fetch ?? options.fetchImpl ?? globalThis.fetch;
     const deadlineMs = callOptions.deadlineMs ?? (isRead ? readDeadlineMs : writeDeadlineMs);
     const deadline = AbortSignal.timeout(deadlineMs);
     const signal = callOptions.signal ? AbortSignal.any([callOptions.signal, deadline]) : deadline;

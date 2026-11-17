@@ -95,6 +95,8 @@ export interface DaemonOperatorConnection {
   readonly source?: ConnectedHostSource;
   /** Why there is no usable credential, when `token` is null. */
   readonly unavailable?: ConnectedHostUnavailable;
+  /** How a request reaches the host: absent, the network; in a daemon-hosted turn, the daemon's own request path. */
+  readonly fetch?: typeof fetch | undefined;
 }
 
 export interface DaemonOperatorConfigReader {
@@ -186,6 +188,7 @@ export function createDaemonOperatorInvoke(
       credential: connection.tokenPath ?? 'the connected-host credential',
       ...(connection.source === undefined ? {} : { source: connection.source }),
       ...(connection.unavailable === undefined ? {} : { unavailable: connection.unavailable }),
+      ...(connection.fetch === undefined ? {} : { fetch: connection.fetch }),
     }), { validateResponses: false, ...(fetchImpl ? { fetchImpl: fetchImpl as typeof fetch } : {}) });
     try {
       const body: unknown = await host.invoke(

@@ -83,6 +83,7 @@ export * from './connected-host-client.js';
 export * from './operator-connection-owner.js';
 export * from './daemon-operator-client.js';
 export * from './agent-delegation-credential.js';
+export * from './in-process-host.js';
 export * from './schedule-next-routes.js';
 export * from './personal-ops-effect-receipt.js';
 export * from './autonomy-schedule.js';

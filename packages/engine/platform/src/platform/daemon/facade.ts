@@ -379,6 +379,9 @@ export class DaemonServer {
     // A hosted session may be running with nobody attached, so an undeliverable
     // message to one has no screen to appear on. Same alerter, same reason.
     this.hostedSessions?.setOwnerAlerter(createDaemonOwnerAlerter(this.routeBindings, this.surfaceDeliveryHelper));
+    // A hosted Agent turn's operator tools call this daemon's own routes in
+    // process: the same authentication, gate and handlers as over the wire.
+    this.hostedSessions?.setRequestPath({ serve: (req) => this.handleRequest(req), operatorToken: () => this.authToken });
     // Whether this daemon is keeping itself current, asked over the wire
     // rather than read out of a log on the host, see routes/update.ts.
     registerUpdateGatewayMethods(this.runtimeServices.gatewayMethods, this.lifecycle);

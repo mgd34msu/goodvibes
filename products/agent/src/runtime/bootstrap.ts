@@ -149,11 +149,6 @@ export type BootstrapContext = RuntimeContext & {
 export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: BootstrapOptions): Promise<BootstrapContext> {
   const workingDir = options.workingDir;
   const configManager = options.configManager;
-  const controlPlaneRecentEventsRef: {
-    value: (limit: number) => readonly import('@goodvibes-jev/engine/platform/platform/control-plane').ControlPlaneRecentEvent[];
-  } = {
-    value: (_limit) => [],
-  };
   const {
     userSessionId,
     runtimeBus,
@@ -180,7 +175,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     requestRender,
     setRenderRequest,
     runtimeSessionIdRef,
-  } = await initializeBootstrapCore(stdout, options, (limit) => controlPlaneRecentEventsRef.value(limit));
+  } = await initializeBootstrapCore(stdout, options);
   options.onHookDispatcherReady?.({ runtime, surface: services.surface, hookDispatcher: services.hookDispatcher });
   const providerRegistry = services.providerRegistry;
   // A saved custom-provider model must never crash boot, see provider-boot.ts.
@@ -451,7 +446,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
         { sessionId: failedSessionId, error: reason },
       );
     },
-    getControlPlaneRecentEvents: (limit) => controlPlaneRecentEventsRef.value(limit),
     toolRegistry,
     promptContextReceipts,
     forensicsRegistry,

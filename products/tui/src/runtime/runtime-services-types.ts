@@ -183,9 +183,9 @@ export interface RuntimeServices {
   /**
    * An EMPTY verb catalog. This product answers no verbs, it is a client. The
    * field exists because the platform's `startExternalServices` takes a daemon-grade
-   * `RuntimeServices` even in the adopt-only mode this surface runs in, and
-   * because plugin loading is handed one. Nothing is ever served off it: with
-   * `adoptOnly` no `DaemonServer` is constructed, so a descriptor registered
+   * `RuntimeServices` even though this surface only adopts a daemon, and
+   * because plugin loading is handed one. Nothing is ever served off it: a
+   * surface constructs no `DaemonServer`, so a descriptor registered
    * here has no listener behind it. Plugin registrations that need to be
    * ANSWERED belong daemon-side, see docs/decisions for the plugin split.
    */

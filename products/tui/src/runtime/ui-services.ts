@@ -6,7 +6,6 @@ import {
 import type { RuntimeServices } from './services.ts';
 import { createUiReadModels, type UiReadModelOptions } from './ui-read-models.ts';
 import type { ForensicsRegistry } from '@/runtime/index.ts';
-import type { ControlPlaneRecentEvent } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { SessionUnionCache, type SessionReadFacade } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import type { HostServiceStatus } from '@/runtime/index.ts';
 import type { SecretsManager } from '../config/secrets.ts';
@@ -58,7 +57,6 @@ export type UiCoordinationServices = UiRuntimeSharedServices['coordination'];
 
 export interface UiRuntimeServicesOptions extends UiReadModelOptions {
   readonly forensicsRegistry?: ForensicsRegistry;
-  readonly getControlPlaneRecentEvents?: (limit: number) => readonly ControlPlaneRecentEvent[];
   /**
    * The shared session read facade constructed in bootstrap-core (so
    * bootstrap.ts can drive its adopted-external/local mode). When omitted

@@ -34,7 +34,6 @@ import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { loadBootstrapSystemPrompt } from '@/runtime/index.ts';
 import { createShellPlanRuntime, createShellRemoteCommandService } from '@/runtime/index.ts';
 import { createRuntimeFoundationClients } from '@/runtime/index.ts';
-import type { ControlPlaneRecentEvent } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { ForensicsRegistry } from '@/runtime/index.ts';
 import type { PolicyRuntimeState } from '@/runtime/index.ts';
@@ -71,7 +70,6 @@ export interface BootstrapShellOptions {
   readonly permissionPromptRef: { requestPermission: PermissionRequestHandler };
   readonly onSessionIdChanged: (sessionId: string) => void;
   readonly writeLastSessionPointer: (sessionId: string) => void;
-  readonly getControlPlaneRecentEvents: (limit: number) => readonly ControlPlaneRecentEvent[];
   readonly toolRegistry: ToolRegistry;
   readonly forensicsRegistry: ForensicsRegistry;
   readonly policyRuntimeState: PolicyRuntimeState;
@@ -97,7 +95,6 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     permissionPromptRef,
     onSessionIdChanged,
     writeLastSessionPointer,
-    getControlPlaneRecentEvents,
     toolRegistry,
     forensicsRegistry,
     policyRuntimeState,

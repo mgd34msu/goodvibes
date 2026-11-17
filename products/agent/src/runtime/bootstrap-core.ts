@@ -37,7 +37,6 @@ import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/pl
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 import type { ConversationFollowUpItem } from '@goodvibes-jev/engine/platform/platform/core';
 import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
-import type { ControlPlaneRecentEvent } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { MutableRuntimeState } from '@/runtime/index.ts';
 import type { BootstrapOptions } from './context.ts';
 import '@/runtime/index.ts';
@@ -139,7 +138,6 @@ export function composeAgentRuntimeState(
 export async function initializeBootstrapCore(
   stdout: NodeJS.WriteStream,
   options: BootstrapOptions,
-  getControlPlaneRecentEvents: (limit: number) => readonly ControlPlaneRecentEvent[],
 ): Promise<BootstrapCoreState> {
   const workingDir = options.workingDir;
   const homeDirectory = options.homeDirectory;
@@ -225,7 +223,6 @@ export async function initializeBootstrapCore(
   const policyRuntimeState = services.policyRuntimeState;
   const uiServices = createUiRuntimeServices(services, {
     forensicsRegistry,
-    getControlPlaneRecentEvents,
   });
 
   const conversation = new ConversationManager(() => getTerminalSize(stdout).width);

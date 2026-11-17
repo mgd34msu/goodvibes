@@ -46,8 +46,8 @@ export function createPendingServiceStatus(configManager: Pick<ConfigManager, 'g
  * A service this terminal can actually use. Called for both the daemon and the
  * HTTP listener (see bootstrap.ts), so the 'embedded' arm stays live: the platform
  * always reports its in-process HTTP listener as 'embedded', even though this
- * product's daemon status can never carry that mode (adoptOnly is hardcoded on
- * every host-services call this app makes).
+ * product's daemon status can never carry that mode (a surface only adopts a
+ * daemon, see daemon-adoption-policy.ts).
  */
 
 /**

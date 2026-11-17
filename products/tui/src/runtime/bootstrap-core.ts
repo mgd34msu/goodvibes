@@ -45,7 +45,6 @@ import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/pl
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 import type { ConversationFollowUpItem } from '@goodvibes-jev/engine/platform/platform/core';
 import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
-import type { ControlPlaneRecentEvent } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { BootstrapOptions } from './context.ts';
 import { type RuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import {
@@ -260,7 +259,6 @@ export function narrateInboundEvent(event: { source: string; metadata: Readonly<
 export async function initializeBootstrapCore(
   stdout: NodeJS.WriteStream,
   options: BootstrapOptions,
-  getControlPlaneRecentEvents: (limit: number) => readonly ControlPlaneRecentEvent[],
 ): Promise<BootstrapCoreState> {
   const workingDir = options.workingDir;
   const homeDirectory = options.homeDirectory;
@@ -314,7 +312,6 @@ export async function initializeBootstrapCore(
   const forensicsCollector = new ForensicsCollector(runtimeBus, forensicsRegistry);
   const uiServices = createUiRuntimeServices(services, {
     forensicsRegistry,
-    getControlPlaneRecentEvents,
     sessionUnionCache,
   });
 

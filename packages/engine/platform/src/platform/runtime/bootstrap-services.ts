@@ -89,18 +89,11 @@ export interface HostServiceStatus {
   readonly authenticated?: boolean | undefined;
 }
 
+/** What a host started: the daemon it adopted (never one it runs) and the optional HTTP listener. Recent control-plane events are the daemon's (`GET /api/control-plane/recent-events`). */
 export interface HostServicesHandle {
-  /** Never set: a host holds no daemon object. Accepted from callers that still build a pending handle with it. */
-  readonly daemonServer?: null | undefined;
   readonly httpListener: HttpListenerService | null;
   readonly daemonStatus: HostServiceStatus;
   readonly httpListenerStatus: HostServiceStatus;
-  /**
-   * Never set: recent control-plane events live in the daemon, which serves
-   * them as an operator verb. Accepted from callers that still build a pending
-   * handle with it.
-   */
-  readonly listRecentControlPlaneEvents?: ((limit: number) => readonly import('../control-plane/gateway.js').ControlPlaneRecentEvent[]) | undefined;
   stop(): Promise<void>;
 }
 
@@ -427,7 +420,6 @@ export async function startHostServices(
       identity,
       localVersion: localDaemonVersion,
       versionCompatible,
-      adoptOnly: true,
     });
     switch (decision.action) {
       case 'adopt':
@@ -470,8 +462,7 @@ export async function startHostServices(
           { host: daemonHost, port: daemonPort, reason: decision.identity?.reason });
         break;
       }
-      case 'adopt-only-idle':
-      case 'spawn': {
+      case 'absent': {
         daemonStatus = daemonServiceStatus('unavailable', {
           reason: 'No GoodVibes daemon is running on the configured host/port; install and start it with: goodvibes-daemon install-service',
         });

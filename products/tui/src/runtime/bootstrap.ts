@@ -171,9 +171,6 @@ export type BootstrapContext = RuntimeContext & {
 export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: BootstrapOptions): Promise<BootstrapContext> {
   const workingDir = options.workingDir;
   const configManager = options.configManager;
-  // Recent control-plane events live in the daemon and are served by its
-  // operator verb; this process holds no copy to list.
-  const noLocalControlPlaneEvents = (_limit: number): readonly import('@goodvibes-jev/engine/platform/platform/control-plane').ControlPlaneRecentEvent[] => [];
   const {
     userSessionId,
     runtimeBus,
@@ -203,7 +200,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     sessionSpine,
     sessionInboundInputs,
     sessionUnionCache,
-  } = await initializeBootstrapCore(stdout, options, noLocalControlPlaneEvents);
+  } = await initializeBootstrapCore(stdout, options);
   const providerRegistry = services.providerRegistry;
   const { hookDispatcher, pluginManager } = services;
   options.onHookDispatcherReady?.({ runtime, surface: services.surface, hookDispatcher });
@@ -335,7 +332,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       runtimeSessionIdRef.value = sessionId;
     },
     writeLastSessionPointer: writeSessionPointer,
-    getControlPlaneRecentEvents: noLocalControlPlaneEvents,
     toolRegistry,
     forensicsRegistry,
     policyRuntimeState: services.policyRuntimeState,

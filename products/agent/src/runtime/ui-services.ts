@@ -6,7 +6,6 @@ import {
 import type { RuntimeServices } from './services.ts';
 import { createUiReadModels, type UiReadModelOptions } from './ui-read-models.ts';
 import type { ForensicsRegistry } from '@/runtime/index.ts';
-import type { ControlPlaneRecentEvent } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { HostServiceStatus } from '@/runtime/index.ts';
 import type { SecretsManager } from '../config/secrets.ts';
@@ -46,7 +45,6 @@ export type UiCoordinationServices = UiRuntimeSharedServices['coordination'];
 
 export interface UiRuntimeServicesOptions extends UiReadModelOptions {
   readonly forensicsRegistry?: ForensicsRegistry;
-  readonly getControlPlaneRecentEvents?: (limit: number) => readonly ControlPlaneRecentEvent[];
 }
 
 export function createUiRuntimeServices(runtimeServices: RuntimeServices, options: UiRuntimeServicesOptions = {}): UiRuntimeServices {

@@ -17,11 +17,9 @@ export function pendingHostServiceStatus(
 }
 export function createPendingHostServices(status: (name: HostServiceName) => HostServiceStatus): HostServicesHandle {
   return {
-    daemonServer: null,
     httpListener: null,
     daemonStatus: status('daemon'),
     httpListenerStatus: status('httpListener'),
-    listRecentControlPlaneEvents: () => [],
     async stop(): Promise<void> {},
   };
 }

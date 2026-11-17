@@ -40,8 +40,8 @@ export function runtimePortDiagnostic(
     }
     // The only mode left after every named branch above is 'embedded', and this
     // function reads either endpoint's status (see getRuntimeEndpointStatus):
-    // the daemon status can never carry it in this product (adoptOnly is
-    // hardcoded, see bootstrap.ts), but the HTTP listener's status legitimately
+    // the daemon status can never carry it (a surface only adopts a daemon,
+    // see daemon-adoption-policy.ts), but the HTTP listener's status legitimately
     // does, since the platform always reports its in-process listener as 'embedded'.
     return `An embedded GoodVibes service is running at ${status.baseUrl}.`;
   }
@@ -65,8 +65,8 @@ export function isRuntimeEndpointActive(
   const status = getRuntimeEndpointStatus(state, endpoint);
   // This helper serves both endpoints (see handler-onboarding.ts's daemon and
   // httpListener calls), so the 'embedded' arm stays live for httpListener even
-  // though a daemon status here is never 'embedded' in this product (adoptOnly
-  // is hardcoded, see bootstrap.ts). Dropping the arm would mark a running
+  // though a daemon status here is never 'embedded' (a surface only adopts a
+  // daemon, see daemon-adoption-policy.ts). Dropping the arm would mark a running
   // HTTP listener as inactive.
   if (status) return status.mode === 'embedded' || status.mode === 'external';
   return endpoint === 'daemon'

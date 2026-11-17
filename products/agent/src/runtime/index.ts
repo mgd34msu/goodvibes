@@ -76,13 +76,12 @@ export {
   synchronizeConfiguredServices,
   synchronizeConfiguredServices as syncConfiguredServices,
   registerHostRuntimeEvents,
-  // Shared adopt-or-spawn policy (daemon-adoption-policy.ts): probes the
-  // configured host/port, band-checks any GoodVibes daemon found there, and
-  // only ever ADOPTS a compatible one, Agent passes `adoptOnly: true` at the
-  // call site (bootstrap-external-services.ts) so it never spawns or embeds a
-  // daemon itself. A daemon that is INSTALLED on this machine but stopped is
-  // handled separately at boot: one start through the platform service manager,
-  // then a fresh adopt-only probe (the platform's autostartInstalledDaemon, wired in
+  // Shared adopt policy (daemon-adoption-policy.ts): probes the configured
+  // host/port, band-checks any GoodVibes daemon found there, and only ever
+  // ADOPTS a compatible one; a surface never spawns or embeds a daemon itself.
+  // A daemon that is INSTALLED on this machine but stopped is handled
+  // separately at boot: one start through the platform service manager, then a
+  // fresh probe (the platform's autostartInstalledDaemon, wired in
   // runtime/bootstrap-external-services.ts).
   startHostServices,
   startHostServices as startExternalServices,

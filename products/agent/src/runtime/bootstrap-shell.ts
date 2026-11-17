@@ -25,7 +25,6 @@ import { ownerInputFor } from './owner-input.ts';
 import { loadBootstrapSystemPrompt } from '@/runtime/index.ts';
 import { createShellPlanRuntime, createShellRemoteCommandService } from '@/runtime/index.ts';
 import { createRuntimeFoundationClients } from '@/runtime/index.ts';
-import type { ControlPlaneRecentEvent } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { ForensicsRegistry } from '@/runtime/index.ts';
 import type { PolicyRuntimeState } from '@/runtime/index.ts';
@@ -54,7 +53,6 @@ export interface BootstrapShellOptions {
   readonly writeLastSessionPointer: (sessionId: string) => void;
   readonly announceSessionResumed: (resumedSessionId: string, turnCount: number) => void;
   readonly announceSessionRecoveryFailed: (sessionId: string, reason: string) => void;
-  readonly getControlPlaneRecentEvents: (limit: number) => readonly ControlPlaneRecentEvent[];
   readonly toolRegistry: ToolRegistry;
   readonly promptContextReceipts?: AgentPromptContextReceiptStore;
   readonly forensicsRegistry: ForensicsRegistry;
@@ -116,7 +114,6 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     writeLastSessionPointer,
     announceSessionResumed,
     announceSessionRecoveryFailed,
-    getControlPlaneRecentEvents,
     toolRegistry,
     promptContextReceipts,
     forensicsRegistry,

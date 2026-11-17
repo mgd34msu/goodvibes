@@ -1,23 +1,17 @@
 /**
- * daemon-adoption-policy.ts, the SHARED adopt-or-spawn DECISION policy.
+ * daemon-adoption-policy.ts, the SHARED adopt DECISION policy.
  *
- * Find an already-running compatible daemon and attach to it, else spawn one (or,
- * under an adopt-only policy, run without one). The probing/spawn I/O lives in
+ * Find an already-running compatible daemon and attach to it, else run without
+ * one. A surface never starts a daemon of its own: a daemon that is installed
+ * but stopped is started through the service manager
+ * (runtime/client/daemon-autostart.ts). The probing I/O lives in
  * bootstrap-services.ts behind injectable seams; THIS module is the pure decision
  * every consumer routes through, so the ruling is identical everywhere and unit
- * testable without real sockets or child processes.
+ * testable without real sockets.
  *
- * HOIST CONTEXT. The TUI already drives the full spawn-or-adopt path through the
- * platform. The agent bypassed it with a stub that hard-declared `external` and never
- * probed, never version-checked, and never spawned. Two of those divergences are
- * risks, not choices, and this policy removes them:
- *   - A compatible-daemon check is ALWAYS applied before adopting (the agent
- *     skipped it and would adopt a wire-incompatible daemon).
+ *   - A compatible-daemon check is ALWAYS applied before adopting.
  *   - A probe is always the source of truth for "is a daemon there and mine"
  *     (no pid/lockfile is trusted; that is the caller's discovery hint only).
- * The one genuine choice, own the daemon lifecycle (spawn) vs never own it
- * (adopt-only), is expressed as the `adoptOnly` flag rather than a wholesale
- * function override.
  */
 
 /** Result of probing the occupant of the configured daemon host/port. */
@@ -69,14 +63,13 @@ export function classifyDaemonProbe(input: DaemonProbeClassificationInput): Daem
   return input.versionCompatible(input.localVersion, remoteWireVersion) ? 'adopt' : 'incompatible';
 }
 
-/** The action the adopt-or-spawn policy selects. */
+/** The action the adopt policy selects. */
 export type DaemonAdoptionAction =
   | 'disabled'      // daemon.enabled is false
   | 'adopt'         // a compatible GoodVibes daemon is already running, attach
-  | 'incompatible'  // a GoodVibes daemon is running on an incompatible band, refuse both adopt and spawn
+  | 'incompatible'  // a GoodVibes daemon is running on an incompatible band, refuse to adopt it
   | 'blocked'       // the port is occupied by an unverified process, continue without a daemon
-  | 'spawn'         // port free, spawn a detached daemon (default lifecycle ownership)
-  | 'adopt-only-idle'; // port free + adopt-only policy, do not spawn; run without a local daemon
+  | 'absent';       // port free: no daemon is running, continue without one
 
 export interface DaemonAdoptionDecision {
   readonly action: DaemonAdoptionAction;
@@ -95,17 +88,12 @@ export interface DaemonAdoptionPolicyInput {
   readonly identity: DaemonIdentityProbeResult | null;
   readonly localVersion: string;
   readonly versionCompatible: (localVersion: string, remoteVersion: string | undefined) => boolean;
-  /**
-   * Adopt-only policy: attach to a compatible running daemon but NEVER spawn
-   * one. This surface does not own the daemon lifecycle. Default false.
-   */
-  readonly adoptOnly: boolean;
 }
 
 /**
- * Decide adopt-or-spawn from probe results + config. Pure. The caller maps the
- * returned action onto its I/O (adopt = keep external status, spawn = launch the
- * detached `goodvibes-daemon` binary, etc.) and supplies the surface-specific
+ * Decide whether to adopt, from probe results + config. Pure. The caller maps the
+ * returned action onto a status (adopt = external, absent = unavailable, etc.)
+ * and supplies the surface-specific
  * status strings, this function owns only the ruling, so it is identical for
  * every consumer.
  */
@@ -130,9 +118,5 @@ export function decideDaemonAdoption(input: DaemonAdoptionPolicyInput): DaemonAd
     return { action: 'blocked', identity, reason: identity.reason ?? 'Configured daemon port is occupied by an unverified process' };
   }
 
-  // Port is free.
-  if (input.adoptOnly) {
-    return { action: 'adopt-only-idle', reason: 'adopt-only policy: no compatible daemon on the configured host/port, and this surface does not spawn one' };
-  }
-  return { action: 'spawn', reason: 'No daemon on the configured host/port; spawning a detached daemon for this session' };
+  return { action: 'absent', reason: 'No GoodVibes daemon is running on the configured host/port' };
 }

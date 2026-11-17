@@ -107,10 +107,6 @@ export const CONFIG_DOMAIN_OWNERS: Readonly<Record<ConfigDomain, 'daemon' | 'cli
   push: 'daemon',
   // The daemon provisions and runs its own tunnel and edge worker.
   cloudflare: 'daemon',
-  // Worktree setup is run by whichever process provisions the worktree (the
-  // daemon's worktrees.setup.run, the orchestration engine): one value on the
-  // daemon tier, so the setting the operator sees is the one setup reads.
-  worktree: 'daemon',
 
   agents: 'client',
   batch: 'client',
@@ -147,6 +143,7 @@ export const CONFIG_DOMAIN_OWNERS: Readonly<Record<ConfigDomain, 'daemon' | 'cli
   ui: 'client',
   update: 'client',
   voice: 'client',
+  worktree: 'client',
 };
 
 /** Subtrees the daemon owns inside a client domain: local voice provisioning is model files on the daemon's disk. */

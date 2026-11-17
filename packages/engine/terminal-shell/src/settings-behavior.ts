@@ -53,39 +53,6 @@ export function parseNumberEditBuffer(buffer: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-/**
- * The one-line edit text of a list setting: comma separated, or a JSON list
- * when an entry holds a comma, starts with `[`, or has edge spaces, so that
- * {@link parseListEditText} gives back the same entries (a brace glob such as
- * `.env.{local,dev}` or a command with a comma stays whole).
- */
-export function formatListEditText(values: readonly string[]): string {
-  const needsJson = values.some((value) => value.includes(',') || value !== value.trim()) || values[0]?.trimStart().startsWith('[') === true;
-  return needsJson ? JSON.stringify(values) : values.join(', ');
-}
-
-/**
- * Parse list edit text: a JSON list of strings when the text starts with `[`,
- * otherwise comma separated (each entry trimmed). Empty entries are dropped.
- */
-export function parseListEditText(text: string): { readonly ok: true; readonly values: string[] } | { readonly ok: false; readonly reason: string } {
-  const trimmed = text.trim();
-  if (!trimmed.startsWith('[')) {
-    return { ok: true, values: trimmed.split(',').map((part) => part.trim()).filter((part) => part.length > 0) };
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(trimmed);
-  } catch {
-    return { ok: false, reason: 'it starts with [ but is not a JSON list; write ["a, b", "c"] or a comma-separated list' };
-  }
-  if (!Array.isArray(parsed) || !parsed.every((entry): entry is string => typeof entry === 'string')) {
-    return { ok: false, reason: 'a JSON list here holds only quoted text entries' };
-  }
-  // Entries are kept exactly as quoted; only empty ones are dropped.
-  return { ok: true, values: parsed.filter((entry) => entry.trim().length > 0) };
-}
-
 export function cycleSettingChoice<Value>(values: readonly Value[], current: Value, direction: 'left' | 'right'): Value | undefined {
   if (values.length === 0) return undefined;
   const index = Math.max(0, values.indexOf(current));

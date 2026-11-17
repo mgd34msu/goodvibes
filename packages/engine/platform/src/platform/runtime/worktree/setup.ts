@@ -27,43 +27,6 @@ export interface WorktreeSetupConfig {
   readonly commands: readonly string[];
   /** Globs (relative to the source working tree) of UNTRACKED or git-ignored files to copy into the new worktree (e.g. `.env`, `.env.*`, `config/local.json`). */
   readonly carryOverGlobs: readonly string[];
-  /** Which lists were derived from the repository (setting `auto`) rather than configured, so a failure names its source. */
-  readonly derived?: { readonly commands: boolean; readonly carryOverGlobs: boolean } | undefined;
-}
-
-/**
- * One worktree setup list setting (`worktree.setup.commands` or
- * `worktree.setup.carryOverGlobs`): `auto` derives it from the repository
- * ({@link deriveWorktreeSetup}), `none` runs or copies nothing, and a list is
- * used as given. Stored as the list, or as `{ "mode": "auto" }` /
- * `{ "mode": "none" }`; an empty list reads as `auto`, the default.
- */
-export type WorktreeSetupChoice =
-  | { readonly mode: 'auto' }
-  | { readonly mode: 'none' }
-  | { readonly mode: 'list'; readonly values: readonly string[] };
-
-/** The stored value of a choice: what a settings editor writes. */
-export type WorktreeSetupListSetting = readonly string[] | { readonly mode: 'auto' | 'none' };
-
-/** Read one worktree setup list setting as its stated mode. */
-export function readWorktreeSetupChoice(value: unknown): WorktreeSetupChoice {
-  if (value === 'none') return { mode: 'none' };
-  if (value !== null && typeof value === 'object' && !Array.isArray(value) && (value as { readonly mode?: unknown }).mode === 'none') {
-    return { mode: 'none' };
-  }
-  const values = readStringArray(value);
-  return values.length > 0 ? { mode: 'list', values } : { mode: 'auto' };
-}
-
-/** The stored value for a choice; `auto` is stored as the empty default list. */
-export function worktreeSetupSettingValue(choice: WorktreeSetupChoice): WorktreeSetupListSetting {
-  return choice.mode === 'list' ? [...choice.values] : choice.mode === 'none' ? { mode: 'none' } : [];
-}
-
-/** The suffix a failed derived step carries, so nobody reads it as a configured one. */
-function derivedNote(key: 'worktree.setup.commands' | 'worktree.setup.carryOverGlobs'): string {
-  return ` (derived from the repository because ${key} is auto; set it to none or to a list to change it)`;
 }
 
 /** The honest terminal state of a setup run. */
@@ -229,17 +192,16 @@ export async function runWorktreeSetup(
       const output = summarizeError(err);
       steps.push({ kind: 'command', label: commandLine, ok: false, output: clampOutput(output) });
       logger.warn('runWorktreeSetup: command threw', { commandLine, worktreePath, error: output });
-      return { state: 'failed', startedAt, completedAt: now(), steps, error: `setup command failed to run: ${commandLine}${config.derived?.commands ? derivedNote('worktree.setup.commands') : ''}` };
+      return { state: 'failed', startedAt, completedAt: now(), steps, error: `setup command failed to run: ${commandLine}` };
     }
     const ok = outcome.exitCode === 0;
     steps.push({ kind: 'command', label: commandLine, ok, exitCode: outcome.exitCode, output: outcome.output });
     if (!ok) {
       logger.warn('runWorktreeSetup: command exited non-zero', { commandLine, worktreePath, exitCode: outcome.exitCode, timedOut: outcome.timedOut === true });
-      const source = config.derived?.commands ? derivedNote('worktree.setup.commands') : '';
       if (outcome.timedOut) {
-        return { state: 'failed', startedAt, completedAt: now(), steps, error: `setup command was stopped after running longer than ${commandTimeoutMs >= 1000 ? `${Math.round(commandTimeoutMs / 1000)}s` : `${commandTimeoutMs}ms`}: ${commandLine}${source}` };
+        return { state: 'failed', startedAt, completedAt: now(), steps, error: `setup command was stopped after running longer than ${commandTimeoutMs >= 1000 ? `${Math.round(commandTimeoutMs / 1000)}s` : `${commandTimeoutMs}ms`}: ${commandLine}` };
       }
-      return { state: 'failed', startedAt, completedAt: now(), steps, error: `setup command exited ${outcome.exitCode}: ${commandLine}${source}` };
+      return { state: 'failed', startedAt, completedAt: now(), steps, error: `setup command exited ${outcome.exitCode}: ${commandLine}` };
     }
   }
 
@@ -262,7 +224,7 @@ export async function runWorktreeSetup(
     }
     if (carryError) {
       steps.push({ kind: 'carry-over', label: 'carry over untracked files', ok: false, output: clampOutput(carryError) });
-      return { state: 'failed', startedAt, completedAt: now(), steps, error: `carry-over of untracked files failed: ${carryError}${config.derived?.carryOverGlobs ? derivedNote('worktree.setup.carryOverGlobs') : ''}` };
+      return { state: 'failed', startedAt, completedAt: now(), steps, error: `carry-over of untracked files failed: ${carryError}` };
     }
     steps.push({
       kind: 'carry-over',
@@ -278,10 +240,10 @@ export async function runWorktreeSetup(
 }
 
 /**
- * The configured lists only, with no derivation: `worktree.setup.commands`
- * (command lines) and `worktree.setup.carryOverGlobs` (globs). `auto`, `none`
- * and malformed values read as empty, never a throw. What a new worktree gets
- * is {@link resolveEffectiveWorktreeSetup}.
+ * Resolve the per-project worktree setup config from the daemon config. Reads
+ * `worktree.setup.commands` (array of command lines) and
+ * `worktree.setup.carryOverGlobs` (array of globs). Non-array/malformed values
+ * degrade to empty (setup then `skipped`), never a throw.
  */
 export function resolveWorktreeSetupConfig(get: (key: string) => unknown): WorktreeSetupConfig {
   return {
@@ -299,12 +261,9 @@ function readStringArray(value: unknown): readonly string[] {
 export interface DeriveSetupIo {
   readonly fileExists: (path: string) => boolean;
   readonly listDir: (path: string) => readonly string[];
-  /** The active virtual environment of the process that runs setup commands, if any. */
-  readonly virtualEnv?: (() => string | undefined) | undefined;
 }
 
 const defaultDeriveIo: DeriveSetupIo = {
-  virtualEnv: () => process.env['VIRTUAL_ENV'] || undefined,
   fileExists: (path) => existsSync(path),
   listDir: (path) => {
     try {
@@ -321,7 +280,7 @@ const defaultDeriveIo: DeriveSetupIo = {
  * precedence). The derived commands are lockfile-faithful (`npm ci`, frozen
  * lockfiles) so a worktree install can never rewrite the lockfile.
  */
-const LOCKFILE_ECOSYSTEMS: ReadonlyArray<ReadonlyArray<{ readonly file: string; readonly command: string; readonly needsVirtualEnv?: true }>> = [
+const LOCKFILE_ECOSYSTEMS: ReadonlyArray<ReadonlyArray<{ readonly file: string; readonly command: string }>> = [
   // JavaScript/TypeScript, one package manager per repo.
   [
     { file: 'bun.lock', command: 'bun install' },
@@ -333,9 +292,7 @@ const LOCKFILE_ECOSYSTEMS: ReadonlyArray<ReadonlyArray<{ readonly file: string; 
   // Python, uv's lock wins over a bare requirements file.
   [
     { file: 'uv.lock', command: 'uv sync' },
-    // pip with no active virtual environment installs into the user's own
-    // Python, so it is derived only when setup runs inside one.
-    { file: 'requirements.txt', command: 'pip install -r requirements.txt', needsVirtualEnv: true },
+    { file: 'requirements.txt', command: 'pip install -r requirements.txt' },
   ],
   // Rust / Go.
   [{ file: 'Cargo.lock', command: 'cargo fetch' }],
@@ -347,14 +304,12 @@ const LOCKFILE_ECOSYSTEMS: ReadonlyArray<ReadonlyArray<{ readonly file: string; 
  * its install command, and the presence of `.env` / `.env.*` files at the repo
  * root yields the carry-over globs for them. A repo with no lockfile and no
  * env files derives NOTHING, setup stays an honest `skipped`, exactly as if
- * no config existed. `pip install -r requirements.txt` is derived only when a
- * virtual environment is active for the setup commands.
+ * no config existed.
  */
 export function deriveWorktreeSetup(sourceRoot: string, io: DeriveSetupIo = defaultDeriveIo): WorktreeSetupConfig {
   const commands: string[] = [];
-  const inVirtualEnv = (io.virtualEnv ?? defaultDeriveIo.virtualEnv)?.() !== undefined;
   for (const ecosystem of LOCKFILE_ECOSYSTEMS) {
-    const match = ecosystem.find((candidate) => (candidate.needsVirtualEnv !== true || inVirtualEnv) && io.fileExists(join(sourceRoot, candidate.file)));
+    const match = ecosystem.find((candidate) => io.fileExists(join(sourceRoot, candidate.file)));
     if (match) commands.push(match.command);
   }
   const rootEntries = io.listDir(sourceRoot);
@@ -366,24 +321,26 @@ export function deriveWorktreeSetup(sourceRoot: string, io: DeriveSetupIo = defa
 }
 
 /**
- * The EFFECTIVE worktree setup, one stated mode per list: `auto` (the default)
- * derives it from the repository, `none` runs or copies nothing, a list is used
- * as given. The only reader the provisioning paths use, so the settings text,
- * `/worktree setup` and a new worktree agree.
+ * The EFFECTIVE worktree setup: derived from the repo by default, with user
+ * config OVERRIDING the derivation per field, a configured `commands` array
+ * replaces the derived install commands; a configured `carryOverGlobs` array
+ * replaces the derived env globs. User config never merely enables derivation;
+ * its presence supersedes it. An isolated agent therefore starts with deps and
+ * env with ZERO configuration, and absence of any signal (no lockfile, no env
+ * files, no config) is an honest no-op.
  */
 export function resolveEffectiveWorktreeSetup(
   get: (key: string) => unknown,
   sourceRoot: string,
   io: DeriveSetupIo = defaultDeriveIo,
 ): WorktreeSetupConfig {
-  const commands = readWorktreeSetupChoice(get('worktree.setup.commands'));
-  const globs = readWorktreeSetupChoice(get('worktree.setup.carryOverGlobs'));
-  const derived = commands.mode === 'auto' || globs.mode === 'auto' ? deriveWorktreeSetup(sourceRoot, io) : undefined;
-  const pick = (choice: WorktreeSetupChoice, fromRepo: readonly string[] | undefined): readonly string[] =>
-    choice.mode === 'list' ? choice.values : choice.mode === 'none' ? [] : (fromRepo ?? []);
+  const configured = resolveWorktreeSetupConfig(get);
+  const needsDerivedCommands = configured.commands.length === 0;
+  const needsDerivedGlobs = configured.carryOverGlobs.length === 0;
+  if (!needsDerivedCommands && !needsDerivedGlobs) return configured;
+  const derived = deriveWorktreeSetup(sourceRoot, io);
   return {
-    commands: pick(commands, derived?.commands),
-    carryOverGlobs: pick(globs, derived?.carryOverGlobs),
-    derived: { commands: commands.mode === 'auto', carryOverGlobs: globs.mode === 'auto' },
+    commands: needsDerivedCommands ? derived.commands : configured.commands,
+    carryOverGlobs: needsDerivedGlobs ? derived.carryOverGlobs : configured.carryOverGlobs,
   };
 }

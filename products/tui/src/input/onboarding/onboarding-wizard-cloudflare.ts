@@ -48,12 +48,12 @@ export const CLOUDFLARE_BATCH_MODE_OPTIONS: readonly OnboardingWizardRadioOption
   {
     id: 'explicit',
     label: 'Explicit batch only',
-    hint: 'Only requests explicitly marked for batch execution use the configured batch path.',
+    hint: 'Only requests explicitly marked for batch execution (the batch job API, or x-goodvibes-execution: batch) use the configured batch path.',
   },
   {
     id: 'eligible-by-default',
-    label: 'Eligible requests (not yet enforced)',
-    hint: 'Accepted and reported to clients, but not yet enforced by the daemon: it behaves like explicit.',
+    label: 'Eligible requests by default',
+    hint: 'Every non-streaming chat completion on the daemon\'s OpenAI-compatible route is queued as a batch unless it asks to run live. Terminal and web chat stays live.',
   },
 ];
 

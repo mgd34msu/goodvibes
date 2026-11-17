@@ -5,6 +5,9 @@ import { summarizeError } from '../../utils/error-display.js';
 import { isRecord } from '../../utils/record-coerce.js';
 import { resolveModelReference } from '../../providers/model-id-resolution.js';
 import { serviceFailureStatus } from './error-response.js';
+import { DaemonBatchError } from '../../batch/types.js';
+import type { DaemonBatchJob } from '../../batch/types.js';
+import type { DaemonBatchManager } from '../../batch/manager.js';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -14,7 +17,17 @@ export interface OpenAICompatibleRouteContext {
   readonly recordApiResponse: (request: Request, path: string, response: Response) => Response;
   /** Null when the caller may spend provider money; the refusal otherwise. */
   readonly requireAdmin?: ((request: Request) => Response | null) | undefined;
+  /**
+   * The daemon's batch queue. A non-streaming chat completion is batch-capable:
+   * it is queued when it asks for batch execution (`x-goodvibes-execution: batch`)
+   * or, with `batch.mode` set to `eligible-by-default`, when it does not ask to
+   * run live. Absent: every completion runs live.
+   */
+  readonly batch?: Pick<DaemonBatchManager, 'createJob' | 'getJob' | 'currentMode'> | undefined;
 }
+
+/** How a caller asks for one execution or the other; any other value is refused. */
+const EXECUTION_HEADER = 'x-goodvibes-execution';
 
 interface ResolvedModel {
   readonly provider: LLMProvider;
@@ -106,8 +119,17 @@ export async function dispatchOpenAICompatibleRoutes(
   if (request.method === 'POST' && routePath === '/chat/completions') {
     const adminError = context.requireAdmin?.(request) ?? null;
     if (adminError) return context.recordApiResponse(request, `${prefix}/chat/completions`, adminError);
-    const response = await handleChatCompletions(request, context);
+    const response = await handleChatCompletions(request, context, prefix);
     return context.recordApiResponse(request, `${prefix}/chat/completions`, response);
+  }
+
+  // A completion that was queued as a batch job is read back here, by its job id.
+  const completionMatch = request.method === 'GET' ? /^\/chat\/completions\/([^/]+)$/u.exec(routePath) : null;
+  if (completionMatch) {
+    const adminError = context.requireAdmin?.(request) ?? null;
+    if (adminError) return context.recordApiResponse(request, `${prefix}/chat/completions/{id}`, adminError);
+    const response = await handleQueuedCompletion(completionMatch[1]!, context, prefix);
+    return context.recordApiResponse(request, `${prefix}/chat/completions/{id}`, response);
   }
 
   return null;
@@ -137,6 +159,7 @@ function handleListModels(context: OpenAICompatibleRouteContext): Response {
 async function handleChatCompletions(
   request: Request,
   context: OpenAICompatibleRouteContext,
+  prefix: string,
 ): Promise<Response> {
   const body = await context.parseJsonBody(request);
   if (body instanceof Response) return openAIErrorFromResponse(body);
@@ -166,7 +189,12 @@ async function handleChatCompletions(
   const maxTokens = readMaxTokens(parsed);
   const ignored = ignoredParams(body);
   const headers: Record<string, string> = ignored.length > 0 ? { [IGNORED_PARAMS_HEADER]: ignored.join(',') } : {};
+  const execution = readExecutionPreference(request);
+  if (execution instanceof Response) return execution;
   if (parsed.stream === true) {
+    if (execution === 'batch') {
+      return openAIError('A streamed completion cannot run as a batch: provider batches answer later, all at once. Remove "stream" or the x-goodvibes-execution: batch header and resend.', 400, 'invalid_request_error', 'batch_stream_unsupported', 'stream');
+    }
     return streamChatCompletion({
       request,
       resolved,
@@ -175,6 +203,10 @@ async function handleChatCompletions(
       headers,
     });
   }
+
+  const queue = decideBatchExecution(context.batch, execution);
+  if (queue instanceof Response) return queue;
+  if (queue) return queueChatCompletion(queue, resolved, prepared, maxTokens, headers, prefix);
 
   try {
     const response = await resolved.provider.chat({
@@ -386,11 +418,15 @@ function readMaxTokens(input: ChatCompletionRequest): number | undefined {
     : undefined;
 }
 
-function buildChatCompletionResponse(model: string, response: ChatResponse): JsonRecord {
+function buildChatCompletionResponse(
+  model: string,
+  response: ChatResponse,
+  identity: { readonly id: string; readonly createdMs: number } = { id: `chatcmpl-goodvibes-${crypto.randomUUID()}`, createdMs: Date.now() },
+): JsonRecord {
   return {
-    id: `chatcmpl-goodvibes-${crypto.randomUUID()}`,
+    id: identity.id,
     object: 'chat.completion',
-    created: Math.floor(Date.now() / 1000),
+    created: Math.floor(identity.createdMs / 1000),
     model,
     choices: [{
       index: 0,
@@ -521,6 +557,117 @@ function streamChatCompletion(input: {
       connection: 'keep-alive',
     },
   });
+}
+
+/** The execution the caller asked for, undefined when it did not ask, or the refusal of an unknown value. */
+function readExecutionPreference(request: Request): 'batch' | 'live' | undefined | Response {
+  const raw = request.headers.get(EXECUTION_HEADER);
+  if (raw === null || raw.trim() === '') return undefined;
+  const value = raw.trim().toLowerCase();
+  if (value === 'batch' || value === 'live') return value;
+  return openAIError(`${EXECUTION_HEADER} must be "batch" or "live", not "${raw.trim()}".`, 400, 'invalid_request_error', 'invalid_execution', EXECUTION_HEADER);
+}
+
+/**
+ * Whether this completion is queued: the queue that takes it, null to run it
+ * live, or the refusal of a batch the daemon does not accept. `explicit`
+ * queues only what asks for batch; `eligible-by-default` queues everything
+ * that does not ask to run live.
+ */
+function decideBatchExecution(
+  batch: OpenAICompatibleRouteContext['batch'],
+  execution: 'batch' | 'live' | undefined,
+): NonNullable<OpenAICompatibleRouteContext['batch']> | null | Response {
+  if (execution === 'live') return null;
+  const mode = batch?.currentMode() ?? 'off';
+  if (execution === 'batch') {
+    if (!batch || mode === 'off') {
+      return openAIError('This daemon does not queue batch work: batch.mode is off. Set batch.mode to explicit or eligible-by-default, or resend without x-goodvibes-execution: batch to run it now.', 409, 'invalid_request_error', 'batch_disabled', EXECUTION_HEADER);
+    }
+    return batch;
+  }
+  return batch && mode === 'eligible-by-default' ? batch : null;
+}
+
+/** Queue one completion as a batch job and answer 202 with where to read it, or the finished answer when it ran live. */
+async function queueChatCompletion(
+  batch: NonNullable<OpenAICompatibleRouteContext['batch']>,
+  resolved: ResolvedModel,
+  prepared: PreparedChatRequest,
+  maxTokens: number | undefined,
+  headers: Record<string, string>,
+  prefix: string,
+): Promise<Response> {
+  let job: DaemonBatchJob;
+  try {
+    job = await batch.createJob({
+      provider: resolved.providerId,
+      model: resolved.modelId,
+      request: {
+        messages: prepared.messages,
+        ...(prepared.tools && prepared.tools.length > 0 ? { tools: prepared.tools } : {}),
+        ...(prepared.systemPrompt ? { systemPrompt: prepared.systemPrompt } : {}),
+        ...(prepared.reasoningEffort ? { reasoningEffort: prepared.reasoningEffort } : {}),
+        ...(maxTokens !== undefined ? { maxTokens } : {}),
+      },
+      source: { kind: 'daemon-api', id: 'openai-compatible' },
+      metadata: { [RESPONSE_MODEL_METADATA_KEY]: resolved.responseModel },
+    });
+  } catch (error) {
+    if (error instanceof DaemonBatchError) {
+      return openAIError(error.message, error.status, openAIErrorType(error.status), error.code.toLowerCase(), EXECUTION_HEADER);
+    }
+    const status = serviceFailureStatus(error, 500);
+    return openAIError(summarizeError(error), status, openAIErrorType(status), 'batch_error');
+  }
+  return answerForJob(job, headers, prefix);
+}
+
+/** Recorded on a queued completion's job, so reading it back names the model the caller asked for. */
+const RESPONSE_MODEL_METADATA_KEY = 'goodvibes.responseModel';
+
+async function handleQueuedCompletion(
+  rawId: string,
+  context: OpenAICompatibleRouteContext,
+  prefix: string,
+): Promise<Response> {
+  let jobId: string;
+  try { jobId = decodeURIComponent(rawId); }
+  catch { return openAIError('Malformed completion id in path.', 400, 'invalid_request_error', 'invalid_id'); }
+  const job = context.batch ? await context.batch.getJob(jobId) : null;
+  if (!job) return openAIError(`No queued completion '${jobId}' was found.`, 404, 'not_found_error', 'not_found');
+  return answerForJob(job, {}, prefix);
+}
+
+/**
+ * A queued completion as the caller reads it: the chat.completion once it
+ * finished, 202 with its status while it waits, or the error it ended with.
+ */
+function answerForJob(job: DaemonBatchJob, headers: Record<string, string>, prefix: string): Response {
+  const model = job.metadata?.[RESPONSE_MODEL_METADATA_KEY] ?? job.model;
+  const ranLive = job.metadata?.['goodvibes.execution'] === 'live-fallback';
+  const executionHeaders = { ...headers, [EXECUTION_HEADER]: ranLive ? 'live-fallback' : 'batch' };
+  if (job.status === 'completed' && job.result) {
+    return Response.json(
+      buildChatCompletionResponse(model, job.result, { id: job.id, createdMs: job.completedAt ?? job.updatedAt }),
+      { headers: executionHeaders },
+    );
+  }
+  const pollPath = `${prefix}/chat/completions/${encodeURIComponent(job.id)}`;
+  if (job.status === 'queued' || job.status === 'submitting' || job.status === 'submitted' || job.status === 'running') {
+    return Response.json({
+      id: job.id,
+      object: 'chat.completion.batch_job',
+      status: job.status,
+      created: Math.floor(job.createdAt / 1000),
+      model,
+      poll: pollPath,
+    }, { status: 202, headers: { ...executionHeaders, location: pollPath } });
+  }
+  const detail = job.error?.message ?? `The batch job ended ${job.status} without a result.`;
+  if (job.status === 'cancelled') return openAIError(`The queued completion was cancelled. ${detail}`, 409, 'invalid_request_error', 'batch_cancelled');
+  if (job.status === 'expired') return openAIError(`The provider batch expired before this completion ran. ${detail}`, 410, 'invalid_request_error', 'batch_expired');
+  return openAIError(detail, 502, 'server_error', job.error?.code?.toLowerCase() ?? 'batch_failed');
 }
 
 function buildUsage(response: ChatResponse): JsonRecord {

@@ -307,6 +307,11 @@ export class DaemonBatchManager {
     }
   }
 
+  /** `batch.mode` as the manager applies it, for a route deciding whether a batch-capable request is queued. */
+  currentMode(): DaemonBatchRuntimeSnapshot['mode'] {
+    return this.getMode();
+  }
+
   async describeRuntime(): Promise<DaemonBatchRuntimeSnapshot> {
     return {
       mode: this.getMode(),

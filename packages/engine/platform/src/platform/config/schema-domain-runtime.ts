@@ -663,7 +663,7 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'batch.mode',
     type: 'enum',
     default: 'off',
-    description: 'Daemon provider Batch API mode: off, explicit per request, or eligible-by-default (accepted and reported to clients, not yet enforced by the daemon; behaves like explicit)',
+    description: 'Daemon provider Batch API mode. off: nothing is queued (the batch job API refuses with BATCH_DISABLED). explicit: the batch job API is open, and a non-streaming OpenAI-compatible chat completion is queued when it sends x-goodvibes-execution: batch. eligible-by-default: every non-streaming OpenAI-compatible chat completion is queued unless it sends x-goodvibes-execution: live; a queued one is answered 202 with the job id and read back at <pathPrefix>/chat/completions/<id>. Streaming requests and terminal, companion and web chat always run live.',
     enumValues: ['off', 'explicit', 'eligible-by-default'],
   },
   {

@@ -562,6 +562,8 @@ export class DaemonHttpRouter {
       recordApiResponse: (request, path, routeResponse) => this.recordApiResponse(request, path, routeResponse),
       // Chat completions spend provider money; only listing models stays open.
       requireAdmin,
+      // A non-streaming completion is batch-capable: batch.mode decides whether it is queued.
+      ...(context.batchManager ? { batch: context.batchManager } : {}),
     };
     const batch: Parameters<typeof dispatchBatchRoutes>[1] | null = context.batchManager
       ? { batchManager: context.batchManager, parseJsonBody, parseOptionalJsonBody }

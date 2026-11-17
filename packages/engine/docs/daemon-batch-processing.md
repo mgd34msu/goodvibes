@@ -15,15 +15,17 @@ Batching is off by default.
 }
 ```
 
-Live TUI, companion, and daemon chat behavior remains live unless a client uses the batch job API or explicitly opts a batch-capable daemon request into batch execution.
+Live TUI, companion, web and daemon chat always runs live. Batch work comes from the batch job API and from the one batch-capable daemon request: a non-streaming chat completion on the OpenAI-compatible route (`POST <pathPrefix>/chat/completions`, `/v1` by default).
 
 ## Modes
 
 `batch.mode` controls whether the daemon accepts batch work:
 
 - `off`: reject batch jobs. `POST /api/batch/jobs` fails with `BATCH_DISABLED`.
-- `explicit`: accept requests sent to the batch job API. This is the intended default when a client exposes a per-message "run as batch" control.
-- `eligible-by-default`: intended to accept batch-capable daemon requests as batch by default, without a client having to call the batch job API explicitly. As shipped, the daemon does not yet implement that automatic routing: `off` is the only value that changes daemon behavior (it disables `/api/batch/jobs`), and `explicit` and `eligible-by-default` are currently equivalent, both simply leave the batch job API open. `batch.mode` is reported to clients (`/api/batch/config`) so a client can read the configured value today and adopt automatic routing on its own, ahead of daemon-side enforcement. Streaming chat paths stay live regardless, because provider Batch APIs are asynchronous and non-streaming.
+- `explicit`: accept requests sent to the batch job API, and queue a non-streaming OpenAI-compatible chat completion that sends the header `x-goodvibes-execution: batch`.
+- `eligible-by-default`: as `explicit`, and queue every non-streaming OpenAI-compatible chat completion unless it sends `x-goodvibes-execution: live`.
+
+A queued completion is answered `202` with `{ id, object: "chat.completion.batch_job", status, created, model, poll }` and a `Location` header. `GET <pathPrefix>/chat/completions/<id>` reads it back: `202` with its status while it waits, `200` with the ordinary `chat.completion` (its `id` is the job id) once it finished, and an OpenAI-shaped error when it failed (`502`), was cancelled (`409`) or expired (`410`). When the provider cannot batch and `batch.fallback` is `live`, the completion runs at once and the first answer is the finished `chat.completion`, marked `x-goodvibes-execution: live-fallback`. A streamed request (`stream: true`) always runs live; one that also asks for batch is refused with `batch_stream_unsupported`, and asking for batch while the mode is `off` is refused with `batch_disabled` (`409`). An `x-goodvibes-execution` value other than `batch` or `live` is refused with `invalid_execution`.
 
 `batch.fallback` decides what a job does when its provider has no Batch API:
 

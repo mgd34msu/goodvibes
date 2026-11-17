@@ -55,7 +55,7 @@ export const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
   'batch.mode': {
     off: 'Keep daemon work on the immediate local path.',
     explicit: 'Use batch only when callers explicitly request batch execution.',
-    'eligible-by-default': 'Accepted and reported to clients, but not yet enforced: it behaves like explicit, and daemon chat stays live.',
+    'eligible-by-default': 'Queue every non-streaming OpenAI-compatible chat completion as a batch unless it asks to run live; terminal and web chat stays live.',
   },
   'batch.fallback': {
     live: 'A batch job for a provider that cannot batch runs at once on the live path, at live prices, and comes back already finished.',

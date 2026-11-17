@@ -74,9 +74,11 @@ reviewed skills, routines and memory, read from the same `~/.goodvibes/agent`
 stores the Agent uses) and the session has the Agent's `profile`, `occasions`,
 `agent_artifacts`, `agent_documents`, `agent_research_runs`,
 `agent_research_sources`, `agent_review_packet_presets`, `agent_review_packet_share`,
-`agent_media_generate` and `agent_notify` tools beside the platform tools (using the
-daemon's own channel delivery, media providers and webhook notifier), and
-`agent_work_plan` when the session is in the daemon's own project. The Agent tools that work through the Agent's own
+`agent_media_generate`, `agent_notify` and `agent_local_registry` tools beside the platform tools (using the
+daemon's own channel delivery, media providers, webhook notifier and memory store), and
+`agent_work_plan` when the session is in the daemon's own project. Its platform tools carry the
+Agent's read-mode table, so a mode reads or changes exactly as it does in the Agent, and a
+`profile` or `occasions` call is admitted with the scopes the paired Agent's credential holds. The Agent tools that work through the Agent's own
 command session are named in that prompt with the platform tool that covers the
 same facts; the Agent tools not yet hosted are named too; a call to either is
 refused with the reason and the next step. Creation submits `initialPrompt` without waiting for its turn to finish.

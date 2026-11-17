@@ -2,7 +2,7 @@ import type { MemoryAddOptions } from '@goodvibes-jev/engine/platform/platform/s
 import type { AgentPersonaCreateInput, AgentPersonaUpdateInput } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { AgentSkillCreateInput, AgentSkillUpdateInput } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { AgentRoutineCreateInput, AgentRoutineUpdateInput } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentNoteRegistry } from '../agent/note-registry.ts';
+import { AgentNoteRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';

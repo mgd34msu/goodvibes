@@ -1,5 +1,5 @@
 import { memoryRecordTemporalStatus, type MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
-import type { AgentNoteRecord } from '../agent/note-registry.ts';
+import type { AgentNoteRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { AgentPersonaRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { formatAgentRecordOrigin } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { evaluateAgentRoutineReadiness, type AgentRoutineRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';

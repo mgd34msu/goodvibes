@@ -1,5 +1,5 @@
 import type { ShellPathService } from '@/runtime/index.ts';
-import { AgentNoteRegistry } from '../agent/note-registry.ts';
+import { AgentNoteRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { createAgentRuntimeProfile, type AgentRuntimeProfileInfo } from '../agent/runtime-profile.ts';

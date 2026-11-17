@@ -49,6 +49,14 @@ export * from './occasions-tool.js';
 export * from './local-state-admission.js';
 export * from './hosted-turn.js';
 export * from './read-modes.js';
+export * from './note-registry.js';
+export * from './review-authority.js';
+export * from './memory-input-guard.js';
+export * from './local-registry-admission.js';
+// Not re-exported: the argument readers, which share their names with other tools' own.
+export { readActivation, type AgentLocalRegistryToolArgs } from './local-registry-args.js';
+export { handleMemory } from './local-registry-memory.js';
+export { createAgentLocalRegistryTool, registerAgentLocalRegistryTool, type AgentLocalRegistryAction, type AgentLocalRegistryDomain } from './local-registry-tool.js';
 export * from './preview-text.js';
 export * from './read-helpers.js';
 export * from './effect-admission.js';

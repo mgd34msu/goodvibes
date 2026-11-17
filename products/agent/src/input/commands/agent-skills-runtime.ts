@@ -15,7 +15,7 @@ import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibe
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { parseAgentLocalLibraryArgs, resolveCommandFilePath, type ParsedAgentLocalLibraryArgs } from './agent-local-library-args.ts';
 import { requireShellPaths } from './runtime-services.ts';
-import { assertActorMayEnable, assertActorMayMarkReviewed, type RegistryActor } from '../../agent/review-authority.ts';
+import { assertActorMayEnable, assertActorMayMarkReviewed, type RegistryActor } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { commandRefusal } from './confirmation.ts';
 
 const SKILL_VALUE_FLAGS = ['name', 'description', 'procedure', 'tags', 'triggers', 'requires-env', 'requires-command', 'requires-commands', 'skills'] as const;

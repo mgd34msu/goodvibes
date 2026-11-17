@@ -232,6 +232,7 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
       agent: createAgentHostedTurn({
         homeDirectory: services.homeDirectory,
         memoryRegistry: services.memoryRegistry,
+        memoryAccess: services.memorySpine,
         gatewayMethods: services.gatewayMethods,
         artifactStore: services.artifactStore,
         notificationConfig: services.configManager,

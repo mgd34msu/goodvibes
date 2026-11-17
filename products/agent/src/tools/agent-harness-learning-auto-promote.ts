@@ -1,6 +1,6 @@
 import { learningPromotionReference, MIN_PROMPT_MEMORY_CONFIDENCE } from './agent-harness-learning-curator-common.ts';
 import type { MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import { AgentNoteRegistry } from '../agent/note-registry.ts';
+import { AgentNoteRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';

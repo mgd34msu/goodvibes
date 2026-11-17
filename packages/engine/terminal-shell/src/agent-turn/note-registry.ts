@@ -1,9 +1,9 @@
-import { freshReviewPatch, parseAgentReviewState, reviewedReviewPatch, staleReviewPatch } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { freshReviewPatch, parseAgentReviewState, reviewedReviewPatch, staleReviewPatch } from './review-state.js';
 import { existsSync, readFileSync } from 'node:fs';
-import type { ShellPathService } from '@/runtime/index.ts';
-import { writeStoreFile, runStoreFileUpdateSync } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { assertNoSecretLikeText, assertStoreRewritable } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { writeStoreFile, runStoreFileUpdateSync } from './store-file.js';
+import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
+import { assertNoSecretLikeText, assertStoreRewritable } from './persona-registry.js';
 
 export type AgentNoteSource = 'user' | 'agent' | 'imported' | 'system';
 export type AgentNoteReviewState = 'fresh' | 'reviewed' | 'stale';
@@ -13,16 +13,16 @@ export interface AgentNoteRecord {
   readonly title: string;
   readonly body: string;
   readonly tags: readonly string[];
-  readonly sourceUrl?: string;
+  readonly sourceUrl?: string | undefined;
   readonly source: AgentNoteSource;
   readonly provenance: string;
   readonly reviewState: AgentNoteReviewState;
-  readonly staleReason?: string;
+  readonly staleReason?: string | undefined;
   readonly createdAt: string;
   readonly updatedAt: string;
-  readonly reviewedAt?: string;
+  readonly reviewedAt?: string | undefined;
   /** The records made from this note, by either promotion path; the one record of "already promoted". */
-  readonly promoted?: readonly AgentNotePromotion[];
+  readonly promoted?: readonly AgentNotePromotion[] | undefined;
 }
 
 export interface AgentNotePromotion {
@@ -34,18 +34,18 @@ export interface AgentNotePromotion {
 export interface AgentNoteCreateInput {
   readonly title: string;
   readonly body: string;
-  readonly tags?: readonly string[];
-  readonly sourceUrl?: string;
-  readonly source?: AgentNoteSource;
-  readonly provenance?: string;
+  readonly tags?: readonly string[] | undefined;
+  readonly sourceUrl?: string | undefined;
+  readonly source?: AgentNoteSource | undefined;
+  readonly provenance?: string | undefined;
 }
 
 export interface AgentNoteUpdateInput {
-  readonly title?: string;
-  readonly body?: string;
-  readonly tags?: readonly string[];
-  readonly sourceUrl?: string;
-  readonly provenance?: string;
+  readonly title?: string | undefined;
+  readonly body?: string | undefined;
+  readonly tags?: readonly string[] | undefined;
+  readonly sourceUrl?: string | undefined;
+  readonly provenance?: string | undefined;
 }
 
 export interface AgentNoteSnapshot {

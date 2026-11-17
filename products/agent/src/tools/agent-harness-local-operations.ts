@@ -1,7 +1,7 @@
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { requireConfirmedAction } from './agent-harness-tool-utils.ts';
-import { AgentNoteRegistry, type AgentNotePromotion } from '../agent/note-registry.ts';
+import { AgentNoteRegistry, type AgentNotePromotion } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';

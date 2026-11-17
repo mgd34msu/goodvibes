@@ -12,7 +12,7 @@
  * when the typed id matches exactly, so a stray Enter cannot destroy a record.
  */
 import type { ShellPathService } from '@/runtime/index.ts';
-import { AgentNoteRegistry } from '../agent/note-registry.ts';
+import { AgentNoteRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';

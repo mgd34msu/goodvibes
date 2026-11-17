@@ -1,17 +1,17 @@
-import { assertAgentLocalRegistryWrite, assertAgentLocalRegistryEffectCurrent, createAgentLocalRegistryWriteLifecycle, createAgentLocalRegistryInputProjector } from './agent-local-registry-admission.ts';
+import { assertAgentLocalRegistryWrite, assertAgentLocalRegistryEffectCurrent, createAgentLocalRegistryWriteLifecycle, createAgentLocalRegistryInputProjector } from './local-registry-admission.js';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { ShellPathService } from '@/runtime/index.ts';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import type { MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import { AgentPersonaRegistry, type AgentPersonaRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentNoteRegistry, type AgentNoteRecord } from '../agent/note-registry.ts';
-import { AgentRoutineRegistry, type AgentRoutineRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentSkillRegistry, type AgentSkillBundleRecord, type AgentSkillRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { assertActorMayEnable, assertActorMayMarkReviewed } from '../agent/review-authority.ts';
+import { AgentPersonaRegistry, type AgentPersonaRecord } from './persona-registry.js';
+import { AgentNoteRegistry, type AgentNoteRecord } from './note-registry.js';
+import { AgentRoutineRegistry, type AgentRoutineRecord } from './routine-registry.js';
+import { AgentSkillRegistry, type AgentSkillBundleRecord, type AgentSkillRecord } from './skill-registry.js';
+import { formatAgentRecordOrigin, formatAgentRecordReviewState } from './record-labels.js';
+import { assertActorMayEnable, assertActorMayMarkReviewed } from './review-authority.js';
 import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
-import { buildAgentLocalRequirements } from './agent-local-registry-requirements.ts';
+import { buildAgentLocalRequirements } from './local-registry-requirements.js';
 import {
   AGENT_TOOL_PROVENANCE,
   type AgentLocalRegistryToolArgs,
@@ -26,13 +26,13 @@ import {
   requireTextField,
   requireUpdateFields,
   invalidAction,
-} from './agent-local-registry-args.ts';
-import { handleMemory, MEMORY_CLASSES, MEMORY_SCOPES } from './agent-local-registry-memory.ts';
-import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+} from './local-registry-args.js';
+import { handleMemory, MEMORY_CLASSES, MEMORY_SCOPES } from './local-registry-memory.js';
+import { confirmParameter, requestParameter } from './effect-admission.js';
 
 export type AgentLocalRegistryDomain = 'memory' | 'note' | 'persona' | 'skill' | 'skill_bundle' | 'routine';
 export type AgentLocalRegistryAction = 'list' | 'search' | 'get' | 'create' | 'update' | 'enable' | 'disable' | 'review' | 'stale' | 'use' | 'clear_active' | 'start' | 'delete';
-export type { AgentLocalRegistryToolArgs } from './agent-local-registry-args.ts';
+export type { AgentLocalRegistryToolArgs } from './local-registry-args.js';
 
 const DOMAINS: readonly AgentLocalRegistryDomain[] = ['memory', 'note', 'persona', 'skill', 'skill_bundle', 'routine'];
 const ACTIONS: readonly AgentLocalRegistryAction[] = ['list', 'search', 'get', 'create', 'update', 'enable', 'disable', 'review', 'stale', 'use', 'clear_active', 'start', 'delete'];

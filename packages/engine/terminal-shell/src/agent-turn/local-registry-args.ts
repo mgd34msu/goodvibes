@@ -1,14 +1,14 @@
 /**
  * Shared arg-reading/validation helpers for the agent_local_registry tool.
  *
- * Split out of agent-local-registry-tool.ts to stay under the 800-line
+ * Split out of local-registry-tool.ts to stay under the 800-line
  * architecture cap. These are generic across every domain (memory, note,
  * persona, skill, skill_bundle, routine), no domain-specific logic lives
  * here.
  */
 
-import type { AgentLocalRegistryAction, AgentLocalRegistryDomain } from './agent-local-registry-tool.ts';
-import { readFlag, readString } from './tool-args.ts';
+import type { AgentLocalRegistryAction, AgentLocalRegistryDomain } from './local-registry-tool.js';
+import { readFlag, readString } from './tool-args.js';
 
 export interface AgentLocalRegistryToolArgs {
   readonly domain?: unknown;

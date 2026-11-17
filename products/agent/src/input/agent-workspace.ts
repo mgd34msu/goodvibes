@@ -6,7 +6,7 @@ import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state
 import type { AgentConfigSetting } from '../config/settings-catalog.ts';
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { CommandContext } from './command-registry.ts';
-import { AgentNoteRegistry } from '../agent/note-registry.ts';
+import { AgentNoteRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { AgentRuntimeProfileInfo } from '../agent/runtime-profile.ts';

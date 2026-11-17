@@ -14,7 +14,7 @@ import {
 import type { CommandContext } from '../input/command-registry.ts';
 import { requireShellPaths } from '../input/commands/runtime-services.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { assertActorMayMarkReviewed } from '../agent/review-authority.ts';
+import { assertActorMayMarkReviewed } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
 import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 

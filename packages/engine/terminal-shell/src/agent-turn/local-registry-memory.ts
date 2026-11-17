@@ -1,7 +1,7 @@
 /**
  * Agent-local memory domain handler (memory honesty).
  *
- * Split out of agent-local-registry-tool.ts to stay under the 800-line
+ * Split out of local-registry-tool.ts to stay under the 800-line
  * architecture cap. Owns the `memory` domain of the agent_local_registry
  * tool: list/search/get/create/update/review/stale/delete.
  *
@@ -35,8 +35,8 @@ import {
   type MemoryVectorStats,
 } from '@goodvibes-jev/engine/platform/platform/state';
 import type { MemoryAccess, MemoryOperationOptions } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import { assertNoSecretLikeMemoryText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { formatAgentRecordReference, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { assertNoSecretLikeMemoryText } from './memory-safety.js';
+import { formatAgentRecordReference, formatAgentRecordReviewState } from './record-labels.js';
 import {
   AGENT_TOOL_PROVENANCE,
   type AgentLocalRegistryToolArgs,
@@ -48,11 +48,11 @@ import {
   requireId,
   requireSummary,
   requireUpdateFields,
-} from './agent-local-registry-args.ts';
+} from './local-registry-args.js';
 // `import type` is erased at compile time, so this does not create a runtime
-// circular dependency even though agent-local-registry-tool.ts imports
+// circular dependency even though local-registry-tool.ts imports
 // handleMemory (below) from this module.
-import type { AgentLocalRegistryAction } from './agent-local-registry-tool.ts';
+import type { AgentLocalRegistryAction } from './local-registry-tool.js';
 
 export const MEMORY_CLASSES: readonly MemoryClass[] = ['decision', 'constraint', 'incident', 'pattern', 'fact', 'risk', 'runbook', 'architecture', 'ownership'];
 export const MEMORY_SCOPES: readonly MemoryScope[] = ['session', 'project', 'team'];

@@ -1,16 +1,16 @@
 import { dirname } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { readFileObservation } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { ShellPathService } from '@/runtime/index.ts';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import { MemorySpineClient, type MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import { assertCurrentToolEffect, assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/tools';
-import { noteStorePath } from '../agent/note-registry.ts';
-import { personaStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { routineStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { skillStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { assertAgentMemoryInput } from './agent-memory-input-guard.ts';
-import { captureAgentExportPath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { noteStorePath } from './note-registry.js';
+import { personaStorePath } from './persona-registry.js';
+import { routineStorePath } from './routine-registry.js';
+import { skillStorePath } from './skill-registry.js';
+import { assertAgentMemoryInput } from './memory-input-guard.js';
+import { captureAgentExportPath } from './artifact-effect.js';
 
 const contexts = new WeakMap<object, { readonly assertBeforeWrite: () => void; readonly assertLocation: () => void; readonly acceptOwnEffect: () => void }>();
 const readActions = new Set(['list', 'search', 'get']);

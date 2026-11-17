@@ -10,7 +10,7 @@ import { readExecutionMode } from '../permissions/execution-mode.ts';
 import { listAvailableSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { CommandContext } from './command-registry.ts';
-import { AgentNoteRegistry } from '../agent/note-registry.ts';
+import { AgentNoteRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentResearchRunRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentResearchSourceRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';

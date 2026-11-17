@@ -14,7 +14,6 @@ import { wireAgentGoogleTool, type GoogleToolWiringDeps } from './bootstrap-goog
 import { registerAgentKnowledgeIngestTool } from '../tools/agent-knowledge-ingest-tool.ts';
 import { registerAgentKnowledgeTool } from '../tools/agent-knowledge-tool.ts';
 import { registerAgentLearningConsolidationTool } from '../tools/agent-learning-consolidation-tool.ts';
-import { registerAgentLocalRegistryTool } from '../tools/agent-local-registry-tool.ts';
 import { registerAgentModelCompareTool } from '../tools/agent-model-compare-tool.ts';
 import { registerAgentOperatorActionTool } from '../tools/agent-operator-action-tool.ts';
 import { registerAgentOperatorBriefingTool } from '../tools/agent-operator-briefing-tool.ts';
@@ -164,6 +163,8 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     mediaProviders: services.mediaProviders,
     channelDeliveryRouter: services.channelDeliveryRouter,
     workPlan: services.workPlan,
+    memoryRegistry: services.memoryRegistry,
+    memoryAccess: services.memorySpineClient,
   });
   registerAgentBrowserTool(toolRegistry, {
     screenshotDirectory: agentBrowserScreenshotRoot(services.shellPaths.homeDirectory),
@@ -204,7 +205,6 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
   registerAgentChannelSendTool(toolRegistry, services.channelDeliveryRouter, { shellPaths: services.shellPaths });
   registerAgentKnowledgeTool(toolRegistry, services.shellPaths, configManager);
   registerAgentLearningConsolidationTool(toolRegistry, services.shellPaths, services.memoryRegistry, services.memorySpineClient);
-  registerAgentLocalRegistryTool(toolRegistry, services.shellPaths, services.memoryRegistry, services.memorySpineClient);
   registerAgentResearchReportTool(toolRegistry, services.artifactStore, deps.researchReportSourceOwner ?? deps.researchSourceOwner,
     deps.researchReportSourceOwner ? 'report-only' : 'shared', deps.researchSourceOwner);
   registerAgentModelCompareTool(toolRegistry, {

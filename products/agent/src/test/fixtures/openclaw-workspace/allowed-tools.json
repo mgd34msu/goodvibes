@@ -1,3 +1,0 @@
-{
-  "allow": ["read", "write", "Bash(git status)", "search", "teleport"]
-}

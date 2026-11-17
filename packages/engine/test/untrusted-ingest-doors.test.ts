@@ -84,7 +84,7 @@ test('fetch, an MCP result and web search each record what they read, and a send
   providers.register({
     id: 'stand-in', label: 'Stand-in search', capabilities: [],
     search: async () => ({ metadata: {},
-      results: [{ rank: 1, url: 'https://results.example/post', title: 'A post', snippet: SEARCH, domain: 'results.example', type: 'web', providerId: 'stand-in', metadata: {} }] }),
+      results: [{ rank: 1, url: 'https://results.example/post', title: 'A post', snippet: SEARCH, domain: 'results.example', type: 'organic', providerId: 'stand-in', metadata: {} }] }),
   }, { replace: true });
 
   const config = new ConfigManager({ surfaceRoot: 'agent', workingDir: root, homeDir: join(root, 'home'), configDir: join(root, 'config'), ownsDaemonTier: true });

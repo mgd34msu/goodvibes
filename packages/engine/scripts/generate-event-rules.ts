@@ -72,11 +72,14 @@ function members(type: ts.Type): readonly ts.Type[] {
   return [type];
 }
 
-function arrayElement(type: ts.Type): ts.Type | null {
+/** The member types an element of an array or tuple can be; null when `type` is neither (or an empty tuple). */
+function arrayElement(type: ts.Type): readonly ts.Type[] | null {
   if (checker.isArrayType(type) || checker.isTupleType(type)) {
     const args = checker.getTypeArguments(type as ts.TypeReference);
-    if (checker.isTupleType(type)) return args.length > 0 ? checker.getUnionType([...args]) : null;
-    return args[0] ?? null;
+    // A tuple's element is any of its positions; each position contributes its own members.
+    if (checker.isTupleType(type)) return args.length > 0 ? args.flatMap(members) : null;
+    const element = args[0];
+    return element ? members(element) : null;
   }
   return null;
 }
@@ -97,7 +100,12 @@ function objectFields(type: ts.Type, depth: number): (Rule & { key: string })[] 
 
 /** The rule for a value of `type` (undefined and, for optional fields, absence already handled). */
 function valueRule(type: ts.Type, depth: number): Rule {
-  const parts = members(type).filter((member) => !isUndefined(member));
+  return membersRule(members(type), depth);
+}
+
+/** The rule for a value that is any one of `types`. */
+function membersRule(types: readonly ts.Type[], depth: number): Rule {
+  const parts = types.filter((member) => !isUndefined(member));
   if (parts.length === 0) return { kind: 'unknown' };
   if (parts.some((part) => (part.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0)) return { kind: 'unknown' };
   const withoutNull = parts.filter((part) => !isNull(part));
@@ -115,7 +123,7 @@ function valueRule(type: ts.Type, depth: number): Rule {
     const only = withoutNull[0]!;
     const element = arrayElement(only);
     if (element !== null) {
-      const inner = valueRule(element, depth);
+      const inner = membersRule(element, depth);
       if (inner.kind === 'string') return { kind: 'string[]' };
       if (inner.kind === 'enum') return { kind: 'enum[]', values: inner.values ?? [] };
       if (inner.kind === 'object') return inner.fields ? { kind: 'object[]', fields: inner.fields } : { kind: 'object[]' };

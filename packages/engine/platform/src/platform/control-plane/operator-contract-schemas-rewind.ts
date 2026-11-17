@@ -3,9 +3,9 @@
  *
  * Input/output JSON schemas for rewind.plan + rewind.apply, the unified
  * message-anchored rewind (see platform/rewind/). rewind.plan is a read-only
- * dry-run preview that mints a single-use confirm token; rewind.apply consumes
- * it (or confirm:true) and returns a receipt whose `undo` block records how to
- * reverse the rewind. ws-only invoke verbs (no REST binding). Handlers:
+ * dry-run preview that mints a single-use confirm token; rewind.apply runs only
+ * with it and returns a receipt whose `undo` block records how to reverse the
+ * rewind. ws-only invoke verbs (no REST binding). Handlers:
  * routes/rewind.ts.
  */
 import {
@@ -35,7 +35,6 @@ export const REWIND_APPLY_INPUT_SCHEMA = objectSchema(
     sessionId: STRING_SCHEMA,
     turnId: STRING_SCHEMA,
     scope: REWIND_SCOPE_SCHEMA,
-    confirm: BOOLEAN_SCHEMA,
     confirmToken: STRING_SCHEMA,
   },
   ['sessionId', 'scope'],

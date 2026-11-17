@@ -64,12 +64,7 @@ export interface UnifiedRewindServiceDeps {
 }
 
 export interface RewindApplyOptions {
-  /**
-   * Not an authorization: an apply runs only with `confirmToken`. A call that
-   * sends `confirm: true` alone is refused with the plan method named.
-   */
-  readonly confirm?: boolean | undefined;
-  /** The single-use token `plan()` returned for this same anchor and scope. */
+  /** The single-use token `plan()` returned for this same anchor and scope; without it nothing runs. */
   readonly confirmToken?: string | undefined;
 }
 

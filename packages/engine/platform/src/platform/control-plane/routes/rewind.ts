@@ -34,14 +34,6 @@ function requireScope(value: unknown): RewindScope {
   return value as RewindScope;
 }
 
-function optionalBoolean(value: unknown, field: string): boolean | undefined {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value !== 'boolean') {
-    throw new GatewayVerbError(`Invalid ${field}: expected a boolean`, 'INVALID_ARGUMENT', 400, field);
-  }
-  return value;
-}
-
 function readAnchor(params: Record<string, unknown>): { anchor: RewindAnchor; scope: RewindScope } {
   const sessionId = requireStringValue(params.sessionId, 'sessionId');
   const turnId = optionalString(params.turnId, 'turnId');
@@ -61,10 +53,9 @@ export function createRewindApplyHandler(service: Pick<UnifiedRewindService, 'ap
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const { anchor, scope } = readAnchor(params);
-    const confirm = optionalBoolean(params.confirm, 'confirm');
     const confirmToken = optionalString(params.confirmToken, 'confirmToken');
     try {
-      return await service.apply(anchor, scope, { confirm, confirmToken });
+      return await service.apply(anchor, scope, { confirmToken });
     } catch (error) {
       if (error instanceof RewindTokenError) {
         throw new GatewayVerbError(error.message, 'INVALID_ARGUMENT', 400, 'confirmToken');

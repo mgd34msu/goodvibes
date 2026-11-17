@@ -166,7 +166,7 @@ export function HostedSessionWorkDetail({ sessionId, attachment, record, fallbac
 
       {tab === 'changes' && <SessionChanges sessionId={sessionId} canSteer={!ended} closed={ended} streamPaused={streamPaused} />}
       {tab === 'rewind' && <SessionRewind sessionId={sessionId} closed={ended} />}
-      {tab === 'checkpoints' && <CheckpointsPanel />}
+      {tab === 'checkpoints' && <CheckpointsPanel sessionId={sessionId} />}
     </DetailPane>
   );
 }

@@ -182,8 +182,7 @@ async function handleSubscribe(args: readonly string[], ctx: CommandContext, fet
 
   const result = await registry.subscribe(url, requestedName, refreshIntervalMs, hostOptions);
   if (!result.ok) {
-    ctx.print([`Could not subscribe (${result.stage}).`, `  ${result.detail}`].join('\n'));
-    return;
+    throw commandRefusal([`Could not subscribe (${result.stage}); nothing was stored.`, `  ${result.detail}`].join('\n'), undefined, 'COMMAND_FAILED');
   }
   const intervalMin = Math.round(result.refreshIntervalMs / 60_000);
   ctx.print([

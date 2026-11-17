@@ -164,11 +164,10 @@ export async function runCalendarConnect(
 
 function printConnectResult(ctx: CommandContext, label: string, result: ConnectResult): void {
   if (!result.ok) {
-    ctx.print([
+    throw commandRefusal([
       `Could not connect ${label} (${result.stage ?? 'unknown'} stage).`,
       `  ${result.error ?? 'unknown error'}`,
-    ].join('\n'));
-    return;
+    ].join('\n'), undefined, 'COMMAND_FAILED');
   }
   const via = result.transport === 'device-code' ? 'device code' : result.transport === 'pasted-code' ? 'pasted sign-in' : 'browser sign-in';
   ctx.print([

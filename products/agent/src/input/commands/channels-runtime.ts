@@ -365,8 +365,7 @@ async function printReadOnlyChannelRead(
 ): Promise<void> {
   const result = await readConnectedHostMethod(context, methodId, input);
   if (!result.ok) {
-    context.print(formatConnectedHostRouteFailure(title, result, 'read-only; no channel send/action route was called'));
-    return;
+    throw commandRefusal(formatConnectedHostRouteFailure(title, result, 'read-only; no channel send/action route was called'), undefined, 'COMMAND_FAILED');
   }
   context.print(format(result.body));
 }

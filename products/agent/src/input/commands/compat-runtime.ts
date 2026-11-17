@@ -3,6 +3,7 @@ import { handleCompatCommand } from '../../cli/agent-knowledge-command.ts';
 import { parseGoodVibesCli } from '../../cli/parser.ts';
 import type { CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths } from './runtime-services.ts';
+import { printCliCommandResult, refuseCliParseErrors } from './cli-command-output.ts';
 
 export function registerCompatRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
@@ -15,10 +16,7 @@ export function registerCompatRuntimeCommands(registry: CommandRegistry): void {
     argsHint: '[--json]',
     async handler(args, ctx) {
       const cli = parseGoodVibesCli(['compat', ...args], 'goodvibes-agent');
-      if (cli.errors.length > 0) {
-        ctx.print(cli.errors.join('\n'));
-        return;
-      }
+      refuseCliParseErrors(cli.errors);
 
       const shellPaths = requireShellPaths(ctx);
       const runtime: CliCommandRuntime = {
@@ -28,7 +26,7 @@ export function registerCompatRuntimeCommands(registry: CommandRegistry): void {
         homeDirectory: shellPaths.homeDirectory,
       };
       const result = await handleCompatCommand(runtime);
-      ctx.print(result.output);
+      printCliCommandResult((text) => ctx.print(text), result);
     },
   });
 }

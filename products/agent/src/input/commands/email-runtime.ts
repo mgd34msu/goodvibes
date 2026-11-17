@@ -290,8 +290,7 @@ async function handleSet(
     const storePassword = async (password: string): Promise<void> => {
       const result = await persistMailboxField(cm, secretsManager, field, password, writeRouted);
       if (!result.ok) {
-        ctx.print(result.error ?? `Could not store ${configKey}.`);
-        return;
+        throw commandRefusal(result.error ?? `Could not store ${configKey}.`, undefined, 'COMMAND_FAILED');
       }
       ctx.print(
         `Email config updated\n` +
@@ -331,8 +330,7 @@ async function handleSet(
     throw commandRefusal(`${configKey} was not changed: ${summarizeError(error)}`);
   }
   if (!result.ok) {
-    ctx.print(result.error ?? `Could not update ${configKey}.`);
-    return;
+    throw commandRefusal(`${configKey} was not changed: ${result.error ?? 'the value was refused'}`, undefined, 'COMMAND_FAILED');
   }
   // The value the write reports the connected host holding now, not this process's local copy.
   ctx.print(`Email config updated\n  key:   ${configKey}\n  value: ${String(result.value)}`);

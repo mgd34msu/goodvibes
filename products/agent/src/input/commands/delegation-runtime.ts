@@ -178,20 +178,18 @@ export function registerDelegationRuntimeCommands(registry: CommandRegistry): vo
     }
     const input = parseDelegationArgs(args, false);
     if ('error' in input) {
-      ctx.print(`${input.error}\n${DELEGATION_USAGE}`);
-      return;
+      throw commandRefusal(`${input.error}\n${DELEGATION_USAGE}`);
     }
     if (!input.task) {
-      ctx.print(DELEGATION_USAGE);
-      return;
+      throw commandRefusal(DELEGATION_USAGE);
     }
     const operator = ctx.clients?.operator;
     if (!operator) {
-      ctx.print([
-        'Delegation unavailable. No operator client is attached.',
+      throw commandRefusal(
+        'Delegation unavailable; the task was not handed off: no operator client is attached.',
         'Use the shared-session route from a configured Agent runtime, or open GoodVibes TUI in the target workspace.',
-      ].join('\n'));
-      return;
+        'COMMAND_FAILED',
+      );
     }
     let createdSessionId: string | undefined;
     try {

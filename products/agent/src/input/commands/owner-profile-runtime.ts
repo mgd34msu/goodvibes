@@ -25,6 +25,7 @@ import { parseGoodVibesCli } from '../../cli/parser.ts';
 import type { CommandRegistry } from '../command-registry.ts';
 import { READ_VERB, ownerOnlyVerb, withCommandVerbs, type CommandVerbs } from './command-verbs.ts';
 import { requireShellPaths } from './runtime-services.ts';
+import { printCliCommandResult, refuseCliParseErrors } from './cli-command-output.ts';
 
 /**
  * A write here presents the owner's own credential and is recorded as his own
@@ -61,10 +62,7 @@ export function registerOwnerProfileRuntimeCommands(registry: CommandRegistry): 
     argsHint: 'read|get|person|provenance|set|note|undo|forget|status',
     async handler(args, ctx) {
       const cli = parseGoodVibesCli(['owner-profile', ...args], 'goodvibes-agent');
-      if (cli.errors.length > 0) {
-        ctx.print(cli.errors.join('\n'));
-        return;
-      }
+      refuseCliParseErrors(cli.errors);
 
       const shellPaths = requireShellPaths(ctx);
       const runtime: CliCommandRuntime = {
@@ -77,7 +75,7 @@ export function registerOwnerProfileRuntimeCommands(registry: CommandRegistry): 
       // result of a model-run command, which is when the People section is
       // shown as a count instead of a list.
       const result = await handleOwnerProfileCommand(runtime, { outputEntersModelContext: ctx.invokedByModel === true });
-      ctx.print(result.output);
+      printCliCommandResult((text) => ctx.print(text), result);
     },
   }, OWNER_PROFILE_VERBS));
 }

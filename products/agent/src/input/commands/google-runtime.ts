@@ -173,8 +173,7 @@ async function setCalendarAddress(args: readonly string[], ctx: CommandContext, 
   }
   const checked = await registry.validate(url, GOOGLE_CALENDAR_SUBSCRIPTION_NAME);
   if (!checked.ok) {
-    ctx.print([`Nothing was stored or replaced: the calendar address could not be read (${checked.stage}); the current calendar feed, if any, is kept.`, `  ${checked.detail}`].join('\n'));
-    return;
+    throw commandRefusal([`Nothing was stored or replaced: the calendar address could not be read (${checked.stage}); the current calendar feed, if any, is kept.`, `  ${checked.detail}`].join('\n'), undefined, 'COMMAND_FAILED');
   }
   // The address works. A feed under the same name would refuse the subscribe
   // as a duplicate, so the earlier one is dropped now; its address is held so
@@ -184,13 +183,12 @@ async function setCalendarAddress(args: readonly string[], ctx: CommandContext, 
   const subscribed = await registry.subscribe(url, GOOGLE_CALENDAR_SUBSCRIPTION_NAME);
   if (!subscribed.ok) {
     if (!replaced.removed) {
-      ctx.print([`Nothing was stored: the calendar address could not be subscribed (${subscribed.stage}).`, `  ${subscribed.detail}`].join('\n'));
-      return;
+      throw commandRefusal([`Nothing was stored: the calendar address could not be subscribed (${subscribed.stage}).`, `  ${subscribed.detail}`].join('\n'), undefined, 'COMMAND_FAILED');
     }
     const restored = typeof previousUrl === 'string' && previousUrl.trim().length > 0
       ? await registry.subscribe(previousUrl, GOOGLE_CALENDAR_SUBSCRIPTION_NAME)
       : null;
-    ctx.print([
+    throw commandRefusal([
       restored?.ok
         ? `The new calendar address could not be subscribed (${subscribed.stage}); the previous '${GOOGLE_CALENDAR_SUBSCRIPTION_NAME}' feed was put back.`
         : restored === null
@@ -253,24 +251,23 @@ async function approveRefusedOutwardAction(rest: readonly string[], ctx: Command
   }
   const approved = takeRefusedOutwardAction(chosen.id);
   if (!approved) {
-    ctx.print('That approval expired. Ask for the send again.');
-    return;
+    throw commandRefusal('Nothing was sent: that approval expired.', 'Ask for the send again.', 'COMMAND_FAILED');
   }
   if (!approved.perform) {
     // No way to perform it from here: grant a one-use approval for the exact
     // content instead, which the next identical call spends.
     const approval = getOutwardApprovalStore().grant({ action: approved.action, surface: 'owner-direct', content: approved.content });
-    ctx.print(approval === null
-      ? 'Could not record the approval.'
-      : `Approved: ${approved.description}. It is tied to that exact content, good once, and expires in five minutes.`);
+    if (approval === null) throw commandRefusal(`Could not record the approval for ${approved.description}; nothing was approved.`, 'Ask for the send again.', 'COMMAND_FAILED');
+    ctx.print(`Approved: ${approved.description}. It is tied to that exact content, good once, and expires in five minutes.`);
     return;
   }
   const outcome = await approved.perform();
-  ctx.print(outcome.ok ? `Approved and done: ${outcome.text}` : `Approved, but it did not go through: ${outcome.text}`);
   // The model asked for this; it learns how it ended on its next request.
   ctx.session.conversationManager.hostInstructions.set('replay',
     `The owner approved "${approved.description}" with /google approve. ${outcome.ok ? 'Done' : 'It failed'}: ${outcome.text} Do not send it again.`,
     { once: true, append: true });
+  if (!outcome.ok) throw commandRefusal(`Approved, but it did not go through: ${outcome.text}`, undefined, 'COMMAND_FAILED');
+  ctx.print(`Approved and done: ${outcome.text}`);
 }
 
 /** `fetcher` replaces the real HTTP feed fetch, for tests. */

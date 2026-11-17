@@ -45,8 +45,7 @@ export function registerAgentWorkspaceRuntimeCommands(registry: CommandRegistry)
           throw commandRefusal('Usage: /work start|status|cancel|resume <work-id>');
         }
         if (!ctx.nativeWorkLedger?.execute) {
-          ctx.print('Native execution controls are unavailable on this host.');
-          return;
+          throw commandRefusal(`Nothing was run: native execution controls are unavailable on this host, so /work ${action} cannot run here.`, undefined, 'COMMAND_FAILED');
         }
         const result = await ctx.nativeWorkLedger.execute(action, args[1]!);
         const state = ctx.nativeWorkLedger.state;

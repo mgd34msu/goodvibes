@@ -18,6 +18,7 @@ import { handleCiCommand } from '../../cli/ci-command.ts';
 import { handlePrincipalsCommand } from '../../cli/principals-command.ts';
 import { handleChannelProfilesCommand } from '../../cli/channel-profiles-command.ts';
 import { requireShellPaths } from './runtime-services.ts';
+import { printCliCommandResult, refuseCliParseErrors } from './cli-command-output.ts';
 
 function buildCliRuntime(ctx: CommandContext, command: string, args: readonly string[]): CliCommandRuntime {
   const shellPaths = requireShellPaths(ctx);
@@ -35,8 +36,10 @@ async function runBridgedCliCommand(
   args: readonly string[],
   handler: (runtime: CliCommandRuntime) => Promise<CliCommandOutput>,
 ): Promise<void> {
-  const result = await handler(buildCliRuntime(ctx, command, args));
-  ctx.print(result.output);
+  const runtime = buildCliRuntime(ctx, command, args);
+  refuseCliParseErrors(runtime.cli.errors);
+  const result = await handler(runtime);
+  printCliCommandResult((text) => ctx.print(text), result);
 }
 
 export function registerConnectedHostAdminCommands(registry: CommandRegistry): void {

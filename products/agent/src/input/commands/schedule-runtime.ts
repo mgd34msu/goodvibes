@@ -102,7 +102,7 @@ function printReadOnlyScheduleBoundary(print: (text: string) => void, requestedA
 async function promoteRoutineSchedule(args: readonly string[], ctx: CommandContext): Promise<void> {
   const parsed = parseRoutineSchedulePromotionArgs(args);
   if (parsed.errors.length > 0) {
-    ctx.print([
+    throw commandRefusal([
       'Usage: /schedule promote-routine <routine-id> (--cron <expr>|--every <interval>|--at <iso-time>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route][ | label]>|--delivery-route <route[ | label]>|--delivery-webhook <url>] [--disabled] --yes',
       ...parsed.errors.map((error) => `  ${error}`),
     ].join('\n'));
@@ -119,7 +119,7 @@ async function promoteRoutineSchedule(args: readonly string[], ctx: CommandConte
 async function createReminder(args: readonly string[], ctx: CommandContext): Promise<void> {
   const parsed = parseReminderScheduleArgs(args);
   if (parsed.errors.length > 0) {
-    ctx.print([
+    throw commandRefusal([
       'Usage: /schedule remind (--cron <expr>|--every <interval>|--at <iso-time>) (--message <text>|<text...>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route][ | label]>|--delivery-route <route[ | label]>|--delivery-webhook <url>] [--disabled] --yes',
       ...parsed.errors.map((error) => `  ${error}`),
     ].join('\n'));
@@ -133,7 +133,8 @@ async function createReminder(args: readonly string[], ctx: CommandContext): Pro
   const shellPaths = requireShellPaths(ctx);
   const connection = resolveReminderConnectedHostConnection(ctx.platform.configManager, shellPaths.homeDirectory);
   const result = await createReminderSchedule(connection, preview);
-  ctx.print(result.ok ? formatReminderScheduleSuccess(result) : formatReminderScheduleFailure(result));
+  if (!result.ok) throw commandRefusal(formatReminderScheduleFailure(result), undefined, 'COMMAND_FAILED');
+  ctx.print(formatReminderScheduleSuccess(result));
 }
 
 async function editSchedule(args: readonly string[], ctx: CommandContext): Promise<void> {
@@ -141,7 +142,7 @@ async function editSchedule(args: readonly string[], ctx: CommandContext): Promi
     defaultRequestProvenance: `/schedule edit ${args[0] ?? ''}`.trim(),
   });
   if (parsed.errors.length > 0) {
-    ctx.print([
+    throw commandRefusal([
       'Usage: /schedule edit <schedule-id> [--cron <expr>|--every <interval>|--at <iso-time>] [--timezone <tz>] [--stagger-ms <ms>] [--name <text>] [--prompt <text>|--task <text> --success-criteria <text>] [--revision <rev> --yes]',
       ...parsed.errors.map((error) => `  ${error}`),
     ].join('\n'));
@@ -162,7 +163,8 @@ async function editSchedule(args: readonly string[], ctx: CommandContext): Promi
   const shellPaths = requireShellPaths(ctx);
   const connection = resolveAgentConnectedHostConnection(ctx.platform.configManager, shellPaths.homeDirectory);
   const result = await editConnectedSchedule(connection, preview);
-  ctx.print(result.ok ? formatScheduleEditSuccess(result) : formatScheduleEditFailure(result));
+  if (!result.ok) throw commandRefusal(formatScheduleEditFailure(result), undefined, 'COMMAND_FAILED');
+  ctx.print(formatScheduleEditSuccess(result));
 }
 
 export function registerScheduleRuntimeCommands(registry: CommandRegistry): void {

@@ -78,10 +78,10 @@ export function createHomeGraphAutoLinkReader() {
     const selected = slots.flatMap((_slot, index) => readings[index]?.outcome === 'act' && readings[index]?.verdict === 'yes' ? [candidates[index]!.reference] : []);
     const unsettled = readings.some((reading) => !reading || reading.outcome !== 'act' || reading.verdict === 'uncertain');
     if (selected.length > 1) { run.recordAction('ambiguous: several candidates read as the subject'); return { status: 'ambiguous' }; }
-    if (!selected[0]) {
-      run.recordAction(unsettled ? 'unread: subject did not settle' : 'none: no candidate is the subject');
-      return unsettled ? { status: 'unread', reason: 'uncertain' } : { status: 'none' };
-    }
+    // One yes is unique only when every other candidate settled as no: an
+    // unsettled sibling (a twin device) could be the subject too.
+    if (unsettled) { run.recordAction('unread: subject did not settle'); return { status: 'unread', reason: 'uncertain' }; }
+    if (!selected[0]) { run.recordAction('none: no candidate is the subject'); return { status: 'none' }; }
     run.recordAction('linked: settled document subject; exact IDs and write policy remain local');
     return { status: 'linked', reference: selected[0], relation: relation.choice as AutoLinkRelation,
       provenance: Object.freeze({ judgmentDecisionIds: Object.freeze(run.decisionId ? [run.decisionId] : []), requestedModel: run.result.requestedModel, model: run.result.model }) };

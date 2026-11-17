@@ -1,5 +1,7 @@
 // Proves: An agent's answer to a channel message is sent twice, or not at all, when the daemon restarts between storing it and sending it.
 // Red when: A repeated report after a restart sends the answer again, or an answer stored but not sent when the daemon stopped is never sent or is sent on every start.
+// Proves: One rate limit on the send loses the answer on the channel, or a retry repeats the parts of a long answer that already arrived.
+// Red when: dispatchFinalWithRetry gives up on a retryable failure, or deliverFinalExclusive resends delivered parts.
 /**
  * An agent's answer to a channel message reaches the channel once, also when
  * the daemon restarts after sending it and the surface that ran the agent
@@ -13,7 +15,9 @@
  * (its reply goes to the helper's ntfy sender); the ntfy server is a loopback
  * server that records every message it receives. A restart is a second set of
  * these objects over the same files, with the process's ntfy repeat memory
- * cleared as a new process starts without it.
+ * cleared as a new process starts without it. A rate limit is the ntfy server
+ * refusing a request with 429; the pipeline's wait before a retry resolves at
+ * once.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -38,13 +42,18 @@ afterEach(async () => {
   ntfyOutboundDedup.reset();
 });
 
-/** The ntfy server: every message it received, by topic. */
-async function ntfyServer(): Promise<{ readonly url: string; readonly received: Array<{ topic: string; body: string }> }> {
+/** The ntfy server: every message it accepted, by topic. `refuse` answers 429 to the requests it picks, which are not received. */
+async function ntfyServer(refuse: (request: number, body: string) => boolean = () => false): Promise<{ readonly url: string; readonly received: Array<{ topic: string; body: string }> }> {
   const received: Array<{ topic: string; body: string }> = [];
+  let requests = 0;
   const server: Server = createServer((req, res) => {
     let body = '';
     req.on('data', (chunk) => { body += String(chunk); });
-    req.on('end', () => { received.push({ topic: decodeURIComponent((req.url ?? '/').slice(1)), body }); res.writeHead(200).end('{}'); });
+    req.on('end', () => {
+      if (refuse(++requests, body)) { res.writeHead(429, { 'retry-after': '1' }).end('{"error":"limit reached"}'); return; }
+      received.push({ topic: decodeURIComponent((req.url ?? '/').slice(1)), body });
+      res.writeHead(200).end('{}');
+    });
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   cleanups.push(async () => {
@@ -68,7 +77,7 @@ async function daemon(root: string, options: { readonly dies?: () => void } = {}
   });
   await sessionBroker.start();
   const channelPlugins = new ChannelPluginRegistry();
-  const channelReplyPipeline = new ChannelReplyPipeline({ channelPlugins, routeBindings });
+  const channelReplyPipeline = new ChannelReplyPipeline({ channelPlugins, routeBindings, waitBeforeRetry: async () => undefined });
   const helper = new DaemonSurfaceDeliveryHelper({
     pendingSurfaceReplies: new Map<string, PendingSurfaceReply>(),
     channelReplyPipeline, configManager, routeBindings, sessionBroker, channelPlugins,
@@ -176,4 +185,33 @@ test('an answer stored but not yet sent when the daemon stopped is sent after th
   cleanups.push(() => third.stop());
   await third.helper.completeSurfaceReplyFromSurface({ agentId: 'agent-owed', sessionId: session, body: 'the owed answer' });
   expect(ntfy.received).toHaveLength(1);
+});
+
+test('an answer refused once by a rate limit still arrives once, and a retried part of a long answer does not repeat the part already sent', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'gv-delivery-retry-'));
+  cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+  const first = 'A'.repeat(1_200);
+  const second = 'B'.repeat(1_200);
+  // The first request of all, and the first request carrying the second part, are rate limited.
+  let secondPartRefused = false;
+  const ntfy = await ntfyServer((request, body) => {
+    if (request === 1) return true;
+    if (body.includes('BBBB') && !secondPartRefused) { secondPartRefused = true; return true; }
+    return false;
+  });
+  const d = await daemon(root);
+  cleanups.push(() => d.stop());
+  d.configManager.setMany([{ key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfy.url }], { kind: 'owner', surface: 'fixture' });
+
+  const short = await conversation(d, 'topic-short', 'agent-short');
+  await d.helper.completeSurfaceReplyFromSurface({ agentId: 'agent-short', sessionId: short, body: 'a short answer' });
+  expect(ntfy.received.filter((entry) => entry.topic === 'topic-short').map((entry) => entry.body)).toEqual(['a short answer']);
+
+  const long = await conversation(d, 'topic-long', 'agent-long');
+  await d.helper.completeSurfaceReplyFromSurface({ agentId: 'agent-long', sessionId: long, body: `${first}\n\n${second}` });
+  const parts = ntfy.received.filter((entry) => entry.topic === 'topic-long').map((entry) => entry.body);
+  expect(secondPartRefused).toBe(true);
+  // Two messages arrived, each part once, in order.
+  const which = (body: string) => (body.includes('AAAA') ? (body.includes('BBBB') ? 'both' : 'first part') : body.includes('BBBB') ? 'second part' : 'other');
+  expect(parts.map(which)).toEqual(['first part', 'second part']);
 });

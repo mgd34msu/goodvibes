@@ -14,7 +14,7 @@ import type { PreparedToolCall, ToolRegistry, ToolExecutionEffect } from '../too
 import { assertProjectionCurrent, projectionFunction, projectionProperty, ToolInputProjectionError, type ToolPreparedSettingsMutation } from '../tools/input-projection.js';
 import { bindTurnHookDispatcher, type TurnHookOwner } from '../hooks/turn-ownership.js';
 import { getConfigSnapshot, isAutoApproveEnabled } from '../config/index.js';
-import type { BackgroundAgentsMode, PermissionsToolConfig } from '../config/schema.js';
+import type { PermissionsToolConfig } from '../config/schema.js';
 import type { PermissionAttribution, PermissionExecutionOptions, PermissionPromptDecision, PermissionRequestHandler } from './prompt.js';
 import { describeHookChange } from './hook-change-prompt.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -139,6 +139,8 @@ interface CallFactInput {
   readonly landed: RememberedDecision | null;
   readonly policy: PermissionCheckResult | null;
   readonly untrustedRead: boolean;
+  /** The registry's prepared call was declared read-only by its tool's own projection. */
+  readonly declaredReadOnly?: boolean | undefined;
 }
 
 /** A session answer or saved rule that matched a call. */
@@ -865,6 +867,7 @@ export class PermissionManager {
       toolName, args, category, mode, surface: effectSurface, definition, ownerOnly,
       directory: capturedAuthority.directory, tools: permissions.tools, remembered: durable, landed, policy,
       untrustedRead: Array.isArray(exposure) && exposure.length > 0,
+      declaredReadOnly: preparedCall?.registry.isPreparedReadOnly(preparedCall.call) === true,
     }));
     const policyResult = this.policyResultOf(decided, analysis);
     const safety = await this.assessExecutionSafety({
@@ -1193,7 +1196,7 @@ export class PermissionManager {
       rule: i.mode === 'yolo' ? undefined : this.ruleFact(i),
       paths: paths === undefined ? undefined : classifyPaths(paths, i.directory),
       recoverable: declaredRecoverable(i.definition, i.args),
-      ownerOnly: i.ownerOnly, untrustedRead: i.untrustedRead,
+      ownerOnly: i.ownerOnly, untrustedRead: i.untrustedRead, declaredReadOnly: i.declaredReadOnly,
     };
   }
 
@@ -1595,11 +1598,6 @@ export class PermissionManager {
   /** The gate preset the current `permissions.mode` selects. */
   getPreset(): GatePreset {
     return presetForMode(this.getMode());
-  }
-
-  /** Saved background-agent settings no longer create a second execution policy. */
-  getBackgroundAgentsMode(): BackgroundAgentsMode {
-    return 'inherit';
   }
 
   /**

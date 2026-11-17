@@ -3,8 +3,8 @@
  * each tool declares (no model request, no I/O), and the bounded runner every
  * tool loop uses to run them.
  *
- * - A read (declared `read_fs` only, or `concurrency: 'parallel'`) runs beside
- *   any other read.
+ * - A read (declared `read_fs` only, `concurrency: 'parallel'`, or a call in
+ *   one of the tool's declared `readModes`) runs beside any other read.
  * - A write (declared `write_fs` only, with its paths declared) runs beside
  *   reads and writes whose paths it does not overlap.
  * - Everything else (`exec`, undeclared effects, a tool the owner decides,
@@ -16,7 +16,7 @@
  */
 import { isAbsolute, normalize, resolve, sep } from 'node:path';
 import { declaredValues } from '../gate/classify.js';
-import type { ToolDefinition, ToolSideEffect } from '../types/tools.js';
+import { readModeCategory, type ToolDefinition, type ToolSideEffect } from '../types/tools.js';
 import type { ConfigManager } from '../config/manager.js';
 
 /** At most this many calls of one response are in flight when `runtime.maxParallelToolCalls` is not set. */
@@ -66,7 +66,10 @@ export function toolCallLane(definition: ToolDefinition | undefined, args: Recor
   if (definition.concurrency === 'singleton') return { kind: 'alone', reason: 'the tool runs one call at a time' };
   const effects = definition.sideEffects;
   const touchesFiles = effects === undefined || effects.some((effect) => FILE_EFFECTS.has(effect));
-  if (definition.concurrency === 'parallel') {
+  // A call in one of the modes the tool declares read-only reads, whatever its other modes do.
+  const readMode = definition.readModes !== undefined && readModeCategory(definition.readModes, args, 'write') === 'read'
+    && effects !== undefined && !effects.includes('exec');
+  if (definition.concurrency === 'parallel' || readMode) {
     return touchesFiles ? { kind: 'read', paths: touchedPaths(definition, args, workingDirectory) } : { kind: 'read', paths: [] };
   }
   if (effects === undefined || effects.length === 0) return { kind: 'alone', reason: 'undeclared side effects' };

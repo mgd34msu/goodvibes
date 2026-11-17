@@ -46,6 +46,7 @@ import { registerAgentTerminalProcessTools } from '../tools/agent-terminal-proce
 import { registerAgentVibeTool } from '../tools/agent-vibe-tool.ts';
 import { registerAgentWorkspaceTool } from '../tools/agent-workspace-tool.ts';
 import { compactRegisteredToolDefinitions } from '../tools/tool-definition-compaction.ts';
+import { declareAgentReadModes } from '../tools/agent-tool-policy-guard.ts';
 import { wireCapabilityIndex } from './bootstrap-capability-wiring.ts';
 import { registerClientPhoneTool } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 
@@ -160,5 +161,7 @@ export function registerAgentTools(deps: AgentToolRegistrationDeps): void {
       missing: missingCaptureTools,
     });
   }
+  // The harness facades registered here get their read modes like the tools composed before them.
+  declareAgentReadModes(toolRegistry);
   compactRegisteredToolDefinitions(toolRegistry);
 }

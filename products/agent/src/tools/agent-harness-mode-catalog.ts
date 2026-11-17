@@ -173,6 +173,14 @@ export const HARNESS_MODE_DESCRIPTORS: readonly HarnessModeDescriptor[] = [
   { id: 'channel_routing_remove', kind: 'effect', family: 'comms', summary: 'Remove a channel-to-profile routing assignment.', next: 'Check channel_routing after removal.', keywords: ['remove routing', 'delete routing', 'routing remove', 'profile unassign', 'unassign channel'], parameters: ['draftRoute', 'target'] },
 ] as const;
 
+/**
+ * The modes that only read (every kind but `effect`). The catalog's `kind` is
+ * the one source: agent_harness declares these as its read modes, so the gate
+ * classes them as reads and they run beside other reads.
+ */
+export const HARNESS_READ_MODES: readonly AgentHarnessMode[] = Object.freeze(
+  HARNESS_MODE_DESCRIPTORS.filter((descriptor) => descriptor.kind !== 'effect').map((descriptor) => descriptor.id));
+
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }

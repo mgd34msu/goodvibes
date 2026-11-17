@@ -15,7 +15,8 @@
  *   4. the owner-only list;
  *   5. a matching allow rule;
  *   6. the declared-effect defaults: a read inside the allowed directories,
- *      a recoverable write inside them;
+ *      a read of the app's own state, a call its registration declared
+ *      read-only, a recoverable write inside the directories;
  *   7. anything else is a judgment, and only then is a model asked.
  *
  * Untrusted text is never what allows an action: when the turn read some, an
@@ -112,6 +113,12 @@ export interface CallFacts {
   readonly ownerOnly?: OwnerOnlyKind | undefined;
   /** The turn read text anyone can write (the untrusted-content ledger holds an entry for it). */
   readonly untrustedRead: boolean;
+  /**
+   * The tool's registration declared this exact call read-only (its input
+   * projection said so, ToolRegistry.isPreparedReadOnly): the registration,
+   * not a reading, owns that fact.
+   */
+  readonly declaredReadOnly?: boolean | undefined;
 }
 
 /** What settled a fact, for the caller's own records. */
@@ -123,6 +130,8 @@ export type CallClass =
   | { readonly kind: 'judgment' };
 
 const LOCAL_EFFECTS: ReadonlySet<ToolSideEffect> = new Set(['read_fs', 'write_fs']);
+/** What a read may declare and still stay on this machine: files and the app's own state. */
+const LOCAL_READ_EFFECTS: ReadonlySet<ToolSideEffect> = new Set(['read_fs', 'state']);
 
 /** An undeclared tool, or one that runs commands, reaches the network or hands work on, can reach outside. */
 function mayReachOutside(facts: CallFacts): boolean {
@@ -179,12 +188,22 @@ export function classifyCall(mode: GatePresetName, facts: CallFacts): CallClass 
   }
   const effects = facts.sideEffects;
   const paths = facts.paths;
-  if (effects !== undefined && paths !== undefined && paths.every((path) => path.inside)) {
-    if (facts.category === 'read' && effects.every((effect) => effect === 'read_fs')) {
+  // A read is settled by its declaration, as plan mode settles it: one that
+  // declares only files and the app's own state, or a call its registration
+  // declared read-only (it changes and sends nothing, whatever it reads from).
+  // A read of files is settled only when its files are declared and inside.
+  if (facts.category === 'read' && effects !== undefined
+    && (effects.every((effect) => LOCAL_READ_EFFECTS.has(effect)) || (facts.declaredReadOnly === true && !effects.includes('exec')))) {
+    const readsFiles = effects.includes('read_fs');
+    if (!readsFiles || (paths !== undefined && paths.every((path) => path.inside))) {
       return { kind: 'fact', allow: true, basis: 'declared-effect', decision: {
-        state: 'allowed', decidedBy: 'code', reason: 'a read inside the allowed directories',
+        state: 'allowed', decidedBy: 'code',
+        reason: readsFiles ? 'a read inside the allowed directories'
+          : facts.declaredReadOnly === true ? 'a call its tool declared read-only' : 'a read of the app\'s own state',
       } };
     }
+  }
+  if (effects !== undefined && paths !== undefined && paths.every((path) => path.inside)) {
     if (facts.category === 'write' && paths.length > 0 && facts.recoverable && effects.every((effect) => LOCAL_EFFECTS.has(effect))) {
       return { kind: 'fact', allow: true, basis: 'declared-effect', decision: {
         state: 'allowed', decidedBy: 'code', reason: 'a recoverable change inside the allowed directories',

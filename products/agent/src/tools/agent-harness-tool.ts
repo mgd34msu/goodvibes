@@ -64,7 +64,7 @@ import { runWorkspaceAction } from './agent-harness-workspace-action-runner.ts';
 import type { AgentHarnessToolArgs, AgentHarnessToolDeps } from './agent-harness-tool-types.ts';
 import { catalogEnvelope, catalogFilters, effectOutput, error, output, readLimit, readString, requireConfirmedAction, settingLookupArgs } from './agent-harness-tool-utils.ts';
 import { CATALOG_QUERIES as CQ } from './agent-harness-catalog-filters.ts';
-import { describeHarnessMode, HARNESS_MODE_DESCRIPTORS, installedModeDescriptors, listHarnessModes, type AgentHarnessMode } from './agent-harness-mode-catalog.ts';
+import { describeHarnessMode, HARNESS_MODE_DESCRIPTORS, HARNESS_READ_MODES, installedModeDescriptors, listHarnessModes, type AgentHarnessMode } from './agent-harness-mode-catalog.ts';
 import { describeHarnessUiSurface, listHarnessUiSurfaces, openHarnessUiSurface, totalHarnessUiSurfaces } from './agent-harness-ui-surface-metadata.ts';
 import { AGENT_WORKSPACE_CATEGORIES, allWorkspaceActions, buildWorkspaceEditorContext, describeWorkspaceAction, describeWorkspaceCategory, listWorkspaceActions, resolveWorkspaceActionDetail } from './agent-harness-workspace-actions.ts';
 import { connectedHostSummary, describeConnectedHostCapability, settingsPolicySummary } from './agent-harness-metadata.ts';
@@ -197,6 +197,8 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
         additionalProperties: false,
       },
       sideEffects: ['state'],
+      // Every mode but an effect only reads: the gate classes it as a read and it runs beside other reads.
+      readModes: { field: 'mode', values: HARNESS_READ_MODES },
       concurrency: 'serial',
     } satisfies Tool['definition']),
     execute: async (rawArgs, options) => {

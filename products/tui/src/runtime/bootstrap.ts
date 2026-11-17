@@ -80,7 +80,7 @@ import { createRelayReadAccessors } from './relay-reachability-bridge.ts';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { registerStartupProviders } from './startup-provider-registration.ts';
 import { createSerialSteps } from './serial-steps.ts';
-import { startTerminalRoutines } from './terminal-routines.ts';
+import { retryTerminalRoutineMove, startTerminalRoutines } from './terminal-routines.ts';
 
 type ExternalServiceFactories = NonNullable<Parameters<typeof startExternalServices>[3]>;
 
@@ -418,7 +418,21 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // The home's shared housekeeping is the adopted daemon's; with none adopted
   // (not installed, stopped, blocked, disabled) this terminal keeps it.
   const settleHomeHousekeeping = (): void => {
-    services.settleHomeHousekeeping(externalServices.daemonStatus.mode === 'external');
+    const adopted = externalServices.daemonStatus.mode === 'external';
+    services.settleHomeHousekeeping(adopted);
+    if (adopted) retryRoutineMove();
+  };
+  // Routines a start-up move left running nowhere (the daemon could not be
+  // reached then) are moved once a daemon is adopted or comes back.
+  const retryRoutineMove = (): void => {
+    if (!configManager.get('automation.enabled')) return;
+    void retryTerminalRoutineMove({ configManager, automationManager: services.automationManager, homeDirectory: services.homeDirectory })
+      .then((lines) => {
+        if (lines.length === 0) return;
+        systemMessageRouter.low(lines.join('\n'));
+        requestRender();
+      })
+      .catch((error: unknown) => logger.warn('Moving terminal routines to the daemon failed', { error: summarizeError(error) }));
   };
 
   const inspectExternalServices = () => {
@@ -560,6 +574,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   sessionUnionCache.setOnTransition((online) => {
     requestRender();
     daemonHandshake.onLivenessTransition(online);
+    if (online) retryRoutineMove();
   });
   deferredStartup.schedule(
     createPluginStartupTask(
@@ -569,7 +584,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       (message) => systemMessageRouter.high(message),
     ),
   );
-  deferredStartup.schedule({
+  const externalServicesStarted = deferredStartup.schedule({
     label: 'external-services',
     run: async () => {
       // Register the persistent companion-pairing token as the daemon's shared
@@ -652,6 +667,9 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     deferredStartup.schedule({
       label: 'automation',
       run: async () => {
+        // The daemon may be being started or attached by the external-services
+        // task; moving before it answers would report routines as not running.
+        await externalServicesStarted;
         const lines = await startTerminalRoutines({ configManager, automationManager: services.automationManager, homeDirectory: services.homeDirectory });
         if (lines.length > 0) {
           systemMessageRouter.low(lines.join('\n'));

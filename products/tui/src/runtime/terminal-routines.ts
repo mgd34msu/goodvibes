@@ -15,7 +15,8 @@
  * holder exits, however it exits, and another open terminal takes it over on
  * its next try.
  */
-import { existsSync, readFileSync, renameSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, renameSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import {
   AutomationJobStore,
   formatEveryInterval,
@@ -117,9 +118,14 @@ export interface TerminalRoutineMove {
   readonly moved: number;
   /** Lines for the person; empty when there was nothing to move. */
   readonly lines: readonly string[];
+  /**
+   * True while routines in this terminal's store run nowhere because the
+   * daemon could not be reached; the next attach to the daemon tries again.
+   */
+  readonly waiting: boolean;
 }
 
-const NOTHING_MOVED: TerminalRoutineMove = { moved: 0, lines: [] };
+const NOTHING_MOVED: TerminalRoutineMove = { moved: 0, lines: [], waiting: false };
 
 /**
  * Routine files this process found nothing to move from: the daemon already
@@ -127,6 +133,67 @@ const NOTHING_MOVED: TerminalRoutineMove = { moved: 0, lines: [] };
  * default setup), or none is left to move. Later calls skip them at no cost.
  */
 const settledStores = new Set<string>();
+
+/** Routine files whose routines were left running nowhere because the daemon could not be reached. */
+const waitingStores = new Set<string>();
+
+/** One move per routine file at a time in this process (start-up, an attach and /schedule can overlap). */
+const movesInFlight = new Map<string, Promise<TerminalRoutineMove>>();
+
+/** Routine files this process found no claimed copy of (see recoverClaimedStore). */
+const recoveredStores = new Set<string>();
+
+function processIsGone(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH';
+  }
+}
+
+/**
+ * Earlier builds renamed the routine file to `<path>.moving-<pid>-<ts>` before
+ * sending its routines, so a terminal that exited mid-move left them in a file
+ * nothing read. When the store path is free and the process that claimed such
+ * a file is gone, the newest one is put back so its routines are moved (or run)
+ * again. Cost: one directory read per process, and only while the store path
+ * is absent.
+ */
+function recoverClaimedStore(path: string): void {
+  if (recoveredStores.has(path) || existsSync(path)) return;
+  const prefix = `${basename(path)}.moving-`;
+  let claimed: { readonly name: string; readonly at: number } | null = null;
+  try {
+    for (const name of readdirSync(dirname(path))) {
+      if (!name.startsWith(prefix)) continue;
+      const [pid, at] = name.slice(prefix.length).split('-').map(Number);
+      if (!Number.isInteger(pid) || !Number.isFinite(at) || !processIsGone(pid!)) continue;
+      if (!claimed || at! > claimed.at) claimed = { name, at: at! };
+    }
+  } catch {
+    recoveredStores.add(path);
+    return;
+  }
+  if (!claimed) {
+    recoveredStores.add(path);
+    return;
+  }
+  try {
+    renameSync(join(dirname(path), claimed.name), path);
+    logger.info('Terminal routines: put back a routine file an interrupted move left claimed', { path, from: claimed.name });
+  } catch (error) {
+    logger.warn('Terminal routines: a routine file an interrupted move left claimed could not be put back', { path, from: claimed.name, error: summarizeError(error) });
+    recoveredStores.add(path);
+  }
+}
+
+/** The line for routines that run nowhere because the daemon could not be reached. */
+function notRunningLine(path: string, count: number, reason: string): string {
+  return `${count} routine(s) in ${path} are not running: the daemon could not be reached (${reason}). `
+    + 'Start the daemon (goodvibes service start), or set daemon.enabled to false to run them in this terminal; '
+    + 'this terminal hands them to the daemon as soon as it reaches it.';
+}
 
 /** A routine that is archived or whose one run time has passed is not moved. */
 function finishedRoutine(job: { readonly archivedAt?: unknown; readonly schedule?: unknown }, now: number): boolean {
@@ -168,9 +235,12 @@ async function daemonRoutineIds(rpc: OperatorRpcAvailable): Promise<ReadonlySet<
 
 interface SentRoutines {
   readonly moved: readonly string[];
+  readonly movedIds: readonly string[];
   readonly skipped: readonly string[];
   readonly kept: readonly AutomationJob[];
   readonly failures: readonly string[];
+  /** The daemon stopped answering part way; the kept routines were not refused, only not sent. */
+  readonly daemonStopped: boolean;
 }
 
 /**
@@ -180,6 +250,7 @@ interface SentRoutines {
  */
 async function sendRoutines(rpc: OperatorRpcAvailable, jobs: readonly AutomationJob[], now: number, held: ReadonlySet<string>): Promise<SentRoutines> {
   const moved: string[] = [];
+  const movedIds: string[] = [];
   const skipped: string[] = [];
   const kept: AutomationJob[] = [];
   const failures: string[] = [];
@@ -197,13 +268,14 @@ async function sendRoutines(rpc: OperatorRpcAvailable, jobs: readonly Automation
     try {
       const created = await rpc.platformClient.operator.invoke('automation.jobs.create', moveInput(job));
       moved.push(`${created.id} (${job.name})`);
+      movedIds.push(job.id);
     } catch (error) {
       kept.push(job);
       failures.push(`${job.name}: ${describeOperatorRpcError(error)}`);
       daemonStopped = !refusedOnlyThisRoutine(error);
     }
   }
-  return { moved, skipped, kept, failures };
+  return { moved, movedIds, skipped, kept, failures, daemonStopped };
 }
 
 function moveLines(sent: SentRoutines, keptNote: string): readonly string[] {
@@ -227,14 +299,15 @@ function moveLines(sent: SentRoutines, keptNote: string): readonly string[] {
  * every routine of its own store, so when it already holds every routine still
  * to run, the file is its own store (the default setup: the terminal and the
  * daemon keep routines in the same file) or was moved already, and it is left
- * alone. When it holds none, the file is claimed by renaming it, so two
- * terminals starting together cannot both send it. When it holds some (an
- * earlier move stopped part way), only the missing ones are sent and the file
- * stays where it is. Each routine keeps its id, so a create sent again
- * returns the first one instead of a copy. A routine the daemon refused, or
- * one not sent because the daemon stopped answering, stays in the file and is
- * tried again by the next `/schedule` or start. The local runner, if this
- * terminal ran routines while the daemon was off, stops first.
+ * alone. Otherwise the routines it does not hold are sent from the file where
+ * it is: each keeps its id, so a create sent twice (two terminals starting
+ * together, or a reply that was lost) returns the first one instead of a copy,
+ * and a terminal that exits part way leaves every unsent routine in the file
+ * for the next start. Only once every routine still to run is on the daemon is
+ * the file renamed out of the way. A routine the daemon refused, or one not
+ * sent because the daemon stopped answering, stays in the file and is tried
+ * again by the next attach to the daemon, `/schedule` or start. The local
+ * runner, if this terminal ran routines while the daemon was off, stops first.
  * Cost: one file read and one `automation.jobs.list` the first time in a
  * process; nothing after that once the file is settled.
  */
@@ -249,13 +322,32 @@ export async function moveTerminalRoutinesToDaemon(
   // This terminal ran routines itself (daemon off) and may have added some since the file was settled.
   if (runner?.holdsLock) settledStores.delete(path);
   runner?.release();
+  const running = movesInFlight.get(path);
+  if (running) return running;
+  const move = moveStore(path, rpc)
+    .then((result) => {
+      if (result.waiting) waitingStores.add(path);
+      else waitingStores.delete(path);
+      return result;
+    })
+    .finally(() => movesInFlight.delete(path));
+  movesInFlight.set(path, move);
+  return move;
+}
+
+function unreadableStore(path: string, error: unknown): TerminalRoutineMove {
+  return { moved: 0, waiting: false, lines: [`This terminal's routine file ${path} could not be read (${summarizeError(error)}); its routines were not moved to the daemon. Fix or remove the file, then run /schedule list.`] };
+}
+
+async function moveStore(path: string, rpc: OperatorRpcAvailable): Promise<TerminalRoutineMove> {
+  recoverClaimedStore(path);
   if (settledStores.has(path) || !existsSync(path)) return NOTHING_MOVED;
   const now = Date.now();
   let ids: { readonly all: readonly string[]; readonly movable: readonly string[] };
   try {
     ids = readRoutineIds(path, now);
   } catch (error) {
-    return { moved: 0, lines: [`This terminal's routine file ${path} could not be read (${summarizeError(error)}); its routines were not moved to the daemon. Fix or remove the file, then run /schedule list.`] };
+    return unreadableStore(path, error);
   }
   if (ids.movable.length === 0) {
     settledStores.add(path);
@@ -265,50 +357,46 @@ export async function moveTerminalRoutinesToDaemon(
   try {
     held = await daemonRoutineIds(rpc);
   } catch (error) {
-    return { moved: 0, lines: [`The daemon could not list its routines (${describeOperatorRpcError(error)}), so the routines in ${path} were not moved to it; the next /schedule tries again.`] };
+    return { moved: 0, waiting: true, lines: [notRunningLine(path, ids.movable.length, describeOperatorRpcError(error))] };
   }
   if (ids.movable.every((id) => held.has(id))) {
     settledStores.add(path);
     return NOTHING_MOVED;
   }
-  if (ids.all.some((id) => held.has(id))) {
-    // Part of this file is on the daemon already: send the rest and leave the file in place.
-    let jobs: readonly AutomationJob[];
-    try {
-      jobs = (await new AutomationJobStore({ path }).load()).jobs;
-    } catch (error) {
-      return { moved: 0, lines: [`This terminal's routine file ${path} could not be read (${summarizeError(error)}); its routines were not moved to the daemon. Fix or remove the file, then run /schedule list.`] };
-    }
-    const sent = await sendRoutines(rpc, jobs, now, held);
-    return { moved: sent.moved.length, lines: moveLines({ ...sent, skipped: [] }, `still in ${path} and tried again by the next /schedule`) };
-  }
-  const claimed = `${path}.moving-${process.pid}-${now}`;
-  try {
-    renameSync(path, claimed);
-  } catch {
-    // Another terminal claimed it a moment ago, or it is gone.
-    return NOTHING_MOVED;
-  }
   let jobs: readonly AutomationJob[];
   try {
-    jobs = (await new AutomationJobStore({ path: claimed }).load()).jobs;
+    jobs = (await new AutomationJobStore({ path }).load()).jobs;
   } catch (error) {
-    if (!existsSync(path)) renameSync(claimed, path);
-    return { moved: 0, lines: [`This terminal's routine file ${path} could not be read (${summarizeError(error)}); its routines were not moved to the daemon. Fix or remove the file, then run /schedule list.`] };
+    return unreadableStore(path, error);
   }
   const sent = await sendRoutines(rpc, jobs, now, held);
-  let keptAt = path;
   if (sent.kept.length > 0) {
-    // A file at the old path now holds routines made since (daemon off in between); never overwrite it.
-    if (existsSync(path)) keptAt = `${path}.not-moved-${now}`;
-    writeJsonFileAtomic(keptAt, { version: 1, jobs: sent.kept }, { durable: true, mode: 0o600 });
+    // Finished routines are named once, when the file is retired, not on every retry.
+    const keptNote = sent.daemonStopped
+      ? `still in ${path}; they are not running until they reach the daemon, and this terminal tries again as soon as it reaches it`
+      : `still in ${path} and tried again by the next /schedule`;
+    return { moved: sent.moved.length, waiting: sent.daemonStopped, lines: moveLines({ ...sent, skipped: [] }, keptNote) };
   }
-  renameSync(claimed, `${path}.moved-to-daemon-${now}`);
-  if (sent.moved.length === 0 && sent.skipped.length === 0 && sent.failures.length === 0) return NOTHING_MOVED;
-  return {
-    moved: sent.moved.length,
-    lines: moveLines(sent, `kept in ${keptAt}${keptAt === path ? ' and tried again by the next /schedule' : '; move that file to the old name to try again'}`),
-  };
+  retireMovedStore(path, now, new Set([...held, ...sent.movedIds]));
+  if (sent.moved.length === 0 && sent.skipped.length === 0) return NOTHING_MOVED;
+  return { moved: sent.moved.length, waiting: false, lines: moveLines(sent, '') };
+}
+
+/**
+ * Renames a routine file whose routines are all on the daemon, so this terminal
+ * never runs them as well if the daemon is turned off later. A routine added to
+ * the file since it was read (this terminal ran with the daemon off in between)
+ * keeps the file in place for the next start to send.
+ */
+function retireMovedStore(path: string, now: number, onDaemon: ReadonlySet<string>): void {
+  try {
+    if (!readRoutineIds(path, now).movable.every((id) => onDaemon.has(id))) return;
+    renameSync(path, `${path}.moved-to-daemon-${now}`);
+    settledStores.add(path);
+  } catch (error) {
+    // Left in place: the next start finds every routine on the daemon and leaves it alone.
+    logger.warn('Terminal routines: a moved routine file could not be renamed', { path, error: summarizeError(error) });
+  }
 }
 
 /**
@@ -396,10 +484,35 @@ export function localRoutineRunnerFor(
   return runner;
 }
 
+/** What a terminal with the daemon setting on does with its routine file now. */
+async function moveForStart(deps: {
+  readonly configManager: ConfigManager;
+  readonly automationManager: Pick<AutomationManager, 'start' | 'stop'>;
+  readonly homeDirectory: string;
+}): Promise<TerminalRoutineMove> {
+  const { configManager, automationManager } = deps;
+  const rpc = resolveOperatorRpc({ configManager, homeDirectory: deps.homeDirectory });
+  if (rpc.available) return moveTerminalRoutinesToDaemon(configManager, rpc, automationManager);
+  const path = terminalRoutineStorePath(configManager);
+  if (!path) return NOTHING_MOVED;
+  recoverClaimedStore(path);
+  if (!existsSync(path)) return NOTHING_MOVED;
+  let movable: number;
+  try {
+    movable = readRoutineIds(path, Date.now()).movable.length;
+  } catch (error) {
+    return unreadableStore(path, error);
+  }
+  if (movable === 0) return NOTHING_MOVED;
+  waitingStores.add(path);
+  return { moved: 0, waiting: true, lines: [notRunningLine(path, movable, rpc.reason)] };
+}
+
 /**
- * Start-up step, run when automation is on: with the daemon on, move any routines this terminal kept to
- * it (nothing runs here); with it off, run them here when this terminal holds
- * the lock. Returns lines worth showing (only when something was moved).
+ * Start-up step, run when automation is on: with the daemon on, move any
+ * routines this terminal kept to it (nothing runs here), and say so when they
+ * could not be moved, since then they run nowhere; with it off, run them here
+ * when this terminal holds the lock. Returns lines worth showing.
  */
 export async function startTerminalRoutines(deps: {
   readonly configManager: ConfigManager;
@@ -407,16 +520,24 @@ export async function startTerminalRoutines(deps: {
   readonly homeDirectory: string;
 }): Promise<readonly string[]> {
   const { configManager, automationManager } = deps;
-  if (resolveDaemonEnabled(configManager)) {
-    const rpc = resolveOperatorRpc({ configManager, homeDirectory: deps.homeDirectory });
-    if (!rpc.available) return [];
-    const move = await moveTerminalRoutinesToDaemon(configManager, rpc, automationManager);
-    if (move.moved === 0) {
-      if (move.lines.length > 0) logger.warn('Terminal routines were not moved to the daemon at start', { detail: move.lines.join(' ') });
-      return [];
-    }
-    return move.lines;
-  }
+  if (resolveDaemonEnabled(configManager)) return (await moveForStart(deps)).lines;
   await localRoutineRunnerFor(automationManager, configManager)?.ensure();
   return [];
+}
+
+/**
+ * Run after this terminal attaches to the daemon: when an earlier try left
+ * routines running nowhere because the daemon could not be reached, try the
+ * move again. Lines are returned only when something changed; the person was
+ * already told the routines were waiting. Free when nothing is waiting.
+ */
+export async function retryTerminalRoutineMove(deps: {
+  readonly configManager: ConfigManager;
+  readonly automationManager: Pick<AutomationManager, 'start' | 'stop'>;
+  readonly homeDirectory: string;
+}): Promise<readonly string[]> {
+  const path = terminalRoutineStorePath(deps.configManager);
+  if (!path || !waitingStores.has(path) || !resolveDaemonEnabled(deps.configManager)) return [];
+  const move = await moveForStart(deps);
+  return move.waiting ? [] : move.lines;
 }

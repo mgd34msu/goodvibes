@@ -11,6 +11,7 @@ import type { ModelPickerModal } from './model-picker.js';
 import type { CapabilityFilter, CategoryFilter } from './model-picker-types.js';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { isTextBackspace } from './delete-key-policy.js';
+import { runPickedCommand } from './command-registry.js';
 export interface ModelPickerCommandContext {
   readonly provider: {
     readonly providerRegistry: Pick<import('@goodvibes-jev/engine/platform/platform/providers').ProviderRegistry, 'getSelectableModels'>;
@@ -21,6 +22,8 @@ export interface ModelPickerCommandContext {
       }
     | undefined;
   readonly executeCommand?: ((name: string, args: string[]) => Promise<boolean>) | undefined;
+  /** Says a picked command's refusal or failure in the conversation. */
+  readonly print?: ((message: string) => void) | undefined;
 }
 export interface ModelPickerTokenState<Context, Picker extends ModelPickerModal> {
   modelPicker: Picker;
@@ -199,7 +202,14 @@ export function createModelPickerTokenHandler<Context extends ModelPickerCommand
         else if (token.logicalName === 'g') picker.cycleGroupBy();
         else if (policy.extraControls && token.logicalName === 'f') togglePin(state);
         else if (policy.extraControls && token.logicalName === 'r') {
-          void state.commandContext?.executeCommand?.('refresh-models', []);
+          const context = state.commandContext;
+          if (context) {
+            void runPickedCommand(context.executeCommand, 'refresh-models', [], (message) => {
+              if (context.print) context.print(message);
+              else logger.warn('model picker: refresh-models was not run', { message });
+              state.requestRender();
+            });
+          }
         }
       }
     } else if (token.type === 'text') {

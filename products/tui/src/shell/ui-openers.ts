@@ -2,6 +2,7 @@ import { createModelPickerCommandOpeners } from '@goodvibes-jev/engine/terminal-
 import { createSettingsWorkspaceOpener } from '@goodvibes-jev/engine/terminal-shell/shell-ui-openers';
 import { modelPickerCatalogServices } from '@goodvibes-jev/engine/terminal-shell/model-picker-targets';
 import { createCommonShellUiOpeners } from '@goodvibes-jev/engine/terminal-shell/shell-ui-openers';
+import { runPickedCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
 import { buildConversationModelPickerTargets, selectedModelPickerRoute } from '@goodvibes-jev/engine/terminal-shell/model-picker-targets';
 import {
   buildConfiguredViaMap,
@@ -391,7 +392,8 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
       describe: (id) => (id === 'model' ? commandContext.session.runtime.model || undefined : undefined),
       onRun: (entry, mode) => {
         if (mode === 'run' && commandContext.executeCommand) {
-          void commandContext.executeCommand(entry.id, []).finally(() => render());
+          // A command gone since the palette opened, or one that refuses, says so like a typed one.
+          void runPickedCommand(commandContext.executeCommand, entry.id, [], (message) => commandContext.print(message)).finally(() => render());
           return;
         }
         // Fill the composer with the command (and a trailing space so the

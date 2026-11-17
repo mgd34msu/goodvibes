@@ -1,6 +1,7 @@
 import { createShellCoreActions } from '@goodvibes-jev/engine/terminal-shell/shell-core-actions';
 import { createBasicShellCommands, createShellNavigationCommands } from '@goodvibes-jev/engine/terminal-shell/basic-shell-commands';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import { runPickedCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
 import type { SelectionItem } from '../selection-modal.ts';
 import { executeCommitAll } from './quit-shared.ts';
 import { startFreshConversation } from './fresh-conversation.ts';
@@ -134,7 +135,8 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
         ctx.openSelection('Help: Commands', items, { allowSearch: true, primaryVerbLabel: 'Run' }, (result) => {
           if (!result) return;
           const name = result.item.id;
-          void (ctx.executeCommand?.(name, []) ?? registry.execute(name, [], ctx));
+          // A command that needs arguments refuses with its usage; that is printed, not left unhandled.
+          void runPickedCommand(ctx.executeCommand ?? ((command, args) => registry.execute(command, args, ctx)), name, [], (message) => ctx.print(message));
         });
         return;
       }

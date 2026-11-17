@@ -5,6 +5,7 @@ import { readShellFrameFacts, createShellSubmissionPorts, createUiEventPublisher
 import { join } from 'node:path';
 import { sanitizeSessionName } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { createHerdrSessionReporter } from '@goodvibes-jev/engine/terminal-shell';
+import { runPickedCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
 import { CommandReadings } from './input/commands/command-readings.ts';
 import { TestRuns } from './input/commands/test-runtime.ts';
 import { wireHostPairingShell } from './shell/host-pairing-shell.ts';
@@ -1560,7 +1561,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       retry: () => {
         if (!resubmitLastTurn()) systemMessageRouter.high('[Retry] Nothing to send again: the failed prompt was already sent again, or a prompt sent after it has completed.');
       },
-      openSession: (sessionId) => { void commandContext.executeCommand?.('session', ['resume', sessionId]); },
+      openSession: (sessionId) => { void runPickedCommand(commandContext.executeCommand, 'session', ['resume', sessionId], (message) => commandContext.print(message)).finally(render); },
       render,
     })) return;
 

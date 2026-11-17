@@ -13,6 +13,7 @@
 import type { CommandContext } from '../input/command-registry.ts';
 import type { InputHandler } from '../input/handler.ts';
 import type { SurfaceModal } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
+import { runPickedCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
 import type { ShellViews } from '../views/builtin-views.ts';
 import type { ViewPanelAdapter } from '../views/view-panel-adapter.ts';
 import { AgentsModal } from '../input/agents-modal.ts';
@@ -89,7 +90,7 @@ export function wireViewOpeners(options: WireViewOpenersOptions): void {
     show(new UsageModal({
       tracker: views.usage,
       tab: opts.tab,
-      compact: () => { void commandContext.executeCommand?.('compact', []).finally(render); },
+      compact: () => { void runPickedCommand(commandContext.executeCommand, 'compact', [], (message) => commandContext.print(message)).finally(render); },
       requestRender: render,
     }));
   };

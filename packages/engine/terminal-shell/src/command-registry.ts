@@ -4,6 +4,7 @@ import type { SlashCommandRawRest } from './slash-command-parser.js';
 import { captureNativeConversationInput, type NativeConversationInput } from './native/native-conversation-input.js';
 import type { DaemonWriteRefusal } from '@goodvibes-jev/engine/platform/platform/config';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
 
 /**
  * The `afterCommand` both terminal apps give their registry: a setting a
@@ -23,6 +24,28 @@ export function reportDaemonWriteRefusals(context: {
     }
   };
 }
+/**
+ * Run a command picked from a list (the command palette, the /help list, a
+ * view's button, a key that starts a command) and say what happened: an
+ * unknown name and a refusal or failure are printed like a typed command's,
+ * never left as an unhandled rejection. The returned promise always settles
+ * normally. A caller that needs the error itself calls the registry directly.
+ */
+export async function runPickedCommand(
+  run: ((name: string, args: string[]) => Promise<boolean>) | undefined,
+  name: string,
+  args: string[],
+  report: (message: string) => void,
+): Promise<void> {
+  try {
+    const handled = run ? await run(name, args) : false;
+    if (!handled) report(`Unknown command: /${name}. Type /help for available commands.`);
+  } catch (error) {
+    const refused = readRefusal(error);
+    report(refused ? formatRefusal(refused) : `Command /${name} failed: ${summarizeError(error)}`);
+  }
+}
+
 export interface TerminalSlashCommand<Context> {
   name: string;
   aliases?: string[] | undefined;

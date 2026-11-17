@@ -59,13 +59,28 @@ export interface PeerClientAcpSnapshot {
   readonly activeConnections: readonly AcpConnection[];
 }
 
+/**
+ * One peer's place in the whole snapshot: which records it has, by id. The
+ * records themselves are in the snapshot's lists (or, for one peer in full,
+ * from `peers.getSnapshot(peerId)`), so nothing is listed twice.
+ */
+export interface PeerClientPeerIndexEntry {
+  readonly peerId: string;
+  readonly hasPeer: boolean;
+  readonly hasSession: boolean;
+  readonly hasRunnerContract: boolean;
+  readonly pairRequestIds: readonly string[];
+  readonly workIds: readonly string[];
+  readonly artifactIds: readonly string[];
+}
+
 export interface PeerClientSnapshot {
   readonly capturedAt: number;
   readonly nodeHostContract: DistributedNodeHostContract;
   readonly acp: PeerClientAcpSnapshot;
   readonly pairing: PeerClientPairingSnapshot;
   readonly peers: readonly DistributedPeerRecord[];
-  readonly peerSnapshots: readonly PeerClientPeerSnapshot[];
+  readonly peerSnapshots: readonly PeerClientPeerIndexEntry[];
   readonly work: readonly DistributedPendingWork[];
   readonly runners: PeerClientRunnersSnapshot;
   readonly supervisor: RemoteSupervisorSnapshot;
@@ -190,24 +205,6 @@ function countRequests(
   };
 }
 
-function collectPeerIds(
-  peers: readonly DistributedPeerRecord[],
-  contracts: readonly RemoteRunnerContract[],
-  sessions: readonly RemoteSessionStateSnapshot[],
-  requests: readonly DistributedRuntimePairRequest[],
-  work: readonly DistributedPendingWork[],
-): readonly string[] {
-  const ids = new Set<string>();
-  for (const peer of peers) ids.add(peer.id);
-  for (const contract of contracts) ids.add(contract.runnerId);
-  for (const session of sessions) ids.add(session.runnerId);
-  for (const request of requests) {
-    if (request.peerId) ids.add(request.peerId);
-    if (request.requestedId) ids.add(request.requestedId);
-  }
-  for (const item of work) ids.add(item.peerId);
-  return [...ids].sort();
-}
 
 function buildAcpSnapshot(store: RuntimeStore): PeerClientAcpSnapshot {
   const state = store.getState().acp;
@@ -227,57 +224,90 @@ interface PeerListing {
   readonly work: readonly DistributedPendingWork[];
   readonly contracts: readonly RemoteRunnerContract[];
   readonly artifacts: readonly RemoteExecutionArtifact[];
-  readonly sessions: readonly RemoteSessionStateSnapshot[];
+  readonly supervisor: RemoteSupervisorSnapshot;
 }
 
+/**
+ * Reads each collection once. The supervisor snapshot is taken first: it is
+ * the one place that brings the runner contracts up to date with the agents in
+ * the store, so the contract list read after it is current.
+ */
 function readPeerListing(deps: PeerClientDependencies): PeerListing {
-  deps.remoteRunnerRegistry.ensureContractsFromStore(deps.runtimeStore);
+  const supervisor = deps.remoteSupervisor.getSnapshot(deps.runtimeStore);
   return {
+    supervisor,
     peers: deps.distributedRuntime.listPeers(undefined, ALL),
     pairRequests: deps.distributedRuntime.listPairRequests(ALL),
     work: deps.distributedRuntime.listWork(ALL),
     contracts: deps.remoteRunnerRegistry.listContracts(),
     artifacts: deps.remoteRunnerRegistry.listArtifacts(),
-    sessions: deps.remoteSupervisor.getSnapshot(deps.runtimeStore).sessions,
   };
 }
 
-function peerSnapshotFrom(listing: PeerListing, peerId: string): PeerClientPeerSnapshot | null {
-  const peer = listing.peers.find((entry) => entry.id === peerId) ?? null;
-  const runnerContract = listing.contracts.find((entry) => entry.runnerId === peerId) ?? null;
-  const pairRequests = listing.pairRequests.filter((request) => request.peerId === peerId || request.requestedId === peerId);
-  const pendingWork = listing.work.filter((item) => item.peerId === peerId);
-  const artifacts = listing.artifacts.filter((artifact) => artifact.runnerId === peerId);
-  const session = listing.sessions.find((entry) => entry.runnerId === peerId) ?? null;
-  if (!peer && !runnerContract && !session && pairRequests.length === 0 && pendingWork.length === 0 && artifacts.length === 0) {
-    return null;
+interface PeerRecords {
+  peer: DistributedPeerRecord | null;
+  session: RemoteSessionStateSnapshot | null;
+  runnerContract: RemoteRunnerContract | null;
+  readonly pairRequests: DistributedRuntimePairRequest[];
+  readonly pendingWork: DistributedPendingWork[];
+  readonly artifacts: RemoteExecutionArtifact[];
+}
+
+/** Every record grouped by peer id, in one pass over each list. */
+function indexByPeer(listing: PeerListing): Map<string, PeerRecords> {
+  const index = new Map<string, PeerRecords>();
+  const at = (peerId: string): PeerRecords => {
+    let entry = index.get(peerId);
+    if (!entry) {
+      entry = { peer: null, session: null, runnerContract: null, pairRequests: [], pendingWork: [], artifacts: [] };
+      index.set(peerId, entry);
+    }
+    return entry;
+  };
+  for (const peer of listing.peers) at(peer.id).peer ??= peer;
+  for (const contract of listing.contracts) at(contract.runnerId).runnerContract ??= contract;
+  for (const session of listing.supervisor.sessions) at(session.runnerId).session ??= session;
+  for (const request of listing.pairRequests) {
+    if (request.peerId) at(request.peerId).pairRequests.push(request);
+    if (request.requestedId && request.requestedId !== request.peerId) at(request.requestedId).pairRequests.push(request);
   }
-  return { peerId, peer, session, runnerContract, pairRequests, pendingWork, artifacts };
+  for (const item of listing.work) at(item.peerId).pendingWork.push(item);
+  for (const artifact of listing.artifacts) at(artifact.runnerId).artifacts.push(artifact);
+  return index;
 }
 
 function buildPeerSnapshot(deps: PeerClientDependencies, peerId: string): PeerClientPeerSnapshot | null {
-  return peerSnapshotFrom(readPeerListing(deps), peerId);
+  const records = indexByPeer(readPeerListing(deps)).get(peerId);
+  return records ? { peerId, ...records } : null;
 }
 
-function buildPeerSnapshots(listing: PeerListing): readonly PeerClientPeerSnapshot[] {
-  const peerIds = collectPeerIds(listing.peers, listing.contracts, listing.sessions, listing.pairRequests, listing.work);
-  const snapshots = peerIds
-    .map((peerId) => peerSnapshotFrom(listing, peerId))
-    .filter((snapshot): snapshot is PeerClientPeerSnapshot => snapshot !== null);
-  return Object.freeze(snapshots);
+function buildPeerIndex(listing: PeerListing): readonly PeerClientPeerIndexEntry[] {
+  const index = indexByPeer(listing);
+  return Object.freeze([...index.keys()].sort().map((peerId) => {
+    const records = index.get(peerId)!;
+    return Object.freeze({
+      peerId,
+      hasPeer: records.peer !== null,
+      hasSession: records.session !== null,
+      hasRunnerContract: records.runnerContract !== null,
+      pairRequestIds: records.pairRequests.map((request) => request.id),
+      workIds: records.pendingWork.map((item) => item.id),
+      artifactIds: records.artifacts.map((artifact) => artifact.id),
+    });
+  }));
 }
 
 function buildSnapshot(deps: PeerClientDependencies): PeerClientSnapshot {
   const listing = readPeerListing(deps);
   const pools = deps.remoteRunnerRegistry.listPools();
-  const supervisor = deps.remoteSupervisor.getSnapshot(deps.runtimeStore);
+  const supervisor = listing.supervisor;
   return Object.freeze({
     capturedAt: Date.now(),
     nodeHostContract: deps.distributedRuntime.getNodeHostContract(),
     acp: buildAcpSnapshot(deps.runtimeStore),
     pairing: countRequests(listing.pairRequests.slice(0, SNAPSHOT_PAIR_REQUESTS), listing.pairRequests),
     peers: listing.peers.slice(0, SNAPSHOT_PEERS),
-    peerSnapshots: buildPeerSnapshots(listing),
+    peerSnapshots: buildPeerIndex(listing),
     work: listing.work.slice(0, SNAPSHOT_WORK),
     runners: {
       pools,
@@ -313,7 +343,8 @@ export function createPeerClient(deps: PeerClientDependencies): PeerClient {
         return resolved.distributedRuntime.listPeers(kind, limit);
       },
       get(peerId: string): DistributedPeerRecord | null {
-        return resolved.distributedRuntime.listPeers(undefined, ALL).find((peer) => peer.id === peerId) ?? null;
+        for (const peer of resolved.distributedRuntime.listPeers(undefined, ALL)) if (peer.id === peerId) return peer;
+        return null;
       },
       getSnapshot(peerId: string): PeerClientPeerSnapshot | null {
         return buildPeerSnapshot(resolved, peerId);

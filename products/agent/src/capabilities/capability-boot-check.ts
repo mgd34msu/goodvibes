@@ -3,7 +3,7 @@ import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools
 import { registerBuiltinCapabilities } from './builtin-capabilities.ts';
 import { resolveCapabilityIndex } from './capability-index.ts';
 import { installCapabilityResolver, refreshCapabilityIndex } from './capability-snapshot.ts';
-import type { ProbeContext } from './capability-probe-runner.ts';
+import type { McpServerPosture, ProbeContext } from './capability-probe-runner.ts';
 import type { CapabilityIndexReport } from './capability-types.ts';
 
 /**
@@ -25,11 +25,11 @@ export interface CapabilityBootCheckInput {
   readonly homeDirectory: string;
   readonly workingDirectory: string;
   /** Answers whether a config key holds a value. Never returns the value. */
-  readonly configValuePresent: (key: string) => boolean;
+  readonly configValuePresent: ProbeContext['configValuePresent'];
   /** Answers whether a secret-store entry holds a value. Never returns the value. */
-  readonly secretPresent?: (key: string) => boolean;
-  /** Live MCP posture, when this session has an MCP client. */
-  readonly mcpServers?: ProbeContext['mcpServers'];
+  readonly secretPresent?: ProbeContext['secretPresent'];
+  /** Live MCP posture (and why it could not be read), when this session has an MCP client. */
+  readonly mcpServers?: McpServerPosture;
   readonly mcpToolNames?: Iterable<string>;
   /** Operator method ids the daemon actually serves. */
   readonly servedOperatorMethodIds?: Iterable<string>;
@@ -44,7 +44,8 @@ export function buildProbeContext(input: CapabilityBootCheckInput): ProbeContext
   }
   return {
     registeredToolNames,
-    mcpServers: input.mcpServers ?? [],
+    mcpServers: input.mcpServers?.servers ?? [],
+    ...(input.mcpServers?.unreadable ? { mcpServersUnreadable: input.mcpServers.unreadable } : {}),
     mcpToolNames: new Set(input.mcpToolNames ?? []),
     servedOperatorMethodIds: new Set(input.servedOperatorMethodIds ?? []),
     configValuePresent: input.configValuePresent,

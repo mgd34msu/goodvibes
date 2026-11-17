@@ -1007,7 +1007,7 @@ export class SecretsManager {
   resolveLocalCredentialSnapshot(key: string):
     | { readonly state: 'resolved'; readonly value: string; readonly revision: string }
     | { readonly state: 'absent'; readonly revision: string }
-    | { readonly state: 'unsupported' } {
+    | { readonly state: 'unsupported'; readonly reason: string } {
     const chain: unknown[] = [this.getPolicy(), this.credentialMutationGeneration];
     const seen = new Set<string>();
     const revision = () => {
@@ -1021,27 +1021,31 @@ export class SecretsManager {
     };
     let current = key;
     for (let depth = 0; depth < 32; depth++) {
-      if (seen.has(current) || this.pendingLocalMutations.has(current) || ownEnvValue(current) !== undefined) return { state: 'unsupported' };
+      if (seen.has(current)) return { state: 'unsupported', reason: 'stored references form a loop' };
+      if (this.pendingLocalMutations.has(current)) return { state: 'unsupported', reason: 'write pending' };
+      if (ownEnvValue(current) !== undefined) return { state: 'unsupported', reason: 'set in the environment' };
       seen.add(current);
       let value: string | undefined;
       for (const path of this.getReadOrder()) {
         const result = path.secure ? this.readEncryptedStore(path.path) : this.readPlaintextStore(path.path);
-        if (result.status === 'unreadable') return { state: 'unsupported' };
+        if (result.status === 'unreadable') return { state: 'unsupported', reason: 'store unreadable' };
         const found = result.status === 'ok' && Object.hasOwn(result.secrets, current) && this.#usable(path, current);
         chain.push([current, path.path, path.secure, found]);
         if (found) { value = result.secrets[current]; break; }
       }
-      if (value === undefined) return depth === 0 ? { state: 'absent', revision: revision() } : { state: 'unsupported' };
-      if (typeof value !== 'string') return { state: 'unsupported' };
+      if (value === undefined) {
+        return depth === 0 ? { state: 'absent', revision: revision() } : { state: 'unsupported', reason: 'stored reference names a secret that is not stored' };
+      }
+      if (typeof value !== 'string') return { state: 'unsupported', reason: 'stored value is not text' };
       chain.push(value);
       const literal = decodeLiteralSecret(value);
       if (literal !== null) return { state: 'resolved', value: literal, revision: revision() };
       if (!isSecretRefInput(value)) return { state: 'resolved', value, revision: revision() };
       const ref = normalizeSecretRef(value);
-      if (!ref || ref.source !== 'goodvibes') return { state: 'unsupported' };
+      if (!ref || ref.source !== 'goodvibes') return { state: 'unsupported', reason: 'held by an external secret provider' };
       current = ref.id;
     }
-    return { state: 'unsupported' };
+    return { state: 'unsupported', reason: 'stored references nest too deeply' };
   }
 
   /**

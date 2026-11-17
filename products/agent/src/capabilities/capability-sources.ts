@@ -1,6 +1,6 @@
 import type { CommandContext } from '../input/command-registry.ts';
 import { isInvokableContractMethod, operatorContractMethods } from '../tools/agent-harness-personal-ops-discovery.ts';
-import type { ProbeContext } from './capability-probe-runner.ts';
+import type { McpServerPosture, PresenceReading } from './capability-probe-runner.ts';
 
 /**
  * Adapters that turn this app's live state into probe inputs.
@@ -8,8 +8,9 @@ import type { ProbeContext } from './capability-probe-runner.ts';
  * Each one fails closed and quietly: a source that cannot be read contributes
  * nothing rather than throwing, because a capability check must never be the
  * reason a session fails to start. What it must never do is turn "I could not
- * read this" into "this is not available" without saying so, that distinction
- * lives in the index, which reports an unresolved prerequisite with its reason.
+ * read this" into "this is not available": each answers present, absent, or
+ * unreadable with a short reason, and the runner words the third as "cannot be
+ * confirmed: <reason>".
  */
 
 interface ConfigManagerLike {
@@ -17,62 +18,76 @@ interface ConfigManagerLike {
 }
 
 /**
- * Whether a config key holds a usable value.
+ * Whether a config key holds a usable value: present, absent, or unreadable
+ * with the reason.
  *
- * Returns a boolean and never the value itself, so a probe result can be shown
- * to the model or written to a log without leaking a password or a token.
+ * Never carries the value itself, so a probe result can be shown to the model
+ * or written to a log without leaking a password or a token.
  */
-export function configValueIsPresent(configManager: unknown, key: string): boolean {
+export function configValueIsPresent(configManager: unknown, key: string): PresenceReading {
   const manager = configManager as ConfigManagerLike | null;
-  if (!manager || typeof manager.get !== 'function') return false;
+  if (!manager || typeof manager.get !== 'function') return { state: 'unreadable', reason: 'no settings reader in this session' };
+  let value: unknown;
   try {
-    const value = manager.get(key);
-    if (value === null || value === undefined) return false;
-    if (typeof value === 'string') return value.trim().length > 0;
-    if (typeof value === 'number') return Number.isFinite(value);
-    if (typeof value === 'boolean') return value;
-    if (Array.isArray(value)) return value.length > 0;
-    if (typeof value === 'object') return Object.keys(value as Record<string, unknown>).length > 0;
-    return false;
+    value = manager.get(key);
   } catch {
-    return false;
+    return { state: 'unreadable', reason: 'settings could not be read' };
   }
+  return valueIsUsable(value) ? PRESENT : ABSENT;
 }
 
+function valueIsUsable(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value === 'boolean') return value;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'object') return Object.keys(value as Record<string, unknown>).length > 0;
+  return false;
+}
+
+const PRESENT: PresenceReading = { state: 'present' };
+const ABSENT: PresenceReading = { state: 'absent' };
+
 interface SecretsManagerLike {
-  readonly resolveLocalCredentialSnapshot: (key: string) => { readonly state: string; readonly value?: string };
+  readonly resolveLocalCredentialSnapshot: (key: string) => { readonly state: string; readonly value?: string; readonly reason?: string };
 }
 
 /**
- * Whether a secret-store entry holds a value. Returns a boolean and never the
- * value. An entry that cannot be observed (store unreadable, overridden from the
- * environment) counts as not present: a capability must not be reported ready on
- * a credential nobody could confirm.
+ * Whether a secret-store entry holds a value, never the value. A store the
+ * snapshot could not observe (unreadable, a write pending, the same name set
+ * in the environment) is `unreadable` with that reason, not `absent`: the
+ * capability is not reported ready, and the agent is not told the credential
+ * is missing when nobody could look.
  */
-export function secretValueIsPresent(secretsManager: unknown, key: string): boolean {
+export function secretValueIsPresent(secretsManager: unknown, key: string): PresenceReading {
   const manager = secretsManager as SecretsManagerLike | null;
-  if (!manager || typeof manager.resolveLocalCredentialSnapshot !== 'function') return false;
+  if (!manager || typeof manager.resolveLocalCredentialSnapshot !== 'function') return { state: 'unreadable', reason: 'no secret store in this session' };
   try {
     const snapshot = manager.resolveLocalCredentialSnapshot(key);
-    return snapshot.state === 'resolved' && typeof snapshot.value === 'string' && snapshot.value.trim().length > 0;
+    if (snapshot.state === 'resolved') return typeof snapshot.value === 'string' && snapshot.value.trim().length > 0 ? PRESENT : ABSENT;
+    if (snapshot.state === 'absent') return ABSENT;
+    return { state: 'unreadable', reason: snapshot.reason ?? 'store unreadable' };
   } catch {
-    return false;
+    return { state: 'unreadable', reason: 'store unreadable' };
   }
 }
 
-/** Live MCP server posture, or nothing when this session has no MCP client. */
-export function safeMcpServerPosture(context: CommandContext): ProbeContext['mcpServers'] {
+/** Live MCP server posture, or why it could not be read; empty when this session has no MCP client. */
+export function safeMcpServerPosture(context: CommandContext): McpServerPosture {
   try {
     const api = context.clients?.mcpApi ?? context.extensions?.mcpRegistry;
     const servers = api?.listServerSecurity?.() ?? [];
-    return servers.map((server) => ({
-      name: server.name,
-      connected: server.connected,
-      trustMode: server.trustMode,
-      schemaFreshness: server.schemaFreshness,
-    }));
+    return {
+      servers: servers.map((server) => ({
+        name: server.name,
+        connected: server.connected,
+        trustMode: server.trustMode,
+        schemaFreshness: server.schemaFreshness,
+      })),
+    };
   } catch {
-    return [];
+    return { servers: [], unreadable: 'the MCP server list could not be read' };
   }
 }
 

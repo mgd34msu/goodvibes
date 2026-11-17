@@ -15,6 +15,18 @@ import type { CapabilityProbe } from './capability-types.ts';
  * file deliberately.
  */
 
+/** What a source says about one value: there, not there, or not observable now and why. */
+export type PresenceReading =
+  | { readonly state: 'present' }
+  | { readonly state: 'absent' }
+  | { readonly state: 'unreadable'; readonly reason: string };
+
+export interface McpServerPosture {
+  readonly servers: ProbeContext['mcpServers'];
+  /** Set when the list could not be read, so "no such server" is not claimed. */
+  readonly unreadable?: string | undefined;
+}
+
 export interface ProbeContext {
   /** Tool names registered in this session. */
   readonly registeredToolNames: ReadonlySet<string>;
@@ -25,6 +37,8 @@ export interface ProbeContext {
     readonly trustMode: string;
     readonly schemaFreshness: string;
   }[];
+  /** Why `mcpServers` could not be read, when it could not. */
+  readonly mcpServersUnreadable?: string | undefined;
   /** Qualified names of MCP tools currently listed by connected servers. */
   readonly mcpToolNames: ReadonlySet<string>;
   /** Operator method ids the daemon actually serves (not merely catalogs). */
@@ -34,12 +48,12 @@ export interface ProbeContext {
    * yes or no, it never returns the value, so a probe result can be reported
    * to the model without leaking a password or a token.
    */
-  readonly configValuePresent: (key: string) => boolean;
+  readonly configValuePresent: (key: string) => PresenceReading;
   /**
-   * Whether a secret-store entry holds a value, answered yes or no like
+   * Whether a secret-store entry holds a value, answered like
    * `configValuePresent`. Absent when the caller has no secret store to ask.
    */
-  readonly secretPresent?: (key: string) => boolean;
+  readonly secretPresent?: (key: string) => PresenceReading;
 }
 
 export interface ProbeResult {
@@ -136,6 +150,9 @@ export function runCapabilityProbe(probe: CapabilityProbe, context: ProbeContext
 
     case 'mcp-server-connected': {
       const server = context.mcpServers.find((entry) => entry.name === probe.serverName);
+      if (!server && context.mcpServersUnreadable) {
+        return { satisfied: false, detail: `the MCP server ${probe.serverName} cannot be confirmed: ${context.mcpServersUnreadable}` };
+      }
       if (!server) return { satisfied: false, detail: `no MCP server named ${probe.serverName} is configured` };
       if (!server.connected) return { satisfied: false, detail: `the MCP server ${probe.serverName} is not connected` };
       if (server.trustMode === 'blocked') return { satisfied: false, detail: `the MCP server ${probe.serverName} is set to blocked` };
@@ -153,18 +170,21 @@ export function runCapabilityProbe(probe: CapabilityProbe, context: ProbeContext
         ? { satisfied: true, detail: `the daemon serves ${probe.methodId}` }
         : { satisfied: false, detail: `${probe.methodId} is cataloged but no daemon route serves it` };
 
-    case 'config-value-present':
-      return context.configValuePresent(probe.key)
-        ? { satisfied: true, detail: `${probe.label} is configured (${probe.key})` }
-        : { satisfied: false, detail: `${probe.label} is not configured (${probe.key} is unset)` };
+    case 'config-value-present': {
+      const reading = context.configValuePresent(probe.key);
+      if (reading.state === 'present') return { satisfied: true, detail: `${probe.label} is configured (${probe.key})` };
+      if (reading.state === 'unreadable') return { satisfied: false, detail: `${probe.label} cannot be confirmed: ${reading.reason}` };
+      return { satisfied: false, detail: `${probe.label} is not configured (${probe.key} is unset)` };
+    }
 
     case 'secret-present': {
       if (!context.secretPresent) {
-        return { satisfied: false, detail: `${probe.label} cannot be checked: no secret store is available to this check` };
+        return { satisfied: false, detail: `${probe.label} cannot be confirmed: no secret store is available to this check` };
       }
-      return context.secretPresent(probe.key)
-        ? { satisfied: true, detail: `${probe.label} is stored` }
-        : { satisfied: false, detail: `${probe.label} is not in the encrypted store` };
+      const reading = context.secretPresent(probe.key);
+      if (reading.state === 'present') return { satisfied: true, detail: `${probe.label} is stored` };
+      if (reading.state === 'unreadable') return { satisfied: false, detail: `${probe.label} cannot be confirmed: ${reading.reason}` };
+      return { satisfied: false, detail: `${probe.label} is not in the encrypted store` };
     }
 
     case 'module-resolvable': {

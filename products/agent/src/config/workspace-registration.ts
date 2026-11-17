@@ -219,7 +219,8 @@ export function isBroadWorkspaceRoot(shellPaths: StoreShellPaths, root: string):
 
 /** What answering the first-start question actually did. */
 export type WorkspaceRegistrationAnswer =
-  | { readonly outcome: 'registered' | 'declined' }
+  | { readonly outcome: 'registered' }
+  | { readonly outcome: 'declined' }
   /** The store refused or could not write; `reason` is its own message. */
   | { readonly outcome: 'not-saved'; readonly reason: string };
 
@@ -238,7 +239,7 @@ export function answerWorkspaceRegistrationPrompt(shellPaths: StoreShellPaths, r
     ? registerWorkspaceForCheckpoints(shellPaths, root)
     : createWorkspaceRegistrationStore(shellPaths).decline(root);
   return outcome.then(
-    (): WorkspaceRegistrationAnswer => ({ outcome: accepted ? 'registered' : 'declined' }),
+    (): WorkspaceRegistrationAnswer => (accepted ? { outcome: 'registered' } : { outcome: 'declined' }),
     (error: unknown): WorkspaceRegistrationAnswer => {
       logger.error('Failed to persist workspace registration prompt answer', { root, accepted, error: summarizeError(error) });
       return { outcome: 'not-saved', reason: summarizeError(error) };

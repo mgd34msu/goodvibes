@@ -82,6 +82,11 @@ export interface TriggerManagerOptions {
   readonly processHost?: TriggerProcessHost | undefined;
   readonly streamHost?: TriggerStreamHost | undefined;
   readonly probeIo?: ProbeIo | undefined;
+  /**
+   * The tools platform-tool probes call (probe-tools.ts); `probeIo.callTool`
+   * runs on the same host. Absent: a platform-tool probe is refused at create.
+   */
+  readonly probeTools?: import('./probe-tools.js').ProbeToolHost | undefined;
   readonly now?: (() => number) | undefined;
   /** Stable for the lifetime of one daemon process. Drives restart detection. */
   readonly daemonBootId?: string | undefined;

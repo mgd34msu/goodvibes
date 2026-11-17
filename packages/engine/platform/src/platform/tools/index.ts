@@ -56,6 +56,7 @@ import { createWorkPlanTool, type WorkPlanToolStore } from './work-plan/index.js
 import { createMcpTool } from './mcp/index.js';
 import { createQueryTool } from './query/index.js';
 import { createTriggerTool } from '../triggers/trigger-tool.js';
+import { TriggerManager } from '../triggers/manager.js';
 import { createRemoteTool } from './remote-trigger/index.js';
 import { createReplTool } from './repl/index.js';
 import { createCapturedReplTool } from './repl/captured.js';
@@ -722,7 +723,10 @@ export function registerAllTools(
   );
   // Every state-tool write is on disk when the call returns, so no exit hook is needed to flush it.
   const kvState = kvBinding.state;
+  // A local trigger supervisor's platform-tool probes may call this registry's reading tools.
+  let detachProbeTools: (() => void) | undefined;
   const dispose = async (): Promise<void> => {
+    detachProbeTools?.();
     await (intelligenceHold ? intelligenceHold.release() : codeIntelligence.dispose());
     await kvBinding.dispose();
   };
@@ -785,7 +789,10 @@ export function registerAllTools(
   // The model's checklist is the project work plan the user sees; a host with its own work plan tool leaves this out.
   if (deps.workPlan) registerTool(createWorkPlanTool(deps.workPlan, deps.resolveSessionId ? { resolveSessionId: deps.resolveSessionId } : {}));
   // "Tell me when this build exits", "watch this log", "check this URL every minute": supervised by the host, not this turn.
-  if (deps.triggers) registerTool(createTriggerTool(deps.triggers, deps.resolveSessionId ? { resolveSessionId: deps.resolveSessionId } : {}));
+  if (deps.triggers) {
+    registerTool(createTriggerTool(deps.triggers, deps.resolveSessionId ? { resolveSessionId: deps.resolveSessionId } : {}));
+    if (deps.triggers instanceof TriggerManager) detachProbeTools = deps.triggers.attachProbeTools(registry, deps.resolveSessionId);
+  }
   if (mcpRegistry) {
     registerTool(createMcpTool(mcpRegistry));
   }

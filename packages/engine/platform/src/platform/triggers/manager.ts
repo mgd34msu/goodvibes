@@ -473,9 +473,25 @@ export class TriggerManager {
   }
 
   create(input: unknown): Promise<TriggerRecord> { return this.work.own(() => this.createOwned(input)); }
+
+  /**
+   * Offers a session's tool registry to platform-tool probes; returns the
+   * detach. A probe prefers the registry of the session that made its trigger.
+   * Nothing to attach to when the host composed no probe tool host.
+   */
+  attachProbeTools(registry: import('./probe-tools.js').ProbeToolRegistry, session?: () => string | undefined): () => void {
+    return this.options.probeTools?.attach(registry, session) ?? (() => {});
+  }
   private async createOwned(input: unknown): Promise<TriggerRecord> {
     this.ensureOwner('create a trigger');
     const validated = validateDefinition(input);
+    if (validated.spec.kind === 'condition' && validated.spec.probe.kind === 'platform-tool') {
+      const probe = validated.spec.probe;
+      const refused = this.options.probeTools
+        ? this.options.probeTools.refusal(probe.tool, probe.input ?? {}, validated.ownerSessionId)
+        : 'Platform-tool probes run on the tools of a session, and this trigger host has none; use an http, file or command probe, or create the trigger in the daemon.';
+      if (refused) throw new RefusalError(refusal({ code: 'TRIGGER_PROBE_TOOL', state: `the probe's ${probe.tool} call cannot run here`, reason: refused, next: ['Probe with a tool that only reads, or with an http, file or command probe'], status: 422 }));
+    }
     if (this.records.has(validated.id)) {
       throw new RefusalError(refusal({ code: 'TRIGGER_EXISTS', state: `a trigger with the id "${validated.id}" exists`, reason: `A trigger with id "${validated.id}" already exists`, next: ['Pick another id, or cancel the existing trigger first'], status: 409 }));
     }
@@ -652,7 +668,10 @@ export class TriggerManager {
     const startedAt = this.now();
     try {
       const io = this.options.probeIo ?? createDefaultProbeIo();
-      const raw = await runProbe(spec.probe, io, { timeoutMs: this.config.probeTimeoutMs ?? 15_000 });
+      const raw = await runProbe(spec.probe, io, {
+        timeoutMs: this.config.probeTimeoutMs ?? 15_000,
+        ...(record.definition.ownerSessionId !== undefined ? { ownerSessionId: record.definition.ownerSessionId } : {}),
+      });
       const value = runExtract(spec.extract, raw);
       return this.applyObservation(id, value, startedAt, spec);
     } catch (error) {

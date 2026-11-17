@@ -23,7 +23,7 @@ export const TRIGGER_TOOL_DEFINITION: ToolDefinition = {
   name: 'trigger',
   description: [
     'Watch for something and act when it happens, without holding this turn open. The daemon supervises the watcher; when it fires, an agent turn starts with what was seen.',
-    'Kinds (definition.spec.kind): "on-exit" runs a command and fires once when it ends (exit code, signal and output tail included); "stream" runs a long-lived command and fires on output lines matching a pattern (batched); "condition" checks a URL, file or command on an interval and fires when a rule holds (change, value, threshold, debounce-n, ...).',
+    'Kinds (definition.spec.kind): "on-exit" runs a command and fires once when it ends (exit code, signal and output tail included); "stream" runs a long-lived command and fires on output lines matching a pattern (batched); "condition" checks a URL, file, command or a reading platform tool (probe {"kind":"platform-tool","tool":"read","input":{...}}) on an interval and fires when a rule holds (change, value, threshold, debounce-n, ...).',
     'Commands are argv: command plus args, never a shell line. Actions: create (definition), list, history (id), cancel (id), reset (id, after its breaker opened).',
     'Example: {"action":"create","definition":{"id":"build","label":"Build finished","spec":{"kind":"on-exit","command":"npm","args":["run","build"]}}}.',
   ].join(' '),

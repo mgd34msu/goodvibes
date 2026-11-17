@@ -14,6 +14,7 @@ import type { ProcessManager } from '../tools/shared/process-manager.js';
 import { createBunStreamHost, createProcessManagerCommandRunner, createProcessManagerTriggerHost, createTriggerActionExecutor, type TriggerAgentSpawner } from './hosts.js';
 import { TriggerManager, type TriggerManagerConfig } from './manager.js';
 import { createDefaultProbeIo } from './probes.js';
+import { ProbeToolHost } from './probe-tools.js';
 
 export interface TriggerSupervisorDeps {
   readonly configManager: Pick<ConfigManager, 'get' | 'subscribe'>;
@@ -57,13 +58,19 @@ export function readTriggerConfig(configManager: Pick<ConfigManager, 'get'>): Tr
  */
 export function createTriggerSupervisor(deps: TriggerSupervisorDeps): TriggerManager {
   const { configManager, processManager } = deps;
+  // Platform-tool probes call the tools of the sessions whose registries attach here (attachProbeTools).
+  const probeTools = new ProbeToolHost();
   const manager = new TriggerManager({
     storePath: deps.resolveStorePath('triggers.db'),
     config: () => readTriggerConfig(configManager),
     actions: createTriggerActionExecutor({ agents: deps.agents, processManager }),
     processHost: createProcessManagerTriggerHost(processManager),
     streamHost: createBunStreamHost(processManager),
-    probeIo: createDefaultProbeIo({ runCommand: createProcessManagerCommandRunner(processManager) }),
+    probeIo: createDefaultProbeIo({
+      runCommand: createProcessManagerCommandRunner(processManager),
+      callTool: (tool, input, timeoutMs, ownerSessionId) => probeTools.call(tool, input, timeoutMs, ownerSessionId),
+    }),
+    probeTools,
     ...(deps.sessionIsLive ? { sessionIsLive: deps.sessionIsLive } : {}),
     watchEnabled: (onChange) => configManager.subscribe('watchers.triggers.enabled', (enabled) => { onChange(enabled === true); }),
   });

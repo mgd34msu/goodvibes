@@ -212,10 +212,17 @@ async function describeProcessEntry(
   context: CommandContext,
   manager: ProcessManager,
   entry: BackgroundProcess,
-  options: CatalogRankingOptions & { readonly includeParameters?: boolean; readonly lookup?: Record<string, unknown> } = {},
+  options: CatalogRankingOptions & {
+    readonly includeParameters?: boolean;
+    readonly lookup?: Record<string, unknown>;
+    /** The detached records already read for a listing, so each row does not read them again. */
+    readonly detachedRecords?: readonly DetachedProcessRecord[];
+  } = {},
 ): Promise<Record<string, unknown>> {
   options.signal?.throwIfAborted();
-  const detached = context.workspace.shellPaths ? findDetachedProcess(context.workspace.shellPaths, entry.id) : undefined;
+  const detached = options.detachedRecords
+    ? options.detachedRecords.find(record => record.processId === entry.id)
+    : context.workspace.shellPaths ? findDetachedProcess(context.workspace.shellPaths, entry.id) : undefined;
   const output = manager.getOutput(entry.id) ?? { stdout: '', stderr: '' };
   const command = redactSensitiveData(entry.cmd);
   const maxOutputChars = options.includeParameters ? MAX_LOG_PREVIEW_CHARS : MAX_COMPACT_LOG_PREVIEW_CHARS;
@@ -330,10 +337,8 @@ function describeDetachedRecord(record: DetachedProcessRecord, includeParameters
 }
 
 /** Detached processes recorded by earlier sessions that this runtime does not track. */
-function earlierDetached(context: CommandContext, manager: ProcessManager): readonly DetachedProcessRecord[] {
-  const shellPaths = context.workspace.shellPaths;
-  if (!shellPaths) return [];
-  return listDetachedProcesses(shellPaths).filter(record => !manager.getStatus(record.processId));
+function earlierDetached(records: readonly DetachedProcessRecord[], manager: ProcessManager): readonly DetachedProcessRecord[] {
+  return records.filter(record => !manager.getStatus(record.processId));
 }
 
 function processToolParity(context: CommandContext | undefined, interactive: InteractiveRuntimeParity | null): readonly Record<string, unknown>[] {
@@ -504,14 +509,16 @@ export async function backgroundProcessSummary(context: CommandContext, args: Ag
   const selected = await matchingProcesses(manager, query, options);
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const entries = selected.matches;
-  const detached = earlierDetached(context, manager);
+  // One read of the detached records for the whole listing; every row and the earlier-session list use it.
+  const detachedRecords = context.workspace.shellPaths ? listDetachedProcesses(context.workspace.shellPaths) : [];
+  const detached = earlierDetached(detachedRecords, manager);
   const all = selected.all;
   const limit = readLimit(args.limit, 100);
   const processes = await mapLimit<(typeof entries)[number], Record<string, unknown>>(entries.slice(0, limit), 4, async ({ entry, judgment }) => {
     const current = manager.getStatus(entry.id);
     // A process that ended and was pruned between the look and this row is shown as it was seen.
     if (!current) return { ...entry, ...(judgment ? { judgment } : {}) };
-    return { ...await describeProcessEntry(context, manager, current, { ...options, includeParameters: args.includeParameters === true }), ...(judgment ? { judgment } : {}) };
+    return { ...await describeProcessEntry(context, manager, current, { ...options, includeParameters: args.includeParameters === true, detachedRecords }), ...(judgment ? { judgment } : {}) };
   });
   const processCapabilities = await capabilities(context, { ...options, assertCurrent: selected.assertCurrent });
   selected.assertCurrent();
@@ -722,17 +729,19 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
       const { lifetime, killOnTimeout, result } = await spawnBackgroundProcess(manager, args, command, cwd, timeoutMs,
         { signal: options.signal, assertCurrent: () => { assertPrivilegeCurrent(); assertEffect(); } }, logPath);
       const cwdLabel = workspaceRelativeLabel(context, cwd);
-      if (lifetime === 'detached' && result.process_id && result.pid && logPath) {
-        recordDetachedProcess(shellPaths, { processId: result.process_id, pid: result.pid, command, cwd: cwdLabel, startedAt: new Date().toISOString(), logPath });
-      }
+      const recorded = lifetime === 'detached' && result.process_id && result.pid && logPath
+        ? recordDetachedProcess(shellPaths, { processId: result.process_id, pid: result.pid, command, cwd: cwdLabel, startedAt: new Date().toISOString(), logPath })
+        : false;
       return {
         status: 'started',
         done: true,
         lifetime,
         killOnTimeout,
-        lifetimeBehavior: lifetime === 'detached'
-          ? `Keeps running after the Agent exits; output goes to ${homeRelative(logPath ?? '')}. Later sessions list it under process action:"list" and can stop it with process action:"kill".`
-          : 'Ended when the Agent closes.',
+        lifetimeBehavior: lifetime !== 'detached'
+          ? 'Ended when the Agent closes.'
+          : recorded
+            ? `Keeps running after the Agent exits; output goes to ${homeRelative(logPath ?? '')}. Later sessions list it under process action:"list" and can stop it with process action:"kill".`
+            : `Keeps running after the Agent exits; output goes to ${homeRelative(logPath ?? '')}. Its start time could not be read (it may already have ended), so later sessions will not list it: stop it with process action:"kill" in this session.`,
         timeoutBehavior: timeoutMs === 0 ? 'No automatic deadline; stop it explicitly with process action:"kill".' : killOnTimeout
           ? `SIGTERM then SIGKILL after ${timeoutMs}ms.`
           : `Left running past ${timeoutMs}ms; stop it explicitly with process action:"kill".`,

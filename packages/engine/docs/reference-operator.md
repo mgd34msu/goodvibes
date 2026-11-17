@@ -4,7 +4,7 @@ Generated from the synced GoodVibes operator contract artifact.
 
 ## Summary
 
-- Methods: `608`
+- Methods: `629`
 - Events: `36`
 - Auth modes: `shared-bearer`, `session-login`
 - HTTP status path: `/status`
@@ -464,6 +464,9 @@ Spawn a discovered third-party agent into a working directory as a hosted daemon
         },
         "progress": {
           "type": "string"
+        },
+        "progressAt": {
+          "type": "number"
         },
         "error": {
           "type": "object",
@@ -4098,7 +4101,7 @@ Raise a permission ask INTO the shared broker from a surface that is not in the 
 
 #### `inbox.answer`
 
-Answer one open inbox item with one of its `options`, or with `text` when it has none (text may also accompany an option). An approval answered approve or deny is decided through the approval broker exactly as approvals.approve/deny would. The first answer wins: a later one, or an answer to a withdrawn or expired item, returns `applied: false` with a `refusal` naming who answered and from where (still 200, so a raced answer does not fail). For a question an agent or session asked, `delivery` says whether the answer reached it now, waits for its session to be opened again, or cannot reach it and why; the answer is kept either way. Who answered is taken from the authenticated caller.
+Answer one open inbox item with one of its `options`, or with `text` when it has none (text may also accompany an option). An approval answered approve or deny is decided through the approval broker exactly as approvals.approve/deny would. The first answer wins: a later one, or an answer to a withdrawn or expired item, returns `applied: false` with a `refusal` naming who answered and from where (still 200, so a raced answer does not fail). For a question an agent or session asked, `delivery` says whether the answer reached it now, waits for its session to be opened again, or cannot reach it and why; the answer is kept either way. A decision item's choice is carried out first by the app whose gate decided (undo restores the files the call changed, never/always/ask save a standing rule for calls like it); the recorded answer's text says what was done, and a choice that could not be done, or a decision another app made, returns `applied: false` with the reason and leaves it open. Who answered is taken from the authenticated caller.
 
 - Title: `Answer Owner Inbox Item`
 - Source: `builtin`
@@ -4155,7 +4158,8 @@ Answer one open inbox item with one of its `options`, or with `text` when it has
             "question",
             "claim",
             "purchase",
-            "queued-action"
+            "queued-action",
+            "decision"
           ]
         },
         "status": {
@@ -4424,7 +4428,8 @@ The asking session reports what became of the answer to a question it posted: `d
             "question",
             "claim",
             "purchase",
-            "queued-action"
+            "queued-action",
+            "decision"
           ]
         },
         "status": {
@@ -4631,7 +4636,7 @@ The asking session reports what became of the answer to a question it posted: `d
 
 #### `inbox.list`
 
-Everything waiting on the owner in one list, newest first: permission asks (kind approval), questions agents left, channel claims, purchase windows and queued actions. `status` is open (default), closed or all; pass `itemId` to read one item wherever it ranks. An answered question carries `delivery`: delivered to the agent or session that asked, waiting for that session to be opened again, or undeliverable with the reason. `revision` moves on every change, so a surface can tell whether its copy is current by comparing one number.
+Everything waiting on the owner in one list, newest first: permission asks (kind approval), questions agents left, channel claims, purchase windows and queued actions. Calls Jev decided for the owner at the permission gate are kind decision: open while the owner can still act on one (undo, never, always, ask, keep), and listed only when `kinds` names decision or the status is closed or all. `status` is open (default), closed or all; pass `itemId` to read one item wherever it ranks. An answered question carries `delivery`: delivered to the agent or session that asked, waiting for that session to be opened again, or undeliverable with the reason. `revision` moves on every change, so a surface can tell whether its copy is current by comparing one number.
 
 - Title: `List Owner Inbox`
 - Source: `builtin`
@@ -4669,7 +4674,8 @@ Everything waiting on the owner in one list, newest first: permission asks (kind
           "question",
           "claim",
           "purchase",
-          "queued-action"
+          "queued-action",
+          "decision"
         ]
       }
     },
@@ -4705,7 +4711,8 @@ Everything waiting on the owner in one list, newest first: permission asks (kind
               "question",
               "claim",
               "purchase",
-              "queued-action"
+              "queued-action",
+              "decision"
             ]
           },
           "status": {
@@ -4963,7 +4970,8 @@ Leave the owner a question or a queued action from a process that is not the dae
             "question",
             "claim",
             "purchase",
-            "queued-action"
+            "queued-action",
+            "decision"
           ]
         },
         "status": {
@@ -5164,7 +5172,8 @@ Take back an open item this caller posted, because the answer is no longer neede
             "question",
             "claim",
             "purchase",
-            "queued-action"
+            "queued-action",
+            "decision"
           ]
         },
         "status": {
@@ -6062,6 +6071,12 @@ Return local auth posture, users, and sessions.
             "items": {
               "type": "string"
             }
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -6110,7 +6125,7 @@ Return local auth posture, users, and sessions.
 
 #### `local_auth.users.create`
 
-Create a local auth user.
+Create a local auth user. roles: omitted creates an admin. scopes: the operator scopes the user holds (for example read:sessions and write:sessions for someone who only chats); omitted, the user holds its role's default set. A narrowed user is not an admin, whatever its roles.
 
 - Title: `Create Local Auth User`
 - Source: `builtin`
@@ -6133,6 +6148,18 @@ Create a local auth user.
     },
     "password": {
       "type": "string"
+    },
+    "roles": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "scopes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [
@@ -6156,6 +6183,12 @@ Create a local auth user.
           "type": "string"
         },
         "roles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "scopes": {
           "type": "array",
           "items": {
             "type": "string"
@@ -6271,6 +6304,90 @@ Rotate a local auth user password.
   },
   "required": [
     "rotated"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `local_auth.users.scopes.set`
+
+Give a local auth user a narrower list of operator scopes, or return it to its role's default set with scopes: null. Takes effect on the user's next request. An unknown user is 400; a scopes value that is neither a nonempty list nor null is 400 INVALID_ARGUMENT naming scopes.
+
+- Title: `Set Local Auth User Scopes`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/local-auth/users/{username}/scopes`
+- Scopes: `write:auth`
+- Emits events: none
+- Dangerous: `yes`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "username": {
+      "type": "string"
+    },
+    "scopes": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "username",
+    "scopes"
+  ],
+  "additionalProperties": true
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "user": {
+      "type": "object",
+      "properties": {
+        "username": {
+          "type": "string"
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "username",
+        "roles"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "user"
   ],
   "additionalProperties": false
 }
@@ -6778,17 +6895,6 @@ Process automation jobs queued for the next heartbeat.
                 "items": {
                   "type": "string"
                 }
-              },
-              "autoApprove": {
-                "type": "boolean"
-              },
-              "sandboxMode": {
-                "type": "string",
-                "enum": [
-                  "inherit",
-                  "isolate",
-                  "off"
-                ]
               },
               "allowUnsafeExternalContent": {
                 "type": "boolean"
@@ -7666,7 +7772,7 @@ Return the automation integration snapshot.
 
 #### `automation.jobs.create`
 
-Create a durable automation job.
+Create a durable automation job. An optional id keeps the job under that id and makes the create repeatable: when a job with that id already exists it is returned unchanged.
 
 - Title: `Create Automation Job`
 - Source: `builtin`
@@ -7844,9 +7950,6 @@ Create a durable automation job.
         "type": "string"
       }
     },
-    "autoApprove": {
-      "type": "boolean"
-    },
     "allowUnsafeExternalContent": {
       "type": "boolean"
     },
@@ -7980,9 +8083,6 @@ Create a durable automation job.
         "includeSummary": {
           "type": "boolean"
         },
-        "includeTranscript": {
-          "type": "boolean"
-        },
         "includeLinks": {
           "type": "boolean"
         },
@@ -7995,7 +8095,6 @@ Create a durable automation job.
         "targets",
         "fallbackTargets",
         "includeSummary",
-        "includeTranscript",
         "includeLinks"
       ],
       "additionalProperties": false
@@ -8511,17 +8610,6 @@ Create a durable automation job.
             "type": "string"
           }
         },
-        "autoApprove": {
-          "type": "boolean"
-        },
-        "sandboxMode": {
-          "type": "string",
-          "enum": [
-            "inherit",
-            "isolate",
-            "off"
-          ]
-        },
         "allowUnsafeExternalContent": {
           "type": "boolean"
         },
@@ -8750,9 +8838,6 @@ Create a durable automation job.
         "includeSummary": {
           "type": "boolean"
         },
-        "includeTranscript": {
-          "type": "boolean"
-        },
         "includeLinks": {
           "type": "boolean"
         },
@@ -8765,7 +8850,6 @@ Create a durable automation job.
         "targets",
         "fallbackTargets",
         "includeSummary",
-        "includeTranscript",
         "includeLinks"
       ],
       "additionalProperties": false
@@ -9514,17 +9598,6 @@ Return automation jobs and recent runs. Without ?limit/?cursor returns { jobs: [
                       "type": "string"
                     }
                   },
-                  "autoApprove": {
-                    "type": "boolean"
-                  },
-                  "sandboxMode": {
-                    "type": "string",
-                    "enum": [
-                      "inherit",
-                      "isolate",
-                      "off"
-                    ]
-                  },
                   "allowUnsafeExternalContent": {
                     "type": "boolean"
                   },
@@ -9753,9 +9826,6 @@ Return automation jobs and recent runs. Without ?limit/?cursor returns { jobs: [
                   "includeSummary": {
                     "type": "boolean"
                   },
-                  "includeTranscript": {
-                    "type": "boolean"
-                  },
                   "includeLinks": {
                     "type": "boolean"
                   },
@@ -9768,7 +9838,6 @@ Return automation jobs and recent runs. Without ?limit/?cursor returns { jobs: [
                   "targets",
                   "fallbackTargets",
                   "includeSummary",
-                  "includeTranscript",
                   "includeLinks"
                 ],
                 "additionalProperties": false
@@ -10338,17 +10407,6 @@ Return automation jobs and recent runs. Without ?limit/?cursor returns { jobs: [
                       "type": "string"
                     }
                   },
-                  "autoApprove": {
-                    "type": "boolean"
-                  },
-                  "sandboxMode": {
-                    "type": "string",
-                    "enum": [
-                      "inherit",
-                      "isolate",
-                      "off"
-                    ]
-                  },
                   "allowUnsafeExternalContent": {
                     "type": "boolean"
                   },
@@ -10577,9 +10635,6 @@ Return automation jobs and recent runs. Without ?limit/?cursor returns { jobs: [
                   "includeSummary": {
                     "type": "boolean"
                   },
-                  "includeTranscript": {
-                    "type": "boolean"
-                  },
                   "includeLinks": {
                     "type": "boolean"
                   },
@@ -10592,7 +10647,6 @@ Return automation jobs and recent runs. Without ?limit/?cursor returns { jobs: [
                   "targets",
                   "fallbackTargets",
                   "includeSummary",
-                  "includeTranscript",
                   "includeLinks"
                 ],
                 "additionalProperties": false
@@ -11157,9 +11211,6 @@ Update a durable automation job. (Renamed from automation.jobs.patch in the 1.0.
         "type": "string"
       }
     },
-    "autoApprove": {
-      "type": "boolean"
-    },
     "allowUnsafeExternalContent": {
       "type": "boolean"
     },
@@ -11293,9 +11344,6 @@ Update a durable automation job. (Renamed from automation.jobs.patch in the 1.0.
         "includeSummary": {
           "type": "boolean"
         },
-        "includeTranscript": {
-          "type": "boolean"
-        },
         "includeLinks": {
           "type": "boolean"
         },
@@ -11308,7 +11356,6 @@ Update a durable automation job. (Renamed from automation.jobs.patch in the 1.0.
         "targets",
         "fallbackTargets",
         "includeSummary",
-        "includeTranscript",
         "includeLinks"
       ],
       "additionalProperties": false
@@ -11721,17 +11768,6 @@ Update a durable automation job. (Renamed from automation.jobs.patch in the 1.0.
             "type": "string"
           }
         },
-        "autoApprove": {
-          "type": "boolean"
-        },
-        "sandboxMode": {
-          "type": "string",
-          "enum": [
-            "inherit",
-            "isolate",
-            "off"
-          ]
-        },
         "allowUnsafeExternalContent": {
           "type": "boolean"
         },
@@ -11960,9 +11996,6 @@ Update a durable automation job. (Renamed from automation.jobs.patch in the 1.0.
         "includeSummary": {
           "type": "boolean"
         },
-        "includeTranscript": {
-          "type": "boolean"
-        },
         "includeLinks": {
           "type": "boolean"
         },
@@ -11975,7 +12008,6 @@ Update a durable automation job. (Renamed from automation.jobs.patch in the 1.0.
         "targets",
         "fallbackTargets",
         "includeSummary",
-        "includeTranscript",
         "includeLinks"
       ],
       "additionalProperties": false
@@ -12638,17 +12670,6 @@ Cancel an active automation run.
               "items": {
                 "type": "string"
               }
-            },
-            "autoApprove": {
-              "type": "boolean"
-            },
-            "sandboxMode": {
-              "type": "string",
-              "enum": [
-                "inherit",
-                "isolate",
-                "off"
-              ]
             },
             "allowUnsafeExternalContent": {
               "type": "boolean"
@@ -13637,17 +13658,6 @@ Return a single automation run record.
               "items": {
                 "type": "string"
               }
-            },
-            "autoApprove": {
-              "type": "boolean"
-            },
-            "sandboxMode": {
-              "type": "string",
-              "enum": [
-                "inherit",
-                "isolate",
-                "off"
-              ]
             },
             "allowUnsafeExternalContent": {
               "type": "boolean"
@@ -14743,17 +14753,6 @@ Return automation run history. Without ?limit/?cursor returns { runs: [...] } (b
                       "type": "string"
                     }
                   },
-                  "autoApprove": {
-                    "type": "boolean"
-                  },
-                  "sandboxMode": {
-                    "type": "string",
-                    "enum": [
-                      "inherit",
-                      "isolate",
-                      "off"
-                    ]
-                  },
                   "allowUnsafeExternalContent": {
                     "type": "boolean"
                   },
@@ -15708,17 +15707,6 @@ Return automation run history. Without ?limit/?cursor returns { runs: [...] } (b
                     "items": {
                       "type": "string"
                     }
-                  },
-                  "autoApprove": {
-                    "type": "boolean"
-                  },
-                  "sandboxMode": {
-                    "type": "string",
-                    "enum": [
-                      "inherit",
-                      "isolate",
-                      "off"
-                    ]
                   },
                   "allowUnsafeExternalContent": {
                     "type": "boolean"
@@ -16718,17 +16706,6 @@ Retry a completed or failed automation run.
                 "type": "string"
               }
             },
-            "autoApprove": {
-              "type": "boolean"
-            },
-            "sandboxMode": {
-              "type": "string",
-              "enum": [
-                "inherit",
-                "isolate",
-                "off"
-              ]
-            },
             "allowUnsafeExternalContent": {
               "type": "boolean"
             },
@@ -17439,9 +17416,6 @@ Create a schedule record.
         "type": "string"
       }
     },
-    "autoApprove": {
-      "type": "boolean"
-    },
     "allowUnsafeExternalContent": {
       "type": "boolean"
     },
@@ -17575,9 +17549,6 @@ Create a schedule record.
         "includeSummary": {
           "type": "boolean"
         },
-        "includeTranscript": {
-          "type": "boolean"
-        },
         "includeLinks": {
           "type": "boolean"
         },
@@ -17590,7 +17561,6 @@ Create a schedule record.
         "targets",
         "fallbackTargets",
         "includeSummary",
-        "includeTranscript",
         "includeLinks"
       ],
       "additionalProperties": false
@@ -18079,17 +18049,6 @@ Create a schedule record.
             "type": "string"
           }
         },
-        "autoApprove": {
-          "type": "boolean"
-        },
-        "sandboxMode": {
-          "type": "string",
-          "enum": [
-            "inherit",
-            "isolate",
-            "off"
-          ]
-        },
         "allowUnsafeExternalContent": {
           "type": "boolean"
         },
@@ -18318,9 +18277,6 @@ Create a schedule record.
         "includeSummary": {
           "type": "boolean"
         },
-        "includeTranscript": {
-          "type": "boolean"
-        },
         "includeLinks": {
           "type": "boolean"
         },
@@ -18333,7 +18289,6 @@ Create a schedule record.
         "targets",
         "fallbackTargets",
         "includeSummary",
-        "includeTranscript",
         "includeLinks"
       ],
       "additionalProperties": false
@@ -19073,17 +19028,6 @@ Return schedule records.
                   "type": "string"
                 }
               },
-              "autoApprove": {
-                "type": "boolean"
-              },
-              "sandboxMode": {
-                "type": "string",
-                "enum": [
-                  "inherit",
-                  "isolate",
-                  "off"
-                ]
-              },
               "allowUnsafeExternalContent": {
                 "type": "boolean"
               },
@@ -19312,9 +19256,6 @@ Return schedule records.
               "includeSummary": {
                 "type": "boolean"
               },
-              "includeTranscript": {
-                "type": "boolean"
-              },
               "includeLinks": {
                 "type": "boolean"
               },
@@ -19327,7 +19268,6 @@ Return schedule records.
               "targets",
               "fallbackTargets",
               "includeSummary",
-              "includeTranscript",
               "includeLinks"
             ],
             "additionalProperties": false
@@ -19954,17 +19894,6 @@ Return schedule records.
                 "items": {
                   "type": "string"
                 }
-              },
-              "autoApprove": {
-                "type": "boolean"
-              },
-              "sandboxMode": {
-                "type": "string",
-                "enum": [
-                  "inherit",
-                  "isolate",
-                  "off"
-                ]
               },
               "allowUnsafeExternalContent": {
                 "type": "boolean"
@@ -20602,7 +20531,7 @@ Trigger a schedule immediately.
 
 #### `batch.jobs.cancel`
 
-Cancel a queued job. A job already in a terminal state is returned unchanged; a job already submitted to the provider is refused with 409, because provider batches cancel as a whole. Needs an admin.
+Cancel a queued job. A job already in a terminal state is returned unchanged; a job already submitted to the provider is refused with 409 BATCH_JOB_ALREADY_SUBMITTED, because provider batches cancel as a whole: the refusal names the provider batch and `next` points at batch.providerBatches.cancel. Needs an admin.
 
 - Title: `Cancel Batch Job`
 - Source: `builtin`
@@ -20653,6 +20582,7 @@ Cancel a queued job. A job already in a terminal state is returned unchanged; a 
           "type": "string",
           "enum": [
             "queued",
+            "submitting",
             "submitted",
             "running",
             "completed",
@@ -20872,6 +20802,7 @@ Queue one chat request to run later as part of a provider batch, answered 202 wi
           "type": "string",
           "enum": [
             "queued",
+            "submitting",
             "submitted",
             "running",
             "completed",
@@ -21021,6 +20952,7 @@ One batch job with its status and, once finished, its result or error. An unknow
           "type": "string",
           "enum": [
             "queued",
+            "submitting",
             "submitted",
             "running",
             "completed",
@@ -21169,6 +21101,7 @@ Batch jobs, newest first. `limit` defaults to 100 and is capped at 1000.
             "type": "string",
             "enum": [
               "queued",
+              "submitting",
               "submitted",
               "running",
               "completed",
@@ -21266,6 +21199,176 @@ Batch jobs, newest first. `limit` defaults to 100 and is capped at 1000.
 }
 ```
 
+#### `batch.providerBatches.cancel`
+
+Cancel a whole provider batch at the provider (the `providerBatchId` shown on a submitted job) and mark its jobs. `providerStatus` is what the provider answered: `cancelled` when it stopped, `running` while it is still winding down, in which case requests it finished before the cancel are collected by the next pass and the rest are marked cancelled when it ends. `jobs` is every job of that batch as the cancel left it. A batch whose jobs are all finished is returned unchanged. Refused with BATCH_PROVIDER_BATCH_NOT_FOUND (404) when no job belongs to the id and BATCH_PROVIDER_CANCEL_UNSUPPORTED (409) when the provider has no cancel call. Needs an admin.
+
+- Title: `Cancel Provider Batch`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/batch/provider-batches/{providerBatchId}/cancel`
+- Scopes: `write:batch`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "providerBatchId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "providerBatchId"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "providerBatchId": {
+      "type": "string"
+    },
+    "providerStatus": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "submitted",
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+        "expired"
+      ]
+    },
+    "jobs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "submitting",
+              "submitted",
+              "running",
+              "completed",
+              "failed",
+              "cancelled",
+              "expired",
+              "dead_lettered"
+            ]
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "updatedAt": {
+            "type": "number"
+          },
+          "request": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "additionalProperties": false
+          },
+          "metadata": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          },
+          "attempts": {
+            "type": "number"
+          },
+          "providerBatchId": {
+            "type": "string"
+          },
+          "providerBatchStatus": {
+            "type": "string"
+          },
+          "submittedAt": {
+            "type": "number"
+          },
+          "completedAt": {
+            "type": "number"
+          },
+          "result": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "message"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "model",
+          "status",
+          "createdAt",
+          "updatedAt",
+          "request",
+          "attempts"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "providerBatchId",
+    "providerStatus",
+    "jobs"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `batch.run`
 
 Run one submit-and-poll pass over the queue now instead of waiting for the timer. `force: true` submits queued jobs even before their delay has elapsed. Returns the counts for this pass, all zero when the mode is `off`. Spends provider budget, so it needs an admin.
@@ -21329,7 +21432,7 @@ Run one submit-and-poll pass over the queue now instead of waiting for the timer
 
 #### `batch.runtime.get`
 
-The batch queue's current mode (`off`: nothing is queued; `explicit`: the job API is open and a non-streaming OpenAI-compatible chat completion is queued when it sends `x-goodvibes-execution: batch`; `eligible-by-default`: every such completion is queued unless it sends `x-goodvibes-execution: live`), what happens to a job whose provider cannot batch (`fallback`: `live` runs it at once on the live path and answers it finished, `fail` refuses it), which queue backend holds jobs, the Cloudflare settings it would use, its limits, and the providers that can batch. `GET /api/batch` and `GET /api/batch/config` return the same document.
+The batch queue's current mode (`off`: nothing is queued; `explicit`: the job API is open and a non-streaming OpenAI-compatible chat completion is queued when it sends `x-goodvibes-execution: batch`; `eligible-by-default`: every such completion whose provider can batch is queued unless it sends `x-goodvibes-execution: live`, and one whose provider cannot runs live as usual), what happens to a job whose provider cannot batch (`fallback`: `live` runs it at once on the live path and answers it finished, `fail` refuses it), which queue backend holds jobs, the Cloudflare settings it would use, its limits, and the providers that can batch. `GET /api/batch` and `GET /api/batch/config` return the same document.
 
 - Title: `Batch Runtime`
 - Source: `builtin`
@@ -21718,6 +21821,9 @@ Move the page back one entry in its history.
     },
     "pageId": {
       "type": "string"
+    },
+    "timeoutMs": {
+      "type": "number"
     }
   },
   "additionalProperties": true
@@ -21776,6 +21882,9 @@ Move the page forward one entry in its history.
     },
     "pageId": {
       "type": "string"
+    },
+    "timeoutMs": {
+      "type": "number"
     }
   },
   "additionalProperties": true
@@ -22086,6 +22195,9 @@ Read the page as text, including open shadow roots and embedded frames, each fra
     },
     "maxChars": {
       "type": "number"
+    },
+    "timeoutMs": {
+      "type": "number"
     }
   },
   "additionalProperties": true
@@ -22189,6 +22301,9 @@ Write a PNG of the visible area or the whole scrollable page and report the exac
     },
     "path": {
       "type": "string"
+    },
+    "timeoutMs": {
+      "type": "number"
     }
   },
   "additionalProperties": true
@@ -22261,6 +22376,9 @@ Scroll the page by an amount, or bring a snapshot element into view.
       "type": "string"
     },
     "amount": {
+      "type": "number"
+    },
+    "timeoutMs": {
       "type": "number"
     }
   },
@@ -23536,6 +23654,9 @@ Open a new tab, optionally at a URL, opening a session first if none is open.
     },
     "headless": {
       "type": "boolean"
+    },
+    "timeoutMs": {
+      "type": "number"
     }
   },
   "additionalProperties": true
@@ -23917,7 +24038,7 @@ Wait for text to become visible, for the URL to match, or for the network to set
 
 #### `calendar.calendars.list`
 
-The calendars the configured account can reach, so a setup flow can offer them for surfaces.calendar.defaultCalendarId. A backend that cannot discover calendars answers 501 CALENDAR_NOT_SUPPORTED.
+The calendars the configured account can reach (the Google calendar list, or the CalDAV collections), so a client can offer them as choices and setup can offer them for surfaces.calendar.defaultCalendarId. A backend that cannot discover calendars answers 501 CALENDAR_NOT_SUPPORTED.
 
 - Title: `List Calendars`
 - Source: `builtin`
@@ -24057,7 +24178,7 @@ Create an event on the configured calendar. Requires explicit confirmation (conf
 
 #### `calendar.events.delete`
 
-Remove an event from the configured calendar. Requires explicit confirmation (confirm: true). `deleted: false` means the calendar no longer held it; a backend that cannot delete events answers 501 CALENDAR_NOT_SUPPORTED.
+Remove an event from the configured calendar (Google or CalDAV). Requires explicit confirmation (confirm: true). `deleted: false` means the calendar no longer held it. A whole recurring series is refused with 409 CALENDAR_SERIES_NOT_SUPPORTED (on Google, one occurrence is removed by the id calendar.events.list gives it); an event that changed after it was read is refused with 409 CALENDAR_EVENT_CHANGED. A backend that cannot delete events answers 501 CALENDAR_NOT_SUPPORTED.
 
 - Title: `Delete Calendar Event`
 - Source: `builtin`
@@ -24282,10 +24403,14 @@ Return event summaries from the configured calendar (a CalDAV server, or the con
         ],
         "additionalProperties": false
       }
+    },
+    "more": {
+      "type": "boolean"
     }
   },
   "required": [
-    "events"
+    "events",
+    "more"
   ],
   "additionalProperties": false
 }
@@ -24293,7 +24418,7 @@ Return event summaries from the configured calendar (a CalDAV server, or the con
 
 #### `calendar.events.update`
 
-Change an event on the configured calendar: only the fields sent change (attendees replaces the guest list). Requires explicit confirmation (confirm: true). An unknown eventId is a 404; a backend that cannot change events answers 501 CALENDAR_NOT_SUPPORTED.
+Change an event on the configured calendar (Google or CalDAV): only the fields sent change (attendees replaces the guest list; start and end are both dates for an all-day event or both date-times). Requires explicit confirmation (confirm: true). An unknown eventId is a 404; an id that names a whole recurring series is refused with 409 CALENDAR_SERIES_NOT_SUPPORTED (on Google, one occurrence is changed by the id calendar.events.list gives it); an event that changed on the calendar after it was read is refused with 409 CALENDAR_EVENT_CHANGED and nothing is written. A backend that cannot change events answers 501 CALENDAR_NOT_SUPPORTED.
 
 - Title: `Update Calendar Event`
 - Source: `builtin`
@@ -24373,7 +24498,7 @@ Change an event on the configured calendar: only the fields sent change (attende
 
 #### `calendar.ics.export`
 
-Export events from the configured calendar as raw .ics content within an optional time window.
+Export events from the configured calendar as raw .ics content within an optional time window. With no limit every event in the window is exported; with a limit the export stops there and more: true says the window holds further events.
 
 - Title: `Export iCalendar`
 - Source: `builtin`
@@ -24399,6 +24524,9 @@ Export events from the configured calendar as raw .ics content within an optiona
     },
     "to": {
       "type": "string"
+    },
+    "limit": {
+      "type": "number"
     }
   },
   "additionalProperties": false
@@ -24416,6 +24544,9 @@ Export events from the configured calendar as raw .ics content within an optiona
     },
     "eventCount": {
       "type": "number"
+    },
+    "more": {
+      "type": "boolean"
     }
   },
   "required": [
@@ -27793,7 +27924,7 @@ Remove a channel draft from the daemon-side store.
 
 #### `channels.drafts.get`
 
-Return a single daemon-mirrored channel draft by id, or a notFound marker.
+Return one channel draft by id: the owner (admin) receives its text, so a draft written on one device can be finished and sent on another; any other caller receives the redacted record. Webhook values stay redacted. An id that names no draft returns a notFound marker.
 
 - Title: `Get Channel Draft`
 - Source: `builtin`
@@ -27886,7 +28017,7 @@ Return a single daemon-mirrored channel draft by id, or a notFound marker.
 
 #### `channels.drafts.list`
 
-Return daemon-mirrored channel drafts for cross-device sync. Webhook values are stored redacted.
+Return channel drafts for cross-device sync, metadata only: each message reads as a redacted marker and webhook values are redacted. The daemon is the store of record; the text is served by channels.drafts.get.
 
 - Title: `List Channel Drafts`
 - Source: `builtin`
@@ -28286,7 +28417,7 @@ Write triage labels to inbox messages at their provider: an IMAP keyword on mail
 
 #### `channels.inbox.list`
 
-Return the merged inbound message feed (Slack DMs, Discord messages, email threads) from the host's synced provider mirror, newest first. Read-only; no provider write. Every known provider reports its own state in `providers`, including the unconfigured and the failing ones, so a short list is never ambiguous, and `partial` is true whenever a configured provider's items are missing because its last sync failed. Page with ?limit and ?cursor (opaque, from nextCursor); ?since=<epoch-ms> returns only items newer than a previous answer's `cursor` watermark; ?provider=<id> narrows to one provider.
+Return the merged inbound message feed (Slack DMs, Discord messages, email threads) from the host's synced provider mirror, newest first. Read-only; no provider write. Every known provider reports its own state in `providers`, including the unconfigured and the failing ones, so a short list is never ambiguous, and `partial` is true whenever a configured provider's items are missing because its last sync failed. Page with ?limit and ?cursor (opaque, from nextCursor); ?since=<cursor> returns only items committed after a previous answer's `cursor` watermark (the store's commit sequence, not a time); ?provider=<id> narrows to one provider. Each provider with triage says in `triage` whether new messages are being labelled and, when not, why and what turns it on; channels.inbox.triage labels a page now.
 
 - Title: `List Channel Inbox`
 - Source: `builtin`
@@ -28440,23 +28571,28 @@ Return the merged inbound message feed (Slack DMs, Discord messages, email threa
           "mailboxHistory": {
             "type": "object",
             "properties": {
-              "uidValidity": {
-                "type": "number"
+              "source": {
+                "type": "string"
               },
               "kind": {
                 "type": "string"
               },
+              "skippedOlderMessages": {
+                "type": "number"
+              },
+              "uidValidity": {
+                "type": "number"
+              },
               "lowerBoundUid": {
                 "type": "number"
               },
-              "skippedOlderMessages": {
+              "pendingMessages": {
                 "type": "number"
               }
             },
             "required": [
-              "uidValidity",
+              "source",
               "kind",
-              "lowerBoundUid",
               "skippedOlderMessages"
             ],
             "additionalProperties": false
@@ -28477,6 +28613,9 @@ Return the merged inbound message feed (Slack DMs, Discord messages, email threa
             ],
             "additionalProperties": false
           },
+          "mailboxScope": {
+            "type": "string"
+          },
           "skippedMessages": {
             "type": "array",
             "items": {
@@ -28485,16 +28624,39 @@ Return the merged inbound message feed (Slack DMs, Discord messages, email threa
                 "uid": {
                   "type": "number"
                 },
+                "messageId": {
+                  "type": "string"
+                },
                 "reason": {
                   "type": "string"
                 }
               },
               "required": [
-                "uid",
                 "reason"
               ],
               "additionalProperties": false
             }
+          },
+          "triage": {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "next": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -28517,6 +28679,111 @@ Return the merged inbound message feed (Slack DMs, Discord messages, email threa
     "hasMore",
     "providers",
     "partial"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `channels.inbox.triage`
+
+Score a page of one provider's stored inbox now: each message gets a spam / priority / normal label from the decision model on the account's privacy-screening route (labels otherwise come after each poll, so this is for a backlog or a re-check). `provider` is required (slack, discord or email); page with `limit` (at most 100) and `cursor` (nextCursor from channels.inbox.list or an earlier answer). `dryRun: true` returns the readings without storing them. Returns one receipt per message: `settled` with its label and score, or `held` / `unavailable` / `withheld` with why nothing was settled. When triage is off for the account the call is refused with the reason and what turns it on; channels.inbox.list reports the same state on each provider as `triage`.
+
+- Title: `Triage Inbox Now`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/channels/inbox/triage`
+- Scopes: `write:channels`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "provider": {
+      "type": "string"
+    },
+    "limit": {
+      "type": "number"
+    },
+    "cursor": {
+      "type": "string"
+    },
+    "dryRun": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "provider"
+  ],
+  "additionalProperties": true
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "receipts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "type": "string"
+          },
+          "battery": {
+            "type": "string"
+          },
+          "batteryVersion": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "total": {
+      "type": "number"
+    },
+    "hasMore": {
+      "type": "boolean"
+    },
+    "nextCursor": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "receipts",
+    "total",
+    "hasMore"
   ],
   "additionalProperties": false
 }
@@ -29423,7 +29690,7 @@ Remove a channel profile binding. Returns { deleted: false } when no binding for
 
 #### `channels.profiles.get`
 
-Return the profile binding for a channel (surfaceKind plus optional channelId). Returns 404 when no binding for that exact key exists.
+Return the profile binding for a channel (surfaceKind plus optional channelId) and `effective`: what a session that channel originates gets, each field merged from this binding and the surface-wide one, with `sources` naming the binding id that supplied each field. Returns 404 when no binding for that exact key exists. A listed or returned binding with `invalid` holds a value this build cannot use; that field is left out until the binding is set again or deleted.
 
 - Title: `Get Channel Profile Binding`
 - Source: `builtin`
@@ -29518,6 +29785,50 @@ Return the profile binding for a channel (surfaceKind plus optional channelId). 
               }
             ]
           }
+        },
+        "invalid": {
+          "type": "object",
+          "properties": {
+            "field": {
+              "type": "string",
+              "enum": [
+                "permissionMode"
+              ]
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "array",
+                  "items": {}
+                }
+              ]
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -29526,10 +29837,58 @@ Return the profile binding for a channel (surfaceKind plus optional channelId). 
         "updatedAt"
       ],
       "additionalProperties": false
+    },
+    "effective": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "permissionMode": {
+              "type": "string",
+              "enum": [
+                "ask-me",
+                "jev-decides",
+                "just-vibes",
+                "yolo",
+                "plan"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "sources": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "permissionMode": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "profile",
+        "sources"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
-    "binding"
+    "binding",
+    "effective"
   ],
   "additionalProperties": false
 }
@@ -29624,6 +29983,50 @@ Return every per-channel profile binding: the model, provider and permission-mod
                 }
               ]
             }
+          },
+          "invalid": {
+            "type": "object",
+            "properties": {
+              "field": {
+                "type": "string",
+                "enum": [
+                  "permissionMode"
+                ]
+              },
+              "value": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "array",
+                    "items": {}
+                  }
+                ]
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "field",
+              "value",
+              "reason"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -29782,6 +30185,50 @@ Bind (upsert) the model/provider and permission-mode defaults for a channel. Key
               }
             ]
           }
+        },
+        "invalid": {
+          "type": "object",
+          "properties": {
+            "field": {
+              "type": "string",
+              "enum": [
+                "permissionMode"
+              ]
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "array",
+                  "items": {}
+                }
+              ]
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "value",
+            "reason"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -29928,7 +30375,7 @@ Return repair actions exposed by a channel surface.
 
 #### `channels.routing.assign`
 
-Create or update a channel-to-profile routing rule in the daemon-persisted routing table. The daemon applies it to inbox items from slack, discord and email (surfaceKind any reaches the same three); any other surface is refused with 400 ROUTING_SURFACE_NOT_ROUTED, because nothing there reads the rule. Requires explicit confirmation; a call made with the Agent's credential (the Agent acting on the owner's behalf) instead takes fresh recorded native admission.
+Create or update a channel-to-profile routing rule in the daemon-persisted routing table. The daemon applies it on every channel surface (slack, discord, telegram, msteams and the rest) and to slack, discord and email inbox items: an agent started for a message from the channel takes the profile's model and reasoning effort when neither the request nor the channel profile chose a model. routeId is the conversation (a chat, channel or room id); without it the rule covers the whole surface, and surfaceKind any covers every channel. tui, web and service are refused with 400 ROUTING_SURFACE_NOT_ROUTED, because their model is chosen in the surface itself. Requires explicit confirmation; a call made with the Agent's credential (the Agent acting on the owner's behalf) instead takes fresh recorded native admission.
 
 - Title: `Assign Channel Routing Rule`
 - Source: `builtin`
@@ -30066,7 +30513,7 @@ Remove a channel-to-profile routing rule from the daemon-persisted routing table
 
 #### `channels.routing.list`
 
-Return the daemon-persisted channel-to-profile routing table.
+Return the daemon-persisted channel-to-profile routing table. The profileId a rule names is stamped on inbox items from that channel (their routeId) so the surface owning the profile picks them up; it sets no model, provider or permission mode. Those come from channels.profiles.*, the one table the daemon applies to sessions a channel originates.
 
 - Title: `List Channel Routing Rules`
 - Source: `builtin`
@@ -33113,6 +33560,44 @@ Create a standing watch on a repo/ref or PR. On a terminal verdict it notifies t
         },
         "updatedAt": {
           "type": "number"
+        },
+        "expiresAt": {
+          "type": "number"
+        },
+        "repair": {
+          "type": "object",
+          "properties": {
+            "failureKey": {
+              "type": "string"
+            },
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "started",
+                "denied",
+                "error"
+              ]
+            },
+            "at": {
+              "type": "number"
+            },
+            "attempts": {
+              "type": "number"
+            },
+            "retryAt": {
+              "type": "number"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "failureKey",
+            "outcome",
+            "at",
+            "attempts"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -33187,7 +33672,7 @@ Remove a standing CI watch. Returns { deleted: false } when no watch with that i
 
 #### `ci.watches.list`
 
-Return every standing CI watch. Stored flags are not repair authority; production repair requires current original-source ownership and Jev admission.
+Return every standing CI watch, each with `expiresAt` (when it ends without a verdict) and, after a repair was tried for the current failure, `repair` (its outcome, attempts and next retry). Stored flags are not repair authority; production repair requires current original-source ownership and Jev admission.
 
 - Title: `List CI Watches`
 - Source: `builtin`
@@ -33255,6 +33740,44 @@ Return every standing CI watch. Stored flags are not repair authority; productio
           },
           "updatedAt": {
             "type": "number"
+          },
+          "expiresAt": {
+            "type": "number"
+          },
+          "repair": {
+            "type": "object",
+            "properties": {
+              "failureKey": {
+                "type": "string"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "started",
+                  "denied",
+                  "error"
+                ]
+              },
+              "at": {
+                "type": "number"
+              },
+              "attempts": {
+                "type": "number"
+              },
+              "retryAt": {
+                "type": "number"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "failureKey",
+              "outcome",
+              "at",
+              "attempts"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -33278,7 +33801,7 @@ Return every standing CI watch. Stored flags are not repair authority; productio
 
 #### `ci.watches.run`
 
-Poll a standing watch immediately: returns the per-job report, whether a completion notification fired, and whether an admitted fix-session started, or an honest refusal/error.
+Poll a standing watch immediately: returns the per-job report, whether a completion notification fired, and whether an admitted fix-session started, or an honest refusal/error. When the check ended the watch without a verdict or a repair, `retired` is true and `endedReason` says why.
 
 - Title: `Check CI Watch Now`
 - Source: `builtin`
@@ -33420,6 +33943,9 @@ Poll a standing watch immediately: returns the per-job report, whether a complet
     },
     "retired": {
       "type": "boolean"
+    },
+    "endedReason": {
+      "type": "string"
     }
   },
   "required": [
@@ -34759,7 +35285,7 @@ Server-Sent Events stream of turn and agent events scoped to a single companion-
 - Access: `authenticated`
 - Transport: `http`
 - HTTP: `GET /api/companion/chat/sessions/{sessionId}/events`
-- Scopes: `read:sessions`
+- Scopes: `read:transcripts`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `no`
@@ -35101,14 +35627,14 @@ Edit a user message and branch the conversation from it. `messageId` (required) 
 
 #### `companion.chat.messages.list`
 
-Return the message list for a companion-chat session.
+Return the messages of a companion-chat session, oldest first. With neither `limit` nor `before` the whole transcript is returned. With `limit` (1-1000, default 100 when only `before` is given) and/or `before` (a message id) one page is returned: the messages just before `before`, or the newest ones. Every answer carries `total` and `more`; while `more` is true, pass `nextBefore` back as `before` to read the page before it. A `before` that names no message in the chat is 404 MESSAGE_NOT_FOUND.
 
 - Title: `List Companion Chat Messages`
 - Source: `builtin`
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/companion/chat/sessions/{sessionId}/messages`
-- Scopes: `read:sessions`
+- Scopes: `read:transcripts`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -35120,6 +35646,12 @@ Return the message list for a companion-chat session.
   "type": "object",
   "properties": {
     "sessionId": {
+      "type": "string"
+    },
+    "limit": {
+      "type": "number"
+    },
+    "before": {
       "type": "string"
     }
   },
@@ -35257,8 +35789,12 @@ Return the message list for a companion-chat session.
             "enum": [
               "cancelled",
               "queued",
-              "unanswered"
+              "unanswered",
+              "failed"
             ]
+          },
+          "failureReason": {
+            "type": "string"
           },
           "inReplyTo": {
             "type": "string"
@@ -35274,11 +35810,22 @@ Return the message list for a companion-chat session.
         ],
         "additionalProperties": false
       }
+    },
+    "total": {
+      "type": "number"
+    },
+    "more": {
+      "type": "boolean"
+    },
+    "nextBefore": {
+      "type": "string"
     }
   },
   "required": [
     "sessionId",
-    "messages"
+    "messages",
+    "total",
+    "more"
   ],
   "additionalProperties": false
 }
@@ -35286,7 +35833,7 @@ Return the message list for a companion-chat session.
 
 #### `companion.chat.messages.retry`
 
-Regenerate an assistant response. Optional `messageId` targets a specific assistant message; omitted, the latest assistant response is re-run. The prior response (and any turns after it) is SUPERSEDED, kept in the message list and on disk, flagged as retained history, never deleted, then a fresh turn re-runs from the preceding user message. Returns the superseded message ids so the caller can render the honest lineage. Rejected on a closed session (409 SESSION_CLOSED) or unknown session (404 SESSION_NOT_FOUND), and with an honest machine code (409 NO_ASSISTANT_MESSAGE) when there is nothing to regenerate. While a reply is streaming, a message is being prepared, or sends are queued it is refused with 409 CHAT_TURN_BUSY and nothing changes: stop the reply (or let it and the queue finish), then retry.
+Regenerate an assistant response. Omitted `messageId`: the latest answered user message is answered again; whatever followed it in its exchange (its reply, a failed reply, or nothing) is SUPERSEDED, while a reply to an earlier message that was stored after it stays active, so retrying a failed regenerate repeats the same exchange. With `messageId` (an active assistant message): that response and every message after it are superseded, and the turn re-runs from the user message it answered. Superseded messages are kept in the message list and on disk, flagged as retained history, never deleted. Returns the superseded message ids so the caller can render the honest lineage. Rejected on a closed session (409 SESSION_CLOSED) or unknown session (404 SESSION_NOT_FOUND); a `messageId` that is unknown is 404 MESSAGE_NOT_FOUND, already superseded 409 MESSAGE_SUPERSEDED, not an assistant message 400 NOT_AN_ASSISTANT_MESSAGE; with no user message to answer again it is 409 NO_ANCHOR_MESSAGE. While a reply is streaming, a message is being prepared, or sends are queued it is refused with 409 CHAT_TURN_BUSY and nothing changes: stop the reply (or let it and the queue finish), then retry.
 
 - Title: `Regenerate Companion Chat Response`
 - Source: `builtin`
@@ -35359,7 +35906,7 @@ Find companion-chat messages whose text contains `query` (case-insensitive) acro
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/companion/chat/messages/search`
-- Scopes: `read:sessions`
+- Scopes: `read:transcripts`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -35921,7 +36468,7 @@ Return a companion-chat session record together with its full message history.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/companion/chat/sessions/{sessionId}`
-- Scopes: `read:sessions`
+- Scopes: `read:transcripts`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -36174,8 +36721,12 @@ Return a companion-chat session record together with its full message history.
             "enum": [
               "cancelled",
               "queued",
-              "unanswered"
+              "unanswered",
+              "failed"
             ]
+          },
+          "failureReason": {
+            "type": "string"
           },
           "inReplyTo": {
             "type": "string"
@@ -36372,6 +36923,62 @@ List active companion-chat sessions. Pass `includeClosed` to include recently cl
   "required": [
     "sessions",
     "totals"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `companion.chat.sessions.reopen`
+
+Open a closed companion-chat session again so it accepts messages. The model history is rebuilt from the saved transcript on the next send. A chat that is already open answers `reopened: false` with its current status; an unknown id is a 404 SESSION_NOT_FOUND.
+
+- Title: `Reopen Companion Chat Session`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/companion/chat/sessions/{sessionId}/reopen`
+- Scopes: `write:sessions`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sessionId"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    },
+    "reopened": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "sessionId",
+    "status",
+    "reopened"
   ],
   "additionalProperties": false
 }
@@ -36650,7 +37257,7 @@ Update companion-chat session metadata, including session-local provider, model 
 
 #### `companion.chat.turns.cancel`
 
-Stop the in-flight turn for a companion chat session, a true server-side stop: the provider stream is aborted, any non-empty partial reply is persisted to the transcript with an explicit `deliveryState: "cancelled"` marker (an honest partial, never disguised as a complete reply) AND committed to the model-facing conversation history with an explicit interruption note, later turns can reason about what the user saw and stopped, which is usually what a follow-up or steer refers to, and the terminal `turn.cancelled` event is published to every subscriber of the session stream so a stop from one client converges on all others. Any announced tool call without a result is closed with a synthetic error `turn.tool_result` before the terminal event. Optional `turnId` guards against cancelling a newer turn a stale stop raced against (409 TURN_MISMATCH). No turn in flight is the benign 404 NO_ACTIVE_TURN (the turn finished before the stop landed). Repeat cancels are idempotent successes. The session stays open; the next message starts a fresh turn normally.
+Stop the in-flight turn for a companion chat session, a true server-side stop: the provider stream is aborted, any non-empty partial reply is persisted to the transcript with an explicit `deliveryState: "cancelled"` marker (an honest partial, never disguised as a complete reply) AND committed to the model-facing conversation history with an explicit interruption note, later turns can reason about what the user saw and stopped, which is usually what a follow-up or steer refers to, and the terminal `turn.cancelled` event is published to every subscriber of the session stream so a stop from one client converges on all others. Any announced tool call without a result is closed with a synthetic error `turn.tool_result` before the terminal event. Optional `turnId` guards against cancelling a newer turn a stale stop raced against (409 TURN_MISMATCH). No turn in flight is the benign 404 NO_ACTIVE_TURN (the turn finished before the stop landed). When the turn has not stopped within 3 seconds (a tool call or the provider has not ended yet) the stop is still accepted and the answer is 409 TURN_STOPPING with `state: "stopping"`: treat the turn as stopping, not failed; the terminal `turn.cancelled` event follows when it stops. Repeat cancels are idempotent successes. The session stays open; the next message starts a fresh turn normally.
 
 - Title: `Cancel Companion Chat Turn`
 - Source: `builtin`
@@ -37108,7 +37715,7 @@ Remove the explicit value of one config key through the daemon API so it reads a
 
 #### `config.set`
 
-Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir swaps the workspace. The same route also serves the settings clients' two-step lanes, `{ settingsPrecondition }` and `{ settingsImportPrecondition }` (capture, then apply the returned reference), which answer with that lane's own object.
+Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is saved for the next start of the daemon. The same route also serves the settings clients' lanes, which answer with that lane's own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer), and `{ settingsImportPrecondition }` takes the same two actions plus `apply`, which spends a captured `reference`.
 
 - Title: `Set Config Value`
 - Source: `builtin`
@@ -37163,10 +37770,20 @@ Write one config value on the daemon: `{ key, value }`, where value is any JSON 
           "type": "string",
           "enum": [
             "capture",
-            "apply"
+            "write"
           ]
         },
         "reference": {
+          "type": "string"
+        },
+        "ifIncarnation": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ifServing": {
+          "type": "string"
+        },
+        "requestId": {
           "type": "string"
         }
       },
@@ -37186,10 +37803,21 @@ Write one config value on the daemon: `{ key, value }`, where value is any JSON 
           "type": "string",
           "enum": [
             "capture",
-            "apply"
+            "apply",
+            "write"
           ]
         },
         "reference": {
+          "type": "string"
+        },
+        "ifIncarnation": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ifServing": {
+          "type": "string"
+        },
+        "requestId": {
           "type": "string"
         }
       },
@@ -37252,10 +37880,20 @@ Write one config value on the daemon: `{ key, value }`, where value is any JSON 
               "type": "string",
               "enum": [
                 "capture",
-                "apply"
+                "write"
               ]
             },
             "reference": {
+              "type": "string"
+            },
+            "ifIncarnation": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "ifServing": {
+              "type": "string"
+            },
+            "requestId": {
               "type": "string"
             }
           },
@@ -37284,10 +37922,21 @@ Write one config value on the daemon: `{ key, value }`, where value is any JSON 
               "type": "string",
               "enum": [
                 "capture",
-                "apply"
+                "apply",
+                "write"
               ]
             },
             "reference": {
+              "type": "string"
+            },
+            "ifIncarnation": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "ifServing": {
+              "type": "string"
+            },
+            "requestId": {
               "type": "string"
             }
           },
@@ -37363,7 +38012,7 @@ Write one config value on the daemon: `{ key, value }`, where value is any JSON 
 
 #### `config.setMany`
 
-Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is set on its own with config.set.
+Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in; when a key does not hold the value asked for (a higher tier overrides it, or it was coerced), the answer is 409 CONFIG_SET_NOT_APPLIED naming those keys in `notApplied`, with the revision written and every entry's held value. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is set on its own with config.set.
 
 - Title: `Set Several Config Values`
 - Source: `builtin`
@@ -41035,6 +41684,9 @@ Start a contract for `ask` (the person's words verbatim) in a hosted session cre
             "external",
             "proposal"
           ]
+        },
+        "ownerPrincipalId": {
+          "type": "string"
         },
         "ask": {
           "type": "string"
@@ -49111,6 +49763,9 @@ One contract with its whole tree, running or ended. The captured input's per-fil
         "proposal"
       ]
     },
+    "ownerPrincipalId": {
+      "type": "string"
+    },
     "ask": {
       "type": "string"
     },
@@ -54168,7 +54823,7 @@ One contract with its whole tree, running or ended. The captured input's per-fil
 
 #### `contracts.list`
 
-Every contract this daemon holds, newest first, each with its whole tree: the ask, the goal, the acceptance criteria with every Jev reading, the groups and units with their checks and nudges, open and answered owner escalations, decisions, usage, and the answer or status line once it ends. `sessionId` narrows the list to one session's contracts (a hosted session's, or a shared session's); ended contracts are left out unless `includeTerminal` is set. For a list view, `contracts.summaries` returns the same contracts as small summaries.
+Every contract this daemon holds, newest first, each with its whole tree: the ask, the goal, the acceptance criteria with every Jev reading, the groups and units with their checks and nudges, open and answered owner escalations, decisions, usage, and the answer or status line once it ends. `sessionId` narrows the list to one session's contracts (a hosted session's, or a shared session's); ended contracts are left out unless `includeTerminal` is set. For a list view, `contracts.summaries` returns the same contracts as small summaries. A contract an identified caller started belongs to that caller (`ownerPrincipalId`) for its whole life; one a hosted session's own turn started belongs to that session's identified owners. Contracts of another caller are left out here and read as CONTRACT_NOT_FOUND everywhere else.
 
 - Title: `List Contracts`
 - Source: `builtin`
@@ -57174,6 +57829,9 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
               "external",
               "proposal"
             ]
+          },
+          "ownerPrincipalId": {
+            "type": "string"
           },
           "ask": {
             "type": "string"
@@ -62287,7 +62945,7 @@ Delete the record of a contract that has ended (passed, failed or cancelled): it
 
 #### `contracts.reply`
 
-The owner's free-text reply to an open escalation of a contract, read by Jev as approve, reject, amend or unclear. Returns how it was read and what the runner did: approved, amended, stopped, asked again (with the new escalation id), or refused when the escalation is no longer open. Approval never passes a criterion Jev read as unmet; the requirement changes only through an amendment. A native work contract's failed-turn question is not read by Jev: it accepts exactly `retry` or `cancel`. 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_NOT_RUNNING when this runner holds the contract only for inspection, 409 with CONTRACT_ENDED when the contract has ended, 409 with ESCALATION_NOT_OPEN when the escalation is already answered or another reply to it is being read, 400 with INVALID_ARGUMENT when the text is not an answer the question accepts.
+The owner's free-text reply to an open escalation of a contract, read by Jev as approve, reject, amend or unclear. Returns how it was read and what the runner did: approved, amended, stopped, asked again (with the new escalation id), or refused when the escalation is no longer open. Approval never passes a criterion Jev read as unmet; the requirement changes only through an amendment. A failed-work question (a native work contract's failed turn, a failed unit, a result that could not be published) is not read by Jev: it accepts exactly `retry` or `cancel`. 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_NOT_RUNNING when this runner holds the contract only for inspection, 409 with CONTRACT_ENDED when the contract has ended, 409 with ESCALATION_NOT_OPEN when the escalation is already answered or another reply to it is being read, 400 with INVALID_ARGUMENT when the text is not an answer the question accepts.
 
 - Title: `Reply to a Contract Escalation`
 - Source: `builtin`
@@ -62376,7 +63034,7 @@ The owner's free-text reply to an open escalation of a contract, read by Jev as 
 
 #### `contracts.retryUnit`
 
-Run one unit of a running contract again: a unit that is working gets a fresh agent with its brief and previous checks, and a passed unit whose commit failed has its changes committed again. `outcome` is `restarted`, `committed`, or `refused` with `reason` naming why and what to do instead (a unit that has not started, is being fixed, or ended with its contract). 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_ENDED once the contract has ended; 409 with CONTRACT_NATIVE for native work.
+Run one unit of a running contract again: a unit that is working gets a fresh agent with its brief and previous checks, a unit that failed (the contract waits on its retry-or-cancel question, the units depending on it held) runs again with a fresh agent, the same as replying `retry`, and a passed unit whose commit failed has its changes committed again. `outcome` is `restarted`, `committed`, or `refused` with `reason` naming why and what to do instead (a unit that has not started, is being fixed, or ended with its contract). 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_ENDED once the contract has ended; 409 with CONTRACT_NATIVE for native work.
 
 - Title: `Run One Contract Unit Again`
 - Source: `builtin`
@@ -65458,6 +66116,9 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
             "external",
             "proposal"
           ]
+        },
+        "ownerPrincipalId": {
+          "type": "string"
         },
         "ask": {
           "type": "string"
@@ -71163,6 +71824,16 @@ Return the current control-plane principal, granted scopes, and authentication m
       "items": {
         "type": "string"
       }
+    },
+    "expiresAt": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "required": [
@@ -71537,6 +72208,16 @@ Return the operator-facing control-plane contract manifest, including auth, tran
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "expiresAt": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   },
                   "required": [
@@ -73433,7 +74114,7 @@ Return the current control-plane gateway snapshot.
 
 #### `control.status`
 
-Return daemon status and version. THREE version fields, because there are two versions and they are not the same number: `buildVersion` is the running artifact's own release version, what a person installed, and what the auto-update loop compares against release tags, and `platformVersion` is the platform build it is composed from. `version` carries the build version and exists because every client already reads it; on an embedded daemon that ships no artifact of its own, all three are the platform build. Pass receipts=peek to also receive undelivered daemon receipts (update/crash/migration notices) without consuming them, then receipts=ack&ids=<id>,<id> once they are shown, so a response lost in transit is offered again. receipts=consume still receives and marks them delivered in one read, so each receipt goes to at most one consuming reader and a lost response is not replayed. Without the flag no receipts are returned or consumed, so identity probes and keepalives never eat them.
+Return daemon status and version. THREE version fields, because there are two versions and they are not the same number: `buildVersion` is the running artifact's own release version, what a person installed, and what the auto-update loop compares against release tags, and `platformVersion` is the platform build it is composed from. `version` carries the build version and exists because every client already reads it; on an embedded daemon that ships no artifact of its own, all three are the platform build. Pass receipts=peek to also receive undelivered daemon receipts (update/crash/migration notices) without consuming them, then receipts=ack&ids=<id>,<id> once they are shown, so a response lost in transit is offered again. Without the flag no receipts are returned or marked, so identity probes and keepalives never take them.
 
 - Title: `Daemon Status`
 - Source: `builtin`
@@ -73454,11 +74135,10 @@ Return daemon status and version. THREE version fields, because there are two ve
     "receipts": {
       "type": "string",
       "enum": [
-        "consume",
         "peek",
         "ack"
       ],
-      "description": "Omit for a read that never touches receipts. \"peek\" returns undelivered daemon receipts without marking them; \"ack\" (with ids) marks exactly those delivered; \"consume\" returns and marks them delivered in one read."
+      "description": "Omit for a read that never touches receipts. \"peek\" returns undelivered daemon receipts without marking them; \"ack\" (with ids) marks exactly those delivered, once the reader has shown them."
     },
     "ids": {
       "type": "string",
@@ -73547,9 +74227,9 @@ Return daemon status and version. THREE version fields, because there are two ve
 
 #### `control.web`
 
-Return the built-in control-plane HTML shell for external clients.
+Open the web app on the approval (`approval`) or session (`session`) the link names: a 302 redirect to the web app when the daemon serves it (controlPlane.webui.serve) or knows where it runs (a user-set web.publicBaseUrl, or web.enabled with web.host/web.port). With no web app known, returns the control plane's built-in HTML page. Answered before authentication; the page signs in on its own.
 
-- Title: `Control-Plane Web Shell`
+- Title: `Open the Web App`
 - Source: `builtin`
 - Access: `authenticated`
 - Transport: `http`
@@ -73564,7 +74244,14 @@ Return the built-in control-plane HTML shell for external clients.
 ```json
 {
   "type": "object",
-  "properties": {},
+  "properties": {
+    "approval": {
+      "type": "string"
+    },
+    "session": {
+      "type": "string"
+    }
+  },
   "additionalProperties": false
 }
 ```
@@ -73658,6 +74345,7 @@ Return the pairing payload a surface scans to reach this daemon through the rela
         "connecting",
         "registered",
         "reconnecting",
+        "refused",
         "stopped"
       ]
     }
@@ -73672,7 +74360,7 @@ Return the pairing payload a surface scans to reach this daemon through the rela
 
 #### `relay.reachability.get`
 
-Whether this daemon is registered with the relay, and what state its registration is in. `disabled` is a distinct answer from every other one and the distinction is the point: it means a gate is off, `relay.enabled`, the relay-connect capability, or an empty `relay.url`, rather than that a connection is failing. `idle` means the gates are open and nothing has started; `connecting`, `registered` and `reconnecting` are the live registration; `stopped` is a controller that was told to stop. `configured` says whether all three gates are open, so a caller can render "turn it on" instead of "it is broken". ws-only invoke verb; no REST binding.
+Whether this daemon is registered with the relay, and what state its registration is in. `disabled` is a distinct answer from every other one and the distinction is the point: it means a gate is off, `relay.enabled`, the relay-connect capability, or an empty `relay.url`, rather than that a connection is failing. `idle` means the gates are open and nothing has started; `connecting`, `registered` and `reconnecting` are the live registration; `refused` means the relay refused the registration for a reason another attempt cannot clear, and the daemon stops dialling until the relay settings or identity change; `stopped` is a controller that was told to stop. `configured` says whether all three gates are open, so a caller can render "turn it on" instead of "it is broken". `rendezvousId`, present while a registration is running, is the id the daemon is registered under, derived from its relay identity key; it is the id a pairing payload carries and a step-up challenge is bound to. `refusal`, present after the relay refused the registration, says why (`state`), what to do (`next`) and whether the daemon keeps trying (`retryable`). ws-only invoke verb; no REST binding.
 
 - Title: `Relay Reachability`
 - Source: `builtin`
@@ -73708,11 +74396,46 @@ Whether this daemon is registered with the relay, and what state its registratio
         "connecting",
         "registered",
         "reconnecting",
+        "refused",
         "stopped"
       ]
     },
     "configured": {
       "type": "boolean"
+    },
+    "rendezvousId": {
+      "type": "string"
+    },
+    "refusal": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "next": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "state",
+        "next",
+        "retryable"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
@@ -75412,6 +76135,184 @@ Register, in advance, that a verification message is expected at one address fro
 }
 ```
 
+#### `email.expectation.wait`
+
+Where one expectation stands, waiting up to timeoutMs (default 0, at most 60000) for it to change. state "arrived" carries the verification link or code the daemon took from the matching message (token); "waiting" lists matching messages that held none (arrivals); "expired", "capability-lost" and "cancelled" say how it ended, with detail; "unknown" means no expectation with that id is open or remembered. watching says whether a mailbox is being read right now, so "nothing yet" is never confused with "nobody is looking". Call it again while the state is "waiting".
+
+- Title: `Wait For Verification Message`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `read:email`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "timeoutMs": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "state": {
+      "type": "string",
+      "enum": [
+        "waiting",
+        "arrived",
+        "expired",
+        "capability-lost",
+        "cancelled",
+        "unknown"
+      ]
+    },
+    "id": {
+      "type": "string"
+    },
+    "expectation": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "serviceDomain": {
+          "type": "string"
+        },
+        "recipientAddress": {
+          "type": "string"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "openedAt": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "authority": {
+          "type": "string"
+        },
+        "remainingMs": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "serviceDomain",
+        "recipientAddress",
+        "purpose",
+        "openedAt",
+        "expiresAt",
+        "authority"
+      ],
+      "additionalProperties": false
+    },
+    "arrivals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "messageId": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "messageId",
+          "at",
+          "reason"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "messageId": {
+      "type": "string"
+    },
+    "at": {
+      "type": "string"
+    },
+    "token": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "link",
+            "code"
+          ]
+        },
+        "url": {
+          "type": "string"
+        },
+        "linkHost": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false
+    },
+    "detail": {
+      "type": "string"
+    },
+    "watching": {
+      "type": "object",
+      "properties": {
+        "running": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "running",
+        "reason"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "state"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `email.inbound.status`
 
 Disclose the inbound-mail watcher: whether it is running and why, which source is reading the mailbox and the delay that source actually costs, the current capability verdict, every persisted cursor with its position and age, every open verification expectation with its remaining window, whether each store could be read, whether arriving mail is actually being announced to the owner, and what each store retains before it is reaped. Read-only.
@@ -76194,8 +77095,7 @@ Return the feature defaults report: every platform capability with its current d
             "type": "string",
             "enum": [
               "enabled",
-              "disabled",
-              "killed"
+              "disabled"
             ]
           },
           "runtimeToggleable": {
@@ -76403,16 +77303,14 @@ Return the features whose saved setting the running daemon has not applied yet. 
             "type": "string",
             "enum": [
               "enabled",
-              "disabled",
-              "killed"
+              "disabled"
             ]
           },
           "saved": {
             "type": "string",
             "enum": [
               "enabled",
-              "disabled",
-              "killed"
+              "disabled"
             ]
           }
         },
@@ -78677,6 +79575,12 @@ Type text into an externally-launched coding-agent session goodvibes only OBSERV
     "queued": {
       "type": "boolean"
     },
+    "submitted": {
+      "type": "boolean"
+    },
+    "declined": {
+      "type": "boolean"
+    },
     "messageId": {
       "type": "string"
     },
@@ -80155,12 +81059,36 @@ Turn the owner keep-awake toggle on or off: a daemon-held sleep inhibitor INDEPE
         "note"
       ],
       "additionalProperties": false
+    },
+    "sleepEdge": {
+      "type": "object",
+      "properties": {
+        "watching": {
+          "type": "boolean"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "watching",
+        "note"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
     "platform",
     "work",
-    "keepAwake"
+    "keepAwake",
+    "sleepEdge"
   ],
   "additionalProperties": false
 }
@@ -80168,7 +81096,7 @@ Turn the owner keep-awake toggle on or off: a daemon-held sleep inhibitor INDEPE
 
 #### `power.status.get`
 
-The host sleep-ownership state: whether the automatic work inhibitor is held (and the live "held because X" reasons, cap, and expiry), and the owner keep-awake toggle with the classes the OS actually granted vs refused, a refused lid-switch block is stated honestly ("idle sleep blocked; lid-close suspend is controlled by your OS here"), never papered over. Surfaces render the always-visible "sleep disabled" chip from this state and the runtime.ops OPS_POWER_STATE_CHANGED event.
+The host sleep-ownership state: whether the automatic work inhibitor is held (and the live "held because X" reasons, cap, and expiry), and the owner keep-awake toggle with the classes the OS actually granted vs refused, a refused lid-switch block is stated honestly ("idle sleep blocked; lid-close suspend is controlled by your OS here"), never papered over. sleepEdge says whether work is checkpointed before sleep and caught up on wake, and its note says why not when it cannot be. Surfaces render the always-visible "sleep disabled" chip from this state and the runtime.ops OPS_POWER_STATE_CHANGED event.
 
 - Title: `Get Sleep-Ownership State`
 - Source: `builtin`
@@ -80331,12 +81259,124 @@ The host sleep-ownership state: whether the automatic work inhibitor is held (an
         "note"
       ],
       "additionalProperties": false
+    },
+    "sleepEdge": {
+      "type": "object",
+      "properties": {
+        "watching": {
+          "type": "boolean"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "watching",
+        "note"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
     "platform",
     "work",
-    "keepAwake"
+    "keepAwake",
+    "sleepEdge"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `runtime.state.get`
+
+What the daemon's runtime store holds now, by domain (session, conversation, agents, tasks, permissions and the rest), for debugging. domains names the ones to read, comma-separated; without it every domain is read, and available lists them all. The data is made safe on the way out: dates are ISO text, errors { name, message }, binary data "<N bytes>"; credential fields read [REDACTED] and owner-profile fields [REDACTED_PROFILE], and credential-shaped text is masked; nesting and total size are bounded, a cut value reads "[Truncated]" and truncated is true. unknown lists asked-for domains the store does not hold. Read-only.
+
+- Title: `Read the Runtime State`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `GET /api/runtime/state`
+- Scopes: `read:health`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "domains": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "capturedAt": {
+      "type": "number"
+    },
+    "domains": {
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          },
+          {},
+          {
+            "type": "array",
+            "items": {}
+          }
+        ]
+      }
+    },
+    "available": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "unknown": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "truncated": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "capturedAt",
+    "domains",
+    "available",
+    "unknown",
+    "truncated"
   ],
   "additionalProperties": false
 }
@@ -80344,7 +81384,7 @@ The host sleep-ownership state: whether the automatic work inhibitor is held (an
 
 #### `voice.local.install`
 
-Starts the one-act setup and answers at once with the run it started (or the run already in progress it joined); the install runs on in the daemon, voice.local.status serves its live progress as installInProgress and, when it ends, its receipt as lastInstall. The setup: download + checksum-verify the piper TTS engine, a default voice, and (where a pinned goodvibes-built bundle exists) the whisper.cpp STT engine with its default model into the goodvibes-managed directory, then point the voice.local.* config keys at the managed install, never overwriting a key you already set to a custom value (skipped keys are reported). The physical round trip reports its actual transcript and comparison basis; Classic uses native ordered word tokens without semantic verification. Downloads only when you ask; a failed or checksum-mismatched download keeps nothing.
+Starts the one-act setup and answers at once with the run it started (or the run already in progress it joined); the install runs on in the daemon, voice.local.status serves its live progress as installInProgress and, when it ends, its receipt as lastInstall. The setup: download + checksum-verify the piper TTS engine, a default voice, and (where a pinned goodvibes-built bundle exists) the whisper.cpp STT engine with its default model into the goodvibes-managed directory, then point the voice.local.* config keys at the managed install, never overwriting a key you already set to a custom value (skipped keys are reported). The install ends by speaking a test phrase and reading it back: the transcript is compared word by word in code, allowing one differing word, and the receipt carries the transcript and the comparison. Downloads only when you ask; a failed or checksum-mismatched download keeps nothing.
 
 - Title: `Install the Managed Local-Voice Runtime`
 - Source: `builtin`
@@ -80587,18 +81627,6 @@ Whether the managed local voice runtime (piper TTS + a default voice) is install
         "receipt": {
           "type": "object",
           "properties": {
-            "operationProvenance": {
-              "type": "string",
-              "enum": [
-                "classic"
-              ]
-            },
-            "semanticAssessment": {
-              "type": "string",
-              "enum": [
-                "not-evaluated"
-              ]
-            },
             "proof": {
               "type": "object",
               "properties": {
@@ -80626,23 +81654,7 @@ Whether the managed local voice runtime (piper TTS + a default voice) is install
                   "type": "string",
                   "enum": [
                     "yes",
-                    "no",
-                    "uncertain",
-                    "unavailable",
-                    "classic-exact-match",
-                    "classic-mismatch"
-                  ]
-                },
-                "operationProvenance": {
-                  "type": "string",
-                  "enum": [
-                    "classic"
-                  ]
-                },
-                "semanticAssessment": {
-                  "type": "string",
-                  "enum": [
-                    "not-evaluated"
+                    "no"
                   ]
                 },
                 "proofBasis": {
@@ -80728,9 +81740,7 @@ Whether the managed local voice runtime (piper TTS + a default voice) is install
                     "provisioned",
                     "unsupported-platform",
                     "download-failed",
-                    "checksum-mismatch",
-                    "bundle-unavailable",
-                    "sideload-mismatch"
+                    "checksum-mismatch"
                   ]
                 },
                 "binaryPath": {
@@ -80878,6 +81888,181 @@ Whether the managed local voice runtime (piper TTS + a default voice) is install
     "tts",
     "stt",
     "offerBytes"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `voice.setup`
+
+Sets voice up for what was asked: intent wake (this surface listens for the wake word; implies speech-to-text), stt, tts or voice (all of it), for the surface named (tui, agent, webui, app), which is the one that ends up listening. The plan is decided from this host's own facts (wake rows, wake models on disk, the managed speech runtimes, the input device); steps that need no answer are done at once (the wake rows are set, missing wake models are fetched), and the answer lists each step: do (done, or why it could not be), propose (acceptProposals: true does it) and ask (ttsChoice answers the text-to-speech question: local or a cloud provider this host holds a credential for). An install the plan needs is started and not waited for: installStarted names the run, and voice.local.status serves its progress and receipt. rendered is the plan as one reply a surface prints as-is; complete is true when nothing is left to answer and every step that ran finished.
+
+- Title: `Set Up Voice`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/voice/setup`
+- Scopes: `write:config`
+- Emits events: none
+- Dangerous: `yes`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "intent": {
+      "type": "string",
+      "enum": [
+        "wake",
+        "stt",
+        "tts",
+        "voice"
+      ]
+    },
+    "surface": {
+      "type": "string",
+      "enum": [
+        "tui",
+        "agent",
+        "webui",
+        "app"
+      ]
+    },
+    "acceptProposals": {
+      "type": "boolean"
+    },
+    "ttsChoice": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "intent",
+    "surface"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "plan": {
+      "type": "object",
+      "properties": {
+        "intent": {
+          "type": "string"
+        },
+        "shapes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "guided-walkthrough",
+              "browser-automation",
+              "official-cli",
+              "question-driven"
+            ]
+          }
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "do",
+                  "propose",
+                  "ask"
+                ]
+              },
+              "subject": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "trade": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "label",
+                    "trade"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "subject",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "intent",
+        "shapes",
+        "steps"
+      ],
+      "additionalProperties": false
+    },
+    "rendered": {
+      "type": "string"
+    },
+    "complete": {
+      "type": "boolean"
+    },
+    "installStarted": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "running"
+          ]
+        },
+        "startedAt": {
+          "type": "number"
+        },
+        "joined": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "state",
+        "startedAt",
+        "joined"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "plan",
+    "rendered",
+    "complete"
   ],
   "additionalProperties": false
 }
@@ -88235,7 +89420,7 @@ Return Home Graph data quality, review, and maintenance issues.
 
 #### `homeassistant.homeGraph.map`
 
-Return a visual Home Graph node/edge map with deterministic layout data and SVG.
+Return a visual Home Graph node/edge map with deterministic layout data and SVG, most relevant first. When more records match than `limit`, `nextCursor` is set: pass it back as `cursor` (body, or ?cursor= on GET) with the same filters for the next slice.
 
 - Title: `Map Home Graph`
 - Source: `builtin`
@@ -88261,6 +89446,9 @@ Return a visual Home Graph node/edge map with deterministic layout data and SVG.
     },
     "limit": {
       "type": "number"
+    },
+    "cursor": {
+      "type": "string"
     },
     "includeSources": {
       "type": "boolean"
@@ -88503,6 +89691,9 @@ Return a visual Home Graph node/edge map with deterministic layout data and SVG.
     },
     "totalEdgeCount": {
       "type": "number"
+    },
+    "nextCursor": {
+      "type": "string"
     },
     "facets": {
       "type": "object",
@@ -90362,6 +91553,9 @@ Re-extract already-stored Home Graph artifacts with missing or sparse extraction
       "type": "number"
     },
     "failed": {
+      "type": "number"
+    },
+    "notExtractable": {
       "type": "number"
     },
     "changedSourceCount": {
@@ -97965,6 +99159,540 @@ Return a single structured knowledge source, node, or issue with linked relation
 }
 ```
 
+#### `knowledge.job-run.cancel`
+
+Stop a queued or running knowledge job run this daemon started: it is settled failed with the cancel reason. A finished run, or one another process owns, is refused with 409 and what to do instead.
+
+- Title: `Cancel Knowledge Job Run`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/knowledge/job-runs/{runId}/cancel`
+- Scopes: `write:knowledge`
+- Emits events: `runtime.knowledge`
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "runId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "runId"
+  ],
+  "additionalProperties": true
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "run": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "jobId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "running",
+            "completed",
+            "failed"
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "inline",
+            "background"
+          ]
+        },
+        "requestedAt": {
+          "type": "number"
+        },
+        "startedAt": {
+          "type": "number"
+        },
+        "completedAt": {
+          "type": "number"
+        },
+        "error": {
+          "type": "string"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "issueCount": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "issueCount"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "sourceCount": {
+                  "type": "number"
+                },
+                "issueCount": {
+                  "type": "number"
+                },
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "classic"
+                  ]
+                },
+                "semanticEnrichment": {
+                  "type": "string",
+                  "enum": [
+                    "attempted",
+                    "not-evaluated"
+                  ]
+                },
+                "recompileFailed": {
+                  "type": "number"
+                },
+                "recompileFailures": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "sourceId": {
+                        "type": "string"
+                      },
+                      "error": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "sourceId",
+                      "error"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "sourceCount",
+                "issueCount"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "refreshed": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "refreshed"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "imported": {
+                  "type": "number"
+                },
+                "failed": {
+                  "type": "number"
+                },
+                "captured": {
+                  "type": "number"
+                },
+                "capturePartial": {
+                  "type": "number"
+                },
+                "captureFailed": {
+                  "type": "number"
+                },
+                "compilationHeld": {
+                  "type": "number"
+                },
+                "compilationFailed": {
+                  "type": "number"
+                },
+                "outcomes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "canonicalUri": {
+                        "type": "string"
+                      },
+                      "sourceId": {
+                        "type": "string"
+                      },
+                      "capture": {
+                        "type": "string",
+                        "enum": [
+                          "completed",
+                          "partial",
+                          "failed"
+                        ]
+                      },
+                      "compilation": {
+                        "type": "string",
+                        "enum": [
+                          "completed",
+                          "held",
+                          "failed",
+                          "not-attempted"
+                        ]
+                      },
+                      "error": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "canonicalUri",
+                      "capture",
+                      "compilation"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "profileCount": {
+                  "type": "number"
+                },
+                "errorCount": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "imported",
+                "failed",
+                "profileCount",
+                "errorCount"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "projections": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "targetId": {
+                        "type": "string"
+                      },
+                      "artifactId": {
+                        "type": "string"
+                      },
+                      "sourceId": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "targetId",
+                      "artifactId"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "preservedUnscopedSourceIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "projections"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "scanned": {
+                  "type": "number"
+                },
+                "enriched": {
+                  "type": "number"
+                },
+                "skipped": {
+                  "type": "number"
+                },
+                "failed": {
+                  "type": "number"
+                },
+                "errors": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": {}
+                      },
+                      {}
+                    ]
+                  }
+                },
+                "selfImprovement": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": {}
+                      },
+                      {
+                        "type": "array",
+                        "items": {}
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "scanned",
+                "enriched",
+                "skipped",
+                "failed",
+                "errors"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "scannedGaps": {
+                  "type": "number"
+                },
+                "candidateGaps": {
+                  "type": "number"
+                },
+                "processedGaps": {
+                  "type": "number"
+                },
+                "createdGaps": {
+                  "type": "number"
+                },
+                "repairableGaps": {
+                  "type": "number"
+                },
+                "suppressedGaps": {
+                  "type": "number"
+                },
+                "skippedGaps": {
+                  "type": "number"
+                },
+                "searched": {
+                  "type": "number"
+                },
+                "ingestedSources": {
+                  "type": "number"
+                },
+                "linkedRepairs": {
+                  "type": "number"
+                },
+                "blockedGaps": {
+                  "type": "number"
+                },
+                "closedGaps": {
+                  "type": "number"
+                },
+                "queuedTasks": {
+                  "type": "number"
+                },
+                "requestedLimit": {
+                  "type": "number"
+                },
+                "effectiveLimit": {
+                  "type": "number"
+                },
+                "coalesced": {
+                  "type": "boolean"
+                },
+                "truncated": {
+                  "type": "boolean"
+                },
+                "budgetExhausted": {
+                  "type": "boolean"
+                },
+                "taskIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "ingestedSourceIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "errors": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": {}
+                      },
+                      {}
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "scannedGaps",
+                "createdGaps",
+                "repairableGaps",
+                "suppressedGaps",
+                "skippedGaps",
+                "searched",
+                "ingestedSources",
+                "linkedRepairs",
+                "errors"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "reportId": {
+                  "type": "string"
+                },
+                "metrics": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "number"
+                  }
+                }
+              },
+              "required": [
+                "reportId",
+                "metrics"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "array",
+                "items": {}
+              }
+            ]
+          }
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "jobId",
+        "status",
+        "mode",
+        "requestedAt",
+        "result",
+        "metadata",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "run"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `knowledge.job-runs.list`
 
 Return recent knowledge job runs.
@@ -99395,7 +101123,7 @@ Run deterministic knowledge lint checks and return the current issues.
 
 #### `knowledge.map`
 
-Return a deterministic visual map of structured knowledge nodes, sources, edges, and optional issues.
+Return a deterministic visual map of structured knowledge nodes, sources, edges, and optional issues, most relevant first (the records named by `ids`/`linkedToIds`, then their neighbours, then the most connected; every record kind gets a share). When more records match than `limit`, `nextCursor` is set: pass it back as `cursor` with the same filters for the next slice.
 
 - Title: `Map Knowledge Graph`
 - Source: `builtin`
@@ -99415,6 +101143,9 @@ Return a deterministic visual map of structured knowledge nodes, sources, edges,
   "properties": {
     "limit": {
       "type": "number"
+    },
+    "cursor": {
+      "type": "string"
     },
     "knowledgeSpaceId": {
       "type": "string"
@@ -99549,6 +101280,9 @@ Return a deterministic visual map of structured knowledge nodes, sources, edges,
     },
     "totalEdgeCount": {
       "type": "number"
+    },
+    "nextCursor": {
+      "type": "string"
     },
     "facets": {
       "type": "object",
@@ -111200,7 +112934,7 @@ Replace task ordering for the current project work plan. Returns the tasks whose
 
 #### `mcp.config.get`
 
-Return effective MCP config from global, external, and project sources. Environment values are redacted to envKeys.
+Return effective MCP config from global, external, and project sources. Environment and request-header values are redacted to envKeys and headerKeys; credentials in url and args read as ***.
 
 - Title: `MCP Effective Config`
 - Source: `builtin`
@@ -111295,6 +113029,12 @@ Return effective MCP config from global, external, and project sources. Environm
               "type": "string"
             }
           },
+          "headerKeys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "role": {
             "anyOf": [
               {
@@ -111358,6 +113098,7 @@ Return effective MCP config from global, external, and project sources. Environm
           "url",
           "args",
           "envKeys",
+          "headerKeys",
           "role",
           "trustMode",
           "allowedPaths",
@@ -111530,6 +113271,12 @@ Reload effective MCP config and reconnect added, removed, or changed servers wit
                   "type": "string"
                 }
               },
+              "headerKeys": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
               "role": {
                 "anyOf": [
                   {
@@ -111593,6 +113340,7 @@ Reload effective MCP config and reconnect added, removed, or changed servers wit
               "url",
               "args",
               "envKeys",
+              "headerKeys",
               "role",
               "trustMode",
               "allowedPaths",
@@ -111941,6 +113689,12 @@ Remove a project/global MCP server config and disconnect it without daemon resta
                   "type": "string"
                 }
               },
+              "headerKeys": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
               "role": {
                 "anyOf": [
                   {
@@ -112004,6 +113758,7 @@ Remove a project/global MCP server config and disconnect it without daemon resta
               "url",
               "args",
               "envKeys",
+              "headerKeys",
               "role",
               "trustMode",
               "allowedPaths",
@@ -112033,7 +113788,7 @@ Remove a project/global MCP server config and disconnect it without daemon resta
 
 #### `mcp.servers.reveal`
 
-Return effective MCP config with environment VALUES included, not just envKeys. Admin only, the redacted mcp.config.get view is what every other caller should use.
+Return effective MCP config with environment and request-header VALUES (env, headers) and the unredacted url and args included, so an edit can resend them. Admin only, the redacted mcp.config.get view is what every other caller should use.
 
 - Title: `MCP Servers Reveal`
 - Source: `builtin`
@@ -112133,6 +113888,18 @@ Return effective MCP config with environment VALUES included, not just envKeys. 
             "properties": {},
             "additionalProperties": true
           },
+          "headerKeys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
           "role": {
             "anyOf": [
               {
@@ -112197,6 +113964,8 @@ Return effective MCP config with environment VALUES included, not just envKeys. 
           "args",
           "envKeys",
           "env",
+          "headerKeys",
+          "headers",
           "role",
           "trustMode",
           "allowedPaths",
@@ -112268,6 +114037,12 @@ Persist a project/global MCP server config and reconnect the changed runtime ser
         "envKeys": {
           "type": "array",
           "items": {
+            "type": "string"
+          }
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
             "type": "string"
           }
         },
@@ -112486,6 +114261,12 @@ Persist a project/global MCP server config and reconnect the changed runtime ser
                   "type": "string"
                 }
               },
+              "headerKeys": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
               "role": {
                 "anyOf": [
                   {
@@ -112549,6 +114330,7 @@ Persist a project/global MCP server config and reconnect the changed runtime ser
               "url",
               "args",
               "envKeys",
+              "headerKeys",
               "role",
               "trustMode",
               "allowedPaths",
@@ -112909,9 +114691,203 @@ Analyze an artifact through a registered media provider.
 }
 ```
 
+#### `media.collect`
+
+Finish a generation job an earlier media.generate answered as pending: pass the providerId, taskId and resume it named. Waits up to waitSeconds (0 checks once) and returns the outputs, or pending again when the job is still running. Nothing new is paid for.
+
+- Title: `Collect Pending Media Job`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/media/collect`
+- Scopes: `write:media`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "providerId": {
+      "type": "string"
+    },
+    "taskId": {
+      "type": "string"
+    },
+    "resume": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "waitSeconds": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "providerId",
+    "taskId"
+  ],
+  "additionalProperties": true
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "providerId": {
+      "type": "string"
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "artifactId": {
+            "type": "string"
+          },
+          "mimeType": {
+            "type": "string"
+          },
+          "dataBase64": {
+            "type": "string"
+          },
+          "uri": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "number"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "acquisitionMode": {
+            "type": "string",
+            "enum": [
+              "inline-data",
+              "local-path",
+              "remote-fetch",
+              "unknown"
+            ]
+          },
+          "fetchMode": {
+            "type": "string",
+            "enum": [
+              "not-applicable",
+              "public-only",
+              "allow-private-hosts",
+              "unknown"
+            ]
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "array",
+                  "items": {}
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "mimeType",
+          "metadata"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          },
+          {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          {
+            "type": "array",
+            "items": {}
+          }
+        ]
+      }
+    },
+    "pending": {
+      "type": "object",
+      "properties": {
+        "providerId": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "resume": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "providerId",
+        "taskId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "providerId",
+    "artifacts",
+    "metadata"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `media.generate`
 
-Generate a media artifact through a registered media provider.
+Generate a media artifact through a registered media provider. A job the provider accepted but had not finished when the wait ended comes back with artifacts empty and pending set (providerId, taskId, resume); the job is paid for and keeps running, and media.collect finishes it. The kind asked for (the major type of outputMimeType, or image with options.image true) chooses the provider: without providerId the first configured provider that makes that kind is used, and when none does (or the named provider does not) the answer is 409 MEDIA_OUTPUT_UNAVAILABLE naming the providers that make it; nothing is sent.
 
 - Title: `Generate Media Artifact`
 - Source: `builtin`
@@ -113120,6 +115096,28 @@ Generate a media artifact through a registered media provider.
           }
         ]
       }
+    },
+    "pending": {
+      "type": "object",
+      "properties": {
+        "providerId": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "resume": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "providerId",
+        "taskId"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
@@ -118313,6 +120311,166 @@ Return memory records prioritised for review. Accepts optional limit (?limit=N) 
 }
 ```
 
+#### `memory.snapshots.list`
+
+The memory store's point-in-time copies, newest first: the daily copy, the copy taken before a schema migration, the copy every restore takes of the records it replaced, and the tripwire copy. Each with its name (what memory.snapshots.restore takes), why it was taken, when, its size on disk and how many records it holds (null when the copy could not be read). Only the records store is copied; the semantic index is rebuilt from the records. Empty for a store that lives in memory only.
+
+- Title: `List Memory Copies`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: `GET /api/memory/snapshots`
+- Scopes: `read:memory`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "snapshots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "sizeBytes": {
+            "type": "number"
+          },
+          "recordCount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "reason",
+          "createdAt",
+          "sizeBytes",
+          "recordCount"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "snapshots"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `memory.snapshots.restore`
+
+Replace every memory record, link, consolidation proposal and store fact with those of one copy (its exact name from memory.snapshots.list, `latest`, or the start of one name such as a date). The owner's act only: requires confirm: true on an explicit request from the owner's own session, device or machine; an agent is refused. A copy of the records being replaced is taken first and named in `undoSnapshot`, so restoring it undoes this restore. One SQLite write transaction: processes that share the store (terminal app, Agent, daemon) see the restored records on their next read, and a failure part way leaves the store as it was. The semantic index then re-embeds only records whose text differs from what it holds (`vectorIndex: updating`). Answers which copy, records before and after, and links after.
+
+- Title: `Restore Memory From a Copy`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/memory/snapshots/restore`
+- Scopes: `write:memory`
+- Emits events: none
+- Dangerous: `yes`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "snapshot": {
+      "type": "string"
+    },
+    "confirm": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "snapshot",
+    "confirm"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "restored": {
+      "type": "string"
+    },
+    "restoredReason": {
+      "type": "string"
+    },
+    "restoredCreatedAt": {
+      "type": "number"
+    },
+    "recordsBefore": {
+      "type": "number"
+    },
+    "recordsAfter": {
+      "type": "number"
+    },
+    "linksAfter": {
+      "type": "number"
+    },
+    "undoSnapshot": {
+      "type": "string"
+    },
+    "vectorIndex": {
+      "type": "string",
+      "enum": [
+        "updating",
+        "off"
+      ]
+    }
+  },
+  "required": [
+    "restored",
+    "restoredReason",
+    "restoredCreatedAt",
+    "recordsBefore",
+    "recordsAfter",
+    "linksAfter",
+    "undoSnapshot",
+    "vectorIndex"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `memory.vector.rebuild`
 
 Rebuild the sqlite-vec vector index.
@@ -121635,7 +123793,7 @@ Apply the surface's per-offer decisions in ONE pass: an accepted notifications o
 
 #### `pairing.handoff.create`
 
-Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https, available via tailscale" instead of dead buttons. The token secret is returned exactly once. Each offer is independently declinable at completion.
+Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https, available via tailscale" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion.
 
 - Title: `Create Pairing Hand-off`
 - Source: `builtin`
@@ -121882,7 +124040,7 @@ The honest TLS/capability posture of a web origin, pass your surface's current o
 
 #### `pairing.tokens.create`
 
-Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client "agent" mints the GoodVibes Agent's credential for the calls it makes on the owner's behalf: the daemon reports it as credential "agent" and judges every call made with it; it is listed with client "agent" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret.
+Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client "agent" mints the GoodVibes Agent's credential for the calls it makes on the owner's behalf: the daemon reports it as credential "agent" and judges every call made with it; it is listed with client "agent" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret. scopes limits the device to that list of operator scopes (for example read:sessions and write:sessions for a phone that only chats); left out, the device holds full operator authority. A caller grants only scopes it holds: a narrowed caller's token inherits its list when scopes is left out, and naming a scope the caller does not hold is 403 MISSING_SCOPE.
 
 - Title: `Mint Paired Device Token`
 - Source: `builtin`
@@ -121911,6 +124069,12 @@ Mint a new named per-device operator token and return its plaintext secret EXACT
       "enum": [
         "agent"
       ]
+    },
+    "scopes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [
@@ -122019,14 +124183,14 @@ Revoke (permanently delete) one paired device token. Revocation is immediate: th
 
 #### `pairing.tokens.list`
 
-List the per-pairing operator tokens (paired devices/browsers) as redacted views: id, user-visible name, created timestamp, last-seen timestamp, and mintedBy (the paired device that minted it, when one did). The token secret is never stored in listable form and is never returned.
+List the per-pairing operator tokens (paired devices/browsers) as redacted views: id, user-visible name, created timestamp, last-seen timestamp, mintedBy (the paired device that minted it, when one did) and scopes (the operator scopes it holds, when it was paired with a narrower list; absent means full operator authority). The token secret is never stored in listable form and is never returned.
 
 - Title: `List Paired Device Tokens`
 - Source: `builtin`
 - Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
-- Scopes: `read:control-plane`
+- Scopes: `read:pairing`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -122066,6 +124230,12 @@ none
             "enum": [
               "agent"
             ]
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -124877,7 +127047,8 @@ List the durable user-origin permission rules written by remembered approval dec
             "type": "string",
             "enum": [
               "allow",
-              "deny"
+              "deny",
+              "ask"
             ]
           },
           "tier": {
@@ -129171,7 +131342,7 @@ Return the most recent observed quota window for a provider, remaining, limit, r
 
 #### `stepup.challenge.mint`
 
-Issue a short-lived, single-use WebAuthn challenge. The optional sessionId, rendezvousId, method and path bind it: a challenge minted with any of them is accepted only for a relay request that matches every one given (a different session, rendezvous, HTTP method or path is refused as challenge-unbound), while a challenge minted with none is accepted for any request. The values are recorded as the caller supplied them; they are not checked against the authenticated session. A surface passes it to navigator.credentials.get and returns the assertion on its next mutating relay call. The freshness window (ttlMs) is clamped to 5s–300s (default 120s).
+Issue a short-lived, single-use WebAuthn challenge for one relay call. Pass the method and path of the call it is for: a challenge minted without them authorises nothing. The challenge is bound to the principal that minted it, and to the sessionId and rendezvousId when given; a relay call by another principal, or with a different method, path, session or rendezvous, is refused as challenge-unbound. A surface passes it to navigator.credentials.get and returns the assertion on the call it was minted for. Whether a relay call needs an assertion is decided by its catalog method's scopes (any scope other than read:*), not by its HTTP verb. The freshness window (ttlMs) is clamped to 5s–300s (default 120s).
 
 - Title: `Mint Step-up Challenge`
 - Source: `builtin`
@@ -129455,6 +131626,409 @@ Remove a registered step-up passkey so it can no longer confirm anything (a lost
 ```
 
 ### remote
+
+#### `remote.backends.list`
+
+Return the registered execution backends (docker, ssh, cloud terminal, local process) remote.peers.invoke runs commands on, and any stored registration that no longer reads, with the reason.
+
+- Title: `List Remote Backends`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `GET /api/remote/backends`
+- Scopes: `read:remote`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "backends": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "peerId": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "backendKind": {
+            "type": "string",
+            "enum": [
+              "docker",
+              "ssh",
+              "cloud-terminal",
+              "local-process"
+            ]
+          },
+          "backendConfig": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "docker",
+                  "ssh",
+                  "cloud-terminal",
+                  "local-process"
+                ]
+              },
+              "containerName": {
+                "type": "string"
+              },
+              "dockerHost": {
+                "type": "string"
+              },
+              "sshHost": {
+                "type": "string"
+              },
+              "sshPort": {
+                "type": "number"
+              },
+              "sshUser": {
+                "type": "string"
+              },
+              "identityRef": {
+                "type": "string"
+              },
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "gcp",
+                  "aws",
+                  "azure"
+                ]
+              },
+              "credentialRef": {
+                "type": "string"
+              },
+              "projectId": {
+                "type": "string"
+              },
+              "location": {
+                "type": "string"
+              },
+              "instance": {
+                "type": "string"
+              },
+              "cwd": {
+                "type": "string"
+              },
+              "allowedCommands": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "peerId",
+          "displayName",
+          "backendKind",
+          "backendConfig"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "unreadable": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "peerId": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "peerId",
+          "reason"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "backends",
+    "unreadable"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `remote.backends.register`
+
+Register or replace an execution backend under peerId so remote.peers.invoke runs commands on it. Credentials are goodvibes://secrets/ references only; a value docker or a cloud CLI would read as an option (starting with "-") and an id a paired peer holds are refused.
+
+- Title: `Register Remote Backend`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/remote/backends`
+- Scopes: `write:remote`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "peerId": {
+      "type": "string"
+    },
+    "displayName": {
+      "type": "string"
+    },
+    "backendKind": {
+      "type": "string",
+      "enum": [
+        "docker",
+        "ssh",
+        "cloud-terminal",
+        "local-process"
+      ]
+    },
+    "backendConfig": {
+      "type": "object",
+      "properties": {
+        "containerName": {
+          "type": "string"
+        },
+        "dockerHost": {
+          "type": "string"
+        },
+        "sshHost": {
+          "type": "string"
+        },
+        "sshPort": {
+          "type": "number"
+        },
+        "sshUser": {
+          "type": "string"
+        },
+        "identityRef": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "gcp",
+            "aws",
+            "azure"
+          ]
+        },
+        "credentialRef": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "location": {
+          "type": "string"
+        },
+        "instance": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "allowedCommands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "peerId",
+    "backendKind",
+    "backendConfig"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "backend": {
+      "type": "object",
+      "properties": {
+        "peerId": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "backendKind": {
+          "type": "string",
+          "enum": [
+            "docker",
+            "ssh",
+            "cloud-terminal",
+            "local-process"
+          ]
+        },
+        "backendConfig": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "docker",
+                "ssh",
+                "cloud-terminal",
+                "local-process"
+              ]
+            },
+            "containerName": {
+              "type": "string"
+            },
+            "dockerHost": {
+              "type": "string"
+            },
+            "sshHost": {
+              "type": "string"
+            },
+            "sshPort": {
+              "type": "number"
+            },
+            "sshUser": {
+              "type": "string"
+            },
+            "identityRef": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string",
+              "enum": [
+                "gcp",
+                "aws",
+                "azure"
+              ]
+            },
+            "credentialRef": {
+              "type": "string"
+            },
+            "projectId": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "instance": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "allowedCommands": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "peerId",
+        "displayName",
+        "backendKind",
+        "backendConfig"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "backend"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `remote.backends.remove`
+
+Remove a registered execution backend; 404 when no backend has that id.
+
+- Title: `Remove Remote Backend`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `DELETE /api/remote/backends/{peerId}`
+- Scopes: `write:remote`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "peerId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "peerId"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "peerId": {
+      "type": "string"
+    },
+    "removed": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "peerId",
+    "removed"
+  ],
+  "additionalProperties": false
+}
+```
 
 #### `remote.node_host.contract`
 
@@ -130889,7 +133463,7 @@ Return one remote peer by id; 404 when no peer has that id.
 
 #### `remote.peers.invoke`
 
-Invoke a method on a connected remote peer.
+Run a command on a remote peer. A paired peer gets it as queued work (answer: work, completed). A registered backend (remote.backends.register: docker, ssh, cloud terminal or local process) runs it now and answers with backend: exit code and output; on a backend, payload takes only args, stdin, env, timeoutMs and cwd, and the queue fields (priority, waitMs, sessionId, routeId, automation ids, approvalId) do not apply.
 
 - Title: `Invoke Remote Peer`
 - Source: `builtin`
@@ -131253,12 +133827,60 @@ Invoke a method on a connected remote peer.
       ],
       "additionalProperties": true
     },
+    "backend": {
+      "type": "object",
+      "properties": {
+        "peerId": {
+          "type": "string"
+        },
+        "backendKind": {
+          "type": "string",
+          "enum": [
+            "docker",
+            "ssh",
+            "cloud-terminal",
+            "local-process"
+          ]
+        },
+        "exitCode": {
+          "type": "number"
+        },
+        "completed": {
+          "type": "boolean"
+        },
+        "stdout": {
+          "type": "string"
+        },
+        "stderr": {
+          "type": "string"
+        },
+        "stdoutBytes": {
+          "type": "number"
+        },
+        "stdoutTruncated": {
+          "type": "boolean"
+        },
+        "stderrTruncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "peerId",
+        "backendKind",
+        "completed",
+        "stdout",
+        "stderr",
+        "stdoutBytes",
+        "stdoutTruncated",
+        "stderrTruncated"
+      ],
+      "additionalProperties": false
+    },
     "completed": {
       "type": "boolean"
     }
   },
   "required": [
-    "work",
     "completed"
   ],
   "additionalProperties": false
@@ -133880,7 +136502,7 @@ Return the integration review snapshot used by external helpers.
 
 #### `rewind.apply`
 
-Apply a unified rewind to a session turn anchor, restoring files and/or conversation. DESTRUCTIVE: requires the confirmToken minted by rewind.plan (single-use, ~2 min), which is bound to the session, turn, scope and previewed checkpoint. Called without it, confirm:true included, it returns a non-error refusal (refused:true) naming rewind.plan, never a silent no-op; a bad token is a 400. Every apply records an undo point (the workspace restore takes a pre-restore safety checkpoint; the conversation store captures its pre-rewind snapshot) so the rewind is itself reversible, and returns a receipt whose `undo` block carries how to reverse it: checkpoints.restore with undo.files.restoreCheckpointId for the files, rewind.undo with undo.conversation.undoSnapshotId for the conversation. undo.conversation.expiresAfter states how long that undo point lasts, as the process holding the conversation keeps it (the newest 32 rewinds; on disk where that process keeps its sessions). Emits a REWIND_APPLIED receipt event.
+Apply a unified rewind to a session turn anchor, restoring files and/or conversation. DESTRUCTIVE: requires the confirmToken minted by rewind.plan (single-use, ~2 min), which is bound to the session, turn, scope and previewed checkpoint. Called without it, it returns a non-error refusal (refused:true) naming rewind.plan, never a silent no-op; a bad token is a 400. Every apply records an undo point (the workspace restore takes a pre-restore safety checkpoint; the conversation store captures its pre-rewind snapshot) so the rewind is itself reversible, and returns a receipt whose `undo` block carries how to reverse it: checkpoints.restore with undo.files.restoreCheckpointId for the files, rewind.undo with undo.conversation.undoSnapshotId for the conversation. undo.conversation.expiresAfter states how long that undo point lasts, as the process holding the conversation keeps it (the newest 32 rewinds; on disk where that process keeps its sessions). Emits a REWIND_APPLIED receipt event.
 
 - Title: `Apply a Unified Rewind`
 - Source: `builtin`
@@ -133911,9 +136533,6 @@ Apply a unified rewind to a session turn anchor, restoring files and/or conversa
         "conversation",
         "both"
       ]
-    },
-    "confirm": {
-      "type": "boolean"
     },
     "confirmToken": {
       "type": "string"
@@ -139220,6 +141839,9 @@ Mark a shared session as closed.
         "lastAgentId": {
           "type": "string"
         },
+        "lastAgentModel": {
+          "type": "string"
+        },
         "lastError": {
           "type": "string"
         },
@@ -139610,6 +142232,9 @@ Create a shared session for a surface, route, or web client.
         "lastAgentId": {
           "type": "string"
         },
+        "lastAgentModel": {
+          "type": "string"
+        },
         "lastError": {
           "type": "string"
         },
@@ -139870,6 +142495,9 @@ Remove a surface's participant and its route binding from a session so that surf
           "type": "string"
         },
         "lastAgentId": {
+          "type": "string"
+        },
+        "lastAgentModel": {
           "type": "string"
         },
         "lastError": {
@@ -140194,6 +142822,9 @@ Queue a deferred follow-up for a shared session so it runs after the current age
               "type": "string"
             },
             "lastAgentId": {
+              "type": "string"
+            },
+            "lastAgentModel": {
               "type": "string"
             },
             "lastError": {
@@ -140577,14 +143208,14 @@ Queue a deferred follow-up for a shared session so it runs after the current age
 
 #### `sessions.get`
 
-Return metadata for a shared session.
+Return a shared session record with its newest 100 messages. It returns conversation text, so it needs read:transcripts; sessions.list and sessions.search return session metadata under read:sessions.
 
 - Title: `Get Shared Session`
 - Source: `builtin`
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/sessions/{sessionId}`
-- Scopes: `read:sessions`
+- Scopes: `read:transcripts`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -140723,6 +143354,9 @@ Return metadata for a shared session.
           "type": "string"
         },
         "lastAgentId": {
+          "type": "string"
+        },
+        "lastAgentModel": {
           "type": "string"
         },
         "lastError": {
@@ -141060,6 +143694,33 @@ Join a hosted session and receive its transcript so far, so a client that was ne
           },
           "at": {
             "type": "number"
+          },
+          "toolCalls": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "arguments": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "arguments"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "callId": {
+            "type": "string"
           }
         },
         "required": [
@@ -141083,7 +143744,7 @@ Join a hosted session and receive its transcript so far, so a client that was ne
 
 #### `sessions.hosted.create`
 
-Compose a full conversation loop INSIDE the daemon for a workspace: the same orchestrator, tool registry and permission gate a terminal runs, hosted here so the conversation does not depend on the client that started it staying open. `workspaceRoot` must be absolute, a relative path would resolve against the daemon's own directory, which is never what the caller meant, and must be the daemon's working directory or a registered workspace (or inside one); anything else is refused with the allowed folders named (sessions.hosted.workspaces lists them). `modelId` is resolved against this daemon's live model registry when given, so an unknown or ambiguous id is refused here rather than at the first turn; omitted, the session follows the daemon's current selection. `detachPolicy` overrides the `hostedSessions.detachPolicy` setting for this session alone. `originSurface` names the app the session is for (`agent`, `tui`, `webui`); its client-owned settings are that app's, and with `agent` the session answers as the GoodVibes Agent: the Agent's prompt and its tools that need no terminal, the others refused and named. `initialPrompt` is submitted as the first user message and the call does NOT wait for that turn, watch the `turn` and `tools` event domains filtered on the returned session id. Refused with the live count and the setting named when `hostedSessions.maxSessions` is already reached. ws-only invoke verb; no REST binding.
+Compose a full conversation loop INSIDE the daemon for a workspace: the same orchestrator, tool registry and permission gate a terminal runs, hosted here so the conversation does not depend on the client that started it staying open. `workspaceRoot` must be absolute, a relative path would resolve against the daemon's own directory, which is never what the caller meant, and must be the daemon's working directory or a registered workspace (or inside one); anything else is refused with the allowed folders named (sessions.hosted.workspaces lists them). `modelId` is resolved against this daemon's live model registry when given, so an unknown or ambiguous id is refused here rather than at the first turn; omitted, the session follows the daemon's current selection. `detachPolicy` overrides the `hostedSessions.detachPolicy` setting for this session alone. `originSurface` names the app the session is for (`agent`, `tui`, `webui`); its client-owned settings are that app's, and with `agent` the session answers as the GoodVibes Agent: the Agent's prompt and its tools that need no terminal, the others refused and named. Its operator tools act on this daemon with full operator authority, so `agent` is refused (HOSTED_SURFACE_FORBIDDEN) for a caller that does not hold admin. `initialPrompt` is submitted as the first user message and the call does NOT wait for that turn, watch the `turn` and `tools` event domains filtered on the returned session id. Refused with the live count and the setting named when `hostedSessions.maxSessions` is already reached. ws-only invoke verb; no REST binding.
 
 - Title: `Create a Daemon-Hosted Session`
 - Source: `builtin`
@@ -142081,7 +144742,7 @@ Cancel a queued shared-session input before it is delivered or spawned. An input
 
 #### `sessions.inputs.deliver`
 
-A live registered surface reports that it collected a queued input (moves it to `delivered`) or finished acting on it (`consumed:true` moves it to `completed`). This is how a surface-managed session, where steer/follow-up inputs queue for the surface rather than spawn a daemon executor, closes the input lifecycle honestly. Only queued/delivered inputs advance; a report on an input that already ended (cancelled, failed, answered by a daemon agent) is refused with 409 `INPUT_NOT_DELIVERABLE` naming its state, binds no agent and forwards no answer. One exception: an input a daemon restart cancelled while a surface in another process was answering it completes on that surface's `consumed:true` report. `agentId` names the agent the surface is running for this input: it binds the reply so a message that arrived over a channel gets its answer routed back to that conversation, the same binding the daemon makes for the executors it spawns itself. `answer` (sent with `consumed:true`, optionally with `status`) is the output that agent finished with, the daemon writes it into the session and delivers it to the channel. `claim:true` is how a surface takes an input before it starts work on it: it succeeds for one caller only, for a `queued` input, or for a `delivered` one with no agent bound for at least two minutes (a claimant that died before starting it). Any other caller is refused with 409 `INPUT_NOT_CLAIMABLE` naming the state, and nothing changes.
+A live registered surface reports that it collected a queued input (moves it to `delivered`) or finished acting on it (`consumed:true` moves it to `completed`). This is how a surface-managed session, where steer/follow-up inputs queue for the surface rather than spawn a daemon executor, closes the input lifecycle honestly. Only queued/delivered inputs advance; a report on an input that already ended (cancelled, failed, answered by a daemon agent) is refused with 409 `INPUT_NOT_DELIVERABLE` naming its state, binds no agent and forwards no answer. One exception: an input a daemon restart cancelled while a surface in another process was answering it completes on that surface's `consumed:true` report. `agentId` names the agent the surface is running for this input: it binds the reply so a message that arrived over a channel gets its answer routed back to that conversation, the same binding the daemon makes for the executors it spawns itself. `surfaceInstance`, sent with `agentId`, names the surface process running that agent; it is kept in the input's `metadata.deliveringSurfaceInstance` (cleared by a report that names none), so a surface that restarted can fail the inputs a process that is gone was answering. `answer` (sent with `consumed:true`, optionally with `status`) is the output that agent finished with, the daemon writes it into the session and delivers it to the channel. `claim:true` is how a surface takes an input before it starts work on it: it succeeds for one caller only, for a `queued` input, or for a `delivered` one with no agent bound for at least two minutes (a claimant that died before starting it). Any other caller is refused with 409 `INPUT_NOT_CLAIMABLE` naming the state, and nothing changes.
 
 - Title: `Mark Shared Session Input Delivered`
 - Source: `builtin`
@@ -142109,6 +144770,9 @@ A live registered surface reports that it collected a queued input (moves it to 
       "type": "boolean"
     },
     "agentId": {
+      "type": "string"
+    },
+    "surfaceInstance": {
       "type": "string"
     },
     "answer": {
@@ -142367,7 +145031,7 @@ Return explicit session inputs, including queued follow-ups and delivered steeri
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/sessions/{sessionId}/inputs`
-- Scopes: `read:sessions`
+- Scopes: `read:transcripts`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -142515,6 +145179,9 @@ Return explicit session inputs, including queued follow-ups and delivered steeri
           "type": "string"
         },
         "lastAgentId": {
+          "type": "string"
+        },
+        "lastAgentModel": {
           "type": "string"
         },
         "lastError": {
@@ -142872,7 +145539,7 @@ Return the session integration snapshot.
 
 #### `sessions.list`
 
-Return shared-session integration state.
+Return shared-session integration state. `unreadable`, present only when there are any, names each stored session, message or input this build could not read at start (kind, id, why); they stay in the store untouched and load again under a build that knows them.
 
 - Title: `List Shared Sessions`
 - Source: `builtin`
@@ -143035,6 +145702,9 @@ Return shared-session integration state.
           "lastAgentId": {
             "type": "string"
           },
+          "lastAgentModel": {
+            "type": "string"
+          },
           "lastError": {
             "type": "string"
           },
@@ -143080,6 +145750,34 @@ Return shared-session integration state.
           "surfaceKinds",
           "participants",
           "metadata"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "unreadable": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "session",
+              "message",
+              "input"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "reason"
         ],
         "additionalProperties": false
       }
@@ -143384,6 +146082,9 @@ Append a user message to a shared session. Omitted `kind` defaults to `message` 
                   "type": "string"
                 },
                 "lastAgentId": {
+                  "type": "string"
+                },
+                "lastAgentModel": {
                   "type": "string"
                 },
                 "lastError": {
@@ -143776,7 +146477,7 @@ Return a page of retained session messages. Offset counts backward from the newe
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/sessions/{sessionId}/messages`
-- Scopes: `read:sessions`
+- Scopes: `read:transcripts`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -143924,6 +146625,9 @@ Return a page of retained session messages. Offset counts backward from the newe
           "type": "string"
         },
         "lastAgentId": {
+          "type": "string"
+        },
+        "lastAgentModel": {
           "type": "string"
         },
         "lastError": {
@@ -144350,7 +147054,7 @@ List the messages queued behind the current turn (submitted while the model was 
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/sessions/{sessionId}/queued-messages`
-- Scopes: `read:sessions`
+- Scopes: `read:transcripts`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -144619,6 +147323,9 @@ Idempotently register (or heartbeat) a session keyed on a caller-supplied id, ca
         "lastAgentId": {
           "type": "string"
         },
+        "lastAgentModel": {
+          "type": "string"
+        },
         "lastError": {
           "type": "string"
         },
@@ -144842,6 +147549,9 @@ Reopen a previously closed shared session.
           "type": "string"
         },
         "lastAgentId": {
+          "type": "string"
+        },
+        "lastAgentModel": {
           "type": "string"
         },
         "lastError": {
@@ -145072,6 +147782,9 @@ Paginated, filtered query over shared sessions: free-text query (matches id/titl
             "type": "string"
           },
           "lastAgentId": {
+            "type": "string"
+          },
+          "lastAgentModel": {
             "type": "string"
           },
           "lastError": {
@@ -145407,6 +148120,9 @@ Deliver a live steering message to the active agent for a shared session, option
               "type": "string"
             },
             "lastAgentId": {
+              "type": "string"
+            },
+            "lastAgentModel": {
               "type": "string"
             },
             "lastError": {
@@ -147649,7 +150365,7 @@ Return a single runtime task record.
 
 #### `tasks.list`
 
-Return the integration snapshot for runtime tasks.
+Return the integration snapshot for runtime tasks. `limit` returns only the newest that many tasks (the totals stay whole), so a long-lived daemon does not send its whole history.
 
 - Title: `List Runtime Tasks`
 - Source: `builtin`
@@ -147666,7 +150382,11 @@ Return the integration snapshot for runtime tasks.
 ```json
 {
   "type": "object",
-  "properties": {},
+  "properties": {
+    "limit": {
+      "type": "number"
+    }
+  },
   "additionalProperties": false
 }
 ```
@@ -148968,6 +151688,9 @@ Return telemetry aggregates and runtime metrics without recent record payloads.
         "sessionId": {
           "type": "string"
         },
+        "conversationSessionId": {
+          "type": "string"
+        },
         "sessionStatus": {
           "type": "string"
         },
@@ -149052,6 +151775,7 @@ Return telemetry aggregates and runtime metrics without recent record payloads.
       },
       "required": [
         "sessionId",
+        "conversationSessionId",
         "sessionStatus",
         "traceExport",
         "tasks",
@@ -149705,6 +152429,9 @@ Return the current telemetry snapshot with aggregates, runtime state, and recent
         "sessionId": {
           "type": "string"
         },
+        "conversationSessionId": {
+          "type": "string"
+        },
         "sessionStatus": {
           "type": "string"
         },
@@ -149789,6 +152516,7 @@ Return the current telemetry snapshot with aggregates, runtime state, and recent
       },
       "required": [
         "sessionId",
+        "conversationSessionId",
         "sessionStatus",
         "traceExport",
         "tasks",
@@ -151990,7 +154718,7 @@ Return registered voices for a voice provider.
 
 #### `watchers.create`
 
-Register a new watcher.
+Register a new watcher (kind defaults to polling). The kinds that can be created here, and what each needs: webhook or polling with a url (polling also takes endpoint), requested every intervalMs, its response being what the watcher observes; filesystem with a path, whose size and modification time are observed; manual, which needs nothing and runs only when started by hand. socket and integration watchers are registered by the component that owns them, and are refused here because nothing would observe them. A header carrying a credential must be a goodvibes://secrets/ reference.
 
 - Title: `Create Watcher`
 - Source: `builtin`
@@ -152073,9 +154801,6 @@ Register a new watcher.
       "additionalProperties": {
         "type": "string"
       }
-    },
-    "run": {
-      "type": "string"
     }
   },
   "required": [
@@ -152960,6 +155685,725 @@ Stop a watcher instance.
 }
 ```
 
+#### `watchers.triggers.cancel`
+
+Cancel a trigger; a command an on-exit trigger supervises is stopped.
+
+- Title: `Cancel a trigger`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:watchers`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "trigger": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "watching": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "firedCount": {
+          "type": "number"
+        },
+        "lastFiredAt": {
+          "type": "string"
+        },
+        "nextCheckAt": {
+          "type": "string"
+        },
+        "lastError": {
+          "type": "string"
+        },
+        "droppedLines": {
+          "type": "number"
+        },
+        "owedBatches": {
+          "type": "number"
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "kind",
+        "watching",
+        "state",
+        "firedCount"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "trigger"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `watchers.triggers.create`
+
+Create a trigger from a definition { id, label, description?, spec, action?, ownerSessionId? }. spec.kind is on-exit, stream or condition; commands are argv, never a shell line. The action defaults to an agent turn; an action-grant action names a grant the owner registered. Needs watchers.triggers.enabled.
+
+- Title: `Create a trigger`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:watchers`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "definition": {
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          },
+          {},
+          {
+            "type": "array",
+            "items": {}
+          }
+        ]
+      }
+    }
+  },
+  "required": [
+    "definition"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "trigger": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "watching": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "firedCount": {
+          "type": "number"
+        },
+        "lastFiredAt": {
+          "type": "string"
+        },
+        "nextCheckAt": {
+          "type": "string"
+        },
+        "lastError": {
+          "type": "string"
+        },
+        "droppedLines": {
+          "type": "number"
+        },
+        "owedBatches": {
+          "type": "number"
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "kind",
+        "watching",
+        "state",
+        "firedCount"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "trigger"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `watchers.triggers.grant.list`
+
+The commands the owner approved for triggers to run when they fire, with the digest a trigger names.
+
+- Title: `List trigger action grants`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `read:watchers`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "grants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "digest": {
+            "type": "string"
+          },
+          "confirmedBy": {
+            "type": "string"
+          },
+          "confirmedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "description",
+          "command",
+          "args",
+          "digest",
+          "confirmedBy",
+          "confirmedAt"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "grants"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `watchers.triggers.grant.register`
+
+The owner approves one command (argv, optional working directory) that a trigger may run when it fires. Only the owner registers a grant; a caller that declares it is not a user request is refused. Re-registering the same command keeps its digest.
+
+- Title: `Approve a command for triggers`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:watchers`
+- Emits events: none
+- Dangerous: `yes`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "command": {
+      "type": "string"
+    },
+    "args": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "cwd": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "description",
+    "command"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "grant": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "command": {
+          "type": "string"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "confirmedBy": {
+          "type": "string"
+        },
+        "confirmedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "description",
+        "command",
+        "args",
+        "digest",
+        "confirmedBy",
+        "confirmedAt"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "grant"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `watchers.triggers.history`
+
+The newest runs of one trigger (default 20, at most 200): when, outcome, detail and how a watched command ended.
+
+- Title: `Read a trigger's runs`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `read:watchers`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "limit": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "trigger": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "watching": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "firedCount": {
+          "type": "number"
+        },
+        "lastFiredAt": {
+          "type": "string"
+        },
+        "nextCheckAt": {
+          "type": "string"
+        },
+        "lastError": {
+          "type": "string"
+        },
+        "droppedLines": {
+          "type": "number"
+        },
+        "owedBatches": {
+          "type": "number"
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "kind",
+        "watching",
+        "state",
+        "firedCount"
+      ],
+      "additionalProperties": false
+    },
+    "runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            },
+            {},
+            {
+              "type": "array",
+              "items": {}
+            }
+          ]
+        }
+      }
+    }
+  },
+  "required": [
+    "trigger",
+    "runs"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `watchers.triggers.list`
+
+List the supervised triggers: id, label, kind, what each watches, state, how often it fired and its last error.
+
+- Title: `List triggers`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `read:watchers`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ownership": {
+      "type": "string",
+      "enum": [
+        "local",
+        "other-process",
+        "unclaimed"
+      ]
+    },
+    "triggers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "watching": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "firedCount": {
+            "type": "number"
+          },
+          "lastFiredAt": {
+            "type": "string"
+          },
+          "nextCheckAt": {
+            "type": "string"
+          },
+          "lastError": {
+            "type": "string"
+          },
+          "droppedLines": {
+            "type": "number"
+          },
+          "owedBatches": {
+            "type": "number"
+          },
+          "next": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "kind",
+          "watching",
+          "state",
+          "firedCount"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "ownership",
+    "triggers"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `watchers.triggers.reset`
+
+Close the breaker of a trigger that stopped after repeated failures, once the cause is fixed. Refused, with the reason, when the trigger is not stopped.
+
+- Title: `Reset a trigger's breaker`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:watchers`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "trigger": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "watching": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "firedCount": {
+          "type": "number"
+        },
+        "lastFiredAt": {
+          "type": "string"
+        },
+        "nextCheckAt": {
+          "type": "string"
+        },
+        "lastError": {
+          "type": "string"
+        },
+        "droppedLines": {
+          "type": "number"
+        },
+        "owedBatches": {
+          "type": "number"
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "kind",
+        "watching",
+        "state",
+        "firedCount"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "trigger"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `watchers.triggers.status`
 
 Read the surface trigger supervisor and affected record summaries without claiming execution ownership.
@@ -153040,7 +156484,7 @@ Read the surface trigger supervisor and affected record summaries without claimi
 
 #### `watchers.update`
 
-Update an existing watcher. (Renamed from watchers.patch in the 1.0.0 core-verb rename, canonical verb is update, not patch.)
+Update an existing watcher. A kind change needs what that kind needs (see watchers.create): a url for webhook or polling, a path for filesystem, nothing for manual. (Renamed from watchers.patch in the 1.0.0 core-verb rename, canonical verb is update, not patch.)
 
 - Title: `Update Watcher`
 - Source: `builtin`
@@ -153126,9 +156570,6 @@ Update an existing watcher. (Renamed from watchers.patch in the 1.0.0 core-verb 
       "additionalProperties": {
         "type": "string"
       }
-    },
-    "run": {
-      "type": "string"
     }
   },
   "required": [
@@ -174336,7 +177777,7 @@ Read native hosted dispatch status. Does not admit, claim, retry or execute.
 
 #### `workspaces.registrations.add`
 
-Register a workspace root so the whole subtree beneath it is covered. Refuses an absurdly broad root (the home directory, the filesystem root, or the daemon state directory) with a 400, coverage flows down the entire subtree, so a root that broad would sweep far more than a project. Idempotent: re-registering the same normalized root returns alreadyRegistered:true. Registering a root clears any remembered decline recorded at exactly that root.
+Register a workspace root so the whole subtree beneath it is covered. Refuses an absurdly broad root (the home directory, the filesystem root, or the daemon state directory) with a 400, coverage flows down the entire subtree, so a root that broad would sweep far more than a project. Idempotent: re-registering the same normalized root returns alreadyRegistered:true. A root registered before native work existed has no native scope; re-registering it grants that scope and answers nativeScopeGranted:true (false otherwise), which is the step a native-work refusal asks for. Registering a root clears any remembered decline recorded at exactly that root.
 
 - Title: `Register a Workspace`
 - Source: `builtin`
@@ -174407,11 +177848,15 @@ Register a workspace root so the whole subtree beneath it is covered. Refuses an
     },
     "alreadyRegistered": {
       "type": "boolean"
+    },
+    "nativeScopeGranted": {
+      "type": "boolean"
     }
   },
   "required": [
     "workspace",
-    "alreadyRegistered"
+    "alreadyRegistered",
+    "nativeScopeGranted"
   ],
   "additionalProperties": false
 }
@@ -176835,7 +180280,8 @@ A question, claim, purchase window or queued action in the owner inbox was poste
             "question",
             "claim",
             "purchase",
-            "queued-action"
+            "queued-action",
+            "decision"
           ]
         },
         "status": {
@@ -176985,7 +180431,7 @@ A question, claim, purchase window or queued action in the owner inbox was poste
 
 #### `control.ready`
 
-Initial SSE/WebSocket handshake event emitted after a control-plane subscription is opened.
+Initial SSE/WebSocket handshake event emitted after a control-plane subscription is opened. `domains` is what the stream delivers; `withheldDomains` names requested domains this credential may not read; `unrecognisedDomains` names requested `?domains=` values that are not runtime event domains, so nothing will arrive for them (a request naming only unknown domains is refused with 400 UNKNOWN_EVENT_DOMAIN).
 
 - Title: `Ready Handshake`
 - Source: `builtin`
@@ -177011,6 +180457,18 @@ Initial SSE/WebSocket handshake event emitted after a control-plane subscription
     },
     "transport": {
       "type": "string"
+    },
+    "withheldDomains": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "unrecognisedDomains": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [

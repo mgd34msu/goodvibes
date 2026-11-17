@@ -813,7 +813,7 @@
    "get": {
     "operationId": "contracts.list",
     "summary": "List Contracts",
-    "description": "Every contract this daemon holds, newest first, each with its whole tree: the ask, the goal, the acceptance criteria with every Jev reading, the groups and units with their checks and nudges, open and answered owner escalations, decisions, usage, and the answer or status line once it ends. `sessionId` narrows the list to one session's contracts (a hosted session's, or a shared session's); ended contracts are left out unless `includeTerminal` is set. For a list view, `contracts.summaries` returns the same contracts as small summaries.",
+    "description": "Every contract this daemon holds, newest first, each with its whole tree: the ask, the goal, the acceptance criteria with every Jev reading, the groups and units with their checks and nudges, open and answered owner escalations, decisions, usage, and the answer or status line once it ends. `sessionId` narrows the list to one session's contracts (a hosted session's, or a shared session's); ended contracts are left out unless `includeTerminal` is set. For a list view, `contracts.summaries` returns the same contracts as small summaries. A contract an identified caller started belongs to that caller (`ownerPrincipalId`) for its whole life; one a hosted session's own turn started belongs to that session's identified owners. Contracts of another caller are left out here and read as CONTRACT_NOT_FOUND everywhere else.",
     "tags": [
      "contracts"
     ],
@@ -994,7 +994,7 @@
    "post": {
     "operationId": "contracts.reply",
     "summary": "Reply to a Contract Escalation",
-    "description": "The owner's free-text reply to an open escalation of a contract, read by Jev as approve, reject, amend or unclear. Returns how it was read and what the runner did: approved, amended, stopped, asked again (with the new escalation id), or refused when the escalation is no longer open. Approval never passes a criterion Jev read as unmet; the requirement changes only through an amendment. A native work contract's failed-turn question is not read by Jev: it accepts exactly `retry` or `cancel`. 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_NOT_RUNNING when this runner holds the contract only for inspection, 409 with CONTRACT_ENDED when the contract has ended, 409 with ESCALATION_NOT_OPEN when the escalation is already answered or another reply to it is being read, 400 with INVALID_ARGUMENT when the text is not an answer the question accepts.",
+    "description": "The owner's free-text reply to an open escalation of a contract, read by Jev as approve, reject, amend or unclear. Returns how it was read and what the runner did: approved, amended, stopped, asked again (with the new escalation id), or refused when the escalation is no longer open. Approval never passes a criterion Jev read as unmet; the requirement changes only through an amendment. A failed-work question (a native work contract's failed turn, a failed unit, a result that could not be published) is not read by Jev: it accepts exactly `retry` or `cancel`. 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_NOT_RUNNING when this runner holds the contract only for inspection, 409 with CONTRACT_ENDED when the contract has ended, 409 with ESCALATION_NOT_OPEN when the escalation is already answered or another reply to it is being read, 400 with INVALID_ARGUMENT when the text is not an answer the question accepts.",
     "tags": [
      "contracts"
     ],
@@ -1712,7 +1712,7 @@
    "get": {
     "operationId": "sessions.list",
     "summary": "List Shared Sessions",
-    "description": "Return shared-session integration state.",
+    "description": "Return shared-session integration state. `unreadable`, present only when there are any, names each stored session, message or input this build could not read at start (kind, id, why); they stay in the store untouched and load again under a build that knows them.",
     "tags": [
      "sessions"
     ],
@@ -1748,6 +1748,34 @@
            "type": "array",
            "items": {
             "$ref": "#/components/schemas/Session"
+           }
+          },
+          "unreadable": {
+           "type": "array",
+           "items": {
+            "type": "object",
+            "properties": {
+             "kind": {
+              "type": "string",
+              "enum": [
+               "session",
+               "message",
+               "input"
+              ]
+             },
+             "id": {
+              "type": "string"
+             },
+             "reason": {
+              "type": "string"
+             }
+            },
+            "required": [
+             "kind",
+             "id",
+             "reason"
+            ],
+            "additionalProperties": false
            }
           }
          },
@@ -1858,7 +1886,7 @@
    "get": {
     "operationId": "sessions.get",
     "summary": "Get Shared Session",
-    "description": "Return metadata for a shared session.",
+    "description": "Return a shared session record with its newest 100 messages. It returns conversation text, so it needs read:transcripts; sessions.list and sessions.search return session metadata under read:sessions.",
     "tags": [
      "sessions"
     ],
@@ -1900,7 +1928,7 @@
      }
     },
     "x-scopes": [
-     "read:sessions"
+     "read:transcripts"
     ],
     "x-error-codes": [
      {
@@ -2007,7 +2035,7 @@
    "post": {
     "operationId": "sessions.followUp",
     "summary": "Queue Shared Session Follow-Up",
-    "description": "Queue a deferred follow-up for a shared session so it runs after the current agent completes, or spawn immediately when the session is idle.\n\nReplay key: body field `messageId`. Sending the same messageId again (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response.",
+    "description": "Queue a deferred follow-up for a shared session so it runs after the current agent completes, or spawn immediately when the session is idle.\n\nReplay key: body field `messageId`. Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.",
     "tags": [
      "sessions"
     ],
@@ -2057,7 +2085,7 @@
     "x-replay-key": {
      "in": "body",
      "name": "messageId",
-     "behavior": "Sending the same messageId again (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response."
+     "behavior": "Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response."
     },
     "x-error-codes": [
      {
@@ -2074,11 +2102,6 @@
       "code": "SESSION_CLOSED",
       "status": 409,
       "meaning": "The session is closed; reopen it (sessions.reopen) before sending to it."
-     },
-     {
-      "code": "WORKSPACE_BUSY",
-      "status": 409,
-      "meaning": "A workspace swap is in progress; retry after retryAfterMs."
      },
      {
       "code": "SESSION_AGENT_BIND_FAILED",
@@ -2227,7 +2250,7 @@
    "post": {
     "operationId": "sessions.inputs.deliver",
     "summary": "Mark Shared Session Input Delivered",
-    "description": "A live registered surface reports that it collected a queued input (moves it to `delivered`) or finished acting on it (`consumed:true` moves it to `completed`). This is how a surface-managed session, where steer/follow-up inputs queue for the surface rather than spawn a daemon executor, closes the input lifecycle honestly. Only queued/delivered inputs advance; a report on an input that already ended (cancelled, failed, answered by a daemon agent) is refused with 409 `INPUT_NOT_DELIVERABLE` naming its state, binds no agent and forwards no answer. One exception: an input a daemon restart cancelled while a surface in another process was answering it completes on that surface's `consumed:true` report. `agentId` names the agent the surface is running for this input: it binds the reply so a message that arrived over a channel gets its answer routed back to that conversation, the same binding the daemon makes for the executors it spawns itself. `answer` (sent with `consumed:true`, optionally with `status`) is the output that agent finished with, the daemon writes it into the session and delivers it to the channel. `claim:true` is how a surface takes an input before it starts work on it: it succeeds for one caller only, for a `queued` input, or for a `delivered` one with no agent bound for at least two minutes (a claimant that died before starting it). Any other caller is refused with 409 `INPUT_NOT_CLAIMABLE` naming the state, and nothing changes.",
+    "description": "A live registered surface reports that it collected a queued input (moves it to `delivered`) or finished acting on it (`consumed:true` moves it to `completed`). This is how a surface-managed session, where steer/follow-up inputs queue for the surface rather than spawn a daemon executor, closes the input lifecycle honestly. Only queued/delivered inputs advance; a report on an input that already ended (cancelled, failed, answered by a daemon agent) is refused with 409 `INPUT_NOT_DELIVERABLE` naming its state, binds no agent and forwards no answer. One exception: an input a daemon restart cancelled while a surface in another process was answering it completes on that surface's `consumed:true` report. `agentId` names the agent the surface is running for this input: it binds the reply so a message that arrived over a channel gets its answer routed back to that conversation, the same binding the daemon makes for the executors it spawns itself. `surfaceInstance`, sent with `agentId`, names the surface process running that agent; it is kept in the input's `metadata.deliveringSurfaceInstance` (cleared by a report that names none), so a surface that restarted can fail the inputs a process that is gone was answering. `answer` (sent with `consumed:true`, optionally with `status`) is the output that agent finished with, the daemon writes it into the session and delivers it to the channel. `claim:true` is how a surface takes an input before it starts work on it: it succeeds for one caller only, for a `queued` input, or for a `delivered` one with no agent bound for at least two minutes (a claimant that died before starting it). Any other caller is refused with 409 `INPUT_NOT_CLAIMABLE` naming the state, and nothing changes.",
     "tags": [
      "sessions"
     ],
@@ -2320,6 +2343,9 @@
           "type": "boolean"
          },
          "agentId": {
+          "type": "string"
+         },
+         "surfaceInstance": {
           "type": "string"
          },
          "answer": {
@@ -2429,7 +2455,7 @@
      }
     },
     "x-scopes": [
-     "read:sessions"
+     "read:transcripts"
     ],
     "x-error-codes": [
      {
@@ -2527,7 +2553,7 @@
    "post": {
     "operationId": "sessions.messages.create",
     "summary": "Post Shared Session Message",
-    "description": "Append a user message to a shared session. Omitted `kind` defaults to `message` conversation routing; send `kind: \"task\"` to request agent or contract task continuation.\n\nReplay key: body field `messageId`. Sending the same messageId again (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response.",
+    "description": "Append a user message to a shared session. Omitted `kind` defaults to `message` conversation routing; send `kind: \"task\"` to request agent or contract task continuation.\n\nReplay key: body field `messageId`. Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.",
     "tags": [
      "sessions"
     ],
@@ -2601,7 +2627,7 @@
     "x-replay-key": {
      "in": "body",
      "name": "messageId",
-     "behavior": "Sending the same messageId again (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response."
+     "behavior": "Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response."
     },
     "x-error-codes": [
      {
@@ -2623,11 +2649,6 @@
       "code": "SESSION_CLOSED",
       "status": 409,
       "meaning": "The session is closed; reopen it (sessions.reopen) before sending to it."
-     },
-     {
-      "code": "WORKSPACE_BUSY",
-      "status": 409,
-      "meaning": "A workspace swap is in progress; retry after retryAfterMs."
      },
      {
       "code": "SESSION_AGENT_BIND_FAILED",
@@ -2743,7 +2764,7 @@
      }
     },
     "x-scopes": [
-     "read:sessions"
+     "read:transcripts"
     ],
     "x-error-codes": [
      {
@@ -3196,7 +3217,7 @@
      }
     },
     "x-scopes": [
-     "read:sessions"
+     "read:transcripts"
     ]
    }
   },
@@ -3408,7 +3429,7 @@
    "post": {
     "operationId": "sessions.steer",
     "summary": "Steer Shared Session",
-    "description": "Deliver a live steering message to the active agent for a shared session, optionally falling back to spawn when explicitly allowed.\n\nReplay key: body field `messageId`. Sending the same messageId again (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response.",
+    "description": "Deliver a live steering message to the active agent for a shared session, optionally falling back to spawn when explicitly allowed.\n\nReplay key: body field `messageId`. Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.",
     "tags": [
      "sessions"
     ],
@@ -3458,7 +3479,7 @@
     "x-replay-key": {
      "in": "body",
      "name": "messageId",
-     "behavior": "Sending the same messageId again (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response."
+     "behavior": "Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response."
     },
     "x-error-codes": [
      {
@@ -3475,11 +3496,6 @@
       "code": "SESSION_CLOSED",
       "status": 409,
       "meaning": "The session is closed; reopen it (sessions.reopen) before sending to it."
-     },
-     {
-      "code": "WORKSPACE_BUSY",
-      "status": 409,
-      "meaning": "A workspace swap is in progress; retry after retryAfterMs."
      },
      {
       "code": "SESSION_AGENT_BIND_FAILED",
@@ -3892,11 +3908,6 @@
       "meaning": "The session is closed; reopen it (sessions.reopen) before sending to it."
      },
      {
-      "code": "WORKSPACE_BUSY",
-      "status": 409,
-      "meaning": "A workspace swap is in progress; retry after retryAfterMs."
-     },
-     {
       "code": "SESSION_AGENT_BIND_FAILED",
       "status": 500,
       "meaning": "The input was accepted but the agent started for it could not be bound; the input was released to the queue."
@@ -4055,9 +4066,19 @@
    "get": {
     "operationId": "tasks.list",
     "summary": "List Runtime Tasks",
-    "description": "Return the integration snapshot for runtime tasks.",
+    "description": "Return the integration snapshot for runtime tasks. `limit` returns only the newest that many tasks (the totals stay whole), so a long-lived daemon does not send its whole history.",
     "tags": [
      "tasks"
+    ],
+    "parameters": [
+     {
+      "name": "limit",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "number"
+      }
+     }
     ],
     "responses": {
      "200": {
@@ -4324,7 +4345,7 @@
     ]
    }
   },
-  "/api/control/gateway-methods/{methodId}/invoke": {
+  "/api/control-plane/methods/{methodId}/invoke": {
    "post": {
     "operationId": "gateway.invoke",
     "summary": "Invoke a method that has no REST route",
@@ -4481,7 +4502,7 @@
     }
    },
    "Conflict": {
-    "description": "The target is in a state that cannot take this action; the body names the state and what is allowed. Codes declared: CONTRACT_ENDED, CONTRACT_NATIVE, CONTRACT_NOT_RUNNING, NOT_HOSTING, CONTRACT_NOT_ENDED, ESCALATION_NOT_OPEN, SESSION_NOT_LIVE, IDEMPOTENCY_KEY_REUSED, HOSTED_SESSION_STILL_RUNNING, SESSION_ACTIVE, SESSION_CLOSED, WORKSPACE_BUSY, CANCEL_NOT_ALLOWED, INPUT_NOT_CLAIMABLE, INPUT_NOT_DELIVERABLE.",
+    "description": "The target is in a state that cannot take this action; the body names the state and what is allowed. Codes declared: CONTRACT_ENDED, CONTRACT_NATIVE, CONTRACT_NOT_RUNNING, NOT_HOSTING, CONTRACT_NOT_ENDED, ESCALATION_NOT_OPEN, SESSION_NOT_LIVE, IDEMPOTENCY_KEY_REUSED, HOSTED_SESSION_STILL_RUNNING, SESSION_ACTIVE, SESSION_CLOSED, CANCEL_NOT_ALLOWED, INPUT_NOT_CLAIMABLE, INPUT_NOT_DELIVERABLE.",
     "content": {
      "application/json": {
       "schema": {
@@ -4566,8 +4587,7 @@
        "TOKEN_EXPIRED",
        "TOOL_EXEC_FAILED",
        "UNKNOWN",
-       "VALIDATION_FAILED",
-       "WORKSPACE_BUSY"
+       "VALIDATION_FAILED"
       ]
      },
      "category": {
@@ -6071,6 +6091,9 @@
        "external",
        "proposal"
       ]
+     },
+     "ownerPrincipalId": {
+      "type": "string"
      },
      "ask": {
       "type": "string"
@@ -9117,6 +9140,9 @@
       "type": "string"
      },
      "lastAgentId": {
+      "type": "string"
+     },
+     "lastAgentModel": {
       "type": "string"
      },
      "lastError": {

@@ -661,6 +661,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "progress": {
                   "type": "string"
                 },
+                "progressAt": {
+                  "type": "number"
+                },
                 "error": {
                   "type": "object",
                   "properties": {
@@ -4271,7 +4274,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "inbox.answer",
         "title": "Answer Owner Inbox Item",
-        "description": "Answer one open inbox item with one of its `options`, or with `text` when it has none (text may also accompany an option). An approval answered approve or deny is decided through the approval broker exactly as approvals.approve/deny would. The first answer wins: a later one, or an answer to a withdrawn or expired item, returns `applied: false` with a `refusal` naming who answered and from where (still 200, so a raced answer does not fail). For a question an agent or session asked, `delivery` says whether the answer reached it now, waits for its session to be opened again, or cannot reach it and why; the answer is kept either way. Who answered is taken from the authenticated caller.",
+        "description": "Answer one open inbox item with one of its `options`, or with `text` when it has none (text may also accompany an option). An approval answered approve or deny is decided through the approval broker exactly as approvals.approve/deny would. The first answer wins: a later one, or an answer to a withdrawn or expired item, returns `applied: false` with a `refusal` naming who answered and from where (still 200, so a raced answer does not fail). For a question an agent or session asked, `delivery` says whether the answer reached it now, waits for its session to be opened again, or cannot reach it and why; the answer is kept either way. A decision item's choice is carried out first by the app whose gate decided (undo restores the files the call changed, never/always/ask save a standing rule for calls like it); the recorded answer's text says what was done, and a choice that could not be done, or a decision another app made, returns `applied: false` with the reason and leaves it open. Who answered is taken from the authenticated caller.",
         "category": "approvals",
         "source": "builtin",
         "access": "admin",
@@ -4318,7 +4321,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "question",
                     "claim",
                     "purchase",
-                    "queued-action"
+                    "queued-action",
+                    "decision"
                   ]
                 },
                 "status": {
@@ -4579,7 +4583,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "question",
                     "claim",
                     "purchase",
-                    "queued-action"
+                    "queued-action",
+                    "decision"
                   ]
                 },
                 "status": {
@@ -4788,7 +4793,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "inbox.list",
         "title": "List Owner Inbox",
-        "description": "Everything waiting on the owner in one list, newest first: permission asks (kind approval), questions agents left, channel claims, purchase windows and queued actions. `status` is open (default), closed or all; pass `itemId` to read one item wherever it ranks. An answered question carries `delivery`: delivered to the agent or session that asked, waiting for that session to be opened again, or undeliverable with the reason. `revision` moves on every change, so a surface can tell whether its copy is current by comparing one number.",
+        "description": "Everything waiting on the owner in one list, newest first: permission asks (kind approval), questions agents left, channel claims, purchase windows and queued actions. Calls Jev decided for the owner at the permission gate are kind decision: open while the owner can still act on one (undo, never, always, ask, keep), and listed only when `kinds` names decision or the status is closed or all. `status` is open (default), closed or all; pass `itemId` to read one item wherever it ranks. An answered question carries `delivery`: delivered to the agent or session that asked, waiting for that session to be opened again, or undeliverable with the reason. `revision` moves on every change, so a surface can tell whether its copy is current by comparing one number.",
         "category": "approvals",
         "source": "builtin",
         "access": "authenticated",
@@ -4821,7 +4826,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "question",
                   "claim",
                   "purchase",
-                  "queued-action"
+                  "queued-action",
+                  "decision"
                 ]
               }
             },
@@ -4852,7 +4858,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "question",
                       "claim",
                       "purchase",
-                      "queued-action"
+                      "queued-action",
+                      "decision"
                     ]
                   },
                   "status": {
@@ -5102,7 +5109,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "question",
                     "claim",
                     "purchase",
-                    "queued-action"
+                    "queued-action",
+                    "decision"
                   ]
                 },
                 "status": {
@@ -5295,7 +5303,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "question",
                     "claim",
                     "purchase",
-                    "queued-action"
+                    "queued-action",
+                    "decision"
                   ]
                 },
                 "status": {
@@ -6181,6 +6190,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
                   }
                 },
                 "required": [
@@ -6231,7 +6246,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "local_auth.users.create",
         "title": "Create Local Auth User",
-        "description": "Create a local auth user.",
+        "description": "Create a local auth user. roles: omitted creates an admin. scopes: the operator scopes the user holds (for example read:sessions and write:sessions for someone who only chats); omitted, the user holds its role's default set. A narrowed user is not an admin, whatever its roles.",
         "category": "auth",
         "source": "builtin",
         "access": "admin",
@@ -6254,6 +6269,18 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "password": {
               "type": "string"
+            },
+            "roles": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "scopes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           },
           "required": [
@@ -6272,6 +6299,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "string"
                 },
                 "roles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "scopes": {
                   "type": "array",
                   "items": {
                     "type": "string"
@@ -6383,6 +6416,88 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           },
           "required": [
             "rotated"
+          ],
+          "additionalProperties": false
+        },
+        "dangerous": true,
+        "effect": "write",
+        "invokable": true
+      },
+      {
+        "id": "local_auth.users.scopes.set",
+        "title": "Set Local Auth User Scopes",
+        "description": "Give a local auth user a narrower list of operator scopes, or return it to its role's default set with scopes: null. Takes effect on the user's next request. An unknown user is 400; a scopes value that is neither a nonempty list nor null is 400 INVALID_ARGUMENT naming scopes.",
+        "category": "auth",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:auth"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/api/local-auth/users/{username}/scopes"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "username": {
+              "type": "string"
+            },
+            "scopes": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "username",
+            "scopes"
+          ],
+          "additionalProperties": true
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "user": {
+              "type": "object",
+              "properties": {
+                "username": {
+                  "type": "string"
+                },
+                "roles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "scopes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "username",
+                "roles"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "user"
           ],
           "additionalProperties": false
         },
@@ -6886,17 +7001,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "items": {
                           "type": "string"
                         }
-                      },
-                      "autoApprove": {
-                        "type": "boolean"
-                      },
-                      "sandboxMode": {
-                        "type": "string",
-                        "enum": [
-                          "inherit",
-                          "isolate",
-                          "off"
-                        ]
                       },
                       "allowUnsafeExternalContent": {
                         "type": "boolean"
@@ -7773,7 +7877,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "automation.jobs.create",
         "title": "Create Automation Job",
-        "description": "Create a durable automation job.",
+        "description": "Create a durable automation job. An optional id keeps the job under that id and makes the create repeatable: when a job with that id already exists it is returned unchanged.",
         "category": "automation",
         "source": "builtin",
         "access": "admin",
@@ -7954,9 +8058,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "type": "string"
               }
             },
-            "autoApprove": {
-              "type": "boolean"
-            },
             "allowUnsafeExternalContent": {
               "type": "boolean"
             },
@@ -8090,9 +8191,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "includeSummary": {
                   "type": "boolean"
                 },
-                "includeTranscript": {
-                  "type": "boolean"
-                },
                 "includeLinks": {
                   "type": "boolean"
                 },
@@ -8105,7 +8203,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "targets",
                 "fallbackTargets",
                 "includeSummary",
-                "includeTranscript",
                 "includeLinks"
               ],
               "additionalProperties": false
@@ -8616,17 +8713,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "type": "string"
                   }
                 },
-                "autoApprove": {
-                  "type": "boolean"
-                },
-                "sandboxMode": {
-                  "type": "string",
-                  "enum": [
-                    "inherit",
-                    "isolate",
-                    "off"
-                  ]
-                },
                 "allowUnsafeExternalContent": {
                   "type": "boolean"
                 },
@@ -8855,9 +8941,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "includeSummary": {
                   "type": "boolean"
                 },
-                "includeTranscript": {
-                  "type": "boolean"
-                },
                 "includeLinks": {
                   "type": "boolean"
                 },
@@ -8870,7 +8953,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "targets",
                 "fallbackTargets",
                 "includeSummary",
-                "includeTranscript",
                 "includeLinks"
               ],
               "additionalProperties": false
@@ -9620,17 +9702,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               "type": "string"
                             }
                           },
-                          "autoApprove": {
-                            "type": "boolean"
-                          },
-                          "sandboxMode": {
-                            "type": "string",
-                            "enum": [
-                              "inherit",
-                              "isolate",
-                              "off"
-                            ]
-                          },
                           "allowUnsafeExternalContent": {
                             "type": "boolean"
                           },
@@ -9859,9 +9930,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "includeSummary": {
                             "type": "boolean"
                           },
-                          "includeTranscript": {
-                            "type": "boolean"
-                          },
                           "includeLinks": {
                             "type": "boolean"
                           },
@@ -9874,7 +9942,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "targets",
                           "fallbackTargets",
                           "includeSummary",
-                          "includeTranscript",
                           "includeLinks"
                         ],
                         "additionalProperties": false
@@ -10444,17 +10511,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               "type": "string"
                             }
                           },
-                          "autoApprove": {
-                            "type": "boolean"
-                          },
-                          "sandboxMode": {
-                            "type": "string",
-                            "enum": [
-                              "inherit",
-                              "isolate",
-                              "off"
-                            ]
-                          },
                           "allowUnsafeExternalContent": {
                             "type": "boolean"
                           },
@@ -10683,9 +10739,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "includeSummary": {
                             "type": "boolean"
                           },
-                          "includeTranscript": {
-                            "type": "boolean"
-                          },
                           "includeLinks": {
                             "type": "boolean"
                           },
@@ -10698,7 +10751,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "targets",
                           "fallbackTargets",
                           "includeSummary",
-                          "includeTranscript",
                           "includeLinks"
                         ],
                         "additionalProperties": false
@@ -11268,9 +11320,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "type": "string"
               }
             },
-            "autoApprove": {
-              "type": "boolean"
-            },
             "allowUnsafeExternalContent": {
               "type": "boolean"
             },
@@ -11404,9 +11453,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "includeSummary": {
                   "type": "boolean"
                 },
-                "includeTranscript": {
-                  "type": "boolean"
-                },
                 "includeLinks": {
                   "type": "boolean"
                 },
@@ -11419,7 +11465,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "targets",
                 "fallbackTargets",
                 "includeSummary",
-                "includeTranscript",
                 "includeLinks"
               ],
               "additionalProperties": false
@@ -11827,17 +11872,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "type": "string"
                   }
                 },
-                "autoApprove": {
-                  "type": "boolean"
-                },
-                "sandboxMode": {
-                  "type": "string",
-                  "enum": [
-                    "inherit",
-                    "isolate",
-                    "off"
-                  ]
-                },
                 "allowUnsafeExternalContent": {
                   "type": "boolean"
                 },
@@ -12066,9 +12100,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "includeSummary": {
                   "type": "boolean"
                 },
-                "includeTranscript": {
-                  "type": "boolean"
-                },
                 "includeLinks": {
                   "type": "boolean"
                 },
@@ -12081,7 +12112,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "targets",
                 "fallbackTargets",
                 "includeSummary",
-                "includeTranscript",
                 "includeLinks"
               ],
               "additionalProperties": false
@@ -12741,17 +12771,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "items": {
                         "type": "string"
                       }
-                    },
-                    "autoApprove": {
-                      "type": "boolean"
-                    },
-                    "sandboxMode": {
-                      "type": "string",
-                      "enum": [
-                        "inherit",
-                        "isolate",
-                        "off"
-                      ]
                     },
                     "allowUnsafeExternalContent": {
                       "type": "boolean"
@@ -13737,17 +13756,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "items": {
                         "type": "string"
                       }
-                    },
-                    "autoApprove": {
-                      "type": "boolean"
-                    },
-                    "sandboxMode": {
-                      "type": "string",
-                      "enum": [
-                        "inherit",
-                        "isolate",
-                        "off"
-                      ]
                     },
                     "allowUnsafeExternalContent": {
                       "type": "boolean"
@@ -14840,17 +14848,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               "type": "string"
                             }
                           },
-                          "autoApprove": {
-                            "type": "boolean"
-                          },
-                          "sandboxMode": {
-                            "type": "string",
-                            "enum": [
-                              "inherit",
-                              "isolate",
-                              "off"
-                            ]
-                          },
                           "allowUnsafeExternalContent": {
                             "type": "boolean"
                           },
@@ -15805,17 +15802,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "items": {
                               "type": "string"
                             }
-                          },
-                          "autoApprove": {
-                            "type": "boolean"
-                          },
-                          "sandboxMode": {
-                            "type": "string",
-                            "enum": [
-                              "inherit",
-                              "isolate",
-                              "off"
-                            ]
                           },
                           "allowUnsafeExternalContent": {
                             "type": "boolean"
@@ -16812,17 +16798,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "type": "string"
                       }
                     },
-                    "autoApprove": {
-                      "type": "boolean"
-                    },
-                    "sandboxMode": {
-                      "type": "string",
-                      "enum": [
-                        "inherit",
-                        "isolate",
-                        "off"
-                      ]
-                    },
                     "allowUnsafeExternalContent": {
                       "type": "boolean"
                     },
@@ -17535,9 +17510,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "type": "string"
               }
             },
-            "autoApprove": {
-              "type": "boolean"
-            },
             "allowUnsafeExternalContent": {
               "type": "boolean"
             },
@@ -17671,9 +17643,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "includeSummary": {
                   "type": "boolean"
                 },
-                "includeTranscript": {
-                  "type": "boolean"
-                },
                 "includeLinks": {
                   "type": "boolean"
                 },
@@ -17686,7 +17655,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "targets",
                 "fallbackTargets",
                 "includeSummary",
-                "includeTranscript",
                 "includeLinks"
               ],
               "additionalProperties": false
@@ -18170,17 +18138,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "type": "string"
                   }
                 },
-                "autoApprove": {
-                  "type": "boolean"
-                },
-                "sandboxMode": {
-                  "type": "string",
-                  "enum": [
-                    "inherit",
-                    "isolate",
-                    "off"
-                  ]
-                },
                 "allowUnsafeExternalContent": {
                   "type": "boolean"
                 },
@@ -18409,9 +18366,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "includeSummary": {
                   "type": "boolean"
                 },
-                "includeTranscript": {
-                  "type": "boolean"
-                },
                 "includeLinks": {
                   "type": "boolean"
                 },
@@ -18424,7 +18378,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "targets",
                 "fallbackTargets",
                 "includeSummary",
-                "includeTranscript",
                 "includeLinks"
               ],
               "additionalProperties": false
@@ -19153,17 +19106,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "type": "string"
                         }
                       },
-                      "autoApprove": {
-                        "type": "boolean"
-                      },
-                      "sandboxMode": {
-                        "type": "string",
-                        "enum": [
-                          "inherit",
-                          "isolate",
-                          "off"
-                        ]
-                      },
                       "allowUnsafeExternalContent": {
                         "type": "boolean"
                       },
@@ -19392,9 +19334,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "includeSummary": {
                         "type": "boolean"
                       },
-                      "includeTranscript": {
-                        "type": "boolean"
-                      },
                       "includeLinks": {
                         "type": "boolean"
                       },
@@ -19407,7 +19346,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "targets",
                       "fallbackTargets",
                       "includeSummary",
-                      "includeTranscript",
                       "includeLinks"
                     ],
                     "additionalProperties": false
@@ -20034,17 +19972,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "items": {
                           "type": "string"
                         }
-                      },
-                      "autoApprove": {
-                        "type": "boolean"
-                      },
-                      "sandboxMode": {
-                        "type": "string",
-                        "enum": [
-                          "inherit",
-                          "isolate",
-                          "off"
-                        ]
                       },
                       "allowUnsafeExternalContent": {
                         "type": "boolean"
@@ -20679,7 +20606,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "batch.jobs.cancel",
         "title": "Cancel Batch Job",
-        "description": "Cancel a queued job. A job already in a terminal state is returned unchanged; a job already submitted to the provider is refused with 409, because provider batches cancel as a whole. Needs an admin.",
+        "description": "Cancel a queued job. A job already in a terminal state is returned unchanged; a job already submitted to the provider is refused with 409 BATCH_JOB_ALREADY_SUBMITTED, because provider batches cancel as a whole: the refusal names the provider batch and `next` points at batch.providerBatches.cancel. Needs an admin.",
         "category": "batch",
         "source": "builtin",
         "access": "admin",
@@ -20725,6 +20652,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "string",
                   "enum": [
                     "queued",
+                    "submitting",
                     "submitted",
                     "running",
                     "completed",
@@ -20941,6 +20869,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "string",
                   "enum": [
                     "queued",
+                    "submitting",
                     "submitted",
                     "running",
                     "completed",
@@ -21088,6 +21017,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "string",
                   "enum": [
                     "queued",
+                    "submitting",
                     "submitted",
                     "running",
                     "completed",
@@ -21233,6 +21163,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "type": "string",
                     "enum": [
                       "queued",
+                      "submitting",
                       "submitted",
                       "running",
                       "completed",
@@ -21332,6 +21263,173 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "invokable": true
       },
       {
+        "id": "batch.providerBatches.cancel",
+        "title": "Cancel Provider Batch",
+        "description": "Cancel a whole provider batch at the provider (the `providerBatchId` shown on a submitted job) and mark its jobs. `providerStatus` is what the provider answered: `cancelled` when it stopped, `running` while it is still winding down, in which case requests it finished before the cancel are collected by the next pass and the rest are marked cancelled when it ends. `jobs` is every job of that batch as the cancel left it. A batch whose jobs are all finished is returned unchanged. Refused with BATCH_PROVIDER_BATCH_NOT_FOUND (404) when no job belongs to the id and BATCH_PROVIDER_CANCEL_UNSUPPORTED (409) when the provider has no cancel call. Needs an admin.",
+        "category": "batch",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:batch"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/api/batch/provider-batches/{providerBatchId}/cancel"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "providerBatchId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "providerBatchId"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "providerBatchId": {
+              "type": "string"
+            },
+            "providerStatus": {
+              "type": "string",
+              "enum": [
+                "queued",
+                "submitted",
+                "running",
+                "completed",
+                "failed",
+                "cancelled",
+                "expired"
+              ]
+            },
+            "jobs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "queued",
+                      "submitting",
+                      "submitted",
+                      "running",
+                      "completed",
+                      "failed",
+                      "cancelled",
+                      "expired",
+                      "dead_lettered"
+                    ]
+                  },
+                  "createdAt": {
+                    "type": "number"
+                  },
+                  "updatedAt": {
+                    "type": "number"
+                  },
+                  "request": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": true
+                  },
+                  "source": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": true
+                  },
+                  "attempts": {
+                    "type": "number"
+                  },
+                  "providerBatchId": {
+                    "type": "string"
+                  },
+                  "providerBatchStatus": {
+                    "type": "string"
+                  },
+                  "submittedAt": {
+                    "type": "number"
+                  },
+                  "completedAt": {
+                    "type": "number"
+                  },
+                  "result": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": true
+                  },
+                  "error": {
+                    "type": "object",
+                    "properties": {
+                      "message": {
+                        "type": "string"
+                      },
+                      "code": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "message"
+                    ],
+                    "additionalProperties": true
+                  }
+                },
+                "required": [
+                  "id",
+                  "provider",
+                  "model",
+                  "status",
+                  "createdAt",
+                  "updatedAt",
+                  "request",
+                  "attempts"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "providerBatchId",
+            "providerStatus",
+            "jobs"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "outward",
+        "invokable": true
+      },
+      {
         "id": "batch.run",
         "title": "Run Batch Pass",
         "description": "Run one submit-and-poll pass over the queue now instead of waiting for the timer. `force: true` submits queued jobs even before their delay has elapsed. Returns the counts for this pass, all zero when the mode is `off`. Spends provider budget, so it needs an admin.",
@@ -21393,7 +21491,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "batch.runtime.get",
         "title": "Batch Runtime",
-        "description": "The batch queue's current mode (`off`: nothing is queued; `explicit`: the job API is open and a non-streaming OpenAI-compatible chat completion is queued when it sends `x-goodvibes-execution: batch`; `eligible-by-default`: every such completion is queued unless it sends `x-goodvibes-execution: live`), what happens to a job whose provider cannot batch (`fallback`: `live` runs it at once on the live path and answers it finished, `fail` refuses it), which queue backend holds jobs, the Cloudflare settings it would use, its limits, and the providers that can batch. `GET /api/batch` and `GET /api/batch/config` return the same document.",
+        "description": "The batch queue's current mode (`off`: nothing is queued; `explicit`: the job API is open and a non-streaming OpenAI-compatible chat completion is queued when it sends `x-goodvibes-execution: batch`; `eligible-by-default`: every such completion whose provider can batch is queued unless it sends `x-goodvibes-execution: live`, and one whose provider cannot runs live as usual), what happens to a job whose provider cannot batch (`fallback`: `live` runs it at once on the live path and answers it finished, `fail` refuses it), which queue backend holds jobs, the Cloudflare settings it would use, its limits, and the providers that can batch. `GET /api/batch` and `GET /api/batch/config` return the same document.",
         "category": "batch",
         "source": "builtin",
         "access": "authenticated",
@@ -21772,6 +21870,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "pageId": {
               "type": "string"
+            },
+            "timeoutMs": {
+              "type": "number"
             }
           },
           "additionalProperties": true
@@ -21827,6 +21928,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "pageId": {
               "type": "string"
+            },
+            "timeoutMs": {
+              "type": "number"
             }
           },
           "additionalProperties": true
@@ -22127,6 +22231,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "maxChars": {
               "type": "number"
+            },
+            "timeoutMs": {
+              "type": "number"
             }
           },
           "additionalProperties": true
@@ -22227,6 +22334,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "path": {
               "type": "string"
+            },
+            "timeoutMs": {
+              "type": "number"
             }
           },
           "additionalProperties": true
@@ -22296,6 +22406,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "type": "string"
             },
             "amount": {
+              "type": "number"
+            },
+            "timeoutMs": {
               "type": "number"
             }
           },
@@ -23544,6 +23657,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "headless": {
               "type": "boolean"
+            },
+            "timeoutMs": {
+              "type": "number"
             }
           },
           "additionalProperties": true
@@ -23909,7 +24025,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "calendar.calendars.list",
         "title": "List Calendars",
-        "description": "The calendars the configured account can reach, so a setup flow can offer them for surfaces.calendar.defaultCalendarId. A backend that cannot discover calendars answers 501 CALENDAR_NOT_SUPPORTED.",
+        "description": "The calendars the configured account can reach (the Google calendar list, or the CalDAV collections), so a client can offer them as choices and setup can offer them for surfaces.calendar.defaultCalendarId. A backend that cannot discover calendars answers 501 CALENDAR_NOT_SUPPORTED.",
         "category": "calendar",
         "source": "builtin",
         "access": "authenticated",
@@ -24044,7 +24160,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "calendar.events.delete",
         "title": "Delete Calendar Event",
-        "description": "Remove an event from the configured calendar. Requires explicit confirmation (confirm: true). `deleted: false` means the calendar no longer held it; a backend that cannot delete events answers 501 CALENDAR_NOT_SUPPORTED.",
+        "description": "Remove an event from the configured calendar (Google or CalDAV). Requires explicit confirmation (confirm: true). `deleted: false` means the calendar no longer held it. A whole recurring series is refused with 409 CALENDAR_SERIES_NOT_SUPPORTED (on Google, one occurrence is removed by the id calendar.events.list gives it); an event that changed after it was read is refused with 409 CALENDAR_EVENT_CHANGED. A backend that cannot delete events answers 501 CALENDAR_NOT_SUPPORTED.",
         "category": "calendar",
         "source": "builtin",
         "access": "admin",
@@ -24259,10 +24375,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 ],
                 "additionalProperties": false
               }
+            },
+            "more": {
+              "type": "boolean"
             }
           },
           "required": [
-            "events"
+            "events",
+            "more"
           ],
           "additionalProperties": false
         },
@@ -24272,7 +24392,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "calendar.events.update",
         "title": "Update Calendar Event",
-        "description": "Change an event on the configured calendar: only the fields sent change (attendees replaces the guest list). Requires explicit confirmation (confirm: true). An unknown eventId is a 404; a backend that cannot change events answers 501 CALENDAR_NOT_SUPPORTED.",
+        "description": "Change an event on the configured calendar (Google or CalDAV): only the fields sent change (attendees replaces the guest list; start and end are both dates for an all-day event or both date-times). Requires explicit confirmation (confirm: true). An unknown eventId is a 404; an id that names a whole recurring series is refused with 409 CALENDAR_SERIES_NOT_SUPPORTED (on Google, one occurrence is changed by the id calendar.events.list gives it); an event that changed on the calendar after it was read is refused with 409 CALENDAR_EVENT_CHANGED and nothing is written. A backend that cannot change events answers 501 CALENDAR_NOT_SUPPORTED.",
         "category": "calendar",
         "source": "builtin",
         "access": "admin",
@@ -24350,7 +24470,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "calendar.ics.export",
         "title": "Export iCalendar",
-        "description": "Export events from the configured calendar as raw .ics content within an optional time window.",
+        "description": "Export events from the configured calendar as raw .ics content within an optional time window. With no limit every event in the window is exported; with a limit the export stops there and more: true says the window holds further events.",
         "category": "calendar",
         "source": "builtin",
         "access": "authenticated",
@@ -24376,6 +24496,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "to": {
               "type": "string"
+            },
+            "limit": {
+              "type": "number"
             }
           },
           "additionalProperties": false
@@ -24388,6 +24511,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "eventCount": {
               "type": "number"
+            },
+            "more": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -27710,7 +27836,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "channels.drafts.get",
         "title": "Get Channel Draft",
-        "description": "Return a single daemon-mirrored channel draft by id, or a notFound marker.",
+        "description": "Return one channel draft by id: the owner (admin) receives its text, so a draft written on one device can be finished and sent on another; any other caller receives the redacted record. Webhook values stay redacted. An id that names no draft returns a notFound marker.",
         "category": "channels",
         "source": "builtin",
         "access": "authenticated",
@@ -27800,7 +27926,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "channels.drafts.list",
         "title": "List Channel Drafts",
-        "description": "Return daemon-mirrored channel drafts for cross-device sync. Webhook values are stored redacted.",
+        "description": "Return channel drafts for cross-device sync, metadata only: each message reads as a redacted marker and webhook values are redacted. The daemon is the store of record; the text is served by channels.drafts.get.",
         "category": "channels",
         "source": "builtin",
         "access": "authenticated",
@@ -28192,7 +28318,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "channels.inbox.list",
         "title": "List Channel Inbox",
-        "description": "Return the merged inbound message feed (Slack DMs, Discord messages, email threads) from the host's synced provider mirror, newest first. Read-only; no provider write. Every known provider reports its own state in `providers`, including the unconfigured and the failing ones, so a short list is never ambiguous, and `partial` is true whenever a configured provider's items are missing because its last sync failed. Page with ?limit and ?cursor (opaque, from nextCursor); ?since=<epoch-ms> returns only items newer than a previous answer's `cursor` watermark; ?provider=<id> narrows to one provider.",
+        "description": "Return the merged inbound message feed (Slack DMs, Discord messages, email threads) from the host's synced provider mirror, newest first. Read-only; no provider write. Every known provider reports its own state in `providers`, including the unconfigured and the failing ones, so a short list is never ambiguous, and `partial` is true whenever a configured provider's items are missing because its last sync failed. Page with ?limit and ?cursor (opaque, from nextCursor); ?since=<cursor> returns only items committed after a previous answer's `cursor` watermark (the store's commit sequence, not a time); ?provider=<id> narrows to one provider. Each provider with triage says in `triage` whether new messages are being labelled and, when not, why and what turns it on; channels.inbox.triage labels a page now.",
         "category": "channels",
         "source": "builtin",
         "access": "authenticated",
@@ -28341,23 +28467,28 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "mailboxHistory": {
                     "type": "object",
                     "properties": {
-                      "uidValidity": {
-                        "type": "number"
+                      "source": {
+                        "type": "string"
                       },
                       "kind": {
                         "type": "string"
                       },
+                      "skippedOlderMessages": {
+                        "type": "number"
+                      },
+                      "uidValidity": {
+                        "type": "number"
+                      },
                       "lowerBoundUid": {
                         "type": "number"
                       },
-                      "skippedOlderMessages": {
+                      "pendingMessages": {
                         "type": "number"
                       }
                     },
                     "required": [
-                      "uidValidity",
+                      "source",
                       "kind",
-                      "lowerBoundUid",
                       "skippedOlderMessages"
                     ],
                     "additionalProperties": false
@@ -28378,6 +28509,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     ],
                     "additionalProperties": false
                   },
+                  "mailboxScope": {
+                    "type": "string"
+                  },
                   "skippedMessages": {
                     "type": "array",
                     "items": {
@@ -28386,16 +28520,39 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "uid": {
                           "type": "number"
                         },
+                        "messageId": {
+                          "type": "string"
+                        },
                         "reason": {
                           "type": "string"
                         }
                       },
                       "required": [
-                        "uid",
                         "reason"
                       ],
                       "additionalProperties": false
                     }
+                  },
+                  "triage": {
+                    "type": "object",
+                    "properties": {
+                      "state": {
+                        "type": "string"
+                      },
+                      "reason": {
+                        "type": "string"
+                      },
+                      "next": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "state"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -28422,6 +28579,108 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
+        "invokable": true
+      },
+      {
+        "id": "channels.inbox.triage",
+        "title": "Triage Inbox Now",
+        "description": "Score a page of one provider's stored inbox now: each message gets a spam / priority / normal label from the decision model on the account's privacy-screening route (labels otherwise come after each poll, so this is for a backlog or a re-check). `provider` is required (slack, discord or email); page with `limit` (at most 100) and `cursor` (nextCursor from channels.inbox.list or an earlier answer). `dryRun: true` returns the readings without storing them. Returns one receipt per message: `settled` with its label and score, or `held` / `unavailable` / `withheld` with why nothing was settled. When triage is off for the account the call is refused with the reason and what turns it on; channels.inbox.list reports the same state on each provider as `triage`.",
+        "category": "channels",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:channels"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/api/channels/inbox/triage"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "limit": {
+              "type": "number"
+            },
+            "cursor": {
+              "type": "string"
+            },
+            "dryRun": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "provider"
+          ],
+          "additionalProperties": true
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "receipts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "score": {
+                    "type": "number"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "battery": {
+                    "type": "string"
+                  },
+                  "batteryVersion": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "id",
+                  "status"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "total": {
+              "type": "number"
+            },
+            "hasMore": {
+              "type": "boolean"
+            },
+            "nextCursor": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "receipts",
+            "total",
+            "hasMore"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
         "invokable": true
       },
       {
@@ -29312,7 +29571,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "channels.profiles.get",
         "title": "Get Channel Profile Binding",
-        "description": "Return the profile binding for a channel (surfaceKind plus optional channelId). Returns 404 when no binding for that exact key exists.",
+        "description": "Return the profile binding for a channel (surfaceKind plus optional channelId) and `effective`: what a session that channel originates gets, each field merged from this binding and the surface-wide one, with `sources` naming the binding id that supplied each field. Returns 404 when no binding for that exact key exists. A listed or returned binding with `invalid` holds a value this build cannot use; that field is left out until the binding is set again or deleted.",
         "category": "channels",
         "source": "builtin",
         "access": "authenticated",
@@ -29402,6 +29661,50 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       }
                     ]
                   }
+                },
+                "invalid": {
+                  "type": "object",
+                  "properties": {
+                    "field": {
+                      "type": "string",
+                      "enum": [
+                        "permissionMode"
+                      ]
+                    },
+                    "value": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        }
+                      ]
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "field",
+                    "value",
+                    "reason"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": [
@@ -29410,10 +29713,58 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "updatedAt"
               ],
               "additionalProperties": false
+            },
+            "effective": {
+              "type": "object",
+              "properties": {
+                "profile": {
+                  "type": "object",
+                  "properties": {
+                    "model": {
+                      "type": "string"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "permissionMode": {
+                      "type": "string",
+                      "enum": [
+                        "ask-me",
+                        "jev-decides",
+                        "just-vibes",
+                        "yolo",
+                        "plan"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "sources": {
+                  "type": "object",
+                  "properties": {
+                    "model": {
+                      "type": "string"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "permissionMode": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "profile",
+                "sources"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
-            "binding"
+            "binding",
+            "effective"
           ],
           "additionalProperties": false
         },
@@ -29505,6 +29856,50 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         }
                       ]
                     }
+                  },
+                  "invalid": {
+                    "type": "object",
+                    "properties": {
+                      "field": {
+                        "type": "string",
+                        "enum": [
+                          "permissionMode"
+                        ]
+                      },
+                      "value": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          {
+                            "type": "array",
+                            "items": {}
+                          }
+                        ]
+                      },
+                      "reason": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "field",
+                      "value",
+                      "reason"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -29660,6 +30055,50 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       }
                     ]
                   }
+                },
+                "invalid": {
+                  "type": "object",
+                  "properties": {
+                    "field": {
+                      "type": "string",
+                      "enum": [
+                        "permissionMode"
+                      ]
+                    },
+                    "value": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        }
+                      ]
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "field",
+                    "value",
+                    "reason"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": [
@@ -29805,7 +30244,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "channels.routing.assign",
         "title": "Assign Channel Routing Rule",
-        "description": "Create or update a channel-to-profile routing rule in the daemon-persisted routing table. The daemon applies it to inbox items from slack, discord and email (surfaceKind any reaches the same three); any other surface is refused with 400 ROUTING_SURFACE_NOT_ROUTED, because nothing there reads the rule. Requires explicit confirmation; a call made with the Agent's credential (the Agent acting on the owner's behalf) instead takes fresh recorded native admission.",
+        "description": "Create or update a channel-to-profile routing rule in the daemon-persisted routing table. The daemon applies it on every channel surface (slack, discord, telegram, msteams and the rest) and to slack, discord and email inbox items: an agent started for a message from the channel takes the profile's model and reasoning effort when neither the request nor the channel profile chose a model. routeId is the conversation (a chat, channel or room id); without it the rule covers the whole surface, and surfaceKind any covers every channel. tui, web and service are refused with 400 ROUTING_SURFACE_NOT_ROUTED, because their model is chosen in the surface itself. Requires explicit confirmation; a call made with the Agent's credential (the Agent acting on the owner's behalf) instead takes fresh recorded native admission.",
         "category": "channels",
         "source": "builtin",
         "access": "admin",
@@ -29939,7 +30378,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "channels.routing.list",
         "title": "List Channel Routing Rules",
-        "description": "Return the daemon-persisted channel-to-profile routing table.",
+        "description": "Return the daemon-persisted channel-to-profile routing table. The profileId a rule names is stamped on inbox items from that channel (their routeId) so the surface owning the profile picks them up; it sets no model, provider or permission mode. Those come from channels.profiles.*, the one table the daemon applies to sessions a channel originates.",
         "category": "channels",
         "source": "builtin",
         "access": "authenticated",
@@ -32865,6 +33304,44 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 },
                 "updatedAt": {
                   "type": "number"
+                },
+                "expiresAt": {
+                  "type": "number"
+                },
+                "repair": {
+                  "type": "object",
+                  "properties": {
+                    "failureKey": {
+                      "type": "string"
+                    },
+                    "outcome": {
+                      "type": "string",
+                      "enum": [
+                        "started",
+                        "denied",
+                        "error"
+                      ]
+                    },
+                    "at": {
+                      "type": "number"
+                    },
+                    "attempts": {
+                      "type": "number"
+                    },
+                    "retryAt": {
+                      "type": "number"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "failureKey",
+                    "outcome",
+                    "at",
+                    "attempts"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": [
@@ -32939,7 +33416,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "ci.watches.list",
         "title": "List CI Watches",
-        "description": "Return every standing CI watch. Stored flags are not repair authority; production repair requires current original-source ownership and Jev admission.",
+        "description": "Return every standing CI watch, each with `expiresAt` (when it ends without a verdict) and, after a repair was tried for the current failure, `repair` (its outcome, attempts and next retry). Stored flags are not repair authority; production repair requires current original-source ownership and Jev admission.",
         "category": "ci",
         "source": "builtin",
         "access": "authenticated",
@@ -33002,6 +33479,44 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   },
                   "updatedAt": {
                     "type": "number"
+                  },
+                  "expiresAt": {
+                    "type": "number"
+                  },
+                  "repair": {
+                    "type": "object",
+                    "properties": {
+                      "failureKey": {
+                        "type": "string"
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "enum": [
+                          "started",
+                          "denied",
+                          "error"
+                        ]
+                      },
+                      "at": {
+                        "type": "number"
+                      },
+                      "attempts": {
+                        "type": "number"
+                      },
+                      "retryAt": {
+                        "type": "number"
+                      },
+                      "reason": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "failureKey",
+                      "outcome",
+                      "at",
+                      "attempts"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -33027,7 +33542,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "ci.watches.run",
         "title": "Check CI Watch Now",
-        "description": "Poll a standing watch immediately: returns the per-job report, whether a completion notification fired, and whether an admitted fix-session started, or an honest refusal/error.",
+        "description": "Poll a standing watch immediately: returns the per-job report, whether a completion notification fired, and whether an admitted fix-session started, or an honest refusal/error. When the check ended the watch without a verdict or a repair, `retired` is true and `endedReason` says why.",
         "category": "ci",
         "source": "builtin",
         "access": "authenticated",
@@ -33164,6 +33679,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "retired": {
               "type": "boolean"
+            },
+            "endedReason": {
+              "type": "string"
             }
           },
           "required": [
@@ -34481,7 +34999,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "http"
         ],
         "scopes": [
-          "read:sessions"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",
@@ -34817,7 +35335,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "companion.chat.messages.list",
         "title": "List Companion Chat Messages",
-        "description": "Return the message list for a companion-chat session.",
+        "description": "Return the messages of a companion-chat session, oldest first. With neither `limit` nor `before` the whole transcript is returned. With `limit` (1-1000, default 100 when only `before` is given) and/or `before` (a message id) one page is returned: the messages just before `before`, or the newest ones. Every answer carries `total` and `more`; while `more` is true, pass `nextBefore` back as `before` to read the page before it. A `before` that names no message in the chat is 404 MESSAGE_NOT_FOUND.",
         "category": "companion",
         "source": "builtin",
         "access": "authenticated",
@@ -34826,7 +35344,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:sessions"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",
@@ -34836,6 +35354,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "type": "object",
           "properties": {
             "sessionId": {
+              "type": "string"
+            },
+            "limit": {
+              "type": "number"
+            },
+            "before": {
               "type": "string"
             }
           },
@@ -34968,8 +35492,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "enum": [
                       "cancelled",
                       "queued",
-                      "unanswered"
+                      "unanswered",
+                      "failed"
                     ]
+                  },
+                  "failureReason": {
+                    "type": "string"
                   },
                   "inReplyTo": {
                     "type": "string"
@@ -34985,11 +35513,22 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 ],
                 "additionalProperties": false
               }
+            },
+            "total": {
+              "type": "number"
+            },
+            "more": {
+              "type": "boolean"
+            },
+            "nextBefore": {
+              "type": "string"
             }
           },
           "required": [
             "sessionId",
-            "messages"
+            "messages",
+            "total",
+            "more"
           ],
           "additionalProperties": false
         },
@@ -34999,7 +35538,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "companion.chat.messages.retry",
         "title": "Regenerate Companion Chat Response",
-        "description": "Regenerate an assistant response. Optional `messageId` targets a specific assistant message; omitted, the latest assistant response is re-run. The prior response (and any turns after it) is SUPERSEDED, kept in the message list and on disk, flagged as retained history, never deleted, then a fresh turn re-runs from the preceding user message. Returns the superseded message ids so the caller can render the honest lineage. Rejected on a closed session (409 SESSION_CLOSED) or unknown session (404 SESSION_NOT_FOUND), and with an honest machine code (409 NO_ASSISTANT_MESSAGE) when there is nothing to regenerate. While a reply is streaming, a message is being prepared, or sends are queued it is refused with 409 CHAT_TURN_BUSY and nothing changes: stop the reply (or let it and the queue finish), then retry.",
+        "description": "Regenerate an assistant response. Omitted `messageId`: the latest answered user message is answered again; whatever followed it in its exchange (its reply, a failed reply, or nothing) is SUPERSEDED, while a reply to an earlier message that was stored after it stays active, so retrying a failed regenerate repeats the same exchange. With `messageId` (an active assistant message): that response and every message after it are superseded, and the turn re-runs from the user message it answered. Superseded messages are kept in the message list and on disk, flagged as retained history, never deleted. Returns the superseded message ids so the caller can render the honest lineage. Rejected on a closed session (409 SESSION_CLOSED) or unknown session (404 SESSION_NOT_FOUND); a `messageId` that is unknown is 404 MESSAGE_NOT_FOUND, already superseded 409 MESSAGE_SUPERSEDED, not an assistant message 400 NOT_AN_ASSISTANT_MESSAGE; with no user message to answer again it is 409 NO_ANCHOR_MESSAGE. While a reply is streaming, a message is being prepared, or sends are queued it is refused with 409 CHAT_TURN_BUSY and nothing changes: stop the reply (or let it and the queue finish), then retry.",
         "category": "companion",
         "source": "builtin",
         "access": "authenticated",
@@ -35071,7 +35610,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:sessions"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",
@@ -35618,7 +36157,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:sessions"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",
@@ -35864,8 +36403,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "enum": [
                       "cancelled",
                       "queued",
-                      "unanswered"
+                      "unanswered",
+                      "failed"
                     ]
+                  },
+                  "failureReason": {
+                    "type": "string"
                   },
                   "inReplyTo": {
                     "type": "string"
@@ -36063,6 +36606,59 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
+        "invokable": true
+      },
+      {
+        "id": "companion.chat.sessions.reopen",
+        "title": "Reopen Companion Chat Session",
+        "description": "Open a closed companion-chat session again so it accepts messages. The model history is rebuilt from the saved transcript on the next send. A chat that is already open answers `reopened: false` with its current status; an unknown id is a 404 SESSION_NOT_FOUND.",
+        "category": "companion",
+        "source": "builtin",
+        "access": "authenticated",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:sessions"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/api/companion/chat/sessions/{sessionId}/reopen"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "reopened": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "sessionId",
+            "status",
+            "reopened"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
         "invokable": true
       },
       {
@@ -36336,7 +36932,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "companion.chat.turns.cancel",
         "title": "Cancel Companion Chat Turn",
-        "description": "Stop the in-flight turn for a companion chat session, a true server-side stop: the provider stream is aborted, any non-empty partial reply is persisted to the transcript with an explicit `deliveryState: \"cancelled\"` marker (an honest partial, never disguised as a complete reply) AND committed to the model-facing conversation history with an explicit interruption note, later turns can reason about what the user saw and stopped, which is usually what a follow-up or steer refers to, and the terminal `turn.cancelled` event is published to every subscriber of the session stream so a stop from one client converges on all others. Any announced tool call without a result is closed with a synthetic error `turn.tool_result` before the terminal event. Optional `turnId` guards against cancelling a newer turn a stale stop raced against (409 TURN_MISMATCH). No turn in flight is the benign 404 NO_ACTIVE_TURN (the turn finished before the stop landed). Repeat cancels are idempotent successes. The session stays open; the next message starts a fresh turn normally.",
+        "description": "Stop the in-flight turn for a companion chat session, a true server-side stop: the provider stream is aborted, any non-empty partial reply is persisted to the transcript with an explicit `deliveryState: \"cancelled\"` marker (an honest partial, never disguised as a complete reply) AND committed to the model-facing conversation history with an explicit interruption note, later turns can reason about what the user saw and stopped, which is usually what a follow-up or steer refers to, and the terminal `turn.cancelled` event is published to every subscriber of the session stream so a stop from one client converges on all others. Any announced tool call without a result is closed with a synthetic error `turn.tool_result` before the terminal event. Optional `turnId` guards against cancelling a newer turn a stale stop raced against (409 TURN_MISMATCH). No turn in flight is the benign 404 NO_ACTIVE_TURN (the turn finished before the stop landed). When the turn has not stopped within 3 seconds (a tool call or the provider has not ended yet) the stop is still accepted and the answer is 409 TURN_STOPPING with `state: \"stopping\"`: treat the turn as stopping, not failed; the terminal `turn.cancelled` event follows when it stops. Repeat cancels are idempotent successes. The session stays open; the next message starts a fresh turn normally.",
         "category": "companion",
         "source": "builtin",
         "access": "authenticated",
@@ -36784,7 +37380,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "config.set",
         "title": "Set Config Value",
-        "description": "Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir swaps the workspace. The same route also serves the settings clients' two-step lanes, `{ settingsPrecondition }` and `{ settingsImportPrecondition }` (capture, then apply the returned reference), which answer with that lane's own object.",
+        "description": "Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is saved for the next start of the daemon. The same route also serves the settings clients' lanes, which answer with that lane's own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer), and `{ settingsImportPrecondition }` takes the same two actions plus `apply`, which spends a captured `reference`.",
         "category": "config",
         "source": "builtin",
         "access": "admin",
@@ -36839,10 +37435,20 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "string",
                   "enum": [
                     "capture",
-                    "apply"
+                    "write"
                   ]
                 },
                 "reference": {
+                  "type": "string"
+                },
+                "ifIncarnation": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "ifServing": {
+                  "type": "string"
+                },
+                "requestId": {
                   "type": "string"
                 }
               },
@@ -36862,10 +37468,21 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "string",
                   "enum": [
                     "capture",
-                    "apply"
+                    "apply",
+                    "write"
                   ]
                 },
                 "reference": {
+                  "type": "string"
+                },
+                "ifIncarnation": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "ifServing": {
+                  "type": "string"
+                },
+                "requestId": {
                   "type": "string"
                 }
               },
@@ -36928,10 +37545,20 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "type": "string",
                       "enum": [
                         "capture",
-                        "apply"
+                        "write"
                       ]
                     },
                     "reference": {
+                      "type": "string"
+                    },
+                    "ifIncarnation": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "ifServing": {
+                      "type": "string"
+                    },
+                    "requestId": {
                       "type": "string"
                     }
                   },
@@ -36960,10 +37587,21 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "type": "string",
                       "enum": [
                         "capture",
-                        "apply"
+                        "apply",
+                        "write"
                       ]
                     },
                     "reference": {
+                      "type": "string"
+                    },
+                    "ifIncarnation": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "ifServing": {
+                      "type": "string"
+                    },
+                    "requestId": {
                       "type": "string"
                     }
                   },
@@ -37037,7 +37675,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "config.setMany",
         "title": "Set Several Config Values",
-        "description": "Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is set on its own with config.set.",
+        "description": "Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in; when a key does not hold the value asked for (a higher tier overrides it, or it was coerced), the answer is 409 CONFIG_SET_NOT_APPLIED naming those keys in `notApplied`, with the revision written and every entry's held value. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is set on its own with config.set.",
         "category": "config",
         "source": "builtin",
         "access": "admin",
@@ -40708,6 +41346,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "external",
                     "proposal"
                   ]
+                },
+                "ownerPrincipalId": {
+                  "type": "string"
                 },
                 "ask": {
                   "type": "string"
@@ -48793,6 +49434,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "proposal"
               ]
             },
+            "ownerPrincipalId": {
+              "type": "string"
+            },
             "ask": {
               "type": "string"
             },
@@ -53859,7 +54503,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "contracts.list",
         "title": "List Contracts",
-        "description": "Every contract this daemon holds, newest first, each with its whole tree: the ask, the goal, the acceptance criteria with every Jev reading, the groups and units with their checks and nudges, open and answered owner escalations, decisions, usage, and the answer or status line once it ends. `sessionId` narrows the list to one session's contracts (a hosted session's, or a shared session's); ended contracts are left out unless `includeTerminal` is set. For a list view, `contracts.summaries` returns the same contracts as small summaries.",
+        "description": "Every contract this daemon holds, newest first, each with its whole tree: the ask, the goal, the acceptance criteria with every Jev reading, the groups and units with their checks and nudges, open and answered owner escalations, decisions, usage, and the answer or status line once it ends. `sessionId` narrows the list to one session's contracts (a hosted session's, or a shared session's); ended contracts are left out unless `includeTerminal` is set. For a list view, `contracts.summaries` returns the same contracts as small summaries. A contract an identified caller started belongs to that caller (`ownerPrincipalId`) for its whole life; one a hosted session's own turn started belongs to that session's identified owners. Contracts of another caller are left out here and read as CONTRACT_NOT_FOUND everywhere else.",
         "category": "contracts",
         "source": "builtin",
         "access": "authenticated",
@@ -56860,6 +57504,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "external",
                       "proposal"
                     ]
+                  },
+                  "ownerPrincipalId": {
+                    "type": "string"
                   },
                   "ask": {
                     "type": "string"
@@ -61985,7 +62632,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "contracts.reply",
         "title": "Reply to a Contract Escalation",
-        "description": "The owner's free-text reply to an open escalation of a contract, read by Jev as approve, reject, amend or unclear. Returns how it was read and what the runner did: approved, amended, stopped, asked again (with the new escalation id), or refused when the escalation is no longer open. Approval never passes a criterion Jev read as unmet; the requirement changes only through an amendment. A native work contract's failed-turn question is not read by Jev: it accepts exactly `retry` or `cancel`. 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_NOT_RUNNING when this runner holds the contract only for inspection, 409 with CONTRACT_ENDED when the contract has ended, 409 with ESCALATION_NOT_OPEN when the escalation is already answered or another reply to it is being read, 400 with INVALID_ARGUMENT when the text is not an answer the question accepts.",
+        "description": "The owner's free-text reply to an open escalation of a contract, read by Jev as approve, reject, amend or unclear. Returns how it was read and what the runner did: approved, amended, stopped, asked again (with the new escalation id), or refused when the escalation is no longer open. Approval never passes a criterion Jev read as unmet; the requirement changes only through an amendment. A failed-work question (a native work contract's failed turn, a failed unit, a result that could not be published) is not read by Jev: it accepts exactly `retry` or `cancel`. 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_NOT_RUNNING when this runner holds the contract only for inspection, 409 with CONTRACT_ENDED when the contract has ended, 409 with ESCALATION_NOT_OPEN when the escalation is already answered or another reply to it is being read, 400 with INVALID_ARGUMENT when the text is not an answer the question accepts.",
         "category": "contracts",
         "source": "builtin",
         "access": "authenticated",
@@ -62098,7 +62745,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "contracts.retryUnit",
         "title": "Run One Contract Unit Again",
-        "description": "Run one unit of a running contract again: a unit that is working gets a fresh agent with its brief and previous checks, and a passed unit whose commit failed has its changes committed again. `outcome` is `restarted`, `committed`, or `refused` with `reason` naming why and what to do instead (a unit that has not started, is being fixed, or ended with its contract). 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_ENDED once the contract has ended; 409 with CONTRACT_NATIVE for native work.",
+        "description": "Run one unit of a running contract again: a unit that is working gets a fresh agent with its brief and previous checks, a unit that failed (the contract waits on its retry-or-cancel question, the units depending on it held) runs again with a fresh agent, the same as replying `retry`, and a passed unit whose commit failed has its changes committed again. `outcome` is `restarted`, `committed`, or `refused` with `reason` naming why and what to do instead (a unit that has not started, is being fixed, or ended with its contract). 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_ENDED once the contract has ended; 409 with CONTRACT_NATIVE for native work.",
         "category": "contracts",
         "source": "builtin",
         "access": "authenticated",
@@ -65190,6 +65837,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "external",
                     "proposal"
                   ]
+                },
+                "ownerPrincipalId": {
+                  "type": "string"
                 },
                 "ask": {
                   "type": "string"
@@ -70908,6 +71558,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "items": {
                 "type": "string"
               }
+            },
+            "expiresAt": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -71270,6 +71930,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               "items": {
                                 "type": "string"
                               }
+                            },
+                            "expiresAt": {
+                              "anyOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
                             }
                           },
                           "required": [
@@ -73157,7 +73827,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "control.status",
         "title": "Daemon Status",
-        "description": "Return daemon status and version. THREE version fields, because there are two versions and they are not the same number: `buildVersion` is the running artifact's own release version, what a person installed, and what the auto-update loop compares against release tags, and `platformVersion` is the platform build it is composed from. `version` carries the build version and exists because every client already reads it; on an embedded daemon that ships no artifact of its own, all three are the platform build. Pass receipts=peek to also receive undelivered daemon receipts (update/crash/migration notices) without consuming them, then receipts=ack&ids=<id>,<id> once they are shown, so a response lost in transit is offered again. receipts=consume still receives and marks them delivered in one read, so each receipt goes to at most one consuming reader and a lost response is not replayed. Without the flag no receipts are returned or consumed, so identity probes and keepalives never eat them.",
+        "description": "Return daemon status and version. THREE version fields, because there are two versions and they are not the same number: `buildVersion` is the running artifact's own release version, what a person installed, and what the auto-update loop compares against release tags, and `platformVersion` is the platform build it is composed from. `version` carries the build version and exists because every client already reads it; on an embedded daemon that ships no artifact of its own, all three are the platform build. Pass receipts=peek to also receive undelivered daemon receipts (update/crash/migration notices) without consuming them, then receipts=ack&ids=<id>,<id> once they are shown, so a response lost in transit is offered again. Without the flag no receipts are returned or marked, so identity probes and keepalives never take them.",
         "category": "control-plane",
         "source": "builtin",
         "access": "authenticated",
@@ -73178,11 +73848,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "receipts": {
               "type": "string",
               "enum": [
-                "consume",
                 "peek",
                 "ack"
               ],
-              "description": "Omit for a read that never touches receipts. \"peek\" returns undelivered daemon receipts without marking them; \"ack\" (with ids) marks exactly those delivered; \"consume\" returns and marks them delivered in one read."
+              "description": "Omit for a read that never touches receipts. \"peek\" returns undelivered daemon receipts without marking them; \"ack\" (with ids) marks exactly those delivered, once the reader has shown them."
             },
             "ids": {
               "type": "string",
@@ -73267,8 +73936,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       },
       {
         "id": "control.web",
-        "title": "Control-Plane Web Shell",
-        "description": "Return the built-in control-plane HTML shell for external clients.",
+        "title": "Open the Web App",
+        "description": "Open the web app on the approval (`approval`) or session (`session`) the link names: a 302 redirect to the web app when the daemon serves it (controlPlane.webui.serve) or knows where it runs (a user-set web.publicBaseUrl, or web.enabled with web.host/web.port). With no web app known, returns the control plane's built-in HTML page. Answered before authentication; the page signs in on its own.",
         "category": "control-plane",
         "source": "builtin",
         "access": "authenticated",
@@ -73284,7 +73953,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "inputSchema": {
           "type": "object",
-          "properties": {},
+          "properties": {
+            "approval": {
+              "type": "string"
+            },
+            "session": {
+              "type": "string"
+            }
+          },
           "additionalProperties": false
         },
         "outputSchema": {
@@ -73368,6 +74044,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "connecting",
                 "registered",
                 "reconnecting",
+                "refused",
                 "stopped"
               ]
             }
@@ -73384,7 +74061,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "relay.reachability.get",
         "title": "Relay Reachability",
-        "description": "Whether this daemon is registered with the relay, and what state its registration is in. `disabled` is a distinct answer from every other one and the distinction is the point: it means a gate is off, `relay.enabled`, the relay-connect capability, or an empty `relay.url`, rather than that a connection is failing. `idle` means the gates are open and nothing has started; `connecting`, `registered` and `reconnecting` are the live registration; `stopped` is a controller that was told to stop. `configured` says whether all three gates are open, so a caller can render \"turn it on\" instead of \"it is broken\". ws-only invoke verb; no REST binding.",
+        "description": "Whether this daemon is registered with the relay, and what state its registration is in. `disabled` is a distinct answer from every other one and the distinction is the point: it means a gate is off, `relay.enabled`, the relay-connect capability, or an empty `relay.url`, rather than that a connection is failing. `idle` means the gates are open and nothing has started; `connecting`, `registered` and `reconnecting` are the live registration; `refused` means the relay refused the registration for a reason another attempt cannot clear, and the daemon stops dialling until the relay settings or identity change; `stopped` is a controller that was told to stop. `configured` says whether all three gates are open, so a caller can render \"turn it on\" instead of \"it is broken\". `rendezvousId`, present while a registration is running, is the id the daemon is registered under, derived from its relay identity key; it is the id a pairing payload carries and a step-up challenge is bound to. `refusal`, present after the relay refused the registration, says why (`state`), what to do (`next`) and whether the daemon keeps trying (`retryable`). ws-only invoke verb; no REST binding.",
         "category": "control-plane",
         "source": "builtin",
         "access": "authenticated",
@@ -73410,11 +74087,46 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "connecting",
                 "registered",
                 "reconnecting",
+                "refused",
                 "stopped"
               ]
             },
             "configured": {
               "type": "boolean"
+            },
+            "rendezvousId": {
+              "type": "string"
+            },
+            "refusal": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "next": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "retryable": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "code",
+                "message",
+                "state",
+                "next",
+                "retryable"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -75025,6 +75737,176 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "invokable": true
       },
       {
+        "id": "email.expectation.wait",
+        "title": "Wait For Verification Message",
+        "description": "Where one expectation stands, waiting up to timeoutMs (default 0, at most 60000) for it to change. state \"arrived\" carries the verification link or code the daemon took from the matching message (token); \"waiting\" lists matching messages that held none (arrivals); \"expired\", \"capability-lost\" and \"cancelled\" say how it ended, with detail; \"unknown\" means no expectation with that id is open or remembered. watching says whether a mailbox is being read right now, so \"nothing yet\" is never confused with \"nobody is looking\". Call it again while the state is \"waiting\".",
+        "category": "email",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "ws"
+        ],
+        "scopes": [
+          "read:email"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "timeoutMs": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "waiting",
+                "arrived",
+                "expired",
+                "capability-lost",
+                "cancelled",
+                "unknown"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "expectation": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "serviceDomain": {
+                  "type": "string"
+                },
+                "recipientAddress": {
+                  "type": "string"
+                },
+                "purpose": {
+                  "type": "string"
+                },
+                "openedAt": {
+                  "type": "string"
+                },
+                "expiresAt": {
+                  "type": "string"
+                },
+                "authority": {
+                  "type": "string"
+                },
+                "remainingMs": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "id",
+                "kind",
+                "serviceDomain",
+                "recipientAddress",
+                "purpose",
+                "openedAt",
+                "expiresAt",
+                "authority"
+              ],
+              "additionalProperties": false
+            },
+            "arrivals": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "messageId": {
+                    "type": "string"
+                  },
+                  "at": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "messageId",
+                  "at",
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "messageId": {
+              "type": "string"
+            },
+            "at": {
+              "type": "string"
+            },
+            "token": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "link",
+                    "code"
+                  ]
+                },
+                "url": {
+                  "type": "string"
+                },
+                "linkHost": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            "detail": {
+              "type": "string"
+            },
+            "watching": {
+              "type": "object",
+              "properties": {
+                "running": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "running",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "read",
+        "invokable": true
+      },
+      {
         "id": "email.inbound.status",
         "title": "Inbound Mail Status",
         "description": "Disclose the inbound-mail watcher: whether it is running and why, which source is reading the mailbox and the delay that source actually costs, the current capability verdict, every persisted cursor with its position and age, every open verification expectation with its remaining window, whether each store could be read, whether arriving mail is actually being announced to the owner, and what each store retains before it is reaped. Read-only.",
@@ -75771,8 +76653,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "type": "string",
                     "enum": [
                       "enabled",
-                      "disabled",
-                      "killed"
+                      "disabled"
                     ]
                   },
                   "runtimeToggleable": {
@@ -75972,16 +76853,14 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "type": "string",
                     "enum": [
                       "enabled",
-                      "disabled",
-                      "killed"
+                      "disabled"
                     ]
                   },
                   "saved": {
                     "type": "string",
                     "enum": [
                       "enabled",
-                      "disabled",
-                      "killed"
+                      "disabled"
                     ]
                   }
                 },
@@ -78146,6 +79025,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "queued": {
               "type": "boolean"
             },
+            "submitted": {
+              "type": "boolean"
+            },
+            "declined": {
+              "type": "boolean"
+            },
             "messageId": {
               "type": "string"
             },
@@ -79577,12 +80462,36 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "note"
               ],
               "additionalProperties": false
+            },
+            "sleepEdge": {
+              "type": "object",
+              "properties": {
+                "watching": {
+                  "type": "boolean"
+                },
+                "note": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "watching",
+                "note"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
             "platform",
             "work",
-            "keepAwake"
+            "keepAwake",
+            "sleepEdge"
           ],
           "additionalProperties": false
         },
@@ -79592,7 +80501,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "power.status.get",
         "title": "Get Sleep-Ownership State",
-        "description": "The host sleep-ownership state: whether the automatic work inhibitor is held (and the live \"held because X\" reasons, cap, and expiry), and the owner keep-awake toggle with the classes the OS actually granted vs refused, a refused lid-switch block is stated honestly (\"idle sleep blocked; lid-close suspend is controlled by your OS here\"), never papered over. Surfaces render the always-visible \"sleep disabled\" chip from this state and the runtime.ops OPS_POWER_STATE_CHANGED event.",
+        "description": "The host sleep-ownership state: whether the automatic work inhibitor is held (and the live \"held because X\" reasons, cap, and expiry), and the owner keep-awake toggle with the classes the OS actually granted vs refused, a refused lid-switch block is stated honestly (\"idle sleep blocked; lid-close suspend is controlled by your OS here\"), never papered over. sleepEdge says whether work is checkpointed before sleep and caught up on wake, and its note says why not when it cannot be. Surfaces render the always-visible \"sleep disabled\" chip from this state and the runtime.ops OPS_POWER_STATE_CHANGED event.",
         "category": "health",
         "source": "builtin",
         "access": "authenticated",
@@ -79750,12 +80659,121 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "note"
               ],
               "additionalProperties": false
+            },
+            "sleepEdge": {
+              "type": "object",
+              "properties": {
+                "watching": {
+                  "type": "boolean"
+                },
+                "note": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "watching",
+                "note"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
             "platform",
             "work",
-            "keepAwake"
+            "keepAwake",
+            "sleepEdge"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "read",
+        "invokable": true
+      },
+      {
+        "id": "runtime.state.get",
+        "title": "Read the Runtime State",
+        "description": "What the daemon's runtime store holds now, by domain (session, conversation, agents, tasks, permissions and the rest), for debugging. domains names the ones to read, comma-separated; without it every domain is read, and available lists them all. The data is made safe on the way out: dates are ISO text, errors { name, message }, binary data \"<N bytes>\"; credential fields read [REDACTED] and owner-profile fields [REDACTED_PROFILE], and credential-shaped text is masked; nesting and total size are bounded, a cut value reads \"[Truncated]\" and truncated is true. unknown lists asked-for domains the store does not hold. Read-only.",
+        "category": "health",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "read:health"
+        ],
+        "http": {
+          "method": "GET",
+          "path": "/api/runtime/state"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "domains": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "capturedAt": {
+              "type": "number"
+            },
+            "domains": {
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {},
+                  {
+                    "type": "array",
+                    "items": {}
+                  }
+                ]
+              }
+            },
+            "available": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "unknown": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "capturedAt",
+            "domains",
+            "available",
+            "unknown",
+            "truncated"
           ],
           "additionalProperties": false
         },
@@ -79765,7 +80783,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "voice.local.install",
         "title": "Install the Managed Local-Voice Runtime",
-        "description": "Starts the one-act setup and answers at once with the run it started (or the run already in progress it joined); the install runs on in the daemon, voice.local.status serves its live progress as installInProgress and, when it ends, its receipt as lastInstall. The setup: download + checksum-verify the piper TTS engine, a default voice, and (where a pinned goodvibes-built bundle exists) the whisper.cpp STT engine with its default model into the goodvibes-managed directory, then point the voice.local.* config keys at the managed install, never overwriting a key you already set to a custom value (skipped keys are reported). The physical round trip reports its actual transcript and comparison basis; Classic uses native ordered word tokens without semantic verification. Downloads only when you ask; a failed or checksum-mismatched download keeps nothing.",
+        "description": "Starts the one-act setup and answers at once with the run it started (or the run already in progress it joined); the install runs on in the daemon, voice.local.status serves its live progress as installInProgress and, when it ends, its receipt as lastInstall. The setup: download + checksum-verify the piper TTS engine, a default voice, and (where a pinned goodvibes-built bundle exists) the whisper.cpp STT engine with its default model into the goodvibes-managed directory, then point the voice.local.* config keys at the managed install, never overwriting a key you already set to a custom value (skipped keys are reported). The install ends by speaking a test phrase and reading it back: the transcript is compared word by word in code, allowing one differing word, and the receipt carries the transcript and the comparison. Downloads only when you ask; a failed or checksum-mismatched download keeps nothing.",
         "category": "health",
         "source": "builtin",
         "access": "admin",
@@ -80001,18 +81019,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "receipt": {
                   "type": "object",
                   "properties": {
-                    "operationProvenance": {
-                      "type": "string",
-                      "enum": [
-                        "classic"
-                      ]
-                    },
-                    "semanticAssessment": {
-                      "type": "string",
-                      "enum": [
-                        "not-evaluated"
-                      ]
-                    },
                     "proof": {
                       "type": "object",
                       "properties": {
@@ -80040,23 +81046,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "type": "string",
                           "enum": [
                             "yes",
-                            "no",
-                            "uncertain",
-                            "unavailable",
-                            "classic-exact-match",
-                            "classic-mismatch"
-                          ]
-                        },
-                        "operationProvenance": {
-                          "type": "string",
-                          "enum": [
-                            "classic"
-                          ]
-                        },
-                        "semanticAssessment": {
-                          "type": "string",
-                          "enum": [
-                            "not-evaluated"
+                            "no"
                           ]
                         },
                         "proofBasis": {
@@ -80142,9 +81132,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "provisioned",
                             "unsupported-platform",
                             "download-failed",
-                            "checksum-mismatch",
-                            "bundle-unavailable",
-                            "sideload-mismatch"
+                            "checksum-mismatch"
                           ]
                         },
                         "binaryPath": {
@@ -80296,6 +81284,179 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
+        "invokable": true
+      },
+      {
+        "id": "voice.setup",
+        "title": "Set Up Voice",
+        "description": "Sets voice up for what was asked: intent wake (this surface listens for the wake word; implies speech-to-text), stt, tts or voice (all of it), for the surface named (tui, agent, webui, app), which is the one that ends up listening. The plan is decided from this host's own facts (wake rows, wake models on disk, the managed speech runtimes, the input device); steps that need no answer are done at once (the wake rows are set, missing wake models are fetched), and the answer lists each step: do (done, or why it could not be), propose (acceptProposals: true does it) and ask (ttsChoice answers the text-to-speech question: local or a cloud provider this host holds a credential for). An install the plan needs is started and not waited for: installStarted names the run, and voice.local.status serves its progress and receipt. rendered is the plan as one reply a surface prints as-is; complete is true when nothing is left to answer and every step that ran finished.",
+        "category": "health",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:config"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/api/voice/setup"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "intent": {
+              "type": "string",
+              "enum": [
+                "wake",
+                "stt",
+                "tts",
+                "voice"
+              ]
+            },
+            "surface": {
+              "type": "string",
+              "enum": [
+                "tui",
+                "agent",
+                "webui",
+                "app"
+              ]
+            },
+            "acceptProposals": {
+              "type": "boolean"
+            },
+            "ttsChoice": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "intent",
+            "surface"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "plan": {
+              "type": "object",
+              "properties": {
+                "intent": {
+                  "type": "string"
+                },
+                "shapes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "guided-walkthrough",
+                      "browser-automation",
+                      "official-cli",
+                      "question-driven"
+                    ]
+                  }
+                },
+                "steps": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "do",
+                          "propose",
+                          "ask"
+                        ]
+                      },
+                      "subject": {
+                        "type": "string"
+                      },
+                      "message": {
+                        "type": "string"
+                      },
+                      "options": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "trade": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "label",
+                            "trade"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "subject",
+                      "message"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "intent",
+                "shapes",
+                "steps"
+              ],
+              "additionalProperties": false
+            },
+            "rendered": {
+              "type": "string"
+            },
+            "complete": {
+              "type": "boolean"
+            },
+            "installStarted": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "running"
+                  ]
+                },
+                "startedAt": {
+                  "type": "number"
+                },
+                "joined": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "state",
+                "startedAt",
+                "joined"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "plan",
+            "rendered",
+            "complete"
+          ],
+          "additionalProperties": false
+        },
+        "dangerous": true,
+        "effect": "write",
         "invokable": true
       },
       {
@@ -87592,7 +88753,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "homeassistant.homeGraph.map",
         "title": "Map Home Graph",
-        "description": "Return a visual Home Graph node/edge map with deterministic layout data and SVG.",
+        "description": "Return a visual Home Graph node/edge map with deterministic layout data and SVG, most relevant first. When more records match than `limit`, `nextCursor` is set: pass it back as `cursor` (body, or ?cursor= on GET) with the same filters for the next slice.",
         "category": "knowledge",
         "source": "builtin",
         "access": "authenticated",
@@ -87618,6 +88779,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "limit": {
               "type": "number"
+            },
+            "cursor": {
+              "type": "string"
             },
             "includeSources": {
               "type": "boolean"
@@ -87855,6 +89019,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "totalEdgeCount": {
               "type": "number"
+            },
+            "nextCursor": {
+              "type": "string"
             },
             "facets": {
               "type": "object",
@@ -89693,6 +90860,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "type": "number"
             },
             "failed": {
+              "type": "number"
+            },
+            "notExtractable": {
               "type": "number"
             },
             "changedSourceCount": {
@@ -97233,6 +98403,540 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "invokable": true
       },
       {
+        "id": "knowledge.job-run.cancel",
+        "title": "Cancel Knowledge Job Run",
+        "description": "Stop a queued or running knowledge job run this daemon started: it is settled failed with the cancel reason. A finished run, or one another process owns, is refused with 409 and what to do instead.",
+        "category": "knowledge",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:knowledge"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/api/knowledge/job-runs/{runId}/cancel"
+        },
+        "events": [
+          "runtime.knowledge"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "runId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "runId"
+          ],
+          "additionalProperties": true
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "jobId": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "queued",
+                    "running",
+                    "completed",
+                    "failed"
+                  ]
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "inline",
+                    "background"
+                  ]
+                },
+                "requestedAt": {
+                  "type": "number"
+                },
+                "startedAt": {
+                  "type": "number"
+                },
+                "completedAt": {
+                  "type": "number"
+                },
+                "error": {
+                  "type": "string"
+                },
+                "result": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {},
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "issueCount": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "issueCount"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "sourceCount": {
+                          "type": "number"
+                        },
+                        "issueCount": {
+                          "type": "number"
+                        },
+                        "provenance": {
+                          "type": "string",
+                          "enum": [
+                            "classic"
+                          ]
+                        },
+                        "semanticEnrichment": {
+                          "type": "string",
+                          "enum": [
+                            "attempted",
+                            "not-evaluated"
+                          ]
+                        },
+                        "recompileFailed": {
+                          "type": "number"
+                        },
+                        "recompileFailures": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "sourceId": {
+                                "type": "string"
+                              },
+                              "error": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "sourceId",
+                              "error"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "sourceCount",
+                        "issueCount"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "refreshed": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "refreshed"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "imported": {
+                          "type": "number"
+                        },
+                        "failed": {
+                          "type": "number"
+                        },
+                        "captured": {
+                          "type": "number"
+                        },
+                        "capturePartial": {
+                          "type": "number"
+                        },
+                        "captureFailed": {
+                          "type": "number"
+                        },
+                        "compilationHeld": {
+                          "type": "number"
+                        },
+                        "compilationFailed": {
+                          "type": "number"
+                        },
+                        "outcomes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "canonicalUri": {
+                                "type": "string"
+                              },
+                              "sourceId": {
+                                "type": "string"
+                              },
+                              "capture": {
+                                "type": "string",
+                                "enum": [
+                                  "completed",
+                                  "partial",
+                                  "failed"
+                                ]
+                              },
+                              "compilation": {
+                                "type": "string",
+                                "enum": [
+                                  "completed",
+                                  "held",
+                                  "failed",
+                                  "not-attempted"
+                                ]
+                              },
+                              "error": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "canonicalUri",
+                              "capture",
+                              "compilation"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "profileCount": {
+                          "type": "number"
+                        },
+                        "errorCount": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "imported",
+                        "failed",
+                        "profileCount",
+                        "errorCount"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "projections": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "targetId": {
+                                "type": "string"
+                              },
+                              "artifactId": {
+                                "type": "string"
+                              },
+                              "sourceId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "targetId",
+                              "artifactId"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "preservedUnscopedSourceIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "note": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "projections"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "scanned": {
+                          "type": "number"
+                        },
+                        "enriched": {
+                          "type": "number"
+                        },
+                        "skipped": {
+                          "type": "number"
+                        },
+                        "failed": {
+                          "type": "number"
+                        },
+                        "errors": {
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              {}
+                            ]
+                          }
+                        },
+                        "selfImprovement": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              {
+                                "type": "array",
+                                "items": {}
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "scanned",
+                        "enriched",
+                        "skipped",
+                        "failed",
+                        "errors"
+                      ],
+                      "additionalProperties": true
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "scannedGaps": {
+                          "type": "number"
+                        },
+                        "candidateGaps": {
+                          "type": "number"
+                        },
+                        "processedGaps": {
+                          "type": "number"
+                        },
+                        "createdGaps": {
+                          "type": "number"
+                        },
+                        "repairableGaps": {
+                          "type": "number"
+                        },
+                        "suppressedGaps": {
+                          "type": "number"
+                        },
+                        "skippedGaps": {
+                          "type": "number"
+                        },
+                        "searched": {
+                          "type": "number"
+                        },
+                        "ingestedSources": {
+                          "type": "number"
+                        },
+                        "linkedRepairs": {
+                          "type": "number"
+                        },
+                        "blockedGaps": {
+                          "type": "number"
+                        },
+                        "closedGaps": {
+                          "type": "number"
+                        },
+                        "queuedTasks": {
+                          "type": "number"
+                        },
+                        "requestedLimit": {
+                          "type": "number"
+                        },
+                        "effectiveLimit": {
+                          "type": "number"
+                        },
+                        "coalesced": {
+                          "type": "boolean"
+                        },
+                        "truncated": {
+                          "type": "boolean"
+                        },
+                        "budgetExhausted": {
+                          "type": "boolean"
+                        },
+                        "taskIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "ingestedSourceIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "errors": {
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              {}
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "scannedGaps",
+                        "createdGaps",
+                        "repairableGaps",
+                        "suppressedGaps",
+                        "skippedGaps",
+                        "searched",
+                        "ingestedSources",
+                        "linkedRepairs",
+                        "errors"
+                      ],
+                      "additionalProperties": true
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "reportId": {
+                          "type": "string"
+                        },
+                        "metrics": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "number"
+                          }
+                        }
+                      },
+                      "required": [
+                        "reportId",
+                        "metrics"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "metadata": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": {}
+                      },
+                      {
+                        "type": "array",
+                        "items": {}
+                      }
+                    ]
+                  }
+                },
+                "createdAt": {
+                  "type": "number"
+                },
+                "updatedAt": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "id",
+                "jobId",
+                "status",
+                "mode",
+                "requestedAt",
+                "result",
+                "metadata",
+                "createdAt",
+                "updatedAt"
+              ],
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
+        "invokable": true
+      },
+      {
         "id": "knowledge.job-runs.list",
         "title": "List Knowledge Job Runs",
         "description": "Return recent knowledge job runs.",
@@ -98651,7 +100355,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "knowledge.map",
         "title": "Map Knowledge Graph",
-        "description": "Return a deterministic visual map of structured knowledge nodes, sources, edges, and optional issues.",
+        "description": "Return a deterministic visual map of structured knowledge nodes, sources, edges, and optional issues, most relevant first (the records named by `ids`/`linkedToIds`, then their neighbours, then the most connected; every record kind gets a share). When more records match than `limit`, `nextCursor` is set: pass it back as `cursor` with the same filters for the next slice.",
         "category": "knowledge",
         "source": "builtin",
         "access": "authenticated",
@@ -98671,6 +100375,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "properties": {
             "limit": {
               "type": "number"
+            },
+            "cursor": {
+              "type": "string"
             },
             "knowledgeSpaceId": {
               "type": "string"
@@ -98800,6 +100507,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "totalEdgeCount": {
               "type": "number"
+            },
+            "nextCursor": {
+              "type": "string"
             },
             "facets": {
               "type": "object",
@@ -110343,7 +112053,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "mcp.config.get",
         "title": "MCP Effective Config",
-        "description": "Return effective MCP config from global, external, and project sources. Environment values are redacted to envKeys.",
+        "description": "Return effective MCP config from global, external, and project sources. Environment and request-header values are redacted to envKeys and headerKeys; credentials in url and args read as ***.",
         "category": "mcp",
         "source": "builtin",
         "access": "authenticated",
@@ -110436,6 +112146,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "type": "string"
                     }
                   },
+                  "headerKeys": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
                   "role": {
                     "anyOf": [
                       {
@@ -110499,6 +112215,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "url",
                   "args",
                   "envKeys",
+                  "headerKeys",
                   "role",
                   "trustMode",
                   "allowedPaths",
@@ -110671,6 +112388,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "type": "string"
                         }
                       },
+                      "headerKeys": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
                       "role": {
                         "anyOf": [
                           {
@@ -110734,6 +112457,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "url",
                       "args",
                       "envKeys",
+                      "headerKeys",
                       "role",
                       "trustMode",
                       "allowedPaths",
@@ -111082,6 +112806,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "type": "string"
                         }
                       },
+                      "headerKeys": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
                       "role": {
                         "anyOf": [
                           {
@@ -111145,6 +112875,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "url",
                       "args",
                       "envKeys",
+                      "headerKeys",
                       "role",
                       "trustMode",
                       "allowedPaths",
@@ -111176,7 +112907,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "mcp.servers.reveal",
         "title": "MCP Servers Reveal",
-        "description": "Return effective MCP config with environment VALUES included, not just envKeys. Admin only, the redacted mcp.config.get view is what every other caller should use.",
+        "description": "Return effective MCP config with environment and request-header VALUES (env, headers) and the unredacted url and args included, so an edit can resend them. Admin only, the redacted mcp.config.get view is what every other caller should use.",
         "category": "mcp",
         "source": "builtin",
         "access": "admin",
@@ -111274,6 +113005,18 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "properties": {},
                     "additionalProperties": true
                   },
+                  "headerKeys": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "headers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
                   "role": {
                     "anyOf": [
                       {
@@ -111338,6 +113081,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "args",
                   "envKeys",
                   "env",
+                  "headerKeys",
+                  "headers",
                   "role",
                   "trustMode",
                   "allowedPaths",
@@ -111414,6 +113159,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "envKeys": {
                   "type": "array",
                   "items": {
+                    "type": "string"
+                  }
+                },
+                "headers": {
+                  "type": "object",
+                  "additionalProperties": {
                     "type": "string"
                   }
                 },
@@ -111627,6 +113378,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "type": "string"
                         }
                       },
+                      "headerKeys": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
                       "role": {
                         "anyOf": [
                           {
@@ -111690,6 +113447,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "url",
                       "args",
                       "envKeys",
+                      "headerKeys",
                       "role",
                       "trustMode",
                       "allowedPaths",
@@ -112047,9 +113805,200 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "invokable": true
       },
       {
+        "id": "media.collect",
+        "title": "Collect Pending Media Job",
+        "description": "Finish a generation job an earlier media.generate answered as pending: pass the providerId, taskId and resume it named. Waits up to waitSeconds (0 checks once) and returns the outputs, or pending again when the job is still running. Nothing new is paid for.",
+        "category": "media",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:media"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/api/media/collect"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "providerId": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "resume": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "waitSeconds": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "providerId",
+            "taskId"
+          ],
+          "additionalProperties": true
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "providerId": {
+              "type": "string"
+            },
+            "artifacts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "artifactId": {
+                    "type": "string"
+                  },
+                  "mimeType": {
+                    "type": "string"
+                  },
+                  "dataBase64": {
+                    "type": "string"
+                  },
+                  "uri": {
+                    "type": "string"
+                  },
+                  "filename": {
+                    "type": "string"
+                  },
+                  "sizeBytes": {
+                    "type": "number"
+                  },
+                  "sha256": {
+                    "type": "string"
+                  },
+                  "acquisitionMode": {
+                    "type": "string",
+                    "enum": [
+                      "inline-data",
+                      "local-path",
+                      "remote-fetch",
+                      "unknown"
+                    ]
+                  },
+                  "fetchMode": {
+                    "type": "string",
+                    "enum": [
+                      "not-applicable",
+                      "public-only",
+                      "allow-private-hosts",
+                      "unknown"
+                    ]
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        }
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "mimeType",
+                  "metadata"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "array",
+                    "items": {}
+                  }
+                ]
+              }
+            },
+            "pending": {
+              "type": "object",
+              "properties": {
+                "providerId": {
+                  "type": "string"
+                },
+                "taskId": {
+                  "type": "string"
+                },
+                "resume": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "providerId",
+                "taskId"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "providerId",
+            "artifacts",
+            "metadata"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "outward",
+        "invokable": true
+      },
+      {
         "id": "media.generate",
         "title": "Generate Media Artifact",
-        "description": "Generate a media artifact through a registered media provider.",
+        "description": "Generate a media artifact through a registered media provider. A job the provider accepted but had not finished when the wait ended comes back with artifacts empty and pending set (providerId, taskId, resume); the job is paid for and keeps running, and media.collect finishes it. The kind asked for (the major type of outputMimeType, or image with options.image true) chooses the provider: without providerId the first configured provider that makes that kind is used, and when none does (or the named provider does not) the answer is 409 MEDIA_OUTPUT_UNAVAILABLE naming the providers that make it; nothing is sent.",
         "category": "media",
         "source": "builtin",
         "access": "admin",
@@ -112253,6 +114202,28 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   }
                 ]
               }
+            },
+            "pending": {
+              "type": "object",
+              "properties": {
+                "providerId": {
+                  "type": "string"
+                },
+                "taskId": {
+                  "type": "string"
+                },
+                "resume": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "providerId",
+                "taskId"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -117364,6 +119335,184 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "invokable": true
       },
       {
+        "id": "memory.snapshots.list",
+        "title": "List Memory Copies",
+        "description": "The memory store's point-in-time copies, newest first: the daily copy, the copy taken before a schema migration, the copy every restore takes of the records it replaced, and the tripwire copy. Each with its name (what memory.snapshots.restore takes), why it was taken, when, its size on disk and how many records it holds (null when the copy could not be read). Only the records store is copied; the semantic index is rebuilt from the records. Empty for a store that lives in memory only.",
+        "category": "memory",
+        "source": "builtin",
+        "access": "authenticated",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "read:memory"
+        ],
+        "http": {
+          "method": "GET",
+          "path": "/api/memory/snapshots"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "snapshots": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "type": "number"
+                  },
+                  "sizeBytes": {
+                    "type": "number"
+                  },
+                  "recordCount": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "reason",
+                  "createdAt",
+                  "sizeBytes",
+                  "recordCount"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "snapshots"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "read",
+        "invokable": true
+      },
+      {
+        "id": "memory.snapshots.restore",
+        "title": "Restore Memory From a Copy",
+        "description": "Replace every memory record, link, consolidation proposal and store fact with those of one copy (its exact name from memory.snapshots.list, `latest`, or the start of one name such as a date). The owner's act only: requires confirm: true on an explicit request from the owner's own session, device or machine; an agent is refused. A copy of the records being replaced is taken first and named in `undoSnapshot`, so restoring it undoes this restore. One SQLite write transaction: processes that share the store (terminal app, Agent, daemon) see the restored records on their next read, and a failure part way leaves the store as it was. The semantic index then re-embeds only records whose text differs from what it holds (`vectorIndex: updating`). Answers which copy, records before and after, and links after.",
+        "category": "memory",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:memory"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/api/memory/snapshots/restore"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "snapshot": {
+              "type": "string"
+            },
+            "confirm": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "snapshot",
+            "confirm"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "restored": {
+              "type": "string"
+            },
+            "restoredReason": {
+              "type": "string"
+            },
+            "restoredCreatedAt": {
+              "type": "number"
+            },
+            "recordsBefore": {
+              "type": "number"
+            },
+            "recordsAfter": {
+              "type": "number"
+            },
+            "linksAfter": {
+              "type": "number"
+            },
+            "undoSnapshot": {
+              "type": "string"
+            },
+            "vectorIndex": {
+              "type": "string",
+              "enum": [
+                "updating",
+                "off"
+              ]
+            }
+          },
+          "required": [
+            "restored",
+            "restoredReason",
+            "restoredCreatedAt",
+            "recordsBefore",
+            "recordsAfter",
+            "linksAfter",
+            "undoSnapshot",
+            "vectorIndex"
+          ],
+          "additionalProperties": false
+        },
+        "dangerous": true,
+        "effect": "write",
+        "ownerOnly": true,
+        "invokable": true,
+        "errorCodes": [
+          {
+            "code": "MEMORY_SNAPSHOT_UNAVAILABLE",
+            "status": 409,
+            "meaning": "This store keeps no copies (an in-memory store), or a copy of the current records could not be taken first; nothing was changed."
+          },
+          {
+            "code": "MEMORY_SNAPSHOT_NOT_FOUND",
+            "status": 404,
+            "meaning": "No copy has that name (or there are no copies yet); nothing was changed."
+          },
+          {
+            "code": "MEMORY_SNAPSHOT_AMBIGUOUS",
+            "status": 409,
+            "meaning": "More than one copy starts with that text; name one in full. Nothing was changed."
+          },
+          {
+            "code": "MEMORY_SNAPSHOT_UNREADABLE",
+            "status": 422,
+            "meaning": "The copy cannot be read or was written by a newer version; nothing was changed."
+          }
+        ]
+      },
+      {
         "id": "memory.vector.rebuild",
         "title": "Rebuild Memory Vector Index",
         "description": "Rebuild the sqlite-vec vector index.",
@@ -120610,7 +122759,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "pairing.handoff.create",
         "title": "Create Pairing Hand-off",
-        "description": "Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render \"needs https, available via tailscale\" instead of dead buttons. The token secret is returned exactly once. Each offer is independently declinable at completion.",
+        "description": "Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render \"needs https, available via tailscale\" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion.",
         "category": "pairing",
         "source": "builtin",
         "access": "authenticated",
@@ -120841,7 +122990,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "pairing.tokens.create",
         "title": "Mint Paired Device Token",
-        "description": "Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client \"agent\" mints the GoodVibes Agent's credential for the calls it makes on the owner's behalf: the daemon reports it as credential \"agent\" and judges every call made with it; it is listed with client \"agent\" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret.",
+        "description": "Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client \"agent\" mints the GoodVibes Agent's credential for the calls it makes on the owner's behalf: the daemon reports it as credential \"agent\" and judges every call made with it; it is listed with client \"agent\" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret. scopes limits the device to that list of operator scopes (for example read:sessions and write:sessions for a phone that only chats); left out, the device holds full operator authority. A caller grants only scopes it holds: a narrowed caller's token inherits its list when scopes is left out, and naming a scope the caller does not hold is 403 MISSING_SCOPE.",
         "category": "pairing",
         "source": "builtin",
         "access": "authenticated",
@@ -120865,6 +123014,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "enum": [
                 "agent"
               ]
+            },
+            "scopes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           },
           "required": [
@@ -120962,7 +123117,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "pairing.tokens.list",
         "title": "List Paired Device Tokens",
-        "description": "List the per-pairing operator tokens (paired devices/browsers) as redacted views: id, user-visible name, created timestamp, last-seen timestamp, and mintedBy (the paired device that minted it, when one did). The token secret is never stored in listable form and is never returned.",
+        "description": "List the per-pairing operator tokens (paired devices/browsers) as redacted views: id, user-visible name, created timestamp, last-seen timestamp, mintedBy (the paired device that minted it, when one did) and scopes (the operator scopes it holds, when it was paired with a narrower list; absent means full operator authority). The token secret is never stored in listable form and is never returned.",
         "category": "pairing",
         "source": "builtin",
         "access": "authenticated",
@@ -120970,7 +123125,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:control-plane"
+          "read:pairing"
         ],
         "outputSchema": {
           "type": "object",
@@ -121000,6 +123155,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "enum": [
                       "agent"
                     ]
+                  },
+                  "scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
                   }
                 },
                 "required": [
@@ -123727,7 +125888,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "type": "string",
                     "enum": [
                       "allow",
-                      "deny"
+                      "deny",
+                      "ask"
                     ]
                   },
                   "tier": {
@@ -127889,7 +130051,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "stepup.challenge.mint",
         "title": "Mint Step-up Challenge",
-        "description": "Issue a short-lived, single-use WebAuthn challenge. The optional sessionId, rendezvousId, method and path bind it: a challenge minted with any of them is accepted only for a relay request that matches every one given (a different session, rendezvous, HTTP method or path is refused as challenge-unbound), while a challenge minted with none is accepted for any request. The values are recorded as the caller supplied them; they are not checked against the authenticated session. A surface passes it to navigator.credentials.get and returns the assertion on its next mutating relay call. The freshness window (ttlMs) is clamped to 5s–300s (default 120s).",
+        "description": "Issue a short-lived, single-use WebAuthn challenge for one relay call. Pass the method and path of the call it is for: a challenge minted without them authorises nothing. The challenge is bound to the principal that minted it, and to the sessionId and rendezvousId when given; a relay call by another principal, or with a different method, path, session or rendezvous, is refused as challenge-unbound. A surface passes it to navigator.credentials.get and returns the assertion on the call it was minted for. Whether a relay call needs an assertion is decided by its catalog method's scopes (any scope other than read:*), not by its HTTP verb. The freshness window (ttlMs) is clamped to 5s–300s (default 120s).",
         "category": "relay",
         "source": "builtin",
         "access": "authenticated",
@@ -128157,6 +130319,400 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "dangerous": true,
+        "effect": "write",
+        "invokable": true
+      },
+      {
+        "id": "remote.backends.list",
+        "title": "List Remote Backends",
+        "description": "Return the registered execution backends (docker, ssh, cloud terminal, local process) remote.peers.invoke runs commands on, and any stored registration that no longer reads, with the reason.",
+        "category": "remote",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "read:remote"
+        ],
+        "http": {
+          "method": "GET",
+          "path": "/api/remote/backends"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "backends": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "peerId": {
+                    "type": "string"
+                  },
+                  "displayName": {
+                    "type": "string"
+                  },
+                  "backendKind": {
+                    "type": "string",
+                    "enum": [
+                      "docker",
+                      "ssh",
+                      "cloud-terminal",
+                      "local-process"
+                    ]
+                  },
+                  "backendConfig": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "docker",
+                          "ssh",
+                          "cloud-terminal",
+                          "local-process"
+                        ]
+                      },
+                      "containerName": {
+                        "type": "string"
+                      },
+                      "dockerHost": {
+                        "type": "string"
+                      },
+                      "sshHost": {
+                        "type": "string"
+                      },
+                      "sshPort": {
+                        "type": "number"
+                      },
+                      "sshUser": {
+                        "type": "string"
+                      },
+                      "identityRef": {
+                        "type": "string"
+                      },
+                      "provider": {
+                        "type": "string",
+                        "enum": [
+                          "gcp",
+                          "aws",
+                          "azure"
+                        ]
+                      },
+                      "credentialRef": {
+                        "type": "string"
+                      },
+                      "projectId": {
+                        "type": "string"
+                      },
+                      "location": {
+                        "type": "string"
+                      },
+                      "instance": {
+                        "type": "string"
+                      },
+                      "cwd": {
+                        "type": "string"
+                      },
+                      "allowedCommands": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "peerId",
+                  "displayName",
+                  "backendKind",
+                  "backendConfig"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "unreadable": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "peerId": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "peerId",
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "backends",
+            "unreadable"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "read",
+        "invokable": true
+      },
+      {
+        "id": "remote.backends.register",
+        "title": "Register Remote Backend",
+        "description": "Register or replace an execution backend under peerId so remote.peers.invoke runs commands on it. Credentials are goodvibes://secrets/ references only; a value docker or a cloud CLI would read as an option (starting with \"-\") and an id a paired peer holds are refused.",
+        "category": "remote",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:remote"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/api/remote/backends"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "peerId": {
+              "type": "string"
+            },
+            "displayName": {
+              "type": "string"
+            },
+            "backendKind": {
+              "type": "string",
+              "enum": [
+                "docker",
+                "ssh",
+                "cloud-terminal",
+                "local-process"
+              ]
+            },
+            "backendConfig": {
+              "type": "object",
+              "properties": {
+                "containerName": {
+                  "type": "string"
+                },
+                "dockerHost": {
+                  "type": "string"
+                },
+                "sshHost": {
+                  "type": "string"
+                },
+                "sshPort": {
+                  "type": "number"
+                },
+                "sshUser": {
+                  "type": "string"
+                },
+                "identityRef": {
+                  "type": "string"
+                },
+                "provider": {
+                  "type": "string",
+                  "enum": [
+                    "gcp",
+                    "aws",
+                    "azure"
+                  ]
+                },
+                "credentialRef": {
+                  "type": "string"
+                },
+                "projectId": {
+                  "type": "string"
+                },
+                "location": {
+                  "type": "string"
+                },
+                "instance": {
+                  "type": "string"
+                },
+                "cwd": {
+                  "type": "string"
+                },
+                "allowedCommands": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "peerId",
+            "backendKind",
+            "backendConfig"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "backend": {
+              "type": "object",
+              "properties": {
+                "peerId": {
+                  "type": "string"
+                },
+                "displayName": {
+                  "type": "string"
+                },
+                "backendKind": {
+                  "type": "string",
+                  "enum": [
+                    "docker",
+                    "ssh",
+                    "cloud-terminal",
+                    "local-process"
+                  ]
+                },
+                "backendConfig": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "docker",
+                        "ssh",
+                        "cloud-terminal",
+                        "local-process"
+                      ]
+                    },
+                    "containerName": {
+                      "type": "string"
+                    },
+                    "dockerHost": {
+                      "type": "string"
+                    },
+                    "sshHost": {
+                      "type": "string"
+                    },
+                    "sshPort": {
+                      "type": "number"
+                    },
+                    "sshUser": {
+                      "type": "string"
+                    },
+                    "identityRef": {
+                      "type": "string"
+                    },
+                    "provider": {
+                      "type": "string",
+                      "enum": [
+                        "gcp",
+                        "aws",
+                        "azure"
+                      ]
+                    },
+                    "credentialRef": {
+                      "type": "string"
+                    },
+                    "projectId": {
+                      "type": "string"
+                    },
+                    "location": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "cwd": {
+                      "type": "string"
+                    },
+                    "allowedCommands": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "peerId",
+                "displayName",
+                "backendKind",
+                "backendConfig"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "backend"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
+        "invokable": true
+      },
+      {
+        "id": "remote.backends.remove",
+        "title": "Remove Remote Backend",
+        "description": "Remove a registered execution backend; 404 when no backend has that id.",
+        "category": "remote",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:remote"
+        ],
+        "http": {
+          "method": "DELETE",
+          "path": "/api/remote/backends/{peerId}"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "peerId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "peerId"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "peerId": {
+              "type": "string"
+            },
+            "removed": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "peerId",
+            "removed"
+          ],
+          "additionalProperties": false
+        },
         "effect": "write",
         "invokable": true
       },
@@ -129576,7 +132132,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "remote.peers.invoke",
         "title": "Invoke Remote Peer",
-        "description": "Invoke a method on a connected remote peer.",
+        "description": "Run a command on a remote peer. A paired peer gets it as queued work (answer: work, completed). A registered backend (remote.backends.register: docker, ssh, cloud terminal or local process) runs it now and answers with backend: exit code and output; on a backend, payload takes only args, stdin, env, timeoutMs and cwd, and the queue fields (priority, waitMs, sessionId, routeId, automation ids, approvalId) do not apply.",
         "category": "remote",
         "source": "builtin",
         "access": "admin",
@@ -129935,12 +132491,60 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               ],
               "additionalProperties": true
             },
+            "backend": {
+              "type": "object",
+              "properties": {
+                "peerId": {
+                  "type": "string"
+                },
+                "backendKind": {
+                  "type": "string",
+                  "enum": [
+                    "docker",
+                    "ssh",
+                    "cloud-terminal",
+                    "local-process"
+                  ]
+                },
+                "exitCode": {
+                  "type": "number"
+                },
+                "completed": {
+                  "type": "boolean"
+                },
+                "stdout": {
+                  "type": "string"
+                },
+                "stderr": {
+                  "type": "string"
+                },
+                "stdoutBytes": {
+                  "type": "number"
+                },
+                "stdoutTruncated": {
+                  "type": "boolean"
+                },
+                "stderrTruncated": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "peerId",
+                "backendKind",
+                "completed",
+                "stdout",
+                "stderr",
+                "stdoutBytes",
+                "stdoutTruncated",
+                "stderrTruncated"
+              ],
+              "additionalProperties": false
+            },
             "completed": {
               "type": "boolean"
             }
           },
           "required": [
-            "work",
             "completed"
           ],
           "additionalProperties": false
@@ -132516,7 +135120,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "rewind.apply",
         "title": "Apply a Unified Rewind",
-        "description": "Apply a unified rewind to a session turn anchor, restoring files and/or conversation. DESTRUCTIVE: requires the confirmToken minted by rewind.plan (single-use, ~2 min), which is bound to the session, turn, scope and previewed checkpoint. Called without it, confirm:true included, it returns a non-error refusal (refused:true) naming rewind.plan, never a silent no-op; a bad token is a 400. Every apply records an undo point (the workspace restore takes a pre-restore safety checkpoint; the conversation store captures its pre-rewind snapshot) so the rewind is itself reversible, and returns a receipt whose `undo` block carries how to reverse it: checkpoints.restore with undo.files.restoreCheckpointId for the files, rewind.undo with undo.conversation.undoSnapshotId for the conversation. undo.conversation.expiresAfter states how long that undo point lasts, as the process holding the conversation keeps it (the newest 32 rewinds; on disk where that process keeps its sessions). Emits a REWIND_APPLIED receipt event.",
+        "description": "Apply a unified rewind to a session turn anchor, restoring files and/or conversation. DESTRUCTIVE: requires the confirmToken minted by rewind.plan (single-use, ~2 min), which is bound to the session, turn, scope and previewed checkpoint. Called without it, it returns a non-error refusal (refused:true) naming rewind.plan, never a silent no-op; a bad token is a 400. Every apply records an undo point (the workspace restore takes a pre-restore safety checkpoint; the conversation store captures its pre-rewind snapshot) so the rewind is itself reversible, and returns a receipt whose `undo` block carries how to reverse it: checkpoints.restore with undo.files.restoreCheckpointId for the files, rewind.undo with undo.conversation.undoSnapshotId for the conversation. undo.conversation.expiresAfter states how long that undo point lasts, as the process holding the conversation keeps it (the newest 32 rewinds; on disk where that process keeps its sessions). Emits a REWIND_APPLIED receipt event.",
         "category": "rewind",
         "source": "builtin",
         "access": "authenticated",
@@ -132542,9 +135146,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "conversation",
                 "both"
               ]
-            },
-            "confirm": {
-              "type": "boolean"
             },
             "confirmToken": {
               "type": "string"
@@ -137728,6 +140329,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "lastAgentId": {
                   "type": "string"
                 },
+                "lastAgentModel": {
+                  "type": "string"
+                },
                 "lastError": {
                   "type": "string"
                 },
@@ -138127,6 +140731,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "lastAgentId": {
                   "type": "string"
                 },
+                "lastAgentModel": {
+                  "type": "string"
+                },
                 "lastError": {
                   "type": "string"
                 },
@@ -138399,6 +141006,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "string"
                 },
                 "lastAgentId": {
+                  "type": "string"
+                },
+                "lastAgentModel": {
                   "type": "string"
                 },
                 "lastError": {
@@ -138730,6 +141340,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "type": "string"
                     },
                     "lastAgentId": {
+                      "type": "string"
+                    },
+                    "lastAgentModel": {
                       "type": "string"
                     },
                     "lastError": {
@@ -139114,7 +141727,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "body",
           "name": "messageId",
-          "behavior": "Sending the same messageId again (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response."
+          "behavior": "Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response."
         },
         "errorCodes": [
           {
@@ -139133,11 +141746,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "meaning": "The session is closed; reopen it (sessions.reopen) before sending to it."
           },
           {
-            "code": "WORKSPACE_BUSY",
-            "status": 409,
-            "meaning": "A workspace swap is in progress; retry after retryAfterMs."
-          },
-          {
             "code": "SESSION_AGENT_BIND_FAILED",
             "status": 500,
             "meaning": "The input was accepted but the agent started for it could not be bound; the input was released to the queue."
@@ -139147,7 +141755,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "sessions.get",
         "title": "Get Shared Session",
-        "description": "Return metadata for a shared session.",
+        "description": "Return a shared session record with its newest 100 messages. It returns conversation text, so it needs read:transcripts; sessions.list and sessions.search return session metadata under read:sessions.",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -139156,7 +141764,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:sessions"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",
@@ -139288,6 +141896,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "string"
                 },
                 "lastAgentId": {
+                  "type": "string"
+                },
+                "lastAgentModel": {
                   "type": "string"
                 },
                 "lastError": {
@@ -139627,6 +142238,33 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   },
                   "at": {
                     "type": "number"
+                  },
+                  "toolCalls": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "arguments": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "arguments"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "callId": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -139652,7 +142290,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "sessions.hosted.create",
         "title": "Create a Daemon-Hosted Session",
-        "description": "Compose a full conversation loop INSIDE the daemon for a workspace: the same orchestrator, tool registry and permission gate a terminal runs, hosted here so the conversation does not depend on the client that started it staying open. `workspaceRoot` must be absolute, a relative path would resolve against the daemon's own directory, which is never what the caller meant, and must be the daemon's working directory or a registered workspace (or inside one); anything else is refused with the allowed folders named (sessions.hosted.workspaces lists them). `modelId` is resolved against this daemon's live model registry when given, so an unknown or ambiguous id is refused here rather than at the first turn; omitted, the session follows the daemon's current selection. `detachPolicy` overrides the `hostedSessions.detachPolicy` setting for this session alone. `originSurface` names the app the session is for (`agent`, `tui`, `webui`); its client-owned settings are that app's, and with `agent` the session answers as the GoodVibes Agent: the Agent's prompt and its tools that need no terminal, the others refused and named. `initialPrompt` is submitted as the first user message and the call does NOT wait for that turn, watch the `turn` and `tools` event domains filtered on the returned session id. Refused with the live count and the setting named when `hostedSessions.maxSessions` is already reached. ws-only invoke verb; no REST binding.",
+        "description": "Compose a full conversation loop INSIDE the daemon for a workspace: the same orchestrator, tool registry and permission gate a terminal runs, hosted here so the conversation does not depend on the client that started it staying open. `workspaceRoot` must be absolute, a relative path would resolve against the daemon's own directory, which is never what the caller meant, and must be the daemon's working directory or a registered workspace (or inside one); anything else is refused with the allowed folders named (sessions.hosted.workspaces lists them). `modelId` is resolved against this daemon's live model registry when given, so an unknown or ambiguous id is refused here rather than at the first turn; omitted, the session follows the daemon's current selection. `detachPolicy` overrides the `hostedSessions.detachPolicy` setting for this session alone. `originSurface` names the app the session is for (`agent`, `tui`, `webui`); its client-owned settings are that app's, and with `agent` the session answers as the GoodVibes Agent: the Agent's prompt and its tools that need no terminal, the others refused and named. Its operator tools act on this daemon with full operator authority, so `agent` is refused (HOSTED_SURFACE_FORBIDDEN) for a caller that does not hold admin. `initialPrompt` is submitted as the first user message and the call does NOT wait for that turn, watch the `turn` and `tools` event domains filtered on the returned session id. Refused with the live count and the setting named when `hostedSessions.maxSessions` is already reached. ws-only invoke verb; no REST binding.",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -140628,7 +143266,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "sessions.inputs.deliver",
         "title": "Mark Shared Session Input Delivered",
-        "description": "A live registered surface reports that it collected a queued input (moves it to `delivered`) or finished acting on it (`consumed:true` moves it to `completed`). This is how a surface-managed session, where steer/follow-up inputs queue for the surface rather than spawn a daemon executor, closes the input lifecycle honestly. Only queued/delivered inputs advance; a report on an input that already ended (cancelled, failed, answered by a daemon agent) is refused with 409 `INPUT_NOT_DELIVERABLE` naming its state, binds no agent and forwards no answer. One exception: an input a daemon restart cancelled while a surface in another process was answering it completes on that surface's `consumed:true` report. `agentId` names the agent the surface is running for this input: it binds the reply so a message that arrived over a channel gets its answer routed back to that conversation, the same binding the daemon makes for the executors it spawns itself. `answer` (sent with `consumed:true`, optionally with `status`) is the output that agent finished with, the daemon writes it into the session and delivers it to the channel. `claim:true` is how a surface takes an input before it starts work on it: it succeeds for one caller only, for a `queued` input, or for a `delivered` one with no agent bound for at least two minutes (a claimant that died before starting it). Any other caller is refused with 409 `INPUT_NOT_CLAIMABLE` naming the state, and nothing changes.",
+        "description": "A live registered surface reports that it collected a queued input (moves it to `delivered`) or finished acting on it (`consumed:true` moves it to `completed`). This is how a surface-managed session, where steer/follow-up inputs queue for the surface rather than spawn a daemon executor, closes the input lifecycle honestly. Only queued/delivered inputs advance; a report on an input that already ended (cancelled, failed, answered by a daemon agent) is refused with 409 `INPUT_NOT_DELIVERABLE` naming its state, binds no agent and forwards no answer. One exception: an input a daemon restart cancelled while a surface in another process was answering it completes on that surface's `consumed:true` report. `agentId` names the agent the surface is running for this input: it binds the reply so a message that arrived over a channel gets its answer routed back to that conversation, the same binding the daemon makes for the executors it spawns itself. `surfaceInstance`, sent with `agentId`, names the surface process running that agent; it is kept in the input's `metadata.deliveringSurfaceInstance` (cleared by a report that names none), so a surface that restarted can fail the inputs a process that is gone was answering. `answer` (sent with `consumed:true`, optionally with `status`) is the output that agent finished with, the daemon writes it into the session and delivers it to the channel. `claim:true` is how a surface takes an input before it starts work on it: it succeeds for one caller only, for a `queued` input, or for a `delivered` one with no agent bound for at least two minutes (a claimant that died before starting it). Any other caller is refused with 409 `INPUT_NOT_CLAIMABLE` naming the state, and nothing changes.",
         "category": "sessions",
         "source": "builtin",
         "access": "admin",
@@ -140659,6 +143297,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "type": "boolean"
             },
             "agentId": {
+              "type": "string"
+            },
+            "surfaceInstance": {
               "type": "string"
             },
             "answer": {
@@ -140928,7 +143569,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:sessions"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",
@@ -141069,6 +143710,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "string"
                 },
                 "lastAgentId": {
+                  "type": "string"
+                },
+                "lastAgentModel": {
                   "type": "string"
                 },
                 "lastError": {
@@ -141432,7 +144076,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "sessions.list",
         "title": "List Shared Sessions",
-        "description": "Return shared-session integration state.",
+        "description": "Return shared-session integration state. `unreadable`, present only when there are any, names each stored session, message or input this build could not read at start (kind, id, why); they stay in the store untouched and load again under a build that knows them.",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -141593,6 +144237,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "lastAgentId": {
                     "type": "string"
                   },
+                  "lastAgentModel": {
+                    "type": "string"
+                  },
                   "lastError": {
                     "type": "string"
                   },
@@ -141638,6 +144285,34 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "surfaceKinds",
                   "participants",
                   "metadata"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "unreadable": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "session",
+                      "message",
+                      "input"
+                    ]
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "id",
+                  "reason"
                 ],
                 "additionalProperties": false
               }
@@ -141942,6 +144617,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "type": "string"
                         },
                         "lastAgentId": {
+                          "type": "string"
+                        },
+                        "lastAgentModel": {
                           "type": "string"
                         },
                         "lastError": {
@@ -142328,7 +145006,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "body",
           "name": "messageId",
-          "behavior": "Sending the same messageId again (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response."
+          "behavior": "Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response."
         },
         "errorCodes": [
           {
@@ -142352,11 +145030,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "meaning": "The session is closed; reopen it (sessions.reopen) before sending to it."
           },
           {
-            "code": "WORKSPACE_BUSY",
-            "status": 409,
-            "meaning": "A workspace swap is in progress; retry after retryAfterMs."
-          },
-          {
             "code": "SESSION_AGENT_BIND_FAILED",
             "status": 500,
             "meaning": "The input was accepted but the agent started for it could not be bound; the input was released to the queue."
@@ -142375,7 +145048,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:sessions"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",
@@ -142516,6 +145189,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "string"
                 },
                 "lastAgentId": {
+                  "type": "string"
+                },
+                "lastAgentModel": {
                   "type": "string"
                 },
                 "lastError": {
@@ -142950,7 +145626,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:sessions"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",
@@ -143212,6 +145888,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "lastAgentId": {
                   "type": "string"
                 },
+                "lastAgentModel": {
+                  "type": "string"
+                },
                 "lastError": {
                   "type": "string"
                 },
@@ -143442,6 +146121,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "lastAgentId": {
                   "type": "string"
                 },
+                "lastAgentModel": {
+                  "type": "string"
+                },
                 "lastError": {
                   "type": "string"
                 },
@@ -143669,6 +146351,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "type": "string"
                   },
                   "lastAgentId": {
+                    "type": "string"
+                  },
+                  "lastAgentModel": {
                     "type": "string"
                   },
                   "lastError": {
@@ -144004,6 +146689,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "type": "string"
                     },
                     "lastAgentId": {
+                      "type": "string"
+                    },
+                    "lastAgentModel": {
                       "type": "string"
                     },
                     "lastError": {
@@ -144388,7 +147076,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "replay": {
           "in": "body",
           "name": "messageId",
-          "behavior": "Sending the same messageId again (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response."
+          "behavior": "Sending the same messageId again to the same session (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response."
         },
         "errorCodes": [
           {
@@ -144405,11 +147093,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "code": "SESSION_CLOSED",
             "status": 409,
             "meaning": "The session is closed; reopen it (sessions.reopen) before sending to it."
-          },
-          {
-            "code": "WORKSPACE_BUSY",
-            "status": 409,
-            "meaning": "A workspace swap is in progress; retry after retryAfterMs."
           },
           {
             "code": "SESSION_AGENT_BIND_FAILED",
@@ -146057,11 +148740,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "meaning": "The session is closed; reopen it (sessions.reopen) before sending to it."
           },
           {
-            "code": "WORKSPACE_BUSY",
-            "status": 409,
-            "meaning": "A workspace swap is in progress; retry after retryAfterMs."
-          },
-          {
             "code": "SESSION_AGENT_BIND_FAILED",
             "status": 500,
             "meaning": "The input was accepted but the agent started for it could not be bound; the input was released to the queue."
@@ -146269,7 +148947,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "tasks.list",
         "title": "List Runtime Tasks",
-        "description": "Return the integration snapshot for runtime tasks.",
+        "description": "Return the integration snapshot for runtime tasks. `limit` returns only the newest that many tasks (the totals stay whole), so a long-lived daemon does not send its whole history.",
         "category": "tasks",
         "source": "builtin",
         "access": "authenticated",
@@ -146286,7 +148964,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "inputSchema": {
           "type": "object",
-          "properties": {},
+          "properties": {
+            "limit": {
+              "type": "number"
+            }
+          },
           "additionalProperties": false
         },
         "outputSchema": {
@@ -147566,6 +150248,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "sessionId": {
                   "type": "string"
                 },
+                "conversationSessionId": {
+                  "type": "string"
+                },
                 "sessionStatus": {
                   "type": "string"
                 },
@@ -147650,6 +150335,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               },
               "required": [
                 "sessionId",
+                "conversationSessionId",
                 "sessionStatus",
                 "traceExport",
                 "tasks",
@@ -148291,6 +150977,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "sessionId": {
                   "type": "string"
                 },
+                "conversationSessionId": {
+                  "type": "string"
+                },
                 "sessionStatus": {
                   "type": "string"
                 },
@@ -148375,6 +151064,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               },
               "required": [
                 "sessionId",
+                "conversationSessionId",
                 "sessionStatus",
                 "traceExport",
                 "tasks",
@@ -150553,7 +153243,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "watchers.create",
         "title": "Create Watcher",
-        "description": "Register a new watcher.",
+        "description": "Register a new watcher (kind defaults to polling). The kinds that can be created here, and what each needs: webhook or polling with a url (polling also takes endpoint), requested every intervalMs, its response being what the watcher observes; filesystem with a path, whose size and modification time are observed; manual, which needs nothing and runs only when started by hand. socket and integration watchers are registered by the component that owns them, and are refused here because nothing would observe them. A header carrying a credential must be a goodvibes://secrets/ reference.",
         "category": "watchers",
         "source": "builtin",
         "access": "admin",
@@ -150639,9 +153329,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "additionalProperties": {
                 "type": "string"
               }
-            },
-            "run": {
-              "type": "string"
             }
           },
           "required": [
@@ -151524,6 +154211,881 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "invokable": true
       },
       {
+        "id": "watchers.triggers.cancel",
+        "title": "Cancel a trigger",
+        "description": "Cancel a trigger; a command an on-exit trigger supervises is stopped.",
+        "category": "watchers",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "ws"
+        ],
+        "scopes": [
+          "write:watchers"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "trigger": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "watching": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "firedCount": {
+                  "type": "number"
+                },
+                "lastFiredAt": {
+                  "type": "string"
+                },
+                "nextCheckAt": {
+                  "type": "string"
+                },
+                "lastError": {
+                  "type": "string"
+                },
+                "droppedLines": {
+                  "type": "number"
+                },
+                "owedBatches": {
+                  "type": "number"
+                },
+                "next": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "kind",
+                "watching",
+                "state",
+                "firedCount"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "trigger"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
+        "invokable": true,
+        "errorCodes": [
+          {
+            "code": "TRIGGER_OPERATOR_REQUIRED",
+            "status": 403,
+            "meaning": "The caller is not an administrative operator with watcher access; call with the owner's operator credential."
+          },
+          {
+            "code": "TRIGGER_NOT_FOUND",
+            "status": 404,
+            "meaning": "No trigger has that id; list the triggers to see their ids."
+          },
+          {
+            "code": "TRIGGER_EXISTS",
+            "status": 409,
+            "meaning": "A trigger with that id exists; pick another id or cancel the existing one first."
+          },
+          {
+            "code": "TRIGGERS_OFF",
+            "status": 409,
+            "meaning": "The trigger family is off; set watchers.triggers.enabled to true and try again."
+          },
+          {
+            "code": "TRIGGER_RESET_REFUSED",
+            "status": 409,
+            "meaning": "The trigger is not stopped by its breaker, so there is nothing to reset; list the triggers to see its state."
+          },
+          {
+            "code": "TRIGGER_DEFINITION_INVALID",
+            "status": 400,
+            "meaning": "A field of the definition or grant was refused; the message names it. Fix it and send again."
+          },
+          {
+            "code": "TRIGGER_OTHER_PROCESS",
+            "status": 409,
+            "meaning": "Another GoodVibes process supervises these triggers; change them from that process, or close it so this one takes over."
+          },
+          {
+            "code": "TRIGGER_GRANT_CHANGED",
+            "status": 409,
+            "meaning": "The named grant no longer matches what the trigger was approved for; register the grant again and recreate the trigger."
+          }
+        ]
+      },
+      {
+        "id": "watchers.triggers.create",
+        "title": "Create a trigger",
+        "description": "Create a trigger from a definition { id, label, description?, spec, action?, ownerSessionId? }. spec.kind is on-exit, stream or condition; commands are argv, never a shell line. The action defaults to an agent turn; an action-grant action names a grant the owner registered. Needs watchers.triggers.enabled.",
+        "category": "watchers",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "ws"
+        ],
+        "scopes": [
+          "write:watchers"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "definition": {
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {},
+                  {
+                    "type": "array",
+                    "items": {}
+                  }
+                ]
+              }
+            }
+          },
+          "required": [
+            "definition"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "trigger": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "watching": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "firedCount": {
+                  "type": "number"
+                },
+                "lastFiredAt": {
+                  "type": "string"
+                },
+                "nextCheckAt": {
+                  "type": "string"
+                },
+                "lastError": {
+                  "type": "string"
+                },
+                "droppedLines": {
+                  "type": "number"
+                },
+                "owedBatches": {
+                  "type": "number"
+                },
+                "next": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "kind",
+                "watching",
+                "state",
+                "firedCount"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "trigger"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
+        "invokable": true,
+        "errorCodes": [
+          {
+            "code": "TRIGGER_OPERATOR_REQUIRED",
+            "status": 403,
+            "meaning": "The caller is not an administrative operator with watcher access; call with the owner's operator credential."
+          },
+          {
+            "code": "TRIGGER_NOT_FOUND",
+            "status": 404,
+            "meaning": "No trigger has that id; list the triggers to see their ids."
+          },
+          {
+            "code": "TRIGGER_EXISTS",
+            "status": 409,
+            "meaning": "A trigger with that id exists; pick another id or cancel the existing one first."
+          },
+          {
+            "code": "TRIGGERS_OFF",
+            "status": 409,
+            "meaning": "The trigger family is off; set watchers.triggers.enabled to true and try again."
+          },
+          {
+            "code": "TRIGGER_RESET_REFUSED",
+            "status": 409,
+            "meaning": "The trigger is not stopped by its breaker, so there is nothing to reset; list the triggers to see its state."
+          },
+          {
+            "code": "TRIGGER_DEFINITION_INVALID",
+            "status": 400,
+            "meaning": "A field of the definition or grant was refused; the message names it. Fix it and send again."
+          },
+          {
+            "code": "TRIGGER_OTHER_PROCESS",
+            "status": 409,
+            "meaning": "Another GoodVibes process supervises these triggers; change them from that process, or close it so this one takes over."
+          },
+          {
+            "code": "TRIGGER_GRANT_CHANGED",
+            "status": 409,
+            "meaning": "The named grant no longer matches what the trigger was approved for; register the grant again and recreate the trigger."
+          }
+        ]
+      },
+      {
+        "id": "watchers.triggers.grant.list",
+        "title": "List trigger action grants",
+        "description": "The commands the owner approved for triggers to run when they fire, with the digest a trigger names.",
+        "category": "watchers",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "ws"
+        ],
+        "scopes": [
+          "read:watchers"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "grants": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "command": {
+                    "type": "string"
+                  },
+                  "args": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "cwd": {
+                    "type": "string"
+                  },
+                  "digest": {
+                    "type": "string"
+                  },
+                  "confirmedBy": {
+                    "type": "string"
+                  },
+                  "confirmedAt": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "description",
+                  "command",
+                  "args",
+                  "digest",
+                  "confirmedBy",
+                  "confirmedAt"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "grants"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "read",
+        "invokable": true
+      },
+      {
+        "id": "watchers.triggers.grant.register",
+        "title": "Approve a command for triggers",
+        "description": "The owner approves one command (argv, optional working directory) that a trigger may run when it fires. Only the owner registers a grant; a caller that declares it is not a user request is refused. Re-registering the same command keeps its digest.",
+        "category": "watchers",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "ws"
+        ],
+        "scopes": [
+          "write:watchers"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string"
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "cwd": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "description",
+            "command"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "grant": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "command": {
+                  "type": "string"
+                },
+                "args": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "cwd": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                },
+                "confirmedBy": {
+                  "type": "string"
+                },
+                "confirmedAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "description",
+                "command",
+                "args",
+                "digest",
+                "confirmedBy",
+                "confirmedAt"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "grant"
+          ],
+          "additionalProperties": false
+        },
+        "dangerous": true,
+        "effect": "write",
+        "ownerOnly": true,
+        "invokable": true,
+        "errorCodes": [
+          {
+            "code": "TRIGGER_OPERATOR_REQUIRED",
+            "status": 403,
+            "meaning": "The caller is not an administrative operator with watcher access; call with the owner's operator credential."
+          },
+          {
+            "code": "TRIGGER_NOT_FOUND",
+            "status": 404,
+            "meaning": "No trigger has that id; list the triggers to see their ids."
+          },
+          {
+            "code": "TRIGGER_EXISTS",
+            "status": 409,
+            "meaning": "A trigger with that id exists; pick another id or cancel the existing one first."
+          },
+          {
+            "code": "TRIGGERS_OFF",
+            "status": 409,
+            "meaning": "The trigger family is off; set watchers.triggers.enabled to true and try again."
+          },
+          {
+            "code": "TRIGGER_RESET_REFUSED",
+            "status": 409,
+            "meaning": "The trigger is not stopped by its breaker, so there is nothing to reset; list the triggers to see its state."
+          },
+          {
+            "code": "TRIGGER_DEFINITION_INVALID",
+            "status": 400,
+            "meaning": "A field of the definition or grant was refused; the message names it. Fix it and send again."
+          },
+          {
+            "code": "TRIGGER_OTHER_PROCESS",
+            "status": 409,
+            "meaning": "Another GoodVibes process supervises these triggers; change them from that process, or close it so this one takes over."
+          },
+          {
+            "code": "TRIGGER_GRANT_CHANGED",
+            "status": 409,
+            "meaning": "The named grant no longer matches what the trigger was approved for; register the grant again and recreate the trigger."
+          }
+        ]
+      },
+      {
+        "id": "watchers.triggers.history",
+        "title": "Read a trigger's runs",
+        "description": "The newest runs of one trigger (default 20, at most 200): when, outcome, detail and how a watched command ended.",
+        "category": "watchers",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "ws"
+        ],
+        "scopes": [
+          "read:watchers"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "limit": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "trigger": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "watching": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "firedCount": {
+                  "type": "number"
+                },
+                "lastFiredAt": {
+                  "type": "string"
+                },
+                "nextCheckAt": {
+                  "type": "string"
+                },
+                "lastError": {
+                  "type": "string"
+                },
+                "droppedLines": {
+                  "type": "number"
+                },
+                "owedBatches": {
+                  "type": "number"
+                },
+                "next": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "kind",
+                "watching",
+                "state",
+                "firedCount"
+              ],
+              "additionalProperties": false
+            },
+            "runs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    },
+                    {},
+                    {
+                      "type": "array",
+                      "items": {}
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "required": [
+            "trigger",
+            "runs"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "read",
+        "invokable": true,
+        "errorCodes": [
+          {
+            "code": "TRIGGER_OPERATOR_REQUIRED",
+            "status": 403,
+            "meaning": "The caller is not an administrative operator with watcher access; call with the owner's operator credential."
+          },
+          {
+            "code": "TRIGGER_NOT_FOUND",
+            "status": 404,
+            "meaning": "No trigger has that id; list the triggers to see their ids."
+          },
+          {
+            "code": "TRIGGER_EXISTS",
+            "status": 409,
+            "meaning": "A trigger with that id exists; pick another id or cancel the existing one first."
+          },
+          {
+            "code": "TRIGGERS_OFF",
+            "status": 409,
+            "meaning": "The trigger family is off; set watchers.triggers.enabled to true and try again."
+          },
+          {
+            "code": "TRIGGER_RESET_REFUSED",
+            "status": 409,
+            "meaning": "The trigger is not stopped by its breaker, so there is nothing to reset; list the triggers to see its state."
+          },
+          {
+            "code": "TRIGGER_DEFINITION_INVALID",
+            "status": 400,
+            "meaning": "A field of the definition or grant was refused; the message names it. Fix it and send again."
+          },
+          {
+            "code": "TRIGGER_OTHER_PROCESS",
+            "status": 409,
+            "meaning": "Another GoodVibes process supervises these triggers; change them from that process, or close it so this one takes over."
+          },
+          {
+            "code": "TRIGGER_GRANT_CHANGED",
+            "status": 409,
+            "meaning": "The named grant no longer matches what the trigger was approved for; register the grant again and recreate the trigger."
+          }
+        ]
+      },
+      {
+        "id": "watchers.triggers.list",
+        "title": "List triggers",
+        "description": "List the supervised triggers: id, label, kind, what each watches, state, how often it fired and its last error.",
+        "category": "watchers",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "ws"
+        ],
+        "scopes": [
+          "read:watchers"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "ownership": {
+              "type": "string",
+              "enum": [
+                "local",
+                "other-process",
+                "unclaimed"
+              ]
+            },
+            "triggers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "watching": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "firedCount": {
+                    "type": "number"
+                  },
+                  "lastFiredAt": {
+                    "type": "string"
+                  },
+                  "nextCheckAt": {
+                    "type": "string"
+                  },
+                  "lastError": {
+                    "type": "string"
+                  },
+                  "droppedLines": {
+                    "type": "number"
+                  },
+                  "owedBatches": {
+                    "type": "number"
+                  },
+                  "next": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "label",
+                  "kind",
+                  "watching",
+                  "state",
+                  "firedCount"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "ownership",
+            "triggers"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "read",
+        "invokable": true
+      },
+      {
+        "id": "watchers.triggers.reset",
+        "title": "Reset a trigger's breaker",
+        "description": "Close the breaker of a trigger that stopped after repeated failures, once the cause is fixed. Refused, with the reason, when the trigger is not stopped.",
+        "category": "watchers",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "ws"
+        ],
+        "scopes": [
+          "write:watchers"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "trigger": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "watching": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "firedCount": {
+                  "type": "number"
+                },
+                "lastFiredAt": {
+                  "type": "string"
+                },
+                "nextCheckAt": {
+                  "type": "string"
+                },
+                "lastError": {
+                  "type": "string"
+                },
+                "droppedLines": {
+                  "type": "number"
+                },
+                "owedBatches": {
+                  "type": "number"
+                },
+                "next": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "kind",
+                "watching",
+                "state",
+                "firedCount"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "trigger"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
+        "invokable": true,
+        "errorCodes": [
+          {
+            "code": "TRIGGER_OPERATOR_REQUIRED",
+            "status": 403,
+            "meaning": "The caller is not an administrative operator with watcher access; call with the owner's operator credential."
+          },
+          {
+            "code": "TRIGGER_NOT_FOUND",
+            "status": 404,
+            "meaning": "No trigger has that id; list the triggers to see their ids."
+          },
+          {
+            "code": "TRIGGER_EXISTS",
+            "status": 409,
+            "meaning": "A trigger with that id exists; pick another id or cancel the existing one first."
+          },
+          {
+            "code": "TRIGGERS_OFF",
+            "status": 409,
+            "meaning": "The trigger family is off; set watchers.triggers.enabled to true and try again."
+          },
+          {
+            "code": "TRIGGER_RESET_REFUSED",
+            "status": 409,
+            "meaning": "The trigger is not stopped by its breaker, so there is nothing to reset; list the triggers to see its state."
+          },
+          {
+            "code": "TRIGGER_DEFINITION_INVALID",
+            "status": 400,
+            "meaning": "A field of the definition or grant was refused; the message names it. Fix it and send again."
+          },
+          {
+            "code": "TRIGGER_OTHER_PROCESS",
+            "status": 409,
+            "meaning": "Another GoodVibes process supervises these triggers; change them from that process, or close it so this one takes over."
+          },
+          {
+            "code": "TRIGGER_GRANT_CHANGED",
+            "status": 409,
+            "meaning": "The named grant no longer matches what the trigger was approved for; register the grant again and recreate the trigger."
+          }
+        ]
+      },
+      {
         "id": "watchers.triggers.status",
         "title": "Inspect supervised triggers",
         "description": "Read the surface trigger supervisor and affected record summaries without claiming execution ownership.",
@@ -151596,7 +155158,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "watchers.update",
         "title": "Update Watcher",
-        "description": "Update an existing watcher. (Renamed from watchers.patch in the 1.0.0 core-verb rename, canonical verb is update, not patch.)",
+        "description": "Update an existing watcher. A kind change needs what that kind needs (see watchers.create): a url for webhook or polling, a path for filesystem, nothing for manual. (Renamed from watchers.patch in the 1.0.0 core-verb rename, canonical verb is update, not patch.)",
         "category": "watchers",
         "source": "builtin",
         "access": "admin",
@@ -151685,9 +155247,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "additionalProperties": {
                 "type": "string"
               }
-            },
-            "run": {
-              "type": "string"
             }
           },
           "required": [
@@ -172848,7 +176407,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "workspaces.registrations.add",
         "title": "Register a Workspace",
-        "description": "Register a workspace root so the whole subtree beneath it is covered. Refuses an absurdly broad root (the home directory, the filesystem root, or the daemon state directory) with a 400, coverage flows down the entire subtree, so a root that broad would sweep far more than a project. Idempotent: re-registering the same normalized root returns alreadyRegistered:true. Registering a root clears any remembered decline recorded at exactly that root.",
+        "description": "Register a workspace root so the whole subtree beneath it is covered. Refuses an absurdly broad root (the home directory, the filesystem root, or the daemon state directory) with a 400, coverage flows down the entire subtree, so a root that broad would sweep far more than a project. Idempotent: re-registering the same normalized root returns alreadyRegistered:true. A root registered before native work existed has no native scope; re-registering it grants that scope and answers nativeScopeGranted:true (false otherwise), which is the step a native-work refusal asks for. Registering a root clears any remembered decline recorded at exactly that root.",
         "category": "workspaces",
         "source": "builtin",
         "access": "authenticated",
@@ -172914,11 +176473,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "alreadyRegistered": {
               "type": "boolean"
+            },
+            "nativeScopeGranted": {
+              "type": "boolean"
             }
           },
           "required": [
             "workspace",
-            "alreadyRegistered"
+            "alreadyRegistered",
+            "nativeScopeGranted"
           ],
           "additionalProperties": false
         },
@@ -175436,7 +178999,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "question",
                     "claim",
                     "purchase",
-                    "queued-action"
+                    "queued-action",
+                    "decision"
                   ]
                 },
                 "status": {
@@ -175586,7 +179150,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "control.ready",
         "title": "Ready Handshake",
-        "description": "Initial SSE/WebSocket handshake event emitted after a control-plane subscription is opened.",
+        "description": "Initial SSE/WebSocket handshake event emitted after a control-plane subscription is opened. `domains` is what the stream delivers; `withheldDomains` names requested domains this credential may not read; `unrecognisedDomains` names requested `?domains=` values that are not runtime event domains, so nothing will arrive for them (a request naming only unknown domains is refused with 400 UNKNOWN_EVENT_DOMAIN).",
         "category": "transport",
         "source": "builtin",
         "transport": [
@@ -175613,6 +179177,18 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "transport": {
               "type": "string"
+            },
+            "withheldDomains": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "unrecognisedDomains": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           },
           "required": [
@@ -175947,10 +179523,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       }
     ],
     "schemaCoverage": {
-      "methods": 608,
-      "typedInputs": 603,
+      "methods": 629,
+      "typedInputs": 624,
       "genericInputs": 5,
-      "typedOutputs": 606,
+      "typedOutputs": 627,
       "genericOutputs": 2
     },
     "eventCoverage": {
@@ -175959,8 +179535,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       "withWireEvents": 36
     },
     "validationCoverage": {
-      "methods": 608,
-      "validated": 601,
+      "methods": 629,
+      "validated": 622,
       "skippedGeneric": 0,
       "skippedUntyped": 7
     }

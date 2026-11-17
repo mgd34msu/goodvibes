@@ -146,7 +146,7 @@ class ChannelsToolsSurfaceListOutput(TypedDict, total=True):
 
 # control.status
 class ControlStatusInput(TypedDict, total=True):
-    receipts: NotRequired[Literal["consume", "peek", "ack"]]
+    receipts: NotRequired[Literal["peek", "ack"]]
     ids: NotRequired[str]
 
 class ControlStatusOutput(TypedDict, total=True):
@@ -396,6 +396,7 @@ class HomeassistantHomeGraphMapInput(TypedDict, total=True):
     installationId: NotRequired[str]
     knowledgeSpaceId: NotRequired[str]
     limit: NotRequired[float]
+    cursor: NotRequired[str]
     includeSources: NotRequired[bool]
     includeIssues: NotRequired[bool]
     includeGenerated: NotRequired[bool]
@@ -435,6 +436,7 @@ class HomeassistantHomeGraphMapOutput(TypedDict, total=True):
     edgeCount: float
     totalNodeCount: NotRequired[float]
     totalEdgeCount: NotRequired[float]
+    nextCursor: NotRequired[str]
     facets: NotRequired[Mapping[str, Any]]
     nodes: list[Mapping[str, Any]]
     edges: list[Mapping[str, Any]]
@@ -539,6 +541,7 @@ class HomeassistantHomeGraphReindexOutput(TypedDict, total=True):
     reparsed: float
     skipped: float
     failed: float
+    notExtractable: NotRequired[float]
     changedSourceCount: NotRequired[float]
     forcedSourceCount: NotRequired[float]
     skippedGeneratedPageArtifactCount: NotRequired[float]

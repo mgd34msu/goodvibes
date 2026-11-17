@@ -15,7 +15,7 @@ Auth: `Authorization: Bearer <token>` or the login session cookie. Errors are `{
 | `sessions.delete` | `DELETE /api/sessions/{sessionId}` | write:sessions |  | Permanently remove a shared session record and its queued inputs/messages from the home-scoped store. |
 | `sessions.detach` | `POST /api/sessions/{sessionId}/detach` | write:sessions |  | Remove a surface's participant and its route binding from a session so that surface stops receiving updates, … |
 | `sessions.followUp` | `POST /api/sessions/{sessionId}/follow-up` | write:sessions | body `messageId` | Queue a deferred follow-up for a shared session so it runs after the current agent completes, or spawn immedi… |
-| `sessions.get` | `GET /api/sessions/{sessionId}` | read:sessions |  | Return metadata for a shared session. |
+| `sessions.get` | `GET /api/sessions/{sessionId}` | read:transcripts |  | Return a shared session record with its newest 100 messages. |
 | `sessions.hosted.attach` | invoke / WebSocket only | write:sessions |  | Join a hosted session and receive its transcript so far, so a client that was never connected, or one reconne… |
 | `sessions.hosted.create` | invoke / WebSocket only | write:sessions |  | Compose a full conversation loop INSIDE the daemon for a workspace: the same orchestrator, tool registry and … |
 | `sessions.hosted.detach` | invoke / WebSocket only | write:sessions |  | Leave a hosted session. |
@@ -24,16 +24,16 @@ Auth: `Authorization: Bearer <token>` or the login session cookie. Errors are `{
 | `sessions.hosted.workspaces` | invoke / WebSocket only | read:sessions |  | The folders sessions.hosted.create accepts as workspaceRoot: the daemon's working directory and every registe… |
 | `sessions.inputs.cancel` | `POST /api/sessions/{sessionId}/inputs/{inputId}/cancel` | write:sessions |  | Cancel a queued shared-session input before it is delivered or spawned. |
 | `sessions.inputs.deliver` | `POST /api/sessions/{sessionId}/inputs/{inputId}/deliver` | write:sessions |  | A live registered surface reports that it collected a queued input (moves it to `delivered`) or finished acti… |
-| `sessions.inputs.list` | `GET /api/sessions/{sessionId}/inputs` | read:sessions |  | Return explicit session inputs, including queued follow-ups and delivered steering requests. |
+| `sessions.inputs.list` | `GET /api/sessions/{sessionId}/inputs` | read:transcripts |  | Return explicit session inputs, including queued follow-ups and delivered steering requests. |
 | `sessions.integration.snapshot` | `GET /api/session` | read:sessions |  | Return the session integration snapshot. |
 | `sessions.list` | `GET /api/sessions` | read:sessions |  | Return shared-session integration state. |
 | `sessions.messages.create` | `POST /api/sessions/{sessionId}/messages` | write:sessions | body `messageId` | Append a user message to a shared session. |
-| `sessions.messages.list` | `GET /api/sessions/{sessionId}/messages` | read:sessions |  | Return a page of retained session messages. |
+| `sessions.messages.list` | `GET /api/sessions/{sessionId}/messages` | read:transcripts |  | Return a page of retained session messages. |
 | `sessions.permissionMode.get` | `GET /api/sessions/{sessionId}/permission-mode` | read:sessions |  | Return the effective session execution mode: ask-me, jev-decides, just-vibes, yolo, or the read-only plan pos… |
 | `sessions.permissionMode.set` | `POST /api/sessions/{sessionId}/permission-mode` | write:sessions |  | Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. |
 | `sessions.queuedMessages.delete` | `DELETE /api/sessions/{sessionId}/queued-messages/{messageId}` | write:sessions |  | Remove a message still waiting in the mid-turn queue so it is never delivered. |
 | `sessions.queuedMessages.edit` | `POST /api/sessions/{sessionId}/queued-messages/{messageId}` | write:sessions |  | Replace the text of a message still waiting in the mid-turn queue. |
-| `sessions.queuedMessages.list` | `GET /api/sessions/{sessionId}/queued-messages` | read:sessions |  | List the messages queued behind the current turn (submitted while the model was thinking), in delivery order. |
+| `sessions.queuedMessages.list` | `GET /api/sessions/{sessionId}/queued-messages` | read:transcripts |  | List the messages queued behind the current turn (submitted while the model was thinking), in delivery order. |
 | `sessions.register` | `POST /api/sessions/register` | write:sessions | body `sessionId` | Idempotently register (or heartbeat) a session keyed on a caller-supplied id, carrying its kind, project, and… |
 | `sessions.reopen` | `POST /api/sessions/{sessionId}/reopen` | write:sessions |  | Reopen a previously closed shared session. |
 | `sessions.search` | invoke / WebSocket only | read:sessions |  | Paginated, filtered query over shared sessions: free-text query (matches id/title), project, kind, surfaceKin… |
@@ -132,10 +132,10 @@ Stream: `GET /api/control-plane/events?domains=<comma list>` (`text/event-stream
 These methods recognise a retry of the same request by a request header or a body field, and return the first result instead of acting twice:
 
 - `contracts.start`: header `Idempotency-Key`. A retry with the same key and the same body returns the first contract (with the Idempotent-Replayed: true response header) instead of starting a second one; the same key with a different body is refused with IDEMPOTENCY_KEY_REUSED. Keys are kept with the contract store per caller, so a retry after a daemon restart still returns the first contract; the body is compared field by field, in any order. The key may also be sent as `idempotencyKey` in the body; the header wins when both are given. A replayed result carries `replayed: true`.
-- `sessions.followUp`: body `messageId`. Sending the same messageId again (1 to 128 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response.
-- `sessions.messages.create`: body `messageId`. Sending the same messageId again (1 to 128 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response.
+- `sessions.followUp`: body `messageId`. Sending the same messageId again to the same session (1 to 128 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.
+- `sessions.messages.create`: body `messageId`. Sending the same messageId again to the same session (1 to 128 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.
 - `sessions.register`: body `sessionId`. Registering the same sessionId again is a heartbeat, not a second session; it returns the existing record.
-- `sessions.steer`: body `messageId`. Sending the same messageId again (1 to 128 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response.
+- `sessions.steer`: body `messageId`. Sending the same messageId again to the same session (1 to 128 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.
 - `workLedger.importLegacy`: body `requestId`. Sending the same requestId again replays the durable result without a new admission evaluation.
 - `workLedger.submit`: body `requestId`. Sending the same requestId with the same content again returns the original immutable receipt (replayed: true). After a lost response, use workLedger.submission.get with the same requestId.
 
@@ -162,7 +162,6 @@ Declared by each method beside its route; every operation also lists its own und
 | `SESSION_ACTIVE` | 409 | The session is still active; close it, then delete it. |
 | `INVALID_MESSAGE_ID` | 400 | messageId is not 1 to 128 letters, digits, ".", "_", ":" or "-"; nothing was changed. |
 | `SESSION_CLOSED` | 409 | The session is closed; reopen it (sessions.reopen) before sending to it. |
-| `WORKSPACE_BUSY` | 409 | A workspace swap is in progress; retry after retryAfterMs. |
 | `SESSION_AGENT_BIND_FAILED` | 500 | The input was accepted but the agent started for it could not be bound; the input was released to the queue. |
 | `CANCEL_NOT_ALLOWED` | 409 | Only a queued input can be cancelled; the body says whether it is running or ended. |
 | `INPUT_NOT_CLAIMABLE` | 409 | Another surface holds the input or it has ended; the body returns the input. Nothing was changed. |

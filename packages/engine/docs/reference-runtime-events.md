@@ -815,7 +815,8 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
             "question",
             "claim",
             "purchase",
-            "queued-action"
+            "queued-action",
+            "decision"
           ]
         },
         "status": {
@@ -1792,84 +1793,83 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
 | `sessionId` | string | yes |
-| `origin` | enum: `turn`, `agent-tool`, `cli`, `hosted`, `external`, `proposal` | yes |
+| `origin` | enum: `agent-tool`, `cli`, `external`, `hosted`, `proposal`, `turn` | yes |
 | `ask` | string | yes |
 | `ownerAgentId` | string | yes |
 | `gateProblems` | string[] | optional |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_STATUS_CHANGED`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
-| `from` | enum: `queued`, `shaping`, `planning`, `checking-plan`, `running`, `judging`, `fixing`, `committing`, `awaiting-owner`, `passed`, `failed`, `cancelled` | yes |
-| `to` | enum: `queued`, `shaping`, `planning`, `checking-plan`, `running`, `judging`, `fixing`, `committing`, `awaiting-owner`, `passed`, `failed`, `cancelled` | yes |
+| `from` | enum: `awaiting-owner`, `cancelled`, `checking-plan`, `committing`, `failed`, `fixing`, `judging`, `passed`, `planning`, `queued`, `running`, `shaping` | yes |
+| `to` | enum: `awaiting-owner`, `cancelled`, `checking-plan`, `committing`, `failed`, `fixing`, `judging`, `passed`, `planning`, `queued`, `running`, `shaping` | yes |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_SHAPED`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
 | `forbidsDelegation` | object | yes |
-| `forbidsDelegation.verdict` | enum: `yes`, `no`, `uncertain` | yes |
+| `forbidsDelegation.verdict` | enum: `no`, `uncertain`, `yes` | yes |
 | `forbidsDelegation.probability` | number | yes |
 | `forbidsDelegation.outcome` | enum: `act`, `confirm`, `escalate` | yes |
 | `requestsParallelAgents` | object | yes |
-| `requestsParallelAgents.verdict` | enum: `yes`, `no`, `uncertain` | yes |
+| `requestsParallelAgents.verdict` | enum: `no`, `uncertain`, `yes` | yes |
 | `requestsParallelAgents.probability` | number | yes |
 | `requestsParallelAgents.outcome` | enum: `act`, `confirm`, `escalate` | yes |
 | `forbidsWriting` | object | yes |
-| `forbidsWriting.verdict` | enum: `yes`, `no`, `uncertain` | yes |
+| `forbidsWriting.verdict` | enum: `no`, `uncertain`, `yes` | yes |
 | `forbidsWriting.probability` | number | yes |
 | `forbidsWriting.outcome` | enum: `act`, `confirm`, `escalate` | yes |
 | `asksForAttempts` | object | yes |
-| `asksForAttempts.verdict` | enum: `yes`, `no`, `uncertain` | yes |
+| `asksForAttempts.verdict` | enum: `no`, `uncertain`, `yes` | yes |
 | `asksForAttempts.probability` | number | yes |
 | `asksForAttempts.outcome` | enum: `act`, `confirm`, `escalate` | yes |
 | `decisionIds` | string[] | yes |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_PLANNED`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
 | `goal` | string | yes |
 | `criteria` | object[] | yes |
 | `criteria[].id` | string | yes |
 | `criteria[].text` | string | yes |
-| `criteria[].origin` | enum: `stated`, `derived`, `integration`, `fix`, `owner` | yes |
+| `criteria[].origin` | enum: `derived`, `fix`, `integration`, `owner`, `stated` | yes |
 | `criteria[].quote` | string | optional |
 | `criteria[].serves` | string[] | yes |
-| `criteria[].disposition` | enum: `judged`, `excluded`, `met-by-structure` | yes |
+| `criteria[].disposition` | enum: `excluded`, `judged`, `met-by-structure` | yes |
 | `criteria[].dispositionReason` | string | optional |
 | `groups` | object[] | yes |
 | `groups[].id` | string | yes |
 | `groups[].title` | string | yes |
-| `groups[].kind` | enum: `work`, `fix`, `integration` | yes |
+| `groups[].kind` | enum: `fix`, `integration`, `work` | yes |
 | `groups[].dependsOn` | string[] | yes |
 | `groups[].unitIds` | string[] | yes |
 | `units` | object[] | yes |
 | `units[].id` | string | yes |
 | `units[].groupId` | string | yes |
 | `units[].title` | string | yes |
-| `units[].role` | enum: `implement`, `research`, `design`, `integration` | yes |
+| `units[].role` | enum: `design`, `implement`, `integration`, `research` | yes |
 | `units[].dependsOn` | string[] | yes |
 | `units[].attempts` | number | yes |
 | `repair` | number | yes |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_PLAN_CHECKED`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
-| `check` | enum: `structure`, `criterion-trace`, `plan-coverage`, `criterion-shape`, `unit-shape` | yes |
+| `check` | enum: `criterion-shape`, `criterion-trace`, `plan-coverage`, `structure`, `unit-shape` | yes |
 | `targetId` | string | optional |
 | `passed` | boolean | yes |
 | `problems` | object[] | yes |
@@ -1877,34 +1877,34 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `problems[].targetId` | string | optional |
 | `problems[].message` | string | yes |
 | `decisionIds` | string[] | yes |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_GROUP_STATUS_CHANGED`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
 | `groupId` | string | yes |
-| `from` | enum: `pending`, `blocked`, `running`, `judging`, `fixing`, `awaiting-owner`, `passed`, `failed`, `cancelled` | yes |
-| `to` | enum: `pending`, `blocked`, `running`, `judging`, `fixing`, `awaiting-owner`, `passed`, `failed`, `cancelled` | yes |
+| `from` | enum: `awaiting-owner`, `blocked`, `cancelled`, `failed`, `fixing`, `judging`, `passed`, `pending`, `running` | yes |
+| `to` | enum: `awaiting-owner`, `blocked`, `cancelled`, `failed`, `fixing`, `judging`, `passed`, `pending`, `running` | yes |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_UNIT_STATUS_CHANGED`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
 | `groupId` | string | yes |
 | `unitId` | string | yes |
-| `from` | enum: `pending`, `blocked`, `running`, `checking`, `held`, `nudged`, `fixing`, `awaiting-owner`, `held-merge`, `passed`, `failed`, `cancelled` | yes |
-| `to` | enum: `pending`, `blocked`, `running`, `checking`, `held`, `nudged`, `fixing`, `awaiting-owner`, `held-merge`, `passed`, `failed`, `cancelled` | yes |
+| `from` | enum: `awaiting-owner`, `blocked`, `cancelled`, `checking`, `failed`, `fixing`, `held`, `held-merge`, `nudged`, `passed`, `pending`, `running` | yes |
+| `to` | enum: `awaiting-owner`, `blocked`, `cancelled`, `checking`, `failed`, `fixing`, `held`, `held-merge`, `nudged`, `passed`, `pending`, `running` | yes |
 | `agentId` | string | optional |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_UNIT_SPAWNED`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
 | `unitId` | string | yes |
 | `agentId` | string | yes |
@@ -1913,19 +1913,19 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `route.provider` | string | yes |
 | `route.reasoningEffort` | string | optional |
 | `route.reason` | string | yes |
-| `purpose` | enum: `unit`, `fresh-unit`, `transport-retry`, `silence-retry`, `resume` | yes |
+| `purpose` | enum: `fresh-unit`, `resume`, `silence-retry`, `transport-retry`, `unit` | yes |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_CHECKED`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
-| `scope` | enum: `unit`, `group`, `deliverable` | yes |
+| `scope` | enum: `deliverable`, `group`, `unit` | yes |
 | `targetId` | string | yes |
 | `checkId` | string | yes |
-| `trigger` | enum: `turn-end`, `completion`, `agent-failed`, `fix-passed`, `resume`, `owner-amend` | yes |
-| `result` | enum: `pass`, `nudge`, `await-owner`, `native-decision`, `stall`, `recorded` | yes |
+| `trigger` | enum: `agent-failed`, `completion`, `fix-passed`, `owner-amend`, `resume`, `turn-end` | yes |
+| `result` | enum: `await-owner`, `native-decision`, `nudge`, `pass`, `recorded`, `stall` | yes |
 | `criteria` | object[] | yes |
 | `criteria[].criterionId` | string | yes |
 | `criteria[].verdict` | enum: `met`, `unmet`, `unshown` | yes |
@@ -1935,203 +1935,204 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `goal.verdict` | enum: `met`, `unmet`, `unshown` | yes |
 | `goal.outcome` | enum: `act`, `confirm`, `escalate` | yes |
 | `quality` | object[] | yes |
-| `quality[].item` | enum: `placeholder`, `tests_weakened`, `breaks_existing`, `out_of_scope`, `hidden_failure`, `unsupported_claims` | yes |
-| `quality[].verdict` | enum: `yes`, `no`, `uncertain` | yes |
+| `quality[].item` | enum: `breaks_existing`, `hidden_failure`, `out_of_scope`, `placeholder`, `tests_weakened`, `unsupported_claims` | yes |
+| `quality[].verdict` | enum: `no`, `uncertain`, `yes` | yes |
 | `quality[].outcome` | enum: `act`, `confirm`, `escalate` | yes |
 | `gates` | object[] | yes |
 | `gates[].gate` | string | yes |
 | `gates[].passed` | boolean | yes |
 | `gates[].skipped` | boolean | yes |
-| `gates[].outcome` | enum: `passed`, `failed`, `unverified` | optional |
+| `gates[].outcome` | enum: `failed`, `passed`, `unverified` | optional |
 | `gates[].required` | boolean | optional |
 | `gates[].reason` | string | optional |
-| `claims` | enum: `files_verified`, `git_corroborated`, `verified_empty`, `unverifiable_no_claims`, `unverified` | optional |
+| `claims` | enum: `files_verified`, `git_corroborated`, `unverifiable_no_claims`, `unverified`, `verified_empty` | optional |
 | `decisionIds` | string[] | yes |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_NUDGED`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
 | `unitId` | string | yes |
 | `nudgeId` | string | yes |
 | `checkId` | string | yes |
-| `kinds` | enum[]: `unmet`, `unshown`, `regression`, `quality`, `gate`, `claims` | yes |
+| `kinds` | enum[]: `claims`, `gate`, `quality`, `regression`, `unmet`, `unshown` | yes |
 | `criterionIds` | string[] | yes |
-| `delivery` | enum: `hold`, `bus`, `wake` | yes |
+| `delivery` | enum: `bus`, `hold`, `wake` | yes |
 | `agentId` | string | yes |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_NUDGE_CONSUMED`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
 | `unitId` | string | yes |
 | `nudgeId` | string | yes |
 | `agentId` | string | yes |
 | `turn` | number | optional |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_CRITERION_REGRESSED`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
 | `unitId` | string | yes |
 | `criterionId` | string | yes |
 | `metAtCheckId` | string | yes |
 | `checkId` | string | yes |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_STALLED`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
-| `scope` | enum: `unit`, `group`, `deliverable` | yes |
+| `scope` | enum: `deliverable`, `group`, `unit` | yes |
 | `targetId` | string | yes |
-| `route` | enum: `split`, `fresh`, `owner` | yes |
+| `route` | enum: `fresh`, `owner`, `split` | yes |
 | `unmetCriterionIds` | string[] | yes |
 | `reason` | string | yes |
 | `decisionId` | string | optional |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_FIX_PLANNED`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
-| `scope` | enum: `unit`, `group`, `deliverable` | yes |
+| `scope` | enum: `deliverable`, `group`, `unit` | yes |
 | `targetId` | string | yes |
 | `groupId` | string | yes |
 | `unitIds` | string[] | yes |
 | `round` | number | yes |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_ESCALATED`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
 | `escalationId` | string | yes |
-| `scope` | enum: `plan`, `unit`, `group`, `deliverable`, `shape` | yes |
+| `scope` | enum: `deliverable`, `group`, `plan`, `shape`, `unit` | yes |
 | `targetId` | string | yes |
-| `reason` | enum: `plan-unresolved`, `stalled`, `unsettled`, `fix-rounds-exhausted`, `writing-unclear`, `attempts-undecided`, `owner-decision-needed` | yes |
+| `reason` | enum: `attempts-undecided`, `fix-rounds-exhausted`, `owner-decision-needed`, `plan-unresolved`, `stalled`, `unsettled`, `writing-unclear` | yes |
 | `question` | string | yes |
 | `unmetCriterionIds` | string[] | yes |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_OWNER_REPLIED`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
 | `escalationId` | string | yes |
-| `reading` | enum: `approve`, `reject`, `amend`, `unclear` | yes |
+| `reading` | enum: `amend`, `approve`, `reject`, `unclear` | yes |
 | `outcome` | enum: `act`, `confirm`, `escalate` | yes |
-| `action` | enum: `approved`, `amended`, `stopped`, `asked-again`, `refused` | yes |
+| `action` | enum: `amended`, `approved`, `asked-again`, `refused`, `stopped` | yes |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_GATE_RESULT`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
 | `targetId` | string | yes |
 | `gate` | string | yes |
 | `passed` | boolean | yes |
 | `skipped` | boolean | yes |
 | `durationMs` | number | yes |
-| `outcome` | enum: `passed`, `failed`, `unverified` | optional |
+| `outcome` | enum: `failed`, `passed`, `unverified` | optional |
 | `required` | boolean | optional |
 | `reason` | string | optional |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_UNIT_SILENT`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
 | `unitId` | string | yes |
 | `agentId` | string | yes |
 | `silentMs` | number | yes |
-| `action` | enum: `retried`, `failed` | yes |
+| `action` | enum: `failed`, `retried` | yes |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_MERGE_CONFLICT`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
 | `unitId` | string | yes |
 | `branch` | string | yes |
 | `path` | string | yes |
 | `files` | string[] | yes |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_ATTEMPTS_SELECTED`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
 | `unitId` | string | yes |
 | `candidateIds` | string[] | yes |
 | `chosen` | string|null | yes |
 | `outcome` | enum: `act`, `confirm`, `escalate` | yes |
 | `decisionId` | string | optional |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_COMMITTED`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
-| `status` | enum: `committed`, `applied`, `skipped`, `failed` | yes |
+| `status` | enum: `applied`, `committed`, `failed`, `skipped` | yes |
 | `hash` | string | optional |
 | `note` | string | yes |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_PASSED`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
 | `criteriaMet` | number | yes |
 | `criteriaJudged` | number | yes |
 | `excluded` | number | yes |
 | `nudges` | number | yes |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_FAILED`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
 | `reason` | string | yes |
-| `failureKind` | enum: `transport`, `max_turns`, `planning`, `budget`, `owner-rejected`, `judgment-unavailable`, `zombie`, `other` | yes |
+| `failureKind` | enum: `budget`, `judgment-unavailable`, `max_turns`, `other`, `owner-rejected`, `planning`, `transport`, `zombie` | yes |
 | `membersSettled` | boolean | yes |
 | `turnLimit` | number | optional |
-| `turnLimitSource` | enum: `default`, `spawn-override`, `policy-bound` | optional |
+| `turnLimitSource` | enum: `default`, `policy-bound`, `spawn-override` | optional |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_CANCELLED`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | yes |
 | `reason` | string | yes |
 | `filesModified` | number | yes |
+| `occurrenceId` | string | optional |
 
 ### `CONTRACT_SPAWN_GUARD_TRIGGERED`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `occurrenceId` | string | optional |
 | `contractId` | string | optional |
 | `agentId` | string | yes |
 | `depth` | number | yes |
 | `activeAgents` | number | yes |
 | `reason` | string | yes |
+| `occurrenceId` | string | optional |
 

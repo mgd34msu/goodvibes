@@ -316,7 +316,7 @@ export const BUILTIN_COMPAT_PROVIDERS: readonly BuiltinCompatDefinition[] = [
     // so only OpenAI models are listed.
     modelListing: 'none',
     label: 'Cloudflare AI Gateway',
-    setupDescription: 'Routes OpenAI requests through your Cloudflare AI Gateway (account id from cloudflare.accountId or CLOUDFLARE_ACCOUNT_ID, gateway id from CLOUDFLARE_AI_GATEWAY_ID); the stored key is the OpenAI key the gateway passes on.',
+    setupDescription: 'Routes OpenAI requests through your Cloudflare AI Gateway (account id from cloudflare.accountId or CLOUDFLARE_ACCOUNT_ID, gateway id from cloudflare.aiGatewayId or CLOUDFLARE_AI_GATEWAY_ID); the stored key is the OpenAI key the gateway passes on.',
     envVars: getBuiltinProviderEnvVars('cloudflare-ai-gateway'),
     serviceNames: ['cloudflare-ai-gateway'],
     baseURL: 'https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/openai',

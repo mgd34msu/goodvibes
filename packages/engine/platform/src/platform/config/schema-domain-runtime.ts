@@ -59,6 +59,7 @@ export const runtimeConfigDefaults = {
     enabled: false,
     freeTierMode: true,
     accountId: '',
+    aiGatewayId: '',
     apiTokenRef: '',
     zoneId: '',
     zoneName: '',
@@ -743,7 +744,13 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'cloudflare.accountId',
     type: 'string',
     default: '',
-    description: 'Cloudflare account id used by platform-owned Worker/Queue provisioning',
+    description: 'Cloudflare account id used by platform-owned Worker/Queue provisioning and by the cloudflare-ai-gateway provider (which falls back to CLOUDFLARE_ACCOUNT_ID when this is empty).',
+  },
+  {
+    key: 'cloudflare.aiGatewayId',
+    type: 'string',
+    default: '',
+    description: 'Cloudflare AI Gateway id the cloudflare-ai-gateway provider sends through (with cloudflare.accountId). If empty, the provider falls back to CLOUDFLARE_AI_GATEWAY_ID. A change to either id takes effect at once.',
   },
   {
     key: 'cloudflare.apiTokenRef',

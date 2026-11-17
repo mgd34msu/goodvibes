@@ -26,7 +26,7 @@ import {
   buildRegistryModelPricingDeps, resolveModelPricing as resolveModelPricingFromDeps, type ResolvedModelPricing,
 } from './model-pricing.js';
 import { GatewayPricingService } from './gateway-pricing.js';
-import { registerBuiltinProviders, CATALOG_PROVIDER_NAME_ALIASES } from './builtin-registry.js';
+import { registerBuiltinProviders, CATALOG_PROVIDER_NAME_ALIASES, CLOUDFLARE_GATEWAY_SETTING_KEYS } from './builtin-registry.js';
 import type { CacheHitTracker } from './cache-strategy.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { SubscriptionManager } from '../config/subscriptions.js';
@@ -182,6 +182,13 @@ export class ProviderRegistry {
       try { options.registerDispose?.(stopModelConfiguration); }
       catch (error) { stopModelConfiguration(); throw error; }
     }
+    // The Cloudflare AI Gateway's URL is built from these settings; a change rebuilds that one provider at once.
+    for (const key of CLOUDFLARE_GATEWAY_SETTING_KEYS) {
+      const stop = this.configManager.subscribe?.(key, () => this.rebuildBuiltins(new Set(['cloudflare-ai-gateway'])));
+      if (!stop) continue;
+      try { options.registerDispose?.(stop); }
+      catch (error) { stop(); throw error; }
+    }
   }
 
   /**
@@ -212,7 +219,7 @@ export class ProviderRegistry {
       runtimeBus: this.runtimeBus,
       persistenceRoot: this.getPersistenceRoot(),
       cachePolicy: this.configManager, // cache.enabled / cache.stableTtl, read per request like their hit-rate siblings
-      settings: this.configManager, // cloudflare.accountId for the Cloudflare AI Gateway base URL
+      settings: this.configManager, // cloudflare.accountId and cloudflare.aiGatewayId for the Cloudflare AI Gateway base URL
     });
     if (!this.providers.has('decision-router')) this.register(new DecisionRouterProvider({
       settings: () => this.configManager.get('provider.decisionRouter'),
@@ -240,6 +247,11 @@ export class ProviderRegistry {
     }
     if (changed.size === 0) return;
     this.builtinKeys = { ...resolved };
+    this.rebuildBuiltins(changed);
+  }
+
+  /** Replace the named builtins with ones built from the current keys and settings, and announce the change. */
+  private rebuildBuiltins(changed: ReadonlySet<string>): void {
     this.registerBuiltins({ keys: this.builtinKeys, changed });
     // Which failover groups have a callable backend follows the keys.
     this.syntheticCanonicalModels = buildSyntheticCanonicalModels(this.catalogModels, this.catalogProviderUsable);

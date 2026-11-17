@@ -51,18 +51,25 @@ function resolveFoundryBaseUrl(): string | null {
   return normalized.endsWith('/openai/v1') ? normalized : `${normalized}/openai/v1`;
 }
 
-/** Where the Cloudflare account id comes from: the `cloudflare.accountId` setting, then the environment. */
+/** Where the Cloudflare ids come from: the `cloudflare.accountId` and `cloudflare.aiGatewayId` settings, then the environment. */
 export interface CloudflareGatewaySettings {
-  get(key: 'cloudflare.accountId'): unknown;
+  get(key: 'cloudflare.accountId' | 'cloudflare.aiGatewayId'): unknown;
+}
+
+/** The settings the Cloudflare AI Gateway provider is built from; the registry rebuilds it when one changes. */
+export const CLOUDFLARE_GATEWAY_SETTING_KEYS = ['cloudflare.accountId', 'cloudflare.aiGatewayId'] as const;
+
+function settingOrEnv(settings: CloudflareGatewaySettings | undefined, key: 'cloudflare.accountId' | 'cloudflare.aiGatewayId', envVar: string): string | undefined {
+  const setting = settings?.get(key);
+  return (typeof setting === 'string' && setting.trim()) || firstEnvValue([envVar]);
 }
 
 const CLOUDFLARE_GATEWAY_UNCONFIGURED_BASE_URL = 'https://gateway-not-configured.invalid/openai';
 
 /** `https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/openai`, or null while either id is missing. */
 export function resolveCloudflareGatewayBaseUrl(settings?: CloudflareGatewaySettings): string | null {
-  const setting = settings?.get('cloudflare.accountId');
-  const accountId = (typeof setting === 'string' && setting.trim()) || firstEnvValue(['CLOUDFLARE_ACCOUNT_ID']);
-  const gatewayId = firstEnvValue(['CLOUDFLARE_AI_GATEWAY_ID']);
+  const accountId = settingOrEnv(settings, 'cloudflare.accountId', 'CLOUDFLARE_ACCOUNT_ID');
+  const gatewayId = settingOrEnv(settings, 'cloudflare.aiGatewayId', 'CLOUDFLARE_AI_GATEWAY_ID');
   if (!accountId || !gatewayId) return null;
   return `https://gateway.ai.cloudflare.com/v1/${encodeURIComponent(accountId)}/${encodeURIComponent(gatewayId)}/openai`;
 }
@@ -71,8 +78,8 @@ export function resolveCloudflareGatewayBaseUrl(settings?: CloudflareGatewaySett
 class CloudflareGatewayNotConfiguredProvider extends OpenAICompatProvider {
   override async chat(params: ChatRequest): Promise<ChatResponse> {
     throw new ProviderError(
-      `Provider "cloudflare-ai-gateway" has no account or gateway configured, the request for model "${params.model ?? 'default'}" was not sent and the API key was not used. Set cloudflare.accountId (or CLOUDFLARE_ACCOUNT_ID) and CLOUDFLARE_AI_GATEWAY_ID to your gateway's ids.`,
-      { category: 'config', guidance: 'Set cloudflare.accountId (or CLOUDFLARE_ACCOUNT_ID) and CLOUDFLARE_AI_GATEWAY_ID.' },
+      `Provider "cloudflare-ai-gateway" has no account or gateway configured, the request for model "${params.model ?? 'default'}" was not sent and the API key was not used. Set cloudflare.accountId and cloudflare.aiGatewayId (or CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_AI_GATEWAY_ID) to your gateway's ids; a setting takes effect at once.`,
+      { category: 'config', guidance: 'Set cloudflare.accountId and cloudflare.aiGatewayId (or CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_AI_GATEWAY_ID).' },
     );
   }
 }
@@ -93,7 +100,7 @@ export function createBuiltinCompatProvider(
     readonly cacheHitTracker?: import('./cache-strategy.js').CacheHitTracker | undefined;
     /** On-disk cache path for this provider's live-discovered model list. */
     readonly modelsCachePath?: string | undefined;
-    /** Settings the Cloudflare AI Gateway reads its account id from. */
+    /** Settings the Cloudflare AI Gateway reads its account and gateway ids from. */
     readonly settings?: CloudflareGatewaySettings | undefined;
   },
 ): LLMProvider {
@@ -196,7 +203,7 @@ export function registerBuiltinProviders(
      * itself as being for "eligible providers (Anthropic)".
      */
     readonly cachePolicy?: import('./cache-strategy.js').CachePolicyReader | undefined;
-    /** Settings a builtin reads at construction (the Cloudflare AI Gateway account id). */
+    /** Settings a builtin reads at construction (the Cloudflare AI Gateway account and gateway ids). */
     readonly settings?: CloudflareGatewaySettings | undefined;
   },
 ): void {

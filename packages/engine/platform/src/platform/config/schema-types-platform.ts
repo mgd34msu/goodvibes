@@ -23,6 +23,7 @@ export interface CloudflareConfig {
   enabled: boolean;
   freeTierMode: boolean;
   accountId: string;
+  aiGatewayId: string;
   apiTokenRef: string;
   zoneId: string;
   zoneName: string;

@@ -62,7 +62,7 @@ The runtime also supports a broad compatible/gateway layer. Each entry below is 
 | `xai` | xAI | `XAI_API_KEY` |
 | `xiaomi` | Xiaomi MiMo | `XIAOMI_API_KEY` |
 | `zai` | Z.ai | `ZAI_API_KEY` or `Z_AI_API_KEY` |
-| `cloudflare-ai-gateway` | Cloudflare AI Gateway (OpenAI models through your gateway; set `cloudflare.accountId` or `CLOUDFLARE_ACCOUNT_ID`, and `CLOUDFLARE_AI_GATEWAY_ID`, or nothing is sent) | `CLOUDFLARE_AI_GATEWAY_API_KEY` (the OpenAI key the gateway passes on) |
+| `cloudflare-ai-gateway` | Cloudflare AI Gateway (OpenAI models through your gateway; set `cloudflare.accountId` (or `CLOUDFLARE_ACCOUNT_ID`) and `cloudflare.aiGatewayId` (or `CLOUDFLARE_AI_GATEWAY_ID`), or nothing is sent; a setting change applies at once) | `CLOUDFLARE_AI_GATEWAY_API_KEY` (the OpenAI key the gateway passes on) |
 | `vercel-ai-gateway` | Vercel AI Gateway | `AI_GATEWAY_API_KEY` |
 | `litellm` | LiteLLM (local gateway, port 4000) | `LITELLM_API_KEY` |
 | `copilot-proxy` | Copilot Proxy (local gateway, port 3000) | `COPILOT_PROXY_API_KEY` |

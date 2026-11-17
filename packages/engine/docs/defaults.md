@@ -46,7 +46,8 @@ wait between attempts to 30 seconds.
 | `batch.maxQueueMessagesPerDay` | `1 000` | Free-tier-oriented client guardrail. |
 | `cloudflare.enabled` | `false` | Cloudflare is optional and never required for daemon value. |
 | `cloudflare.freeTierMode` | `true` | Prefer small queue signals and bounded daily usage. |
-| `cloudflare.accountId` | empty string | Cloudflare account id used by platform-owned provisioning. |
+| `cloudflare.accountId` | empty string | Cloudflare account id used by platform-owned provisioning and by the `cloudflare-ai-gateway` provider (which falls back to `CLOUDFLARE_ACCOUNT_ID`). |
+| `cloudflare.aiGatewayId` | empty string | Cloudflare AI Gateway id the `cloudflare-ai-gateway` provider sends through; empty falls back to `CLOUDFLARE_AI_GATEWAY_ID`. A change to either id rebuilds the provider at once. |
 | `cloudflare.apiTokenRef` | empty string | Secret reference for the Cloudflare API token; empty falls back to `CLOUDFLARE_API_TOKEN`. |
 | `cloudflare.zoneId` | empty string | Optional Cloudflare zone id used by DNS and Access automation. |
 | `cloudflare.zoneName` | empty string | Optional Cloudflare zone name used during onboarding/discovery. |

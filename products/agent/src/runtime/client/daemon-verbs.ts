@@ -38,6 +38,8 @@
  * and must never be laundered into an empty result.
  */
 import { statSync } from 'node:fs';
+import { getOperatorMethod } from '@goodvibes-jev/engine/contracts';
+import { validateOperatorResponse } from '@goodvibes-jev/engine/operator-client/client-core';
 import { OwnedSelectionObservation, captureRemoteSettingsPrecondition } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
 import { agentHostPairingStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-pairing-store';
@@ -300,6 +302,11 @@ export function createAgentDaemonVerbCaller(options: AgentDaemonVerbCallerOption
         const code = typeof body?.code === 'string' && body.code.length > 0 ? body.code : undefined;
         throw new ConnectedHostVerbError(`'${methodId}' failed: ${described}`, response.status, code);
       }
+      // The check the typed operator client applies, so a host of another
+      // version is reported as a contract mismatch naming the field, not as a
+      // TypeError inside the command that reads the answer.
+      const method = getOperatorMethod(methodId);
+      if (method) await validateOperatorResponse(method, payload);
       return payload as T;
     },
   };

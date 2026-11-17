@@ -33,9 +33,10 @@
  * does for the daemon itself (`resolveDaemonEndpoint`).
  */
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { createGoodVibesPlatform, isOperatorMethodId } from '@goodvibes-jev/engine/platform';
+import { createGoodVibesPlatform, getOperatorMethod, isOperatorMethodId } from '@goodvibes-jev/engine/platform';
 import type { GoodVibesPlatform } from '@goodvibes-jev/engine/platform';
 import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { validateOperatorResponse } from '@goodvibes-jev/engine/operator-client/client-core';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { readConnectedDaemonOrigin, resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config/goodvibes-home';
@@ -286,6 +287,11 @@ async function invokeGatewayMethodOverHttp<T>(
       status: response.status,
     });
   }
+  // The same check the typed client applies to an HTTP-bound verb, so a daemon
+  // of another version is reported as a contract mismatch naming the field,
+  // not as a TypeError inside the command that read the answer.
+  const method = getOperatorMethod(methodId);
+  if (method) await validateOperatorResponse(method, payload);
   return payload as T;
 }
 

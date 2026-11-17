@@ -39,16 +39,13 @@
  */
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { describeOperatorRpcError, getOperatorRpc, type OperatorRpc } from './operator-rpc.ts';
-import {
-  MALFORMED,
-  toProfileDocument,
-  toProfileProvenanceReport,
-  toProfileState,
-  toProfileWriteResult,
-  type ExactProfileInput,
-  type ProfileInput,
-  type ProfileVerb,
-  type ProfileWriteVerb,
+import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
+import type {
+  ExactProfileInput,
+  ProfileInput,
+  ProfileVerb,
+  ProfileWriteResultView,
+  ProfileWriteVerb,
 } from './profile-types.ts';
 import {
   PROFILE_TAG,
@@ -92,19 +89,15 @@ const USAGE = [
  * misspelled field name or a missing required argument is a compile error here
  * rather than a 400 discovered at runtime.
  *
- * The RESULT is deliberately `unknown`. Widening the method id to `string` at
- * the call site selects the client's generic
- * `invoke<T = unknown>(methodId: string, …)` overload rather than the typed
- * one, because the typed overload's return type is a claim about the wire that
- * nothing enforces: only 5 of the contract's 452 method ids carry a Zod
- * response schema and no `profile.*` verb is one of them (see
- * profile-types.ts). Every response goes through a checker before a renderer
- * reads a property off it.
+ * The result is the verb's contract output type, and that is enforced: the
+ * operator client checks every response against the verb's output schema in
+ * the operator contract before `invoke` resolves, and a mismatch rejects with a
+ * `ContractError` naming the verb and the field.
  */
 type ProfileInvoke = <TVerb extends ProfileVerb, TBody extends ProfileInput<TVerb>>(
   methodId: TVerb,
   input: ExactProfileInput<TVerb, TBody>,
-) => Promise<unknown>;
+) => Promise<OperatorMethodOutput<TVerb>>;
 
 /**
  * The rpc resolver, injectable so tests can drive the full command against a
@@ -116,10 +109,6 @@ export interface ProfileCommandDeps {
 }
 
 const DEFAULT_DEPS: ProfileCommandDeps = { resolveRpc: getOperatorRpc };
-
-function unrecognizedResponse(verb: string): string {
-  return `${PROFILE_TAG} the daemon answered ${verb} with a response this build does not recognise; it is probably running a different platform version. Nothing was read or written.`;
-}
 
 /**
  * Resolve what the owner typed to a field id.
@@ -137,14 +126,12 @@ async function resolveFieldToken(
   print: (text: string) => void,
 ): Promise<string | null> {
   if (token.includes('.')) return token;
-  let raw: unknown;
+  let document: OperatorMethodOutput<'profile.read'>;
   try {
-    raw = await invoke('profile.read', {});
+    document = await invoke('profile.read', {});
   } catch {
     return token;
   }
-  const document = toProfileDocument(raw);
-  if (document === MALFORMED) return token;
   const matches = collectFieldLabels(document).get(normalizeFieldToken(token));
   if (!matches || matches.length === 0) return token;
   if (matches.length === 1) return matches[0] ?? token;
@@ -154,8 +141,7 @@ async function resolveFieldToken(
 
 async function runShow(invoke: ProfileInvoke, print: (text: string) => void): Promise<void> {
   try {
-    const document = toProfileDocument(await invoke('profile.read', {}));
-    print(document === MALFORMED ? unrecognizedResponse('profile.read') : renderProfileDocument(document));
+    print(renderProfileDocument(await invoke('profile.read', {})));
   } catch (error) {
     print(`${PROFILE_TAG} ${describeOperatorRpcError(error)}`);
   }
@@ -163,8 +149,7 @@ async function runShow(invoke: ProfileInvoke, print: (text: string) => void): Pr
 
 async function runStatus(invoke: ProfileInvoke, print: (text: string) => void): Promise<void> {
   try {
-    const state = toProfileState(await invoke('profile.status', {}));
-    print(state === MALFORMED ? unrecognizedResponse('profile.status') : renderProfileStatus(state));
+    print(renderProfileStatus(await invoke('profile.status', {})));
   } catch (error) {
     print(`${PROFILE_TAG} ${describeOperatorRpcError(error)}`);
   }
@@ -174,8 +159,7 @@ async function runWhere(invoke: ProfileInvoke, token: string, print: (text: stri
   const fieldId = await resolveFieldToken(invoke, token, print);
   if (fieldId === null) return;
   try {
-    const report = toProfileProvenanceReport(await invoke('profile.provenance', { fieldId }));
-    print(report === MALFORMED ? unrecognizedResponse('profile.provenance') : renderProfileProvenance(report));
+    print(renderProfileProvenance(await invoke('profile.provenance', { fieldId })));
   } catch (error) {
     print(`${PROFILE_TAG} ${describeOperatorRpcError(error)}`);
   }
@@ -195,8 +179,9 @@ async function runWrite<TVerb extends ProfileWriteVerb, TBody extends ProfileInp
   print: (text: string) => void,
 ): Promise<void> {
   try {
-    const result = toProfileWriteResult(await invoke(verb, input));
-    print(result === MALFORMED ? unrecognizedResponse(verb) : renderProfileWriteResult(result));
+    // All four write verbs answer one shape (PROFILE_CONTRACT_SHAPES_AGREE).
+    const result: ProfileWriteResultView = await invoke(verb, input);
+    print(renderProfileWriteResult(result));
   } catch (error) {
     print(`${PROFILE_TAG} ${describeOperatorRpcError(error)}`);
   }
@@ -208,10 +193,16 @@ async function runWrite<TVerb extends ProfileWriteVerb, TBody extends ProfileInp
  * `note`, `forget` calls this solely when `--section` was given.
  */
 function parseSectionArgs(args: readonly string[]): { section: string; text: string } {
-  if (args[1] === '--section' && typeof args[2] === 'string' && args[2].length > 0) {
-    return { section: args[2], text: args.slice(3).join(' ').trim() };
-  }
-  return { section: 'Notes', text: args.slice(1).join(' ').trim() };
+  // The text arrives as typed (one raw word after the subcommand); a leading `--section <name>` is read off it.
+  const raw = args.slice(1).join(' ').trim();
+  const section = /^--section\s+(\S+)(?:\s+|$)/.exec(raw);
+  if (section) return { section: section[1]!, text: raw.slice(section[0].length).trim() };
+  return { section: 'Notes', text: raw };
+}
+
+/** Whether a `/profile` line names a prose section: `--section` first in its as-typed text. */
+function namesSection(args: readonly string[]): boolean {
+  return /^--section(?:\s|$)/.test(args.slice(1).join(' ').trim());
 }
 
 export function registerProfileRuntimeCommands(
@@ -223,6 +214,12 @@ export function registerProfileRuntimeCommands(
     description: 'What the platform knows about you: read it, correct it, trace where a fact came from, or forget one',
     usage: '[show|where <field>|set <field> <value>|note [--section <name>] <text>|forget <field>|forget --section <name> <text>|undo <field>|status]',
     argsHint: '[show|where|set|note|forget|undo|status]',
+    // Values, notes and line texts are kept as typed (a forget matches the exact text of a line).
+    rawRest: (args) => {
+      const sub = args[0];
+      if (sub === 'set') return 2;
+      return sub === 'note' || sub === 'forget' || sub === 'where' || sub === 'undo' ? 1 : undefined;
+    },
     async handler(args, ctx) {
       const sub = args[0] ?? 'show';
       if (!(SUBCOMMANDS as readonly string[]).includes(sub)) {
@@ -246,7 +243,7 @@ export function registerProfileRuntimeCommands(
       // about a person. The line is named by its exact text, never by position:
       // the owner edits this file himself, so an index taken from an earlier
       // read may address a different line by the time the delete lands (§9.2).
-      const forgetProse = sub === 'forget' && args[1] === '--section' ? parseSectionArgs(args) : null;
+      const forgetProse = sub === 'forget' && namesSection(args) ? parseSectionArgs(args) : null;
       if (forgetProse && forgetProse.text.length === 0) {
         ctx.print('Usage: /profile forget --section <name> <the exact text of the line>');
         return;
@@ -271,10 +268,14 @@ export function registerProfileRuntimeCommands(
         ctx.print(`${PROFILE_TAG} ${rpc.reason}`);
         return;
       }
-      // `methodId as string` is what picks the generic overload, so the result
-      // stays `unknown` and has to go through a checker, see ProfileInvoke.
-      const invoke: ProfileInvoke = (methodId, input) =>
-        rpc.platformClient.operator.invoke(methodId as string, input as unknown as Record<string, unknown>);
+      // `methodId as string` picks the client's single generic overload, so the
+      // input keeps ProfileInvoke's exact-key check; the client has already
+      // checked the answer against the verb's output schema, see ProfileInvoke.
+      const invoke: ProfileInvoke = async <TVerb extends ProfileVerb, TBody extends ProfileInput<TVerb>>(
+        methodId: TVerb,
+        input: ExactProfileInput<TVerb, TBody>,
+      ): Promise<OperatorMethodOutput<TVerb>> =>
+        await rpc.platformClient.operator.invoke(methodId as string, input as unknown as Record<string, unknown>) as OperatorMethodOutput<TVerb>;
       const print = (text: string): void => { ctx.print(text); };
 
       if (sub === 'show') {

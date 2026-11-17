@@ -49,6 +49,12 @@ export interface FakeModel {
   /** The full tool definitions of the last request that carried tools. */
   readonly lastTools: () => ReadonlyArray<{ function?: { name?: string; description?: string; parameters?: unknown } }>;
   script(marker: string, script: Script | readonly ScriptedReply[]): void;
+  /**
+   * A script for a prompt the product wraps in its own words (a channel
+   * message inside a session transcript): claimed when the newest user message
+   * contains the marker anywhere.
+   */
+  scriptWrapped(marker: string, script: Script | readonly ScriptedReply[]): void;
   /** Tool results the model received for a marker, in message order. */
   toolResults(marker: string): Array<{ id: string; name: string; content: string }>;
   stop(): void;
@@ -78,6 +84,7 @@ function streamReply(reply: ScriptedReply, model: string): string {
 
 export function startFakeModel(modelId = 'rt-1'): FakeModel {
   const scripts = new Map<string, Script>();
+  const wrapped = new Set<string>();
   const requests: RecordedRequest[] = [];
   let lastTools: ReadonlyArray<{ function?: { name?: string; description?: string; parameters?: unknown } }> = [];
   const server = Bun.serve({
@@ -102,6 +109,14 @@ export function startFakeModel(modelId = 'rt-1'): FakeModel {
         const text = textOf(message.content);
         // The longest marker the message starts with, so RTX and RTXY never claim each other's prompts.
         for (const key of scripts.keys()) if (text.trimStart().startsWith(key) && key.length > (marker?.length ?? 0)) { marker = key; lastUser = index; }
+      }
+      if (marker === null) {
+        const newest = [...messages].reverse().findIndex((message) => message.role === 'user');
+        if (newest >= 0) {
+          const index = messages.length - 1 - newest;
+          const text = textOf(messages[index]!.content);
+          for (const key of wrapped) if (text.includes(key) && key.length > (marker?.length ?? 0)) { marker = key; lastUser = index; }
+        }
       }
       const step = marker === null ? 0 : messages.slice(lastUser + 1).filter((message) => message.role === 'assistant').length;
       const script = marker === null ? undefined : scripts.get(marker);
@@ -130,6 +145,10 @@ export function startFakeModel(modelId = 'rt-1'): FakeModel {
     requests,
     lastTools: () => lastTools,
     script(marker, script) {
+      scripts.set(marker, typeof script === 'function' ? script : (step) => script[step]);
+    },
+    scriptWrapped(marker, script) {
+      wrapped.add(marker);
       scripts.set(marker, typeof script === 'function' ? script : (step) => script[step]);
     },
     toolResults(marker) {

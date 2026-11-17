@@ -517,14 +517,9 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
       if (dispatcher === null) {
         throw new ContractOperatorError('This daemon hosts no sessions, so it cannot dispatch work into a new one. Use contracts.start, which runs the work on the daemon\'s own runner.', 'NOT_HOSTING', 409);
       }
-      if (input.workspaceRoot !== undefined && (!isAbsolute(input.workspaceRoot) || !isWithin(deps.workingDirectory, input.workspaceRoot))) {
-        throw new ContractOperatorError(
-          `workspaceRoot must be an absolute path inside this daemon's workspace ${deps.workingDirectory}; '${input.workspaceRoot}' is not.`,
-          'INVALID_ARGUMENT',
-          400,
-          'workspaceRoot',
-        );
-      }
+      // workspaceRoot is admitted where the session is created: the hosted
+      // session manager's rule (the daemon's working directory and registered
+      // workspaces), refused there as INVALID_ARGUMENT.
       const handle = await dispatcher.dispatch({
         task: input.ask,
         metadata: {

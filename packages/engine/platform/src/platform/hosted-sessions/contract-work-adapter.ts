@@ -25,9 +25,8 @@ import {
   type ContractExternalWorkAdapter,
 } from '../contract/external.js';
 import { ContractOperatorError, type ContractOperatorService } from '../contract/operator-service.js';
-import { realpathSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { logger } from '../utils/logger.js';
+import { HostedSessionArgumentError } from './errors.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { HostedSessionManager } from './manager.js';
 
@@ -40,13 +39,12 @@ export interface HostedContractWorkAdapterDeps {
   readonly runner: Pick<ContractOperatorService, 'start' | 'get' | 'cancel'> & Partial<Pick<ContractOperatorService, 'attachDispatcher'>>;
   /** `kill` lets the adapter end a session it created once its contract is over or never started. */
   readonly hostedSessions: Pick<HostedSessionManager, 'create' | 'hosts'> & Partial<Pick<HostedSessionManager, 'kill'>>;
-  /** Where a session created for a dispatch works when the request names no workspace. Absolute. */
-  readonly workspaceRoot?: string | undefined;
   /**
-   * Directories a request's `metadata.workspaceRoot` must lie inside (symlinks resolved).
-   * Omitted ⇒ none: only the adapter's own `workspaceRoot`, which is always allowed.
+   * Where a session created for a dispatch works when the request names no workspace. Absolute.
+   * A `metadata.workspaceRoot` the request names is admitted by the session manager's own
+   * workspace rule (the daemon's working directory and registered workspaces), not here.
    */
-  readonly allowedWorkspaceRoots?: readonly string[] | undefined;
+  readonly workspaceRoot?: string | undefined;
   /**
    * Whether the requester may run work on the hosted session `metadata.sessionId` names.
    * Omitted ⇒ no request may name an existing session: the adapter has no requester
@@ -76,27 +74,6 @@ function metadataString(metadata: Record<string, unknown> | undefined, key: stri
 
 /** The contract statuses that have no further transition. */
 const SETTLED_STATUSES: ReadonlySet<string> = new Set(['passed', 'failed', 'cancelled']);
-
-/** The real path of `path`, or of its nearest existing ancestor with the rest appended, so a symlink inside a root cannot lead out of it. */
-function canonicalPath(path: string): string {
-  let head = resolve(path);
-  const tail: string[] = [];
-  for (;;) {
-    try {
-      return join(realpathSync(head), ...tail.reverse());
-    } catch {
-      const parent = dirname(head);
-      if (parent === head) return resolve(path);
-      tail.push(basename(head));
-      head = parent;
-    }
-  }
-}
-
-function insideRoot(root: string, candidate: string): boolean {
-  const fromRoot = relative(canonicalPath(root), canonicalPath(candidate));
-  return fromRoot === '' || (!fromRoot.startsWith('..') && !isAbsolute(fromRoot));
-}
 
 export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterDeps): HostedContractWorkAdapter {
   /** Sessions this adapter created for a dispatch, by contract id: it ends them with the work. */
@@ -157,13 +134,13 @@ export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterD
       const requested = metadataString(request.metadata, 'workspaceRoot');
       const workspaceRoot = requested ?? deps.workspaceRoot;
       if (workspaceRoot === undefined) throw new ContractOperatorError('A dispatch without a hosted session needs metadata.workspaceRoot: no default workspace is set.', 'INVALID_ARGUMENT', 400, 'workspaceRoot');
-      if (requested !== undefined) {
-        const roots = [...(deps.allowedWorkspaceRoots ?? []), ...(deps.workspaceRoot === undefined ? [] : [deps.workspaceRoot])];
-        if (!isAbsolute(requested) || !roots.some((root) => insideRoot(root, requested))) {
-          throw new ContractOperatorError(`metadata.workspaceRoot ${requested} is outside the workspaces this daemon allows for dispatched work.`, 'INVALID_ARGUMENT', 400, 'workspaceRoot');
-        }
+      try {
+        sessionId = (await deps.hostedSessions.create({ workspaceRoot })).id;
+      } catch (error) {
+        // The manager owns where work may run; its refusal is the caller's argument error here.
+        if (error instanceof HostedSessionArgumentError) throw new ContractOperatorError(error.message, 'INVALID_ARGUMENT', 400, 'workspaceRoot');
+        throw error;
       }
-      sessionId = (await deps.hostedSessions.create({ workspaceRoot })).id;
       created = true;
     }
     let started;

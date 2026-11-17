@@ -214,7 +214,7 @@ export function composeHostedSessionsForFacade(
   runtimeServices.contractOperator.attachHosted(manager.contractRunners());
   // Dispatched contract work (the external work seam) runs in a hosted session:
   // a new one in the daemon's working directory unless the request names a
-  // workspace inside it. Every floor's runner publishes on the daemon bus, so
+  // workspace the manager allows. Every floor's runner publishes on the daemon bus, so
   // settlement ends the session made for the work without anyone polling.
   manager.attachContractWork(createHostedContractWorkAdapter({
     runner: runtimeServices.contractOperator,

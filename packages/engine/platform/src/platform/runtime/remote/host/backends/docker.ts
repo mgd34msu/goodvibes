@@ -43,7 +43,7 @@ export function createDockerBackend(ctx: BackendContext): Backend {
 
         // Resolve DOCKER_HOST. When it is a secret reference, pull the real value
         // from the credential store and pass it via env (never argv).
-        const env: Record<string, string> = { ...(payload?.env ?? {}) };
+        const env: Record<string, string> = {};
         let credential: string | null = null;
         if (config.dockerHost) {
           let resolved: string | null;
@@ -64,7 +64,7 @@ export function createDockerBackend(ctx: BackendContext): Backend {
           env.DOCKER_HOST = resolved;
         }
 
-        const innerCommand = buildRemoteShellCommand(command, payload?.args);
+        const innerCommand = buildRemoteShellCommand(command, payload);
 
         const args = ['docker', 'exec'];
         if (payload?.stdin !== undefined) args.push('-i');

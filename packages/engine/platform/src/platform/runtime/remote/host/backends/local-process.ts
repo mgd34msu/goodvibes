@@ -1,3 +1,4 @@
+import { isAbsolute, resolve } from 'node:path';
 import type { PeerRecord } from '../peer-registry.js';
 import type { LocalProcessBackendConfig } from '../peer-registry.js';
 import {
@@ -64,6 +65,12 @@ export function tokenizeCommand(command: string): string[] {
   return tokens;
 }
 
+function resolveExecutable(executable: string, registeredCwd: string | undefined): string | null {
+  if (isAbsolute(executable)) return executable;
+  if (executable.includes('/')) return resolve(registeredCwd ?? process.cwd(), executable);
+  return Bun.which(executable, registeredCwd !== undefined ? { cwd: registeredCwd } : undefined);
+}
+
 /**
  * Local-process backend: spawns the command directly on the daemon host. This is
  * the lowest-friction backend, used for self-hosted peers. An optional
@@ -100,7 +107,14 @@ export function createLocalProcessBackend(ctx: BackendContext): Backend {
             );
           }
         }
-        const args = [...tokens, ...(payload?.args ?? [])];
+        // The program is found here, from the daemon's own PATH and the
+        // registered directory, before the payload's directory or environment
+        // apply, so neither can put a different program under an allowed name.
+        const program = resolveExecutable(executable, config.cwd);
+        if (program === null) {
+          throw new BackendDispatchError(`Command '${executable}' was not found on this host.`, 'REMOTE_BACKEND_BAD_COMMAND', 400);
+        }
+        const args = [program, ...tokens.slice(1), ...(payload?.args ?? [])];
         const cwd = payload?.cwd ?? config.cwd;
         ctx.logger.info('remote local-process dispatch', { peerId: peer.peerId, executable });
         const result = await runProcess({

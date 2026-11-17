@@ -370,7 +370,7 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
   },
   payload: {
     type: 'object',
-    description: 'Command payload for remote_peers_invoke. For a registered backend: stdin, env, timeoutMs, cwd (put arguments in command, not payload.args).',
+    description: 'Command payload for remote_peers_invoke. For a registered backend: stdin and timeoutMs (put arguments, environment and directory in command, not payload.args, payload.env or payload.cwd).',
   },
   displayName: {
     type: 'string',

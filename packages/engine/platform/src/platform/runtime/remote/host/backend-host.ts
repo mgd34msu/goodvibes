@@ -17,7 +17,13 @@ import { existsSync } from 'node:fs';
 import type { RemoteHostCredentialStore, RemoteHostLogger } from './context.js';
 import { PeerRegistry, type PeerRecord, type BackendKind } from './peer-registry.js';
 import { RemoteDispatcher, type RemoteInvokeResult } from './dispatcher.js';
-import { BackendDispatchError, type Backend, type DispatchPayload } from './backends/types.js';
+import {
+  BackendDispatchError,
+  ENV_NAME_PATTERN,
+  isProgramChangingEnvName,
+  type Backend,
+  type DispatchPayload,
+} from './backends/types.js';
 
 export interface RemoteBackendHostOptions {
   /** The project root; the registry lives in its private operator directory. */
@@ -81,6 +87,13 @@ export function readBackendPayload(payload: unknown, routeTimeoutMs?: number): D
     if (!env || typeof env !== 'object' || Array.isArray(env)
       || Object.values(env as Record<string, unknown>).some((value) => typeof value !== 'string')) {
       throw badPayload('payload.env must be an object of string values.');
+    }
+    const names = Object.keys(env);
+    const malformed = names.filter((name) => !ENV_NAME_PATTERN.test(name));
+    if (malformed.length > 0) throw badPayload(`payload.env names ${malformed.join(', ')} are not environment variable names.`);
+    const refused = names.filter(isProgramChangingEnvName);
+    if (refused.length > 0) {
+      throw badPayload(`payload.env may not set ${refused.join(', ')}: ${refused.length > 1 ? 'they change' : 'it changes'} which program runs or what it loads, so a command allowed by name could run something else.`);
     }
     read.env = { ...(env as Record<string, string>) };
   }

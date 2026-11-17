@@ -69,9 +69,14 @@ const REMOTE_MODE_ROUTES = {
       const absent = [...(peerId ? [] : ['peerId']), ...(command ? [] : ['command'])];
       if (absent.length > 0) return missing(absent, 'Call mode:"remote_peers" to list peers, then pass peerId (or target) and the command to run.');
       const payload = args.payload && typeof args.payload === 'object' && !Array.isArray(args.payload) ? args.payload as Record<string, unknown> : {};
-      // The permission gate judges `command`; arguments sent beside it would run without being judged.
+      // The permission gate judges `command`; arguments, environment or a
+      // directory sent beside it would change what runs without being judged.
       if (payload['args'] !== undefined) {
         return missing(['command with its arguments'], 'payload.args is not accepted here: put the arguments in command itself, so the command the permission gate judges is the command that runs.');
+      }
+      const unjudged = ['env', 'cwd'].filter((field) => payload[field] !== undefined);
+      if (unjudged.length > 0) {
+        return missing(['command with its environment and directory'], `payload.${unjudged.join(' and payload.')} ${unjudged.length > 1 ? 'are' : 'is'} not accepted here: on a shell backend write them into command itself (cd <dir> && NAME=value <command>), so the command the permission gate judges is the command that runs.`);
       }
       return { input: { peerId, command, ...(Object.keys(payload).length > 0 ? { payload } : {}) } };
     },

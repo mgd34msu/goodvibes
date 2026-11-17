@@ -82,7 +82,7 @@ export function createCloudTerminalBackend(ctx: BackendContext): Backend {
         if (tokenizeCommand(command).length === 0) {
           throw new BackendDispatchError('Empty command.', 'REMOTE_BACKEND_BAD_COMMAND', 400);
         }
-        const remoteCommand = buildRemoteShellCommand(command, payload?.args);
+        const remoteCommand = buildRemoteShellCommand(command, payload);
         const { args, credEnvKey } = buildArgs(config, remoteCommand);
         let credential: string | null;
         try {
@@ -97,7 +97,7 @@ export function createCloudTerminalBackend(ctx: BackendContext): Backend {
         const credPath = await scratch.write(credential, 'cred');
         try {
           lifetime.assertOpen();
-          const env: Record<string, string> = { ...(payload?.env ?? {}) };
+          const env: Record<string, string> = {};
           if (credEnvKey) env[credEnvKey] = credPath;
           ctx.logger.info('remote cloud-terminal dispatch', { peerId: peer.peerId, provider: config.provider });
           let result;

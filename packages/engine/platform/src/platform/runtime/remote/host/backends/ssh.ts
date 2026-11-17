@@ -142,13 +142,12 @@ export function createSshBackend(ctx: BackendContext): Backend {
             '-o', 'StrictHostKeyChecking=accept-new', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15'];
           if (identity.controlPath) args.push('-o', 'ControlMaster=auto', '-o', `ControlPath=${identity.controlPath}`, '-o', 'ControlPersist=60');
           else args.push('-o', 'ControlMaster=no', '-o', 'ControlPath=none');
-          args.push('--', identity.target, buildRemoteShellCommand(command, payload?.args));
+          args.push('--', identity.target, buildRemoteShellCommand(command, payload));
           ctx.logger.info('remote ssh dispatch', { peerId: peer.peerId, host: config.sshHost, port: config.sshPort ?? 22 });
           let result;
           try {
             result = await runProcess({
               args, timeoutMs: resolveTimeout(payload), signal,
-              ...(payload?.env !== undefined ? { env: payload.env } : {}),
               ...(payload?.stdin !== undefined ? { stdin: payload.stdin } : {}),
             });
           } catch {

@@ -10,11 +10,16 @@ export interface DispatchPayload {
   args?: string[];
   /** Data piped to the process stdin. */
   stdin?: string;
-  /** Per-invocation environment overlay (never includes secrets). */
+  /**
+   * Per-invocation environment for the command that runs (never includes
+   * secrets). Names that change which program runs or how it loads are
+   * refused when the payload is read. The shell-style backends set it inside
+   * the remote shell; it never reaches the local docker, ssh or cloud CLI.
+   */
   env?: Record<string, string>;
   /** Hard timeout for synchronous execution, in milliseconds. */
   timeoutMs?: number;
-  /** Working directory override (backend-dependent). */
+  /** Working directory of the command that runs (the shell-style backends change to it in the remote shell). */
   cwd?: string;
 }
 
@@ -97,7 +102,44 @@ export class BackendDispatchError extends Error {
  * The route is admin-only and a model's call is judged by the permission gate
  * on its `command` before it is sent, so callers that need literal arguments
  * pre-quote them inside `command` or `args`.
+ *
+ * `payload.env` and `payload.cwd` are applied inside the remote shell, quoted,
+ * ahead of the command, so they reach the command that runs and never the
+ * local CLI that carries it (where a variable such as DOCKER_HOST would send
+ * the command somewhere else).
  */
-export function buildRemoteShellCommand(command: string, args?: string[]): string {
-  return args && args.length > 0 ? `${command} ${args.join(' ')}` : command;
+export function buildRemoteShellCommand(command: string, payload?: DispatchPayload): string {
+  const line = payload?.args && payload.args.length > 0 ? `${command} ${payload.args.join(' ')}` : command;
+  const exports = Object.entries(payload?.env ?? {}).map(([name, value]) => `export ${name}=${quoteShell(value)}; `).join('');
+  const cd = payload?.cwd !== undefined ? `cd ${quoteShell(payload.cwd)} && ` : '';
+  return `${exports}${cd}${line}`;
 }
+
+function quoteShell(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/** An environment variable name a shell accepts. */
+export const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * Whether a payload environment variable would change which program runs or
+ * what it loads, so a command allowed by name could run something else.
+ */
+export function isProgramChangingEnvName(name: string): boolean {
+  const upper = name.toUpperCase();
+  if (PROGRAM_CHANGING_ENV_NAMES.has(upper)) return true;
+  return PROGRAM_CHANGING_ENV_PREFIXES.some((prefix) => upper.startsWith(prefix))
+    || upper.endsWith('_PROXY');
+}
+
+const PROGRAM_CHANGING_ENV_NAMES = new Set([
+  'PATH', 'HOME', 'SHELL', 'ENV', 'BASH_ENV', 'IFS', 'CDPATH', 'ZDOTDIR', 'PROMPT_COMMAND',
+  'NODE_OPTIONS', 'NODE_PATH', 'PYTHONPATH', 'PYTHONSTARTUP', 'PYTHONHOME', 'PERL5LIB', 'PERL5OPT',
+  'PERLLIB', 'RUBYOPT', 'RUBYLIB', 'JAVA_TOOL_OPTIONS', '_JAVA_OPTIONS', 'JDK_JAVA_OPTIONS',
+  'GIT_EXEC_PATH', 'GIT_PROXY_COMMAND', 'EDITOR', 'VISUAL', 'PAGER',
+  'DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CONFIG', 'DOCKER_CERT_PATH', 'DOCKER_TLS_VERIFY',
+  'SSH_AUTH_SOCK', 'SSH_ASKPASS', 'KUBECONFIG',
+]);
+
+const PROGRAM_CHANGING_ENV_PREFIXES = ['LD_', 'DYLD_', 'BUN_', 'GIT_SSH', 'GIT_CONFIG', 'CLOUDSDK_', 'AWS_', 'AZURE_', 'GOOGLE_'];

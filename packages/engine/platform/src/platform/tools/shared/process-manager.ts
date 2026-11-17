@@ -261,6 +261,8 @@ export class ProcessManager {
   private readonly _expired = new Map<string, number>();
   private readonly _launches = new Set<Promise<BgCommandResult>>();
   private _closed = false;
+  /** Fires when the oldest kept finished record reaches its retention limit; reads never prune. */
+  private _pruneTimer: ReturnType<typeof setTimeout> | undefined;
   private _closing: Promise<void> | undefined;
   /** Callers of `whenSettled`, woken when their process finishes or its record goes. */
   private readonly _settledWaiters = new Map<string, Set<() => void>>();
@@ -355,6 +357,8 @@ export class ProcessManager {
   close(): Promise<void> {
     if (this._closing) return this._closing;
     this._closed = true;
+    if (this._pruneTimer !== undefined) clearTimeout(this._pruneTimer);
+    this._pruneTimer = undefined;
     this._closing = Promise.resolve().then(async () => {
       // No launch may spawn after the closed check, so drain its credential
       // resolution concurrently instead of delaying existing-child termination.
@@ -727,7 +731,6 @@ export class ProcessManager {
 
   /** Authority-scoped bg_* access. Another captured caller cannot inspect/stop it. */
   async handleOwnedBoundaryCommand(cmd: string, owner: object): Promise<BgCommandResult | null> {
-    this.pruneCompletedProcesses();
     const match = cmd.match(/^bg_(status|output|stop)\s+(\S+)$/);
     if (cmd.trim() === 'bg_list') {
       const ids = new Set([...this._boundaryExecutions].filter(([, item]) => item.owner === owner).map(([id]) => id));
@@ -780,13 +783,11 @@ export class ProcessManager {
 
   /** Get the status record for a background process, or undefined if not found. */
   getStatus(id: string): BackgroundProcess | undefined {
-    this.pruneCompletedProcesses();
     return this._processes.get(id);
   }
 
   /** Get the accumulated stdout/stderr for a background process. */
   getOutput(id: string): { stdout: string; stderr: string } | undefined {
-    this.pruneCompletedProcesses();
     const entry = this._processes.get(id);
     if (!entry) return undefined;
     return {
@@ -891,7 +892,6 @@ export class ProcessManager {
   async handleCommandAsync(cmd: string): Promise<BgCommandResult | null> {
     const stopMatch = cmd.match(/^bg_stop\s+(\S+)$/);
     if (!stopMatch || this._boundaryExecutions.has(stopMatch[1]!)) return this.handleCommand(cmd);
-    this.pruneCompletedProcesses();
     const id = stopMatch[1]!;
     const outcome = await this.stopConfirmed(id);
     if (outcome === 'unknown') return { cmd, exit_code: 1, stdout: '', stderr: `Unknown process: ${id}`, success: false };
@@ -904,9 +904,18 @@ export class ProcessManager {
   /** Runtime cleanup can distinguish retained boundaries without exposing their owner token. */
   hasBoundaryOwner(id: string): boolean { return this._boundaryExecutions.has(id); }
 
+  /**
+   * How many processes `bg_list` would show as running, counted in place: no
+   * copy, no prune. Cheap enough for every frame.
+   */
+  runningCount(): number {
+    let running = 0;
+    for (const entry of this._processes.values()) if (!entry.done && !this._boundaryExecutions.has(entry.id)) running++;
+    return running;
+  }
+
   /** List tracked processes with authoritative completion and display status. */
   list(): Array<{ id: string; pid: number; cmd: string; status: string; done: boolean; startedBy?: string | undefined }> {
-    this.pruneCompletedProcesses();
     return Array.from(this._processes.values()).map((e) => ({
       id: e.id,
       pid: e.pid,
@@ -922,7 +931,6 @@ export class ProcessManager {
    * Returns a BgCommandResult if the command was handled, null otherwise.
    */
   handleCommand(cmd: string): BgCommandResult | null {
-    this.pruneCompletedProcesses();
     const boundaryMatch = cmd.match(/^bg_(?:status|output|stop)\s+(\S+)(?:\s.*)?$/);
     if (boundaryMatch && this._boundaryExecutions.has(boundaryMatch[1]!))
       return { cmd, exit_code: 1, stdout: '', stderr: 'This process requires its captured execution authority', success: false };
@@ -996,20 +1004,38 @@ export class ProcessManager {
     return null;
   }
 
+  /**
+   * Drops finished records past their retention (age or count). Runs where a
+   * process starts or finishes, and from a timer set for the moment the oldest
+   * kept record expires; no read prunes.
+   */
   private pruneCompletedProcesses(now = Date.now()): void {
     const completed = [...this._processes.values()]
       .filter((entry) => entry.done)
       .sort((a, b) => (b.completedAt ?? b.startTime) - (a.completedAt ?? a.startTime));
+    let oldestKept: number | undefined;
     for (let i = 0; i < completed.length; i++) {
       const entry = completed[i]!;
       const completedAt = entry.completedAt ?? entry.startTime;
-      if (now - completedAt <= COMPLETED_PROCESS_TTL_MS && i < MAX_COMPLETED_PROCESSES) continue;
+      if (now - completedAt <= COMPLETED_PROCESS_TTL_MS && i < MAX_COMPLETED_PROCESSES) {
+        oldestKept = completedAt;
+        continue;
+      }
       this._processes.delete(entry.id);
       this._inputs.delete(entry.id);
       this._boundaryExecutions.delete(entry.id);
       this._expired.set(entry.id, completedAt);
       if (this._expired.size > MAX_EXPIRED_PROCESSES) this._expired.delete(this._expired.keys().next().value!);
       void this.releaseSpills(entry.id);
+    }
+    if (this._pruneTimer !== undefined) clearTimeout(this._pruneTimer);
+    this._pruneTimer = undefined;
+    if (oldestKept !== undefined && !this._closed) {
+      this._pruneTimer = setTimeout(() => {
+        this._pruneTimer = undefined;
+        this.pruneCompletedProcesses();
+      }, Math.max(0, oldestKept + COMPLETED_PROCESS_TTL_MS + 1 - now));
+      this._pruneTimer.unref?.();
     }
     // Every path that finishes a process prunes, so this is where its waiters wake.
     for (const [id, waiters] of this._settledWaiters) {

@@ -1237,7 +1237,7 @@ async function main() {
       keepAwakeRefused: !keepAwakeHolding(powerChipSource.get()) && powerChipSource.get().keepAwake,
       microphone: voice && voiceCaptureRowVisible(voice) ? voiceCaptureDescription(voice) : null,
       runningAgents: agentManager.list().filter((a) => a.status === 'running' || a.status === 'pending').length,
-      runningProcesses: processManager.list().filter((p) => processManager.getStatus(p.id)?.done === false).length,
+      runningProcesses: processManager.runningCount(),
     });
   };
   wireShellUiOpeners({

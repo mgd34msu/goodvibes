@@ -5,15 +5,12 @@ import { MODAL_NAMES, isModalActive, type ActiveModalState } from './modal-state
 import type { SessionTarget } from './session-focus.js';
 /** Per-frame observations shared by terminal renderers; presentation remains in each shell. */
 export function readShellFrameFacts<PromptInfo>(
-  processManager: {
-    list(): readonly { readonly id: string }[];
-    getStatus(id: string): { readonly done: boolean } | null | undefined;
-  },
+  processManager: { runningCount(): number },
   input: { readonly prompt: string; getWrappedPromptInfo(width: number): PromptInfo },
   promptWidth: () => number,
   argsHint: (prompt: string) => string | undefined,
 ) {
-  const runningProcessCount = processManager.list().filter((process) => processManager.getStatus(process.id)?.done === false).length;
+  const runningProcessCount = processManager.runningCount();
   const cw = promptWidth();
   return { runningProcessCount, cw, promptInfo: input.getWrappedPromptInfo(cw), commandArgsHint: argsHint(input.prompt) };
 }

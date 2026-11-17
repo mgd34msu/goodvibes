@@ -291,7 +291,7 @@ async function main() {
         busy: mainTurnBusy(),
         label: remoteConversation.hostedToolPreview() ?? sessionSnapshot.streamToolPreview?.trim() ?? undefined,
         agents: buildActivityAgentRows(activeAgents, ctx.services.fleetUnion.nodes()),
-        processes: processManager.list().filter((p) => processManager.getStatus(p.id)?.done === false).length,
+        processes: processManager.runningCount(),
         daemonPartial: ctx.services.fleetUnion.partial() ?? undefined,
       },
       needsYou: pendingPermission ? ['Approval needed, answer the prompt on screen.'] : [],
@@ -502,7 +502,7 @@ async function main() {
       userIsMidGesture: () => input.prompt.length > 0 || input.modalStack.length > 0 || input.waitingForOwner
         || shellCommandsRunning > 0 || setupPairing?.ownsInput === true || pendingPermission !== null,
       workRunningHere: () => mainTurnBusy() || uiServices.readModels.agents.getSnapshot().active.length > 0
-        || processManager.list().some((entry) => processManager.getStatus(entry.id)?.done === false),
+        || processManager.list().some((entry) => !entry.done),
       sessionId: () => runtime.sessionId,
       notify: (line) => {
         systemMessageRouter.high(`[Update] ${line}`);

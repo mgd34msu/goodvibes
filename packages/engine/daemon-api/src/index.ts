@@ -60,6 +60,8 @@ export type {
   RouteBodySchema,
 } from './route-helpers.js';
 export type {
+  ChannelActionOutcomeLike,
+  ChannelActionRefusalLike,
   ChannelAgentToolDefinitionLike,
   ChannelAllowlistInput,
   ChannelAuthorizeActionInput,

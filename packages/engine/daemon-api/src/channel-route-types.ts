@@ -106,6 +106,24 @@ export interface ChannelDirectoryQuery {
   readonly live?: boolean | undefined;
 }
 
+/** A refusal as a channel tool or action states it: what is true, why, and what to do next. */
+export interface ChannelActionRefusalLike {
+  readonly code: string;
+  readonly state: string;
+  readonly reason: string;
+  readonly next: readonly string[];
+  readonly status?: number | undefined;
+}
+
+/**
+ * What a channel tool or operator action call came to: the answer, or a
+ * refusal saying the thing asked about was not found, the call was refused, or
+ * the surface has no such tool or action. Only `ok` is a success.
+ */
+export type ChannelActionOutcomeLike =
+  | { readonly status: 'ok'; readonly result: unknown }
+  | { readonly status: 'not-found' | 'refused' | 'unknown-action'; readonly refusal: ChannelActionRefusalLike };
+
 export interface ChannelPluginServiceLike {
   listAccounts(surface?: ChannelSurface): Promise<readonly unknown[]>;
   getAccount(surface: ChannelSurface, accountId: string): Promise<unknown | null>;
@@ -122,9 +140,9 @@ export interface ChannelPluginServiceLike {
   listCapabilities(surface?: ChannelSurface): Promise<readonly unknown[]>;
   listTools(surface?: ChannelSurface): Promise<readonly unknown[]>;
   listAgentTools(surface?: ChannelSurface): readonly ChannelAgentToolDefinitionLike[];
-  runTool(surface: ChannelSurface, toolId: string, input?: JsonRecord): Promise<unknown | null>;
+  invokeTool(surface: ChannelSurface, toolId: string, input?: JsonRecord): Promise<ChannelActionOutcomeLike>;
   listOperatorActions(surface?: ChannelSurface): Promise<readonly unknown[]>;
-  runOperatorAction(surface: ChannelSurface, actionId: string, input?: JsonRecord): Promise<unknown | null>;
+  invokeOperatorAction(surface: ChannelSurface, actionId: string, input?: JsonRecord): Promise<ChannelActionOutcomeLike>;
   resolveTarget(surface: ChannelSurface, input: ChannelTargetResolutionInput): Promise<ChannelResolvedTargetLike | null>;
   authorizeActorAction(surface: ChannelSurface, input: ChannelAuthorizeActionInput): Promise<unknown | null>;
   resolveAllowlist(surface: ChannelSurface, input: ChannelAllowlistInput): Promise<unknown | null>;

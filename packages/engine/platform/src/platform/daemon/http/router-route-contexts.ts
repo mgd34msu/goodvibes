@@ -18,6 +18,7 @@ import type { IntegrationHelperService } from '../../runtime/integration/helpers
 import type { ApprovalBroker } from '../../control-plane/index.js';
 import type { PlatformServiceManager } from '../service-manager.js';
 import { toRecord } from '../../utils/record-coerce.js';
+import { unknownChannelAction } from '../../channels/action-outcome.js';
 import type { JsonRecord } from '../helpers.js';
 import type { WatcherRegistry } from '../../watchers/index.js';
 import type { DaemonChannelRouteContext, InboundMailHealthLike } from './channel-route-types.js';
@@ -122,14 +123,18 @@ export function buildChannelRouteContext(input: {
         if (surface !== undefined && !isChannelSurface(surface)) return [];
         return input.channelPlugins.listAgentTools(surface);
       },
-      runTool: async (surface, toolId, body) =>
-        isChannelSurface(surface) ? input.channelPlugins.runTool(surface, toolId, body) : null,
+      invokeTool: async (surface, toolId, body) =>
+        isChannelSurface(surface)
+          ? input.channelPlugins.invokeTool(surface, toolId, body)
+          : unknownChannelAction(surface as ChannelSurface, 'surface', toolId, []),
       listOperatorActions: async (surface) => {
         if (surface !== undefined && !isChannelSurface(surface)) return [];
         return input.channelPlugins.listOperatorActions(surface);
       },
-      runOperatorAction: async (surface, actionId, body) =>
-        isChannelSurface(surface) ? input.channelPlugins.runOperatorAction(surface, actionId, body) : null,
+      invokeOperatorAction: async (surface, actionId, body) =>
+        isChannelSurface(surface)
+          ? input.channelPlugins.invokeOperatorAction(surface, actionId, body)
+          : unknownChannelAction(surface as ChannelSurface, 'surface', actionId, []),
       resolveTarget: async (surface, target) =>
         isChannelSurface(surface) ? input.channelPlugins.resolveTarget(surface, target) : null,
       authorizeActorAction: async (surface, authz) => {

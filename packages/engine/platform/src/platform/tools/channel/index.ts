@@ -2,6 +2,7 @@ import type { Tool } from '../../types/tools.js';
 import type { ChannelPluginRegistry } from '../../channels/index.js';
 import type { ChannelConversationKind } from '../../channels/index.js';
 import { CHANNEL_ACCOUNT_ACTION_EFFECTS, readAccountLifecycleAction } from '../../channels/builtin/account-action-effects.js';
+import { describeActionFailure } from '../../channels/action-outcome.js';
 
 function formatJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
@@ -194,17 +195,15 @@ export function createChannelTool(registry: ChannelPluginRegistry | null): Tool 
             || described.actionIds.some((id) => OWNER_ONLY_OPERATOR_ACTIONS.has(id) || id === 'account-action'))) {
             return invalid(`Channel tool '${args.toolId}' on '${surface}' changes credentials or access or is marked dangerous, so this tool does not run it. Nothing was changed. Ask the owner to run it from the operator surface (the daemon channel routes or the terminal channel commands).`);
           }
-          const result = await registry.runTool(
+          const outcome = await registry.invokeTool(
             surface as never,
             args.toolId,
             typeof args.input === 'object' && args.input !== null ? args.input as Record<string, unknown> : undefined,
           );
-          if (result === null) {
-            return invalid(`Unknown channel tool '${args.toolId}' for surface '${surface}'.`);
-          }
+          if (outcome.status !== 'ok') return invalid(describeActionFailure(outcome));
           return {
             success: true,
-            output: formatJson({ surface, toolId: args.toolId, result }),
+            output: formatJson({ surface, toolId: args.toolId, result: outcome.result }),
           };
         }
         case 'actions': {
@@ -226,17 +225,15 @@ export function createChannelTool(registry: ChannelPluginRegistry | null): Tool 
           if (described?.dangerous) {
             return invalid(`Channel action '${args.actionId}' on '${surface}' is marked dangerous, so this tool does not run it: a confirmation in the tool arguments is not the owner's. Nothing was changed. Ask the owner to run it from the operator surface.`);
           }
-          const result = await registry.runOperatorAction(
+          const outcome = await registry.invokeOperatorAction(
             surface as never,
             args.actionId,
             typeof args.input === 'object' && args.input !== null ? args.input as Record<string, unknown> : undefined,
           );
-          if (result === null) {
-            return invalid(`Unknown channel action '${args.actionId}' for surface '${surface}'.`);
-          }
+          if (outcome.status !== 'ok') return invalid(describeActionFailure(outcome));
           return {
             success: true,
-            output: formatJson({ surface, actionId: args.actionId, result }),
+            output: formatJson({ surface, actionId: args.actionId, result: outcome.result }),
           };
         }
         case 'authorize': {

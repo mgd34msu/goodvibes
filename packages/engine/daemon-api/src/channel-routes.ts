@@ -9,6 +9,7 @@ import {
   type JsonRecord,
 } from './route-helpers.js';
 import type {
+  ChannelActionOutcomeLike,
   ChannelConversationPolicy,
   ChannelDirectoryScope,
   ChannelGroupPolicyInput,
@@ -37,6 +38,20 @@ const POLICY_BOOLEAN_FIELDS = [
 ] as const;
 const POLICY_MODE_FIELDS = ['dmPolicy', 'groupPolicy'] as const;
 const POLICY_LIST_FIELDS = ['allowlistUserIds', 'allowlistChannelIds', 'allowlistGroupIds', 'allowedCommands'] as const;
+
+/**
+ * A channel tool or action that did not run to an answer: 404 when the thing it
+ * asked about or the tool or action itself does not exist, 400 when it was
+ * refused, with the refusal's state, reason and next steps.
+ */
+function channelActionRefusalResponse(outcome: Exclude<ChannelActionOutcomeLike, { readonly status: 'ok' }>): Response {
+  const { refusal } = outcome;
+  const status = refusal.status ?? (outcome.status === 'refused' ? 400 : 404);
+  return jsonErrorResponse(
+    { error: refusal.reason, code: refusal.code, state: refusal.state, next: refusal.next, status },
+    { status },
+  );
+}
 
 function invalidPolicyField(field: string, expected: string): Response {
   return jsonErrorResponse(
@@ -266,14 +281,14 @@ export function createDaemonChannelRouteHandlers(
       if (admin) return admin;
       const input = await readOptionalChannelBody(context, req);
       if (input instanceof Response) return input;
-      const result = await context.channelPlugins.runTool(
+      const outcome = await context.channelPlugins.invokeTool(
         surface as ChannelSurface,
         toolId,
         input,
       );
-      return result !== null
-        ? Response.json({ toolId, surface, result })
-        : jsonErrorResponse({ error: 'Unknown channel tool' }, { status: 404 });
+      return outcome.status === 'ok'
+        ? Response.json({ toolId, surface, result: outcome.result })
+        : channelActionRefusalResponse(outcome);
     },
     getChannelActions: () => context.channelPlugins.listOperatorActions().then((actions) => Response.json({ actions })),
     getChannelSurfaceActions: (surface) => context.channelPlugins
@@ -284,14 +299,14 @@ export function createDaemonChannelRouteHandlers(
       if (admin) return admin;
       const input = await readOptionalChannelBody(context, req);
       if (input instanceof Response) return input;
-      const result = await context.channelPlugins.runOperatorAction(
+      const outcome = await context.channelPlugins.invokeOperatorAction(
         surface as ChannelSurface,
         actionId,
         input,
       );
-      return result !== null
-        ? Response.json({ actionId, surface, result })
-        : jsonErrorResponse({ error: 'Unknown channel action' }, { status: 404 });
+      return outcome.status === 'ok'
+        ? Response.json({ actionId, surface, result: outcome.result })
+        : channelActionRefusalResponse(outcome);
     },
     postChannelResolveTarget: async (surface, req) => {
       const admin = context.requireAdmin(req);

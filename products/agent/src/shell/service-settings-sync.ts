@@ -13,7 +13,7 @@ import type { CliServiceRuntime } from '../cli/service-posture.ts';
  * stops, restarts or removes it.
  */
 export const AGENT_EXTERNAL_HOST_SERVICE_MESSAGE =
-  'This setting was not changed. GoodVibes Agent starts an installed GoodVibes daemon service it finds stopped at launch, and installs and starts it when you accept the start-up repair question; it does not change the service\'s settings, stop, restart or uninstall it. Do those with goodvibes-daemon (install-service, start-service, stop-service, restart-service, uninstall-service) or the GoodVibes TUI.';
+  'This setting was not changed. GoodVibes Agent starts an installed GoodVibes daemon service it finds stopped at launch, and installs and starts it when you accept the start-up repair question; it does not change the service\'s settings, stop, restart or uninstall it. Manage the rest of the host lifecycle outside Agent with goodvibes-daemon (install-service, start-service, stop-service, restart-service, uninstall-service) or the GoodVibes TUI.';
 
 export type ServiceSettingsSyncChange = ServiceSettingChange;
 

@@ -12,6 +12,8 @@ import type { ProcessNode, ProcessState } from '../types.js';
  *   idle         → 'idle'      armed, waiting for its next check
  *   running      → 'running'-ish: a supervised child or stream is live, so
  *                  'executing-tool' is the honest fleet-shaped state
+ *   firing       → 'executing-tool' the process ended and its on-exit
+ *                  action is being delivered
  *   backoff      → 'retrying'  a failed check is walking the ladder
  *   circuit-open → 'stalled'   parked after its strikes ran out; NOT 'failed',
  *                  because the definition is intact and a reset resumes it
@@ -23,6 +25,7 @@ export function adaptWatcherTrigger(record: TriggerRecord, now: number): Process
   let state: ProcessState;
   switch (record.state) {
     case 'running':
+    case 'firing':
       state = 'executing-tool';
       break;
     case 'backoff':
@@ -46,7 +49,10 @@ export function adaptWatcherTrigger(record: TriggerRecord, now: number): Process
       break;
   }
 
-  const alive = record.state === 'idle' || record.state === 'running' || record.state === 'backoff';
+  const alive = record.state === 'idle'
+    || record.state === 'running'
+    || record.state === 'firing'
+    || record.state === 'backoff';
   const kind = record.definition.spec.kind;
   const startedAt = record.definition.createdAt;
 
@@ -78,6 +84,9 @@ function describeActivity(record: TriggerRecord): ProcessNode['currentActivity']
   const at = record.updatedAt || record.definition.createdAt;
   if (record.state === 'circuit-open') {
     return { kind: 'phase', text: `breaker open after ${record.strikes} strikes: ${record.lastError ?? 'repeated failures'}`, at };
+  }
+  if (record.state === 'firing') {
+    return { kind: 'phase', text: 'delivering its on-exit action', at };
   }
   if (record.state === 'backoff') {
     return { kind: 'phase', text: `retrying after failure: ${record.lastError ?? 'check failed'}`, at };

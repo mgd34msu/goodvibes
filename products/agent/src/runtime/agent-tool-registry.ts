@@ -136,8 +136,8 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     memoryAccess: services.memorySpineClient,
     // Same holder instance `services.contextAccountingHolder` exposes, the
     // context_accounting tool registered here and the bind call bootstrap.ts
-    // makes after constructing the Orchestrator (see
-    // context-accounting-source.ts) must share ONE holder, otherwise the tool
+    // makes after constructing the Orchestrator (bindSessionContextAccounting)
+    // must share ONE holder, otherwise the tool
     // would read an unbound holder of its own while the real source sits on a
     // different instance nothing reads.
     contextAccountingHolder: services.contextAccountingHolder,

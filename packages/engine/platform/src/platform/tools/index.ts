@@ -149,6 +149,9 @@ export { createEditTool } from './edit/index.js';
 export { createRepoMapTool } from './repo-map/index.js';
 export { ContextAccountingHolder, createContextAccountingTool } from './context-accounting/index.js';
 export type { ContextAccountingSource, ContextTokenState } from './context-accounting/index.js';
+// The one session-backed source for context_accounting, bound by both terminal apps and the daemon's hosted sessions.
+export { bindSessionContextAccounting, createSessionContextAccountingSource } from './context-accounting/session-source.js';
+export type { SessionContextAccountingOptions, SessionContextAccountingHandle, ContextAccountingOrchestrator, CompactionActivityBus } from './context-accounting/session-source.js';
 export type { EditToolOptions } from './edit/index.js';
 export type { EditItem, EditInput } from './edit/types.js';
 export { createFindTool } from './find/index.js';

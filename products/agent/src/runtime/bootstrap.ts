@@ -52,7 +52,7 @@ import { createDeferredStartupCoordinator } from '@/runtime/index.ts';
 import { wireAgentExternalServices } from './bootstrap-external-services.ts';
 import { initializeBootstrapCore } from './bootstrap-core.ts';
 import { ensureBootModelResolvable } from './provider-boot.ts';
-import { bindOrchestratorContextAccounting } from './context-accounting-source.ts';
+import { bindSessionContextAccounting } from '@goodvibes-jev/engine/platform/platform/tools';
 import { createBootstrapShell } from './bootstrap-shell.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import '@goodvibes-jev/engine/terminal-shell';
@@ -387,19 +387,20 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   });
   conversation.setSessionLineageTracker(services.sessionLineageTracker);
 
-  // Bind the context_accounting tool (platform 1.6.1) to THIS Orchestrator so it
-  // reports real session data instead of the unbound-holder honesty message.
-  // Must run after setCoreServices (nothing here depends on it, but this
-  // keeps every orchestrator.* wiring call grouped) and before the first
-  // turn, see context-accounting-source.ts for what each facet reads.
+  // context_accounting answers for this session (the platform's one session
+  // source, as the TUI and hosted sessions bind it): its injections, token use
+  // and compaction, following a resume or fork. Bound before the first turn.
   runtimeUnsubs.push(
-    bindOrchestratorContextAccounting({
+    bindSessionContextAccounting(services.contextAccountingHolder, {
       orchestrator,
-      holder: services.contextAccountingHolder,
       runtimeBus,
-      runtimeStore: store,
       getSessionId: () => runtime.sessionId,
-      getContextWindow: () => providerRegistry.getKnownContextWindowForModel(providerRegistry.getCurrentModel()),
+      getContextWindow: () => {
+        const known = providerRegistry.getKnownContextWindowForModel(providerRegistry.getCurrentModel());
+        return known !== null && known > 0 ? known : null;
+      },
+      // The session's compaction count from its owner, the counter /compact reads.
+      getCompactionCount: () => services.sessionLineageTracker.getCompactionCount(),
     }),
   );
 

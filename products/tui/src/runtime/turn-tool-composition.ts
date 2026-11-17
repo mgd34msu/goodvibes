@@ -61,7 +61,7 @@ export function registerTuiTurnTools(toolRegistry: ToolRegistry, services: Runti
     memoryAccess: services.memorySpine,
     // The model keeps the same work plan /work-plan shows.
     workPlan: services.workPlan,
-    // Register context_accounting against OUR holder (the Orchestrator-backed source bound at bootstrap.ts). See runtime/context-accounting-source.ts.
+    // Register context_accounting against OUR holder (the Orchestrator-backed source bootstrap.ts binds with bindSessionContextAccounting).
     contextAccountingHolder: services.contextAccountingHolder,
     // First contained (sandboxed) command run announces "commands now run contained" once, recorded and surfaced now.
     onSandboxedRun: options.onSandboxedRun,

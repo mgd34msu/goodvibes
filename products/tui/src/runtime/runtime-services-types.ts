@@ -277,7 +277,7 @@ export interface RuntimeServices {
   readonly agentManager: AgentManager;
   readonly agentMessageBus: AgentMessageBus;
   readonly agentOrchestrator: AgentOrchestrator;
-  readonly contextAccountingHolder: ContextAccountingHolder; // bound at bootstrap.ts; see context-accounting-source.ts
+  readonly contextAccountingHolder: ContextAccountingHolder; // bound at bootstrap.ts (bindSessionContextAccounting)
   readonly permissionManager: import('@goodvibes-jev/engine/platform/platform/runtime/client-services').ClientRuntimeServices['permissionManager'];
   readonly sandboxEscalationHandler: ReturnType<typeof import('@goodvibes-jev/engine/platform/platform/runtime/bootstrap').createApprovalDerivedHandlers>['sandboxEscalationHandler'];
   readonly onSandboxedRun: ReturnType<typeof import('@goodvibes-jev/engine/platform/platform/runtime/bootstrap').createApprovalDerivedHandlers>['onSandboxedRun'];

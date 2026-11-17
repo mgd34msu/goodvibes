@@ -68,7 +68,7 @@ import { announceResumeState } from './resume-notice.ts';
 import { announceInstallHealth } from './install-self-check-startup.ts';
 import { buildSharedOrchestratorCoreServices, refreshMemoryRecallSnapshot } from './orchestrator-core-services.ts';
 import './daemon-attach-notices.ts';
-import { wireContextAccountingSource } from './context-accounting-source.ts';
+import { bindSessionContextAccounting } from '@goodvibes-jev/engine/platform/platform/tools';
 import {
   autostartInstalledDaemon,
   createDaemonServiceControl,
@@ -273,19 +273,20 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   });
   conversation.setSessionLineageTracker(services.sessionLineageTracker);
 
-  // Bind context_accounting's session source to the live Orchestrator (see context-accounting-source.ts).
-  wireContextAccountingSource(
-    {
-      orchestrator,
-      providerRegistry,
-      sessionLineageTracker: services.sessionLineageTracker,
-      runtimeBus,
-      sessionId: runtime.sessionId,
-      currentSessionId: () => runtime.sessionId,
+  // context_accounting answers for this session (the platform's one session
+  // source, as the Agent and hosted sessions bind it): its injections, token use
+  // and compaction, following a resume or fork.
+  bootstrapUnsubs.push(bindSessionContextAccounting(services.contextAccountingHolder, {
+    orchestrator,
+    runtimeBus,
+    getSessionId: () => runtime.sessionId,
+    getContextWindow: () => {
+      const known = providerRegistry.getKnownContextWindowForModel(providerRegistry.getCurrentModel());
+      return known !== null && known > 0 ? known : null;
     },
-    services.contextAccountingHolder,
-    bootstrapUnsubs,
-  );
+    // The session's compaction count from its owner, the counter /compact reads.
+    getCompactionCount: () => services.sessionLineageTracker.getCompactionCount(),
+  }));
 
   const acpLifetime = new AbortController();
   bootstrapUnsubs.push(() => acpLifetime.abort());
@@ -620,6 +621,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     model: runtime.model,
     provider: runtime.provider,
     toolCount,
+    // The palette key as bound (the person's keybindings.json included), for the splash hint.
+    commandPaletteKey: services.keybindingsManager.getComboLabel('command-palette'),
   };
 
   // ── Phase 8: Restore known providers; /scan owns network discovery ──────

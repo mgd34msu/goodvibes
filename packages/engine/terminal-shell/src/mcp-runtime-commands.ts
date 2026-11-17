@@ -1,7 +1,7 @@
 import type { McpApi, McpConfigScope, McpReloadResult, McpServerConfig } from '@goodvibes-jev/engine/platform/platform/mcp';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { commandRefusal, requireYesFlag, stripYesFlag, type CommandConfirmationContext } from './command-confirmation.js';
+import { commandRefusal, stripYesFlag, type CommandConfirmationContext } from './command-confirmation.js';
 import { maskLaunchArgs } from './renderer/mcp-form-rows.js';
 import { quoteSlashCommandArg } from './slash-command-parser.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
@@ -39,18 +39,16 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
     addServerPointer: 'Agent Workspace -> Tools & MCP -> Add MCP server',
     authReviewCommand: '/auth review',
     confirmedActions: 'confirmed add/remove/reload actions',
-    commandPolicy: 'trust, role, and quarantine command actions still require explicit --yes confirmation.',
+    commandPolicy: 'loosening a server\'s trust mode or approving a quarantined schema asks once before it applies.',
     ...policy.wording,
   };
-  // The --yes hint only applies where the command asks for confirmation.
-  const present = (message: string): string => message.replaceAll(' --yes', '');
   const MCP_ROLES = ['general', 'docs', 'filesystem', 'git', 'database', 'browser', 'automation', 'ops', 'remote'] as const;
   const MCP_TRUST_MODES = ['constrained', 'ask-on-risk', 'allow-all', 'blocked'] as const;
   const MCP_COMMAND_TRUST_MODES = ['constrained', 'ask-on-risk', 'blocked'] as const;
   const MCP_ADD_COMMAND_USAGE =
-    '/mcp add <name> <command|https-url> ... --yes; options: --scope project|global, --role <role>, --trust constrained|ask-on-risk|blocked, --env KEY=VALUE (command servers), --header Name=Value (url servers), --path <path>, --host <host>';
-  const MCP_TRUST_COMMAND_USAGE = '/mcp trust <server> <constrained|ask-on-risk|blocked|config> --yes';
-  const MCP_ROLE_COMMAND_USAGE = '/mcp role <server> <general|docs|filesystem|git|database|browser|automation|ops|remote|config> --yes';
+    '/mcp add <name> <command|https-url> ...; options: --scope project|global, --role <role>, --trust constrained|ask-on-risk|blocked, --env KEY=VALUE (command servers), --header Name=Value (url servers), --path <path>, --host <host>';
+  const MCP_TRUST_COMMAND_USAGE = '/mcp trust <server> <constrained|ask-on-risk|blocked|config>';
+  const MCP_ROLE_COMMAND_USAGE = '/mcp role <server> <general|docs|filesystem|git|database|browser|automation|ops|remote|config>';
   interface ParsedMcpAddArgs {
     readonly scope: McpConfigScope;
     readonly server: McpServerConfig;
@@ -71,12 +69,8 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
   function isMcpScope(value: string): value is McpConfigScope {
     return value === 'project' || value === 'global';
   }
-  function stripMcpAddYesFlag(args: readonly string[]): {
-    readonly rest: readonly string[];
-    readonly yes: boolean;
-  } {
+  function stripMcpAddYesFlag(args: readonly string[]): { readonly rest: readonly string[] } {
     const rest: string[] = [];
-    let yes = false;
     let passthrough = false;
     for (const token of args) {
       if (passthrough) {
@@ -88,13 +82,10 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
         rest.push(token);
         continue;
       }
-      if (token === '--yes') {
-        yes = true;
-        continue;
-      }
+      if (token === '--yes') continue;
       rest.push(token);
     }
-    return { rest, yes };
+    return { rest };
   }
   function formatMcpTrustMode(mode: McpDisplayTrustMode): string {
     if (mode === 'ask-on-risk') return 'allow inside scope, deny outside';
@@ -256,11 +247,11 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
       description: 'Manage MCP servers and their tools',
       ...(policy.hidden ? { hidden: true } : {}),
       usage: '[servers|review|tools [<server>]|config|add|remove|reload|auth-review|repair [server]]',
-      argsHint: present('[servers|review|tools|config|add --yes|remove --yes]'),
+      argsHint: '[servers|review|tools|config|add|remove]',
       async handler(args, ctx) {
-        const print = (message: string) => ctx.print(present(message));
+        const print = (message: string) => ctx.print(message);
         /** A line that did not do what was asked: thrown, so the terminal and a model caller both see it refused. */
-        const refuse: (message: string, next?: string) => never = (message, next) => { throw commandRefusal(present(message), next); };
+        const refuse: (message: string, next?: string) => never = (message, next) => { throw commandRefusal(message, next); };
         const mcpApi = requireMcpApi(ctx);
         const listServerSecurity = () => mcpApi.listServerSecurity();
         /** The configured or connected server a change names; an unknown name is refused before anything is asked or changed. */
@@ -285,11 +276,10 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
             ? `${serverName} is back on its configured MCP ${what}: ${value}.`
             : `${serverName} had no MCP ${what} set for this session; it runs on its configured ${what}: ${value}.`);
         };
-        // A trailing --yes is never a server argument, whether or not this
-        // product asks for confirmation; only tokens after -- are passed on.
+        // A --yes typed out of habit is dropped and never read as a server
+        // argument; only tokens after -- are passed on as typed.
         const stripped = args[0] === 'add' ? stripMcpAddYesFlag(args) : stripYesFlag(args);
-        const confirmation = { rest: stripped.rest, yes: true };
-        const commandArgs = [...confirmation.rest];
+        const commandArgs = [...stripped.rest];
         const subcommand = commandArgs[0];
         if (!subcommand && ctx.openMcpWorkspace) {
           ctx.openMcpWorkspace();
@@ -393,7 +383,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
           }
           const nextSteps = [
             selected.schemaFreshness === 'quarantined'
-              ? `/mcp quarantine ${quoteSlashCommandArg(selected.name)} approve operator --yes`
+              ? `/mcp quarantine ${quoteSlashCommandArg(selected.name)} approve operator`
               : null,
             !selected.connected ? wording.authReviewCommand : null,
             '/mcp review',
@@ -419,10 +409,6 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
           const requestedMode = commandArgs[2];
           if (serverName && requestedMode === 'config') {
             if (!knownServer(serverName, 'trust mode')) return;
-            if (!confirmation.yes) {
-              requireYesFlag(ctx, `return ${serverName} to its configured MCP trust mode`, MCP_TRUST_COMMAND_USAGE);
-              return;
-            }
             clearSessionPolicy(serverName, 'trustMode');
             return;
           }
@@ -437,16 +423,12 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
               refuse(`The trust mode of ${serverName} was not changed: allow-all is not set by a command.`, `Use /settings → MCP to explicitly enable allow-all for ${serverName}.`);
             }
             if (!knownServer(serverName, 'trust mode')) return;
-            if (!confirmation.yes) {
-              requireYesFlag(ctx, `change MCP trust mode for ${serverName}`, MCP_TRUST_COMMAND_USAGE);
-              return;
-            }
             try {
               mcpApi.setServerTrustMode(serverName, mode);
             } catch (error) {
               refuse(`MCP trust mode not changed: ${summarizeError(error)}`);
             }
-            print(`Updated MCP trust mode for ${serverName} to ${formatMcpTrustMode(mode)} for this session only: it stays through reconnects and config reloads until \`/mcp trust ${serverName} config --yes\` or a restart. Edit the server in /mcp to keep it after a restart.`);
+            print(`Updated MCP trust mode for ${serverName} to ${formatMcpTrustMode(mode)} for this session only: it stays through reconnects and config reloads until \`/mcp trust ${serverName} config\` or a restart. Edit the server in /mcp to keep it after a restart.`);
             return;
           }
           refuse(`Usage: ${MCP_TRUST_COMMAND_USAGE}`, 'Use /settings -> MCP to explicitly enable allow-all.');
@@ -456,10 +438,6 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
           const requestedRole = commandArgs[2];
           if (serverName && requestedRole === 'config') {
             if (!knownServer(serverName, 'role')) return;
-            if (!confirmation.yes) {
-              requireYesFlag(ctx, `return ${serverName} to its configured MCP role`, MCP_ROLE_COMMAND_USAGE);
-              return;
-            }
             clearSessionPolicy(serverName, 'role');
             return;
           }
@@ -469,25 +447,17 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
             }
             const role = requestedRole;
             if (!knownServer(serverName, 'role')) return;
-            if (!confirmation.yes) {
-              requireYesFlag(ctx, `change MCP role for ${serverName}`, MCP_ROLE_COMMAND_USAGE);
-              return;
-            }
             try {
               mcpApi.setServerRole(serverName, role);
             } catch (error) {
               refuse(`MCP role not changed: ${summarizeError(error)}`);
             }
-            print(`Updated MCP role for ${serverName} to ${formatMcpRole(role)} for this session only: it stays through reconnects and config reloads until \`/mcp role ${serverName} config --yes\` or a restart. Edit the server in /mcp to keep it after a restart.`);
+            print(`Updated MCP role for ${serverName} to ${formatMcpRole(role)} for this session only: it stays through reconnects and config reloads until \`/mcp role ${serverName} config\` or a restart. Edit the server in /mcp to keep it after a restart.`);
             return;
           }
           refuse(`Usage: ${MCP_ROLE_COMMAND_USAGE}`);
         }
         if (subcommand === 'add') {
-          if (!confirmation.yes) {
-            requireYesFlag(ctx, 'add or update an MCP server config', MCP_ADD_COMMAND_USAGE);
-            return;
-          }
           let parsedAdd: ParsedMcpAddArgs;
           try {
             parsedAdd = parseAddServerArgs(commandArgs);
@@ -516,11 +486,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
         }
         if (subcommand === 'remove') {
           const serverName = commandArgs[1]?.trim();
-          if (!serverName) refuse('Usage: /mcp remove <server> [--scope project|global] --yes');
-          if (!confirmation.yes) {
-            requireYesFlag(ctx, `remove MCP server ${serverName}`, '/mcp remove <server> [--scope project|global] --yes');
-            return;
-          }
+          if (!serverName) refuse('Usage: /mcp remove <server> [--scope project|global]');
           let scope: McpConfigScope = 'project';
           try {
             for (let index = 2; index < commandArgs.length; index += 1) {
@@ -548,10 +514,6 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
           return;
         }
         if (subcommand === 'reload') {
-          if (!confirmation.yes) {
-            requireYesFlag(ctx, 'reload the MCP runtime from config', '/mcp reload --yes');
-            return;
-          }
           try {
             const result = await reloadMcpRuntime(ctx);
             const servers = listServerSecurity();
@@ -596,26 +558,14 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
         if (subcommand === 'quarantine') {
           const serverName = commandArgs[1];
           const action = commandArgs[2];
-          if (!serverName) refuse('Usage: /mcp quarantine <server> [detail] --yes | /mcp quarantine <server> approve [operatorId] --yes');
+          if (!serverName) refuse('Usage: /mcp quarantine <server> [detail] | /mcp quarantine <server> approve [operatorId]');
           const target = knownServer(serverName, action === 'approve' ? 'quarantine override' : 'quarantine');
           if (!target) return;
           if (action === 'approve') {
             if (target.schemaFreshness !== 'quarantined') refuse(`MCP server ${serverName} is not quarantined (status ${formatMcpFreshness(target.schemaFreshness)}). Nothing was approved.`);
-            if (!confirmation.yes) {
-              requireYesFlag(
-                ctx,
-                `approve MCP tool-definition quarantine override for ${serverName}`,
-                '/mcp quarantine <server> approve [operatorId] --yes',
-              );
-              return;
-            }
             const operatorId = commandArgs[3] || 'operator';
             mcpApi.approveSchemaQuarantine(serverName, operatorId);
             print(`Approved MCP tool-definition quarantine override for ${serverName} as ${operatorId}. Refresh is still recommended.`);
-            return;
-          }
-          if (!confirmation.yes) {
-            requireYesFlag(ctx, `quarantine MCP server ${serverName}`, '/mcp quarantine <server> [detail] --yes');
             return;
           }
           const detail = commandArgs.slice(2).join(' ') || 'quarantined by operator';

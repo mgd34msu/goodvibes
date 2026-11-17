@@ -35,7 +35,7 @@ export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry)
     effect: 'mixed',
     description: 'Review provider auth posture and export redacted auth review bundles',
     hidden: true,
-    usage: '[review|show <provider>|repair <provider>|bundle export <path> --yes|bundle inspect <path>]',
+    usage: '[review|show <provider>|repair <provider>|bundle export <path>|bundle inspect <path>]',
     // Login and local-auth lines are refused here, but a password typed into one must still never reach the input history.
     secretArgs: { subcommands: { login: [4], 'local add-user': [3], 'local rotate-password': [3], 'local revoke-session': [2] } },
     async handler(args, ctx) {
@@ -48,7 +48,7 @@ export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry)
             'Connected-host auth management is outside GoodVibes Agent.',
             'Agent connects to a GoodVibes host owned outside this package and does not create, delete, rotate, revoke, or clear connected-host auth users, sessions, or bootstrap credentials.',
             'Use the owning GoodVibes host for connected-host auth administration.',
-            'Agent auth commands available here: /auth review, /auth show <provider>, /auth repair <provider>, /auth bundle export <path> --yes, /auth bundle inspect <path>.',
+            'Agent auth commands available here: /auth review, /auth show <provider>, /auth repair <provider>, /auth bundle export <path>, /auth bundle inspect <path>.',
           ].join('\n'),
         );
         return;
@@ -75,11 +75,10 @@ export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry)
           secretsManager,
           subscriptions,
           resolvePath: (path) => shellPaths.resolveWorkspacePath(path),
-          confirmed: parsed.yes,
         })
       )
         return;
-      throw commandRefusal('Usage: /auth [review|show <provider>|bundle export <path> --yes|bundle inspect <path>]');
+      throw commandRefusal('Usage: /auth [review|show <provider>|bundle export <path>|bundle inspect <path>]');
     },
   });
 }
@@ -139,7 +138,6 @@ const handleAuthReview = createAuthReviewHandler<CommandContext>({
 });
 
 const handleAuthBundle = createAuthBundleHandler<CommandContext, AuthReviewBundle>({
-  confirmExport: true,
   reportReadFailure: true,
   build: (base) => ({ ...base, externalRuntimeAuth: 'managed-outside-agent' }),
   inspect: (value) => inspectAuthBundle(value as AuthReviewBundle),

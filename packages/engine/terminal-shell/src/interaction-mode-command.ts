@@ -1,7 +1,7 @@
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ShellModeManagerService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { commandRefusal, requireYesFlag, stripYesFlag } from './command-confirmation.js';
+import { commandRefusal, stripYesFlag } from './command-confirmation.js';
 import type { TerminalSlashCommand } from './command-registry.js';
 interface InteractionModeContext {
   readonly ops: { readonly modeManager?: ShellModeManagerService | null | undefined };
@@ -32,15 +32,10 @@ export function createInteractionModeCommand<Context extends InteractionModeCont
         ctx.print('The print level is not available in this runtime.');
         return;
       }
-      const parsed = { rest: stripYesFlag(args).rest, yes: true };
-      const commandArgs = parsed.rest;
+      const commandArgs = stripYesFlag(args).rest;
       const sub = commandArgs[0] ?? 'show';
 
       if (sub === 'quiet' || sub === 'balanced' || sub === 'operator') {
-        if (!parsed.yes) {
-          requireYesFlag(ctx, `set the print level to ${sub}`, '/mode <quiet|balanced|operator> --yes');
-          return;
-        }
         const newMode = sub as 'quiet' | 'balanced' | 'operator';
         mgr.setHITLMode(newMode);
         let saveFailure: string | null = null;
@@ -97,10 +92,6 @@ export function createInteractionModeCommand<Context extends InteractionModeCont
         }
         if (verbosity !== 'minimal' && verbosity !== 'normal' && verbosity !== 'verbose') {
           ctx.print(policy.invalidVerbosity(verbosity));
-          return;
-        }
-        if (!parsed.yes) {
-          requireYesFlag(ctx, `set notification verbosity for ${domain}`, '/mode set-domain <domain> <minimal|normal|verbose> --yes');
           return;
         }
         mgr.setDomainVerbosity(domain, verbosity as 'minimal' | 'normal' | 'verbose');

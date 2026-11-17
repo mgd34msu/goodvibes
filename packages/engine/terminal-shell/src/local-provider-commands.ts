@@ -9,7 +9,7 @@ import { formatProviderModel } from '@goodvibes-jev/engine/platform/platform/pro
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import type { ConcealedInputRequest } from './concealed-input.js';
-import { commandRefusal, requireYesFlag, stripYesFlag } from './command-confirmation.js';
+import { commandRefusal, stripYesFlag } from './command-confirmation.js';
 import { readRefusal } from '@goodvibes-jev/engine/errors';
 
 export interface LocalProviderCommandContext {
@@ -96,7 +96,6 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
     apiKey: string | undefined,
   ): Promise<void> {
     const { name, baseURL, endpoint, directory, file } = request;
-    const confirmationSuffix = '';
     context.print(`Probing ${baseURL}/models ...`);
     let ids: string[] = [];
     let unreadable = false;
@@ -116,7 +115,7 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
           ? apiKey ? ' The endpoint did not accept the key.' : ' The endpoint needs an API key.'
           : '';
         context.print(
-          `${baseURL}/models answered HTTP ${response.status}, so provider '${name}' was not added.${keyHint} Fix the endpoint${response.status === 401 || response.status === 403 ? ' or key' : ''}, then run /provider add ${name} ${baseURL}${confirmationSuffix} again.`,
+          `${baseURL}/models answered HTTP ${response.status}, so provider '${name}' was not added.${keyHint} Fix the endpoint${response.status === 401 || response.status === 403 ? ' or key' : ''}, then run /provider add ${name} ${baseURL} again.`,
         );
         return;
       }
@@ -170,7 +169,7 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
       await writeFile(file, JSON.stringify(config, null, 2), { encoding: 'utf-8', flag: 'wx' });
     } catch (error) {
       throw (error as NodeJS.ErrnoException).code === 'EEXIST'
-        ? commandRefusal(`Provider '${name}' already exists at ${file}`, `Remove it first with: /provider remove ${name}${confirmationSuffix}`)
+        ? commandRefusal(`Provider '${name}' already exists at ${file}`, `Remove it first with: /provider remove ${name}`)
         : commandRefusal(`Error writing provider file: ${summarizeError(error)}`, undefined, 'COMMAND_FAILED');
     }
     // The key is stored last, so a failed write leaves no key without a provider; a failed
@@ -196,30 +195,24 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
     );
   }
   function registerLocalProviderRuntimeCommands(registry: Pick<TerminalCommandRegistry<Context>, 'register'>): void {
-    const confirmationSuffix = '';
     registry.register({
       name: 'provider',
       effect: 'mixed',
       aliases: ['p'],
       description: 'Switch provider or manage custom providers (add/remove)',
       ...(policy.hidden ? { hidden: true } : {}),
-      usage: `[add <name> <baseURL>${policy.allowInlineKey ? ' [apiKey]' : ''}${confirmationSuffix} | remove <name>${confirmationSuffix} | <provider-name>]`,
+      usage: `[add <name> <baseURL>${policy.allowInlineKey ? ' [apiKey]' : ''} | remove <name> | <provider-name>]`,
       argsHint: '[add|remove|name]',
       async handler(args, context) {
-        const parsed = { rest: stripYesFlag(args).rest, yes: true };
-        const commandArgs = parsed.rest;
+        const commandArgs = stripYesFlag(args).rest;
         const paths = services.requireShellPaths(context);
         if (commandArgs[0] === 'add') {
           const name = commandArgs[1];
           const baseURL = commandArgs[2];
           const apiKey = policy.allowInlineKey ? commandArgs[3] : undefined;
-          const usage = `/provider add <name> <baseURL>${policy.allowInlineKey ? ' [apiKey]' : ''}${confirmationSuffix}`;
+          const usage = `/provider add <name> <baseURL>${policy.allowInlineKey ? ' [apiKey]' : ''}`;
           if (!name || !baseURL) {
-            throw commandRefusal(`Usage: ${usage}\nExample: /provider add my-server http://192.168.0.85:8001/v1${confirmationSuffix}`);
-          }
-          if (!parsed.yes) {
-            requireYesFlag(context, `add custom provider ${name}`, usage);
-            return;
+            throw commandRefusal(`Usage: ${usage}\nExample: /provider add my-server http://192.168.0.85:8001/v1`);
           }
           if (!validProviderName(name)) {
             throw commandRefusal('Error: Provider name must contain only letters, numbers, hyphens, and underscores.');
@@ -236,21 +229,21 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
           const file = join(directory, `${name}.json`);
           if (existsSync(file)) {
             context.print(
-              `Provider '${name}' already exists at ${file}\nRemove it first with: /provider remove ${name}${confirmationSuffix}`,
+              `Provider '${name}' already exists at ${file}\nRemove it first with: /provider remove ${name}`,
             );
             return;
           }
           const platformSlot = platformCredentialSlot(name);
           if (platformSlot) {
             context.print(
-              `Provider '${name}' was not added: its API key would be stored as ${platformSlot}, which is the key of a built-in provider or service, so adding it would overwrite that key and removing it would delete it. Choose another name, for example /provider add ${name}-local ${baseURL}${confirmationSuffix}.`,
+              `Provider '${name}' was not added: its API key would be stored as ${platformSlot}, which is the key of a built-in provider or service, so adding it would overwrite that key and removing it would delete it. Choose another name, for example /provider add ${name}-local ${baseURL}.`,
             );
             return;
           }
           const sharing = keySlotOwner(directory, name);
           if (sharing) {
             context.print(
-              `Provider '${name}' was not added: its API key would be stored as ${customProviderKeyName(name)}, which provider '${sharing}' already uses. Choose a name that differs by more than - and _, or remove '${sharing}' first with /provider remove ${sharing}${confirmationSuffix}.`,
+              `Provider '${name}' was not added: its API key would be stored as ${customProviderKeyName(name)}, which provider '${sharing}' already uses. Choose a name that differs by more than - and _, or remove '${sharing}' first with /provider remove ${sharing}.`,
             );
             return;
           }
@@ -266,13 +259,9 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
         }
         if (commandArgs[0] === 'remove' || commandArgs[0] === 'rm') {
           const name = commandArgs[1];
-          const usage = `/provider remove <name>${confirmationSuffix}`;
+          const usage = `/provider remove <name>`;
           if (!name) {
             throw commandRefusal(`Usage: ${usage}`);
-          }
-          if (!parsed.yes) {
-            requireYesFlag(context, `remove custom provider ${name}`, usage);
-            return;
           }
           if (!validProviderName(name)) {
             throw commandRefusal('Error: Provider name must contain only letters, numbers, hyphens, and underscores.');

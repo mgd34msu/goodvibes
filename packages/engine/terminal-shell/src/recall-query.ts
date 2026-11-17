@@ -286,6 +286,6 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
  * A mutation's arguments: the line runs as typed (the registry asks first for
  * a line that cannot be undone), and a `--yes` typed out of habit is dropped.
  */
-export function mutationArguments(args: string[]): { rest: string[]; yes: boolean } {
-  return { rest: args.filter((a) => a !== '--yes'), yes: true };
+export function mutationArguments(args: string[]): { rest: string[] } {
+  return { rest: args.filter((a) => a !== '--yes') };
 }

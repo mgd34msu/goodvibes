@@ -362,7 +362,6 @@ const contentCommands = createSessionContentCommands<CommandContext, Record<stri
   },
   text: (message) => (typeof message.content === 'string' ? message.content : ''),
   role: (message) => String(message.role ?? 'unknown'),
-  confirmExport: false,
   invalidPath: 'Error: Export path must be within the current directory.',
   exported: (count, path) => `Exported ${count} messages to: ${path}`,
   failed: (_action, error) => 'Export failed: ' + summarizeError(error),

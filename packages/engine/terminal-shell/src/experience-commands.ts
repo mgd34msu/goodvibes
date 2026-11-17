@@ -4,7 +4,7 @@ import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/pl
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { TerminalSlashCommand } from './command-registry.js';
 import { readRefusal } from '@goodvibes-jev/engine/errors';
-import { commandRefusal, requireYesFlag, stripYesFlag } from './command-confirmation.js';
+import { commandRefusal, stripYesFlag } from './command-confirmation.js';
 import { switchAlwaysSpeak } from './tts-runtime-commands.js';
 import { inspectVoiceBundle, isVoiceBundleKey, readVoiceBundle, type VoiceBundle } from './voice-settings-review.js';
 interface ExperienceContext {
@@ -66,13 +66,12 @@ export function createVoiceExperienceCommand<Context extends ExperienceContext>(
   readonly help: string;
   readonly reportFailure: boolean;
   readonly paths: (context: Context) => ShellPathService;
-  readonly wake: (args: string[], ctx: Context, shellPaths: ShellPathService, yes: boolean) => void | Promise<void>;
+  readonly wake: (args: string[], ctx: Context, shellPaths: ShellPathService) => void | Promise<void>;
   readonly provision: (
     sub: 'status' | 'setup',
     args: string[],
     ctx: Context,
     shellPaths: ShellPathService,
-    yes: boolean,
   ) => void | Promise<void>;
   readonly review: (enabled: boolean) => string[];
 }): TerminalSlashCommand<Context> {
@@ -84,16 +83,15 @@ export function createVoiceExperienceCommand<Context extends ExperienceContext>(
     async handler(args, ctx) {
       try {
         const { rest } = stripYesFlag(args);
-        const yes = true;
         const commandArgs = [...rest],
           shellPaths = policy.paths(ctx),
           sub = (commandArgs[0] ?? 'review').toLowerCase();
         if (sub === 'wake') {
-          await policy.wake(commandArgs, ctx, shellPaths, yes);
+          await policy.wake(commandArgs, ctx, shellPaths);
           return;
         }
         if (sub === 'status' || sub === 'setup') {
-          await policy.provision(sub, commandArgs, ctx, shellPaths, yes);
+          await policy.provision(sub, commandArgs, ctx, shellPaths);
           return;
         }
         if (sub === 'review') {
@@ -114,10 +112,6 @@ export function createVoiceExperienceCommand<Context extends ExperienceContext>(
             }
             const target = shellPaths.resolveWorkspacePath(path);
             if (mode === 'export') {
-              if (!yes) {
-                requireYesFlag(ctx, 'export voice bundle to ' + path, '/voice bundle export <path> --yes');
-                return;
-              }
               const config = ctx.platform.configManager;
               const settings: Record<string, unknown> = {};
               for (const setting of config.getSchema()) {
@@ -140,10 +134,6 @@ export function createVoiceExperienceCommand<Context extends ExperienceContext>(
             }
             if (mode === 'inspect') {
               ctx.print(inspectVoiceBundle(value));
-              return;
-            }
-            if (!yes) {
-              requireYesFlag(ctx, 'apply the voice settings in ' + path, '/voice bundle import <path> --yes');
               return;
             }
             const read = readVoiceBundle(value);

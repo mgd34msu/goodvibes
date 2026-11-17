@@ -202,7 +202,7 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
   help: 'Usage: /voice [review|status|setup|enable|disable|wake status|wake setup [yes]|bundle export <path>|bundle inspect <path>|bundle import <path>]',
   reportFailure: false,
   paths: requireShellPaths,
-  async wake(args, ctx, shellPaths, _yes) {
+  async wake(args, ctx, shellPaths) {
     // The wake models are provisioned locally by the platform (checksum-pinned
     // download), not through a daemon verb, so this path needs no gateway.
     // Installation already provisions them and a daemon retries at boot.
@@ -258,7 +258,7 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
     ctx.print('Usage: /voice wake [status|setup]');
     return;
   },
-  async provision(sub, _args, ctx, _shellPaths, _yes) {
+  async provision(sub, _args, ctx, _shellPaths) {
     // The one-act managed install returns a final receipt (no per-phase
     // streaming over the verb), so the announcement block prints first and
     // the receipt/failure block follows once the (possibly long,

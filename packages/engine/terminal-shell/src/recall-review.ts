@@ -32,7 +32,6 @@ export function createRecallReviewCommands<Context extends RecallQueryContext>(
     readonly command: string;
     readonly scopedQueue: boolean;
     readonly temporal: boolean;
-    readonly confirmPromote: boolean;
     readonly queueExtras?: ((context: Context) => readonly string[] | undefined) | undefined;
   },
 ) {
@@ -147,16 +146,13 @@ export function createRecallReviewCommands<Context extends RecallQueryContext>(
   function handleRecallPromote(args: string[], context: Context): void | Promise<void> {
     const memory = getMemory(context);
     if (!memory) return;
-    const parsed = mutationArguments(args, presentation.confirmPromote);
+    const parsed = mutationArguments(args);
     const [id, scope] = parsed.rest;
     if (!id || !scope || !isValidScope(scope)) {
       context.print(
-        `${presentation.tag} Usage: /${presentation.command} promote <id> <${VALID_SCOPES.join('|')}>${presentation.confirmPromote ? ' --yes' : ''}`,
+        `${presentation.tag} Usage: /${presentation.command} promote <id> <${VALID_SCOPES.join('|')}>`,
       );
       return;
-    }
-    if (!parsed.yes) {
-      throw commandRefusal(`Refusing to promote durable memory record ${id} to ${scope} scope without --yes.\nUsage: /${presentation.command} promote <id> <scope> --yes`);
     }
     return afterMemory(memory.update(id, { scope }), (record) => {
       if (!record) {

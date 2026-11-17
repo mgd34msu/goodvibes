@@ -28,7 +28,6 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
     readonly headingSuffix: string;
     readonly detailSeparator: string;
     readonly postureSeparator: string;
-    readonly confirmDelete: boolean;
     readonly reviewSeparator: string;
     readonly reviewDetailSeparator: string;
     readonly field: (view: 'current' | 'info', key: string, value: string) => string;
@@ -312,10 +311,10 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
     }
 
     if (sub === 'delete') {
-      const parsed = policy.confirmDelete ? stripYesFlag(args) : { rest: args, yes: true };
+      const parsed = stripYesFlag(args);
       const target = parsed.rest[1];
       if (!target) {
-        throw commandRefusal('Usage: /session delete <session-id>' + (policy.confirmDelete ? ' --yes' : ''));
+        throw commandRefusal('Usage: /session delete <session-id> --yes');
       }
       // Resolve first, so the confirmation names the session that would be removed.
       const candidates = resolveSessionTarget(sm, target);

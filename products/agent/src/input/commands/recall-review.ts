@@ -23,7 +23,6 @@ export const { handleRecallQueue, handleRecallReview, handleRecallExplain, handl
       command: 'memory',
       scopedQueue: false,
       temporal: false,
-      confirmPromote: true,
       queueExtras(context) {
         const proposals = context.clients?.memoryConsolidation?.listPendingProposals() ?? [];
         return proposals.length

@@ -8,7 +8,6 @@ export const { handleRecallQueue, handleRecallReview, handleRecallExplain, handl
     command: 'recall',
     scopedQueue: true,
     temporal: true,
-    confirmPromote: false,
   });
 export function handleRecallInjections(args: string[], context: CommandContext): void {
   const agentId = args[0];

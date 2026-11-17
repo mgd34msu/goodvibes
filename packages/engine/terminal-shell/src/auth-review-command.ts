@@ -1,6 +1,6 @@
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { commandRefusal, requireYesFlag } from './command-confirmation.js';
+import { commandRefusal } from './command-confirmation.js';
 import { buildAuthInspectionSnapshot, inspectProviderAuth } from '@goodvibes-jev/engine/platform/platform/runtime/security';
 import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
 interface AuthReviewContext {
@@ -49,7 +49,6 @@ export interface AuthReviewBundleBase {
   readonly pendingSubscriptions: readonly string[];
 }
 export function createAuthBundleHandler<Context extends AuthReviewContext, Bundle extends AuthReviewBundleBase>(policy: {
-  readonly confirmExport: boolean;
   readonly reportReadFailure: boolean;
   readonly build: (base: AuthReviewBundleBase) => Bundle;
   readonly inspect: (value: unknown) => string;
@@ -61,7 +60,6 @@ export function createAuthBundleHandler<Context extends AuthReviewContext, Bundl
       readonly secretsManager: Parameters<typeof inspectProviderAuth>[1]['secretsManager'];
       readonly subscriptions: Parameters<typeof inspectProviderAuth>[1]['subscriptionManager'];
       readonly resolvePath: (path: string) => string;
-      readonly confirmed: boolean;
     },
   ): Promise<boolean> => {
     if (args[0] !== 'bundle') return false;
@@ -69,14 +67,10 @@ export function createAuthBundleHandler<Context extends AuthReviewContext, Bundl
       path = args[2];
     if (mode !== 'export' && mode !== 'inspect') return false;
     if (!path) {
-      throw commandRefusal(`Usage: /auth bundle ${mode} <path>${mode === 'export' && policy.confirmExport ? ' --yes' : ''}`);
+      throw commandRefusal(`Usage: /auth bundle ${mode} <path>`);
     }
     const target = services.resolvePath(path);
     if (mode === 'export') {
-      if (policy.confirmExport && !services.confirmed) {
-        requireYesFlag(context, `export auth review bundle to ${path}`, '/auth bundle export <path> --yes');
-        return true;
-      }
       const secretKeys = await services.secretsManager.list();
       const bundle = policy.build({
         version: 1,

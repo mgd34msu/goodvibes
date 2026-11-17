@@ -13,7 +13,7 @@ import {
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import type { ConcealedInputRequest } from './concealed-input.js';
 import type { TerminalSlashCommand } from './command-registry.js';
-import { commandRefusal, requireYesFlag, stripYesFlag, type ConfirmableCommand } from './command-confirmation.js';
+import { commandRefusal, stripYesFlag, type ConfirmableCommand } from './command-confirmation.js';
 import type { CommandSubcommandHints } from './command-args-hint.js';
 
 interface SecretsCommandContext {
@@ -36,13 +36,12 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
     readonly deleted: (key: string) => string;
   },
 ): TerminalSlashCommand<Context> & CommandSubcommandHints & Pick<ConfirmableCommand<Context>, 'confirm'> {
-  const suffix = '';
   const storageFlags = '[--user|--project] [--secure|--plaintext]';
   const mutationUsage = (operation: string) =>
-    `/secrets ${operation} <KEY> <${operation === 'link' ? 'secret-ref' : 'value'}> ${storageFlags}${suffix}`;
-  const deletionUsage = `/secrets delete <KEY> ${storageFlags}${suffix}`;
-  const trustUsage = `/secrets trust <KEY>${suffix}`;
-  const usage = `set <KEY> <value> ${storageFlags}${suffix} | link <KEY> <secret-ref> ${storageFlags}${suffix} | get <KEY> | test <secret-ref> | providers | list | trust <KEY>${suffix} | delete <KEY> ${storageFlags}${suffix}`;
+    `/secrets ${operation} <KEY> <${operation === 'link' ? 'secret-ref' : 'value'}> ${storageFlags}`;
+  const deletionUsage = `/secrets delete <KEY> ${storageFlags}`;
+  const trustUsage = `/secrets trust <KEY>`;
+  const usage = `set <KEY> <value> ${storageFlags} | link <KEY> <secret-ref> ${storageFlags} | get <KEY> | test <secret-ref> | providers | list | trust <KEY> | delete <KEY> ${storageFlags}`;
   const referenceExamples = [
     'OPENAI_API_KEY goodvibes://secrets/env/OPENAI_API_KEY',
     'SLACK_BOT_TOKEN goodvibes://secrets/bitwarden?item=GoodVibes%20Slack&field=password',
@@ -59,14 +58,14 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
     argsHint: '<set|link|get|test|providers|list|trust|delete> [KEY]',
     secretArgs: { subcommands: { set: { from: 2 } } },
     subcommands: {
-      set: `<KEY> <value> ${storageFlags}${suffix}`,
-      link: `<KEY> <secret-ref> ${storageFlags}${suffix}`,
+      set: `<KEY> <value> ${storageFlags}`,
+      link: `<KEY> <secret-ref> ${storageFlags}`,
       get: '<KEY>',
       test: '<secret-ref>',
       providers: '',
       list: '',
-      trust: `<KEY>${suffix}`,
-      delete: `<KEY> ${storageFlags}${suffix}`,
+      trust: `<KEY>`,
+      delete: `<KEY> ${storageFlags}`,
     },
     // The registry asks once for a line that cannot be undone.
     confirm: (args) => {
@@ -78,19 +77,19 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
     },
     async handler(args, context) {
       const store = manager(context);
-      const parsed = { rest: stripYesFlag(args).rest, yes: true };
+      const parsed = { rest: stripYesFlag(args).rest };
       const [subcommand, ...rest] = parsed.rest;
       const invalidReference = (): never => { throw commandRefusal('[secrets] Invalid secret reference.', 'Use /secrets providers for examples.'); };
       if (!subcommand || subcommand === 'list') {
         const records = (await store.listDetailed()).filter((record) => record.source !== 'env');
         context.print(
           !records.length
-            ? `[secrets] No secrets stored. Use: /secrets set <KEY> <value>${suffix}`
+            ? `[secrets] No secrets stored. Use: /secrets set <KEY> <value>`
             : [
                 '[secrets] Stored keys:',
                 ...records.map(
                   (record) =>
-                    `  ${record.key} (${record.source}${record.refSource ? `, ref:${record.refSource}` : ''}${record.overriddenByEnv ? ', env override' : ''}${record.unconfirmed ? `, not used until confirmed: /secrets trust ${record.key}${suffix}` : ''})`,
+                    `  ${record.key} (${record.source}${record.refSource ? `, ref:${record.refSource}` : ''}${record.overriddenByEnv ? ', env override' : ''}${record.unconfirmed ? `, not used until confirmed: /secrets trust ${record.key}` : ''})`,
                 ),
               ].join('\n'),
         );
@@ -103,7 +102,7 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
             ...BUILTIN_SECRET_PROVIDER_SOURCES.map((source) => `  ${source}`),
             '',
             'Examples:',
-            ...referenceExamples.map((example) => `  /secrets link ${example}${suffix}`),
+            ...referenceExamples.map((example) => `  /secrets link ${example}`),
           ].join('\n'),
         );
         return;
@@ -145,14 +144,6 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
         if (!key) {
           throw commandRefusal(`[secrets] Usage: ${mutationUsage(subcommand)}`);
         }
-        if (!parsed.yes) {
-          requireYesFlag(
-            context,
-            `${subcommand === 'link' ? 'link secret reference for' : 'store secret value for'} ${key}`,
-            mutationUsage(subcommand),
-          );
-          return;
-        }
         const requestedScope = flags.has('--user') ? 'user' : 'project';
         const scope = policy.writeScope(key, requestedScope);
         const medium = flags.has('--plaintext') ? 'plaintext' : 'secure';
@@ -181,7 +172,7 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
         // quotes is an ordinary character). Several words would have to be
         // re-joined with guessed spacing, so they are refused instead.
         if (parts.length > 1) {
-          throw commandRefusal(`[secrets] Nothing was stored: the value for ${key} is more than one word. Put it in quotes ("…") to keep its spaces exactly; inside the quotes write \\\\ for a backslash and \\" for a quote, or run /secrets set ${key}${suffix} with no value to type it masked where that is offered.\nUsage: ${mutationUsage(subcommand)}`);
+          throw commandRefusal(`[secrets] Nothing was stored: the value for ${key} is more than one word. Put it in quotes ("…") to keep its spaces exactly; inside the quotes write \\\\ for a backslash and \\" for a quote, or run /secrets set ${key} with no value to type it masked where that is offered.\nUsage: ${mutationUsage(subcommand)}`);
         }
         const value = parts[0] ?? '';
         if (!value.length) {
@@ -206,12 +197,8 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
         if (!key) {
           throw commandRefusal(`[secrets] Usage: ${trustUsage}`);
         }
-        if (!parsed.yes) {
-          requireYesFlag(context, `use ${key} from this project's secret store`, trustUsage);
-          return;
-        }
         if (!store.confirmProjectSecret) {
-          throw commandRefusal(`[secrets] Nothing was confirmed: this app does not read this project's secret store. Store ${key} with /secrets set ${key} <value> --user${suffix}.`);
+          throw commandRefusal(`[secrets] Nothing was confirmed: this app does not read this project's secret store. Store ${key} with /secrets set ${key} <value> --user.`);
         }
         const confirmed = store.confirmProjectSecret(key);
         if (!confirmed.length) throw commandRefusal(`[secrets] Nothing was confirmed: ${key} is not in this project's secret store.`, '/secrets list shows what is stored.');
@@ -241,10 +228,6 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
         const key = rest.find((value) => !value.startsWith('--'));
         if (!key) {
           throw commandRefusal(`[secrets] Usage: ${deletionUsage}`);
-        }
-        if (!parsed.yes) {
-          requireYesFlag(context, `delete secret ${key}`, deletionUsage);
-          return;
         }
         await store.delete(key, {
           scope: policy.deleteScope(key, flags.has('--user') ? 'user' : flags.has('--project') ? 'project' : undefined),

@@ -127,7 +127,6 @@ export const { handleSessionWorkflowCommand, saveCommand } = createSessionWorkfl
   headingSuffix: ':',
   detailSeparator: ': ',
   postureSeparator: '=',
-  confirmDelete: true,
   reviewSeparator: ': ',
   reviewDetailSeparator: ': ',
   field(view, key, value) {

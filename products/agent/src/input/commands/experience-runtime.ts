@@ -8,7 +8,7 @@ import 'node:fs';
 import 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths, requireVoiceSetup } from './runtime-services.ts';
-import { commandRefusal, requireYesFlag } from './confirmation.ts';
+import { commandRefusal } from './confirmation.ts';
 import { handleApprovalOperatorAction } from './operator-actions-runtime.ts';
 import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
 import {
@@ -81,16 +81,16 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
   description:
     'Review or toggle always-speak mode, manage the managed local-voice runtime and the wake-word models, and export or import the voice settings',
   usage:
-    '[review|status|setup --yes|enable|disable|wake status|wake setup --yes [yes]|bundle export <path> --yes|bundle inspect <path>|bundle import <path> --yes]',
-  help: 'Usage: /voice [review|status|setup --yes|enable|disable|wake status|wake setup --yes [yes]|bundle export <path> --yes|bundle inspect <path>|bundle import <path> --yes]',
+    '[review|status|setup|enable|disable|wake status|wake setup [yes]|bundle export <path>|bundle inspect <path>|bundle import <path>]',
+  help: 'Usage: /voice [review|status|setup|enable|disable|wake status|wake setup [yes]|bundle export <path>|bundle inspect <path>|bundle import <path>]',
   reportFailure: true,
   paths: requireShellPaths,
-  async wake(args, ctx, _shellPaths, yes) {
+  async wake(args, ctx, _shellPaths) {
     // Wake artifacts live under the same managed voice root as the local
     // runtime, in its `wake` subdirectory, and are served by the same
     // voiceSetup service, so this reads and provisions through the platform's
     // own wake service rather than a second provisioning path. Nothing
-    // downloads unless the user typed `setup --yes`.
+    // downloads until `/voice wake setup` is run.
     const voiceSetup = requireVoiceSetup(ctx);
     const wakeSub = (args[1] ?? 'status').toLowerCase();
     // Read the artifact state BEFORE resolving: whether the speech gate is on
@@ -108,10 +108,6 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
       return;
     }
     if (wakeSub === 'setup') {
-      if (!yes) {
-        requireYesFlag(ctx, 'download the pinned wake-word classifier and speech-embedding front end (~3.7 MB)', '/voice wake setup --yes');
-        return;
-      }
       // The platform's voice setup: this surface listens for the wake word,
       // the models are fetched, and speech-to-text (what makes a wake word
       // useful) is proposed, or installed when the answer `yes` was given.
@@ -121,16 +117,16 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
       try {
         const outcome = await runWakeSetupPlan(voiceSetup, args[2]?.toLowerCase() === 'yes');
         const proposesStt = proposesSpeechToText(outcome);
-        ctx.print(['Wake-Word Setup', outcome.rendered, ...(proposesStt ? ['(yes: /voice wake setup --yes yes installs it now)'] : [])].join('\n'));
+        ctx.print(['Wake-Word Setup', outcome.rendered, ...(proposesStt ? ['(yes: /voice wake setup yes installs it now)'] : [])].join('\n'));
       } catch (error) {
         if (readRefusal(error)) throw error;
         throw commandRefusal(`Wake-Word Setup\n  setup failed: ${error instanceof Error ? error.message : String(error)}`);
       }
       return;
     }
-    throw commandRefusal('Usage: /voice wake [status|setup --yes]');
+    throw commandRefusal('Usage: /voice wake [status|setup]');
   },
-  async provision(sub, _args, ctx, _shellPaths, yes) {
+  async provision(sub, _args, ctx, _shellPaths) {
     if (sub === 'status') {
       const status = requireVoiceSetup(ctx).status();
       // Live install progress: voice.local.status carries an
@@ -151,16 +147,12 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
                 `  install in progress (started ${new Date(installInProgress.startedAt).toISOString()})`,
                 ...installInProgress.components.map((component) => `  ${formatVoiceInstallProgressLine(component)}`),
               ]
-            : ['  next /voice setup --yes']),
+            : ['  next /voice setup']),
         ].join('\n'),
       );
       return;
     }
     if (sub === 'setup') {
-      if (!yes) {
-        requireYesFlag(ctx, 'install the managed local-voice runtime (downloads piper TTS + a default voice)', '/voice setup --yes');
-        return;
-      }
       const voiceSetup = requireVoiceSetup(ctx);
       // install() is single-flight: a second run joins the one in progress and
       // gets the same receipt. The command ends when the install does, so
@@ -224,6 +216,6 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
     '  posture: optional local companion interaction; disabled by default',
     '  note: voice remains an optional operator convenience, not a required SaaS dependency',
     '  next /voice status',
-    '  next /voice setup --yes',
+    '  next /voice setup',
   ],
 });

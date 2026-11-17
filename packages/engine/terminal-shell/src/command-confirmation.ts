@@ -173,10 +173,31 @@ export const SHARED_COMMAND_CONFIRMATIONS: Readonly<Partial<Record<string, Share
     };
   },
   mcp(args) {
-    if (args[0] !== 'remove' || !args[1]) return undefined;
+    // The words after the subcommand, without `--scope <scope>`.
+    const words = args.slice(1).filter((word, index, all) => !word.startsWith('--') && all[index - 1] !== '--scope');
+    const server = words[0];
+    if (!server) return undefined;
+    // Loosening security is the owner's call: a looser trust mode, or lifting a quarantine.
+    if (args[0] === 'trust' && (words[1] === 'ask-on-risk' || words[1] === 'config')) {
+      return {
+        title: `Loosen MCP trust for ${server}?`,
+        detail: words[1] === 'config'
+          ? `${server} goes back to its configured trust mode, which may allow more than the mode set for this session.`
+          : `${server} may then act anywhere inside its scope without asking; calls outside it are still denied.`,
+        confirmLabel: 'Loosen',
+      };
+    }
+    if (args[0] === 'quarantine' && words[1] === 'approve') {
+      return {
+        title: `Approve the quarantined schema of ${server}?`,
+        detail: `${server}'s changed tool schema is accepted and its tools are offered again.`,
+        confirmLabel: 'Approve',
+      };
+    }
+    if (args[0] !== 'remove') return undefined;
     return {
-      title: `Remove MCP server ${args[1]}?`,
-      detail: `${args[1]}'s entry (its command, arguments, environment and trust settings) is deleted from the MCP config and its tools stop being offered. Re-adding it means typing the whole /mcp add line again.`,
+      title: `Remove MCP server ${server}?`,
+      detail: `${server}'s entry (its command, arguments, environment and trust settings) is deleted from the MCP config and its tools stop being offered. Re-adding it means typing the whole /mcp add line again.`,
       confirmLabel: 'Remove',
     };
   },

@@ -294,7 +294,6 @@ export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry)
           secretsManager,
           subscriptions,
           resolvePath: (path) => shellPaths.resolveWorkspacePath(path),
-          confirmed: true,
         })
       )
         return;
@@ -413,7 +412,6 @@ const handleAuthReview = createAuthReviewHandler<CommandContext>({
 });
 
 const handleAuthBundle = createAuthBundleHandler<CommandContext, AuthReviewBundle>({
-  confirmExport: false,
   reportReadFailure: false,
   build: (base) => ({ ...base, daemonLoginUrl: 'http://127.0.0.1:3421/login', listenerLoginUrl: 'http://127.0.0.1:3422/login' }),
   inspect: (value) => inspectAuthBundle(value as AuthReviewBundle),

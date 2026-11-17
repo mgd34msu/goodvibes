@@ -151,7 +151,7 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
       async handler(args, ctx) {
         // Export writes live sign-in tokens, so it needs an explicit --yes even where other mutations do not.
         const explicit = stripYesFlag(args);
-        const parsed = { rest: explicit.rest, yes: true };
+        const parsed = { rest: explicit.rest };
         args = [...parsed.rest];
         const print = (message: string) => ctx.print(policy.present(message));
         const shellPaths = policy.eagerPaths ? requireShellPaths(ctx) : undefined;
@@ -237,14 +237,6 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
           const provider = args[1];
           const mode = args[2]?.toLowerCase();
           if (!provider || !mode) throw commandRefusal('Usage: /subscription login <provider> start|finish <code>');
-          if (!parsed.yes) {
-            requireYesFlag(
-              ctx,
-              `${mode} provider subscription login for ${provider}`,
-              '/subscription login <provider> start|finish <code> --yes',
-            );
-            return;
-          }
           const service = services.get(provider);
           const resolved = getSubscriptionProviderConfig(provider, service);
           if (!resolved) {
@@ -362,10 +354,6 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
         if (sub === 'logout') {
           const provider = args[1];
           if (!provider) throw commandRefusal('Usage: /subscription logout <provider>');
-          if (!parsed.yes) {
-            requireYesFlag(ctx, `log out provider subscription ${provider}`, '/subscription logout <provider> --yes');
-            return;
-          }
           const removed = await manager.logout(provider);
           print(
             removed

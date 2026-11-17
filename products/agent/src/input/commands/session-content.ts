@@ -140,7 +140,6 @@ const contentCommands = createSessionContentCommands<CommandContext, ReturnType<
   },
   text: (message) => extractText(message.content),
   role: (message) => message.role,
-  confirmExport: true,
   invalidPath: 'Error\n  message Export path must be within the current directory.',
   exported: (count, path) => `Exported conversation\n  messages ${count}\n  path ${path}`,
   failed: formatSessionFailure,

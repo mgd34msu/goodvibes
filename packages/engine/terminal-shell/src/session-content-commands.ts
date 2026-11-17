@@ -5,7 +5,7 @@ import type { ExportMessage } from '@goodvibes-jev/engine/platform/platform/expo
 import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { TerminalSlashCommand } from './command-registry.js';
-import { commandRefusal, requireYesFlag, stripYesFlag } from './command-confirmation.js';
+import { commandRefusal, stripYesFlag, type ConfirmableCommand } from './command-confirmation.js';
 import { formatTranscript, parseTranscriptFormat, type TranscriptFormat } from './session-export-format.js';
 interface ContentContext {
   readonly session: {
@@ -29,7 +29,6 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
   readonly markdown: (messages: readonly Message[]) => ExportMessage[];
   readonly text: (message: Message) => string;
   readonly role: (message: Message) => string;
-  readonly confirmExport: boolean;
   readonly invalidPath: string;
   readonly exported: (count: number, path: string) => string;
   readonly failed: (action: string, error: unknown) => string;
@@ -44,22 +43,38 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
    */
   readonly redact?: ((text: string, context: Context) => Promise<string>) | undefined;
 }) {
-  const exportCommand: TerminalSlashCommand<Context> = {
+  /** The file an export line writes: the named path, or a new timestamped one. */
+  const exportTarget = (rest: readonly string[]): { readonly format: TranscriptFormat; readonly outPath: string | undefined } => {
+    let format: TranscriptFormat = 'markdown',
+      outPath: string | undefined;
+    for (const arg of rest) {
+      const named = parseTranscriptFormat(arg);
+      if (named) format = named;
+      else outPath = arg;
+    }
+    return { format, outPath };
+  };
+  const exportCommand: TerminalSlashCommand<Context> & Pick<ConfirmableCommand<Context>, 'confirm'> = {
     name: 'export',
     effect: 'local-state',
     description: 'Export conversation to a Markdown file',
-    usage: '[format] [path]' + (policy.confirmExport ? ' --yes' : ' [--yes]'),
+    usage: '[format] [path]',
     argsHint: '[markdown] [path]',
+    // Writing a new file runs at once; replacing a file that is already there
+    // cannot be undone, so the registry asks once (--yes answers in advance).
+    confirm(args, ctx) {
+      const { outPath } = exportTarget(args);
+      if (!outPath) return undefined;
+      const resolvedPath = policy.paths(ctx).resolveWorkspacePath(outPath);
+      try { if (!statSync(resolvedPath).isFile()) return undefined; } catch { return undefined; }
+      return { title: `Replace ${resolvedPath}?`, detail: `${resolvedPath} already exists; the exported conversation replaces its contents, which cannot be recovered.`, confirmLabel: 'Replace' };
+    },
     async handler(args, ctx) {
       const shellPaths = policy.paths(ctx);
-      const { rest, yes } = stripYesFlag(args);
-      let format: TranscriptFormat = 'markdown',
-        outPath: string | undefined;
-      for (const arg of rest) {
-        const named = parseTranscriptFormat(arg);
-        if (named) format = named;
-        else outPath = arg;
-      }
+      const { rest } = stripYesFlag(args);
+      const target = exportTarget(rest);
+      const format = target.format;
+      let outPath = target.outPath;
       if (!outPath) {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
         outPath = './conversation-' + timestamp + (format === 'markdown' ? '.md' : '.txt');
@@ -67,18 +82,6 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
       const resolvedPath = shellPaths.resolveWorkspacePath(outPath);
       if (!shellPaths.isWithinWorkingDirectory(resolvedPath)) {
         ctx.print(policy.invalidPath);
-        return;
-      }
-      // Replacing a file that is already there needs --yes in every product;
-      // a new file needs it only where the product asks for every export.
-      let replacing = false;
-      try { replacing = statSync(resolvedPath).isFile(); } catch { /* nothing there yet */ }
-      if (replacing && !yes) {
-        ctx.print(`${resolvedPath} already exists, so nothing was written. Run ${['/export', ...rest, '--yes'].join(' ')} to replace it, or give another path.`);
-        return;
-      }
-      if (policy.confirmExport && !yes) {
-        requireYesFlag(ctx, 'export conversation to ' + resolvedPath, '/export [format] [path] --yes');
         return;
       }
       try {

@@ -43,6 +43,7 @@ import { registerAgentNotifyTool } from './notify-tool.js';
 import { registerAgentMediaGenerateTool } from './media-generate-tool.js';
 import { registerAgentReviewPacketShareTool } from './review-packet-share-tool.js';
 import { registerAgentWorkPlanTool, type AgentWorkPlanStore } from './work-plan-tool.js';
+import { declareAgentReadModes } from './read-modes.js';
 import { resolve } from 'node:path';
 import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
@@ -201,6 +202,8 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
       });
       registry.declareElsewhere(AGENT_SHELL_TOOL_NAMES, SHELL_REFUSAL);
       registry.declareElsewhere(AGENT_NOT_YET_HOSTED_TOOL_NAMES, NOT_YET_HOSTED_REFUSAL);
+      // The Agent's read-mode table, on the platform tools here as on the Agent's own registry.
+      declareAgentReadModes(registry);
       return undefined;
     },
     async systemPrompt(input) {

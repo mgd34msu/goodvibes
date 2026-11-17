@@ -1,4 +1,4 @@
-import { readModeCategory, type ToolReadModes } from '@goodvibes-jev/engine/platform/platform/types';
+import { readModeCategory } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { wrapAgentContextToolForAgentPolicy } from './agent-context-policy.ts';
 import { wrapReadToolForAgentPolicy } from './agent-read-policy.ts';
@@ -8,67 +8,8 @@ import {
   type SettingsToolArgs,
 } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 import type { AgentToolPolicyInvocationExplanation } from './agent-tool-policy-guard-types.ts';
+import { agentReadModesFor, declareAgentReadModes } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 export type { AgentToolPolicyInvocationExplanation } from './agent-tool-policy-guard-types.ts';
-
-/**
- * The one table of the Agent's mode policy: for each tool, the modes that only
- * read. It is set on the tool's definition as `readModes`, so the permission
- * gate (the only place a call is decided) classes a listed mode as a read and
- * decides any other mode as a change: asked of the owner, or decided by Jev,
- * as the permission mode says. Nothing here refuses a call. The same table
- * answers the policy explanation, so what the Agent says matches what runs.
- */
-const AGENT_READ_MODES: Readonly<Record<string, ToolReadModes>> = Object.freeze({
-  remote: { field: 'mode', values: ['pools', 'contracts', 'artifacts', 'review'] },
-  // Resolving a target that would be created is a change, whatever the mode.
-  channel: { field: 'mode', values: ['accounts', 'directory', 'resolve_target', 'capabilities', 'tools', 'agent_tools', 'actions'], unless: ['createIfMissing'] },
-  mcp: { field: 'mode', values: ['servers', 'tools', 'schema', 'resources', 'security', 'auth'] },
-  control: { field: 'mode', values: ['commands', 'panels', 'subscriptions'] },
-  task: { field: 'mode', values: ['list', 'show', 'handoffs'] },
-  query: { field: 'mode', values: ['list', 'show'] },
-  // The facades over agent_harness: the actions that forward to a read mode of
-  // the harness mode catalog (agent_harness declares its own from the catalog).
-  models: { field: 'action', values: ['status', 'route', 'local', 'providers', 'provider'] },
-  memory: { field: 'action', values: ['status', 'provider', 'refinement', 'curator', 'candidate', 'list', 'search', 'get', 'stale'] },
-  settings: { field: 'action', values: ['list', 'get', 'preview_import'] },
-  workspace: { field: 'action', values: ['status', 'actions', 'action', 'surfaces', 'surface', 'shortcuts', 'keybindings', 'keybinding', 'commands', 'command', 'cli_commands', 'cli_command'] },
-  setup: { field: 'action', values: ['status', 'item', 'repair', 'checkpoint'] },
-  personal_ops: { field: 'action', values: ['briefing', 'status', 'queue', 'intake', 'lane'] },
-  research: { field: 'action', values: ['briefing', 'status', 'plan', 'runs', 'run', 'sources', 'source', 'reports', 'report_artifact'] },
-  computer: { field: 'action', values: ['status', 'plan', 'control', 'browser', 'setup', 'mcp'] },
-  device: { field: 'action', values: ['status', 'capability', 'browser', 'control', 'voice', 'provider'] },
-});
-
-/**
- * Facades over agent_harness whose every action reads: they declare no side
- * effects, and the gate classes their calls as reads.
- */
-const AGENT_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
-  'audit', 'autonomy', 'channels', 'context', 'delegation', 'execution', 'host', 'route', 'security', 'sessions', 'support',
-]);
-
-/** The read modes the Agent declares for a tool, when it declares any. */
-export function agentReadModesFor(toolName: string): ToolReadModes | undefined {
-  return AGENT_READ_MODES[toolName];
-}
-
-/**
- * Put the table's declarations on the registered definitions: a tool's read
- * modes, and the read category of a facade that only reads. Idempotent, so a
- * host that registers more tools later declares them by calling it again.
- */
-export function declareAgentReadModes(registry: ToolRegistry): void {
-  for (const tool of registry.list()) {
-    const name = tool.definition.name;
-    const readModes = AGENT_READ_MODES[name];
-    if (readModes && tool.definition.readModes !== readModes) {
-      tool.definition = { ...tool.definition, readModes };
-    } else if (AGENT_READ_ONLY_TOOLS.has(name) && tool.definition.category === undefined
-      && Array.isArray(tool.definition.sideEffects) && tool.definition.sideEffects.length === 0) {
-      tool.definition = { ...tool.definition, category: 'read' };
-    }
-  }
-}
 
 /**
  * The Agent's tool policy, installed on the main registry and on every
@@ -79,7 +20,7 @@ export function declareAgentReadModes(registry: ToolRegistry): void {
 export function installAgentToolPolicyGuard(registry: ToolRegistry): void {
   declareAgentReadModes(registry);
   for (const tool of registry.list()) {
-    if (AGENT_READ_MODES[tool.definition.name]) continue;
+    if (agentReadModesFor(tool.definition.name)) continue;
     if (tool.definition.name === 'read') {
       wrapReadToolForAgentPolicy(tool);
     } else if (tool.definition.name === 'goodvibes_context') {
@@ -94,7 +35,7 @@ export function explainAgentToolPolicyInvocation(
   toolName: string,
   args: Record<string, unknown> = {},
 ): AgentToolPolicyInvocationExplanation {
-  const readModes = AGENT_READ_MODES[toolName];
+  const readModes = agentReadModesFor(toolName);
   if (readModes) {
     const mode = typeof args[readModes.field] === 'string' ? String(args[readModes.field]) : '(none)';
     // The gate's own rule: a listed mode is a read, anything else is a change.

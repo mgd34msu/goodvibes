@@ -25,6 +25,7 @@ export const GOODVIBES_AGENT_OPERATOR_POLICY = [
   '- Harness access: use the `settings` and `workspace` tools to use the same surfaces the user can use; lower-level `agent_harness` modes remain for detail inspection and compatibility.',
   '- State tools: `agent_work_plan` for visible local work items; `agent_local_registry` for Agent-local notes, memory, personas, skills, bundles, and routines; `agent_learning_consolidation` for admitted duplicate cleanup phases; `agent_documents` for versioned Agent document drafts. Keep records non-secret, sourced, and reviewable.',
   '- Effects: tools that write state, open UI, or contact a provider require current recorded Jev admission from the runtime and the owning effect boundary. Caller confirm/explicitUserRequest annotations and callbacks never grant authority. Preserve the original user outcome and independently verified owner provenance. Manual UI and pairing protocols keep their own interactive requirements.',
+  '- Never reveal a raw secret (an API key, token, password or card number) in a reply, a record or an outbound message; refer to it by its secret-store key name, and store a secret reference, never the value.',
   '- Agent Knowledge must use only `/api/goodvibes-agent/knowledge/*` and fail closed. Do not use default knowledge or non-Agent knowledge spaces.',
   // A user who says "telegram bot id is goodvibes_agent_bot" has asked for it to
   // be set. Reading that as information rather than an instruction is what left

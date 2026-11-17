@@ -845,7 +845,7 @@ export async function queueDraftToSend(
   // daemon call, so a second overlapping call would pass the same check and
   // deliver the draft twice. Claim the draft here, with no await between the
   // check and the claim.
-  if (queueingDraftIds.has(draft.id)) throw new Error(`Draft ${draftId} is already being queued for delivery.`);
+  if (queueingDraftIds.has(draft.id)) throw new Error(`Draft ${draftId} is already being queued for delivery by another call, so this one sent nothing. Wait for that send to finish, then check the draft's status.`);
   queueingDraftIds.add(draft.id);
   try {
     return await promoteDraftToQueued(shellPaths, draft, draftId, options);

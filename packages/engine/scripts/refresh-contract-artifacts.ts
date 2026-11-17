@@ -38,6 +38,7 @@ import { buildOperatorContract } from '../platform/src/platform/control-plane/op
 import { PEER_CONTRACT_SOURCE } from '../contracts/src/peer-contract-source.ts';
 import { buildMockDaemonFixtureMap } from '../contracts/src/testing/mock-daemon.ts';
 import type { OperatorContractManifest } from '../contracts/src/types.ts';
+import { isLinearSchemaPattern } from '../transport-http/src/client-plumbing.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ENGINE_ROOT = resolve(__dirname, '..');
@@ -164,6 +165,31 @@ const catalog = new GatewayMethodCatalog();
 const operatorContract = buildOperatorContract(catalog);
 const operatorMethodIds = operatorContract.operator.methods.map((m) => m.id);
 const peerEndpointIds = PEER_CONTRACT_SOURCE.endpoints.map((e) => e.id);
+
+// Every pattern a shipped contract carries must run on the caller's thread:
+// the web UI validates synchronously and cannot evaluate any other pattern.
+function schemaPatternsOf(value: unknown, found: Set<string>, seen = new Set<object>()): Set<string> {
+  if (value === null || typeof value !== 'object' || seen.has(value)) return found;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (const item of value) schemaPatternsOf(item, found, seen);
+    return found;
+  }
+  const record = value as Record<string, unknown>;
+  const type = record.type;
+  if (typeof record.pattern === 'string' && (type === 'string' || (Array.isArray(type) && type.includes('string')))) {
+    found.add(record.pattern);
+  }
+  for (const child of Object.values(record)) schemaPatternsOf(child, found, seen);
+  return found;
+}
+const nonLinearPatterns = [...schemaPatternsOf([operatorContract, PEER_CONTRACT_SOURCE], new Set())]
+  .filter((pattern) => !isLinearSchemaPattern(pattern));
+if (nonLinearPatterns.length > 0) {
+  console.error('[refresh:contracts] these schema patterns cannot run synchronously; rewrite each so one stretch of text has one way to match:');
+  for (const pattern of nonLinearPatterns) console.error(`  ${pattern}`);
+  process.exit(1);
+}
 
 const operatorJson = safeStringify(operatorContract) + '\n';
 const peerJson = safeStringify(PEER_CONTRACT_SOURCE) + '\n';

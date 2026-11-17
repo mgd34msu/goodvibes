@@ -215,79 +215,398 @@ function schemaPattern(source: string): RegExp | null {
   return pattern;
 }
 
-const QUANTIFIER = /^(?:([*+?])|\{(\d+)(?:(,)(\d*))?\})\??/;
-
 /**
- * True when a regular expression cannot backtrack without bound: no
- * backreference or lookaround, at most one unbounded repeat, and every group
- * repeated more than once has a fixed width with no alternation. A group made
- * optional with `?` may have any width. This admits every pattern the shipped
- * contracts use (fixed-width ids, `\S`, bounded runs, one trailing `+`) and
- * refuses nested or overlapping repetition such as `(a+)+` or `(a|aa)*`.
+ * True when a regular expression is proven to run in time linear in its input
+ * on a backtracking engine, so it may run on this thread. Anything the proof
+ * cannot cover runs in the isolated executor instead, which is always correct.
+ *
+ * The proof: no backreference, lookaround or inline modifier; every part
+ * matches a given stretch of text in at most one way (alternatives start with
+ * different characters or are distinct fixed strings; a repeated group always
+ * has one way to match and cannot match empty); and two parts that can each
+ * match a varying amount of text never meet unless the second must start with
+ * a character none of the text since the first can contain, so where one ends
+ * and the next begins is decided by the input. A pattern with such a part is
+ * also anchored with `^`, so it is tried from one position only. This admits
+ * every pattern the shipped contracts use (fixed-width ids, `\S`, bounded runs,
+ * `^\d+(?:\.\d{1,3})?$`) and refuses nested or overlapping repetition such as
+ * `(a+)+`, `(a|aa)*`, `a{0,255}a{0,255}` and `(?:a|a)?(?:a|a)?`.
  */
 export function isLinearSchemaPattern(source: string): boolean {
-  interface Frame { variable: boolean; alternation: boolean }
-  const frames: Frame[] = [{ variable: false, alternation: false }];
-  let last: 'atom' | Frame | null = null;
-  let unbounded = 0;
-  let index = 0;
-  const markVariable = () => { for (const frame of frames) frame.variable = true; };
-  while (index < source.length) {
-    const char = source[index]!;
-    if (char === '\\') {
-      const escaped = source[index + 1] ?? '';
-      if (/[1-9k]/.test(escaped)) return false;
-      index += 2;
-      last = 'atom';
-      continue;
-    }
-    if (char === '[') {
-      index += 1;
-      if (source[index] === '^') index += 1;
-      if (source[index] === ']') index += 1;
-      while (index < source.length && source[index] !== ']') index += source[index] === '\\' ? 2 : 1;
-      index += 1;
-      last = 'atom';
-      continue;
-    }
-    if (char === '(') {
-      if (/^\(\?<?[=!]/.test(source.slice(index, index + 4))) return false;
-      frames.push({ variable: false, alternation: false });
-      const named = /^\(\?(?::|<[^>]*>)/.exec(source.slice(index));
-      index += named ? named[0].length : 1;
-      last = null;
-      continue;
-    }
-    if (char === ')') {
-      if (frames.length < 2) return false;
-      const frame = frames.pop()!;
-      if (frame.variable || frame.alternation) markVariable();
-      index += 1;
-      last = frame;
-      continue;
-    }
-    if (char === '|') {
-      frames[frames.length - 1]!.alternation = true;
-      index += 1;
-      last = null;
-      continue;
-    }
-    const quantifier = QUANTIFIER.exec(source.slice(index));
-    if (quantifier && last !== null) {
-      const [, symbol, min, comma, max] = quantifier;
-      const upper = symbol === '?' ? 1 : symbol ? Infinity : comma === undefined ? Number(min) : max ? Number(max) : Infinity;
-      const lower = symbol === '+' ? 1 : symbol ? 0 : Number(min);
-      if (last !== 'atom' && upper > 1 && (last.variable || last.alternation)) return false;
-      if (upper === Infinity && ++unbounded > 1) return false;
-      if (upper !== lower) markVariable();
-      index += quantifier[0].length;
-      last = null;
-      continue;
-    }
-    index += 1;
-    last = 'atom';
+  const cursor: PatternCursor = { source, index: 0 };
+  const pattern = readAlternatives(cursor);
+  if (!pattern || cursor.index !== source.length) return false;
+  return pattern.anchored || (pattern.determined && pattern.maxWidth <= MAX_UNANCHORED_PATTERN_WIDTH);
+}
+
+// A pattern with one way to match, tried at every position of an unanchored
+// search, costs its width per position; past this width it must be anchored.
+const MAX_UNANCHORED_PATTERN_WIDTH = 1024;
+
+// Character sets as sorted, merged UTF-16 code unit ranges: schema patterns
+// compile without flags, so one character is one code unit.
+type CharRanges = readonly (readonly [number, number])[];
+const MAX_CODE_UNIT = 0xffff;
+const NO_CHARS: CharRanges = [];
+
+function charRanges(list: readonly (readonly [number, number])[]): CharRanges {
+  const sorted = [...list].sort((left, right) => left[0] - right[0]);
+  const merged: [number, number][] = [];
+  for (const [low, high] of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && low <= last[1] + 1) last[1] = Math.max(last[1], high);
+    else merged.push([low, high]);
   }
-  return frames.length === 1;
+  return merged;
+}
+
+function unionChars(left: CharRanges, right: CharRanges): CharRanges {
+  if (left.length === 0) return right;
+  if (right.length === 0) return left;
+  return charRanges([...left, ...right]);
+}
+
+function complementChars(set: CharRanges): CharRanges {
+  const out: [number, number][] = [];
+  let next = 0;
+  for (const [low, high] of set) {
+    if (low > next) out.push([next, low - 1]);
+    next = high + 1;
+  }
+  if (next <= MAX_CODE_UNIT) out.push([next, MAX_CODE_UNIT]);
+  return out;
+}
+
+function charsOverlap(left: CharRanges, right: CharRanges): boolean {
+  let i = 0;
+  let j = 0;
+  while (i < left.length && j < right.length) {
+    const [leftLow, leftHigh] = left[i]!;
+    const [rightLow, rightHigh] = right[j]!;
+    if (leftHigh < rightLow) i += 1;
+    else if (rightHigh < leftLow) j += 1;
+    else return true;
+  }
+  return false;
+}
+
+const DIGIT_CHARS = charRanges([[0x30, 0x39]]);
+const WORD_CHARS = charRanges([[0x30, 0x39], [0x41, 0x5a], [0x5f, 0x5f], [0x61, 0x7a]]);
+const SPACE_CHARS = charRanges([
+  [0x09, 0x0d], [0x20, 0x20], [0xa0, 0xa0], [0x1680, 0x1680], [0x2000, 0x200a],
+  [0x2028, 0x2029], [0x202f, 0x202f], [0x205f, 0x205f], [0x3000, 0x3000], [0xfeff, 0xfeff],
+]);
+const ANY_BUT_LINE_END = complementChars(charRanges([[0x0a, 0x0a], [0x0d, 0x0d], [0x2028, 0x2029]]));
+const CLASS_ESCAPES: Readonly<Record<string, CharRanges>> = {
+  d: DIGIT_CHARS, D: complementChars(DIGIT_CHARS),
+  w: WORD_CHARS, W: complementChars(WORD_CHARS),
+  s: SPACE_CHARS, S: complementChars(SPACE_CHARS),
+};
+const CONTROL_ESCAPES: Readonly<Record<string, number>> = { t: 9, n: 10, v: 11, f: 12, r: 13 };
+
+interface PatternCursor { readonly source: string; index: number }
+
+/** What the linearity proof needs to know about one part of a pattern. */
+interface PatternPart {
+  /** At most one way to match from a given position. */
+  readonly determined: boolean;
+  /**
+   * When not determined: the characters the text matched since the part's
+   * last choice may contain, which whatever follows must not start with.
+   */
+  readonly trailing: CharRanges | null;
+  readonly nullable: boolean;
+  /** Characters a non-empty match can start with. */
+  readonly first: CharRanges;
+  /** Characters a match can contain. */
+  readonly chars: CharRanges;
+  /**
+   * The characters every match holds at each of its first positions (at most
+   * MAX_PATTERN_PREFIX); `prefixComplete` when that covers the whole match.
+   */
+  readonly prefix: readonly CharRanges[];
+  readonly prefixComplete: boolean;
+  /** Longest match in code units; Infinity when unbounded. */
+  readonly maxWidth: number;
+  /** The one string this part matches, when it matches exactly one. */
+  readonly literal: string | null;
+  /** Begins with a `^` assertion. */
+  readonly anchored: boolean;
+}
+
+const MAX_PATTERN_PREFIX = 32;
+
+const ASSERTION_PART: PatternPart = {
+  determined: true, trailing: null, nullable: true, first: NO_CHARS, chars: NO_CHARS,
+  prefix: [], prefixComplete: true, maxWidth: 0, literal: '', anchored: false,
+};
+
+function charPart(chars: CharRanges, code: number | null): PatternPart {
+  return {
+    determined: true, trailing: null, nullable: false, first: chars, chars,
+    prefix: [chars], prefixComplete: true, maxWidth: 1,
+    literal: code === null ? null : String.fromCharCode(code), anchored: false,
+  };
+}
+
+/** True when no text matches both parts: they differ at the start or at some position both must fill. */
+function partsExclusive(left: PatternPart, right: PatternPart): boolean {
+  if (!(left.nullable && right.nullable) && !charsOverlap(left.first, right.first)) return true;
+  const shared = Math.min(left.prefix.length, right.prefix.length);
+  for (let position = 0; position < shared; position += 1) {
+    if (!charsOverlap(left.prefix[position]!, right.prefix[position]!)) return true;
+  }
+  return false;
+}
+
+interface ReadEscape { readonly chars: CharRanges; readonly code: number | null; readonly assertion: boolean; readonly next: number }
+
+/** The escape at `index` (a backslash), or null when the proof does not cover it. */
+function readEscape(source: string, index: number, inClass: boolean): ReadEscape | null {
+  const escaped = source[index + 1];
+  if (escaped === undefined) return null;
+  const single = (code: number, next = index + 2): ReadEscape => ({ chars: [[code, code]], code, assertion: false, next });
+  const classChars = CLASS_ESCAPES[escaped];
+  if (classChars) return { chars: classChars, code: null, assertion: false, next: index + 2 };
+  if (escaped === 'b') return inClass ? single(8) : { chars: NO_CHARS, code: null, assertion: true, next: index + 2 };
+  if (escaped === 'B' && !inClass) return { chars: NO_CHARS, code: null, assertion: true, next: index + 2 };
+  // Backreferences, octal escapes and named references.
+  if (/[1-9k]/.test(escaped)) return null;
+  if (escaped === '0') return /[0-9]/.test(source[index + 2] ?? '') ? null : single(0);
+  const control = CONTROL_ESCAPES[escaped];
+  if (control !== undefined) return single(control);
+  if (escaped === 'x' || escaped === 'u') {
+    const digits = escaped === 'x' ? 2 : 4;
+    const hex = source.slice(index + 2, index + 2 + digits);
+    if (hex.length === digits && /^[0-9a-fA-F]+$/.test(hex)) return single(Number.parseInt(hex, 16), index + 2 + digits);
+    return single(escaped.charCodeAt(0));
+  }
+  if (escaped === 'c') {
+    const letter = source[index + 2] ?? '';
+    return /[A-Za-z]/.test(letter) ? single(letter.charCodeAt(0) % 32, index + 3) : null;
+  }
+  return single(escaped.charCodeAt(0));
+}
+
+/** The character class at `index` (an opening bracket), or null when the proof does not cover it. */
+function readClass(source: string, index: number): { chars: CharRanges; next: number } | null {
+  let at = index + 1;
+  const negated = source[at] === '^';
+  if (negated) at += 1;
+  const members: (readonly [number, number])[] = [];
+  const readMember = (position: number): ReadEscape | null => {
+    if (source[position] === '\\') return readEscape(source, position, true);
+    const code = source.charCodeAt(position);
+    return { chars: [[code, code]], code, assertion: false, next: position + 1 };
+  };
+  while (at < source.length && source[at] !== ']') {
+    const low = readMember(at);
+    if (!low) return null;
+    at = low.next;
+    if (source[at] === '-' && at + 1 < source.length && source[at + 1] !== ']') {
+      const high = readMember(at + 1);
+      if (!high) return null;
+      if (low.code === null || high.code === null) {
+        members.push(...low.chars, ...high.chars, [0x2d, 0x2d]);
+      } else {
+        if (low.code > high.code) return null;
+        members.push([low.code, high.code]);
+      }
+      at = high.next;
+    } else {
+      members.push(...low.chars);
+    }
+  }
+  if (source[at] !== ']') return null;
+  const chars = charRanges(members);
+  return { chars: negated ? complementChars(chars) : chars, next: at + 1 };
+}
+
+const QUANTIFIER = /(?:([*+?])|\{(\d+)(?:(,)(\d*))?\})\??/y;
+const NAMED_GROUP = /\(\?<[A-Za-z_$][\w$]*>/y;
+
+function readAlternatives(cursor: PatternCursor): PatternPart | null {
+  const branches: PatternPart[] = [];
+  for (;;) {
+    const branch = readSequence(cursor);
+    if (!branch) return null;
+    branches.push(branch);
+    if (cursor.source[cursor.index] !== '|') break;
+    cursor.index += 1;
+  }
+  if (branches.length === 1) return branches[0]!;
+  let nullable = 0;
+  let exclusive = true;
+  for (let i = 0; i < branches.length; i += 1) {
+    if (branches[i]!.nullable) nullable += 1;
+    for (let j = 0; j < i && exclusive; j += 1) {
+      if (!partsExclusive(branches[i]!, branches[j]!)) exclusive = false;
+    }
+  }
+  // Two alternatives that can match the same text give that text two ways to
+  // match, which a repetition or a sequence multiplies. Exclusive alternatives
+  // can each start a match of a different length only when they are distinct
+  // fixed strings, which also never match the same text.
+  if (nullable > 1) return null;
+  if (!exclusive) {
+    const literals = branches.map((branch) => branch.literal);
+    if (literals.some((literal) => literal === null) || new Set(literals).size !== literals.length) return null;
+  }
+  let first = NO_CHARS;
+  let chars = NO_CHARS;
+  for (const branch of branches) {
+    first = unionChars(first, branch.first);
+    chars = unionChars(chars, branch.chars);
+  }
+  const shared = Math.min(...branches.map((branch) => branch.prefix.length));
+  const prefix: CharRanges[] = [];
+  for (let position = 0; position < shared; position += 1) {
+    prefix.push(branches.reduce<CharRanges>((union, branch) => unionChars(union, branch.prefix[position]!), NO_CHARS));
+  }
+  const determined = exclusive && nullable === 0 && branches.every((branch) => branch.determined);
+  return {
+    determined,
+    trailing: determined ? null : chars,
+    nullable: nullable > 0,
+    first,
+    chars,
+    prefix,
+    prefixComplete: false,
+    maxWidth: Math.max(...branches.map((branch) => branch.maxWidth)),
+    literal: null,
+    anchored: branches.every((branch) => branch.anchored),
+  };
+}
+
+function readSequence(cursor: PatternCursor): PatternPart | null {
+  const { source } = cursor;
+  // The characters the text since the last part with more than one way to
+  // match may contain; null when every part so far has had one way.
+  let pending: CharRanges | null = null;
+  let nullable = true;
+  let first = NO_CHARS;
+  let chars = NO_CHARS;
+  let maxWidth = 0;
+  let literal: string | null = '';
+  let anchored: boolean | undefined;
+  const prefix: CharRanges[] = [];
+  let prefixComplete = true;
+  while (cursor.index < source.length && source[cursor.index] !== '|' && source[cursor.index] !== ')') {
+    const part = readQuantifiedPart(cursor);
+    if (!part) return null;
+    anchored ??= part.anchored;
+    if (prefixComplete) {
+      prefix.push(...part.prefix.slice(0, MAX_PATTERN_PREFIX - prefix.length));
+      prefixComplete = part.prefixComplete && prefix.length < MAX_PATTERN_PREFIX;
+    }
+    if (pending === null) {
+      // Everything before had one way to match, so this part's start is
+      // decided; what stays open is the part's own trailing choice.
+      if (!part.determined) pending = part.trailing ?? part.chars;
+    } else if (!part.nullable && !charsOverlap(part.first, pending)) {
+      // This part must start on a character the pending text cannot hold,
+      // so the input decides where that text ends.
+      pending = part.determined ? null : part.trailing ?? part.chars;
+    } else if (!part.determined && charsOverlap(part.first, pending)) {
+      return null;
+    } else {
+      pending = unionChars(pending, part.chars);
+    }
+    if (nullable) first = unionChars(first, part.first);
+    nullable &&= part.nullable;
+    chars = unionChars(chars, part.chars);
+    maxWidth += part.maxWidth;
+    literal = literal !== null && part.literal !== null ? literal + part.literal : null;
+  }
+  return {
+    determined: pending === null, trailing: pending, nullable, first, chars, prefix, prefixComplete,
+    maxWidth, literal, anchored: anchored ?? false,
+  };
+}
+
+function readQuantifiedPart(cursor: PatternCursor): PatternPart | null {
+  const atom = readAtom(cursor);
+  if (!atom) return null;
+  const { source } = cursor;
+  QUANTIFIER.lastIndex = cursor.index;
+  const quantifier = QUANTIFIER.exec(source);
+  if (!quantifier || atom.assertion) return atom.part;
+  cursor.index = QUANTIFIER.lastIndex;
+  const [, symbol, min, comma, max] = quantifier;
+  const upper = symbol === '?' ? 1 : symbol ? Infinity : comma === undefined ? Number(min) : max ? Number(max) : Infinity;
+  const lower = symbol === '+' ? 1 : symbol ? 0 : Number(min);
+  const part = atom.part;
+  // A part repeated more than once either has one way to match or must start
+  // on a character its own trailing choice cannot hold, so the input decides
+  // where each repetition ends; a part that can match empty gives an optional
+  // or repeated match two ways to be empty.
+  if (upper > 1 && !part.determined && (part.nullable || charsOverlap(part.first, part.trailing ?? part.chars))) return null;
+  if (part.nullable && upper !== lower) return null;
+  const none = upper === 0;
+  const determined = none || (part.determined && lower === upper);
+  // The repetitions every match makes come first, in order.
+  const prefix: CharRanges[] = [];
+  for (let repetition = 0; repetition < lower && prefix.length < MAX_PATTERN_PREFIX; repetition += 1) {
+    prefix.push(...part.prefix.slice(0, MAX_PATTERN_PREFIX - prefix.length));
+    if (!part.prefixComplete || part.prefix.length === 0) break;
+  }
+  const prefixComplete = none || (lower === upper && part.prefixComplete && prefix.length === part.prefix.length * lower);
+  return {
+    determined,
+    trailing: determined ? null : lower === upper ? part.trailing ?? part.chars : part.chars,
+    nullable: lower === 0 || part.nullable,
+    first: none ? NO_CHARS : part.first,
+    chars: none ? NO_CHARS : part.chars,
+    prefix,
+    prefixComplete,
+    maxWidth: none || part.maxWidth === 0 ? 0 : part.maxWidth * upper,
+    literal: part.literal !== null && lower === upper && lower <= 64 ? part.literal.repeat(lower) : null,
+    anchored: part.anchored && lower > 0,
+  };
+}
+
+function readAtom(cursor: PatternCursor): { part: PatternPart; assertion: boolean } | null {
+  const { source } = cursor;
+  const char = source[cursor.index]!;
+  if (char === '^' || char === '$') {
+    cursor.index += 1;
+    return { part: char === '^' ? { ...ASSERTION_PART, anchored: true } : ASSERTION_PART, assertion: true };
+  }
+  if (char === '\\') {
+    const escape = readEscape(source, cursor.index, false);
+    if (!escape) return null;
+    cursor.index = escape.next;
+    return escape.assertion ? { part: ASSERTION_PART, assertion: true } : { part: charPart(escape.chars, escape.code), assertion: false };
+  }
+  if (char === '[') {
+    const set = readClass(source, cursor.index);
+    if (!set) return null;
+    cursor.index = set.next;
+    return { part: charPart(set.chars, null), assertion: false };
+  }
+  if (char === '.') {
+    cursor.index += 1;
+    return { part: charPart(ANY_BUT_LINE_END, null), assertion: false };
+  }
+  if (char === '(') {
+    NAMED_GROUP.lastIndex = cursor.index;
+    if (source.startsWith('(?:', cursor.index)) cursor.index += 3;
+    else if (NAMED_GROUP.test(source)) cursor.index = NAMED_GROUP.lastIndex;
+    else if (source[cursor.index + 1] === '?') return null;
+    else cursor.index += 1;
+    const inner = readAlternatives(cursor);
+    if (!inner || source[cursor.index] !== ')') return null;
+    cursor.index += 1;
+    return { part: inner, assertion: false };
+  }
+  if (char === '*' || char === '+' || char === '?' || char === ')' || char === '|') return null;
+  if (char === '{') {
+    QUANTIFIER.lastIndex = cursor.index;
+    if (QUANTIFIER.test(source)) return null;
+  }
+  cursor.index += 1;
+  const code = char.charCodeAt(0);
+  return { part: charPart([[code, code]], code), assertion: false };
 }
 
 type PatternRequest = { source: string; value: string; path: string };

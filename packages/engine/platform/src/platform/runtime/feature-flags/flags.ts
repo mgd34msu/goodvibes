@@ -199,7 +199,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + ' Sanitizes HTTP response content (none/safe-text/strict modes, default safe-text).'
       + ' Requests to private IPs, cloud metadata endpoints, and encoded private-IP forms are'
       + ' always refused with an honest tool-result reason. Fetches to localhost dev servers'
-      + ' ask once and can be allowed per project (fetch.allowLocalhost).'
+      + ' ask once; approving saves fetch.allowLocalhost in your own settings.'
       + ' Set fetch.sanitizeMode to none to skip content sanitization for trusted flows.',
     defaultState: 'enabled',
     tier: 8,
@@ -409,13 +409,10 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     id: 'adaptive-notification-suppression',
     name: 'Adaptive Notification Suppression',
     description:
-      'Enables mode-context and burst-detection policies in the NotificationRouter. '
-      + 'In quiet/minimal mode, operational churn is suppressed before reaching the '
-      + 'conversation or status bar. Burst detection collapses rapid domain:level '
-      + 'floods into panel_only with a burst_collapsed reason code. '
-      + 'On by default now that collapsed groups have a visible home: the notifications '
-      + 'panel renders burst-collapsed groups with their reason codes. '
-      + 'Disable to revert to base default + quiet-typing + batch-window policies only.',
+      'Holds repeats off the screen: past notifications.burstThreshold notifications '
+      + 'of one kind (same domain, level and title) in one collapse window, the rest '
+      + 'are counted into that kind\'s notification-history entry without a toast. '
+      + 'Disable to let every one toast as its level and the print level allow.',
     defaultState: 'enabled',
     tier: 3,
     runtimeToggleable: true,

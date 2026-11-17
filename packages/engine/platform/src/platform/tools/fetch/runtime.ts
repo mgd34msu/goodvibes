@@ -63,7 +63,7 @@ export interface FetchRuntimeDeps {
    */
   readonly resolveHost?: HostResolver | undefined;
   /**
-   * Interactive-only read of the per-project approval (fetch.allowLocalhost).
+   * Interactive-only read of the saved localhost approval (fetch.allowLocalhost).
    * Autonomous operations always require fresh exact-hop admission.
    */
   readonly isLocalhostAllowed?: (() => boolean) | undefined;
@@ -636,8 +636,8 @@ async function fetchOne(
       if (!localhostApproved) {
         return {
           url: urlInput.url,
-          error: `Request blocked: localhost fetch to "${hostname}" is not approved for this project. `
-            + 'Approve the localhost fetch ask (allow for this project) or set fetch.allowLocalhost to true.',
+          error: `Request blocked: localhost fetch to "${hostname}" is not approved. `
+            + 'Approve the localhost fetch ask, or set fetch.allowLocalhost to true in your own settings (a project settings file cannot turn it on).',
           host_trust_tier: 'localhost',
           sanitization_tier: effectiveSanitizeModeForBlocked,
         };

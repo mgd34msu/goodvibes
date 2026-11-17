@@ -6,14 +6,14 @@ import { sanitizeUrlForLog } from '../../utils/fetch-with-timeout.js';
  * the request is sent. Blocked hosts are denied pre-request with an
  * `SSRF_DENY` telemetry event, absolutely, regardless of configuration.
  * Localhost/loopback targets (dev servers) are their own tier: they ask once
- * and can be allowed per project (fetch.allowLocalhost). Unknown hosts
+ * and the approval is saved in the user's settings (fetch.allowLocalhost). Unknown hosts
  * receive `safe-text` sanitization. Trusted hosts may opt into `none`
  * sanitization via config.
  *
  * Trust tiers:
  *   - `trusted`  , Host is explicitly allowlisted. Sanitization may be relaxed.
  *   - `unknown`  , Host is not in any list; apply `safe-text` sanitization.
- *   - `localhost`, Loopback/dev-server target; requires the per-project
+ *   - `localhost`, Loopback/dev-server target; requires the localhost
  *                   approval (fetch.allowLocalhost) before the request is sent.
  *   - `blocked`  , Host matches an internal address, metadata endpoint, or
  *                   explicit blocklist entry. Request is denied pre-flight.
@@ -43,7 +43,7 @@ import { hostMatchesGlob, normalizeHost } from './host-utils.js';
  *
  * - `trusted`  , Explicitly allowlisted; sanitization may be relaxed.
  * - `unknown`  , Not in any list; standard `safe-text` sanitization applied.
- * - `localhost`, Loopback dev-server target; needs the per-project approval.
+ * - `localhost`, Loopback dev-server target; needs the localhost approval.
  * - `blocked`  , Sensitive host; request denied pre-request, absolutely.
  */
 export type HostTrustTier = 'trusted' | 'unknown' | 'localhost' | 'blocked';
@@ -175,7 +175,7 @@ export function classifyHostTrustTier(
   if (isLocalhostAlias(normalizedHost) || (literal !== null && isPlainLoopbackAddress(literal))) {
     return {
       tier: 'localhost',
-      reason: `host "${host}" is a loopback address, needs the per-project localhost approval (fetch.allowLocalhost)`,
+      reason: `host "${host}" is a loopback address, needs the localhost approval (fetch.allowLocalhost in your own settings)`,
       isSsrf: false,
     };
   }

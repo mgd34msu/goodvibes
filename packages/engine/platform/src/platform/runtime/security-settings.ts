@@ -33,7 +33,7 @@ const SECURITY_FEATURE_SETTINGS: readonly Omit<SecuritySettingReport, 'currentSt
     insecureWhen:
       'When fetch.sanitizeMode is none, response content is returned without sanitization; private-IP and cloud-metadata blocking still applies.',
     enablementEffect:
-      'At safe-text (the default) or strict, unknown hosts are sanitized, explicitly blocked hosts are denied, and private/metadata targets are denied before request or redirect follow. Localhost dev servers ask once and can be allowed per project (fetch.allowLocalhost).',
+      'At safe-text (the default) or strict, unknown hosts are sanitized, explicitly blocked hosts are denied, and private/metadata targets are denied before request or redirect follow. Localhost dev servers ask once; approving saves fetch.allowLocalhost in your own settings (a project file cannot turn it on).',
     enablementRequirements: [
       'Add trusted_hosts only for hosts whose raw content is safe to expose to the model.',
       'Keep fetch.sanitizeMode at safe-text or strict unless the target host is explicitly trusted.',
@@ -41,7 +41,7 @@ const SECURITY_FEATURE_SETTINGS: readonly Omit<SecuritySettingReport, 'currentSt
     operationalNotes: [
       'Requests to private IPs, link-local metadata endpoints, and encoded private IP forms are always blocked.',
       'Redirect chains are validated hop-by-hop.',
-      'Localhost fetches are refused until approved; the approval persists per project via fetch.allowLocalhost.',
+      'Localhost fetches are refused until approved; the approval is saved as fetch.allowLocalhost in your own settings and applies to every project.',
     ],
   },
   {

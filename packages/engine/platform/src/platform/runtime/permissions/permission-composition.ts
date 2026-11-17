@@ -169,8 +169,8 @@ export function createApprovalDerivedHandlers(options: ApprovalDerivedHandlerOpt
     autonomousHost: options.autonomousHost,
     requestApproval: options.requestApproval,
   });
-  // Localhost dev-server fetches ride the same seam: ask once, one-tap
-  // "allow for this project", persisted as fetch.allowLocalhost.
+  // Localhost dev-server fetches ride the same seam: ask once; approving
+  // saves fetch.allowLocalhost in the user's own settings.
   const localhostFetchApproval = buildLocalhostFetchApproval({
     autonomousHost: options.autonomousHost,
     requestApproval: options.requestApproval,

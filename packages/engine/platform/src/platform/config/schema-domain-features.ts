@@ -22,9 +22,9 @@ export interface FetchConfig {
   /** Comma-separated default blocked hosts (always refused); per-call blocked_hosts still adds. */
   blockedHosts: string;
   /**
-   * Allow fetches to localhost/loopback dev servers for this project. Persisted
-   * per project by the one-tap "allow for this project" approval; private-IP and
-   * cloud-metadata blocking is unaffected and absolute.
+   * Allow fetches to localhost/loopback dev servers. Saved in the user's own
+   * settings by the localhost fetch approval (a project file cannot set it);
+   * private-IP and cloud-metadata blocking is unaffected and absolute.
    */
   allowLocalhost: boolean;
 }
@@ -152,7 +152,7 @@ export const featureConfigSettings: ConfigSetting[] = [
     type: 'boolean',
     default: false,
     description:
-      'Allow the fetch tool to reach localhost/loopback dev servers for this project (e.g. http://localhost:3000). Set by the one-tap "allow for this project" answer to the localhost fetch ask and persisted in the project settings, so it never re-asks. Private-IP and cloud-metadata endpoint blocking is unaffected and absolute.',
+      'Allow the fetch tool to reach localhost/loopback dev servers (e.g. http://localhost:3000) in every project. Set by approving the localhost fetch ask and saved in your own settings, so it never re-asks; a project settings file cannot turn it on. Private-IP and cloud-metadata endpoint blocking is unaffected and absolute.',
   },
   {
     key: 'fetch.trustedHosts',

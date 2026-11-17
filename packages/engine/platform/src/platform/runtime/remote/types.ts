@@ -55,7 +55,6 @@ export interface RemoteRunnerContract {
   readonly transport?: {
     readonly state: DaemonTransportState;
     readonly connectedAt?: number | undefined;
-    readonly messageCount: number;
     readonly errorCount: number;
     readonly lastError?: string | undefined;
   };
@@ -75,7 +74,6 @@ export interface RemoteRunnerPool {
 
 export interface RemoteRunnerEvidenceSummary {
   readonly toolCallCount: number;
-  readonly messageCount: number;
   readonly errorCount: number;
   /** Absent for a runner with no transport (see RemoteRunnerContract.transport). */
   readonly transportState?: DaemonTransportState | undefined;

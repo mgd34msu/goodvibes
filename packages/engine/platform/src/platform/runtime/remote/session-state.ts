@@ -10,7 +10,6 @@ export interface RemoteSessionStateSnapshot {
   readonly label: string;
   readonly transportState: string;
   readonly taskId?: string | undefined;
-  readonly messageCount: number;
   readonly errorCount: number;
   readonly lastError?: string | undefined;
   readonly heartbeat: RemoteHeartbeatSnapshot;
@@ -35,7 +34,6 @@ export function buildRemoteSessionStateSnapshot(input: {
     label: input.label,
     transportState: connection?.transportState ?? contract?.transport?.state ?? 'disconnected',
     ...(contract?.taskId ? { taskId: contract.taskId } : {}),
-    messageCount: contract?.transport?.messageCount ?? 0,
     errorCount: connection?.errorCount ?? contract?.transport?.errorCount ?? 0,
     ...(connection?.lastError ?? contract?.transport?.lastError
       ? { lastError: connection?.lastError ?? contract?.transport?.lastError }

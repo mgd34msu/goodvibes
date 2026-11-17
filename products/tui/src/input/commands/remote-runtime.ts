@@ -183,7 +183,6 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           `  communicationLane: ${selected.negotiation.communicationLane}`,
           `  trustClass: ${selected.negotiation.trustClass}`,
           `  taskId: ${selected.taskId ?? 'n/a'}`,
-          `  messageCount: ${selected.messageCount}`,
           `  errorCount: ${selected.errorCount}`,
           ...(selected.lastError ? [`  lastError: ${selected.lastError}`] : []),
           '  capabilities:',
@@ -338,7 +337,6 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           lastUpdatedAt: now,
           transport: Object.freeze({
             state: 'initializing',
-            messageCount: 0,
             errorCount: 0,
           }),
         });
@@ -420,7 +418,6 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           lastUpdatedAt: now,
           transport: Object.freeze({
             state: 'initializing',
-            messageCount: 0,
             errorCount: 0,
           }),
         });

@@ -57,7 +57,7 @@ function artifactProblem(value: unknown, prefix: string): string | null {
   if (missing) return missing;
   return contractProblem(value['runnerContract'], `${prefix}runnerContract.`)
     ?? missingField(value['task'] as Record<string, unknown>, { task: 'string', status: 'string', summary: 'string', startedAt: 'number' }, `${prefix}task.`)
-    ?? missingField(value['evidence'] as Record<string, unknown>, { toolCallCount: 'number', messageCount: 'number', errorCount: 'number' }, `${prefix}evidence.`);
+    ?? missingField(value['evidence'] as Record<string, unknown>, { toolCallCount: 'number', errorCount: 'number' }, `${prefix}evidence.`);
 }
 
 function bundleProblem(value: unknown): string | null {
@@ -107,7 +107,6 @@ function buildCapabilityCeiling(agent: AgentRecord): RemoteRunnerCapabilityCeili
 function buildEvidenceSummary(agent: AgentRecord, connection?: AcpConnection): RemoteRunnerEvidenceSummary {
   return Object.freeze({
     toolCallCount: agent.toolCallCount,
-    messageCount: 0,
     errorCount: connection?.errorCount ?? 0,
     ...(connection ? { transportState: connection.transportState, connectedAt: connection.connectedAt } : {}),
     lastError: connection?.lastError ?? agent.error,
@@ -143,7 +142,6 @@ function buildContract(agent: AgentRecord, workspaceRoot: string | undefined, co
           transport: Object.freeze({
             state: connection.transportState,
             connectedAt: connection.connectedAt,
-            messageCount: existing?.transport?.messageCount ?? 0,
             errorCount: connection.errorCount,
             lastError: connection.lastError,
           }),
@@ -243,7 +241,6 @@ function buildArtifactFromStore(
     }),
     evidence: Object.freeze({
       toolCallCount: 0,
-      messageCount: contract.transport?.messageCount ?? 0,
       errorCount: connection?.errorCount ?? contract.transport?.errorCount ?? 0,
       transportState: connection?.transportState ?? contract.transport?.state,
       connectedAt: connection?.connectedAt ?? contract.transport?.connectedAt,
@@ -552,7 +549,7 @@ export class RemoteRunnerRegistry {
       `  status: ${artifact.task.status}`,
       `  summary: ${artifact.task.summary}`,
       `  tools: ${artifact.runnerContract.capabilityCeiling.allowedTools.join(', ') || '(none)'}`,
-      `  evidence: toolCalls=${artifact.evidence.toolCallCount} messages=${artifact.evidence.messageCount} errors=${artifact.evidence.errorCount}`,
+      `  evidence: toolCalls=${artifact.evidence.toolCallCount} errors=${artifact.evidence.errorCount}`,
     ];
     if (artifact.task.error) lines.push(`  error: ${artifact.task.error}`);
     if (artifact.knowledgeInjections.length > 0) {

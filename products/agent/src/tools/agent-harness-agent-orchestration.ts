@@ -307,7 +307,6 @@ function artifactSummary(artifact: Record<string, unknown>, includeParameters: b
     task: previewHarnessText(taskText, includeParameters ? 160 : 72),
     summary: previewHarnessText(summary, includeParameters ? 220 : 96),
     toolCallCount: typeof evidence.toolCallCount === 'number' ? evidence.toolCallCount : recordOrMetadataNumber(artifact, 'toolCallCount'),
-    messageCount: typeof evidence.messageCount === 'number' ? evidence.messageCount : recordOrMetadataNumber(artifact, 'messageCount'),
     errorCount: typeof evidence.errorCount === 'number' ? evidence.errorCount : recordOrMetadataNumber(artifact, 'errorCount'),
     hasKnowledgeInjections: Boolean(evidence.hasKnowledgeInjections ?? metadata.hasKnowledgeInjections),
     modelRoute: artifactReviewRoute(artifact),

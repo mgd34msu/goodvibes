@@ -139,7 +139,7 @@ export interface DaemonRuntimeRouteContext {
     submitMessage(input: {
       sessionId?: string | undefined;
       routeId?: string | undefined;
-      surfaceKind: string;
+      surfaceKind: AutomationSurfaceKind;
       surfaceId: string;
       externalId?: string | undefined;
       threadId?: string | undefined;
@@ -147,6 +147,7 @@ export interface DaemonRuntimeRouteContext {
       displayName?: string | undefined;
       title?: string | undefined;
       body: string;
+      providerMessageId?: string | undefined;
       metadata?: Record<string, unknown> | undefined;
       routing?: SharedSessionRoutingIntent | undefined;
     }): Promise<{
@@ -161,7 +162,7 @@ export interface DaemonRuntimeRouteContext {
     steerMessage(input: {
       sessionId?: string | undefined;
       routeId?: string | undefined;
-      surfaceKind: string;
+      surfaceKind: AutomationSurfaceKind;
       surfaceId: string;
       externalId?: string | undefined;
       threadId?: string | undefined;
@@ -169,6 +170,7 @@ export interface DaemonRuntimeRouteContext {
       displayName?: string | undefined;
       title?: string | undefined;
       body: string;
+      providerMessageId?: string | undefined;
       metadata?: Record<string, unknown> | undefined;
       routing?: SharedSessionRoutingIntent | undefined;
       allowSpawnFallback?: boolean | undefined;
@@ -184,7 +186,7 @@ export interface DaemonRuntimeRouteContext {
     followUpMessage(input: {
       sessionId?: string | undefined;
       routeId?: string | undefined;
-      surfaceKind: string;
+      surfaceKind: AutomationSurfaceKind;
       surfaceId: string;
       externalId?: string | undefined;
       threadId?: string | undefined;
@@ -192,6 +194,7 @@ export interface DaemonRuntimeRouteContext {
       displayName?: string | undefined;
       title?: string | undefined;
       body: string;
+      providerMessageId?: string | undefined;
       metadata?: Record<string, unknown> | undefined;
       routing?: SharedSessionRoutingIntent | undefined;
     }): Promise<{

@@ -54,6 +54,10 @@ export function createDaemonCliConfiguration(
     // Client-scoped settings in the daemon's own file, not the terminal app's.
     settingsSurfaceRoot: GOODVIBES_DAEMON_SETTINGS_ROOT,
     daemonTierPath: daemonConfigPathForHome(homes.daemonHomeDirectory),
+    // The daemon's own command line writes the daemon's settings file
+    // (`goodvibes-daemon config set controlPlane.port 4321`); a running daemon
+    // picks the change up from the file.
+    ownsDaemonTier: options.readOnly !== true,
     diagnosticMode: options.diagnosticMode,
     readOnly: options.readOnly,
   });

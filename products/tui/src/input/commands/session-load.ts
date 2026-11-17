@@ -80,7 +80,7 @@ export async function loadSessionWithAgents(ctx: CommandContext, sessionManager:
       notices: describeResumeShortfalls(resumed),
     };
   } catch (error) {
-    return { ok: false, message: `Failed to load session: ${error instanceof Error ? error.message : String(error)}` };
+    return { ok: false, message: `Not loaded: ${error instanceof Error ? error.message : String(error)}` };
   }
 }
 

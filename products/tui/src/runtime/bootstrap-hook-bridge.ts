@@ -88,7 +88,8 @@ export function createResumeSessionHandler(options: ResumeSessionOptions): (sess
     // failing to load or restore, which the ops playbooks read as a recovery failure.
     let restoring = false;
     try {
-      if (options.isGenerating?.()) throw new Error('A turn is still running. Wait before resuming a session.');
+      // Loading replaces the live conversation, which a running turn is still appending to.
+      if (options.isGenerating?.()) throw new Error('A turn is still running, so no session was loaded and the conversation is unchanged. Stop it with Esc or let it finish, then retry.');
       // Multi-instance safety, matching what `/session resume` already does
       // for the text path: never fork a session another terminal is holding
       // open without the operator saying so.

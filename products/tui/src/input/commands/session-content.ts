@@ -11,13 +11,6 @@ import { sessionCommand } from './session.ts';
 import { describeSessionLoad, loadSessionWithAgents } from './session-load.ts';
 import { undoLastRewind, redoLastRewind } from './rewind-runtime.ts';
 
-/** Loading replaces the live conversation, which a running turn is still appending to. */
-function refuseWhileGenerating(ctx: CommandContext, action: string): boolean {
-  if (!ctx.isGenerating?.()) return false;
-  ctx.print(`A turn is still running, so ${action} was not started and the conversation is unchanged. Stop it with Esc or let it finish, then retry.`);
-  return true;
-}
-
 export function registerSessionContentCommands(registry: CommandRegistry): void {
   registry.register(contentCommands.exportCommand);
 
@@ -35,7 +28,6 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
         ctx.print('Usage: /load <session-name>\nRun /sessions to list available sessions.');
         return;
       }
-      if (refuseWhileGenerating(ctx, `/load ${args[0]}`)) return;
       const result = await loadSessionWithAgents(ctx, requireSessionManager(ctx), args[0]);
       ctx.renderRequest();
       ctx.print(result.ok ? describeSessionLoad(args[0], result) : result.message);
@@ -412,7 +404,6 @@ const sessionsCommand = createSessionListCommand<CommandContext>({
           else ctx.renderRequest();
         });
     } else {
-      if (refuseWhileGenerating(ctx, `loading ${result.item.id}`)) return;
       // The same load as /load, agent records included.
       const name = result.item.id;
       void loadSessionWithAgents(ctx, sessionManager, name).then((loaded) => {

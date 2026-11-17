@@ -236,10 +236,16 @@ export const AGENT_KNOWLEDGE_ISOLATION = 'agent-only';
  * The review packet part: document drafts and the artifact list it is built
  * from. A tool that needs only this part builds only this part.
  */
-export function buildAgentWorkspaceReviewPacketPart(context: CommandContext, readFailures?: AgentWorkspaceReadFailures) {
-  const artifactListSnapshot = buildAgentWorkspaceArtifactListSnapshot(context, readFailures);
+/** Stores a caller already read; the part uses them instead of reading again. */
+export interface AgentWorkspaceReviewPacketReads {
+  readonly documentDrafts: ReturnType<typeof readDocumentDrafts>;
+  readonly artifactList: ReturnType<typeof buildAgentWorkspaceArtifactListSnapshot>;
+}
+
+export function buildAgentWorkspaceReviewPacketPart(context: CommandContext, readFailures?: AgentWorkspaceReadFailures, reads?: AgentWorkspaceReviewPacketReads) {
+  const artifactListSnapshot = reads?.artifactList ?? buildAgentWorkspaceArtifactListSnapshot(context, readFailures);
   const recentReviewerHandoffs = buildAgentWorkspaceRecentReviewerHandoffsSnapshot(artifactListSnapshot.items);
-  const documentDrafts = readDocumentDrafts(context, readFailures);
+  const documentDrafts = reads?.documentDrafts ?? readDocumentDrafts(context, readFailures);
   const artifactListInfo = {
     truncated: artifactListSnapshot.truncated,
     resolveArtifact: buildAgentWorkspaceArtifactResolver(context),
@@ -269,11 +275,11 @@ export function buildAgentWorkspaceVoiceMediaPart(context: CommandContext) {
 }
 
 /** What the Document Ops lanes read: the review packet part, the voice and media part, and a few runtime facts. */
-export function buildAgentWorkspaceDocumentOpsPart(context: CommandContext): Pick<AgentWorkspaceRuntimeSnapshot,
+export function buildAgentWorkspaceDocumentOpsPart(context: CommandContext, reads?: AgentWorkspaceReviewPacketReads): Pick<AgentWorkspaceRuntimeSnapshot,
   'modelDisplayName' | 'provider' | 'artifactMaxBytes' | 'sessionId' | 'knowledgeRoute' | 'knowledgeIsolation'
   | 'mediaProviderCount' | 'mediaGenerationProviderCount' | 'voiceMediaReadiness' | 'reviewPacketTimeline' | 'reviewPacketWizard'> {
   const model = context.session?.runtime?.model ?? 'unknown';
-  const reviewPacket = buildAgentWorkspaceReviewPacketPart(context);
+  const reviewPacket = buildAgentWorkspaceReviewPacketPart(context, undefined, reads);
   const voiceMedia = buildAgentWorkspaceVoiceMediaPart(context);
   return {
     modelDisplayName: buildAgentWorkspaceCurrentModelSnapshot(context)?.displayName ?? model,

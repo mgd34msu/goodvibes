@@ -48,10 +48,22 @@ function isModelCompareHandoffArtifact(artifact: ArtifactDescriptor): boolean {
 /** How many artifacts one readiness pass inspects; a store holding more is reported as only partly checked. */
 const ARTIFACT_SCAN_LIMIT = 1000;
 
-interface StoreRead<T> {
+export interface StoreRead<T> {
   readonly items: readonly T[];
   /** Why the store could not be read in full, when it could not. */
   readonly problem?: string;
+}
+
+/** The two stores the document lanes read, each read once per call and shared by every lane. */
+export interface DocumentOpsSources {
+  readonly documents: StoreRead<AgentDocumentRecord>;
+  readonly artifacts: StoreRead<ArtifactDescriptor>;
+  /** The artifact store can list at all. */
+  readonly artifactsListable: boolean;
+}
+
+export function readDocumentOpsSources(context: CommandContext): DocumentOpsSources {
+  return { documents: readDocuments(context), artifacts: readArtifacts(context), artifactsListable: Boolean(context.platform.artifactStore?.list) };
 }
 
 function problemText(error: unknown): string {
@@ -105,14 +117,15 @@ export function buildReviewerReadinessChecklist(
     readonly modelCompareReady: boolean;
     readonly artifactBrowserReady: boolean;
   },
+  sources: DocumentOpsSources = readDocumentOpsSources(context),
 ): ReviewerReadinessChecklist {
-  const documentRead = readDocuments(context);
+  const documentRead = sources.documents;
   const documents = documentRead.items;
   const reviewDocuments = documents.filter((document) => document.status !== 'archived');
   const openComments = reviewDocuments.reduce((total, document) => total + document.comments.filter((comment) => comment.status === 'open').length, 0);
   const proposedSuggestions = reviewDocuments.reduce((total, document) => total + document.suggestions.filter((suggestion) => suggestion.status === 'proposed').length, 0);
   const documentsMissingSourceArtifacts = reviewDocuments.filter((document) => document.attachments.length === 0 && !document.lastArtifactId).length;
-  const artifactRead = readArtifacts(context);
+  const artifactRead = sources.artifacts;
   const artifacts = artifactRead.items;
   const comparisons = artifacts.filter(isModelCompareArtifact);
   const judgments = artifacts.filter(isModelCompareJudgmentArtifact);

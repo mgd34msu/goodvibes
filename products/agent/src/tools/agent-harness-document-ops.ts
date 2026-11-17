@@ -1,11 +1,10 @@
 import type { CommandContext } from '../input/command-registry.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogData, captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { AGENT_WORKSPACE_CATEGORIES } from '../input/agent-workspace-categories.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { buildAgentWorkspaceDocumentOpsPart } from '../input/agent-workspace-snapshot.ts';
+import { AGENT_WORKSPACE_ARTIFACT_LIST_LIMIT } from '../input/agent-workspace-snapshot-builders.ts';
 import type { AgentWorkspaceReviewPacketWizard, AgentWorkspaceReviewPacketWizardStep } from '../input/agent-workspace-types.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
-import { buildReviewerReadinessChecklist } from './agent-harness-document-ops-reviewer-readiness.ts';
+import { buildReviewerReadinessChecklist, readDocumentOpsSources } from './agent-harness-document-ops-reviewer-readiness.ts';
 import type {
   AgentHarnessDocumentOpsArgs,
   DocumentOpsLane,
@@ -48,14 +47,6 @@ const MODEL_COMPARE_ACTION_IDS = [
   'document-export-compare',
   'document-model-routing',
 ] as const;
-
-function workspaceActionIds(): ReadonlySet<string> {
-  return new Set(AGENT_WORKSPACE_CATEGORIES.flatMap((category) => category.actions.map((action) => action.id)));
-}
-
-function existingActions(ids: readonly string[], available: ReadonlySet<string>): readonly string[] {
-  return ids.filter((id) => available.has(id));
-}
 
 function hasTool(context: CommandContext, toolName: string): boolean {
   return context.extensions.toolRegistry.has(toolName);
@@ -203,157 +194,120 @@ export function describeLane(lane: DocumentOpsLane, includeParameters: boolean):
   };
 }
 
+/*
+ * The workspace action ids each lane lists. They are constants of the workspace
+ * category table; whether they exist is a property of the build, not of this
+ * run, so no lane status depends on them.
+ */
+const DOCUMENT_ACTIONS = [
+  'document-browse-drafts', 'document-show-draft', 'document-create-draft', 'document-revise-draft', 'document-review-draft',
+  'document-comment-draft', 'document-resolve-comment', 'document-suggest-draft', 'document-accept-suggestion', 'document-reject-suggestion',
+  'document-insert-artifact', 'document-attach-artifact', 'document-review-packet-timeline', 'document-review-packet-wizard',
+  'document-save-review-packet-preset', 'document-refresh-review-packet-preset', 'document-reviewer-readiness', 'document-export-draft',
+  'document-draft-chat',
+] as const;
+const UPLOAD_ACTIONS = ['document-attach-image', 'document-ingest-file', 'document-ingest-url-list', 'knowledge-import-bookmarks', 'knowledge-import-browser-history', 'conversation-image'] as const;
+const EXPORT_ACTIONS = ['conversation-export-current', 'conversation-session-export', 'document-export-draft', 'document-export-artifact-file',
+  'document-export-artifact-package', 'document-export-conversation', 'document-export-session'] as const;
+const SOURCE_ACTIONS = ['research-knowledge-search', 'research-knowledge-ask', 'document-show-source'] as const;
+const MEDIA_ACTIONS = ['media-generate', 'document-generate-media'] as const;
+const ARTIFACT_BROWSER_ACTIONS = ['document-browse-artifacts', 'document-show-artifact', 'document-export-artifact-file', 'document-export-artifact-package',
+  'document-promote-artifact', 'document-insert-artifact', 'document-attach-artifact'] as const;
+const REVIEW_DOCUMENT_ACTIONS = ['document-show-draft', 'document-reviewer-readiness', 'document-resolve-comment', 'document-accept-suggestion',
+  'document-reject-suggestion', 'document-attach-artifact', 'document-export-draft'] as const;
+const REVIEW_COMPARE_ACTIONS = ['document-review-compare', 'document-diff-handoffs', 'document-judge-compare', 'document-apply-compare', 'document-export-compare'] as const;
+
+/**
+ * The lanes, built once per call from run-time facts only: which tools are
+ * registered, whether the artifact store and document registry can be read,
+ * whether Agent Knowledge and a generation provider are present, and what
+ * review work is waiting. The documents and the artifact list are each read
+ * once and shared by the timeline, the wizard and the readiness checklist.
+ */
 function buildLanes(context: CommandContext): readonly DocumentOpsLane[] {
-  // Only the parts the lanes read (review packet, voice and media, a few runtime facts).
-  const snapshot = buildAgentWorkspaceDocumentOpsPart(context);
-  const available = workspaceActionIds();
-  const documentActions = existingActions([
-    'document-browse-drafts',
-    'document-show-draft',
-    'document-create-draft',
-    'document-revise-draft',
-    'document-review-draft',
-    'document-comment-draft',
-    'document-resolve-comment',
-    'document-suggest-draft',
-    'document-accept-suggestion',
-    'document-reject-suggestion',
-    'document-insert-artifact',
-    'document-attach-artifact',
-    'document-review-packet-timeline',
-    'document-review-packet-wizard',
-    'document-save-review-packet-preset',
-    'document-refresh-review-packet-preset',
-    'document-reviewer-readiness',
-    'document-export-draft',
-    'document-draft-chat',
-  ], available);
-  const uploadActions = existingActions([
-    'document-attach-image',
-    'document-ingest-file',
-    'document-ingest-url-list',
-    'knowledge-import-bookmarks',
-    'knowledge-import-browser-history',
-    'conversation-image',
-  ], available);
-  const exportActions = existingActions([
-    'conversation-export-current',
-    'conversation-session-export',
-    'document-export-draft',
-    'document-export-artifact-file',
-    'document-export-artifact-package',
-    'document-export-conversation',
-    'document-export-session',
-  ], available);
-  const sourceActions = existingActions([
-    'research-knowledge-search',
-    'research-knowledge-ask',
-    'document-show-source',
-  ], available);
-  const mediaActions = existingActions([
-    'media-generate',
-    'document-generate-media',
-  ], available);
-  const artifactBrowserActions = existingActions([
-    'document-browse-artifacts',
-    'document-show-artifact',
-    'document-export-artifact-file',
-    'document-export-artifact-package',
-    'document-promote-artifact',
-    'document-insert-artifact',
-    'document-attach-artifact',
-  ], available);
-  const modelCompareActions = existingActions(MODEL_COMPARE_ACTION_IDS, available);
-  const modelCompareReady = hasTool(context, 'agent_model_compare') && modelCompareActions.includes('document-run-compare');
-  const modelCompareComplete = modelCompareReady && modelCompareActions.length === MODEL_COMPARE_ACTION_IDS.length;
-  const documentsReady = hasTool(context, 'agent_documents')
-    && documentActions.includes('document-browse-drafts')
-    && documentActions.includes('document-show-draft')
-    && documentActions.includes('document-create-draft')
-    && documentActions.includes('document-revise-draft')
-    && documentActions.includes('document-comment-draft')
-    && documentActions.includes('document-resolve-comment')
-    && documentActions.includes('document-suggest-draft')
-    && documentActions.includes('document-accept-suggestion')
-    && documentActions.includes('document-reject-suggestion')
-    && documentActions.includes('document-insert-artifact')
-    && documentActions.includes('document-attach-artifact')
-    && documentActions.includes('document-export-draft');
-  const artifactBrowserReady = hasTool(context, 'agent_artifacts')
-    && hasTool(context, 'agent_knowledge_ingest')
-    && Boolean(context.platform.artifactStore?.list)
-    && Boolean(context.platform.artifactStore?.readContent)
-    && artifactBrowserActions.includes('document-browse-artifacts')
-    && artifactBrowserActions.includes('document-show-artifact')
-    && artifactBrowserActions.includes('document-export-artifact-file')
-    && artifactBrowserActions.includes('document-export-artifact-package')
-    && artifactBrowserActions.includes('document-promote-artifact');
-  const reviewerReadiness = buildReviewerReadinessChecklist(context, {
-    documentsReady,
-    modelCompareReady,
-    artifactBrowserReady,
+  const sources = readDocumentOpsSources(context);
+  const snapshot = buildAgentWorkspaceDocumentOpsPart(context, {
+    documentDrafts: sources.documents.items,
+    artifactList: {
+      available: sources.artifactsListable && sources.artifacts.problem === undefined,
+      items: sources.artifacts.items.slice(0, AGENT_WORKSPACE_ARTIFACT_LIST_LIMIT),
+      truncated: sources.artifacts.items.length >= AGENT_WORKSPACE_ARTIFACT_LIST_LIMIT,
+    },
   });
+  const store = context.platform.artifactStore;
+  const storeWritable = typeof store?.create === 'function';
+  const storeReadable = sources.artifactsListable && typeof store?.readContent === 'function' && sources.artifacts.problem === undefined;
+  const documentsReadable = sources.documents.problem === undefined;
+  const knowledgeReachable = Boolean(context.clients?.agentKnowledgeApi);
+  const documentsReady = hasTool(context, 'agent_documents') && documentsReadable;
+  const artifactBrowserReady = hasTool(context, 'agent_artifacts') && hasTool(context, 'agent_knowledge_ingest') && storeReadable;
+  const modelCompareReady = hasTool(context, 'agent_model_compare') && storeWritable;
+  const reviewerReadiness = buildReviewerReadinessChecklist(context, { documentsReady, modelCompareReady, artifactBrowserReady }, sources);
+  const drafts = sources.documents.items.filter((document) => document.status !== 'archived');
+  const maxMegabytes = Math.round(snapshot.artifactMaxBytes / (1024 * 1024));
+  const storeProblem = sources.artifacts.problem;
 
   return [
     {
       id: 'documents',
       label: 'Documents',
-      status: documentsReady ? 'ready' : 'partial',
+      status: documentsReady ? 'ready' : hasTool(context, 'agent_documents') ? 'attention' : 'needs-setup',
       outcome: 'Draft, revise, and export user-facing documents without leaving the Agent conversation.',
-      current: documentsReady
-        ? 'Agent has project-scoped markdown document drafts with version history, review status, review comments, AI suggestion review, read-only inspection, admitted artifact attachment, admitted artifact insertion, and admitted artifact export with reviewer-ready comment and suggestion appendices.'
-        : 'Agent can draft and revise documents in the main conversation and export transcript/session artifacts, but the dedicated markdown draft tool is not fully wired.',
+      current: documentsReadable
+        ? `${drafts.length} active draft(s) of ${sources.documents.items.length}.`
+        : `Drafts could not be read: ${sources.documents.problem}.`,
       next: documentsReady
-        ? 'Use versioned drafts, comments, suggestions, artifact reuse, artifact packages or ZIP archives, and artifact-backed comparison as one document workflow.'
-        : 'Wire agent_documents plus browse/show/create/revise/review/export workspace actions.',
+        ? 'Use agent_documents to browse, revise, comment, accept suggestions and export a draft.'
+        : !hasTool(context, 'agent_documents')
+          ? 'This session has no agent_documents tool; draft in the conversation and export the transcript instead.'
+          : 'Open a workspace (the document registry lives in it), then read this lane again.',
       userRoute: 'Agent Workspace -> Documents & Files -> Create document draft',
       modelRoute: documentsReady ? 'agent_documents' : 'agent_harness mode:"workspace_actions" categoryId:"documents"',
       signals: [
         `Chat route ${snapshot.provider} / ${snapshot.modelDisplayName}`,
-        `Document draft tool: ${hasTool(context, 'agent_documents') ? 'available' : 'gap'}`,
-        `${documentActions.length} document draft action(s)`,
-        `${exportActions.length} export action(s) available`,
-        documentsReady ? 'Versioned markdown drafts: available' : 'Versioned markdown drafts: gap',
-        documentActions.includes('document-comment-draft') ? 'Review comments: available' : 'Review comments: gap',
-        documentActions.includes('document-suggest-draft') ? 'AI suggestion review: available' : 'AI suggestion review: not wired',
-        documentActions.includes('document-attach-artifact') ? 'Artifact-to-document attachment: available' : 'Artifact-to-document attachment: gap',
-        documentActions.includes('document-insert-artifact') ? 'Artifact-to-document insert: available' : 'Artifact-to-document insert: gap',
-        documentActions.includes('document-save-review-packet-preset') ? 'Review packet presets: available' : 'Review packet presets: gap',
-        documentActions.includes('document-refresh-review-packet-preset') ? 'Preset refresh: available' : 'Preset refresh: gap',
+        `Document draft tool: ${hasTool(context, 'agent_documents') ? 'available' : 'missing'}`,
+        `Drafts ${drafts.length}`,
       ],
-      actionIds: documentActions,
+      actionIds: DOCUMENT_ACTIONS,
     },
     {
       id: 'uploads',
       label: 'Uploads',
-      status: uploadActions.length >= 4 ? 'ready' : uploadActions.length > 0 ? 'partial' : 'gap',
+      status: !store ? 'needs-setup' : !storeWritable || storeProblem ? 'attention' : 'ready',
       outcome: 'Attach, paste, or ingest files and URLs through explicit user-visible routes.',
-      current: `${uploadActions.length} upload/ingest action(s) are reachable from the workspace.`,
-      next: uploadActions.length > 0
-        ? 'Use attach, paste, or reviewed source ingest depending on whether the file is prompt context or durable Agent Knowledge.'
-        : 'Wire upload, paste, and file ingest actions before exposing this as ready.',
+      current: !store
+        ? 'No artifact store is available in this runtime.'
+        : storeProblem
+          ? `The artifact store could not be read: ${storeProblem}.`
+          : `${sources.artifacts.items.length} artifact(s) stored; up to ${maxMegabytes} MB each.${storeWritable ? '' : ' The store is read-only here.'}`,
+      next: store && storeWritable
+        ? 'Attach a file as prompt context, or ingest it as Agent Knowledge when it should last.'
+        : 'Uploads need a writable artifact store; check the connected host (host action:"status").',
       userRoute: 'Agent Workspace -> Documents & Files -> Attach artifact to draft',
       modelRoute: 'agent_harness mode:"workspace_actions" query:"upload file ingest"',
       signals: [
-        `${uploadActions.length} upload/ingest action(s)`,
-        `Artifact max ${Math.round(snapshot.artifactMaxBytes / (1024 * 1024))} MB`,
+        `Artifact store ${!store ? 'missing' : storeWritable ? 'writable' : 'read-only'}`,
+        `Artifact max ${maxMegabytes} MB`,
       ],
-      actionIds: uploadActions,
+      actionIds: UPLOAD_ACTIONS,
     },
     {
       id: 'exports',
       label: 'Exports',
-      status: exportActions.length >= 2 ? 'ready' : exportActions.length > 0 ? 'partial' : 'gap',
+      status: !context.workspace?.shellPaths ? 'needs-setup' : storeProblem ? 'attention' : 'ready',
       outcome: 'Turn conversations, sessions, documents, and saved artifacts into local files the user can keep or reuse.',
-      current: `${exportActions.length} export action(s) are reachable for conversation, session, document, comparison, and saved artifact output.`,
-      next: 'Keep transcript, session, document, comparison, and artifact exports visible, explicit, and reusable from one place.',
+      current: context.workspace?.shellPaths
+        ? `Exports write into the workspace; ${drafts.length} draft(s) and ${sources.artifacts.items.length} artifact(s) can be exported.`
+        : 'No workspace is open, so there is nowhere to write an export.',
+      next: context.workspace?.shellPaths
+        ? 'Export the conversation, the session, a draft, or saved artifacts as a file or package.'
+        : 'Open a workspace, then export.',
       userRoute: 'Agent Workspace -> Documents & Files -> Export document artifact',
       modelRoute: 'agent_harness mode:"workspace_actions" query:"export artifact"',
       signals: [
-        `${exportActions.length} export action(s)`,
         `Session ${snapshot.sessionId}`,
       ],
-      actionIds: exportActions,
+      actionIds: EXPORT_ACTIONS,
     },
     {
       id: 'reviewer_readiness',
@@ -374,28 +328,7 @@ function buildLanes(context: CommandContext): readonly DocumentOpsLane[] {
         `Judgments awaiting a route decision ${reviewerReadiness.summary.judgmentsAwaitingRouteDecision}`,
         `Handoffs missing related evidence ${reviewerReadiness.summary.handoffsMissingRelatedArtifacts}`,
       ],
-      actionIds: [
-        ...documentActions.filter((id) => [
-          'document-show-draft',
-          'document-reviewer-readiness',
-          'document-resolve-comment',
-          'document-accept-suggestion',
-          'document-reject-suggestion',
-          'document-attach-artifact',
-          'document-export-draft',
-        ].includes(id)),
-        ...modelCompareActions.filter((id) => [
-          'document-review-compare',
-          'document-diff-handoffs',
-          'document-judge-compare',
-          'document-apply-compare',
-          'document-export-compare',
-        ].includes(id)),
-        ...artifactBrowserActions.filter((id) => [
-          'document-browse-artifacts',
-          'document-show-artifact',
-        ].includes(id)),
-      ],
+      actionIds: [...REVIEW_DOCUMENT_ACTIONS, ...REVIEW_COMPARE_ACTIONS, 'document-browse-artifacts', 'document-show-artifact'],
       reviewerReadiness,
     },
     {
@@ -420,29 +353,7 @@ function buildLanes(context: CommandContext): readonly DocumentOpsLane[] {
         `Timeline events ${snapshot.reviewPacketTimeline.count}`,
         ...snapshot.reviewPacketTimeline.items.slice(0, 5).map((event) => `${event.status}: ${event.kind} ${event.label} -> ${event.route}`),
       ],
-      actionIds: [
-        ...documentActions.filter((id) => [
-          'document-review-packet-timeline',
-          'document-show-draft',
-          'document-reviewer-readiness',
-          'document-resolve-comment',
-          'document-accept-suggestion',
-          'document-reject-suggestion',
-          'document-attach-artifact',
-          'document-export-draft',
-        ].includes(id)),
-        ...modelCompareActions.filter((id) => [
-          'document-review-compare',
-          'document-diff-handoffs',
-          'document-judge-compare',
-          'document-apply-compare',
-          'document-export-compare',
-        ].includes(id)),
-        ...artifactBrowserActions.filter((id) => [
-          'document-browse-artifacts',
-          'document-show-artifact',
-        ].includes(id)),
-      ],
+      actionIds: ['document-review-packet-timeline', ...REVIEW_DOCUMENT_ACTIONS, ...REVIEW_COMPARE_ACTIONS, 'document-browse-artifacts', 'document-show-artifact'],
     },
     {
       id: 'review_packet_wizard',
@@ -468,98 +379,86 @@ function buildLanes(context: CommandContext): readonly DocumentOpsLane[] {
         `Final review ${snapshot.reviewPacketWizard.finalReview}`,
         ...snapshot.reviewPacketWizard.steps.map((step) => `${step.status}: ${step.label} -> ${step.modelRoute}`),
       ],
-      actionIds: existingActions([
-        'document-review-packet-wizard',
-        'document-share-review-packet',
-        'document-record-route-decision',
-        ...snapshot.reviewPacketWizard.steps.map((step) => step.actionId),
-      ], available),
+      actionIds: [...new Set(['document-review-packet-wizard', 'document-share-review-packet', 'document-record-route-decision',
+        ...snapshot.reviewPacketWizard.steps.map((step) => step.actionId)])],
       reviewPacketWizard: snapshot.reviewPacketWizard,
     },
     {
       id: 'source_library',
       label: 'Sources',
-      status: sourceActions.length >= 2 ? 'ready' : sourceActions.length > 0 ? 'partial' : 'gap',
+      status: knowledgeReachable ? 'ready' : 'needs-setup',
       outcome: 'Inspect source-backed records before citing, summarizing, or promoting knowledge.',
-      current: `${sourceActions.length} source lookup/search action(s) are reachable through isolated Agent Knowledge.`,
-      next: 'Use source search/show for citation checks; ingest reviewed files or URLs only through explicit source actions.',
+      current: knowledgeReachable
+        ? 'Agent Knowledge is connected; sources can be searched, shown and ingested.'
+        : 'Agent Knowledge is not connected in this session, so sources cannot be searched.',
+      next: knowledgeReachable
+        ? 'Search or show a source before citing it; ingest reviewed files or URLs only through explicit source actions.'
+        : 'Check the connected host (host action:"status"); Agent Knowledge is served by it.',
       userRoute: 'Agent Workspace -> Documents & Files -> Show source or node',
       modelRoute: 'agent_harness mode:"workspace_actions" query:"Agent Knowledge sources"',
       signals: [
         `Knowledge route ${snapshot.knowledgeRoute}`,
         `Knowledge isolation ${snapshot.knowledgeIsolation}`,
       ],
-      actionIds: sourceActions,
+      actionIds: SOURCE_ACTIONS,
     },
     {
       id: 'media_artifacts',
       label: 'Media Artifacts',
-      status: snapshot.mediaGenerationProviderCount > 0 ? 'ready' : mediaActions.length > 0 ? 'needs-setup' : 'gap',
+      status: snapshot.mediaGenerationProviderCount > 0 ? (storeWritable ? 'ready' : 'attention') : 'needs-setup',
       outcome: 'Generate image or video artifacts through configured providers and keep generated bytes out of the transcript.',
       current: `${snapshot.voiceMediaReadiness.readyMediaProviderCount}/${snapshot.mediaProviderCount} media provider(s) ready; ${snapshot.mediaGenerationProviderCount} generation provider(s).`,
       next: snapshot.mediaGenerationProviderCount > 0
-        ? 'Use admitted media generation when the user asks for a concrete artifact.'
+        ? storeWritable ? 'Use admitted media generation when the user asks for a concrete artifact.' : 'A generation provider is set but the artifact store is not writable, so a result could not be saved.'
         : 'Configure a media generation provider before claiming generated media is ready.',
       userRoute: 'Agent Workspace -> Documents & Files -> Generate media artifact',
       modelRoute: 'agent_media_generate',
       signals: [
-        `${mediaActions.length} media action(s)`,
         `${snapshot.mediaGenerationProviderCount} generation provider(s)`,
       ],
-      actionIds: mediaActions,
+      actionIds: MEDIA_ACTIONS,
     },
     {
       id: 'artifact_browser',
       label: 'Artifact Browser',
-      status: artifactBrowserReady ? 'ready' : artifactBrowserActions.length > 0 ? 'partial' : 'gap',
+      status: artifactBrowserReady ? 'ready' : store ? 'attention' : 'needs-setup',
       outcome: 'Find and reuse uploaded, exported, generated, and source-backed artifacts from one place.',
-      current: artifactBrowserReady
-        ? 'Agent has a unified artifact browser with filters, redacted metadata, bounded text previews, admitted artifact export-to-file, admitted multi-artifact package export and ZIP archive export, admitted artifact-to-Knowledge promotion, admitted artifact-to-document attachment, and admitted artifact-to-document insertion over the platform artifact store.'
-        : 'Artifacts are real and visible in transcript, source, session, and media routes, but the unified browser is not fully wired in this runtime.',
+      current: storeReadable
+        ? `${sources.artifacts.items.length} artifact(s) in the store${sources.artifacts.problem ? ` (${sources.artifacts.problem})` : ''}.`
+        : store ? `The artifact store could not be listed or read: ${storeProblem ?? 'it has no list or read method here'}.` : 'No artifact store is available in this runtime.',
       next: artifactBrowserReady
-        ? 'Use package or ZIP archive exports across document, upload, generated media, session, comparison, and Knowledge artifacts.'
-        : 'Wire agent_artifacts and browse/show workspace actions over the platform artifact store.',
+        ? 'Browse, show, export, package or promote artifacts with agent_artifacts and agent_knowledge_ingest.'
+        : !hasTool(context, 'agent_artifacts') || !hasTool(context, 'agent_knowledge_ingest')
+          ? 'This session lacks agent_artifacts or agent_knowledge_ingest; list artifacts in the workspace instead.'
+          : 'Check the connected host (host action:"status"); the artifact store is served by it.',
       userRoute: 'Agent Workspace -> Documents & Files -> Browse artifacts, Export package, or Promote to Knowledge',
       modelRoute: artifactBrowserReady ? 'agent_artifacts + agent_knowledge_ingest' : 'agent_harness mode:"workspace_actions" categoryId:"documents"',
       signals: [
-        `${uploadActions.length + exportActions.length + mediaActions.length} related artifact action(s)`,
-        `Artifact browser tool: ${hasTool(context, 'agent_artifacts') ? 'available' : 'gap'}`,
-        `Knowledge ingest tool: ${hasTool(context, 'agent_knowledge_ingest') ? 'available' : 'gap'}`,
-        `Artifact list/read store: ${context.platform.artifactStore?.list && context.platform.artifactStore?.readContent ? 'available' : 'gap'}`,
-        `Artifact export action: ${artifactBrowserActions.includes('document-export-artifact-file') ? 'available' : 'gap'}`,
-        `Artifact package export action: ${artifactBrowserActions.includes('document-export-artifact-package') ? 'available' : 'gap'}`,
-        `Knowledge promotion action: ${artifactBrowserActions.includes('document-promote-artifact') ? 'available' : 'gap'}`,
-        `Document attachment action: ${artifactBrowserActions.includes('document-attach-artifact') ? 'available' : 'gap'}`,
-        `Document insertion action: ${artifactBrowserActions.includes('document-insert-artifact') ? 'available' : 'gap'}`,
+        `Artifact browser tool: ${hasTool(context, 'agent_artifacts') ? 'available' : 'missing'}`,
+        `Knowledge ingest tool: ${hasTool(context, 'agent_knowledge_ingest') ? 'available' : 'missing'}`,
+        `Artifact store: ${storeReadable ? 'readable' : store ? 'not readable' : 'missing'}`,
       ],
-      actionIds: artifactBrowserActions,
+      actionIds: ARTIFACT_BROWSER_ACTIONS,
     },
     {
       id: 'model_compare',
       label: 'Blind Model Compare',
-      status: modelCompareComplete ? 'ready' : modelCompareReady ? 'partial' : 'gap',
+      status: modelCompareReady ? 'ready' : hasTool(context, 'agent_model_compare') ? 'attention' : 'needs-setup',
       outcome: 'Run the same prompt across multiple models, hide model identities while judging, save a judgment, then apply the revealed winner or record leave-unchanged evidence only after recorded effect admission.',
-      current: modelCompareReady
-        ? 'Agent has an admitted blind comparison runner with selectable or auto-selected candidates, identical prompt or saved text artifact delivery, rubric capture, delayed reveal, durable JSON comparison artifacts, read-only saved review boards, side-by-side reviewer views, visual reviewer handoff diffs, admitted saved judgment artifacts, task/document/benchmark-filtered preference analytics/synthesis, markdown report export, reviewer handoff artifacts, one-click reviewer handoff ZIP archives with source and matching route-decision receipt evidence, separately admitted winner route updates, and leave-unchanged route-decision receipts.'
-        : 'Model routing and model catalog inspection exist, but Agent does not have a blind side-by-side comparison runner or saved comparison artifacts.',
+      current: `${reviewerReadiness.summary.savedComparisons} saved comparison(s), ${reviewerReadiness.summary.hiddenJudgments} judgment(s) not yet revealed, ${reviewerReadiness.summary.judgmentsAwaitingRouteDecision} awaiting a route decision.`,
       next: modelCompareReady
-        ? 'Use cross-session synthesis and reviewer handoff ZIP archives around saved comparison, judgment, export, route-update, route-decision receipt, and source-artifact reuse artifacts.'
-        : 'Implement a blind compare runner with selectable candidate models, identical prompt/context, rubric capture, delayed reveal, export, and route update handoff.',
+        ? 'Run a comparison with agent_model_compare; reveal and judge it before applying a route change.'
+        : hasTool(context, 'agent_model_compare')
+          ? 'The artifact store is not writable here, so a comparison could not be saved; check the connected host.'
+          : 'This session has no agent_model_compare tool; inspect models with models action:"status".',
       userRoute: 'Agent Workspace -> Documents & Files -> Run blind compare',
       modelRoute: modelCompareReady ? 'agent_model_compare' : 'models action:"status"',
       signals: [
         `Current model ${snapshot.provider} / ${snapshot.modelDisplayName}`,
-        `Blind compare runner: ${modelCompareReady ? 'available' : 'gap'}`,
-        `Saved comparison artifact: ${modelCompareReady && context.platform.artifactStore ? 'available' : 'gap'}`,
-        `Artifact-to-compare reuse: ${modelCompareActions.includes('document-run-compare') ? 'available' : 'gap'}`,
-        `Saved review board/side-by-side/handoff diff view: ${modelCompareActions.includes('document-review-compare') && modelCompareActions.includes('document-diff-handoffs') ? 'available' : 'gap'}`,
-        `Saved judgment artifact: ${modelCompareActions.includes('document-judge-compare') ? 'available' : 'gap'}`,
-        `Saved preference analytics/synthesis with task/document/benchmark filters: ${modelCompareActions.includes('document-compare-analytics') ? 'available' : 'gap'}`,
-        `Winner route update: ${modelCompareActions.includes('document-apply-compare') ? 'available' : 'gap'}`,
-        `Leave-unchanged route receipt: ${modelCompareActions.includes('document-record-route-decision') ? 'available' : 'gap'}`,
-        `Markdown export/handoff/archive: ${modelCompareActions.includes('document-export-compare') ? 'available' : 'gap'}`,
+        `Blind compare runner: ${hasTool(context, 'agent_model_compare') ? 'available' : 'missing'}`,
+        `Saved comparison artifacts: ${storeWritable ? 'writable' : 'not writable'}`,
       ],
-      actionIds: modelCompareActions,
+      actionIds: MODEL_COMPARE_ACTION_IDS,
     },
   ];
 }
@@ -601,50 +500,8 @@ export function documentOpsSummary(context: CommandContext, args: AgentHarnessDo
   };
 }
 
-function captureDocumentBackend(context: CommandContext) {
-  const categoryRevision = JSON.stringify(captureCatalogData(AGENT_WORKSPACE_CATEGORIES));
-  const guards = [captureCatalogMethods(context, ['extensions', 'session', 'platform', 'workspace', 'provider', 'clients', 'executeCommand']),
-    captureCatalogMethods(context.extensions, ['toolRegistry', 'mcpRegistry']), captureCatalogMethods(context.extensions.toolRegistry, ['has']),
-    captureCatalogMethods(context.session, ['runtime', 'sessionMemoryStore']), captureCatalogMethods(context.session.runtime, ['sessionId', 'model', 'provider']),
-    captureCatalogMethods(context.platform, ['config', 'configManager', 'artifactStore', 'voiceProviderRegistry', 'mediaProviderRegistry', 'subscriptionManager', 'serviceRegistry', 'readModels']),
-    captureCatalogMethods(context.workspace, ['shellPaths', 'processManager']),
-    () => { if (JSON.stringify(captureCatalogData(AGENT_WORKSPACE_CATEGORIES)) !== categoryRevision) throw new ToolInputProjectionError('stale'); }];
-  const retainService = (value: unknown, keys: readonly string[]) => { if (value && typeof value === 'object') guards.push(captureCatalogMethods(value, keys)); };
-  retainService(context.platform.configManager, ['get', 'set', 'has']);
-  retainService(context.platform.artifactStore, ['list', 'readContent']);
-  retainService(context.platform.voiceProviderRegistry, ['list']);
-  retainService(context.platform.mediaProviderRegistry, ['list']);
-  retainService(Reflect.get(context.platform, 'subscriptionManager'), ['list', 'listPending']);
-  retainService(Reflect.get(context.platform, 'serviceRegistry'), ['getAll']);
-  retainService(context.workspace.shellPaths, ['workingDirectory', 'homeDirectory', 'resolveUserPath', 'resolveProjectPath', 'resolveSurfaceUserPath', 'resolveUserSurfaceRoot']);
-  retainService(context.workspace.processManager, ['list', 'getStatus']);
-  retainService(context.session.sessionMemoryStore, ['list']);
-  retainService(context.extensions.mcpRegistry, ['listServerSecurity']);
-  if (context.provider) {
-    guards.push(captureCatalogMethods(context.provider, ['providerRegistry']));
-    retainService(context.provider.providerRegistry, ['getCurrentModel']);
-  }
-  if (context.clients) {
-    guards.push(captureCatalogMethods(context.clients, ['mcpApi', 'agentKnowledgeApi', 'promptContextReceipts', 'operator']));
-    retainService(context.clients.mcpApi, ['listServerSecurity']);
-    retainService(context.clients.promptContextReceipts, ['list', 'getSnapshot']);
-    if (context.clients.agentKnowledgeApi) {
-      guards.push(captureCatalogMethods(context.clients.agentKnowledgeApi, ['memory']));
-      retainService(context.clients.agentKnowledgeApi.memory, ['getAll']);
-    }
-  }
-  const retainPublished = (subject: object, key: string) => {
-    guards.push(captureCatalogMethods(subject, [key]));
-    const revision = JSON.stringify(captureCatalogData(Reflect.get(subject, key)));
-    guards.push(() => { if (JSON.stringify(captureCatalogData(Reflect.get(subject, key))) !== revision) throw new ToolInputProjectionError('stale'); });
-  };
-  retainPublished(context.platform, 'config');
-  return () => { for (const guard of guards) guard(); };
-}
-
 export async function describeDocumentOpsLane(context: CommandContext, args: AgentHarnessDocumentOpsArgs, options: CatalogRankingOptions = {}): Promise<DocumentOpsLaneResolution> {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const assertBackend = captureDocumentBackend(context);
   const laneId = readString(args.laneId);
   const target = readString(args.target);
   const query = readString(args.query);
@@ -656,23 +513,17 @@ export async function describeDocumentOpsLane(context: CommandContext, args: Age
     };
   }
   const normalized = input.toLowerCase();
-  const lanes = captureCatalogData(buildLanes(context));
-  const revision = JSON.stringify(lanes);
-  const assertSourceCurrent = () => {
-    options.signal?.throwIfAborted();
-    assertBackend();
-    if (JSON.stringify(captureCatalogData(buildLanes(context))) !== revision) throw new ToolInputProjectionError('stale');
-    assertBackend();
-  };
-  options.retainCurrent?.(assertSourceCurrent, 'agent.harness.document-ops.sources');
-  const assertCurrent = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); assertSourceCurrent(); };
-  assertCurrent();
+  // An unknown lane id is answered from the id list without reading any store.
+  if (laneId && !LANE_IDS.includes(normalized as DocumentOpsLaneId)) {
+    return { status: 'missing_lookup', usage: `Unknown Document Ops lane ${input}. Lane ids: ${LANE_IDS.join(', ')}.` };
+  }
+  // One build per call: the description is consistent with the reads it was built from.
+  const lanes = buildLanes(context);
   const exact = lanes.find((lane) => lane.id === normalized);
   if (exact) return { status: 'found', lane: describeLane(exact, true) };
   const selected = laneId ? { matches: [], judgments: [] } : await rankHarnessCatalog(lanes, input,
-    lane => ({ id: lane.id, description: searchText(lane), evidence: lane }), 'agent.harness.document-ops',
-    { ...options, requirePreservedSource: true, assertCurrent });
-  assertCurrent();
+    lane => ({ id: lane.id, description: searchText(lane) }), 'agent.harness.document-ops', options);
+  options.signal?.throwIfAborted();
   const matches = selected.matches;
   if (matches.length === 1 && matches[0]!.judgment?.reading.verdict === 'yes' && matches[0]!.judgment?.reading.outcome === 'act') return { status: 'found', lane: { ...describeLane(matches[0]!.entry, true), judgment: matches[0]!.judgment } };
   if (matches.length > 0) {

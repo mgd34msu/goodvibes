@@ -1,7 +1,7 @@
 // Proves: A daemon restart while a purchase waits on the owner buys twice, or turns "silence means no" into "silence buys".
 // Red when: The resumed approval submits or records twice or not at all, or the restored window reopens as a notice whose silence buys.
 // Proves: A stop the owner gave while the daemon was down is not read after the restart, or silence is assumed for a channel whose replies were never received, and the veto's silence buys.
-// Red when: The daemon's stop withdraws a kept window's owner-inbox item, or the restored veto window counts silence without first reading the answer the owner recorded there before its deadline.
+// Red when: The daemon's stop withdraws a kept window's owner-inbox item, the restored veto window counts silence without first reading the answer the owner recorded there or the Telegram reply archived for it, or it counts silence on Telegram without proof the replies up to the deadline were received.
 /**
  * A purchase waiting on the owner survives a daemon restart. The case that
  * matters is the follow-up: the owner answered the "goes ahead unless you stop
@@ -38,6 +38,9 @@ import { prepareRestoredPaymentReplyWindow } from '../platform/src/platform/paym
 import { OwnerInbox, type OwnerItem } from '../platform/src/platform/control-plane/owner-inbox.ts';
 import { QuestionStore } from '../platform/src/platform/control-plane/question-store.ts';
 import { UntrustedContentLedger } from '../platform/src/platform/security/untrusted-content.ts';
+import { paymentReplyHistoryBinding, type PaymentReplyHistory, type PaymentReplyHistoryEntry } from '../platform/src/platform/payments/reply-history.ts';
+import { createTelegramSourceAccountOwner } from '../platform/src/platform/channels/telegram/source-account.ts';
+import type { ChannelDeliveryReceipt } from '../platform/src/platform/channels/delivery/types.ts';
 import { startFixtureMerchant, type FixtureMerchant } from './helpers/fixture-merchant.ts';
 import { FixtureCheckoutDriver, readFixtureCheckout } from './helpers/fixture-checkout-driver.ts';
 import { usePaymentsReadings } from './helpers/payments-readings.ts';
@@ -61,6 +64,9 @@ const REQUEST: PurchaseRequest = {
   item: unsafeOwnerSuppliedTextForTests('Mechanical keyboard, tenkeyless'),
   requestedLines: [{ label: 'Mechanical keyboard, tenkeyless', quantity: 1 }], cardId: 'card-1', preferredTier: 'normal',
 };
+/** The owner's Telegram chat with the daemon's bot, and the veto notice the first daemon sent there. */
+const BOT = { id: '7001', username: 'goodvibes_test_bot' };
+const NOTICE_RECEIPT: ChannelDeliveryReceipt = { surfaceKind: 'telegram', conversationId: '1001', messageId: '501', accountId: BOT.id };
 
 let dir: string;
 let merchant: FixtureMerchant;
@@ -107,7 +113,7 @@ function daemon(now: () => number) {
  * The channel side of the notices: the veto notice gets a reply Jev did not
  * read as a go-ahead; any later window hears nothing until the daemon stops.
  */
-function channel(vetoAnswer: 'not-understood' | null | 'quiet'): PaymentNotifier {
+function channel(vetoAnswer: 'not-understood' | null | 'quiet', telegram = false): PaymentNotifier {
   const quiet = (signal: AbortSignal | undefined) => new Promise<never>((_resolve, reject) => {
     signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
   });
@@ -115,7 +121,7 @@ function channel(vetoAnswer: 'not-understood' | null | 'quiet'): PaymentNotifier
     deliver: async () => [],
     awaitAnswer: async () => null,
     prepareWindow: (input): PaymentNoticeWindow => ({
-      deliveries: Promise.resolve([]),
+      deliveries: Promise.resolve(telegram ? [{ channel: 'telegram', delivered: true, backfillable: false, receipt: NOTICE_RECEIPT }] : []),
       cancel: () => {},
       awaitAnswer: async () => input.kind === 'veto' && vetoAnswer !== 'quiet'
         ? vetoAnswer === null ? null : { answer: vetoAnswer, channel: 'telegram' }
@@ -128,13 +134,13 @@ function channel(vetoAnswer: 'not-understood' | null | 'quiet'): PaymentNotifier
  * The first daemon runs the purchase until the follow-up approval is armed and
  * its checkpoint kept, then stops. Returns the checkpoint as the host stored it.
  */
-async function firstDaemonStopsDuringFollowUp(now: () => number, window: 'approval' | 'veto' = 'approval'): Promise<CheckoutWindowCheckpoint> {
+async function firstDaemonStopsDuringFollowUp(now: () => number, window: 'approval' | 'veto' = 'approval', telegram = false): Promise<CheckoutWindowCheckpoint> {
   const first = daemon(now);
   const file = join(dir, 'window-checkpoint.json');
   let armed!: () => void;
   const followUpArmed = new Promise<void>(resolve => { armed = resolve; });
   const run = runCheckout(REQUEST, await readFixtureCheckout(merchant), CONTROLS, {
-    ...first.deps(channel(window === 'approval' ? 'not-understood' : 'quiet')),
+    ...first.deps(channel(window === 'approval' ? 'not-understood' : 'quiet', telegram)),
     retainWindowCheckpoint: async checkpoint => {
       writeFileSync(file, JSON.stringify(checkpoint));
       if (checkpoint.record.windowKind === window) armed();
@@ -150,26 +156,53 @@ async function firstDaemonStopsDuringFollowUp(now: () => number, window: 'approv
   return checkpoint;
 }
 
+/**
+ * The Telegram side of a restart: the replies the daemon's poller archived for
+ * the window (the stored history, as the request store keeps it), every notice
+ * the restored window sends again, and the window armed again with a deadline
+ * still ahead.
+ */
+interface OwnerTelegram {
+  readonly archived: readonly PaymentReplyHistoryEntry[];
+  readonly sentAgain: () => void;
+  readonly reopened: () => void;
+}
+
 /** The restarted daemon resumes the purchase from the kept checkpoint. */
-function restartedDaemon(now: () => number, checkpoint: CheckoutWindowCheckpoint) {
+function restartedDaemon(now: () => number, checkpoint: CheckoutWindowCheckpoint, telegram?: OwnerTelegram) {
   const next = daemon(now);
   const replies = new PaymentReplyInbox();
+  if (telegram) {
+    // The daemon's Telegram source account, attached by its poller with the bot the notice went out on.
+    const lifetime = new AbortController(), accounts = createTelegramSourceAccountOwner();
+    accounts.attach({ readIdentity: async () => BOT, isCurrent: async () => true, isCurrentSync: () => true, lifetime: lifetime.signal });
+    replies.bindTelegramSource(accounts.reader, lifetime.signal);
+    closers.push(() => { lifetime.abort(); accounts.invalidate(); });
+  }
   closers.push(() => replies.close());
   const inboxDelivery = checkpoint.record.windowDeliveries?.find(delivery => delivery.channel === 'owner-inbox');
   if (!inboxDelivery) throw new Error('The follow-up was not posted to the owner inbox');
+  const telegramDelivery = checkpoint.record.windowDeliveries?.find(delivery => delivery.channel === 'telegram');
+  const recipients = telegram && telegramDelivery ? [{ receipt: NOTICE_RECEIPT, delivery: telegramDelivery,
+    target: { channel: 'telegram' as const, request: { target: { kind: 'surface', surfaceKind: 'telegram', address: NOTICE_RECEIPT.conversationId } }, backfillable: false } }] : [];
+  const history: PaymentReplyHistory | undefined = telegram && { version: 1, windows: [{
+    startedAtMs: checkpoint.record.updatedAtMs, binding: paymentReplyHistoryBinding(checkpoint), entries: telegram.archived }] };
   const run = (): Promise<CheckoutOutcome> => readFixtureCheckout(merchant).then(reading => runCheckout(REQUEST, reading, CONTROLS, {
     ...next.deps(channel(null)),
+    retainWindowCheckpoint: async kept => { if ((kept.record.windowDeadlineMs ?? 0) > Date.now()) telegram?.reopened(); },
     resumeWindow: {
       checkpoint,
       prepare: owner => prepareRestoredPaymentReplyWindow({
-        purchaseId: PURCHASE, checkpoint, recipients: [], readHistory: undefined, replies,
-        router: { deliver: async () => { throw new Error('No channel recipient to notify again'); } },
+        purchaseId: PURCHASE, checkpoint, recipients, readHistory: history && (async () => history), replies,
+        router: telegram
+          ? { deliver: async () => undefined, deliverWithReceipt: async () => { telegram.sentAgain(); return { receipt: { ...NOTICE_RECEIPT, messageId: '503' } }; } }
+          : { deliver: async () => { throw new Error('No channel recipient to notify again'); } },
         signal: owner.signal ?? next.stop.signal, assertCurrent: () => owner.assertCurrent?.(), renewMinutes: 60,
         inbox: { port: next.inbox, key: purchaseInboxKey(PURCHASE, checkpoint.record.windowKind ?? 'approval'), delivery: inboxDelivery },
       }),
     },
   }));
-  return { inbox: next.inbox, run };
+  return { inbox: next.inbox, stop: next.stop, run };
 }
 
 function budget(now: () => number) {
@@ -216,19 +249,41 @@ test('silence on the follow-up approval across a restart buys nothing and frees 
   expect(budget(now)).toEqual({ spent: 0, reserved: 0 });
 });
 
-test('a stop the owner recorded while the daemon was down is read after the restart; without it the veto\'s silence buys once', async () => {
+test('after a restart the veto reads a stop given in the inbox or on Telegram while the daemon was down and counts no unreceived silence; otherwise its silence buys once', async () => {
   // The veto window opened two hours ago, so its deadline passed while the daemon was down.
   const earlier = Date.now() - 2 * 60 * 60_000;
   const now = () => earlier;
-  const checkpoint = await firstDaemonStopsDuringFollowUp(now, 'veto');
-  // A terminal app answers the inbox item a minute into the window, while the daemon is down.
-  const terminal = new OwnerInbox({ questions: new QuestionStore({ path: join(dir, 'owner-questions.sqlite') }), now: () => earlier + 60_000 });
-  closers.push(() => terminal.dispose());
-  const item = terminal.listNow({ status: 'open' }).find(entry => entry.key === purchaseInboxKey(PURCHASE, 'veto'))!;
-  expect((await terminal.answer(item.id, { option: 'stop' })).applied).toBe(true);
-  expect((await restartedDaemon(now, checkpoint).run()).kind).toBe('cancelled');
-  expect(merchant.submissions).toHaveLength(0);
-  expect(budget(now)).toEqual({ spent: 0, reserved: 0 });
+  // The owner's "stop" on Telegram a minute into the window, drained into the archive when the daemon came back.
+  const telegramStop: PaymentReplyHistoryEntry = { accountId: BOT.id, userId: 'owner-1', conversationId: NOTICE_RECEIPT.conversationId,
+    threadId: null, messageId: '502', updateId: '9001', replyToMessageId: null, sentAtMs: earlier + 60_000, receivedAtMs: Date.now(), text: 'stop' };
+  const rows = [
+    { row: 'a stop answered in the owner inbox', telegram: false, inboxStop: true, archived: [], ends: 'cancelled', sentAgain: false },
+    { row: 'a stop archived from Telegram', telegram: true, inboxStop: false, archived: [telegramStop], ends: 'cancelled', sentAgain: false },
+    // Nothing archived, but nothing proves the poller received through the deadline: the window opens again.
+    { row: 'Telegram silence with no receive coverage', telegram: true, inboxStop: false, archived: [], ends: 'reopened', sentAgain: true },
+  ] as const;
+  for (const row of rows) {
+    dir = makeProjectTempDir('gv-payments-restart');
+    const checkpoint = await firstDaemonStopsDuringFollowUp(now, 'veto', row.telegram);
+    if (row.inboxStop) {
+      // A terminal app answers the inbox item a minute into the window, while the daemon is down.
+      const terminal = new OwnerInbox({ questions: new QuestionStore({ path: join(dir, 'owner-questions.sqlite') }), now: () => earlier + 60_000 });
+      closers.push(() => terminal.dispose());
+      const item = terminal.listNow({ status: 'open' }).find(entry => entry.key === purchaseInboxKey(PURCHASE, 'veto'))!;
+      expect((await terminal.answer(item.id, { option: 'stop' })).applied).toBe(true);
+    }
+    let sentAgain = false, reopen!: () => void;
+    const reopened = new Promise<'reopened'>(resolve => { reopen = () => resolve('reopened'); });
+    const restarted = restartedDaemon(now, checkpoint, row.telegram ? { archived: row.archived, sentAgain: () => { sentAgain = true; }, reopened: reopen } : undefined);
+    const outcome = restarted.run().then(result => result.kind, () => 'stopped');
+    const ends = await Promise.race([outcome, reopened]);
+    // A window opened again waits its fresh deadline; the daemon stops there.
+    restarted.stop.abort();
+    await outcome;
+    expect({ row: row.row, ends, sentAgain, orders: merchant.submissions.length })
+      .toEqual({ row: row.row, ends: row.ends, sentAgain: row.sentAgain, orders: 0 });
+    if (row.ends === 'cancelled') expect(budget(now)).toEqual({ spent: 0, reserved: 0 });
+  }
 
   // Control: the same restart with nothing recorded lets the veto's silence buy, once.
   dir = makeProjectTempDir('gv-payments-restart');

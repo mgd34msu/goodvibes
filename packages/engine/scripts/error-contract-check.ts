@@ -148,7 +148,6 @@ const STALE_KIND_FILES = [
   'docs/react-native-integration.md',
   'docs/web-ui-integration.md',
   'test/workers/workers.test.ts',
-  'test/workers-wrangler/wrangler.test.ts',
 ];
 
 function assertNoStaleServerKindDocs(): void {

@@ -571,7 +571,7 @@ export class DaemonServer {
   }
 
   /**
-   * Disconnect a server connected with {@link registerMcpServer} and drop its
+   * Disconnect a server connected with {@link DaemonServer.registerMcpServer} and drop its
    * config, so its tools leave the tool surface. Exposed so an in-process
    * embedder stops a server once no session that declared it is left. Leaves
    * the name alone when it now holds another config.

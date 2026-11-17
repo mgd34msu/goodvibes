@@ -260,7 +260,7 @@ export function createNativeConversationIntakeHost(deps: {
     async function classicConversation(): Promise<NativeConversationIntakeResult> {
       assertCurrent();
       const policy = decisionModelPolicyState();
-      if (policy.operation !== 'classic' || policy.policy === 'Default - On' || policy.reason === null
+      if (policy.operation !== 'classic' || (policy.policy === 'Decision Model Only' && policy.reason !== 'not-set') || policy.reason === null
         || record.association || record.decisions.some(entry => entry.decision.outcome === 'reject')) throw new NativeConversationIntakeError('forbidden');
       if (record.unsupportedSources.length) {
         await update({ state: 'blocked', stage: null, reason: 'unsupported-source' });

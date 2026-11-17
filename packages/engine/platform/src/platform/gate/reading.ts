@@ -144,7 +144,7 @@ function callReadingState(toolName: string, args: Record<string, unknown>, worki
 
 /** Reads the independent gate batteries about one captured call in a shared request. */
 export async function readToolCall(input: ReadToolCallInput, site: string = GATE_SITE): Promise<GateReading> {
-  requireDecisionFeature('semantic tool-call risk assessment; Classic uses native permission rules and owner approvals');
+  requireDecisionFeature('semantic tool-call risk assessment; without a decision model, this uses native permission rules and owner approvals');
   const { toolName, args, workingDirectory, signal: abortSignal, askKind = false, askObfuscated = false, port: scopedPort } = input;
   const state = callReadingState(toolName, args, workingDirectory, input.externalRequestEvidence);
   const shell = askObfuscated === true;
@@ -264,7 +264,7 @@ export async function readCatastrophic(
   signal?: AbortSignal,
   options: CatastrophicReadingOptions = {},
 ): Promise<{ readonly verdict: YesNoReading['verdict']; readonly readByGate: boolean }> {
-  requireDecisionFeature('semantic catastrophic-command assessment; Classic retains native permission and approval handling');
+  requireDecisionFeature('semantic catastrophic-command assessment; without a decision model, this retains native permission and approval handling');
   signal?.throwIfAborted();
   const { workingDirectory, externalRequestEvidence, port } = options;
   const state = callReadingState('exec', { command }, workingDirectory, externalRequestEvidence);

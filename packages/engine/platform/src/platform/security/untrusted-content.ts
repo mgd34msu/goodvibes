@@ -990,7 +990,7 @@ export async function evaluateOutwardEffect(input: {
       : assessment.reason === 'over-limit'
         ? 'one of its fields is too long to be read whole; shorten it and send it in parts'
       : assessment.reason === 'decision-model-disabled'
-        ? 'Classic does not assess semantic derivation from untrusted input'
+        ? 'Without a decision model, this does not assess semantic derivation from untrusted input'
         : describeIncompleteSources(input.ledger.incompleteSourcesThisTurn());
   return {
     allowed: false,

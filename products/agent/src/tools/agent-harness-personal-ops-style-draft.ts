@@ -12,7 +12,7 @@ export function personalOpsStyleDraftRecord(): PersonalOpsLiveRecord {
   return {
     id: STYLE_DRAFT_RECORD_ID, label: 'Draft reply in my writing style', status: 'ready',
     summary: isClassicOperation()
-      ? 'Return a protected draft using the default template and supplied key points. Writing style and personal salutation are not inferred in Classic.'
+      ? 'Return a protected draft using the default template and supplied key points. Writing style and personal salutation are not inferred without a decision model.'
       : 'Read an explicitly supplied sent-message corpus and inbound message under protected semantic readings, then return a draft for review.',
     userRoute: 'Agent Workspace -> Personal Ops -> Inbox -> Draft reply in my writing style',
     modelRoute: `personal_ops action:"read" laneId:"inbox" recordId:"${STYLE_DRAFT_RECORD_ID}"`,
@@ -27,13 +27,13 @@ export function personalOpsStyleDraftWorkflow(): PersonalOpsWorkflow {
   return {
     id: 'inbox-style-matched-draft-reply', label: 'Writing-style-matched draft reply', status: 'ready',
     summary: isClassicOperation()
-      ? 'Classic uses a default template with supplied key points; it does not learn style from the corpus. The draft remains separate from delivery.'
+      ? 'Without a decision model, this uses a default template with supplied key points; it does not learn style from the corpus. The draft remains separate from delivery.'
       : 'Use the provided corpus, not an assumed sent mailbox. The draft remains separate from delivery.',
     next: 'Supply the full inbound message, sent-message bodies and optional key points. Review the returned draft before choosing any separately admitted send route.',
     modelRoute: personalOpsStyleDraftRecord().modelRoute,
     inspectRoutes: ['personal_ops action:"lane" laneId:"inbox"'],
-    prerequisites: ['Explicit inbound message and sent-message corpus', isClassicOperation() ? 'Current protected source owner; Classic template is not a learned style' : 'Current protected source owner and settled style readings'],
-    runBoundary: 'Read and draft only. Source ownership and privacy checks remain required; Classic returns an unassessed template. Sending has its own effect admission.',
+    prerequisites: ['Explicit inbound message and sent-message corpus', isClassicOperation() ? 'Current protected source owner; default template is not a learned style' : 'Current protected source owner and settled style readings'],
+    runBoundary: 'Read and draft only. Source ownership and privacy checks remain required; without a decision model, this returns an unassessed template. Sending has its own effect admission.',
   };
 }
 

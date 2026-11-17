@@ -29,9 +29,9 @@ const PROVIDERS = [
   { id: 'laya', label: 'Laya', detail: 'A local Laya decision service using its declared protocol.' },
 ] as const;
 const POLICY_DETAILS: Readonly<Record<string, string>> = {
-  'Default - On': 'Use the configured decision models; halt and report availability problems if the whole chain fails.',
-  Preferred: 'Try the configured decision chain, then continue in Classic only when all targets are unavailable.',
-  'Classic - Off': 'Make no decision-model requests. Ordinary chat and tools remain available with the chosen execution permissions.',
+  Hybrid: 'Use the set decision model; when none is set, or it fails, continue without it. A failure is shown once with the model, what failed and the next step.',
+  'Decision Model Only': 'Use the set decision model; when it fails, stop the operation and report the model, what failed and the next step. With none set, work still continues without one.',
+  'No Decision Model': 'Make no decision-model requests. Ordinary chat and tools remain available with the chosen execution permissions.',
   'ask-me': 'Ordinary work runs automatically; dangerous actions and owner-only decisions ask you.',
   'jev-decides': 'A decision model decides judgment calls; owner-only decisions ask you. With no working decision model you are asked instead.',
   'just-vibes': 'Does as much as it can without interrupting you; anything that needs you is held and listed at the end.',
@@ -103,7 +103,8 @@ export function openSettingsChoice(
     const key = action === 'decision-policy' ? 'judgment.policy' : 'permissions.mode';
     const values = CONFIG_SCHEMA.find(setting => setting.key === key)?.enumValues ?? [];
     open(action === 'decision-policy' ? 'Decision models' : 'Execution permissions',
-      values.map(value => ({ id: value, label: value === 'yolo' ? 'YOLO' : value, detail: POLICY_DETAILS[value] ?? '', primaryAction: 'select' })),
+      // The default policy reads "Hybrid (default)"; only the bare value is stored.
+      values.map(value => ({ id: value, label: value === 'yolo' ? 'YOLO' : value === 'Hybrid' && key === 'judgment.policy' ? 'Hybrid (default)' : value, detail: POLICY_DETAILS[value] ?? '', primaryAction: 'select' })),
       { preSelectId: String(config.get(key)), allowSearch: true },
       result => { if (!result) return;
         if (key === 'permissions.mode' && setExecutionMode) { if (current()) { setExecutionMode(result.item.id); changed(); } }
@@ -189,6 +190,8 @@ export function openSettingsChoice(
     const previousTarget = editingFallback();
     const profiles = DECISION_MODEL_PROFILES.filter(profile => !adapter || profile.adapter === adapter);
     const items: SelectionItem[] = profiles.map(profile => ({ id: profile.id, label: profile.name, detail: profile.model, category: PROVIDERS.find(provider => provider.id === profile.adapter)?.label ?? profile.adapter, primaryAction: 'select' }));
+    // The primary model can be cleared as well as chosen; a fallback target is removed from its own menu.
+    if (action !== 'judgment-fallbacks' && !adapter) items.unshift({ id: '__none__', label: 'No decision model', detail: 'Clear the primary decision model: decisions take their fallbacks. A key in TYPESAFE_API_KEY or a fallback target still sets one.', primaryAction: 'select' });
     open('Choose decision model', items, {
       allowSearch: true,
       preSelectId: profiles.find(profile => profile.model === (previousTarget?.model ?? config.get('judgment.model')))?.id,
@@ -196,6 +199,10 @@ export function openSettingsChoice(
         ? { id: `custom:${query}`, label: `Custom model: ${query}`, detail: 'Use the current endpoint and protocol.', primaryAction: 'select' } : null,
     }, result => {
       if (!result) return;
+      if (result.item.id === '__none__') {
+        save([['judgment.endpoint', ''], ['judgment.model', ''], ['judgment.keySource', 'env'], ['judgment.keyName', 'TYPESAFE_API_KEY'], ['judgment.backend', {}]]);
+        return;
+      }
       const profile = profiles.find(profile => profile.id === result.item.id);
       if (profile) chooseEndpoint(profile);
       else if (result.item.id.startsWith('custom:')) {

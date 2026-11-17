@@ -129,7 +129,7 @@ export function createSandboxEscalationApprovalHandler(
         }
         reasons.push(...applied.annotations);
       } else {
-        reasons.push('Classic operation: no decision-model advisory was taken; owner approval is required.');
+        reasons.push('No decision model: no decision-model advisory was taken; owner approval is required.');
       }
     }
 

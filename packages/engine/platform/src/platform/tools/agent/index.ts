@@ -406,7 +406,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
     }
     const delegationKey = delegationPlanKey(delegationSession, input.authoritativeTask ?? '');
     const heldPlan = heldPlans.get(delegationKey);
-    if (heldPlan && decisionModelPolicyState().policy === 'Preferred' && decisionModelPolicyState().operation === 'classic')
+    if (heldPlan && decisionModelPolicyState().policy === 'Hybrid' && decisionModelPolicyState().operation === 'classic')
       return publish({ success: false, error: 'The previous delegation plan remains held. Availability fallback cannot override its semantic refusal.' });
     const holdPlan = (assignments: readonly { readonly task: string }[], error: unknown, mode: 'spawn' | 'batch-spawn' = 'batch-spawn') => {
       const reason = summarizeError(error);

@@ -149,6 +149,14 @@ export interface CliStatusSnapshot {
     readonly scope: string;
     readonly updatedAt: number | null;
   };
+  /** Whether a decision model is in use, from the settings: the policy as shown and the standing line. */
+  readonly decisionModel: {
+    readonly policy: string;
+    readonly policyLabel: string;
+    readonly set: boolean;
+    readonly inUse: boolean;
+    readonly line: string;
+  };
   readonly workspace: CliWorkspaceStatus | null;
   readonly sandbox: CliSandboxStatus | null;
   readonly relay: CliRelayStatus | null;
@@ -592,6 +600,7 @@ export function buildCliStatusSnapshot(options: CliStatusOptions): CliStatusSnap
       },
     },
     onboarding: common.onboarding,
+    decisionModel: common.decisionModel,
     workspace: options.workspace ?? null,
     sandbox: options.sandbox ?? null,
     relay: options.relay ?? null,
@@ -630,6 +639,10 @@ export function renderCliStatus(options: CliStatusOptions): string {
       String(config.get('provider.model') ?? ''),
       String(config.get('provider.reasoningEffort') ?? ''),
     )}`,
+    '',
+    'Decision model:',
+    `  policy: ${snapshot.decisionModel.policyLabel} (judgment.policy)`,
+    `  ${snapshot.decisionModel.line}`,
     '',
     'Auth:',
     `  permissions: ${describeConfiguredPermissions(config).label} (${String(config.get('permissions.mode'))})`,

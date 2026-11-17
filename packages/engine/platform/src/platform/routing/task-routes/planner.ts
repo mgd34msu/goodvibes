@@ -163,7 +163,7 @@ export async function planTaskRoute(
   deps: TaskRouteDeps = {},
   options: TaskRouteReadOptions = {},
 ): Promise<TaskRoutePlan> {
-  requireDecisionFeature('semantic task route planning; use explicit native targets or ordinary Classic chat');
+  requireDecisionFeature('semantic task route planning; use explicit native targets or ordinary chat');
   const originalArgs = captureStrictJudgmentJson(args);
   const request = typeof originalArgs.query === 'string' && originalArgs.query.trim() ? originalArgs.query
     : typeof originalArgs.target === 'string' && originalArgs.target.trim() ? originalArgs.target : '';

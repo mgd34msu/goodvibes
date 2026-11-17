@@ -60,7 +60,7 @@ export function createProfilePostalReader(
         if (!fallbackEnabled || !valid || !value.trim()) return Object.freeze({ value: null, assertCurrent: check });
         // Privacy-screen even when no provider is configured; never hash or log a raw rejected field.
         snapshotJudgmentInput({ source: value });
-        requireDecisionFeature('interpreting a prose profile address; configure the individual address fields to use them in Classic');
+        requireDecisionFeature('interpreting a prose profile address; configure the individual address fields to use them without a decision model');
         if (!providers) throw new PostalAddressHeldError();
         let providerCurrent = () => {};
         decisionPhase = true;

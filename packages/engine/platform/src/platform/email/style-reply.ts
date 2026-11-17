@@ -17,7 +17,7 @@ export type StyleSentMessage = Pick<EmailSummary, 'bodyPreview'>;
 
 export interface StyleProfile {
   readonly provenance?: 'classic';
-  /** Defaults in Classic are a template choice, never a learned writing style. */
+  /** Defaults without a decision model are a template choice, never a learned writing style. */
   readonly assessment?: 'not-evaluated';
   /** Most common greeting prefix found in sent messages, e.g. 'Hi', 'Hello', 'Hey'. */
   readonly greeting: string;
@@ -27,7 +27,7 @@ export interface StyleProfile {
   readonly medianSentenceCount: number;
   /** Dominant tone established by the corpus reading: 'formal' | 'casual' | 'neutral'. */
   readonly tone: 'formal' | 'casual' | 'neutral';
-  /** True when values are explicit defaults, including an unassessed Classic template. */
+  /** True when values are explicit defaults, including an unassessed default template. */
   readonly isDefault: boolean;
   /**
    * Fields of a corpus-derived profile the reading did not establish (the sent
@@ -169,7 +169,7 @@ export async function composeDraftReply(
       subject: subjectLine,
       requiresBeforeSendReview: true,
       reviewBoundary:
-        (classic ? 'Classic uses the supplied/default template; writing style and personal salutation were not inferred. ' : '') +
+        (classic ? 'Without a decision model, this uses the supplied/default template; writing style and personal salutation were not inferred. ' : '') +
         (templateFields.length
           ? `The ${templateFields.join(', ')} in this draft are template defaults: the sent messages did not establish them, so they are not the author's own style. `
           : '') +

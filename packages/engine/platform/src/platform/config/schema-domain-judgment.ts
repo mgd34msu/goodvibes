@@ -14,7 +14,7 @@ import { captureJudgmentVolumeMonitorControl } from '../observe/judgment-volume-
 export const judgmentConfigDefaults: { judgment: JudgmentSettings } = {
   judgment: {
     volumeMonitor: captureJudgmentVolumeMonitorControl({}),
-    policy: 'Default - On',
+    policy: 'Hybrid',
     endpoint: '',
     keySource: 'env',
     keyName: 'TYPESAFE_API_KEY',
@@ -39,9 +39,9 @@ export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
     validationHint: 'object with enabled and up to 100 budgets; enabled monitoring needs at least one budget',
   },
   {
-    key: 'judgment.policy', type: 'enum', default: 'Default - On',
-    enumValues: ['Default - On', 'Preferred', 'Classic - Off'],
-    description: 'Default - On requires available decision models. Preferred tries the configured chain and falls back to Classic only on availability exhaustion. Classic - Off makes no decision-model calls, uses owner-approved tool execution and ordinary completion, and exposes decision-only feature limitations.',
+    key: 'judgment.policy', type: 'enum', default: 'Hybrid',
+    enumValues: ['Hybrid', 'Decision Model Only', 'No Decision Model'],
+    description: 'Hybrid (default) uses the set decision model and, when none is set or it fails, continues without it: decisions take their fallbacks and a failure is shown once with the model, what failed and the next step. Decision Model Only stops the operation and reports when the set decision model fails. No Decision Model makes no decision-model calls. With no decision model set, every policy continues without one.',
   },
   {
     key: 'judgment.endpoint',

@@ -8,7 +8,7 @@ export class PostalAddressHeldError extends Error {
 }
 export interface PreparedPostalAddress {
   readonly provenance?: 'classic';
-  /** Classic returns native stored fields; no prose profile address was interpreted. */
+  /** Without a decision model, this returns native stored fields; no prose profile address was interpreted. */
   readonly profileAssessment?: 'not-evaluated';
   readonly value: PostalParts | null;
   /** Restriction only, never permission to disclose or place an order. */

@@ -11,7 +11,7 @@ import { TurnCancellationFence, type TurnCancellationResult } from './turn-cance
 import { resolveSystemPrompt } from './orchestrator-system-prompt.js';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { classifyFailure, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { inheritClassicDecisionFallback, isClassicOperation, withDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { decisionModelUse, inheritClassicDecisionFallback, isClassicOperation, withDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { JudgmentInputError } from '../gate/judgment-input.js';
 import { PlannerJudgmentError } from './adaptive-planner.js';
 import { ResponseCompletionError } from './response-completion.js';
@@ -261,6 +261,8 @@ export class Orchestrator {
   /** When the current turn's abort was first asked for; TURN_CANCEL carries it so the cancel latency is measured. */
   private abortRequestedAt: number | undefined;
   private disposed = false;
+  /** What this conversation was last told about the decision model (see tellDecisionModelUse). */
+  private decisionModelTold: { readonly failingSince?: number; readonly noneInUse?: boolean } = {};
   /** Per-tool-call abort registry (per-call cancel; see orchestrator-live-turn.ts). */
   private readonly toolCallAborts = new ToolCallAbortRegistry();
   /** Monotonic id source for queued-message ids. */
@@ -921,7 +923,7 @@ export class Orchestrator {
           admissionAbort.signal.throwIfAborted();
           if (this.disposed) throw new NativeConversationTurnAdmissionError('recovery_required');
           const classic = nativeTurn.source.sourceRef.classic;
-          if (classic?.policy === 'Preferred' && classic.reason === 'unavailable') inheritClassicDecisionFallback();
+          if (classic?.policy === 'Hybrid' && classic.reason === 'unavailable') inheritClassicDecisionFallback();
         }
         await this.runTurnBody(text, content, options, nativeTurn, resume);
       }
@@ -935,16 +937,37 @@ export class Orchestrator {
         }
       }
     };
-    await withDecisionModelPolicy(() => requireConfigManager(this.coreServices).get('judgment.policy'), async () => {
-      if (nativeTurn) await withNativeConversationTurn(nativeTurn.permit, execute);
-      else await withoutNativeConversationTurn(execute);
-    }, state => {
-      this.conversation.addNotice(`[Decision policy] ${state.reason === 'unavailable'
-        ? 'Preferred: decision models are unavailable; continuing this operation in Classic.'
-        : 'Classic - Off: decision models are disabled.'} Tools use the selected permission policy. Responses have no independent semantic verification.`,
-      { level: 'warning', kind: 'operational' });
-      this.requestRender();
-    });
+    try {
+      await withDecisionModelPolicy(() => requireConfigManager(this.coreServices).get('judgment.policy'), async () => {
+        if (nativeTurn) await withNativeConversationTurn(nativeTurn.permit, execute);
+        else await withoutNativeConversationTurn(execute);
+      });
+    } finally {
+      this.tellDecisionModelUse();
+    }
+  }
+
+  /**
+   * Tells this conversation when no decision model is in use: once when none
+   * is set or the owner chose none, once when a set model starts failing
+   * (naming it, what failed and the next step), and once when it answers
+   * again. A model that stays down is not repeated every turn.
+   */
+  private tellDecisionModelUse(): void {
+    const use = decisionModelUse();
+    const told = this.decisionModelTold;
+    if (use.failure !== undefined) {
+      if (told.failingSince === use.failure.since) return;
+      this.decisionModelTold = { failingSince: use.failure.since };
+      this.conversation.addNotice(`[Decision model] ${use.line}`, { level: 'error', kind: 'operational' });
+    } else if (told.failingSince !== undefined) {
+      this.decisionModelTold = {};
+      this.conversation.addNotice('[Decision model] The decision model is answering again.', { level: 'info', kind: 'operational' });
+    } else if (!use.inUse && use.reason !== 'unavailable' && !told.noneInUse) {
+      this.decisionModelTold = { noneInUse: true };
+      this.conversation.addNotice(`[Decision model] ${use.line}`, { level: 'info', kind: 'operational' });
+    } else return;
+    this.requestRender();
   }
 
   private async runTurnBody(

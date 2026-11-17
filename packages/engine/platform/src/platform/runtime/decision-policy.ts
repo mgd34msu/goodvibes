@@ -1,14 +1,14 @@
 import { captureOwnedJson } from '../gate/judgment-input.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { JudgmentError } from '@goodvibes-jev/judgment';
+import { isDecisionModelFailure, type DecisionModelFailure } from '@goodvibes-jev/judgment';
 import {
   DecisionModelsDisabledError, JudgmentPortMissingError, decisionModelPolicyState,
-  installDecisionModelPolicyObserver, type DecisionModelPolicy, type DecisionModelPolicyState,
+  decisionModelFailingLine, installDecisionModelPolicyObserver, type NoDecisionModelReason, type DecisionModelFailureState, type DecisionModelPolicy, type DecisionModelPolicyState,
   parseDecisionModelPolicy, runDecisionOrClassic,
 } from '@goodvibes-jev/engine/errors';
 
-export type { DecisionModelPolicy, DecisionModelPolicyState } from '@goodvibes-jev/engine/errors';
-export { DECISION_MODEL_POLICIES, parseDecisionModelPolicy } from '@goodvibes-jev/engine/errors';
+export type { NoDecisionModelReason, DecisionModelFailureState, DecisionModelPolicy, DecisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+export { DECISION_MODEL_POLICIES, DEFAULT_DECISION_MODEL_POLICY, decisionModelFailingLine, decisionModelPolicyLabel, decisionModelUse, parseDecisionModelPolicy, type DecisionModelUse } from '@goodvibes-jev/engine/errors';
 
 export class DecisionModelPolicyChangedError extends Error {
   constructor() {
@@ -96,7 +96,7 @@ interface PolicyScope {
 interface PolicyHostState {
   readonly schemaVersion: 1;
   readonly scopes: AsyncLocalStorage<PolicyScope>;
-  readonly configurations: { readonly read: () => unknown; active: boolean }[];
+  readonly configurations: { readonly read: () => unknown; readonly isSet?: () => boolean; active: boolean }[];
   readonly revocations: WeakSet<object>;
 }
 // Source and published entrypoints may coexist in an embedding process. They
@@ -117,11 +117,28 @@ function sharedPolicyHostState(): PolicyHostState {
 }
 const hostState = sharedPolicyHostState();
 const { scopes, configurations } = hostState;
+/** The set model's current failure episode, process-wide; undefined while it answers. */
+const episode: { failure: DecisionModelFailureState | undefined } = { failure: undefined };
+const episodeListeners = new Set<(notice: DecisionModelEpisodeNotice) => void>();
 const configured = (): unknown => configurations.findLast(source => source.active)?.read();
+/** Whether the current composition has a decision model set; with no composition, nothing says otherwise. */
+const configuredSet = (): boolean => configurations.findLast(source => source.active)?.isSet?.() ?? true;
 
-/** A composition owns the default; retiring it cannot replace a newer composition. */
-export function configureDecisionModelPolicy(read: () => unknown): () => void {
-  const source = { read, active: true };
+/** Why a fresh operation under `policy` runs without a decision model from its start, or null when it asks decision models. */
+function startingReason(policy: DecisionModelPolicy): NoDecisionModelReason | null {
+  if (policy === 'No Decision Model') return 'selected';
+  // Nothing to ask: every decision takes its fallback at once, with no request and no error.
+  return configuredSet() ? null : 'not-set';
+}
+
+/**
+ * A composition owns the default; retiring it cannot replace a newer composition.
+ * `isSet` says whether a decision model is set at all; when none is, every
+ * operation runs without a decision model with reason `not-set`, so nothing is asked, nothing
+ * waits and nothing reports an error.
+ */
+export function configureDecisionModelPolicy(read: () => unknown, isSet?: () => boolean): () => void {
+  const source = { read, ...(isSet === undefined ? {} : { isSet }), active: true };
   configurations.push(source);
   return () => {
     source.active = false;
@@ -133,8 +150,10 @@ function observe(): DecisionModelPolicyState {
   const scope = scopes.getStore();
   scope?.current();
   const policy = scope?.policy ?? parseDecisionModelPolicy(configured());
-  const reason = scope?.state.reason ?? (policy === 'Classic - Off' ? 'selected' : null);
-  return Object.freeze({ policy, operation: reason === null ? 'decision' : 'classic', reason, revision: scope?.state.revision ?? 0 });
+  const reason = scope === undefined ? startingReason(policy) : scope.state.reason;
+  const failure = episode.failure;
+  return Object.freeze({ policy, operation: reason === null ? 'decision' : 'classic', reason, revision: scope?.state.revision ?? 0,
+    ...(failure === undefined ? {} : { failure }) });
 }
 /** Make the platform's observer the process one again after something else replaced it. */
 export function installPlatformDecisionPolicyObserver(): void {
@@ -162,9 +181,9 @@ export function withDecisionModelPolicy<T>(read: () => unknown, operation: () =>
   const readPolicy = () => parseDecisionModelPolicy(read() ?? configured());
   const policy = readPolicy();
   const current = () => { if (readPolicy() !== policy) throw new DecisionModelPolicyChangedError(); };
-  return scopes.run({ policy, current, onChange, state: { reason: policy === 'Classic - Off' ? 'selected' : null, revision: 0, refusals: new Set() } }, () => {
+  return scopes.run({ policy, current, onChange, state: { reason: startingReason(policy), revision: 0, refusals: new Set() } }, () => {
     current();
-    if (policy === 'Classic - Off') onChange?.(observe());
+    if (scopes.getStore()?.state.reason !== null) onChange?.(observe());
     return operation();
   });
 }
@@ -183,12 +202,17 @@ export function captureDecisionModelPolicyOperation(onChange?: (state: DecisionM
   }, onChange);
 }
 
-/** Only explicit availability exhaustion may downgrade Preferred; never unwrap unrelated failures. */
+/**
+ * Only the set model failing (unreachable, slow, a refused or missing
+ * credential, a malformed answer) may downgrade Hybrid; an answer, an
+ * abstention, a limit or a cancellation never does, and unrelated failures are
+ * never unwrapped.
+ */
 export function activateClassicFallback(error: unknown): boolean {
   const scope = scopes.getStore();
   scope?.current();
-  if (!scope || scope.policy !== 'Preferred') return false;
-  if (!(error instanceof JudgmentPortMissingError) && !(error instanceof JudgmentError && error.kind === 'unavailable')) return false;
+  if (!scope || scope.policy !== 'Hybrid') return false;
+  if (!(error instanceof JudgmentPortMissingError) && !isDecisionModelFailure(error)) return false;
   return inheritClassicDecisionFallback();
 }
 
@@ -198,7 +222,7 @@ export function activateClassicFallback(error: unknown): boolean {
 export function inheritClassicDecisionFallback(): boolean {
   const scope = scopes.getStore();
   scope?.current();
-  if (!scope || scope.policy !== 'Preferred') return false;
+  if (!scope || scope.policy !== 'Hybrid') return false;
   if (scope.state.reason === null) {
     scope.state.reason = 'unavailable'; scope.state.revision++;
     scope.onChange?.(observe());
@@ -227,6 +251,61 @@ export function wasDecisionRefused(action: RefusedDecisionAction): boolean {
   if (typeof action === 'string') return refusals.has(action);
   const captured = captureOwnedJson(action) as RefusedDecisionAction;
   return refusalIndex(refusals).keys.has(refusalKey(captured));
+}
+
+/** A set decision model's failure episode, told once when it starts and once when the model answers again. */
+export interface DecisionModelEpisodeNotice {
+  readonly kind: 'failing' | 'recovered';
+  readonly level: 'error' | 'info';
+  readonly model: string;
+  /** The line to show: the model, what failed, the next step, and whether work continued without a decision model. */
+  readonly message: string;
+  readonly failure?: DecisionModelFailureState;
+}
+
+
+function tellEpisode(notice: DecisionModelEpisodeNotice): void {
+  for (const listener of [...episodeListeners]) {
+    // A listener's own failure never turns a decision or its fallback into an error.
+    try { listener(notice); } catch { /* best effort */ }
+  }
+}
+
+/**
+ * Records a set model's failure. The first failure of an episode is told once,
+ * naming the model, what failed and the next step; later failures of the same
+ * episode only update the standing status, so a model that stays down does not
+ * repeat itself. Called by the settings port; costs nothing while models answer.
+ */
+export function noteDecisionModelFailure(failure: DecisionModelFailure, policy: DecisionModelPolicy = parseDecisionModelPolicy(configured())): void {
+  const known = episode.failure;
+  episode.failure = Object.freeze({ model: failure.model, what: failure.what, nextStep: failure.nextStep, since: known?.since ?? Date.now() });
+  if (known !== undefined) return;
+  tellEpisode({ kind: 'failing', level: 'error', model: failure.model, failure: episode.failure, message: decisionModelFailingLine(episode.failure, policy) });
+}
+
+/** Records an answer; ends a failure episode with one notice. */
+export function noteDecisionModelAnswered(model: string): void {
+  const ended = episode.failure;
+  if (ended === undefined) return;
+  episode.failure = undefined;
+  tellEpisode({ kind: 'recovered', level: 'info', model, message: `The decision model ${model} is answering again.` });
+}
+
+/** The set model's current failure, when it is failing; the standing status every product shows. */
+export function decisionModelFailure(): DecisionModelFailureState | undefined {
+  return episode.failure;
+}
+
+/** Subscribes to failure-episode notices; returns the unsubscribe. */
+export function onDecisionModelEpisode(listener: (notice: DecisionModelEpisodeNotice) => void): () => void {
+  episodeListeners.add(listener);
+  return () => { episodeListeners.delete(listener); };
+}
+
+/** Forgets the failure episode (a composition that retires, or a proof that starts over). */
+export function resetDecisionModelEpisode(): void {
+  episode.failure = undefined;
 }
 
 /** Explicit capability report for genuinely decision-only features. */

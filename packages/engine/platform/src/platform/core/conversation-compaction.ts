@@ -17,7 +17,7 @@ import { captureRevisions, isCurrent, type RevisionSource } from '../utils/revis
 
 /**
  * Score a compaction result through the shared compaction quality scorer.
- * Classic operation takes no semantic score, so it resolves to null: the
+ * operation without a decision model takes no semantic score, so it resolves to null: the
  * no-reduction guard still protects the conversation, and nothing claims a grade.
  */
 async function scoreResult(
@@ -28,7 +28,7 @@ async function scoreResult(
 ): Promise<CompactionQualityScore | null> {
   if (isClassicOperation()) {
     work.assertCurrent();
-    logger.warn('Classic compaction: no independent semantic quality score was taken; the no-reduction guard still applies.');
+    logger.warn('Compaction without a decision model: no independent semantic quality score was taken; the no-reduction guard still applies.');
     return null;
   }
   return computeQualityScore(
@@ -206,7 +206,7 @@ export async function compactConversation(
     work.assertCurrent();
 
     const strategyFellBack = produced.strategy !== produced.requestedStrategy;
-    // Classic operation takes no semantic score: the receipt carries no grade
+    // operation without a decision model takes no semantic score: the receipt carries no grade
     // and says why, instead of a fabricated one.
     const receiptBase = {
       trigger,
@@ -246,7 +246,7 @@ export async function compactConversation(
     const receipt: CompactionReceipt = {
       ...receiptBase,
       outcome: 'applied',
-      ...(quality === null ? { detail: 'Classic compaction: no independent semantic quality score was taken.' } : { quality }),
+      ...(quality === null ? { detail: 'Compaction without a decision model: no independent semantic quality score was taken.' } : { quality }),
     };
     // The conversation is already replaced. A failure in the bookkeeping below
     // (memory read, lineage entry, log) must not turn an applied compaction

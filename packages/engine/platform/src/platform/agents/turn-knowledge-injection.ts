@@ -441,7 +441,7 @@ export async function buildPerTurnKnowledgeInjection(
     return { block: null, record: {
       provenance: 'classic', turn, query, candidatesConsidered: 0, codeCandidatesConsidered: 0,
       injectedIds: [], injectedSources: [], droppedForBudget: [], tokenCost: 0, budgetTokens, relevanceFloor,
-      ingestModes: [], embeddingBackend: resolveEmbeddingBackend(memoryRegistry), reason: 'Classic: passive semantic enrichment is disabled; explicit memory and code search remain available.',
+      ingestModes: [], embeddingBackend: resolveEmbeddingBackend(memoryRegistry), reason: 'No decision model: passive semantic enrichment is disabled; explicit memory and code search remain available.',
     } };
   }
 

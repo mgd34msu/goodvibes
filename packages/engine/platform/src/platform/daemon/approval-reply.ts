@@ -109,7 +109,7 @@ export async function tryResolveApprovalReplyFromChannel(
     if (!id || (action !== 'approve' && action !== 'deny')) return false;
     if (!candidates.some(candidate => candidate.id === id)) return false;
     const resolved = await broker.resolveApproval(id, { approved: action === 'approve', disposition: action === 'approve' ? 'approved' : 'denied',
-      actor: userId, actorSurface: surface, note: text.trim(), reason: 'Explicit owner command during Classic operation.' });
+      actor: userId, actorSurface: surface, note: text.trim(), reason: 'Explicit owner command without a decision model.' });
     return resolved?.status === (action === 'approve' ? 'approved' : 'denied');
   }
 

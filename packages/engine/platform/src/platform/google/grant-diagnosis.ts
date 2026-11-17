@@ -53,7 +53,7 @@ export async function diagnoseInvalidGrant(original: GrantDiagnosisInput): Promi
     const result = await diagnoseOwnedInvalidGrant(original);
     if (!isClassicOperation()) return result;
     return { ...result, provenance: 'classic', ...(result.cause === 'unknown'
-      ? { semanticAssessment: 'not-evaluated' as const, problem: result.problem + ' Classic operation did not interpret the error explanation.' } : {}) };
+      ? { semanticAssessment: 'not-evaluated' as const, problem: result.problem + ' Without a decision model, it did not interpret the error explanation.' } : {}) };
   });
 }
 

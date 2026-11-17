@@ -225,7 +225,7 @@ function verificationSummary(records: readonly AgentExecutionRecord[], includePa
       modelRoute: routeForRecord(record),
     })),
     nextAction: status === 'not-evaluated'
-      ? 'Classic operation shows recorded execution outcomes without deciding which commands verify the task. Inspect the actual records and output.'
+      ? 'Without a decision model, this shows recorded execution outcomes without deciding which commands verify the task. Inspect the actual records and output.'
       : status === 'held'
       ? 'Verification evidence is held until its recorded meaning is settled.'
       : status === 'not_recorded'
@@ -298,7 +298,7 @@ function activityNextAction(status: ActivityCardStatus, verification: Record<str
     : 'Inspect the first failure record before retrying.';
   if (status === 'running') return 'Open the process monitor or live-tail route when available.';
   if (status === 'cancelled') return 'Inspect the cancelled record before deciding whether to retry.';
-  if (verification.status === 'not-evaluated') return 'Inspect the actual execution records and output; verification meaning was not evaluated during Classic operation.';
+  if (verification.status === 'not-evaluated') return 'Inspect the actual execution records and output; verification meaning was not evaluated without a decision model.';
   if (verification.status === 'not_recorded') return 'Run or inspect verification if the change needs proof.';
   return 'No recovery action is needed from this card.';
 }
@@ -466,7 +466,7 @@ async function matchingRecords(all: readonly AgentExecutionRecord[], query: stri
  * (`record.verification`), decided by code when a known tool's call was
  * recorded and read once for any other tool; a history view reads it and asks
  * nothing. A record whose reading has not settled is held; an unknown tool's
- * record made during Classic operation is not evaluated.
+ * record made without a decision model is not evaluated.
  */
 function verificationObservations(all: readonly AgentExecutionRecord[]): VerificationObservations {
   return new Map(all.map((record): [string, VerificationObservation] => [record.id,

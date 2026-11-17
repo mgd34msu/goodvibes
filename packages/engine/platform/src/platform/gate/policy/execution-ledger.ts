@@ -559,7 +559,7 @@ export class AgentExecutionLedger {
       tool: refusal && !this.toolFacts(event.tool) ? '[protected tool call]' : event.tool,
       routeKind: 'other', status: 'running', phase: event.type,
       receivedAt: timestamp, updatedAt: timestamp,
-      argsPreview: refusal ? '[redacted: protected input]' : startedClassic ? '[Classic: argument values withheld; semantic roles unassessed]' : '[judgment pending: values withheld]',
+      argsPreview: refusal ? '[redacted: protected input]' : startedClassic ? '[No decision model: argument values withheld; semantic roles unassessed]' : '[judgment pending: values withheld]',
       argsKeys: [],
       ...(refusal ? { routeKindError: refusal, argsReadingError: refusal } : {}),
     };
@@ -595,7 +595,7 @@ export class AgentExecutionLedger {
     }
     const markClassic = (partial: boolean): void => {
       record.operationProvenance = 'classic'; record.semanticAssessment = partial ? 'partial' : 'not-evaluated';
-      record.argsPreview = '[Classic: argument values withheld; semantic roles unassessed]';
+      record.argsPreview = '[No decision model: argument values withheld; semantic roles unassessed]';
       record.argsKeys = []; record.routeKind = 'other'; record.verification = undefined;
       record.commandPreview = undefined; record.targetPreview = undefined;
     };

@@ -60,7 +60,7 @@ export async function selectHarnessCatalog<T>(entries: readonly T[], query: stri
   const literal = rankClassicCatalog(rows, text, row => row);
   if (literal.length === 0) return null;
   // A sole row that shares only some query words is not decided in code: it
-  // goes to the complete-match rule, then to the one reading (or none in Classic).
+  // goes to the complete-match rule, then to the one reading (or none without a decision model).
   const complete = literal.filter(match => match.score === 1);
   if (complete.length === 1) return entries[complete[0]!.entry.index] ?? null;
   if (isClassicOperation()) return null;

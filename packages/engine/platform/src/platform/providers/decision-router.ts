@@ -236,7 +236,7 @@ export async function prepareDecisionRouterTurn(provider: LLMProvider, input: De
 export function describeDecisionRoute(route: DecisionRouterRouteInfo): string {
   return `Decision Router: ${route.category}${route.resolvedCategory !== route.category ? ' → General' : ''} → ${route.provider} / ${route.model}`
     + (route.effort ? ` · effort ${route.effort}` : '') + (route.fallback === 'uncertain' ? ' · General after an uncertain classification' : '')
-    + (route.fallback === 'classic' ? ' · Classic operation; no decision classification' : '')
+    + (route.fallback === 'classic' ? ' · no decision model in use; no decision classification' : '')
     + (route.effortNote ? ` · ${route.effortNote}` : '');
 }
 

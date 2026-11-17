@@ -62,7 +62,7 @@ function classicSummary(body: string, isHtml: boolean): string {
   const units = isHtml ? pageUnits(body) : body.split(/\n{2,}/).map(text => ({ text: text.trim(), headingLevel: undefined })).filter(unit => unit.text);
   const first = units.find(unit => unit.headingLevel === undefined)?.text ?? '';
   const headings = units.filter(unit => unit.headingLevel !== undefined).map(unit => `${'#'.repeat(unit.headingLevel!)} ${unit.text}`);
-  return ['[Classic page excerpt and outline; no semantic summary was generated.]', first,
+  return ['[Page excerpt and outline without a decision model; no semantic summary was generated.]', first,
     ...(headings.length ? [`Headings:\n${headings.join('\n')}`] : [])].filter(Boolean).join('\n\n');
 }
 

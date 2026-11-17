@@ -353,7 +353,7 @@ export async function buildPersonalOpsIntakeCandidates(
     return candidate ? [{ ...candidate,
       confidence: judgment ? judgment.reading.outcome === 'act' && judgment.reading.verdict === 'yes' ? 'high' as const : 'low' as const : 'not-evaluated' as const,
       why: judgment ? `Canonical engine.tools.registry-rank reading: ${judgment.reading.verdict}.`
-        : 'Classic literal search result. Choose an explicit action; no semantic assessment was taken.',
+        : 'Literal search result. Choose an explicit action; no semantic assessment was taken.',
       ...(judgment ? {} : { provenance: 'classic' as const }),
       judgment,
     }] : [];

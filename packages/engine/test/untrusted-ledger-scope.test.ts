@@ -14,7 +14,7 @@ import { grantOwnerApproval, type ApprovalSurface } from '../platform/src/platfo
 import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 
 let retirePolicy: () => void;
-beforeEach(() => { retirePolicy = configureDecisionModelPolicy(() => 'Classic - Off'); });
+beforeEach(() => { retirePolicy = configureDecisionModelPolicy(() => 'No Decision Model'); });
 afterEach(() => { retirePolicy(); });
 
 const page = (ledger: UntrustedContentLedger, name: string) => ledger.record({

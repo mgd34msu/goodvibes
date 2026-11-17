@@ -69,6 +69,7 @@ Every frame carries `schemaVersion` (currently `1`). Consumers should ignore fra
 | `native` | no | The intake state: `status`, `message`, `request`, `result`, `execution`; `nextStep` (`retry`, `resume`, `cancel` or `inspect`: run `--intake-<nextStep>`, with `inspect` meaning `--intake-status`) when an earlier input must be moved forward first; `notSent: true` when this run's own text was not sent because of that earlier input; `hostedTurn` (`state`, `sessionId`, and on `failed` a `failure` with `summary` and `retryable`) when the host runs the reply. |
 | `refusal` | no | Present when the run was refused before it started (`stopReason` `session-open-elsewhere`): `code`, `state`, `reason`, `next`. |
 | `recovery` | no | Present when the run restored its session from a crash snapshot: `sessionId`, `applied`, `refusal` (when not applied), `snapshotAt`, `snapshotKept`, `messages`, `turns`, `interruptedTurn` (`prompt` masked and cut at 1000 characters, `toolResults`, `interruptedToolCalls` as `{ callId, tool }`, `partialReply`), `lost`. |
+| `diagnostics` | no | Present when no decision model was in use: `decisionModel` with `inUse: false`, `policy`, `reason` (`not-set`, `selected` for No Decision Model, or `unavailable`), `line` (the sentence also printed on stderr) and, when the set model was failing, `failure` (`model`, `what`, `nextStep`). The exit code is what the work earned; a run that finished without the decision model still exits `0`. |
 
 ### Stream frames
 

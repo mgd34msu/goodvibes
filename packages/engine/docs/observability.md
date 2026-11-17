@@ -323,7 +323,7 @@ The `ForensicsClassifier` maps event context to a `FailureClass` using priority-
 | `turn_timeout` | The error message is read as a timeout |
 | `unknown` | No pattern matched, or the error message could not be read |
 
-The rungs are taken in this order, and the stop reason is checked before the error message is read. The error message is not matched against words. The failure reading (a Jev decision) assigns it a category, and only that category maps to a class. In Classic operation, when the reading is unsure, or when it cannot be had at all (the decision model is unreachable), the category is `unknown`; the report is still published with everything else it collected. A permission denial is the gate's `TOOL_PERMISSIONED` event with `approved: false`. Error text is stored with credential-shaped spans masked.
+The rungs are taken in this order, and the stop reason is checked before the error message is read. The error message is not matched against words. The failure reading (a Jev decision) assigns it a category, and only that category maps to a class. Without a decision model, when the reading is unsure, or when it cannot be had at all (the decision model is unreachable), the category is `unknown`; the report is still published with everything else it collected. A permission denial is the gate's `TOOL_PERMISSIONED` event with `approved: false`. Error text is stored with credential-shaped spans masked.
 
 ### FailureReport structure
 
@@ -343,7 +343,7 @@ interface FailureReport {
   phaseTimings: PhaseTimingEntry[];  // turn: PREFLIGHT, MODEL_REQUEST, STREAM, AFTER_STREAM, TOOLS, AFTER_TOOLS; task: CREATED, RUNNING
   slowPhases: string[];              // phases over the phase table's limit for their kind
   slowPhaseAssessment?: 'table' | 'not-needed'; // 'not-needed' for a cancellation or when no phase was timed
-  operationProvenance?: 'classic';   // present on reports produced in Classic operation
+  operationProvenance?: 'classic';   // present on reports produced without a decision model
   phaseLedger: PhaseLedgerEntry[];   // explicit phase transition log
   causalChain: CausalChainEntry[];   // root cause first
   cascadeEvents: CausalChainEntry[];

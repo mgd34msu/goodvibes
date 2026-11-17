@@ -58,7 +58,7 @@ function toGatewayVerbError(error: unknown): never {
   if (error instanceof RefusalError && error.refusal.code === 'IDEMPOTENCY_KEY_REUSED') {
     throw new GatewayVerbError(formatRefusal(error.refusal), error.refusal.code, error.refusal.status ?? 409, 'idempotencyKey');
   }
-  // Decision models are off (Classic): a setting the owner chose, not a daemon fault.
+  // Decision models are off (no decision model): a setting the owner chose, not a daemon fault.
   if (error instanceof DecisionModelsDisabledError) {
     throw new GatewayVerbError(`${error.message} Turn decision models on (judgment.policy) to plan and judge contracts, or delegate with an agent outside a contract.`, 'DECISION_MODELS_DISABLED', 409);
   }

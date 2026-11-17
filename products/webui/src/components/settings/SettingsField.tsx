@@ -315,7 +315,8 @@ export function SettingsField({ field, onCommit, onCommitMany, onReset, persiste
           placement="bottom-end"
           options={[
             ...(field.enumValues.includes(value) ? [] : [{ value, label: value || "(unset)" }]),
-            ...field.enumValues.map((opt) => ({ value: opt, label: opt })),
+            // The default decision policy reads "Hybrid (default)"; only the bare value is stored.
+            ...field.enumValues.map((opt) => ({ value: opt, label: field.key === "judgment.policy" && opt === "Hybrid" ? "Hybrid (default)" : opt })),
           ]}
           onChange={(next) => void commit(next)}
         />

@@ -72,7 +72,7 @@ export function createKnowledgePageSourceReader(policy: KnowledgePageSourceQuali
   async function read(source: KnowledgeSourceRecord, existing?: KnowledgeSourceRecord, status = source.status): Promise<KnowledgePageSourceReading> {
     throwIfAborted();
     if (excluded(source, status, existing)) return { source, useful: false, authority: 'unverified' };
-    requireDecisionFeature('semantic knowledge source quality and authority; use native source inspection or local search in Classic');
+    requireDecisionFeature('semantic knowledge source quality and authority; use native source inspection or local search without a decision model');
     const version = JSON.stringify(source);
     const earlier = sourceVersions.get(source.id);
     if (earlier !== undefined && earlier !== version) throw new KnowledgeSourceQualityHeldError('stale');

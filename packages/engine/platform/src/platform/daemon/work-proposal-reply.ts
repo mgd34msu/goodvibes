@@ -123,7 +123,7 @@ async function resolveOwnedProposalReply(input: ChannelIngressPolicyInput, deps:
   assertSynchronousCurrent(proposalCurrent);
   const reply = { decision: answer === 'reject' ? 'negative' : 'affirmative',
     ...(answer === 'steer' ? { note: text } : {}) };
-  if (reply.decision === 'affirmative') requireDecisionFeature('accepting an autonomous work proposal; continue through an ordinary Classic conversation instead');
+  if (reply.decision === 'affirmative') requireDecisionFeature('accepting an autonomous work proposal; continue through an ordinary conversation instead');
 
   const resolved = store.resolve(target.id, reply.decision === 'affirmative' ? 'accepted' : 'declined');
   if (!resolved) {

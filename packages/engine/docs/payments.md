@@ -897,7 +897,7 @@ pending. When processing starts after expiry, its entire one-second provider
 timestamp bucket must fit before the deadline. Missing time or an overlapping
 bucket fails the wait rather than counting as silence. Original local arrival
 before expiry stays on time across account or storage awaits. Decision-model
-exhaustion remains a decision-model failure. Switching to Classic does not turn
+exhaustion remains a decision-model failure. Switching to Without a decision model, this does not turn
 an uninterpreted owner reply into silence: potential replies remain archived,
 ordinary chat stays available, and the semantic purchase wait fails.
 
@@ -1316,7 +1316,7 @@ leave the purchase unchanged: its unresolved money remains held.
 `payments.purchase.reconcile` records that explicit finding against the original
 `purchaseId` and `operationId`. It requires a current paired administrative
 connection with `write:payments`, an explicit owner request, `confirm: true`,
-and `inspectedMerchantHistory: true`. Classic policy can reconcile existing
+and `inspectedMerchantHistory: true`. With no decision model in use, reconciliation can settle existing
 funds. No model interprets the finding, no browser is resumed, and no new order
 is submitted. The original executor must have actually drained and released its
 execution lease before reconciliation can begin.
@@ -1390,7 +1390,7 @@ distinct provider events and retain their edit time. A new window keeps earlier
 window replies separate. Receiving stops if a matching reply cannot be saved.
 The channel acknowledgement reports storage, without claiming an interpreted
 answer. This also works while a checkout is waiting for native restoration and
-while the selected policy is Classic.
+while no decision model is in use.
 
 Recovery can honor a saved objection after restoring the original native
 authority and verifying its reply account. A saved positive answer or a list
@@ -1688,12 +1688,12 @@ second; treating an unjudgeable domain as established costs a silent purchase
 from a storefront nobody vouched for. A model outage must never make spending
 more automatic.
 
-When decision models are off (Classic operation) the judge does not guess: it
+When decision models are off (operation without a decision model) the judge does not guess: it
 answers not confident, with the recourse "not judged, because decision models
 are off", so the merchant is treated as not major and the owner is asked, unless
 the owner has listed the domain themselves in `payments.majorRetailersAdditional`.
 (Automated checkout itself still needs decision models for the cart reading, so
-today a Classic daemon refuses the checkout before the merchant is judged.)
+today a daemon with no decision model in use refuses the checkout before the merchant is judged.)
 
 The judge returns a `recourse` phrase that comes from a fixed table keyed by the
 recourse reading's closed answer set (an established retailer with a returns
@@ -1800,8 +1800,8 @@ A registrable-domain mismatch refuses locally before any decision-model call.
 Matching the domain does not establish that it is neither a lookalike nor a
 shortening service, especially when the merchant was discovered in page content;
 decision mode reads those meanings once, when the checkout url admits the
-merchant domain; the card fill compares domains in code and asks nothing. Classic
-link validation provides the deterministic URL and domain checks with Classic provenance, without semantic
+merchant domain; the card fill compares domains in code and asks nothing. Without a decision model,
+link validation provides the deterministic URL and domain checks, marked as not semantically checked, without semantic
 lookalike or shortener assurance. Merchant and checkout interpretation separately
 require decision models, as described in the [decision-model policy](../../../docs/decision-model-policy.md).
 
@@ -1999,7 +1999,7 @@ purchase, or about two, sends nothing: the general inbound path still records
 it. Messages are read one at a time, and a poll that offers a message again
 does not produce a second report. A failure to read or send is logged without
 the mail text and never fails the mailbox poll. With no purchases recorded the
-mail is not read at all, and with Classic operation selected nothing is
+mail is not read at all, and with operation without a decision model selected nothing is
 correlated.
 
 A mail tied to a purchase recorded as `submitted-unverified` settles it: the
@@ -2026,7 +2026,7 @@ shipping notice the next day correlates when the reading says it is about the
 purchase, and a promotion from the same shop does not. An order number or
 tracking reference whose reading does not settle is left out of the report;
 the report still goes out. A body longer than one reading takes is matched on
-its first 160,000 characters and reported without identifiers. The reading needs decision models; with Classic operation selected
+its first 160,000 characters and reported without identifiers. The reading needs decision models; with operation without a decision model selected
 `correlatePurchaseMail` refuses with a decision-features-disabled error and
 nothing is correlated.
 

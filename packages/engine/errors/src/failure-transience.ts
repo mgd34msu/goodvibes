@@ -239,7 +239,7 @@ function failureWording(error: unknown, describe: (error: unknown) => string): F
  */
 export function transienceFromReading(failure: FailureConclusions): FailureTransience {
   const basis = failure.source === 'classic' ? 'classic' : 'reading';
-  const categoryDetail = failure.source === 'classic' ? `structured Classic category ${failure.category}` : `read as ${failure.category}`;
+  const categoryDetail = failure.source === 'classic' ? `structured category ${failure.category}` : `read as ${failure.category}`;
   if (failure.billing) return { failureClass: 'terminal', basis, detail: 'the account cannot pay for the request' };
   if (failure.transientNetwork) return { failureClass: 'retryable', basis, detail: 'a transient network fault' };
   if (PERMANENT_CATEGORIES.has(failure.category)) return { failureClass: 'terminal', basis, detail: categoryDetail };

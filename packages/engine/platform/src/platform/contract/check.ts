@@ -299,7 +299,7 @@ function nudgedCriteria(findings: Findings, kinds: readonly NudgeKind[]): string
  * `judgment-unavailable`; there is no other path.
  */
 export async function runUnitCheck(input: UnitCheckInput): Promise<UnitCheckOutcome> {
-  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
+  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
   const { unit, settings } = input;
   // Gate results were identified when they ran; they are compared once, after the readings returned.
   let evidence = input.evidence;
@@ -586,7 +586,7 @@ export async function readUnmetSeverities(input: {
   /** Caller-owned accounting remains available even when this batch throws. */
   readonly usage?: JudgmentUsage | undefined;
 }): Promise<{ readonly severities: ReadonlyMap<string, SeverityReading>; readonly usage: JudgmentUsage }> {
-  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
+  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
   const signal = input.signal;
   signal?.throwIfAborted();
   const usage = input.usage ?? emptyJudgmentUsage();

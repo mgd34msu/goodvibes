@@ -790,7 +790,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
 
 /** Fails an invalid correction step; temporary reading failures recover at their exact call sites. */
 export async function guarded(run: ContractRun, what: string, step: () => Promise<void>): Promise<void> {
-  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
+  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
   try {
     await step();
   } catch (error) {

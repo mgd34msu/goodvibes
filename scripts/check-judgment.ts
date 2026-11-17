@@ -16,7 +16,7 @@ try {
     questions: { connected: { type: 'noul', instructions: 'Does the state describe an installation checking its connection?' } },
     signal: AbortSignal.timeout(30_000) });
   console.log('Decision-model connection verified.');
-  }, () => { console.log('Classic operation selected; no decision-model connection is required or certified.'); }));
+  }, () => { console.log('No decision model selected; no decision-model connection is required or certified.'); }));
 } catch (error) {
   // The installed engine and source script may load separate copies of the
   // judgment module, so use its public status field rather than class identity.

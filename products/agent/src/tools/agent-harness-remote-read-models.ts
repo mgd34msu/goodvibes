@@ -178,7 +178,7 @@ function remoteCertification(input: {
     firstAcross(records, ['sourceTool']) ? `sourceTool ${firstAcross(records, ['sourceTool'])}` : '',
   ].map((entry) => safePreview(entry, 180)).filter(Boolean))].slice(0, 8);
   const missingSignals = [
-    ...(schemaStatus === 'unassessed' ? [`${input.recordKind} schema was not interpreted during Classic operation; certification is unassessed.`]
+    ...(schemaStatus === 'unassessed' ? [`${input.recordKind} schema was not interpreted without a decision model; certification is unassessed.`]
       : schemaStatus === 'certified' ? [] : [`Certified ${input.recordKind} schema is not published.`]),
     ...(input.durableId ? [] : [`Durable ${input.recordKind} id is not published.`]),
     ...(input.runnerId ? [] : [`${input.recordKind} runner id is not published.`]),
@@ -672,7 +672,7 @@ function assertPublisherEntryCurrent(owner: NativePublisherCapture, assertCurren
 }
 
 /** Publisher prose is read only after complete native path/text projection.
- * Classic retains native records with explicitly unassessed meanings. Failed or
+ * Without a decision model, this retains native records with explicitly unassessed meanings. Failed or
  * uncertain readings still retire the capture; no wording heuristic certifies it. */
 export async function settleNativeRemotePublisherSemantics(token: object, options: CatalogRankingOptions & {
   readonly assertCurrent: () => void; readonly assertSourceCurrent: () => void;

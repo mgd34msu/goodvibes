@@ -222,7 +222,7 @@ export interface FailureReadOptions extends Pick<CallOptions, 'signal' | 'before
 }
 
 export interface FailureConclusions {
-  /** Classic uses only structured protocol facts, with no invented semantic readings. */
+  /** Without a decision model, this uses only structured protocol facts, with no invented semantic readings. */
   readonly source?: 'classic';
   /** The category the wording supports; 'unknown' unless the reading is strong enough to act on. */
   readonly category: FailureCategory;

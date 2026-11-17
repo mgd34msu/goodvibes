@@ -32,7 +32,7 @@ describe('first turn', () => {
     host = await startE2ENativeHost(home);
     // The proof is about the program's own path to the model, not a decision model's judgment: Jev is switched off.
     new TuiConfigManager({ configDir: join(home.home, '.goodvibes/tui'), homeDir: home.home, workingDir: home.workspace, surfaceRoot: 'tui' })
-      .set('judgment.policy', 'Classic - Off', { daemonNotRunning: true });
+      .set('judgment.policy', 'No Decision Model', { daemonNotRunning: true });
   });
 
   test('the binary starts in a real terminal with nothing on stderr', async () => {

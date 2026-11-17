@@ -7,7 +7,7 @@
  * ToolRegistry.executePrepared.
  *
  * Only the model is scripted (its responses), and the decision model is off
- * (`Classic - Off`), so the gate decides by code and remembered rules. The
+ * (`No Decision Model`), so the gate decides by code and remembered rules. The
  * owner is a recorder that refuses, so an ask shows up as a refusal.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
@@ -39,7 +39,7 @@ let retirePolicy: () => void;
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'gv-tool-call-e2e-'));
-  retirePolicy = configureDecisionModelPolicy(() => 'Classic - Off');
+  retirePolicy = configureDecisionModelPolicy(() => 'No Decision Model');
 });
 afterEach(async () => {
   await disposables.flush();

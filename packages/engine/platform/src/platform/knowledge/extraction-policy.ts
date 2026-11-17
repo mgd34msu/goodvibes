@@ -135,7 +135,7 @@ export async function readKnowledgeExtractionTextUsability(value: string | undef
     return reading.verdict === 'yes';
   }, () => {
     owner.assertCurrent();
-    // Classic retains nonempty parser output. This is text presence, not a
+    // Without a decision model, this retains nonempty parser output. This is text presence, not a
     // semantic readability certificate; extraction metadata records that limit.
     return Boolean(value.trim());
   }), signal);

@@ -221,9 +221,9 @@ key with a built-in default:
 | `permissions.tools.mcp` | `prompt` | MCP (external server) tool calls |
 | `permissions.tools.delegate` | `prompt` | unknown or unregistered tools (see below) |
 
-In Classic operation the default posture therefore allows read/find/analyze/inspect/state/registry
+In operation without a decision model the default posture therefore allows read/find/analyze/inspect/state/registry
 and prompts for write/edit/exec/fetch/agent/workflow/delegate/MCP. These per-tool defaults are
-read only in Classic operation; in the other operations the stakes reading decides whether a
+read only without a decision model; in the other operations the stakes reading decides whether a
 call asks, and `fetch` is treated as a read-category tool.
 For the broader security posture and how these keys interact with secrets, see
 [Security](./security.md) and [Secrets](./secrets.md).

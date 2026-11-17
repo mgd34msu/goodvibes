@@ -270,7 +270,7 @@ const scopeReadingPasses = new WeakMap<KnowledgeStore, { again: boolean }>();
  * Reads the ordinary-view eligibility of default-space records that have no
  * current reading, a bounded batch per pass, and stores each verdict with the
  * content version it was read from. Runs after the view was answered; nothing
- * waits on it. With no decision model (or Classic - Off) nothing is read and the
+ * waits on it. With no decision model (or No Decision Model) nothing is read and the
  * records stay shown.
  */
 function queueScopeReadings(store: KnowledgeStore): void {

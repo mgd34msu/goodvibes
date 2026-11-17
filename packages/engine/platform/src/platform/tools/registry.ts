@@ -816,7 +816,7 @@ export class ToolRegistry {
 
   private repairPort(record: CapturedProjection, ids: string[], inner?: JudgmentPort): JudgmentPort {
     // Native repairs do not borrow a supplied transport's metadata or recorder.
-    // A handle created in Classic cannot become a semantic capability after its scope ends.
+    // A handle created without a decision model cannot become a semantic capability after its scope ends.
     if (isClassicOperation()) {
       const disabled = (): never => { throw new DecisionModelsDisabledError('semantic tool argument repair; supply exact schema parameters'); };
       return { get model() { return disabled(); }, ask: disabled };

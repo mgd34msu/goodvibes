@@ -714,7 +714,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     const escalation = run.contract.escalations.find((candidate) => candidate.id === escalationId);
     // A failure pause is answered by code, not read, so it needs no decision model.
     if (escalation?.failurePause !== true) {
-      requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
+      requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
       if (run.contract.nativeSource !== undefined) throw new OwnerReplyRefusedError('Native contracts do not read owner approval replies', 'unsupported');
     }
     if (escalation === undefined || escalation.resolvedAt !== undefined) throw new OwnerReplyRefusedError(`contract ${run.id} has no open escalation ${escalationId}`, 'not-open');
@@ -871,7 +871,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
   }
 
   async function operatorPick(run: ContractRun, unitId: string, attemptId: string): Promise<void> {
-    requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
+    requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
     if (run.contract.nativeSource !== undefined) throw new Error('Native attempts require a fresh Jev decision');
     // The pick answers the question at once. A reply to it still being read
     // finds the question answered when its reading returns and applies nothing.

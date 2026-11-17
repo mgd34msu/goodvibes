@@ -335,7 +335,7 @@ export async function runBreaking(
 ): Promise<Record<string, unknown>> {
   return decisionOrClassic(() => runDecisionBreaking(input, projectRoot), async () => ({
     ...await runDiff(input, projectRoot), provenance: 'classic', assessment: 'unassessed',
-    message: 'Classic exposes the actual diff. Semantic compatibility assessment requires a decision model.',
+    message: 'Without a decision model, this exposes the actual diff. Semantic compatibility assessment requires a decision model.',
   }));
 }
 async function runDecisionBreaking(input: AnalyzeInput, projectRoot: string): Promise<Record<string, unknown>> {
@@ -414,7 +414,7 @@ export async function runSemanticDiff(
 ): Promise<Record<string, unknown>> {
   return decisionOrClassic(() => runDecisionSemanticDiff(input, projectRoot, toolLLM, signal), async () => ({
     ...await runDiff(input, projectRoot), provenance: 'classic', risk: 'unassessed', summary_source: 'classic',
-    message: 'Classic exposes the actual diff. Semantic behavior and risk assessment require a decision model.',
+    message: 'Without a decision model, this exposes the actual diff. Semantic behavior and risk assessment require a decision model.',
   }));
 }
 async function runDecisionSemanticDiff(input: AnalyzeInput, projectRoot: string, toolLLM: Pick<ToolLLM, 'chat'>, signal: AbortSignal | undefined): Promise<Record<string, unknown>> {

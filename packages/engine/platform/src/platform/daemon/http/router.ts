@@ -385,14 +385,14 @@ export class DaemonHttpRouter {
         // An error leaves as the route wrote it: its code is the fact a client reads, so nothing is attached for a model to read.
         const response = asset ?? await this.requests.route(req).catch((error: unknown) => {
           if (error instanceof DecisionModelPolicyChangedError) throw error;
-          // Decision models are off (Classic) and this feature needs one: the owner's setting, not a daemon fault.
+          // Decision models are off (no decision model) and this feature needs one: the owner's setting, not a daemon fault.
           if (error instanceof DecisionModelsDisabledError) {
             return jsonErrorResponse({
               error: error.message,
               code: 'DECISION_MODELS_DISABLED',
               category: 'bad_request',
-              state: 'decision models are off (judgment.policy Classic - Off)',
-              next: ['Turn decision models on (judgment.policy Default - On or Preferred) to use this, or use the Classic alternative the message names'],
+              state: 'no decision model is in use (none is set, or judgment.policy is No Decision Model)',
+              next: ['Set a decision model (judgment.model, judgment.endpoint or TYPESAFE_API_KEY) with judgment.policy Hybrid or Decision Model Only to use this, or use the alternative the message names'],
             }, { status: 409 });
           }
           // A route that throws must still answer: a bare rejection reaches the

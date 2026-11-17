@@ -707,7 +707,7 @@ export async function runMemoryConsolidation(input: MemoryConsolidationInput): P
       runId: `mcon-${input.now.toString(36)}-${suffix}`, ranAt: new Date(input.now).toISOString(),
       trigger: input.trigger, idle: input.idle, provenance: 'classic' as const, disposition: 'skipped' as const,
       scanned: 0, merged: [], archived: [], decayed: [], proposed: [], usageSignalAvailable: input.usageLookup !== undefined,
-      note: 'Classic skipped semantic memory consolidation. No memories were merged, archived or decayed. Review and update individual memories explicitly.',
+      note: 'Without a decision model, this skipped semantic memory consolidation. No memories were merged, archived or decayed. Review and update individual memories explicitly.',
     };
   });
 }

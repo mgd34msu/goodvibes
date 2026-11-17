@@ -38,7 +38,7 @@ export async function searchKnowledge(context: KnowledgePacketContext, query: st
   selection.assertCurrent();
   const results = selection.accepted.slice(0, Math.max(1, limit)).map((entry): KnowledgeSearchResult => ({
     kind: entry.kind, id: entry.id, score: entry.localScore ?? 0,
-    reason: entry.provenance === 'classic' ? 'Classic literal token overlap; semantic relevance was not assessed' : RELEVANCE_REASON,
+    reason: entry.provenance === 'classic' ? 'Literal token overlap; semantic relevance was not assessed' : RELEVANCE_REASON,
     ...(entry.provenance ? { provenance: entry.provenance, scoreSource: 'literal-overlap' as const } : {}),
     ...(entry.source ? { source: entry.source } : {}), ...(entry.node ? { node: entry.node } : {}),
   }));
@@ -126,7 +126,7 @@ async function preparePacket(context: KnowledgePacketContext, task: string, writ
       title: row.source ? row.source.title ?? row.source.canonicalUri ?? row.source.sourceUri ?? row.source.id : row.node!.title,
       ...(summary !== undefined ? { summary } : {}),
       ...(row.source ? { uri: row.source.canonicalUri ?? row.source.sourceUri } : {}),
-      reason: selection.provenance === 'classic' ? 'Classic local retrieval; fields are quoted without semantic excerpt verification' : RELEVANCE_REASON,
+      reason: selection.provenance === 'classic' ? 'Local retrieval; fields are quoted without semantic excerpt verification' : RELEVANCE_REASON,
       score: row.localScore ?? 0, estimatedTokens: 0, related, evidence,
       ...(selection.provenance ? { provenance: selection.provenance } : {}),
       metadata: row.source ? { sourceType: row.source.sourceType, status: row.source.status,
@@ -146,7 +146,7 @@ async function preparePacket(context: KnowledgePacketContext, task: string, writ
   }
   const totalCandidates = candidates.length, droppedCount = totalCandidates - items.length;
   const packet: KnowledgePacket = freezeSupport({ task, writeScope: [...captured.request.writeScope], generatedAt: Date.now(),
-    detail, strategy: selection.provenance === 'classic' ? 'Classic local retrieval with complete quoted fields' : 'semantic-ranked exact-span packet', budgetLimit, estimatedTokens, items,
+    detail, strategy: selection.provenance === 'classic' ? 'Local retrieval with complete quoted fields' : 'semantic-ranked exact-span packet', budgetLimit, estimatedTokens, items,
     totalCandidates, droppedCount, truncated: droppedCount > 0, droppedForBudget, budgetExhausted: droppedForBudget > 0,
     candidates: selection.candidates });
   assertCurrent();

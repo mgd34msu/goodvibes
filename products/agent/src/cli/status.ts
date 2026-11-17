@@ -127,6 +127,14 @@ export interface CliStatusSnapshot {
     readonly scope: string;
     readonly updatedAt: number | null;
   };
+  /** Whether a decision model is in use, from the settings: the policy as shown and the standing line. */
+  readonly decisionModel: {
+    readonly policy: string;
+    readonly policyLabel: string;
+    readonly set: boolean;
+    readonly inUse: boolean;
+    readonly line: string;
+  };
   readonly checkpoints: {
     readonly automaticCheckpointsActive: boolean;
     readonly workspaceRegistered: boolean;
@@ -394,6 +402,7 @@ export function buildCliStatusSnapshot(options: CliStatusOptions): CliStatusSnap
     },
     runtimeEndpoints: common.endpoints,
     onboarding: common.onboarding,
+    decisionModel: common.decisionModel,
     checkpoints: options.checkpoints
       ? {
           automaticCheckpointsActive: checkpointsStatusLine(options.checkpoints).active,
@@ -423,6 +432,10 @@ export function renderCliStatus(options: CliStatusOptions, snapshot: CliStatusSn
     `  provider ${getProviderIdFromModel(config.get('provider.model'))}`,
     `  model ${String(config.get('provider.model'))}`,
     `  reasoning ${String(config.get('provider.reasoningEffort'))}`,
+    '',
+    'Decision model',
+    `  policy: ${snapshot.decisionModel.policyLabel} (judgment.policy)`,
+    `  ${snapshot.decisionModel.line}`,
     '',
     'Auth',
     `  permissions: ${snapshot.auth.permissionLabel} (${String(config.get('permissions.mode'))})`,

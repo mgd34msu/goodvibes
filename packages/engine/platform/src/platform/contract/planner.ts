@@ -412,7 +412,7 @@ function isAbort(error: unknown, signal: AbortSignal | undefined): boolean {
  * original request. Shaping does not ask the owner to authorize planning.
  */
 export async function shapeContract(contract: Contract, deps: ContractPlannerDeps, options: { readonly signal?: AbortSignal | undefined } = {}): Promise<ShapeOutcome> {
-  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
+  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
   const context = new PlanningContext(contract, deps);
   context.move('shaping');
   let read: Awaited<ReturnType<typeof readRequestShape>>;
@@ -568,7 +568,7 @@ async function checkPlanOwned(context: PlanningContext, output: string, repair: 
  * cannot produce a readable plan.
  */
 export async function planContract(contract: Contract, deps: ContractPlannerDeps, input: PlanContractInput = {}): Promise<PlanningOutcome> {
-  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
+  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
   assertNativeContractSource(contract);
   if (contract.shape === undefined) throw new Error(`contract ${contract.id} has no request shape; shape it before planning`);
   const context = new PlanningContext(contract, deps);
@@ -836,7 +836,7 @@ export async function acceptEscalatedPlan(
   deps: ContractPlannerDeps,
   options: { readonly signal?: AbortSignal | undefined } = {},
 ): Promise<EscalatedPlanOutcome> {
-  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
+  requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
   if (contract.nativeSource !== undefined) return { kind: 'unrunnable', problems: [{ code: 'native-source-changed', message: 'Native plans require a fresh semantic decision; owner approval is unavailable.' }] };
   if (escalation.reason !== 'plan-unresolved') throw new Error(`escalation ${escalation.id} is not about the plan`);
   if (contract.shape === undefined) throw new Error(`contract ${contract.id} has no request shape`);

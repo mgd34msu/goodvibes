@@ -5,7 +5,7 @@
  * The pieces are the real ones: the supervisor and IMAP watcher, the cursor
  * and record stores, the notice intake, the inbox owner and its SQLite mirror.
  * Only the mail server, the clock and the notice route are stand-ins, and
- * screening runs in its local (Classic) mode so no model is involved.
+ * screening runs in its local (no decision model) mode so no model is involved.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -48,7 +48,7 @@ const cleanups: Array<() => void | Promise<void>> = [];
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'gv-one-reader-'));
   previousPort = installJudgmentPort(imapFixturePort().port);
-  retirePolicy = configureDecisionModelPolicy(() => 'Classic - Off');
+  retirePolicy = configureDecisionModelPolicy(() => 'No Decision Model');
 });
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();

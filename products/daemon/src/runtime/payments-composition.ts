@@ -98,7 +98,7 @@ const REPORTED_MAIL_MEMORY = 512;
  * purchase recorded as unverified moves it, and its operation, to purchased, and that report
  * says so. Messages are handled one at a time, each with one reading of
  * which recent purchase it is about. Nothing here can fail the mailbox poll: a
- * refusal (Classic operation has no decision models) or a send failure is logged,
+ * refusal (operation without a decision model has no decision models) or a send failure is logged,
  * and the message is forgotten so the mailbox offering it again tries again.
  */
 export function createOrderMailObserver(deps: {

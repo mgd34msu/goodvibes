@@ -71,7 +71,7 @@ export function readIntelligenceSnapshot(readiness: CodeIntelligenceReadiness = 
  * Where the recommendations stand: `idle` until something asks for them,
  * `pending` while Jev ranks them, `ready` with the ranked list (which may be
  * empty), `failed` when the ranking could not be read (startupIssues says
- * why), `off` in Classic mode, where nothing is ranked.
+ * why), `off` without a decision model mode, where nothing is ranked.
  */
 export type UiMarketplaceRanking = 'idle' | 'pending' | 'ready' | 'failed' | 'off';
 
@@ -185,7 +185,7 @@ function createMarketplaceReadModel(runtimeServices: RuntimeServices): UiMarketp
       startupIssues.push(`${staleSchemas.length} MCP server schema${staleSchemas.length === 1 ? ' is' : 's are'} stale or quarantined.`);
     }
     if (isClassicOperation()) {
-      startupIssues.push('Classic mode: semantic marketplace recommendations are not evaluated. Browse the catalog and choose entries explicitly.');
+      startupIssues.push('No decision model: semantic marketplace recommendations are not evaluated. Browse the catalog and choose entries explicitly.');
       return { startupIssues, recommendations: [], ranking: 'off' };
     }
     if (ranking === 'failed' && failureMessage) {

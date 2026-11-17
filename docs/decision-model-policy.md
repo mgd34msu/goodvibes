@@ -2,8 +2,11 @@
 
 The `judgment.policy` setting controls decision-model use independently of tool
 permissions. In TUI or Agent, open `/settings`, choose **Judgment**, then
-**Decision models**. Choose **Default - On**, **Preferred**, or **Classic - Off**
-from the picker. WebUI exposes the same policy in its Judgment settings.
+**Decision models**, and choose **Hybrid (default)**, **Decision Model Only** or
+**No Decision Model** from the picker. WebUI shows the same choices in its
+Judgment settings, and `goodvibes-daemon config set judgment.policy <value>`
+sets the daemon's own copy. The stored values are `Hybrid`, `Decision Model Only`
+and `No Decision Model`; "(default)" is only how the default is shown.
 
 Choose **Decision provider** and **Decision model** in that category to configure
 Jev, Clef, Clef-flash, DiffusionGemma Jev, Kev-9B, Laya, or a compatible custom
@@ -18,51 +21,61 @@ WebUI provides editable fallback rows and an Advanced JSON view.
 **Decision deadline (ms)** (`judgment.decisionDeadlineMs`, default 1500) bounds
 a decision that you or a tool call wait on. When no answer arrives in time, that
 decision takes its stated fallback, such as asking you; a target that misses the
-deadline three times in a row is skipped for a minute. A decision with a fallback
-also takes it when decision models are off or unavailable, without a request.
-The sandbox's reading of what host access a command needs works this way: with no
-answer the command counts as unassessed and the sandbox asks you.
+deadline three times in a row is skipped for a minute. A target whose address
+refuses the connection is not asked a second time for the same decision.
 
 Execution permissions are in **Permissions → Execution permissions**, including
 **YOLO**. Choose the decision policy and execution permissions independently.
-The daemon configuration command also exposes these settings.
 
 | Policy | Behavior |
 | --- | --- |
-| Default - On | Use the configured hosted/local decision chain; halt if no decision model is available. |
-| Preferred | Use decision models; continue in Classic after actual availability exhaustion. |
-| Classic - Off | Use Classic from startup, making zero decision-model requests. |
+| Hybrid (default) | Use the set decision model. When it fails (unreachable, too slow, a refused or missing key, a malformed answer), the operation continues without it and you are told once, naming the model, what failed and the next step; you are told again when it answers. |
+| Decision Model Only | Use the set decision model. When it fails, work that needs it stops and reports the model, what failed and the next step. |
+| No Decision Model | Make no decision-model requests. |
 
-Classic supports conversation, tools, editing, command and test execution, final
-responses and saved-session recovery. Ordinary conversation models are still
-required. The Decision Router uses its General target without categorization.
+**With no decision model set** (no `judgment.endpoint`, `judgment.model`,
+`judgment.fallbacks`, credential choice or `TYPESAFE_API_KEY`), every policy
+works without one: nothing is asked, nothing waits and nothing reports an error.
 
-Tool permissions remain separate. `safe-jev` asks the owner during Classic;
-explicit YOLO keeps its meaning. Authentication, workspace boundaries, secret
-handling, spending limits, cancellation and duplicate-execution protection stay
-in force. Results identify Classic operation rather than claiming model verification.
+**You can always tell when no decision model is in use.** The conversation says
+so once (none set, or No Decision Model chosen), says once when a set model
+starts failing and once when it answers again, and never repeats a failure every
+turn. `goodvibes status` and `goodvibes-agent status` show the policy and a
+"Decision model" line; a headless run prints the line on stderr and adds
+`diagnostics.decisionModel` to its JSON result without changing the exit code;
+WebUI shows it in a bar under the header.
+
+Without a decision model, conversation, tools, editing, command and test
+execution, final responses and saved-session recovery work as usual; ordinary
+conversation models are still required. The Decision Router uses its General
+target without categorization. Tool permissions remain separate: `jev-decides`
+asks you instead, and YOLO keeps its meaning. Authentication, workspace
+boundaries, secret handling, spending limits, cancellation and
+duplicate-execution protection stay in force, and results say no decision
+model checked them rather than claiming model verification.
 
 Link validation in every policy requires HTTPS, no embedded user credentials,
 a named host on the standard HTTPS port, and a matching authorized registrable
 domain. Redirect following applies these checks at every hop. Domain mismatches
-refuse locally without a decision-model request. Decision mode also checks
-matching hosts for lookalikes and shortening services. Classic marks accepted
-links as Classic and does not provide those semantic checks; internationalized
+refuse locally without a decision-model request. With a decision model, matching
+hosts are also checked for lookalikes and shortening services; without one,
+accepted links are marked as not checked for those, and internationalized
 domain names are not refused solely because they use punycode.
 
-Preferred preserves conversation history and completed work without replaying
-actions. A refusal, malformed response, privacy rejection, cancellation or stale
-authority does not trigger fallback. An action already refused stays refused.
+Hybrid keeps conversation history and completed work without replaying actions.
+An answer the model gave (including an abstention or a privacy rejection), a
+cancellation or stale authority does not trigger the fallback. An action already
+refused stays refused.
 
 Local knowledge ingestion/search, explicit review and links, structural planning,
-diagnostics, credential masking, speech and catalog browsing remain available.
-Autonomous contract execution, independent semantic knowledge verification,
-merchant/checkout interpretation and semantic recommendations or grading need
-decision models and report that limitation in Classic.
+diagnostics, credential masking, speech and catalog browsing work without a
+decision model. Autonomous contract execution, independent semantic knowledge
+verification, merchant/checkout interpretation and semantic recommendations or
+grading need a decision model and say so when none is in use.
 
-Installation does not require a live decision-model connection. Configure
-provider accounts in the application. Existing installations retain Default - On
-unless the owner changes it.
+Installation does not require a decision-model connection. A settings file that
+holds a value this version does not know is reported by name with the three
+valid values, and the product runs on Hybrid.
 
 ## Decision Router
 

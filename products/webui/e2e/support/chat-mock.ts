@@ -97,12 +97,12 @@ export interface ChatMockOptions {
   replyCode?: string;
 }
 
-function chatJson(route: Route, body: unknown, status = 200, policy: DecisionModelPolicy = 'Default - On') {
+function chatJson(route: Route, body: unknown, status = 200, policy: DecisionModelPolicy = 'Decision Model Only') {
   return route.fulfill({
     status,
     contentType: 'application/json',
     headers: { 'access-control-allow-origin': '*',
-      'x-goodvibes-decision-policy': JSON.stringify({ policy, operation: policy === 'Classic - Off' ? 'classic' : 'decision', reason: policy === 'Classic - Off' ? 'selected' : null, revision: 0 }) },
+      'x-goodvibes-decision-policy': JSON.stringify({ policy, operation: policy === 'No Decision Model' ? 'classic' : 'decision', reason: policy === 'No Decision Model' ? 'selected' : null, revision: 0 }) },
     body: JSON.stringify(body),
   });
 }

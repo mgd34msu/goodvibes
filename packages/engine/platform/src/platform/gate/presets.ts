@@ -1,4 +1,5 @@
 /** Shared execution modes for the engine and every product surface. */
+import { decisionModelSet, type DecisionModelSettings } from '../config/decision-model-set.js';
 import type { PermissionMode } from '../config/schema-types-permissions.js';
 import type { Stakes } from '@goodvibes-jev/judgment';
 import type { GateRiskFamily } from './batteries/risk-family.js';
@@ -119,27 +120,16 @@ export function normalizePermissionMode(mode: unknown): GatePresetName {
   return parsePermissionMode(mode) ?? 'ask-me';
 }
 
-/** The judgment settings that say whether a decision model can answer. */
-export interface DecisionModelSettings {
-  readonly policy?: unknown;
-  readonly endpoint?: unknown;
-  readonly model?: unknown;
-  readonly keySource?: unknown;
-  readonly keyName?: unknown;
-}
+export type { DecisionModelSettings } from '../config/decision-model-set.js';
 
 /**
- * Whether a decision model is set up to answer, from facts the program holds:
- * decision models are not switched off, an endpoint and a model are set, and
- * an environment key it names is present. A key in the secret store is
- * trusted to be there; a failed request then takes the judgment's fallback.
+ * Whether a decision model is there to answer, from facts the program holds:
+ * decision models are not switched off and one is set (config/decision-model-set.ts).
+ * A key in the secret store is trusted to be there; a failed request then
+ * takes the judgment's fallback and is reported.
  */
 export function decisionModelReady(settings: DecisionModelSettings, env: Readonly<Record<string, string | undefined>> = process.env): boolean {
-  if (settings.policy === 'Classic - Off') return false;
-  const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
-  if (!text(settings.endpoint) || !text(settings.model)) return false;
-  if (settings.keySource === 'env') return Boolean(env[text(settings.keyName) || 'TYPESAFE_API_KEY']);
-  return true;
+  return settings.policy !== 'No Decision Model' && decisionModelSet(settings, env);
 }
 
 /**

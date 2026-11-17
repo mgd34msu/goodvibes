@@ -88,7 +88,7 @@ configurable capability, never unreachable machinery.
 | Paired phone capabilities | `device.capabilities.mode` | `ask-every-time`/`honor-grants` | `honor-grants` (on) | no | A paired phone as a tool (camera, screen, location, clipboard, device commands) over the peer transport. Every capture asks first; "always allow" writes one revocable per-capability grant with TTL and count caps. Tunes via `device.*`. |
 | Wake-word detection | `voice.wake.enabled` | `true` | off | no | On-device `hey goodvibes` wake detection; see [Wake-word model](./wake-word-model.md). |
 
-`permissions.tools.<name>` set to `deny` blocks that tool in every mode except `yolo`. The values `allow` and `prompt` are read only in Classic operation (when the decision model is not in use); otherwise the mode and the stakes reading decide whether a call asks. See [Tool safety](./tool-safety.md) and [Security](./security.md#the-gate) for how permission decisions are evaluated.
+`permissions.tools.<name>` set to `deny` blocks that tool in every mode except `yolo`. The values `allow` and `prompt` are read only without a decision model (when the decision model is not in use); otherwise the mode and the stakes reading decide whether a call asks. See [Tool safety](./tool-safety.md) and [Security](./security.md#the-gate) for how permission decisions are evaluated.
 
 ## Recommended host profiles
 

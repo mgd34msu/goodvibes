@@ -416,7 +416,7 @@ export async function startAgreedWork(
 ): Promise<void> {
   deps.readingOptions?.signal?.throwIfAborted();
   assertSynchronousCurrent(deps.readingOptions?.beforeAttempt);
-  requireDecisionFeature('starting agreed autonomous work; continue through an ordinary Classic conversation and its native tool approvals');
+  requireDecisionFeature('starting agreed autonomous work; continue through an ordinary conversation and its native tool approvals');
   const task = note ? `${proposal.task}\n\nAdditional direction from the owner: ${note}` : proposal.task;
   const spawned = deps.trySpawnAgent({ mode: 'spawn', task }, 'ConversationGate.startAgreedWork', proposal.sessionId);
   const binding = proposal.routeId ? deps.routeBindings.getBinding(proposal.routeId) : undefined;

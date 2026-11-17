@@ -556,7 +556,7 @@ export async function runEnvAudit(_input: AnalyzeInput, projectRoot: string): Pr
       extra: [],
       uncertain: selected.uncertain,
       ...(selected.provenance ? { provenance: selected.provenance } : {}),
-      message: selected.provenance ? 'Classic found no single conventionally named env template; no comparison was made'
+      message: selected.provenance ? 'Without a decision model, this found no single conventionally named env template; no comparison was made'
         : !selected.uncertain ? 'No env file reads as a template of the expected variables; nothing to compare against' : 'The env template reading is unsettled; no comparison was made',
     };
   }

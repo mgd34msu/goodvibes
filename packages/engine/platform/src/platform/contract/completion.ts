@@ -971,7 +971,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
   // ── Groups ────────────────────────────────────────────────────────────────────
 
   async function judgeGroup(run: ContractRun, groupId: string, trigger: CheckTrigger): Promise<void> {
-    requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
+    requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
     const group = run.group(groupId);
     if (group === undefined || run.terminal) return;
     run.moveGroup(group, 'judging');
@@ -1018,7 +1018,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
   // ── The deliverable ───────────────────────────────────────────────────────────
 
   async function judgeDeliverable(run: ContractRun, trigger: CheckTrigger): Promise<void> {
-    requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
+    requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
     const { contract } = run;
     if (run.terminal) return;
     assertNativeContractSource(contract);
@@ -1111,7 +1111,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
   }
 
   async function commitDeliverable(run: ContractRun, checkedAnswer?: string): Promise<void> {
-    requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
+    requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
     const { contract } = run;
     if (run.terminal) return;
     assertOwnedContractSource(contract);
@@ -1295,7 +1295,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
   /** Publish worktree results or optionally commit files already in the owner tree.
    * Only an optional shared-tree Git commit failure may remain a warning. */
   async function commitContract(run: ContractRun): Promise<NonNullable<Contract['commit']>> {
-    requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
+    requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
     const { contract } = run;
     if (!GitService.isGitRepo(contract.projectRoot)) return { status: 'skipped', note: 'commit skipped: not a git repository' };
     const settings = config();

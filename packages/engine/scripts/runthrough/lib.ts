@@ -57,7 +57,7 @@ function deepMerge(target: Record<string, unknown>, source: Record<string, unkno
 export interface HomeOptions {
   readonly modelBaseURL: string;
   readonly permissionsMode?: string;
-  /** Default: decision models off ("Classic - Off"). A URL points Jev at that loopback endpoint. */
+  /** Default: decision models off ("No Decision Model"). A URL points Jev at that loopback endpoint. */
   readonly judgment?: 'off' | { endpoint: string; policy?: string };
   readonly extraSettings?: Record<string, unknown>;
   /** Share another home's ports (a second app attached to the same daemon). */
@@ -95,8 +95,8 @@ export function makeHome(base: string, name: string, options: HomeOptions): Home
       capabilities: { toolCalling: true, codeEditing: true, reasoning: false, multimodal: false } }],
   };
   const judgment = options.judgment === undefined || options.judgment === 'off'
-    ? { policy: 'Classic - Off' }
-    : { policy: options.judgment.policy ?? 'Default - On', endpoint: options.judgment.endpoint, keySource: 'none', keyName: '', model: 'rt-jev' };
+    ? { policy: 'No Decision Model' }
+    : { policy: options.judgment.policy ?? 'Decision Model Only', endpoint: options.judgment.endpoint, keySource: 'none', keyName: '', model: 'rt-jev' };
   const common: Record<string, unknown> = {
     controlPlane: { host: '127.0.0.1', port: ports.controlPlane },
     httpListener: { host: '127.0.0.1', port: ports.http },

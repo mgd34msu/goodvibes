@@ -638,7 +638,7 @@ async function formatOwnedComparisonSynthesis(input: Parameters<typeof formatCom
     const reading = readings[index]!;
     if (reading.status === 'not-evaluated') {
       notEvaluated++;
-      pushSynthesisTheme(themes, 'Unassessed preference themes (Classic)', judgment);
+      pushSynthesisTheme(themes, 'Unassessed preference themes (no decision model)', judgment);
     } else if (reading.status === 'held') {
       pushSynthesisTheme(themes, 'Unresolved preference signal', judgment);
       incrementCount(holds, reading.reason);
@@ -670,7 +670,7 @@ async function formatOwnedComparisonSynthesis(input: Parameters<typeof formatCom
 
   lines.push('');
   lines.push('Cross-session reason themes');
-  if (notEvaluated) lines.push(`  Classic operation: ${countPhrase(notEvaluated, 'judgment')} not categorized; saved winner counts and authored reasons remain available.`);
+  if (notEvaluated) lines.push(`  No decision model: ${countPhrase(notEvaluated, 'judgment')} not categorized; saved winner counts and authored reasons remain available.`);
   for (const [label, judgments] of themeCounts) {
     lines.push(`  ${label}: ${countPhrase(judgments.length, 'judgment')}`);
     if (label === 'Unresolved preference signal') for (const [reason, count] of sortedCounts(holds)) lines.push(`    not classified (${count}): ${reason}`);

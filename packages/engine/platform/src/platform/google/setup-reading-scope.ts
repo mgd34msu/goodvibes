@@ -79,7 +79,7 @@ export function ownGoogleSetupRunners(
     } catch (error) {
       if (error instanceof DecisionModelsDisabledError) {
         assertGoogleReadingCurrent(deps);
-        return { outcome: 'needs-human' as const, detail: 'Automatic interpretation is unavailable during Classic operation.',
+        return { outcome: 'needs-human' as const, detail: 'Automatic interpretation is unavailable without a decision model.',
           problem: error.message, fix: spec.manualSteps.join(' ') };
       }
       if (error instanceof GoogleSetupWriteCommittedError) return { outcome: 'failed' as const,

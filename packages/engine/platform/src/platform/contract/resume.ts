@@ -350,7 +350,7 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
     try {
       // Inside the try: a refusal here must end the contract (and free its slot), not reject unseen.
       run.abort.signal.throwIfAborted();
-      requireDecisionFeature('autonomous contract continuation; inspect retained work or continue it through ordinary Classic tools');
+      requireDecisionFeature('autonomous contract continuation; inspect retained work or continue it through ordinary tools');
       contract.resumeFrom = undefined;
       if (contract.inputSnapshot !== undefined) await assertContractInputView(contract.inputSnapshot, run.abort.signal);
       await awaitNativeResumeConditions(contract, run.env.native, run.abort.signal);

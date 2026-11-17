@@ -149,7 +149,7 @@ interface PlannerInputSources {
  *    would be, on four levels. The planner takes a 0-1 score, so the reading's
  *    probability-weighted position on those levels (`normalized`) is used as
  *    is; an unsure reading spreads across levels and lands between them.
- *    Classic records null (unassessed), never a made-up low-risk score.
+ *    Without a decision model, this records null (unassessed), never a made-up low-risk score.
  *  - latencyBudgetMs: no wall-clock budget exists for a workstream. A draft
  *    is reviewed and approved before anything runs, and there is no latency
  *    setting in config, so the budget is unbounded.

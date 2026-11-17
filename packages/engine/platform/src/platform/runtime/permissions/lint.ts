@@ -56,7 +56,7 @@ async function anyBroad(kind: 'path' | 'host', patterns: readonly string[], effe
 
 function unassessedBreadth(rule: PolicyRule): PolicyLintFinding {
   return { severity: 'info', ruleId: rule.id, operationProvenance: 'classic', semanticAssessment: 'not-evaluated',
-    message: `Rule '${rule.id}': the breadth of its patterns was not evaluated (no decision model in Classic); patterns that cover everything are still errors, and native permission rules and owner approvals still apply.` };
+    message: `Rule '${rule.id}': the breadth of its patterns was not evaluated (no decision model); patterns that cover everything are still errors, and native permission rules and owner approvals still apply.` };
 }
 
 async function lintRule(rule: PolicyRule): Promise<PolicyLintFinding[]> {

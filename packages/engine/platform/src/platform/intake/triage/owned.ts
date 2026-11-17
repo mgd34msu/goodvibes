@@ -63,7 +63,7 @@ const OFF: Readonly<Record<'closed' | 'ungranted' | 'revoked' | 'classic', Triag
     next: ['Set up privacy screening for this inbox account; labels then come with new messages'] },
   revoked: { state: 'off', reason: 'The privacy-screening route this account labels mail through was revoked',
     next: ['Reconnect the inbox account to restore its screening route'] },
-  classic: { state: 'off', reason: 'Decision models are off (judgment.policy is Classic), so no model labels mail',
+  classic: { state: 'off', reason: 'Decision models are off (judgment.policy is No Decision Model), so no model labels mail',
     next: ['Set judgment.policy to a decision-model policy to label new mail'] },
 });
 function unavailable(state: InboxTriageState): HandlerError {
@@ -130,7 +130,7 @@ async function createTriagedSource(
     if (closed || owner.signal.aborted) return OFF.closed;
     if (!bound) return OFF.ungranted;
     if (authority.signal.aborted) return OFF.revoked;
-    // Decision models off (Classic) means no model request, triage included.
+    // Decision models off (no decision model) means no model request, triage included.
     if (isClassicOperation()) return OFF.classic;
     try { authority.assertCurrent(); return { state: 'on' }; } catch { return OFF.revoked; }
   };

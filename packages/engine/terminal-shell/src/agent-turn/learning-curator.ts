@@ -234,7 +234,7 @@ function learningPromptPlan(collection: LearningCandidateCollection, candidates:
     suppressed,
     orderingRules: [
       `Prompt context is limited to memory at confidence ${MIN_PROMPT_MEMORY_CONFIDENCE} or higher that is not stale, contradicted or outside its validity window, active personas, and enabled setup-ready behavior.`,
-      isClassicOperation() ? 'Classic lists native eligibility and review facts with unassessed scores/priority; stable label ordering is not a quality ranking.'
+      isClassicOperation() ? 'Without a decision model, this lists native eligibility and review facts with unassessed scores/priority; stable label ordering is not a quality ranking.'
         : 'Current admitted curator readings grade usefulness, freshness, source quality, risk, confidence and priority. Sorting uses the settled priority grade.',
       'Low-confidence, stale, setup-blocked, blocked VIBE.md, and duplicate records stay suppressed until their confidence or enabled/active state is repaired.',
       'Proposals from notes, completed work, completed research, and saved sessions require explicit create or promotion routes before they can guide the assistant.',
@@ -291,7 +291,7 @@ async function ownedLearningCuratorSummary(context: LearningCuratorNativeContext
   const consolidationBatch = learningConsolidationBatchPlan(all, includeParameters);
   return {
     ...(isClassicOperation() ? { operationProvenance: 'classic', semanticAssessment: 'not-evaluated',
-      interpretationNotice: 'Classic shows stored records and mechanical review flags. Automatic proposal, quality and duplicate analysis is unavailable.' } : {}),
+      interpretationNotice: 'Without a decision model, this shows stored records and mechanical review flags. Automatic proposal, quality and duplicate analysis is unavailable.' } : {}),
     summary: {
       candidates: all.length,
       needsReview: all.filter((candidate) => candidate.status === 'needs-review').length,

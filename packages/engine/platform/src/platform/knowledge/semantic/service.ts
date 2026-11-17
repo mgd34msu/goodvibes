@@ -246,7 +246,7 @@ export class KnowledgeSemanticService {
    * continues in the background.
    */
   async answer(input: KnowledgeSemanticAnswerInput): Promise<KnowledgeSemanticAnswerResult> {
-    requireDecisionFeature('verified semantic knowledge answers; use local knowledge search during Classic');
+    requireDecisionFeature('verified semantic knowledge answers; use local knowledge search without a decision model');
     await this.store.init();
     const answerOnce = (current: KnowledgeSemanticAnswerInput) => answerKnowledgeQuery({
       store: this.store,
@@ -419,7 +419,7 @@ export class KnowledgeSemanticService {
 
   /** Public admission probe (MemoryGovernor critical tier) for producers' own expensive tails. */
   admitBackgroundWork(label: string): { allowed: boolean; reason?: string | undefined } {
-    if (isClassicOperation()) return { allowed: false, reason: 'Classic does not run automatic semantic knowledge work.' };
+    if (isClassicOperation()) return { allowed: false, reason: 'Without a decision model, this does not run automatic semantic knowledge work.' };
     return this.options.admitExpensiveWork?.(label) ?? { allowed: true };
   }
 

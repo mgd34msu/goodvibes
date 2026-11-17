@@ -338,7 +338,7 @@ export class HomeGraphService {
 
   async ask(input: HomeGraphAskInput): Promise<HomeGraphAskResult> {
     return this.ownForegroundOperation(async (writes) => {
-      requireDecisionFeature('verified Home Graph answers; use browse or local knowledge search during Classic');
+      requireDecisionFeature('verified Home Graph answers; use browse or local knowledge search without a decision model');
       this.requireAdmission('home-graph ask');
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();

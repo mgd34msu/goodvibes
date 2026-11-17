@@ -114,7 +114,7 @@ export async function rankRecommendationCandidates(
   candidates: readonly RecommendationCandidates[],
   options: { readonly signal?: AbortSignal } = {},
 ): Promise<EcosystemRecommendation[]> {
-  requireDecisionFeature('semantic ecosystem recommendations; browse and explicitly choose catalog entries in Classic');
+  requireDecisionFeature('semantic ecosystem recommendations; browse and explicitly choose catalog entries without a decision model');
   const pairs = candidates.flatMap((candidate) => candidate.entries.map((entry) => ({ candidate, entry })));
   if (pairs.length === 0) return [];
   const port = judgmentPort(RECOMMENDATION_SITE);
@@ -151,6 +151,6 @@ export async function buildEcosystemRecommendations(
   runtimeStore: RuntimeStore | undefined,
   options: EcosystemCatalogPathOptions,
 ): Promise<EcosystemRecommendation[]> {
-  requireDecisionFeature('semantic ecosystem recommendations; browse and explicitly choose catalog entries in Classic');
+  requireDecisionFeature('semantic ecosystem recommendations; browse and explicitly choose catalog entries without a decision model');
   return rankRecommendationCandidates(collectRecommendationCandidates(runtimeStore, options));
 }

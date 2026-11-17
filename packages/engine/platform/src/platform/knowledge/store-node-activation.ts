@@ -211,7 +211,7 @@ async function prepareOwnedNodeActivationPass(store: KnowledgeStore, drafts: rea
         ...(!draft.preserveObservation ? { nodeObservation: undefined } : {}),
         reviewProvenance: knowledgeDecisionStamp(draft.now, { state: accepted ? 'auto-accepted' : 'pending-review',
           reason: accepted ? 'Settled serving-without-review judgment; untrusted origin retained; not an operator review'
-            : reading.operationProvenance === 'classic' ? 'Classic operation: semantic serving approval was not evaluated; retain the untrusted draft for owner review'
+            : reading.operationProvenance === 'classic' ? 'No decision model: semantic serving approval was not evaluated; retain the untrusted draft for owner review'
             : `Pending review: serving judgment ${reading.reason ?? 'uncertain'}` }),
         nodeActivation: { ...(reading.operationProvenance === 'classic' ? {} : { battery: nodeServingWithoutReview.name, version: nodeServingWithoutReview.version }), ...reading,
           ownerConfidenceFloor, ...(activationCache ? { dependencyVersion: 1, dependencyReference: activationCache.reference } : {}),

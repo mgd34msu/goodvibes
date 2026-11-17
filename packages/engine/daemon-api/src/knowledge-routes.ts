@@ -279,7 +279,7 @@ interface HeldReadingAdvice {
   next(recordId: string | undefined): readonly string[];
 }
 
-const RETRY_WITHOUT_DECISION_MODEL = 'Set judgment.policy to Preferred (falls back when no decision model answers) or Classic - Off (no decision-model readings), then retry';
+const RETRY_WITHOUT_DECISION_MODEL = 'Set judgment.policy to Hybrid (falls back when no decision model answers) or No Decision Model (no decision-model readings), then retry';
 
 /** What each reason a knowledge reading was held means for the caller, and what gets past it. */
 const HELD_READING_ADVICE: Readonly<Record<string, HeldReadingAdvice>> = {

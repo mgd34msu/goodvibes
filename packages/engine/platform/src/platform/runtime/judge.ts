@@ -2,7 +2,7 @@
  * The engine's door to the one judgment request. A decision site names its
  * battery, the state, how to settle the readings and its fallback; this
  * supplies the installed port and the operation's decision-model policy, so
- * `judgment.policy: Classic - Off` and a missing port take the fallback at
+ * `judgment.policy: No Decision Model` and a missing port take the fallback at
  * once without a request or a decision-log write.
  */
 import {

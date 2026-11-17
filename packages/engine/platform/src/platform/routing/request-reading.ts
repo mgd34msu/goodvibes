@@ -78,7 +78,7 @@ export async function readRequest(
   request: RoutingRequest,
   options: import('@goodvibes-jev/judgment').CallOptions = {},
 ): Promise<RequestReading> {
-  requireDecisionFeature('semantic request classification; Classic routing uses the configured General target');
+  requireDecisionFeature('semantic request classification; routing without a decision model uses the configured General target');
   const site = options.site ?? 'routing.request';
   const state = requestState(request);
   const run = await fanOut(judgmentPort(site), state, REQUEST_BATTERIES, {

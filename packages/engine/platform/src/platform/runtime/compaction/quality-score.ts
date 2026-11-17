@@ -227,7 +227,7 @@ export async function computeQualityScore(
   output: StrategyOutput,
   options: QualityScoreOptions = {},
 ): Promise<CompactionQualityScore> {
-  requireDecisionFeature('semantic compaction retention and fidelity scoring; native Classic compaction does not claim a quality grade');
+  requireDecisionFeature('semantic compaction retention and fidelity scoring; native compaction does not claim a quality grade');
   options.signal?.throwIfAborted();
   options.assertCurrent?.();
   // Compression ratio: fraction of tokens removed

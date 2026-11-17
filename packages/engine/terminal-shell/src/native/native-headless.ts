@@ -11,6 +11,7 @@ import { createNativeSubmissionIdentity, type NativeSubmissionHost, type NativeH
 import type { NativeHeadlessMode } from './native-headless-options.js';
 import { HEADLESS_SCHEMA_VERSION, type HeadlessUsage } from './headless-turn-events.js';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { DecisionModelUse } from '@goodvibes-jev/engine/errors';
 export type NativeHeadlessHost = (NativeSubmissionHost & {
     readonly journalPath: string;
 }) | {
@@ -33,6 +34,8 @@ export interface NativeHeadlessTurnResult {
     readonly recovery?: HeadlessSessionRecovery | undefined;
     /** Set when the run was refused before it started: what is true, why, and what to do. */
     readonly refusal?: { readonly code: string; readonly state: string; readonly reason: string; readonly next: readonly string[] } | undefined;
+    /** Set when no decision model was in use for the run: none set, switched off, or the set one failing. */
+    readonly decisionModel?: DecisionModelUse | undefined;
     /**
      * Calls permissions.mode just-vibes held for the owner during the run: not run, and the rest
      * of the work went on without them. Run again in ask-me (or answer them with --answer-permissions)
@@ -302,7 +305,13 @@ const writeStderrLine = (line: string): void => {
     }
 };
 export function writeNativeHeadlessResult(result: NativeHeadlessResult, format: string, stdout: (line: string) => void, alwaysNativeType = false, stderr: (line: string) => void = writeStderrLine): void {
-    const { exitCode, native, ...turn } = result;
+    const { exitCode, native, decisionModel: use, ...turn } = result;
+    // Whenever no decision model was in use (none set, switched off, or the set one failing), say so on
+    // stderr and in the JSON diagnostics; the exit code stays what the work earned.
+    const diagnostics = use === undefined || use.inUse ? undefined : { decisionModel: { inUse: false, policy: use.policy, reason: use.reason, line: use.line,
+        ...(use.failure ? { failure: { model: use.failure.model, what: use.failure.what, nextStep: use.failure.nextStep } } : {}) } };
+    if (diagnostics)
+        stderr(diagnostics.decisionModel.line);
     const response = headlessRecoveryText(turn.response);
     const error = turn.error === undefined ? undefined : headlessRecoveryText(turn.error);
     const execution = native?.execution ? { ...native.execution, message: headlessRecoveryText(native.execution.message) } : undefined;
@@ -314,7 +323,7 @@ export function writeNativeHeadlessResult(result: NativeHeadlessResult, format: 
     if (format === 'json' || format === 'stream-json') {
         // sessionId and usage are always present (null before a model turn) so every final frame has one shape.
         stdout(JSON.stringify({ ...(format === 'stream-json' ? { type: alwaysNativeType || state ? 'NATIVE_INTAKE_RESULT' : 'TURN_RESULT' } : {}), schemaVersion: HEADLESS_SCHEMA_VERSION, ok: exitCode === 0,
-            ...turn, response, error, sessionId: turn.sessionId ?? null, usage: turn.usage ?? null, ...(state ? { native: state } : {}) }));
+            ...turn, response, error, sessionId: turn.sessionId ?? null, usage: turn.usage ?? null, ...(state ? { native: state } : {}), ...(diagnostics ? { diagnostics } : {}) }));
         return;
     }
     // A failure that never reached a model turn is diagnostic text; a turn's answer stays on stdout.

@@ -1160,7 +1160,7 @@ export class PermissionManager {
       if (configured === 'allow' || input.category === 'read' && configured !== 'prompt') {
         input.assertCurrent();
         return { result: this.result(true, false, 'config_policy', 'config_allow', analysis,
-          { detail: 'Classic operation: authorized by owner configuration and deterministic tool category; no semantic safety reading.' }) };
+          { detail: 'No decision model: authorized by owner configuration and deterministic tool category; no semantic safety reading.' }) };
       }
     }
     if (this.takeOwnerRevision(input)) return { result: this.result(true, false, 'user_prompt', 'user_approved', analysis) };
@@ -1172,7 +1172,7 @@ export class PermissionManager {
     }
     return this.askOwner(input, analysis, {
       reasons: ownerOnly ? [`Only you decide this: ${ownerOnlyReason(ownerOnly)}.`] : [],
-      ownerOnly, revisedDetail: 'Prepare the exact action revised and approved by the owner during Classic operation.',
+      ownerOnly, revisedDetail: 'Prepare the exact action revised and approved by the owner without a decision model.',
     });
   }
 

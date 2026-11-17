@@ -1,8 +1,12 @@
-/** Browser-safe provenance for host-owned Classic conversation admission. */
+/** Browser-safe provenance for an owner conversation admitted while no decision model is in use. */
 import { enum as enumSchema, literal, strictObject } from 'zod/v4';
 export interface NativeClassicConversationAdmission {
-  readonly provenance: 'owner'; readonly policy: 'Preferred' | 'Classic - Off'; readonly reason: 'selected' | 'unavailable';
+  readonly provenance: 'owner';
+  readonly policy: 'Hybrid' | 'Decision Model Only' | 'No Decision Model';
+  /** `selected`: No Decision Model; `not-set`: none is set; `unavailable`: Hybrid found the set model failing. */
+  readonly reason: 'selected' | 'not-set' | 'unavailable';
 }
 export const nativeClassicConversationAdmissionSchema = strictObject({ provenance: literal('owner'),
-  policy: enumSchema(['Preferred', 'Classic - Off']), reason: enumSchema(['selected', 'unavailable']) })
-  .refine(value => value.policy === 'Preferred' ? value.reason === 'unavailable' : value.reason === 'selected', 'Policy and Classic reason must agree');
+  policy: enumSchema(['Hybrid', 'Decision Model Only', 'No Decision Model']), reason: enumSchema(['selected', 'not-set', 'unavailable']) })
+  .refine(value => value.policy === 'No Decision Model' ? value.reason === 'selected'
+    : value.reason === 'not-set' || (value.policy === 'Hybrid' && value.reason === 'unavailable'), 'Policy and reason must agree');

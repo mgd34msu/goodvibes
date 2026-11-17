@@ -86,7 +86,7 @@ async function outcome(mode: GatePresetName, call: typeof TRUST | typeof PUSH) {
 }
 
 test('with decision models off: who is asked about an owner-only item and a judgment call, in each mode', async () => {
-  const retire = configureDecisionModelPolicy(() => 'Classic - Off');
+  const retire = configureDecisionModelPolicy(() => 'No Decision Model');
   try {
     expect(await outcome('ask-me', TRUST)).toMatchObject({ ran: 0, decidedBy: 'owner', owner: 1, jev: 0, held: 0 });
     expect(await outcome('jev-decides', TRUST)).toMatchObject({ ran: 0, decidedBy: 'owner', owner: 1, jev: 0, held: 0 });
@@ -107,7 +107,7 @@ test('with decision models on but none set up, just-vibes holds a judgment call 
 });
 
 test('jev-decides chosen by a hosted session is ask-me while no decision model works', async () => {
-  const retire = configureDecisionModelPolicy(() => 'Classic - Off');
+  const retire = configureDecisionModelPolicy(() => 'No Decision Model');
   try {
     // The settings say yolo; the session's own choice is what holds inside it.
     const g = gate('yolo');
@@ -135,7 +135,7 @@ test('jev-decides with a working decision model asks Jev, not the owner, on a ju
 });
 
 test('just-vibes reports what it held, and the owner\'s approval at the end lets that same call run', async () => {
-  const retire = configureDecisionModelPolicy(() => 'Classic - Off');
+  const retire = configureDecisionModelPolicy(() => 'No Decision Model');
   try {
     const g = gate('just-vibes');
     const first = await g.check(TRUST);

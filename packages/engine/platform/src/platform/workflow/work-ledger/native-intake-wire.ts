@@ -48,7 +48,7 @@ export const nativeConversationIntakeResultSchema = union([
   && value.receipt.inputId === value.sourceRef.inputId && value.receipt.source.sourceId === value.sourceRef.sourceId
   && value.receipt.source.sourceRevision === value.sourceRef.sourceRevision && value.receipt.source.sessionId === value.sourceRef.sessionId), 'Receipt source identity mismatch')
   .refine(value => !value.sourceRef.classic || value.kind === 'cancelled' || value.kind === 'turn' && value.route === 'converse',
-    'Classic admission must describe an ordinary conversation or its cancellation')
+    'Admission without a decision model must describe an ordinary conversation or its cancellation')
   .refine(value => {
     const continuation = value.kind === 'turn' ? value.continuation : value.kind === 'work' ? value.receipt.source.continuation : value.sourceRef.continuation;
     return JSON.stringify(continuation ? { ...(continuation.version === 2 ? { version: 2 as const } : {}), sessionId: continuation.sessionId, revision: continuation.revision, ...(continuation.selectedDiff ? { selectedDiff: 'unifiedDiff' in continuation.selectedDiff ? nativeSelectedDiffSelector(nativeSelectedDiffContextSchema.parse(continuation.selectedDiff)) : continuation.selectedDiff } : {}) } : null) === JSON.stringify(value.sourceRef.continuation ?? null);
@@ -67,7 +67,7 @@ export type NativeConversationIntakeResult = z.infer<typeof nativeConversationIn
 export type NativeConversationIntakeLookupResult = z.infer<typeof nativeConversationIntakeLookupResultSchema>;
 
 /** Source bytes stay fixed while the authenticated host may attach one terminal
- * Classic admission. A later response cannot remove or rewrite that admission.
+ * Admission without a decision model. A later response cannot remove or rewrite that admission.
  * Both references must already have passed the wire schema.
  */
 export function sameNativeConversationSource(previous: NativeConversationIntakeSourceRef,

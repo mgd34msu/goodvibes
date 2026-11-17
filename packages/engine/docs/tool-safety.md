@@ -233,7 +233,7 @@ restart that follows immediately. A session-only answer is kept in memory,
 keyed like the session cache (an exec command class, or the exact set of
 edited paths). An answer that edited the arguments remembers nothing. A
 remembered allow suppresses the next ask wherever an ask is the only thing
-left to decide (Classic operation); in a decision mode, calls that still need
+left to decide (operation without a decision model); in a decision mode, calls that still need
 the owner (critical or irreversible stakes, a failed boundary check) keep
 asking. A remembered deny is enforced in every mode. Those asks carry
 `rememberEffect: 'owner-asked-again'` so a surface does not promise that "Allow

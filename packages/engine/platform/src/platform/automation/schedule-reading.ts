@@ -121,7 +121,7 @@ function classicSchedule(source: ScheduleReadingInput): ScheduleReading {
       const interval = normalizeEverySchedule(duration[2]!);
       schedule = duration[1] === 'every' ? interval : normalizeAtSchedule(source.now + interval.intervalMs);
     } else return { ...base, kind: 'unknown', reason: 'decision-model-disabled',
-      message: 'Classic accepts an exact zoned ISO timestamp, five-field cron, every 30m or in 2h. Natural-language interpretation requires a decision model.' };
+      message: 'Without a decision model, this accepts an exact zoned ISO timestamp, five-field cron, every 30m or in 2h. Natural-language interpretation requires a decision model.' };
     return { ...base, kind: 'ready', schedule };
   } catch { return { ...base, kind: 'unknown', reason: 'invalid' }; }
 }

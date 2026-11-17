@@ -113,7 +113,7 @@ export async function finalizeKnowledgeIngestedSource(
       summary: extracted.summary, excerpt: extracted.excerpt, sections: extracted.sections,
       links: extracted.links, estimatedTokens: extracted.estimatedTokens, structure: extracted.structure, metadata: extracted.metadata };
     // Settle the pure alias phase against the same native normalization used
-    // by the staged import. Preferred may switch policy here; capture final
+    // by the staged import. Hybrid may switch policy here; capture final
     // source provenance only afterwards, before the one atomic publication.
     const prospectiveSource = prepareKnowledgeSourceRecord(sourceInput, context.store.getSource(input.sourceId));
     const prospectiveExtraction = prepareKnowledgeExtractionRecord(extractionInput, previousExtraction, prospectiveSource);

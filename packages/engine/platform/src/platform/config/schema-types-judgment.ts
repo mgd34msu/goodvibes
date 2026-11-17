@@ -25,7 +25,7 @@ import type { JudgmentVolumeMonitorControl } from '../observe/judgment-volume-mo
 export interface JudgmentSettings {
   /** Optional owner-configured local call-volume alerts. */
   volumeMonitor?: Partial<JudgmentVolumeMonitorControl>;
-  /** Missing on older installations; defaults to Default - On. */
+  /** Missing on older installations; defaults to Hybrid. */
   policy?: DecisionModelPolicy;
   /** System One endpoint base URL; empty uses TYPESAFE_BASE_URL, then the hosted endpoint. */
   endpoint: string;

@@ -1,3 +1,4 @@
+import { decisionModelUse } from '@goodvibes-jev/engine/platform/platform/runtime/decision-policy';
 import { isTerminalContractStatus } from '@goodvibes-jev/engine/platform/platform/contract/types';
 import type { ContractRunner, ContractStatus } from '@goodvibes-jev/engine/platform/platform/contract';
 import type { ConversationMessageSnapshot, Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
@@ -145,7 +146,9 @@ export async function executeHeadlessTurn(
     // A just-vibes run ends with what it held for the owner; nothing was run for them.
     const held = (ctx.permissions?.listHeldForOwner() ?? []).filter((call) => call.heldAt >= startedAt)
       .map((call) => ({ id: call.id, tool: call.toolName, summary: call.summary, reason: call.reason }));
-    return held.length > 0 ? { ...result, heldForOwner: held } : result;
+    // Read while the run's composition still owns the policy: whether a decision model was in use, and its failure.
+    const decisionModel = decisionModelUse();
+    return { ...result, ...(held.length > 0 ? { heldForOwner: held } : {}), ...(decisionModel.inUse ? {} : { decisionModel }) };
   } finally {
     signal.removeEventListener('abort', abort);
     permissionAnswers?.dispose();

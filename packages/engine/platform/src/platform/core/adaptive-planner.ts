@@ -143,7 +143,7 @@ export interface PlannerDecision {
 // ---------------------------------------------------------------------------
 
 const REASON_EXPLANATIONS: Record<StrategyReasonCode, string> = {
-  CLASSIC_SINGLE: 'Classic uses a single conversation worker unless the owner explicitly selects another strategy; no semantic ranking was taken.',
+  CLASSIC_SINGLE: 'Without a decision model, this uses a single conversation worker unless the owner explicitly selects another strategy; no semantic ranking was taken.',
   JUDGMENT_SELECTED: 'The recorded execution-strategy reading selected this available strategy.',
   JUDGMENT_UNSETTLED: 'The execution-strategy reading did not settle. No strategy was authorized.',
   PINNED_MODE: 'The owner explicitly pinned this strategy with /plan mode.',

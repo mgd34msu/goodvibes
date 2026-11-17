@@ -50,13 +50,13 @@ function classicReadiness(options: ModelReadingOptions): ModelReadinessScore {
   const nativeCurrent = () => { options.signal?.throwIfAborted(); };
   nativeCurrent(); assertProjectionCurrent(options.assertCurrent);
   options.retainCurrent?.(nativeCurrent); nativeCurrent();
-  return { ...deferredModelReadiness('Classic does not perform semantic model-readiness assessment.'),
+  return { ...deferredModelReadiness('Without a decision model, this does not perform semantic model-readiness assessment.'),
     provenance: { policy: 'classic', assessment: 'not-evaluated' } };
 }
 function classicFit(options: ModelReadingOptions): LocalModelRecipeFit {
   classicReadiness(options);
   return { ...deferredRecipeFit(), provenance: { policy: 'classic', assessment: 'not-evaluated' },
-    reasons: ['Classic does not assess semantic hardware/recipe suitability.'] };
+    reasons: ['Without a decision model, this does not assess semantic hardware/recipe suitability.'] };
 }
 
 /** Batteries checked once against the routing registry. */

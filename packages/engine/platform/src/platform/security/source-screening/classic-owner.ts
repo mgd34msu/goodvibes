@@ -18,7 +18,7 @@ export function classicScreeningParts(source: ScreeningSource, reference?: Captu
 /** A genuine local screening receipt with Classic provenance, never a Jev reading or semantic privacy certificate. */
 export function createClassicProtectedSourceOwner(authority: Pick<LocalSourceScreeningAuthority | HostedSourceScreeningAuthority,
   'ownerId' | 'revision' | 'signal' | 'assertCurrent'>): ProtectedSourceOwner {
-  const invalid = (): never => { throw new Error('Classic source authority is unavailable'); };
+  const invalid = (): never => { throw new Error('Source authority is unavailable'); };
   if (!authority || typeof authority !== 'object' || nodeTypes.isProxy(authority)) return invalid();
   const prototype: unknown = Object.getPrototypeOf(authority);
   if (prototype !== Object.prototype && prototype !== null) return invalid();
@@ -46,15 +46,15 @@ export function createClassicProtectedSourceOwner(authority: Pick<LocalSourceScr
   const receipts = new Map<Receipt, { readonly entry: Entry; readonly parts: readonly string[] }>();
   const current = (entry?: Entry, operation?: ResearchReferenceOperation) => {
     assertAuthority();
-    if (closed || entry?.released) throw new Error('Classic source authority changed');
+    if (closed || entry?.released) throw new Error('Source authority changed');
     assertScreeningOperation({ signal, assertCurrent: check });
     assertScreeningOperation(operation); assertAuthority();
-    if (closed || entry?.released) throw new Error('Classic source authority changed');
+    if (closed || entry?.released) throw new Error('Source authority changed');
   };
   const capture = (parts: readonly string[], reference?: CapturedResearchReference): Handle => {
     current();
     let refused = false;
-    if (sources.size >= SOURCE_SCREENING_LIMITS.sources) throw new Error('Classic source capacity reached');
+    if (sources.size >= SOURCE_SCREENING_LIMITS.sources) throw new Error('Source capacity reached');
     // Text holding protected input is still a handle whose screening answers
     // held('protected-input'), the same one path the semantic owner gives callers.
     let source: ScreeningSource;
@@ -93,7 +93,7 @@ export function createClassicProtectedSourceOwner(authority: Pick<LocalSourceScr
   };
   const project = (receipt: Receipt, reference: boolean): readonly string[] => {
     const found = receipts.get(receipt);
-    if (!found || Boolean(found.entry.reference) !== reference) throw new Error('Classic screening receipt is not current');
+    if (!found || Boolean(found.entry.reference) !== reference) throw new Error('Screening receipt is not current');
     current(found.entry); return found.parts;
   };
   current();

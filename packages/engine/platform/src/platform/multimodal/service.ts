@@ -59,9 +59,9 @@ function entityNote(metadata: Record<string, unknown>): string | undefined {
     case 'budget': return 'Entities were not assessed: the source is too large for one assessment.';
     case 'unavailable': return 'Entities were not assessed: no decision model answered.';
     case 'not-requested': return metadata.provenance === 'classic'
-      ? 'Classic: semantic entity assessment was not performed.'
+      ? 'No decision model: semantic entity assessment was not performed.'
       : 'Entities were not requested; analyze with detail "detailed", or write the analysis back, to list them.';
-    default: return metadata.provenance === 'classic' ? 'Classic: semantic entity assessment was not performed.' : undefined;
+    default: return metadata.provenance === 'classic' ? 'No decision model: semantic entity assessment was not performed.' : undefined;
   }
 }
 

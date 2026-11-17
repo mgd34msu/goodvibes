@@ -440,3 +440,4 @@ export { SECRET_CONFIG_KEYS, createSecretBackedConfigWriter, isSecretConfigKey, 
 export type { SecretBackedConfigUpdate, SecretBackedConfigManager, SecretBackedSecretStore, DaemonCredentialWriter, SecretBackedConfigRoute } from './secret-backed-config.js';
 export { PAYMENTS_CVV_HANDLING_CONFIG_KEY, PAYMENTS_ADDRESS_FIELD_SUFFIXES, PAYMENTS_SYNTHETIC_CONFIG_KEYS, paymentsAddressConfigKey, paymentsAddressConfigKeys, isPaymentsSyntheticConfigKey } from './payment-config-keys.js';
 export type { PaymentsAddressKind } from './payment-config-keys.js';
+export { DECISION_MODEL_SET_KEYS, decisionModelSet, decisionModelSettings, type DecisionModelSettings } from './decision-model-set.js';

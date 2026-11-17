@@ -26,7 +26,7 @@ export class KnowledgeNodeActivationHeldError extends Error {
   override readonly name = 'KnowledgeNodeActivationHeldError';
   constructor(readonly reason: NodeActivationReason, readonly detail?: string) {
     super(reason === 'decision-model-disabled'
-      ? 'Automatic knowledge activation requires a decision model in Classic operation; retain a draft or use explicit owner review.'
+      ? 'Automatic knowledge activation requires a decision model without a decision model; retain a draft or use explicit owner review.'
       : `Knowledge node activation held: ${reason}.${detail ? ` ${detail}` : ''}`);
   }
 }

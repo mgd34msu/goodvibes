@@ -185,7 +185,7 @@ export class AutoHealer {
     if (hasCapturedToolInvocation() && !this.execution) throw new Error('Captured repair requires its construction-owned backend');
     await this.check();
     if (isClassicOperation()) return { healed: false, content,
-      warnings: ['Automatic semantic repair is unavailable in Classic. The original validation errors are retained; submit an explicit corrected edit.'] };
+      warnings: ['Automatic semantic repair is unavailable without a decision model. The original validation errors are retained; submit an explicit corrected edit.'] };
     try {
       // Config gate: only run when tools.autoHeal is enabled
       if (!this.configManager.get('tools.autoHeal')) {

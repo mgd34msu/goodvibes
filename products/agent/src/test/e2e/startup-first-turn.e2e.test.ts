@@ -45,8 +45,8 @@ describe('first turn against a paired host', () => {
   test('a real daemon starts and this home is paired with it', async () => {
     home = await makeHome(model);
     // The proof is about the program's own path to the model, not a decision model's judgment: Jev is switched off.
-    home.setAgentSetting('judgment.policy', 'Classic - Off');
-    host = await startE2ENativeHost(home, { policy: 'Classic - Off' });
+    home.setAgentSetting('judgment.policy', 'No Decision Model');
+    host = await startE2ENativeHost(home, { policy: 'No Decision Model' });
   });
 
   test('the binary starts in a real terminal with nothing on stderr', async () => {
@@ -76,7 +76,7 @@ describe('no paired host', () => {
 
   test('the binary starts without a host', async () => {
     home = await makeHome(model);
-    home.setAgentSetting('judgment.policy', 'Classic - Off');
+    home.setAgentSetting('judgment.policy', 'No Decision Model');
     agent = launchAgent(home, { cols: 100, rows: 30 });
     await agent.waitForScreen('the main screen', inputAreaVisible);
     await answerWorkspaceQuestion(agent, 'decline');

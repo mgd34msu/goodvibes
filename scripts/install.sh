@@ -3823,7 +3823,7 @@ parse_options() {
           --version) REQUESTED_VERSION=$2; REQUESTED_DAEMON_VERSION=$2; REQUESTED_AGENT_VERSION=$2; REQUESTED_WEBUI_VERSION=$2 ;;
           --bin-dir|--install-dir) INSTALL_DIR=$2; WEBUI_ROOT="$INSTALL_DIR/webui" ;;
           --decision-policy)
-            case "$2" in 'Default - On'|Preferred|'Classic - Off') DECISION_POLICY=$2 ;; *) fail INSTALL_E111 'Unknown decision policy' ;; esac ;;
+            case "$2" in 'Decision Model Only'|Hybrid|'No Decision Model') DECISION_POLICY=$2 ;; *) fail INSTALL_E111 'Unknown decision policy' ;; esac ;;
         esac
         shift 2 ;;
       *) fail INSTALL_E112 "Unknown option: $1. Use --help for released-version installation; source builds use scripts/install-from-checkout.sh." ;;

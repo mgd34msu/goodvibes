@@ -1,5 +1,5 @@
 import type { ChatRequest } from '../providers/interface.js';
-import { withDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { decisionModelUse, withDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { prepareDecisionRouterTurn, describeDecisionRoute, chatWithDecisionRoute } from '../providers/decision-router.js';
 import { assertDecisionAvailable } from '../routing/decision-availability.js';
 import { hasContractPlanConsumer } from '../tools/agent/contract-binding.js';
@@ -455,8 +455,8 @@ export async function runAgentTask(
 ): Promise<void> {
   return withDecisionModelPolicy(() => context.configManager?.get('judgment.policy'), () => runAgentTaskWithPolicy(context, record), state => {
     record.decisionPolicy = state;
-    context.emitAgentProgress(record.id, `[Decision policy] ${state.reason === 'unavailable'
-      ? 'Decision models unavailable; continuing with Classic operation.' : 'Classic - Off; no independent semantic verification.'}`, 'operator');
+    // The owner's conversation tells a failure once per episode; an agent records that it ran without one.
+    context.emitAgentProgress(record.id, `[Decision model] ${decisionModelUse(state).line}`, 'operator');
   });
 }
 

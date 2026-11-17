@@ -512,7 +512,7 @@ export async function decomposeGoal(
     const proposal: PlanProposal = {
       ...base,
       ...(gate.provenance === undefined ? {} : { provenance: gate.provenance }),
-      ...(gate.provenance === 'classic' ? { rationale: 'Classic retains the complete goal as one owner-reviewable item; no semantic decomposition or risk certification was performed.' } : {}),
+      ...(gate.provenance === 'classic' ? { rationale: 'Without a decision model, this retains the complete goal as one owner-reviewable item; no semantic decomposition or risk certification was performed.' } : {}),
       // The planner would have split this goal; say why it is one item and how to change that.
       ...(gate.decompose && outcome.kind === 'heuristic-configured' ? { rationale: "planner.decomposition is 'heuristic', so the goal is kept as one work item; set it to 'agent' to have a planning agent split it." } : {}),
       ...(gate.decompose && outcome.kind === 'fallback' ? { rationale: `The planning agent did not produce a plan (${outcome.reason}), so the goal is kept as one work item; review it, or edit the draft into parts.` } : {}),

@@ -40,8 +40,8 @@ export interface RepairResult {
  * original arguments with a warning. Reading which boolean a non-literal
  * string means (`engine.tools.boolean-value`) and filling a missing required
  * parameter from a spare argument (`engine.tools.param-fill`) are readings,
- * and a JudgmentError from either propagates unless Preferred exhausts its
- * configured chain. Classic keeps format repairs and leaves unresolved values
+ * and a JudgmentError from either propagates unless Hybrid exhausts its
+ * configured chain. Without a decision model, this keeps format repairs and leaves unresolved values
  * for ordinary schema validation, even when the caller supplies its own port.
  * Calls that are already correct
  * pass through unchanged, and a call with no such string and no missing
@@ -166,7 +166,7 @@ async function repairOwnedToolCall(
   const classic = () => {
     assertRepairActive(signal);
     if (booleanStrings.length || required.some(key => !(key in fixed) && properties[key]?.['type'] === 'string')) {
-      warnings.push('During Classic operation, only local format repairs are available. Supply exact boolean values and required parameters; unresolved values are left unchanged.');
+      warnings.push('Without a decision model, only local format repairs are available. Supply exact boolean values and required parameters; unresolved values are left unchanged.');
     }
   };
   // Only the pure interpretation phase can fall back. No tool executes here.

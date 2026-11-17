@@ -204,7 +204,7 @@ function summarize(
 export function renderGoogleSetupReport(report: GoogleSetupReport): string {
   const lines: string[] = [];
   lines.push(report.summary);
-  if (report.provenance === 'classic') lines.push('Classic operation: native setup results only; automatic semantic page interpretation is unavailable.');
+  if (report.provenance === 'classic') lines.push('No decision model: native setup results only; automatic semantic page interpretation is unavailable.');
   lines.push('');
 
   for (const step of report.steps) {

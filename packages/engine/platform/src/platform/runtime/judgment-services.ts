@@ -1,5 +1,5 @@
 import { composeJudgmentVolumeMonitor, type JudgmentVolumeMonitorHandle } from './judgment-volume-monitor.js';
-import { activateClassicFallback, configureDecisionModelPolicy } from './decision-policy.js';
+import { activateClassicFallback, configureDecisionModelPolicy, noteDecisionModelAnswered, noteDecisionModelFailure, resetDecisionModelEpisode } from './decision-policy.js';
 import { assertDecisionModelsEnabled } from '@goodvibes-jev/engine/errors';
 import { bindJudgmentPortAuthority, installJudgmentPort, restoreJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { createJudgmentSourceLifetime } from './judgment-source-lifetime.js';
@@ -10,6 +10,7 @@ import {
   endpointKind,
   JudgmentError,
   captureJudgmentBackendSettings,
+  describeDecisionModelFailure,
   HOSTED_BASE_URL,
   DEFAULT_MODEL,
   DEFAULT_DECISION_DEADLINE_MS,
@@ -25,6 +26,7 @@ import {
 import type { JudgmentKeySource } from '../config/schema-types-judgment.js';
 import type { SecretsManager } from '../config/secrets.js';
 import { captureJudgmentFallbackSettings } from '../config/judgment-fallback-settings.js';
+import { decisionModelSet, decisionModelSettings } from '../config/decision-model-set.js';
 import { openStateDecisionLogWithNotice, scheduleDecisionLogRetention } from '../state/decision-log.js';
 import { logger } from '../utils/logger.js';
 import { maskJudgmentStateCredentials } from '../gate/judgment-input.js';
@@ -184,7 +186,7 @@ async function activeSettings(source: JudgmentSettingsSource, signal?: AbortSign
  * the shared transport's retries; an edit never redirects an in-flight key or
  * payload to a new endpoint. The System One client is rebuilt only when the
  * config changes. A missing key fails the call (and the decision log records
- * the failure); Preferred may then select Classic in the owning operation; Classic never opens the port.
+ * the failure); Hybrid may then select Classic in the owning operation; Classic never opens the port.
  */
 export function createSettingsJudgmentPort(source: JudgmentSettingsSource): JudgmentPort {
   let current: { config: JudgmentConfig; port: JudgmentPort } | undefined;
@@ -211,22 +213,33 @@ export function createSettingsJudgmentPort(source: JudgmentSettingsSource): Judg
       const signal = request.signal;
       if (!signal) throw new JudgmentError('invalid-request', 'settings judgment calls require an owning AbortSignal');
       let config: JudgmentConfig;
-      // A secret store that did not answer is `unavailable` like an exhausted transport: Preferred may fall back to Classic.
+      // A secret store that did not answer is `unavailable` like an exhausted transport: Hybrid may fall back to Classic.
       try { config = await activeSettings(source, signal); }
-      catch (error) { activateClassicFallback(error); throw error; }
+      catch (error) {
+        const failure = describeDecisionModelFailure(settingsModel(source), error);
+        if (failure !== undefined) noteDecisionModelFailure(failure);
+        activateClassicFallback(error);
+        throw error;
+      }
       // Key acquisition may finish after runtime shutdown or caller cancellation.
       // Never create another transport or send a late request in that case.
       signal.throwIfAborted();
       if (current === undefined || !sameConfig(current.config, config)) current = { config, port: createSystemOnePort(config) };
       const beforeAttempt = request.beforeAttempt;
       try {
-        return await current.port.ask({ ...request, signal, beforeAttempt() {
+        const result = await current.port.ask({ ...request, signal, beforeAttempt() {
           signal.throwIfAborted(); assertDecisionModelsEnabled('configured decision transport');
           assertSynchronousJudgmentGuard(beforeAttempt);
           signal.throwIfAborted(); assertDecisionModelsEnabled('configured decision transport');
         } });
+        // Ends a failure episode with one notice; nothing is read or written while the model answers.
+        noteDecisionModelAnswered(result.requestedModel);
+        return result;
       }
       catch (error) {
+        // Tell the owner once per failure episode, naming the model, what failed and the next step.
+        const failure = describeDecisionModelFailure(request.model ?? config.model, error);
+        if (failure !== undefined) noteDecisionModelFailure(failure);
         // The transport has exhausted its configured chain before reporting
         // unavailable. Preserve that fact even if an optional feature later
         // translates the error into its own held/unavailable result.
@@ -299,8 +312,8 @@ function browserBoundaryOptions(source: JudgmentSettingsSource): WebuiAnswerBoun
  * readings, and retiring one hands the process to the newest still running.
  */
 export function composeJudgment(input: JudgmentServicesInput): JudgmentServices {
-  const restorePolicy = configureDecisionModelPolicy(() => input.config.get('judgment.policy'));
-  input.disposal.add('decision-model policy', restorePolicy);
+  const restorePolicy = configureDecisionModelPolicy(() => input.config.get('judgment.policy'), () => decisionModelSet(decisionModelSettings(key => input.config.get(key)), input.env));
+  input.disposal.add('decision-model policy', () => { restorePolicy(); resetDecisionModelEpisode(); });
   const { log: decisionLog, notice: decisionLogNotice } = openStateDecisionLogWithNotice(input.stateRoot);
   const transport = createSettingsJudgmentPort(input);
   const retention = scheduleDecisionLogRetention(decisionLog);

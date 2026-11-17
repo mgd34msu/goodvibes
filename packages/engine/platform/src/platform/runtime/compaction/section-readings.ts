@@ -7,7 +7,7 @@
  * user turn behind a reply) come from code. A pass that would need more than
  * {@link COMPACTION_SELECTION_LIMITS}.maxCalls requests, runs past its
  * deadline, or cannot be read (no decision model, a malformed answer) quotes
- * the sections mechanically instead, the same way Classic operation does, so a
+ * the sections mechanically instead, the same way operation without a decision model does, so a
  * long session can always compact. Only the caller's own cancellation or a
  * changed source ends the pass with an error. */
 import {

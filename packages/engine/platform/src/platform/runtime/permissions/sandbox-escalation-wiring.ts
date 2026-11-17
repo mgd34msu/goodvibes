@@ -17,6 +17,7 @@ import {
 
 import { currentExternalOperationSource } from '../../permissions/external-operation-scope.js';
 import { decisionModelReady, effectivePermissionMode } from '../../gate/presets.js';
+import { decisionModelSettings } from '../../config/decision-model-set.js';
 import type { SandboxEscalationExecution, SandboxEscalationPermit } from '../../tools/exec/sandbox.js';
 import { admitSandboxEscalation } from './autonomous-sandbox-escalation.js';
 import type { AutonomousToolPromptHost } from './autonomous-tool-prompts.js';
@@ -48,10 +49,7 @@ export function buildSandboxEscalationHandler(deps: EscalationWiringDeps): ExecS
 
   const ownerDecides = (): boolean => {
     const config = deps.configManager;
-    return effectivePermissionMode(config.get('permissions.mode'), config.get('behavior.autoApprove') === true, decisionModelReady({
-      policy: config.get('judgment.policy'), endpoint: config.get('judgment.endpoint'), model: config.get('judgment.model'),
-      keySource: config.get('judgment.keySource'), keyName: config.get('judgment.keyName'),
-    })) === 'ask-me';
+    return effectivePermissionMode(config.get('permissions.mode'), config.get('behavior.autoApprove') === true, decisionModelReady(decisionModelSettings(key => config.get(key)))) === 'ask-me';
   };
 
   return async (input, execution) => {

@@ -721,7 +721,7 @@
   consumer that drained updates during downtime and then stopped. Webhook
   identity supplies no durable polling coverage. Expired operator views and
   unavailable decision models cannot turn an unresolved reply into silence.
-  Classic retains potential replies without suppressing ordinary chat.
+  Without a decision model, this retains potential replies without suppressing ordinary chat.
 
 - Retain the exact Telegram account before sending and through reply/expiry
   checks. Missing, pending, retired or replaced sources cannot acquire silence
@@ -1014,8 +1014,8 @@ verification of its published artifacts.
 
 ### Added
 
-- Persisted decision-model policies **Default - On**, **Preferred** and
-  **Classic - Off**, independent of execution permission mode. Classic supports
+- Persisted decision-model policies **Decision Model Only**, **Hybrid** and
+  **No Decision Model**, independent of execution permission mode. Without a decision model, this supports
   ordinary conversation, tools, edits, commands, final answers and session recovery
   without decision-model requests; the Decision Router uses General directly.
 - Native Classic knowledge ingestion/search, explicit review and links, structural
@@ -1027,10 +1027,10 @@ verification of its published artifacts.
 
 ### Changed
 
-- Preferred continues only after actual decision-chain availability exhaustion,
+- Hybrid continues only after actual decision-chain availability exhaustion,
   preserving completed work and history without replaying effects. Refusal,
   malformed responses, privacy rejection, cancellation and stale authority remain terminal.
-- Classic uses owner approval handling for `safe-jev` while retaining explicit YOLO,
+- Without a decision model, this uses owner approval handling for `safe-jev` while retaining explicit YOLO,
   deterministic permissions, workspace/secret boundaries and independent spending rules.
 - Local voice proof distinguishes native ordered-word matches from semantic verdicts;
   persisted diagnostics retain that basis. Native build smoke remains available while

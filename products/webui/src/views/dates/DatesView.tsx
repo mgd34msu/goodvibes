@@ -125,7 +125,7 @@ function sweepSummary(result: OperatorMethodOutput<'occasions.sweep'>): string {
   const delivered = result.deliveries.filter((entry) => entry.delivered);
   const failed = result.deliveries.filter((entry) => !entry.delivered);
   const status = result.hold === 'decision-models-disabled'
-    ? 'Classic ran housekeeping. Automatic nudges and calendar mirroring require decision models.'
+    ? 'Without a decision model, this ran housekeeping. Automatic nudges and calendar mirroring require decision models.'
     : result.hold !== null
     ? `Held: ${result.hold}.`
     : result.delivered
@@ -919,7 +919,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
       {pending.error ? <LoadNote label="Open items" error={pending.error} onRetry={() => void pending.refetch()} /> : null}
       {classic ? (
         <div className="dv-notice dates-note" role="status">
-          Classic lists dates as declared. Subject attribution and reminder text are not assessed. Automatic nudges require decision models.
+          Without a decision model, this lists dates as declared. Subject attribution and reminder text are not assessed. Automatic nudges require decision models.
         </div>
       ) : null}
       {classicOpen.length > 0 ? (

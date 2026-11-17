@@ -221,7 +221,7 @@ export interface CompactionReceipt {
   qualityScore: number;
   /**
    * Letter grade (A–F) derived from the quality score. Empty when no semantic
-   * score was taken (Classic operation does not claim a grade); `detail` then
+   * score was taken (operation without a decision model does not claim a grade); `detail` then
    * says so.
    */
   qualityGrade: string;

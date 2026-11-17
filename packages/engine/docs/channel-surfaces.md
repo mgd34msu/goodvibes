@@ -415,7 +415,7 @@ inventory.
 Each inbox account whose privacy screening is admitted also triages its mail:
 after a poll stores new messages, one model request per batch reads each one as
 spam, priority or normal, on the same model route and under the same retention
-promise as that account's screening. Turning decision models off (Classic) turns
+promise as that account's screening. Turning decision models off (no decision model) turns
 triage off too. The label is stored beside the message in the account's own
 inbox store and shows in `channels.inbox.list` (`triageLabel`, `triageScore`,
 `triageTags`) only while the message's content is the content that was scored

@@ -272,7 +272,7 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
   }
 
   async function checkUnit(run: ContractRun, unit: ContractUnit, trigger: CheckTrigger, given?: string): Promise<void> {
-    requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
+    requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary tools for explicit work');
     const runtime = run.runtime(unit);
     const config = run.env.config();
     // A check asked for after the unit moved on (passed, ended, or taken by correction) has nothing to check.

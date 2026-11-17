@@ -179,7 +179,7 @@ function isExecRequest(request: PermissionPromptRequest): boolean {
  */
 export function createSandboxExecAsk(deps: SandboxExecAskDeps, ask: PermissionRequestHandler): PermissionRequestHandler {
   return async (request, options) => {
-    // Classic keeps actual OS containment but asks the owner instead of semantically inferring host-access needs.
+    // Without a decision model, this keeps actual OS containment but asks the owner instead of semantically inferring host-access needs.
     if (decisionModelPolicyState().operation === 'classic') return ask(request, options);
     if (!isExecRequest(request)) return ask(request, options);
     // The exec runner's own escalation ask comes back through the same raiser; it is the

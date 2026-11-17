@@ -244,7 +244,7 @@ try {
       config.set('controlPlane.webui.serve', true); config.set('controlPlane.webui.bundleDir', bundle);
       config.set('judgment.endpoint', decisionWire.url.origin); config.set('judgment.keySource', 'none');
       config.set('tts.provider', 'elevenlabs'); config.set('tts.voice', 'owned-voice');
-      config.set('judgment.model', 'jev-1.13.0'); config.set('judgment.policy', 'Default - On');
+      config.set('judgment.model', 'jev-1.13.0'); config.set('judgment.policy', 'Decision Model Only');
       config.set('provider.decisionRouter', { ...DEFAULT_DECISION_ROUTER_SETTINGS, initialContextChars: 512, expandedContextChars: 1024,
         categories: { ...DEFAULT_DECISION_ROUTER_SETTINGS.categories,
           general: { ...DEFAULT_DECISION_ROUTER_SETTINGS.categories.general, target: { provider: 'synthetic-wire', model: 'gpt-6.1-sol', effort: 'xhigh' } },
@@ -283,7 +283,7 @@ try {
     await installFakeAudio(page);
     try {
       await signIn(page, host.token);
-      await policy(page, 'Default - On');
+      await policy(page, 'Decision Model Only');
       await select(page, 'synthetic-wire', 'gpt-6.1-sol');
       const startAnswers = answers.length, startJudgments = judgments.length;
       const history = `QUAL_FULL_HISTORY_${viewport.name}_BEGIN ` + 'owned synthetic context '.repeat(600) + ` QUAL_FULL_HISTORY_${viewport.name}_END`;
@@ -316,14 +316,14 @@ try {
       await send(page, `QUAL_RESEARCH_${viewport.name}: Find the requested primary sources.`, startAnswers + 4);
       assert.equal(judgments.length, startJudgments + 2); assert.equal(answers.at(-1)?.model, 'gpt-6.1-sol');
       assert.equal(answers.at(-1)?.reasoning_effort, 'xhigh');
-      await policy(page, 'Preferred'); await policy(page, 'Classic - Off');
+      await policy(page, 'Hybrid'); await policy(page, 'No Decision Model');
       const beforeClassic = judgments.length;
       await page.goto(`${host.baseUrl}/?view=chat&session=${encodeURIComponent(sessionId)}`);
       await send(page, `QUAL_CLASSIC_${viewport.name}: Continue the same authorized conversation.`, startAnswers + 5);
       assert.equal(judgments.length, beforeClassic); assert.equal(answers.at(-1)?.model, 'gpt-6.1-sol');
-      assert.equal(host.services.configManager.get('judgment.policy'), 'Classic - Off');
+      assert.equal(host.services.configManager.get('judgment.policy'), 'No Decision Model');
       // Reload the original persisted reply under DefaultOn.
-      await policy(page, 'Default - On');
+      await policy(page, 'Decision Model Only');
       await page.goto(`${host.baseUrl}/?view=chat&session=${encodeURIComponent(sessionId)}`);
       const savedMessages = await host.fetch(`/api/companion/chat/sessions/${sessionId}/messages`).then(response => response.json()) as { messages: { id: string; role: string; content: string; contentRevision: string }[] };
       const saved = savedMessages.messages.filter(message => message.role === 'assistant').at(-1); assert.ok(saved?.contentRevision);

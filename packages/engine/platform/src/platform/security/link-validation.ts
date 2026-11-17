@@ -181,7 +181,7 @@ export function checkLinkTarget(rawUrl: string, authorizedDomain: string): LinkV
  * whether the admitted domain is a lookalike or a link shortener. Call it once
  * where the domain enters (a purchase's checkout url); later checks of the
  * same action use `checkLinkTarget` against the admitted registrable domain.
- * Classic accepts the code match with explicit Classic provenance.
+ * Without a decision model, this accepts the code match with explicit Classic provenance.
  */
 export async function validateLinkTarget(rawUrl: string, authorizedDomain: string, signal?: AbortSignal): Promise<LinkValidation> {
   signal?.throwIfAborted();

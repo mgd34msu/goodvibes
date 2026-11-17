@@ -1,48 +1,6 @@
-import type { Outcome } from '@goodvibes-jev/judgment';
-
-/** Server reader results. Non-ready results deliberately contain no selected value. */
-export type WebuiReadResult<T> =
-  | { readonly status: 'ready'; readonly value: T; readonly basis: 'structured' | 'judgment'; readonly decisionIds?: readonly string[] }
-  | { readonly status: 'uncertain'; readonly reason: 'unsettled' | 'conflicting-evidence'; readonly outcome: Exclude<Outcome, 'act'> }
-  | { readonly status: 'held'; readonly reason: 'private-input' | 'unsafe-input' | 'unsupported-input' | 'budget' }
-  | { readonly status: 'unavailable'; readonly reason: 'unconfigured' | 'offline' | 'timeout' | 'aborted' | 'stale' | 'invalid-response' | 'internal' };
-
-
-export const WEBUI_READER_LIMITS = Object.freeze({
-  statusChars: 256, queryChars: 256,
-  candidateCount: 64, titleChars: 256, groupChars: 128,
-  keywordCount: 16, keywordChars: 64, concurrency: 4,
-});
-
+/** Status tone vocabularies; the tone is always read from the status catalog, never by a model. */
 export const BADGE_TONES = ['ok', 'warning', 'bad', 'neutral'] as const;
 export const LIBRARY_DOT_TONES = ['ok', 'warn', 'bad', 'info', 'idle'] as const;
 export type StatusValue =
   | { readonly vocabulary: 'badge'; readonly tone: typeof BADGE_TONES[number] }
   | { readonly vocabulary: 'library-dot'; readonly tone: typeof LIBRARY_DOT_TONES[number] };
-export const STATUS_DOMAINS = ['provider-auth', 'session', 'knowledge-job', 'candidate', 'account-auth'] as const;
-export type StatusDomain = typeof STATUS_DOMAINS[number];
-
-/**
- * `structured` is produced only by an authoritative catalog/closed-enum adapter.
- * It is not a browser-provided tone, permission, or privacy clearance.
- */
-export type ResolvedStatus =
-  | ({ readonly kind: 'structured' } & StatusValue)
-  | { readonly kind: 'text'; readonly vocabulary: StatusValue['vocabulary']; readonly status: string; readonly domain: StatusDomain };
-
-/** Descriptors only: identities remain in the authenticated resolver's index map. */
-export interface ResolvedCommandCandidate {
-  readonly title: string;
-  readonly group?: string;
-  readonly keywords?: readonly string[];
-}
-export interface ResolvedCommandRank {
-  readonly query: string;
-  readonly registryVersion: string;
-  readonly candidates: readonly ResolvedCommandCandidate[];
-}
-export interface CommandRankValue {
-  readonly registryVersion: string;
-  readonly accepted: readonly { readonly candidateIndex: number; readonly probability: number }[];
-  readonly rejected: readonly number[];
-}

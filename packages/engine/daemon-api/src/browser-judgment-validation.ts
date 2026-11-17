@@ -67,43 +67,20 @@ export function parseBrowserJudgmentRequest(value: unknown): BrowserJudgmentRequ
   if (!(BROWSER_JUDGMENT_BATTERY_IDS as readonly string[]).includes(battery)) throw new BrowserJudgmentError('JUDGMENT_BATTERY_UNKNOWN');
   if (!Number.isInteger(request.batteryVersion) || Number(request.batteryVersion) < 1) return invalid();
   if (request.batteryVersion !== BROWSER_JUDGMENT_BATTERY_VERSIONS[battery as BrowserJudgmentBatteryId]) throw new BrowserJudgmentError('JUDGMENT_BATTERY_VERSION_UNSUPPORTED');
-  if (battery === 'webui.code.language' || battery === 'webui.voice.speech-seams') {
-    const input = judgmentRecord(request.input, ['sessionId', 'messageId', 'start', 'end', 'contentRevision', ...(battery === 'webui.voice.speech-seams' ? ['cursor'] : [])]);
-    if (battery === 'webui.voice.speech-seams' && (typeof input.cursor !== 'number' || !Number.isInteger(input.cursor) || input.cursor < 0 || input.cursor >= 4096 || input.cursor % 64 !== 0)) return invalid();
+  if (battery === 'webui.voice.speech-seams') {
+    const input = judgmentRecord(request.input, ['sessionId', 'messageId', 'start', 'end', 'contentRevision', 'cursor']);
+    if (typeof input.cursor !== 'number' || !Number.isInteger(input.cursor) || input.cursor < 0 || input.cursor >= 4096 || input.cursor % 64 !== 0) return invalid();
     judgmentText(input.sessionId); judgmentText(input.messageId);
     judgmentText(input.contentRevision);
     if (typeof input.start !== 'number' || !Number.isInteger(input.start) || input.start < 0
       || typeof input.end !== 'number' || !Number.isInteger(input.end) || input.end <= input.start || input.end > 1_000_000) return invalid();
-  } else if ((battery === 'webui.config.credential-key' || battery === 'webui.settings.card-material-key')) {
-    const input = judgmentRecord(request.input, ['keys']);
-    if (!Array.isArray(input.keys) || input.keys.length < 1 || input.keys.length > 64) return invalid();
-    const seen = new Set<string>();
-    for (const key of input.keys) { const name = judgmentText(key, 256); if (seen.has(name)) return invalid(); seen.add(name); }
-  } else if ((battery === 'webui.credentials.provider-key' || battery === 'webui.models.catalog-provider-match')) {
+  } else if (battery === 'webui.models.catalog-provider-match') {
     const input = judgmentRecord(request.input, ['providerId', 'keys']); judgmentText(input.providerId, 128);
     if (!Array.isArray(input.keys) || input.keys.length < 1 || input.keys.length > 64) return invalid();
     const seen = new Set<string>();
     for (const key of input.keys) { const name = judgmentText(key, 256); if (seen.has(name)) return invalid(); seen.add(name); }
-  } else if (battery === 'webui.palette.command-rank') {
-    const input = judgmentRecord(request.input, ['query', 'registryVersion', 'candidates']);
-    judgmentText(input.registryVersion);
-    const query = input.query as Record<string, unknown> | null;
-    if (query?.kind === 'inline') judgmentText(judgmentRecord(query, ['kind', 'text']).text, LIMIT.queryChars);
-    else if (query?.kind === 'reference') judgmentText(judgmentRecord(query, ['kind', 'queryRef']).queryRef);
-    else return invalid();
-    if (!Array.isArray(input.candidates) || input.candidates.length < 1) return invalid();
-    if (input.candidates.length > LIMIT.candidates) return large();
-    const ids = new Set<string>();
-    for (const item of input.candidates) {
-      const candidate = item as Record<string, unknown> | null;
-      let id: string;
-      if (candidate?.kind === 'builtin') id = `builtin:${judgmentText(judgmentRecord(candidate, ['kind', 'commandId']).commandId)}`;
-      else if (candidate?.kind === 'chat') id = `chat:${judgmentText(judgmentRecord(candidate, ['kind', 'sessionId']).sessionId)}`;
-      else return invalid();
-      if (ids.has(id)) return invalid(); ids.add(id);
-    }
   } else {
-    // A battery id added to the list without a branch above must be refused, not read as a palette request.
+    // A battery id added to the list without a branch above must be refused, not read as another battery's request.
     throw new BrowserJudgmentError('JUDGMENT_BATTERY_UNKNOWN');
   }
   return request as unknown as BrowserJudgmentRequest;

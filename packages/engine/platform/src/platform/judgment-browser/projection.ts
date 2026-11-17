@@ -1,8 +1,8 @@
 import { snapshotSpeechSeams } from './speech-source.js';
 import type { Reading } from '@goodvibes-jev/judgment/decisions';
-import { checkAnswers, readYesNo } from '@goodvibes-jev/judgment';
+import { readYesNo } from '@goodvibes-jev/judgment';
 import {
-  BrowserJudgmentError, BROWSER_SPEECH_SEAM_BAND, judgmentRecord, WEBUI_CODE_LANGUAGES, type BrowserJudgmentRequest,
+  BrowserJudgmentError, BROWSER_SPEECH_SEAM_BAND, judgmentRecord, type BrowserJudgmentRequest,
 } from '@goodvibes-jev/engine/daemon-api';
 import type { BrowserJudgmentProjection } from './types.js';
 
@@ -13,14 +13,7 @@ function validateReading(reading: Reading): void {
   if (reading.kind === 'yes-no') {
     judgmentRecord(reading, ['kind', 'probability', 'verdict', 'outcome']);
     if (!probability(reading.probability) || !['yes', 'no', 'uncertain'].includes(reading.verdict)) return invalid();
-  } else if (reading.kind === 'choice') {
-    judgmentRecord(reading, ['kind', 'choice', 'confidence', 'probabilities', 'outcome']);
-    if (!probability(reading.confidence) || !Object.hasOwn(reading.probabilities, reading.choice)
-      || !Object.values(reading.probabilities).every(probability)) return invalid();
-    checkAnswers({ choice: { type: 'choice', instructions: 'Closed result validation',
-      criteria: Object.fromEntries(Object.keys(reading.probabilities).map((key) => [key, null])) } },
-    { choice: { type: 'choice', choice: reading.choice, confidence: reading.confidence, probabilities: reading.probabilities } });
-  } else return invalid(); // First browser readers expose no score rubric.
+  } else return invalid(); // Every browser battery reads yes-no items; no choice or score rubric.
 }
 
 /** Reject malformed values and refuse executable values backed by unsettled readings. */
@@ -42,18 +35,10 @@ export function validateBrowserJudgmentProjection(request: BrowserJudgmentReques
         const expected = readYesNo({ type: 'noul', noul: reading.probability }, BROWSER_SPEECH_SEAM_BAND);
         return reading.verdict !== expected.verdict || reading.outcome !== expected.outcome;
       })) return invalid();
-    } else if (request.battery === 'webui.code.language') {
-      judgmentRecord(result.readings, ['language']);
-      const reading = result.readings.language;
-      if (reading?.kind !== 'choice' || !(WEBUI_CODE_LANGUAGES as readonly string[]).includes(reading.choice)) return invalid();
-      judgmentRecord(reading.probabilities, WEBUI_CODE_LANGUAGES);
-    } else if ((request.battery === 'webui.models.catalog-provider-match' || request.battery === 'webui.credentials.provider-key' || request.battery === 'webui.config.credential-key' || request.battery === 'webui.settings.card-material-key')) {
+    } else if (request.battery === 'webui.models.catalog-provider-match') {
       judgmentRecord(result.readings, request.input.keys.map((_, index) => `key_${index}`));
       if (readings.some(reading => reading.kind !== 'yes-no')) return invalid();
-    } else {
-      judgmentRecord(result.readings, request.input.candidates.map((_, index) => `candidate_${index}`));
-      if (readings.some((reading) => reading.kind !== 'yes-no')) return invalid();
-    }
+    } else return invalid();
     if (result.status === 'held') {
       if (result.reason !== 'uncertain' || (!hasCompound && readings.every((reading) => reading.outcome === 'act'))) return invalid();
       return;
@@ -63,39 +48,13 @@ export function validateBrowserJudgmentProjection(request: BrowserJudgmentReques
       const source = snapshotSpeechSeams(state); const value = judgmentRecord(result.value, ['endOffsets', 'nextCursor']);
       const expected = source.candidates.filter((_, i) => { const r = result.readings[`seam_${i}`]; return r?.kind === 'yes-no' && r.verdict === 'yes'; });
       if (value.nextCursor !== source.nextCursor || !Array.isArray(value.endOffsets) || JSON.stringify(value.endOffsets) !== JSON.stringify(expected)) return invalid();
-    } else if (request.battery === 'webui.code.language') {
-      const value = judgmentRecord(result.value, ['language']);
-      if (readings[0]?.kind !== 'choice' || value.language !== readings[0].choice) return invalid();
-    } else if ((request.battery === 'webui.models.catalog-provider-match' || request.battery === 'webui.credentials.provider-key' || request.battery === 'webui.config.credential-key' || request.battery === 'webui.settings.card-material-key')) {
+    } else if (request.battery === 'webui.models.catalog-provider-match') {
       const value = judgmentRecord(result.value, ['matches']);
       if (!Array.isArray(value.matches) || value.matches.length !== request.input.keys.length) return invalid();
       value.matches.forEach((match, index) => {
         const reading = result.readings[`key_${index}`];
         if (typeof match !== 'boolean' || reading?.kind !== 'yes-no' || match !== (reading.verdict === 'yes')) return invalid();
       });
-    } else {
-      const value = judgmentRecord(result.value, ['registryVersion', 'accepted', 'rejected']);
-      if (value.registryVersion !== request.input.registryVersion || !Array.isArray(value.accepted) || !Array.isArray(value.rejected)) return invalid();
-      const seen = new Set<number>(); const count = request.input.candidates.length;
-      const add = (index: unknown): number => {
-        if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= count || seen.has(index)) return invalid();
-        seen.add(index); return index;
-      };
-      let previous = 2; let previousIndex = -1;
-      for (const item of value.accepted) {
-        const accepted = judgmentRecord(item, ['candidateIndex', 'probability']);
-        const index = add(accepted.candidateIndex); const p = accepted.probability;
-        if (!probability(p) || p > previous || (p === previous && index < previousIndex)) return invalid();
-        const reading = result.readings[`candidate_${index}`];
-        if (reading?.kind !== 'yes-no' || reading.verdict !== 'yes' || reading.probability !== p) return invalid();
-        previous = p; previousIndex = index;
-      }
-      for (const item of value.rejected) {
-        const index = add(item);
-        const reading = result.readings[`candidate_${index}`];
-        if (reading?.kind !== 'yes-no' || reading.verdict !== 'no') return invalid();
-      }
-      if (seen.size !== count) return invalid();
-    }
+    } else return invalid();
   } catch { return invalid(); }
 }

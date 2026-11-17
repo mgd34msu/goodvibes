@@ -1,4 +1,3 @@
-import type { WebuiCodeLanguage } from './browser-code-languages.js';
 /** Closed browser judgment protocol. No prompt, model, route, or credential input. */
 export const BROWSER_JUDGMENT_PROTOCOL_VERSION = 1;
 /** Version-one speech-seam evidence band, shared by the reader and wire validators. */
@@ -7,44 +6,29 @@ export const BROWSER_SPEECH_SEAM_BAND = Object.freeze({
   no: Object.freeze({ actAt: 0.6, confirmAt: 0.55 }),
 });
 export const BROWSER_JUDGMENT_PATH = '/api/judgment/batteries/run';
+/**
+ * The batteries a browser may run. The command palette, code-block language,
+ * settings key classification and credential-to-provider highlight are decided
+ * in the browser by code; a request naming one of their former ids is refused
+ * with JUDGMENT_BATTERY_UNKNOWN.
+ */
 export const BROWSER_JUDGMENT_BATTERY_IDS = [
-  'webui.voice.speech-seams', 'webui.palette.command-rank', 'webui.credentials.provider-key', 'webui.code.language', 'webui.config.credential-key', 'webui.settings.card-material-key', 'webui.models.catalog-provider-match',
+  'webui.voice.speech-seams', 'webui.models.catalog-provider-match',
 ] as const;
 export type BrowserJudgmentBatteryId = typeof BROWSER_JUDGMENT_BATTERY_IDS[number];
 /** Wire binding versions; source-owned message revisions replace digest inputs in v2. */
 export const BROWSER_JUDGMENT_BATTERY_VERSIONS = Object.freeze({
-  'webui.voice.speech-seams': 2, 'webui.code.language': 2,
-  'webui.palette.command-rank': 1,
-  'webui.credentials.provider-key': 1,
-  'webui.config.credential-key': 1, 'webui.settings.card-material-key': 1,
+  'webui.voice.speech-seams': 2,
   'webui.models.catalog-provider-match': 1,
 } as const satisfies Readonly<Record<BrowserJudgmentBatteryId, number>>);
 export type BrowserJudgmentBatteryVersion<K extends BrowserJudgmentBatteryId = BrowserJudgmentBatteryId> = typeof BROWSER_JUDGMENT_BATTERY_VERSIONS[K];
 export interface BrowserJudgmentInputMap {
   'webui.models.catalog-provider-match': { readonly providerId: string; readonly keys: readonly string[] };
   'webui.voice.speech-seams': { readonly sessionId: string; readonly messageId: string; readonly start: number; readonly end: number; readonly contentRevision: string; readonly cursor: number };
-  'webui.settings.card-material-key': { readonly keys: readonly string[] };
-  'webui.config.credential-key': { readonly keys: readonly string[] };
-  'webui.code.language': { readonly sessionId: string; readonly messageId: string; readonly start: number; readonly end: number; readonly contentRevision: string };
-  'webui.credentials.provider-key': { readonly providerId: string; readonly keys: readonly string[] };
-  'webui.palette.command-rank': {
-    readonly query: { readonly kind: 'inline'; readonly text: string } | { readonly kind: 'reference'; readonly queryRef: string };
-    readonly registryVersion: string;
-    readonly candidates: readonly ({ readonly kind: 'builtin'; readonly commandId: string } | { readonly kind: 'chat'; readonly sessionId: string })[];
-  };
 }
 export interface BrowserJudgmentValueMap {
   'webui.models.catalog-provider-match': { readonly matches: readonly boolean[] };
-  'webui.settings.card-material-key': { readonly matches: readonly boolean[] };
   'webui.voice.speech-seams': { readonly endOffsets: readonly number[]; readonly nextCursor: number | null };
-  'webui.config.credential-key': { readonly matches: readonly boolean[] };
-  'webui.code.language': { readonly language: WebuiCodeLanguage };
-  'webui.credentials.provider-key': { readonly matches: readonly boolean[] };
-  'webui.palette.command-rank': {
-    readonly registryVersion: string;
-    readonly accepted: readonly { readonly candidateIndex: number; readonly probability: number }[];
-    readonly rejected: readonly number[];
-  };
 }
 export type BrowserJudgmentRequest<K extends BrowserJudgmentBatteryId = BrowserJudgmentBatteryId> = K extends BrowserJudgmentBatteryId ? {
   readonly protocolVersion: 1; readonly requestId: string; readonly battery: K; readonly batteryVersion: BrowserJudgmentBatteryVersion<K>;
@@ -54,7 +38,7 @@ export type BrowserJudgmentRequest<K extends BrowserJudgmentBatteryId = BrowserJ
 /** Operational budgets, never meaning/confidence thresholds. */
 export const BROWSER_JUDGMENT_LIMITS = Object.freeze({
   bodyBytes: 64 * 1024, bodyMs: 5_000, depth: 16, nodes: 4_096, textChars: 32_768,
-  arrayItems: 128, candidates: 64, queryChars: 256, referenceChars: 256,
+  arrayItems: 128, referenceChars: 256,
   closeMs: 5_000, principalRuns: 4, totalRuns: 16, callsPerRun: 64,
 });
 

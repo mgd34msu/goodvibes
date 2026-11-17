@@ -6,13 +6,13 @@ These are server-only definitions and readers for the browser judgment registrat
 
 A daemon refusal is not read by a model. Every refusal the web UI acts on (a missing, closed, still active or non-local session, an unknown method) carries its machine `code`, so the web UI decides from the code and shows the daemon's own wording. There is no refusal battery: the id is not part of the wire contract or the operator contract, and a request naming it is refused with `JUDGMENT_BATTERY_UNKNOWN`.
 
-The web UI command palette, code-block language, settings key classification and credential-to-provider highlight are decided in the browser by code (the palette's lexical matcher, the bundled highlighter's own detection, the engine's declared config key facts, the provider catalog and the provider's own sign-in routes); none of them asks a model. `webui-status-catalog.ts` contains exhaustive structural tone mappings for the current companion-session, knowledge-job, knowledge-refinement and provider-account auth enum types. `readWebuiStatusCatalog()` is caller-side; unknown labels stay unsupported. Status tone is always read from this table; no model is asked for it. The public `judgment-browser/catalogs` entrypoint re-exports only these pure catalogs, the declared-fact rules below and erased types. Its browser graph includes no provider, source resolver, log or SQLite implementation.
+The web UI command palette, code-block language, settings key classification and credential-to-provider highlight are decided in the browser by code (the palette's lexical matcher, the bundled highlighter's own detection, the engine's declared config key facts, the provider catalog and the provider's own sign-in routes); none of them asks a model, and their former battery ids (`webui.palette.command-rank`, `webui.code.language`, `webui.config.credential-key`, `webui.settings.card-material-key`, `webui.credentials.provider-key`) are not in the wire or operator contract: a request naming one is refused with `JUDGMENT_BATTERY_UNKNOWN`. The only browser batteries are `webui.voice.speech-seams` and `webui.models.catalog-provider-match`. `webui-status-catalog.ts` contains exhaustive structural tone mappings for the current companion-session, knowledge-job, knowledge-refinement and provider-account auth enum types. `readWebuiStatusCatalog()` is caller-side; unknown labels stay unsupported. Status tone is always read from this table; no model is asked for it. The public `judgment-browser/catalogs` entrypoint re-exports only these pure catalogs, the declared-fact rules below and erased types. Its browser graph includes no provider, source resolver, log or SQLite implementation.
 
 The adapters return the actual framework readings on both settled and held projections. An item outcome is never weakened to make a compound usable, and held projections contain no business `value`. The service consumes a held projection's `compoundOutcome` as a minimum for the wire `outcome`; it does not emit a second outcome field.
 
-`webui-specs.ts` exports the WebUI batteries and `WEBUI_BATTERY_QUESTIONS`. Questions, item names, criteria and decision sites are fixed. Fixtures are synthetic calibration inputs; offline replay verifies the harness, not real-model calibration or accuracy.
+`webui-specs.ts` exports the provider-catalog battery and `WEBUI_BATTERY_QUESTIONS`; `speech-seams.ts` holds the speech-seam battery. Questions, item names, criteria and decision sites are fixed. Fixtures are synthetic calibration inputs; offline replay verifies the harness, not real-model calibration or accuracy.
 
-`webui-readers.ts` exports the `snapshotWebui*` functions that screen and capture each complete source before any port or log use. The reading itself runs through the adapters in `webui-adapters.ts`, which the service drives; an unsettled result preserves `confirm` versus `escalate`, including in a compound ranking, and typed per-item evidence is attached by the foundation to the admitted decision log.
+`webui-readers.ts` exports `snapshotWebuiCredentialNames`, which screens and captures the complete provider-catalog source before any port or log use. The reading itself runs through the adapters, which the service drives; an unsettled result preserves `confirm` versus `escalate`, and typed per-item evidence is attached by the foundation to the admitted decision log.
 
 ## Facts the program declares are never read
 
@@ -22,12 +22,6 @@ Code answers these at once, in the browser and in the adapters, from the same de
 - Code grammar: `readFenceTagLanguage(tag)` (`code-fence-language.ts`) maps a fence tag or its highlighter alias to a grammar.
 - Provider credential names: a built-in provider (`isDeclaredCredentialProvider`) declares every name it reads (`readDeclaredProviderCredential`).
 - Status tone: `readWebuiStatusCatalog()`; there is no status battery.
-
-## Resolved server projections
-
-The exact types are in `webui-types.ts`. They are **not browser request schemas**.
-
-- Refusal: `{ methodId, message, status?, code?, category?: 'network' | 'authentication' }`. The selected original failure message must retain complete context. Omit stack, body payloads, headers, URLs and unrelated data
 
 ## Before provider and logging
 
@@ -39,8 +33,6 @@ The foundation recording wrapper stores an unsalted state hash. This helper does
 
 ## Budgets and cancellation
 
-Errors use at most one logical call and select all unresolved eligible items together; `method_unknown` requires HTTP 404 even with `METHOD_NOT_FOUND`.
-
 Abort prevents new calls and late results cannot produce a ready result. Active cancellation depends on the injected port honoring the signal. The service owns admission/fan-out bounds, provider cancellation and request echo validation. It checks the source (`assertCurrent()`), the route and the host policy once at admission and once at commit; between them source revocation, route revocation and request cancellation abort the run through their signals, and each transmission and retention step checks only that signal and the caller's identity. The shared port owns transient-availability retry/backoff with no total outage cutoff.
 
-Known status consumers use catalog IDs; unsupported text is visibly unclassified and makes no provider request. Error interpretation now awaits real server-issued references at the asynchronous HTTP caller boundary. The default daemon owner binds the closed source purposes to its configured Jev route and existing decision-log metadata policy. Actual daemon tests use synthetic loopback inference; they do not establish live-provider calibration.
+Known status consumers use catalog IDs; unsupported text is visibly unclassified and makes no provider request. The default daemon owner binds the closed source purposes to its configured Jev route and existing decision-log metadata policy. Actual daemon tests use synthetic loopback inference; they do not establish live-provider calibration.

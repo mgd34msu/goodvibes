@@ -6,7 +6,6 @@ import { DELIVERABLE_JUDGES } from './batteries/deliverable-judge.js';
 import { FINAL_ANSWER_REVIEWS } from './batteries/final-answer-review.js';
 import { GOAL_OBLIGATIONS } from './batteries/goal-obligations.js';
 import { ORIGINAL_OBLIGATION_COVERAGE } from './batteries/original-obligation-coverage.js';
-import { escalationTurn } from './batteries/escalation-turn.js';
 import { GROUP_JUDGES } from './batteries/group-judge.js';
 import { ownerPick } from './batteries/owner-pick.js';
 import { ownerReply } from './batteries/owner-reply.js';
@@ -28,7 +27,6 @@ export const registry = new BatteryRegistry();
 
 // Intake (section 10.3).
 registry.register(requestRoute);
-registry.register(escalationTurn);
 registry.register(nativeIntakeCoverage);
 
 // Planning (section 3).

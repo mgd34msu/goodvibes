@@ -96,6 +96,7 @@ import { applyAtModelSwitches } from './input/at-model-switch.ts';
 import { createCommandContextUi } from './shell/command-context-ui.ts';
 import { createTerminalPaintWindow } from './shell/terminal-paint-window.ts';
 import { createSessionContractViews, wireWorkTree } from './core/work-tree-wiring.ts';
+import { createContractQuestionComposer } from '@goodvibes-jev/engine/terminal-shell/contract-question-composer';
 import { SessionViews } from './shell/session-views.ts';
 import { proposesSpeechToText, runWakeSetupPlan, wakeSetupRunning } from './core/wake-setup-plan.ts';
 
@@ -307,6 +308,8 @@ async function main(prepared: PreparedShellCliRuntime) {
   // One cached contract snapshot for the session (no manifest), rebuilt on a contract event: every per-frame lookup reads it.
   const sessionContractViews = createSessionContractViews(ctx.services.contractRunner, () => runtime.sessionId,
     (listener) => ctx.services.runtimeBus.onDomain('contracts', listener));
+  // A contract's open question: offered above the composer, answered by the next typed message unless dismissed (Alt+X).
+  const contractQuestions = createContractQuestionComposer(() => sessionContractViews.read());
   // Agents and background processes opened full screen: Enter on a lane or ▶ bead, the Activity modal, the process monitor (shell/session-views.ts).
   const sessionViews = new SessionViews({
     conversation,
@@ -670,7 +673,9 @@ async function main(prepared: PreparedShellCliRuntime) {
       processedText = capture.text;
     }
     // Model directives and the memory markers are the composer's own grammar; what remains is what the user sent.
-    sendTurn(processedText, options);
+    // A typed message answers the contract question on offer, unless it was dismissed.
+    const answer: { readonly answersContractQuestion?: string } = options.spokenOutput ? {} : contractQuestions.answerOptions();
+    sendTurn(processedText, options, answer.answersContractQuestion ? answer : undefined);
   };
 
   /**
@@ -1122,6 +1127,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       composerFlags: composerState.flags,
       composerPendingRisk: composerState.pendingRisk,
       voiceCapture: voiceCaptureStatus(),
+      contractQuestionHint: contractQuestions.hint(),
       throbber,
       turnRunning: mainTurnBusy(),
       backToBottom,
@@ -1336,6 +1342,11 @@ async function main(prepared: PreparedShellCliRuntime) {
     });
     ({ pendingPermission, recoveryPending } = blocking);
     if (blocking.handled) {
+      render();
+      return;
+    }
+    // Alt+X sends the next message as an ordinary one instead of the answer to a contract's question.
+    if (contractQuestions.handleChord(data)) {
       render();
       return;
     }

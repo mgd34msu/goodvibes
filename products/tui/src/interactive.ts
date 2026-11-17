@@ -43,6 +43,7 @@ import './input/command-registry.ts';
 
 import { requestedEffortLevel } from './providers/reasoning-effort-surface.ts';
 import { createSessionContractViews, wireWorkTree } from './core/work-tree-wiring.ts';
+import { createContractQuestionComposer } from '@goodvibes-jev/engine/terminal-shell/contract-question-composer';
 import './input/commands.ts';
 import '@goodvibes-jev/engine/platform/platform/tools';
 import './input/input-history.ts';
@@ -365,6 +366,8 @@ async function main(prepared: PreparedShellCliRuntime) {
   const fleetNodes = (): FleetNodes => currentFleet;
   const sessionContractViews = createSessionContractViews(ctx.services.contractRunner, () => runtime.sessionId);
   unsubs.push(sessionContractViews.dispose);
+  // A contract's open question: offered above the composer, answered by the next typed message unless dismissed (Alt+X).
+  const contractQuestions = createContractQuestionComposer(() => sessionContractViews.read());
   // The work tree's live facts: call/turn timings, agent lanes, the call a permission prompt holds, fold persistence (work-tree-wiring.ts).
   const workTreeWiring = wireWorkTree({
     conversation,
@@ -577,8 +580,11 @@ async function main(prepared: PreparedShellCliRuntime) {
       notify: (message) => systemMessageRouter.high(message),
     });
     if (shouldSendAfterCapture(capture, Boolean(content))) {
+      // A typed message answers the contract question on offer, unless it was dismissed.
+      const answer: { readonly answersContractQuestion?: string } = options.spokenOutput ? {} : contractQuestions.answerOptions();
+      const inputOptions = options.spokenOutput ? createSpokenTurnInputOptions() : answer.answersContractQuestion ? answer : undefined;
       // The output of `!` commands run since the last message goes with this one.
-      sendOwnerTurn(shellPassthrough.consumeContext(capture.text), content, options.spokenOutput ? createSpokenTurnInputOptions() : undefined);
+      sendOwnerTurn(shellPassthrough.consumeContext(capture.text), content, inputOptions);
     } else {
       render();
     }
@@ -1077,6 +1083,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       contextStatusHint,
       submissionStatus,
       retryHint: actionHint(actionOffers),
+      contractQuestionHint: contractQuestions.hint(),
       scriptableStatusLine: scriptableStatusline.current(),
       // behavior.autoCompactThreshold is stored as a percent integer (e.g. 80);
       // the bar expects a fraction [0..1]. Clamp to [0,1] to guard nonsense values.
@@ -1527,6 +1534,11 @@ async function main(prepared: PreparedShellCliRuntime) {
     pendingPermission = blocking.pendingPermission;
     localCards.next();
     if (blocking.handled) {
+      return;
+    }
+    // Alt+X sends the next message as an ordinary one instead of the answer to a contract's question.
+    if (contractQuestions.handleChord(data)) {
+      render();
       return;
     }
     // Alt+R retries a failed turn, Alt+J opens a started fix session; plain

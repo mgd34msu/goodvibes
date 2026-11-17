@@ -830,8 +830,9 @@ export class HostedSessionManager {
    * `sessions.followUp` reach, and the one `create`'s initial prompt uses.
    * `operatorInput` marks input an authenticated operator sent; it starts the
    * session's next untrusted-content turn (session-runtime.ts).
+   * `answersContractQuestion` sends it as the answer to that open contract question.
    */
-  async deliver(sessionId: string, text: string, correlationId?: string, delivery?: { readonly operatorInput?: boolean | undefined }): Promise<void> {
+  async deliver(sessionId: string, text: string, correlationId?: string, delivery?: { readonly operatorInput?: boolean | undefined; readonly answersContractQuestion?: string | undefined }): Promise<void> {
     const live = this.requireLive(sessionId);
     await this.ensureComposed(live);
     this.assertSessionUsable(live);

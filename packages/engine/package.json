@@ -2062,6 +2062,11 @@
       "types": "./terminal-shell/dist/work-tree-wiring.d.ts",
       "import": "./terminal-shell/dist/work-tree-wiring.js"
     },
+    "./terminal-shell/contract-question-composer": {
+      "bun": "./terminal-shell/src/contract-question-composer.ts",
+      "types": "./terminal-shell/dist/contract-question-composer.d.ts",
+      "import": "./terminal-shell/dist/contract-question-composer.js"
+    },
     "./terminal-shell/context-inspector": {
       "bun": "./terminal-shell/src/renderer/context-inspector.ts",
       "types": "./terminal-shell/dist/renderer/context-inspector.d.ts",

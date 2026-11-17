@@ -73,7 +73,7 @@ export function readingsPort(options: { readonly gate?: GateReadingTable; readon
       const battery = request.context?.battery;
       if (request.context?.site === 'engine.gate.autonomous-tool') return admission.port.ask(request);
       if (battery === 'engine.core.completion-applicability') return applicability.port.ask(request);
-      if (battery === 'engine.core.turn-shape' || battery === 'engine.core.execution-strategy') return core.port.ask(request);
+      if (battery === 'engine.core.execution-strategy') return core.port.ask(request);
       if (['engine.core.response-completion', 'engine.core.execution-assurance', 'engine.core.delegation-consolidation', 'engine.agents.brief-fidelity'].includes(battery ?? '')) return completion.port.ask(request);
       if (['engine.compaction.retention', 'engine.compaction.fidelity'].includes(battery ?? '')) return compaction.port.ask(request);
       if (battery === 'contract.request-route') return intake.port.ask(request);

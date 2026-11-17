@@ -245,8 +245,13 @@ contract settles; a daemon that hosts no sessions refuses it with
 instead. A dispatch's `idempotencyKey` is scoped to the caller and kept until
 the contract settles. A hosted session lists the contracts it started
 on its record (`contractIds`), says each contract's question for its owner
-and its outcome in its conversation, and sends its next turn to an open
-question. The external work seam (`ContractExternalWorkAdapter`: `dispatch`,
+and its outcome in its conversation. An operator's message whose `metadata`
+carries `answersContractQuestion` (the open escalation id) goes to that
+contract as the owner's answer, with no model request to decide it; any other
+message is an ordinary turn. In both terminal apps the open question shows
+above the composer and the next typed message is its answer, unless Alt+X
+sends it as an ordinary message (`terminal-shell/contract-question-composer.ts`).
+`contracts.reply` answers a question directly. The external work seam (`ContractExternalWorkAdapter`: `dispatch`,
 `status`, `cancel`, `result`) maps a contract to a snapshot and a result the
 same way in both adapters (`contract-work.ts` in the contracts package).
 

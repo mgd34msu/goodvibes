@@ -184,8 +184,10 @@ export interface HostedSessionRuntime {
    * an unanswered message as consumed. `operatorInput` says an authenticated
    * operator sent it (not a channel, schedule or other automation), which is
    * what starts a new untrusted-content turn for this session.
+   * `answersContractQuestion` (an open escalation id of this session's
+   * contracts) sends the message to that contract as the owner's answer.
    */
-  submit(text: string, correlationId?: string, options?: { readonly operatorInput?: boolean | undefined }): Promise<void>;
+  submit(text: string, correlationId?: string, options?: { readonly operatorInput?: boolean | undefined; readonly answersContractQuestion?: string | undefined }): Promise<void>;
   /** Dedicated native delivery; refuses queue acceptance and requires actual completion. */
   submitNative(permit: NativeConversationTurnPermit, inputId: string, correlationId: string): Promise<void>;
   /** Interrupt the in-flight turn. Returns whether one was running. */
@@ -484,7 +486,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       deleteQueuedMessage: (id: string) => orchestrator.deleteQueuedMessage(id),
     },
     isRunning: () => orchestrator.isTurnInFlight,
-    submit: async (text: string, correlationId?: string, submitOptions?: { readonly operatorInput?: boolean | undefined }): Promise<void> => {
+    submit: async (text: string, correlationId?: string, submitOptions?: { readonly operatorInput?: boolean | undefined; readonly answersContractQuestion?: string | undefined }): Promise<void> => {
       if (disposed) throw new HostedSessionUnavailableError(sessionId, 'its loop was shut down before this message was delivered');
       // `ownerDirect` is deliberately unset: it also decides the gate's surface
       // authority, and a verb call carrying an operator token is not the owner
@@ -499,6 +501,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
         if (submitOptions?.operatorInput === true && !orchestrator.isTurnInFlight && !orchestrator.isThinking) ledger.startTurn();
         await withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(text, undefined, {
           awaitQueuedTurn: true,
+          ...(submitOptions?.answersContractQuestion !== undefined ? { answersContractQuestion: submitOptions.answersContractQuestion } : {}),
           origin: {
             source: 'hosted-session',
             surface: 'service',

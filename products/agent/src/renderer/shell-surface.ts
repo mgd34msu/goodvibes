@@ -4,6 +4,7 @@ import { presetForMode, type GatePresetName } from '@goodvibes-jev/engine/platfo
 import { type Line, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
 import { type VoiceCaptureIndicatorState } from '../core/voice-capture-status.ts';
 import { activeTokens, activeUiTones } from './theme.ts';
+import { UIFactory } from './ui-factory.ts';
 import { renderStatusLine, type StatusChip } from './status-line.ts';
 import { type ThrobberState } from './throbber.ts';
 import { type BackToBottomState } from './back-to-bottom.ts';
@@ -96,6 +97,8 @@ export interface ShellFooterBuildOptions {
    * safety-relevant and both stay visible at once.
    */
   readonly powerNote?: string;
+  /** A contract's open question the next typed message answers (contract-question-composer.ts), a row above the composer. */
+  readonly contractQuestionHint?: string | null;
   /** Live microphone state; a visible state renders the microphone chip. */
   readonly voiceCapture?: VoiceCaptureIndicatorState | null;
   /** What main is doing while it works (a turn, a compaction): the throbber row. Null at rest. */
@@ -183,4 +186,7 @@ export const { buildShellFooter, estimateShellFooterHeight } = createShellFooter
   powerNote: (options) => options.powerNote,
   compactFraction,
   flags: (options) => ((options.composerFlags ?? []).includes('attachments') ? [{ text: 'image attached', fg: activeTokens().info }] : []),
+  hints: (options) => (options.contractQuestionHint
+    ? [UIFactory.stringToLine(`   ${options.contractQuestionHint}`, options.width, { fg: activeTokens().textMuted, bold: true })]
+    : []),
 });

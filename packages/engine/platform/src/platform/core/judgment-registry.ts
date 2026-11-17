@@ -1,5 +1,4 @@
 import { BatteryRegistry } from '@goodvibes-jev/judgment';
-import { turnShape } from './batteries/turn-shape.js';
 import { executionStrategy } from './batteries/planner.js';
 import { responseCompletion, completionApplicability } from './batteries/response-completion.js';
 import { agentBriefFidelity, agentBriefRequirement, agentDelegationAuthorization } from '../agents/brief-fidelity.js';
@@ -10,7 +9,6 @@ import { responseProgress } from './batteries/response-progress.js';
 import { verificationScope, verificationEvidence, verificationRequirement, verificationSource, verificationIntegration, verificationRepairs, verificationNoIssue, verificationResolution, verificationCheckpointHistory, verificationAudit, verificationInstructionAudit, verificationObservationAudit, verificationPageAudit, verificationInstructionPageAudit } from './verification/batteries.js';
 
 export const registry = new BatteryRegistry();
-registry.register(turnShape);
 registry.register(executionStrategy);
 registry.register(responseCompletion);
 registry.register(completionApplicability);

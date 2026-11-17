@@ -105,7 +105,7 @@ export interface HostedSessionSpineIntakeOptions {
   /** Attribute awaited registration/close callbacks to their session owner. */
   readonly withLifecycle?: <T>(sessionId: string, callback: () => Promise<T>) => Promise<T>;
   /** Hand one collected input to its session's loop. */
-  readonly deliver: (sessionId: string, text: string, correlationId?: string | undefined, delivery?: { readonly operatorInput?: boolean | undefined }) => Promise<void>;
+  readonly deliver: (sessionId: string, text: string, correlationId?: string | undefined, delivery?: { readonly operatorInput?: boolean | undefined; readonly answersContractQuestion?: string | undefined }) => Promise<void>;
   readonly now: () => number;
   /** Interval read. Default 750ms without a spine `subscribe`; with one, a 5 s retry pass for deliveries and marks that did not land. */
   readonly intervalMs?: number | undefined;
@@ -167,6 +167,12 @@ interface PendingDelivery {
   readonly correlationId?: string | undefined;
   /** An authenticated operator sent it; see OPERATOR_SURFACE_KINDS. */
   readonly operatorInput?: boolean | undefined;
+  /**
+   * The open contract question an operator's message answers (the message's
+   * `metadata.answersContractQuestion`, an escalation id). Only operator input
+   * carries it: a contract's question is the owner's to answer.
+   */
+  readonly answersContractQuestion?: string | undefined;
   readonly attempts: number;
   /** Failed attempts to classify the current failure; bounded like delivery attempts. */
   readonly readingFailures?: number | undefined;
@@ -424,12 +430,15 @@ export class HostedSessionSpineIntake {
           if (!input.body.trim()) continue;
           // Its turn already ran; only the consumed mark is outstanding.
           if (this.unconsumed.has(pendingKey(record.id, input.id))) continue;
+          const operatorInput = input.surfaceKind !== undefined && OPERATOR_SURFACE_KINDS.has(input.surfaceKind);
+          const answers = input.metadata?.['answersContractQuestion'];
           const delivery: PendingDelivery = {
             sessionId: record.id,
             inputId: input.id,
             body: input.body,
             correlationId: input.correlationId,
-            ...(input.surfaceKind !== undefined && OPERATOR_SURFACE_KINDS.has(input.surfaceKind) ? { operatorInput: true } : {}),
+            ...(operatorInput ? { operatorInput: true } : {}),
+            ...(operatorInput && typeof answers === 'string' && answers.trim() !== '' ? { answersContractQuestion: answers } : {}),
             attempts: 0,
           };
           // Without the collected mark the input is still queued on the spine, so
@@ -587,7 +596,9 @@ export class HostedSessionSpineIntake {
     }
     try {
       await this.options.deliver(pending.sessionId, pending.body, pending.correlationId,
-        pending.operatorInput === true ? { operatorInput: true } : undefined);
+        pending.operatorInput === true
+          ? { operatorInput: true, ...(pending.answersContractQuestion !== undefined ? { answersContractQuestion: pending.answersContractQuestion } : {}) }
+          : undefined);
       this.pending.delete(key);
       // A successfully completed turn stays delivered during shutdown drain.
       try { await spine.markInputDelivered(pending.sessionId, pending.inputId, { consumed: true }); }

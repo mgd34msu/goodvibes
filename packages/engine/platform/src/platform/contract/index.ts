@@ -338,7 +338,6 @@ export { registry as contractJudgmentRegistry } from './judgment-registry.js';
 export { createContractIntake, describeIntake, openEscalation, toolResultStartedContract } from './intake-route.js';
 export type { ContractIntake, ContractIntakeDeps, TurnIntakeOutcome } from './intake-route.js';
 export { REQUEST_ROUTE_SITE, requestRoute } from './batteries/request-route.js';
-export { ESCALATION_TURN_BAND, ESCALATION_TURN_SITE, escalationTurn, turnIsUnrelated } from './batteries/escalation-turn.js';
 export { checkDraftFidelity, draftSection, numberDraft } from './draft-plan.js';
 export { createContractFleetControls, qualifyId, splitQualifiedId } from './fleet-controls.js';
 export type { ContractConflictItem, ContractFleetControls, ContractFleetControlsDeps } from './fleet-controls.js';

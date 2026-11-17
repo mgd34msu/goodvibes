@@ -10,6 +10,7 @@ import { daemonReceiptStoreAt, daemonReceiptsPath } from './receipts.js';
 import { deliverOwnerAlert } from './owner-alert.js';
 import type { DeliveredChannelReply, UndeliveredChannelReply } from '../channels/reply-pipeline.js';
 import type { SharedSessionSurfaceReplyBinding } from '../control-plane/session-intents.js';
+import { BOOT_RECONCILE_CANCEL_REASON } from '../control-plane/session-broker-state.js';
 import { logger } from '../utils/logger.js';
 import { webAppLink } from './web-app-link.js';
 import type { SharedApprovalRecord } from '../control-plane/index.js';
@@ -523,7 +524,10 @@ export class DaemonSurfaceDeliveryHelper {
     if (held) this.context.pendingSurfaceReplies.delete(input.agentId);
     const status = input.status ?? 'completed';
     const sessionId = input.sessionId ?? held?.sessionId;
-    const pending = held ?? this.recoverPendingReply(input.agentId, sessionId);
+    // Recovered before the answer is stored, while the session input still says
+    // whether an earlier report settled this agent's answer (see recoverPendingReply).
+    const recovered = held ? null : this.recoverPendingReply(input.agentId, sessionId);
+    const pending = held ?? recovered;
     if (sessionId) {
       try {
         await this.context.sessionBroker.completeAgent(sessionId, input.agentId, input.body, {
@@ -533,6 +537,10 @@ export class DaemonSurfaceDeliveryHelper {
       } catch (error) {
         // Nothing was delivered: hand the entry back so a retried report still can.
         if (held) this.context.pendingSurfaceReplies.set(input.agentId, held);
+        if (recovered) {
+          this.recoveredReplies.delete(input.agentId);
+          this.context.channelReplyPipeline.untrack(input.agentId);
+        }
         throw error;
       }
     }
@@ -664,11 +672,18 @@ export class DaemonSurfaceDeliveryHelper {
    * The reply route of an agent whose pending entry this process does not hold
    * (it was queued before a daemon restart): read from the session input the
    * agent was started for, which the session broker persists with its route.
-   * Once per agent per process, so a repeated report cannot send it twice.
+   * Only while that input still waits for this answer (running, or cancelled by
+   * the restart's own reconcile, which a completion report revives): once an
+   * earlier report settled the agent's answer, that report took up its delivery,
+   * and a report repeated after a restart (the surface never heard back) must
+   * not send it again. Once per agent per process, so a repeated report cannot
+   * send it twice.
    */
   private recoverPendingReply(agentId: string, sessionId: string | undefined): PendingSurfaceReply | null {
     if (!sessionId || this.recoveredReplies.has(agentId)) return null;
-    const row = this.context.sessionBroker.getInputs(sessionId, 1_000).find((entry) => entry.activeAgentId === agentId && entry.routeId);
+    const row = this.context.sessionBroker.getInputs(sessionId, 1_000).find((entry) => entry.activeAgentId === agentId && entry.routeId
+      && (entry.state === 'delivered' || entry.state === 'spawned'
+        || (entry.state === 'cancelled' && entry.error === BOOT_RECONCILE_CANCEL_REASON)));
     const binding = row?.routeId ? this.context.routeBindings.getBinding(row.routeId) : undefined;
     if (!row || !binding || this.describeRefusal(binding)) return null;
     const pending = this.buildPendingSurfaceReply(binding, { agentId, task: row.body, sessionId });

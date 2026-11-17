@@ -237,7 +237,6 @@ export function useChatSearch(query: string): UseChatSearchReturn {
   useEffect(() => {
     messageGenerationRef.current += 1;
     messageParamsRef.current = { query, includeClosed };
-    setLoadMoreResultsError(undefined);
     if (!query.trim()) {
       setResults([]);
       setMessageSearchState('idle');
@@ -249,6 +248,7 @@ export function useChatSearch(query: string): UseChatSearchReturn {
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setMessageSearchState('searching');
+      setLoadMoreResultsError(undefined);
       void (async () => {
         try {
           const page = await fetchMessageSearchPage(query, includeClosed, controller.signal);

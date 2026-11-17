@@ -19,7 +19,7 @@ export const WRITE_SCHEMA = {
           },
           content: {
             type: 'string',
-            description: 'Text file content to write. Exactly one of content or content_base64 is required (content may be an empty string).',
+            description: 'Text file content to write. Exactly one of content or content_base64 is required (content may be an empty string), except with mode restore, which takes neither.',
           },
           content_base64: {
             type: 'string',
@@ -29,17 +29,18 @@ export const WRITE_SCHEMA = {
           encoding: {
             type: 'string',
             enum: [...WRITE_TEXT_ENCODINGS],
-            description: 'How the text in content is encoded on disk. Default: utf-8. Ignored for content_base64, which is written as raw bytes.',
+            description: 'How the text in content is encoded on disk. Default: utf-8. Text with a character the chosen encoding cannot hold is refused. content_base64 and mode restore write exact bytes and take no other encoding.',
             default: 'utf-8',
           },
           mode: {
             type: 'string',
-            enum: ['fail_if_exists', 'overwrite', 'backup'],
+            enum: ['fail_if_exists', 'overwrite', 'backup', 'restore'],
             description:
               'Behaviour when the file already exists. ' +
               'fail_if_exists (default): return an error. ' +
               'overwrite: replace existing content. ' +
-              'backup: copy existing file to .goodvibes/.backups/ before overwriting.',
+              'backup: copy the existing file to .goodvibes/.backups/ before overwriting (the newest 5 copies per file are kept; the result names the copy). ' +
+              'restore: put back the newest backup of this file (send no content).',
             default: 'fail_if_exists',
           },
         },
@@ -52,7 +53,7 @@ export const WRITE_SCHEMA = {
       type: 'string',
       enum: ['count_only', 'minimal', 'standard', 'verbose'],
       description:
-        'Output detail level. Default: count_only (recommended, you provided the content).',
+        'Output detail level. Default: count_only (recommended, you provided the content). At every level the result lists backup copies made, backups restored, and files auto-heal rewrote (healed), whose content then differs from what you sent.',
       default: 'count_only',
     },
     dry_run: {
@@ -96,7 +97,7 @@ export const WRITE_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-export type WriteMode = 'fail_if_exists' | 'overwrite' | 'backup';
+export type WriteMode = 'fail_if_exists' | 'overwrite' | 'backup' | 'restore';
 export type WriteVerbosity = 'count_only' | 'minimal' | 'standard' | 'verbose';
 export type WriteValidatorName = 'typecheck' | 'lint' | 'test' | 'build';
 export type WriteTransactionMode = 'atomic' | 'partial' | 'none';

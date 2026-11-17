@@ -82,8 +82,9 @@ Read files with token-efficient extraction modes.
 Write files with atomic operations, backup modes, and auto-heal.
 
 - Atomic writes via temp file + rename: no partial writes on crash
-- Overwrite modes: `fail_if_exists`, `overwrite`, `backup` (copies the original to `.goodvibes/.backups/`)
-- Auto-heal pipeline: if a written file has syntax errors and `tools.autoHeal` is enabled, runs formatter -> linter -> LLM fix automatically. The formatter and linter are the ones your user `languages/<language>.json` file sets for the file's language (`"formatter": { "command": "black", "args": ["-q", "{file}"] }`), otherwise prettier and eslint
+- Modes: `fail_if_exists`, `overwrite`, `backup` (copies the original to `.goodvibes/.backups/` and keeps the newest 5 copies per file), `restore` (puts the newest backup of the file back; it takes no content). The result names each backup copy and each restored backup at every verbosity
+- Atomic batches (`transaction.mode: atomic`) refuse to overwrite a file another program changed while the call was running and roll back what the call already wrote; writing through a symbolic link writes the file it points to
+- Auto-heal pipeline: if a written file has syntax errors and `tools.autoHeal` is enabled, runs formatter -> linter -> LLM fix automatically and rewrites the file; the result then lists it under `healed` at every verbosity, because the file no longer holds the content that was sent. The formatter and linter are the ones your user `languages/<language>.json` file sets for the file's language (`"formatter": { "command": "black", "args": ["-q", "{file}"] }`), otherwise prettier and eslint
 - Diagnostics after a write or edit: syntax errors from the built-in parser, plus type errors from a language server that is already running for the file's language
 - Base64 content support for files with special characters
 - Batch writes in a single call with per-file mode control

@@ -49,7 +49,6 @@ import { validateNativeDecisionState } from './native-decisions.js';
 import { bindNativeContractSource } from './native-source.js';
 import { CURRENT_CONTRACT_SCHEMA_VERSION, isContractId, isOpaqueContractId, isTerminalContractStatus, type Contract } from './types.js';
 import { recoverPendingFixIdentities, recoverRepeatedStructuralCriteria } from './fix-identity.js';
-import { removeWorkstreamSnapshots } from '../orchestration/persistence.js';
 
 const DEBOUNCE_MS = 250;
 /** Ended contracts kept per project; the oldest beyond this are removed. */
@@ -639,8 +638,6 @@ export class ContractStore {
       + removeFile(join(contractEndedDir(this.projectRoot), `${contractId}${JSON_SUFFIX}`));
     const lease = contractLeasePath(this.projectRoot, contractId);
     for (const path of [lease, `${lease}-journal`, `${lease}-wal`, `${lease}-shm`]) freed += removeFile(path);
-    // The contract's workstream snapshots (one per group) go with it.
-    freed += removeWorkstreamSnapshots({ root: this.projectRoot, namespace: contractId });
     this.contracts.delete(contractId); this.endedRecords.delete(contractId); this.endedSummaries.delete(contractId);
     this.writeFailures.delete(contractId);
     this.supportedStoredVersions.delete(contractPath(this.projectRoot, contractId));

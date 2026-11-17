@@ -5,7 +5,7 @@
  * Writes are debounced (250ms). Unrecognized corrupt snapshots retain their
  * original bytes under a unique `.unrecognized` name; newer formats stay put.
  */
-import { existsSync, readdirSync, renameSync, rmdirSync, statSync, unlinkSync } from 'node:fs';
+import { existsSync, readdirSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -25,18 +25,14 @@ import {
 
 const DEBOUNCE_MS = 250;
 
-/**
- * Finished workstream snapshots kept per snapshot directory, and for how long
- * after their last write: the same bounds the contract store gives ended
- * contracts (a contract's snapshots are also removed with the contract).
- */
-const MAX_TERMINAL_SNAPSHOTS = 100;
-const TERMINAL_SNAPSHOT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+/** Completed workstream snapshots remain available until explicitly removed. */
+const MAX_TERMINAL_SNAPSHOTS = Infinity;
+const TERMINAL_SNAPSHOT_MAX_AGE_MS = Infinity;
 
 /**
  * Age TTL for `.unrecognized` quarantine files.
  *
- * 30 days, the same as the terminal-snapshot TTL, because these
+ * 30 days, deliberately longer than the terminal-snapshot TTL, because these
  * files are FORENSIC: they exist precisely because something went wrong
  * (torn write, foreign/newer writer, bad shape), and the person who has to
  * explain it may not look for weeks. A month is long enough for a bug report
@@ -336,40 +332,6 @@ export function writeWorkstreamSnapshot(projectRoot: SnapshotRoot, workstream: W
   }
 }
 
-/**
- * Removes every snapshot file of one namespace (a contract's workstreams) and
- * its directory: what the contract store calls when it removes an ended
- * contract. Returns the bytes freed. A root without a namespace is refused, so
- * this never empties the shared directory.
- */
-export function removeWorkstreamSnapshots(location: SnapshotRoot): number {
-  if (typeof location === 'string') throw new RangeError('only a namespaced snapshot directory can be removed');
-  const dir = orchestrationDir(location);
-  let entries: string[];
-  try { entries = readdirSync(dir); }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') logger.warn('orchestration persistence: could not list snapshots to remove', { dir, error: summarizeError(error) });
-    return 0;
-  }
-  let freed = 0;
-  for (const entry of entries) {
-    const path = join(dir, entry);
-    try {
-      const info = statSync(path);
-      if (!info.isFile()) continue;
-      unlinkSync(path);
-      freed += info.size;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') logger.warn('orchestration persistence: snapshot file was not removed', { path, error: summarizeError(error) });
-    }
-  }
-  try { rmdirSync(dir); }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') logger.warn('orchestration persistence: snapshot directory was not removed', { dir, error: summarizeError(error) });
-  }
-  return freed;
-}
-
 // ── Housekeeping ──────────────────────────────────────────────────────────────
 
 /** Seams for the snapshot housekeeping pass. */
@@ -391,7 +353,7 @@ export interface SnapshotReapOptions {
 export interface OrchestrationSnapshotReapSummary {
   /** Terminal snapshots removed for exceeding {@link TERMINAL_SNAPSHOT_MAX_AGE_MS}. */
   readonly terminalExpired: number;
-  /** Terminal snapshots removed for being older than the newest {@link MAX_TERMINAL_SNAPSHOTS} snapshots of their directory. */
+  /** Terminal snapshots removed for exceeding {@link MAX_TERMINAL_SNAPSHOTS}. */
   readonly terminalOverCap: number;
   /** Quarantine files removed for exceeding {@link QUARANTINE_MAX_AGE_MS}. */
   readonly quarantineExpired: number;
@@ -445,9 +407,8 @@ function removeFile(selected: DatedFile, assertParent: () => void): number | und
 
 /**
  * Reap the orchestration snapshot directory: terminal snapshots past their TTL
- * or beyond the newest MAX_TERMINAL_SNAPSHOTS, quarantine files past theirs,
- * and temp files left by an interrupted write. Snapshots are dated by their
- * file time; only one that would be removed is read, to confirm it finished.
+ * or over the count cap, quarantine files past theirs, and temp files left by
+ * an interrupted write.
  *
  * Idempotent, a second pass immediately after a first reclaims nothing, and
  * safe to run from two processes at once: every removal tolerates ENOENT, so
@@ -467,8 +428,7 @@ export function reapOrchestrationSnapshots(projectRoot: SnapshotRoot, options?: 
     return EMPTY_REAP_SUMMARY;
   }
 
-  const snapshots: { readonly path: string; readonly at: number }[] = [];
-  const terminal: (DatedFile & { readonly overCap: boolean })[] = [];
+  const terminal: DatedFile[] = [];
   const quarantined: DatedFile[] = [];
   let staleTempRemoved = 0;
   let bytesReclaimed = 0;
@@ -506,21 +466,13 @@ export function reapOrchestrationSnapshots(projectRoot: SnapshotRoot, options?: 
 
     const workstreamId = entry.slice(0, -'.json'.length);
     if (options?.isRunning?.(workstreamId) === true) continue;
-    try { snapshots.push({ path, at: statSync(path).mtimeMs }); }
-    catch { /* Removed meanwhile. */ }
-  }
-
-  // A snapshot is read only when its age or its place in the count would
-  // remove it; the rest are judged by their file time alone.
-  const newestFirst = [...snapshots].sort((a, b) => b.at - a.at);
-  for (const [index, candidate] of newestFirst.entries()) {
-    if (index < MAX_TERMINAL_SNAPSHOTS && now - candidate.at <= TERMINAL_SNAPSHOT_MAX_AGE_MS) continue;
     try { directory.assertCurrent(); } catch { break; }
+
     // Decide terminal-ness by CONTENT: a snapshot that does not parse or does
     // not validate is left alone here so loadWorkstreamSnapshot can quarantine
     // it with its existing disclosure, rather than being deleted outright.
     let source: ReturnType<typeof readFileObservation>;
-    try { source = readFileObservation(candidate.path); directory.assertCurrent(); }
+    try { source = readFileObservation(path); directory.assertCurrent(); }
     catch { continue; }
     const snapshot = deserializeWorkstreamSnapshot(source.bytes.toString('utf8'));
     if (snapshot === null) continue;
@@ -528,8 +480,8 @@ export function reapOrchestrationSnapshots(projectRoot: SnapshotRoot, options?: 
     // the item list is re-checked here rather than assumed.
     const items: unknown = snapshot.workstream.items;
     if (!Array.isArray(items) || !isTerminalItemSet(items)) continue;
-    const writtenAt = typeof snapshot.writtenAt === 'number' && Number.isFinite(snapshot.writtenAt) ? snapshot.writtenAt : candidate.at;
-    terminal.push({ path: candidate.path, at: Math.max(writtenAt, candidate.at), physical: source.physical, size: source.bytes.byteLength, overCap: index >= MAX_TERMINAL_SNAPSHOTS });
+    const writtenAt = typeof snapshot.writtenAt === 'number' && Number.isFinite(snapshot.writtenAt) ? snapshot.writtenAt : 0;
+    terminal.push({ path, at: writtenAt, physical: source.physical, size: source.bytes.byteLength });
   }
 
   let terminalExpired = 0;
@@ -544,10 +496,12 @@ export function reapOrchestrationSnapshots(projectRoot: SnapshotRoot, options?: 
   }
 
   let terminalOverCap = 0;
-  for (const file of withinTtl) {
-    if (!file.overCap) continue;
-    const removed = removeFile(file, () => directory.assertCurrent());
-    if (removed !== undefined) { bytesReclaimed += removed; terminalOverCap += 1; }
+  if (withinTtl.length > MAX_TERMINAL_SNAPSHOTS) {
+    const oldestFirst = [...withinTtl].sort((a, b) => a.at - b.at);
+    for (const file of oldestFirst.slice(0, withinTtl.length - MAX_TERMINAL_SNAPSHOTS)) {
+      const removed = removeFile(file, () => directory.assertCurrent());
+      if (removed !== undefined) { bytesReclaimed += removed; terminalOverCap += 1; }
+    }
   }
 
   let quarantineExpired = 0;
@@ -655,10 +609,6 @@ export function attachDebouncedWriter(
     // Engine-wide inventory observations cannot schedule a workstream write.
     // A failure notice must not schedule the write that just failed, or a persistent fault would retry forever.
     if (event.type === 'dirty-tree-at-launch' || event.type === 'unattributed-worktree-discovered' || event.type === 'workstream-persistence-failed') return;
-    // Announcements that change no saved state write nothing; every other
-    // event is an item or workstream transition, coalesced by the debounce.
-    if (event.type === 'attempt-judge-proposed' || event.type === 'graph-cycle'
-      || (event.type === 'orphan-worktree-reconciled' && event.disposition === 'reported')) return;
     scheduleWrite(event.workstreamId);
   });
 

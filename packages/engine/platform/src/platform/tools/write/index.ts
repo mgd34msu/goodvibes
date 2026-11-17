@@ -1,10 +1,9 @@
 import { assertCurrentToolInvocation } from '../registry.js';
-import { captureFileEffectRevision } from '../shared/file-effect-revision.js';
 import type { CapturedWriteRevision } from '../shared/captured-write-revision.js';
 import { assertCapturedToolWriteRevision, captureCapturedToolWriteRevision, assertCapturedToolMutationCurrent, assertCapturedToolReadAccess, hasCapturedToolInvocation, prepareCapturedToolBackup } from '../shared/captured-input-tools.js';
 import type { ReadAccessFilter } from '../shared/read-access.js';
-import { chmodSync, lstatSync, existsSync, mkdirSync, readFileSync, readlinkSync, renameSync, rmdirSync, statSync, writeFileSync, copyFileSync, unlinkSync } from 'node:fs';
-import { dirname, extname, join, relative, resolve as resolvePath, sep } from 'node:path';
+import { chmodSync, constants, lstatSync, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmdirSync, statSync, writeFileSync, copyFileSync, unlinkSync, type BigIntStats } from 'node:fs';
+import { basename, dirname, extname, join, relative, resolve as resolvePath, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import type { Tool, ToolDefinition, ToolExecuteOptions } from '../../types/tools.js';
 import { WRITE_SCHEMA, WRITE_TEXT_ENCODINGS, type WriteInput, type WriteFileInput, type WriteMode } from './schema.js';
@@ -21,7 +20,7 @@ import { logger } from '../../utils/logger.js';
 import type { SessionChangeTracker } from '../../sessions/change-tracker.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { resolveWritablePath } from '../../utils/path-safety.js';
-import { noteProjectFilesChanged } from '../../intelligence/project-files-epoch.js';
+import { noteSourceFilesWritten } from '../../intelligence/import-graph.js';
 import { collectPostEditDiagnostics, type DiagnosticsProvider } from '../shared/post-edit-diagnostics.js';
 import { ToolInputProjectionError } from '../input-projection.js';
 
@@ -35,6 +34,8 @@ interface FileWriteResult {
   bytes_written: number;
   mode_applied: WriteMode;
   backup_path?: string | undefined;
+  /** The backup copy a `restore` write put back. */
+  restored_from?: string | undefined;
   warnings?: string[] | undefined;
   auto_heal?: {
     attempted: boolean;
@@ -47,6 +48,8 @@ interface FileWriteResult {
   _content?: string | undefined;
   /** The exact bytes written when the payload is not valid UTF-8 text; `_content` is then unset. */
   _bytes?: Buffer | undefined;
+  /** Stamp of the file this write left on disk (see fileStamp). */
+  _stamp?: string | undefined;
 }
 
 /** The topmost directory a write had to create, so a rolled-back new file can take its empty parents with it. */
@@ -66,6 +69,10 @@ interface WriteOutput {
   files_written: number;
   bytes_written: number;
   files?: FileWriteResult[] | undefined;
+  /** Where each `backup` copy went, when there is no file list to carry it. */
+  backups?: Array<{ path: string; backup_path: string }> | undefined;
+  /** Which backup each `restore` put back, when there is no file list to carry it. */
+  restored?: Array<{ path: string; restored_from: string }> | undefined;
   dry_run?: boolean | undefined;
   warnings?: string[] | undefined;
 }
@@ -102,13 +109,73 @@ function resolveContent(fileInput: WriteFileInput): ResolvedContent {
   return { kind: 'text', text: fileInput.content ?? '' };
 }
 
-/**
- * Build a backup destination path inside .goodvibes/.backups/.
- * e.g. src/foo.ts -> <projectRoot>/.goodvibes/.backups/src/foo.ts.1700000000000
- */
-function buildBackupPath(resolvedPath: string, projectRoot: string): string {
-  const rel = relative(projectRoot, resolvedPath);
-  return join(projectRoot, '.goodvibes', '.backups', `${rel}.${Date.now()}`);
+/** Backups kept per file; a newer backup removes the oldest beyond this. */
+const BACKUPS_KEPT_PER_FILE = 5;
+/** `<ms>` or, for a second backup in the same millisecond, `<ms>_<n>`. */
+const BACKUP_SUFFIX = /^(\d+)(?:_(\d+))?$/;
+
+/** Where a file's backups live: src/foo.ts -> <projectRoot>/.goodvibes/.backups/src/ with names foo.ts.<ms>. */
+function backupLocation(resolvedPath: string, projectRoot: string): { directory: string; name: string } {
+  // resolvedPath is resolved against the real project root, so the backup path is too.
+  const root = realpathSync(resolvePath(projectRoot), 'utf8');
+  const target = join(root, '.goodvibes', '.backups', relative(root, resolvedPath));
+  return { directory: dirname(target), name: basename(target) };
+}
+
+/** A file's backups made by mode `backup`, newest first. */
+function listBackups(resolvedPath: string, projectRoot: string): string[] {
+  const { directory, name } = backupLocation(resolvedPath, projectRoot);
+  let entries: string[];
+  try { entries = readdirSync(directory); } catch { return []; }
+  const found: Array<{ path: string; at: number; seq: number }> = [];
+  for (const entry of entries) {
+    if (!entry.startsWith(`${name}.`)) continue;
+    const match = BACKUP_SUFFIX.exec(entry.slice(name.length + 1));
+    if (match) found.push({ path: join(directory, entry), at: Number(match[1]), seq: Number(match[2] ?? 0) });
+  }
+  return found.sort((a, b) => b.at - a.at || b.seq - a.seq).map((backup) => backup.path);
+}
+
+/** A backup name no earlier backup of the file has, even within one millisecond. */
+function nextBackupPath(resolvedPath: string, projectRoot: string): string {
+  const { directory, name } = backupLocation(resolvedPath, projectRoot);
+  const at = Date.now();
+  let candidate = join(directory, `${name}.${at}`);
+  for (let seq = 1; existsSync(candidate); seq += 1) candidate = join(directory, `${name}.${at}_${seq}`);
+  return candidate;
+}
+
+function pruneBackups(resolvedPath: string, projectRoot: string): void {
+  for (const old of listBackups(resolvedPath, projectRoot).slice(BACKUPS_KEPT_PER_FILE)) {
+    try { unlinkSync(old); } catch { /* an old copy that cannot be removed stays */ }
+  }
+}
+
+/** The newest backup of a file, as the content a `restore` write puts back. */
+function resolveRestore(
+  fileInput: WriteFileInput,
+  resolvedPath: string,
+  projectRoot: string,
+): { ok: true; content: ResolvedContent; from: string } | { ok: false; error: string } {
+  if (hasCapturedToolInvocation()) {
+    return { ok: false, error: `Mode 'restore' is not available in a contract's working copy, which has no backups of its own. Write the content with mode 'overwrite'. Nothing was written.` };
+  }
+  if (fileInput.content !== undefined || fileInput.content_base64 !== undefined) {
+    return { ok: false, error: `Mode 'restore' takes no content for '${fileInput.path}': it writes back the newest backup. Omit content and content_base64. Nothing was written.` };
+  }
+  if (fileInput.encoding && fileInput.encoding !== 'utf-8' && fileInput.encoding !== 'utf8') {
+    return { ok: false, error: `encoding '${fileInput.encoding}' does not apply to mode 'restore', which writes the backup's bytes exactly; omit it. Nothing was written.` };
+  }
+  const newest = listBackups(resolvedPath, projectRoot)[0];
+  if (newest === undefined) {
+    return { ok: false, error: `No backup of '${fileInput.path}' in .goodvibes/.backups: a backup is made only by a write with mode 'backup'. Nothing was written.` };
+  }
+  let bytes: Buffer;
+  try { bytes = readFileSync(newest); } catch (err) {
+    return { ok: false, error: `Could not read the backup '${newest}' of '${fileInput.path}': ${summarizeError(err)}. Nothing was written.` };
+  }
+  const text = bytes.toString('utf-8');
+  return { ok: true, from: newest, content: Buffer.from(text, 'utf-8').equals(bytes) ? { kind: 'text', text } : { kind: 'bytes', bytes } };
 }
 
 /** Module-level constant, avoids re-allocating the Set on every validation call. */
@@ -185,23 +252,58 @@ function followLinks(path: string): string {
   throw new Error(`Too many levels of symbolic links at '${path}'`);
 }
 
+function statIfPresent(path: string): BigIntStats | undefined {
+  return statSync(path, { bigint: true, throwIfNoEntry: false });
+}
+
+const stampOf = (stat: BigIntStats): string => `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}:${stat.mode}`;
+
 /**
- * Atomically write content to a file.
- * Writes to a temp file first, then renames to the target path.
+ * Identity and change time of the file a path names, links followed; null when
+ * there is none. Two equal stamps mean nothing replaced or wrote the file between them.
  */
-function atomicWrite(requestedPath: string, content: string | Buffer, encoding: BufferEncoding = 'utf-8'): void {
+function fileStamp(path: string): string | null {
+  const stat = statIfPresent(path);
+  return stat ? stampOf(stat) : null;
+}
+
+/** The one refusal for a file that changed underneath this call. */
+function changedOnDisk(path: string): string {
+  return `'${path}' changed on disk while this call was running (another program wrote to it), so it was not overwritten. Read it again and retry`;
+}
+
+/** What this call last saw or wrote at a path. */
+interface PathState {
+  readonly bytes: Buffer | null;
+  readonly stamp: string | null;
+  readonly mode?: number | undefined;
+}
+
+/** Read a path's content once, with the stamp taken before the read: a change after the stamp makes a later comparison fail, never pass. */
+function readPathState(path: string): PathState {
+  const stat = statIfPresent(path);
+  if (!stat) return { bytes: null, stamp: null };
+  return { bytes: readFileSync(path), stamp: stampOf(stat), mode: Number(stat.mode & 0o777n) };
+}
+
+/**
+ * Atomically write content to a file: a temp file renamed over the target.
+ * With `expectedStamp`, the target must still be what that stamp names right
+ * before the rename (null: must not exist). Returns the stamp of the written file.
+ */
+function atomicWrite(requestedPath: string, content: string | Buffer, encoding: BufferEncoding = 'utf-8', expectedStamp?: string | null): string {
   // A symbolic link is written through: replacing the link itself with a regular file
   // would drop the link and give the new file the link's 0777 mode.
   const targetPath = followLinks(requestedPath);
   const rand = randomBytes(4).toString('hex');
   const tmpPath = `${targetPath}.tmp.${rand}`;
   try {
-    const mode = existsSync(targetPath) ? lstatSync(targetPath).mode & 0o777 : 0o666 & ~process.umask();
     // Keep the temporary inode private until all bytes have been written.
     writeFileSync(tmpPath, content, { encoding, flag: 'wx', mode: 0o600 });
-    chmodSync(tmpPath, mode);
+    const existing = statIfPresent(targetPath);
+    if (expectedStamp !== undefined && (existing ? stampOf(existing) : null) !== expectedStamp) throw new Error(changedOnDisk(requestedPath));
+    chmodSync(tmpPath, existing ? Number(existing.mode & 0o777n) : 0o666 & ~process.umask());
     renameSync(tmpPath, targetPath);
-    noteProjectFilesChanged();
   } catch (err) {
     // Clean up temp file if rename failed
     try {
@@ -214,34 +316,32 @@ function atomicWrite(requestedPath: string, content: string | Buffer, encoding: 
     }
     throw err;
   }
+  // The import graph is patched with the new text instead of being rebuilt.
+  noteSourceFilesWritten(new Map([[requestedPath, typeof content === 'string' ? content : content.toString('utf-8')]]));
+  return stampOf(statSync(targetPath, { bigint: true }));
 }
 
 // ---------------------------------------------------------------------------
 // Core write logic
 // ---------------------------------------------------------------------------
 
-/**
- * Process a single file write entry.
- * Returns null if successful (mutates results array) or a string error message.
- */
-function processSingleWrite(
-  fileInput: WriteFileInput,
-  projectRoot: string,
-  dryRun: boolean,
-  capturedBackup?: Awaited<ReturnType<typeof prepareCapturedToolBackup>>,
-  sourceRevision?: CapturedWriteRevision,
-  assertCurrent: () => void = () => {},
-): { ok: true; result: FileWriteResult } | { ok: false; error: string } {
-  // Resolve and validate path
-  let resolvedPath: string;
-  try {
-    resolvedPath = resolveWritablePath(fileInput.path, projectRoot);
-  } catch (err) {
-    return { ok: false, error: `Path error for '${fileInput.path}': ${summarizeError(err)}` };
-  }
+/** What one file write needs that the call already established. */
+interface SingleWriteContext {
+  /** The path as resolveWritablePath returned it, resolved once per call. */
+  readonly resolvedPath: string;
+  readonly projectRoot: string;
+  readonly dryRun: boolean;
+  /** Whether the file existed, when the call already knows; looked up otherwise. */
+  readonly existed?: boolean | undefined;
+  /** The stamp the target must still have right before the rename (atomic batches). */
+  readonly expectedStamp?: string | null | undefined;
+  readonly capturedBackup?: Awaited<ReturnType<typeof prepareCapturedToolBackup>> | undefined;
+  readonly sourceRevision?: CapturedWriteRevision | undefined;
+  readonly assertCurrent?: (() => void) | undefined;
+}
 
-  const mode: WriteMode = fileInput.mode ?? 'fail_if_exists';
-
+/** The text or bytes a `content`/`content_base64` entry writes, or why it cannot be written. */
+function resolveInputContent(fileInput: WriteFileInput): { ok: true; content: ResolvedContent; encoding: BufferEncoding } | { ok: false; error: string } {
   // content is text and content_base64 is bytes; sending neither would truncate the file and sending both is ambiguous.
   if (fileInput.content === undefined && fileInput.content_base64 === undefined) {
     return { ok: false, error: `No content for '${fileInput.path}': provide content (text, an empty string is allowed) or content_base64. Nothing was written.` };
@@ -257,11 +357,11 @@ function processSingleWrite(
       ok: false,
       error: fileInput.encoding === 'hex' || fileInput.encoding === 'base64'
         ? `Encoding '${fileInput.encoding}' cannot be used with content: content is text. Send bytes as content_base64. Nothing was written.`
-        : `Invalid encoding: '${fileInput.encoding}'. Valid: ${textEncodings.join(', ')}`,
+        : `Invalid encoding: '${fileInput.encoding}'. Valid: ${textEncodings.join(', ')}. Nothing was written.`,
     };
   }
   if (fileInput.content_base64 !== undefined && fileInput.encoding && fileInput.encoding !== 'utf-8' && fileInput.encoding !== 'utf8') {
-    return { ok: false, error: `encoding '${fileInput.encoding}' does not apply to content_base64, which is written as the decoded bytes; omit it.` };
+    return { ok: false, error: `encoding '${fileInput.encoding}' does not apply to content_base64, which is written as the decoded bytes; omit it. Nothing was written.` };
   }
   const encoding: BufferEncoding = (fileInput.encoding as BufferEncoding) ?? 'utf-8';
 
@@ -277,15 +377,44 @@ function processSingleWrite(
   }
 
   const resolvedContent = resolveContent(fileInput);
-  let content = resolvedContent.kind === 'text' ? resolvedContent.text : '';
   // A narrow text encoding re-encodes each character; one it cannot hold would be written as something else.
   if (resolvedContent.kind === 'text' && fileInput.content !== undefined && encoding !== 'utf-8' && encoding !== 'utf8'
-    && Buffer.from(content, encoding).toString(encoding) !== content) {
+    && Buffer.from(resolvedContent.text, encoding).toString(encoding) !== resolvedContent.text) {
     return { ok: false, error: `The text for '${fileInput.path}' has characters that encoding '${encoding}' cannot hold; use utf-8. Nothing was written.` };
   }
+  return { ok: true, content: resolvedContent, encoding };
+}
 
-  // Notebook validation and normalization
-  if (isNotebookFile(resolvedPath)) {
+/**
+ * Write one file entry: validate its content, back up or refuse per its
+ * mode, then write it. The target is unchanged when it returns an error.
+ */
+function processSingleWrite(
+  fileInput: WriteFileInput,
+  context: SingleWriteContext,
+): { ok: true; result: FileWriteResult } | { ok: false; error: string } {
+  const { resolvedPath, projectRoot, dryRun, capturedBackup, sourceRevision } = context;
+  const assertCurrent = context.assertCurrent ?? (() => {});
+  const mode: WriteMode = fileInput.mode ?? 'fail_if_exists';
+
+  let resolvedContent: ResolvedContent;
+  let encoding: BufferEncoding = 'utf-8';
+  let restoredFrom: string | undefined;
+  if (mode === 'restore') {
+    const restore = resolveRestore(fileInput, resolvedPath, projectRoot);
+    if (!restore.ok) return restore;
+    resolvedContent = restore.content;
+    restoredFrom = restore.from;
+  } else {
+    const input = resolveInputContent(fileInput);
+    if (!input.ok) return input;
+    resolvedContent = input.content;
+    encoding = input.encoding;
+  }
+  let content = resolvedContent.kind === 'text' ? resolvedContent.text : '';
+
+  // Notebook validation and normalization; a restored backup is written back exactly as it was.
+  if (restoredFrom === undefined && resolvedContent.kind === 'text' && isNotebookFile(resolvedPath)) {
     const validation = validateNotebookContent(content);
     if (!validation.valid) {
       return {
@@ -300,7 +429,7 @@ function processSingleWrite(
 
   const byteSize = resolvedContent.kind === 'bytes' ? resolvedContent.bytes.length : Buffer.byteLength(content, encoding);
 
-  const alreadyExists = existsSync(resolvedPath);
+  const alreadyExists = context.existed ?? existsSync(resolvedPath);
 
   if (alreadyExists && mode === 'fail_if_exists') {
     return {
@@ -314,13 +443,14 @@ function processSingleWrite(
     resolved_path: resolvedPath,
     bytes_written: byteSize,
     mode_applied: mode,
+    ...(restoredFrom !== undefined ? { restored_from: restoredFrom } : {}),
     ...(resolvedContent.kind === 'bytes' ? { _bytes: resolvedContent.bytes } : { _content: content }),
   };
 
   if (dryRun) {
     result.would_write = true;
     if (alreadyExists && mode === 'backup') {
-      result.backup_path = capturedBackup?.path ?? buildBackupPath(resolvedPath, projectRoot);
+      result.backup_path = capturedBackup?.path ?? nextBackupPath(resolvedPath, projectRoot);
     }
     return { ok: true, result };
   }
@@ -328,14 +458,18 @@ function processSingleWrite(
   // Backup if needed
   if (alreadyExists && mode === 'backup') {
     if (hasCapturedToolInvocation() && !capturedBackup) return { ok: false, error: 'Captured backup requires its prepared owned destination' };
-    const backupPath = capturedBackup?.path ?? buildBackupPath(resolvedPath, projectRoot);
     try {
       assertCurrent();
-      if (capturedBackup) capturedBackup.create(sourceRevision);
-      else {
+      let backupPath: string;
+      if (capturedBackup) {
+        backupPath = capturedBackup.path;
+        capturedBackup.create(sourceRevision);
+      } else {
+        backupPath = nextBackupPath(resolvedPath, projectRoot);
         mkdirSync(dirname(backupPath), { recursive: true });
         assertCurrent();
-        copyFileSync(resolvedPath, backupPath);
+        copyFileSync(resolvedPath, backupPath, constants.COPYFILE_EXCL);
+        pruneBackups(resolvedPath, projectRoot);
       }
       result.backup_path = backupPath;
     } catch (err) {
@@ -361,7 +495,7 @@ function processSingleWrite(
   // Atomic write
   try {
     assertCurrent();
-    atomicWrite(resolvedPath, resolvedContent.kind === 'bytes' ? resolvedContent.bytes : content, encoding);
+    result._stamp = atomicWrite(resolvedPath, resolvedContent.kind === 'bytes' ? resolvedContent.bytes : content, encoding, context.expectedStamp);
   } catch (err) {
     return {
       ok: false,
@@ -411,16 +545,22 @@ function formatOutput(
   }
 
   if (verbosity === 'count_only') {
+    // Copies made and put back are on disk whatever the verbosity; say where.
+    const backups = results.flatMap((r) => r.backup_path ? [{ path: r.path, backup_path: r.backup_path }] : []);
+    if (backups.length > 0) base.backups = backups;
+    const restored = results.flatMap((r) => r.restored_from ? [{ path: r.path, restored_from: r.restored_from }] : []);
+    if (restored.length > 0) base.restored = restored;
     return base;
   }
 
   if (verbosity === 'minimal') {
-    base.files = results.map(({ _content: _, _bytes: __, ...r }) => ({
+    base.files = results.map((r) => ({
       path: r.path,
       resolved_path: r.resolved_path,
       bytes_written: r.bytes_written,
       mode_applied: r.mode_applied,
       ...(r.backup_path ? { backup_path: r.backup_path } : {}),
+      ...(r.restored_from ? { restored_from: r.restored_from } : {}),
       ...(r.would_write ? { would_write: r.would_write } : {}),
       ...(r.auto_heal ? { auto_heal: r.auto_heal } : {}),
       ...(r.warnings ? { warnings: r.warnings } : {}),
@@ -429,7 +569,7 @@ function formatOutput(
   }
 
   // standard and verbose both include full results (strip internal _content field)
-  base.files = results.map(({ _content: _, _bytes: __, ...r }) => r);
+  base.files = results.map(({ _content: _, _bytes: __, _stamp: ___, ...r }) => r);
   return base;
 }
 
@@ -456,17 +596,19 @@ export function createWriteTool(options?: {
   const projectRoot = options.projectRoot;
   const definition: ToolDefinition = {
     name: 'write',
+    activity: { doing: 'Writing', did: 'wrote', object: 'a file', objects: 'files' },
     // Sent in full on every model request (see ToolDefinition.core).
     core: true,
     description:
       'Write one or more files to disk. Supports batch writes, automatic parent directory creation, ' +
-      'and three overwrite modes: fail_if_exists (default), overwrite, backup. ' +
+      'and modes fail_if_exists (default), overwrite, backup, and restore (puts the newest backup back). ' +
       'Use content_base64 for content containing special characters.',
     parameters: WRITE_SCHEMA as Record<string, unknown>,
     sideEffects: ['write_fs'],
     subjects: { paths: ['files[].path'] },
-    // Undo restores UTF-8 text only; raw bytes and other encodings get no undo entry.
-    ...(options.fileUndoManager ? { recoverable: { unless: ['files[].content_base64', 'files[].encoding'] } } : {}),
+    // Undo restores UTF-8 text only; raw bytes and other encodings get no undo entry,
+    // and a validator runs a project command that undo cannot take back.
+    ...(options.fileUndoManager ? { recoverable: { unless: ['files[].content_base64', 'files[].encoding', 'validate.after[]'] } } : {}),
     concurrency: 'serial',
     supportsProgress: true,
   };
@@ -500,15 +642,19 @@ export function createWriteTool(options?: {
       const undoCall = options.fileUndoManager?.beginCall();
       const pendingUndo: Array<{ path: string; beforeContent: string | null; afterContent: string; tool: 'write'; call: number | undefined }> = [];
       const transactionMode = input.transaction?.mode ?? 'none';
+      const atomic = transactionMode === 'atomic';
       // Snapshots for atomic rollback: map from resolvedPath -> original content (null = new file)
-      const snapshots = new Map<string, string | Buffer | null>();
+      const snapshots = new Map<string, Buffer | null>();
       const snapshotModes = new Map<string, number>();
       const captured = hasCapturedToolInvocation();
-      const capturedAtomic = captured && transactionMode === 'atomic';
+      const capturedAtomic = captured && atomic;
       const revisions = new Map<string, CapturedWriteRevision>();
-      const ownedRevisions = new Map<string, () => void>();
-      const initialRevisions = new Map<string, CapturedWriteRevision>();
       const backups = new Map<WriteFileInput, Awaited<ReturnType<typeof prepareCapturedToolBackup>>>();
+      // What this call last saw or wrote at each path. A file is read at most
+      // once per call; after that an equal stamp proves the bytes are these.
+      const known = new Map<string, PathState>();
+      // Each entry's path, resolved once.
+      const resolvedPaths = new Map<WriteFileInput, string>();
 
       async function rollbackAtomic(failedPath: string, failure: string): Promise<{ success: false; error: string; warnings?: string[] }> {
         const rolledBack: string[] = [];
@@ -520,17 +666,16 @@ export function createWriteTool(options?: {
               const revision = revisions.get(written.resolved_path);
               if (!revision) throw new Error('Captured rollback has no owned revision');
               assertCapturedToolWriteRevision(written.resolved_path, revision);
-            }
-            if (authenticated) {
-              const revision = ownedRevisions.get(written.resolved_path);
-              if (!revision) throw new Error('Rollback has no completed owned file revision');
-              revision(); // Narrow inverse only, never a fresh forward mutation grant.
+            } else if (fileStamp(written.resolved_path) !== known.get(written.resolved_path)?.stamp) {
+              // Only what this call itself left there is put back; another program's change is not overwritten.
+              throw new Error('it changed on disk after this call wrote it (another program wrote to it), so it was left as it is now; read it and restore it yourself');
             }
             assertCapturedToolMutationCurrent(written.resolved_path);
             const snapshot = snapshots.get(written.resolved_path);
             if (snapshot === null || snapshot === undefined) {
               // File was new - delete it, and the bookkeeping that named it.
               unlinkSync(written.resolved_path);
+              noteSourceFilesWritten(new Map([[written.resolved_path, null]]));
               options?.fileCache?.invalidate(written.resolved_path);
               options?.projectIndex?.removeFile(written.resolved_path);
               removeCreatedDirectories(written);
@@ -566,38 +711,34 @@ export function createWriteTool(options?: {
         };
       }
 
-      // Atomic captured batches admit and validate every path before effects.
-      // Repair can await between writes. Exact initial/owned revisions therefore
-      // guard every subsequent write and rollback under the shared view lock.
+      // Atomic captured batches admit, validate and snapshot every path before
+      // any effect. Repair can await between writes; each write then proves its
+      // target is still the snapshotted file by its stamp, right before the rename.
       if (capturedAtomic) {
         const willExist = new Set<string>();
         for (const fileInput of input.files) {
           if (!fileInput.path || typeof fileInput.path !== 'string')
             return { success: false, error: "Atomic transaction has an invalid file path" };
           const path = resolveWritablePath(fileInput.path, projectRoot);
+          resolvedPaths.set(fileInput, path);
           await assertCapturedToolReadAccess(path);
           if (options.capturedReadAccess && !await options.capturedReadAccess(path))
             throw new Error('Captured write path is access-restricted');
-          const checked = processSingleWrite(fileInput, projectRoot, true);
+          const checked = processSingleWrite(fileInput, { resolvedPath: path, projectRoot, dryRun: true });
           if (!checked.ok) return { success: false, error: `Atomic transaction failed on '${fileInput.path}': ${checked.error}` };
           if (willExist.has(path) && (fileInput.mode ?? 'fail_if_exists') === 'fail_if_exists')
             return { success: false, error: `Atomic transaction would create '${fileInput.path}' more than once` };
           willExist.add(path);
-          if (!snapshots.has(path)) {
-            snapshots.set(path, existsSync(path) ? readFileSync(path) : null);
-            if (existsSync(path)) snapshotModes.set(path, statSync(path).mode & 0o777);
+          if (!known.has(path)) {
+            const state = readPathState(path);
+            known.set(path, state);
+            snapshots.set(path, state.bytes);
+            if (state.mode !== undefined) snapshotModes.set(path, state.mode);
           }
           if (fileInput.mode === 'backup') backups.set(fileInput, await prepareCapturedToolBackup(path, dryRun));
         }
-        for (const path of snapshots.keys()) await assertCapturedToolReadAccess(path);
         for (const backup of backups.values()) await backup.assertCurrent();
         assertCapturedToolMutationCurrent();
-        for (const [path, before] of snapshots) {
-          assertCapturedToolMutationCurrent(path);
-          if (before === null ? existsSync(path) : !existsSync(path) || !Buffer.from(before).equals(readFileSync(path)) || (snapshotModes.has(path) && (statSync(path).mode & 0o777) !== snapshotModes.get(path)))
-            throw new Error('Captured atomic write conflicts with changed input');
-          if (before !== null) initialRevisions.set(path, captureCapturedToolWriteRevision(path, Buffer.from(before)));
-        }
       }
 
       // A throw part-way through a non-atomic batch leaves earlier files on
@@ -606,108 +747,125 @@ export function createWriteTool(options?: {
       for (const [fileIndex, fileInput] of input.files.entries()) {
         if (!fileInput || !fileInput.path || typeof fileInput.path !== 'string') {
           const error = `files[${fileIndex}]: invalid file entry: missing or invalid 'path' field.`;
-          if (transactionMode === 'atomic') return await rollbackAtomic(String(fileInput?.path ?? '<invalid>'), error);
+          if (atomic) return await rollbackAtomic(String(fileInput?.path ?? '<invalid>'), error);
           errors.push(error);
           continue;
         }
 
+        let path = resolvedPaths.get(fileInput);
+        let pathError: unknown;
+        if (path === undefined) {
+          try { path = resolveWritablePath(fileInput.path, projectRoot); } catch (err) { pathError = err; }
+        }
+        if (path === undefined) {
+          const error = `Path error for '${fileInput.path}': ${summarizeError(pathError)}`;
+          if (atomic) return await rollbackAtomic(fileInput.path, error);
+          if (captured) throw pathError;
+          errors.push(error);
+          logger.warn('write tool: file write failed', { path: fileInput.path, error });
+          continue;
+        }
+        const resolvedPath: string = path;
+
         if (!capturedAtomic && (captured || options.capturedReadAccess)) {
           try {
-            const path = resolveWritablePath(fileInput.path, projectRoot);
-            await assertCapturedToolReadAccess(path);
-            if (options.capturedReadAccess && !await options.capturedReadAccess(path)) {
+            await assertCapturedToolReadAccess(resolvedPath);
+            if (options.capturedReadAccess && !await options.capturedReadAccess(resolvedPath)) {
               const error = 'Captured write path is access-restricted';
-              if (transactionMode === 'atomic') return await rollbackAtomic(fileInput.path, error);
+              if (atomic) return await rollbackAtomic(fileInput.path, error);
               errors.push(`${fileInput.path}: ${error}`);
               continue;
             }
-            if (captured && fileInput.mode === 'backup') backups.set(fileInput, await prepareCapturedToolBackup(path, dryRun));
+            if (captured && fileInput.mode === 'backup') backups.set(fileInput, await prepareCapturedToolBackup(resolvedPath, dryRun));
           } catch (error) {
-            if (transactionMode === 'atomic') return await rollbackAtomic(fileInput.path, summarizeError(error));
+            if (atomic) return await rollbackAtomic(fileInput.path, summarizeError(error));
             throw error;
           }
         }
         let preparationError: string | undefined;
         try {
           assertCurrent();
-          if (captured) {
-            const path = resolveWritablePath(fileInput.path, projectRoot);
-            if (capturedAtomic) {
-              await assertCapturedToolReadAccess(path);
-              const revision = revisions.get(path) ?? initialRevisions.get(path);
-              if (revision) assertCapturedToolWriteRevision(path, revision);
-              else if (existsSync(path)) throw new Error('Captured atomic write conflicts with newly created input');
-            }
-            assertCapturedToolMutationCurrent(path);
-          }
+          if (captured) assertCapturedToolMutationCurrent(resolvedPath);
         } catch (error) { preparationError = summarizeError(error); }
 
-        // Capture before-content for undo and atomic transaction snapshots BEFORE the write happens
+        // Before-content for undo and atomic rollback, read before the write happens.
         let beforeContent: string | null = null;
-        let beforeBytes: Buffer | null = null;
-        let existedBeforeWrite = false;
-        // Undo compares the file read as UTF-8; a latin1/ascii/binary write would never match, so it gets no undo entry.
-        let undoable = !fileInput.encoding || fileInput.encoding === 'utf-8' || fileInput.encoding === 'utf8';
-        if (!preparationError && !dryRun && fileInput.path) {
-          let resolvedForUndo: string | undefined;
+        let existedBeforeWrite: boolean | undefined;
+        // Why /undo cannot restore this file, when it cannot. Undo compares the
+        // file read as UTF-8, so a latin1/ascii/binary write would never match.
+        let undoSkipReason: string | undefined = !fileInput.encoding || fileInput.encoding === 'utf-8' || fileInput.encoding === 'utf8'
+          ? undefined
+          : `it was written in encoding '${fileInput.encoding}', which /undo cannot restore`;
+        if (!preparationError && !dryRun) {
+          let state = known.get(resolvedPath);
           try {
-            resolvedForUndo = resolveWritablePath(fileInput.path, projectRoot);
-          } catch (err) {
-            logger.warn('write tool: failed to resolve path for before-write snapshot', {
-              path: fileInput.path,
-              error: summarizeError(err),
-            });
-            resolvedForUndo = undefined;
-          }
-          if (resolvedForUndo && existsSync(resolvedForUndo)) {
-            existedBeforeWrite = true;
-            try {
-              beforeBytes = readFileSync(resolvedForUndo);
-              beforeContent = beforeBytes.toString('utf-8');
-              // Undo restores text; a file that is not valid UTF-8 would come back altered, so it gets no undo entry.
-              if (!Buffer.from(beforeContent, 'utf-8').equals(beforeBytes)) { undoable = false; beforeContent = null; }
-              if (authenticated && transactionMode === 'atomic') captureFileEffectRevision(resolvedForUndo, beforeBytes)();
-            } catch (err) {
-              const warning = `Failed to read existing content before writing '${fileInput.path}': ${summarizeError(err)}`;
-              if (transactionMode === 'atomic') {
-                const failure = await rollbackAtomic(fileInput.path, `Atomic transaction cannot safely snapshot '${fileInput.path}': ${summarizeError(err)}`);
-                return { ...failure, warnings: [warning, ...failure.warnings ?? []] };
-              }
-              appendWarning(warnings, `${warning}. Undo snapshot will not include original content.`);
-              beforeContent = null;
+            // A path seen earlier in this call is re-read only when something else changed it since;
+            // an atomic batch leaves that to the stamp check before the rename, which refuses it.
+            if (state !== undefined && !atomic && fileStamp(resolvedPath) !== state.stamp) state = undefined;
+            if (state === undefined) {
+              state = readPathState(resolvedPath);
+              known.set(resolvedPath, state);
             }
+          } catch (err) {
+            const warning = `Failed to read existing content before writing '${fileInput.path}': ${summarizeError(err)}`;
+            if (atomic) {
+              const failure = await rollbackAtomic(fileInput.path, `Atomic transaction cannot safely snapshot '${fileInput.path}': ${summarizeError(err)}`);
+              return { ...failure, warnings: [warning, ...failure.warnings ?? []] };
+            }
+            appendWarning(warnings, warning);
+            state = undefined;
+            undoSkipReason = 'its content before the write could not be read';
           }
-          // Store snapshot for atomic transaction rollback
-          if (transactionMode === 'atomic' && resolvedForUndo && !snapshots.has(resolvedForUndo)) {
-            try {
-              snapshots.set(resolvedForUndo, existedBeforeWrite ? beforeBytes : null);
-              if (existedBeforeWrite) snapshotModes.set(resolvedForUndo, statSync(resolvedForUndo).mode & 0o777);
-            } catch (err) {
-              return await rollbackAtomic(fileInput.path, `Atomic transaction cannot safely snapshot '${fileInput.path}': ${summarizeError(err)}`);
+          if (state !== undefined) {
+            existedBeforeWrite = state.bytes !== null;
+            if (state.bytes !== null) {
+              beforeContent = state.bytes.toString('utf-8');
+              // Undo restores text; a file that is not valid UTF-8 would come back altered, so it gets no undo entry.
+              if (!Buffer.from(beforeContent, 'utf-8').equals(state.bytes)) {
+                beforeContent = null;
+                undoSkipReason ??= 'its content before the write is not UTF-8 text, which /undo cannot restore byte for byte';
+              }
+            }
+            // Store snapshot for atomic transaction rollback
+            if (atomic && !snapshots.has(resolvedPath)) {
+              snapshots.set(resolvedPath, state.bytes);
+              if (state.mode !== undefined) snapshotModes.set(resolvedPath, state.mode);
             }
           }
         }
 
         const outcome = preparationError
           ? { ok: false as const, error: preparationError }
-          : processSingleWrite(fileInput, projectRoot, dryRun, backups.get(fileInput), capturedAtomic ? revisions.get(resolveWritablePath(fileInput.path, projectRoot)) : undefined, assertCurrent);
+          : processSingleWrite(fileInput, {
+              resolvedPath,
+              projectRoot,
+              dryRun,
+              existed: existedBeforeWrite,
+              // The bytes being replaced must be the snapshotted ones, or rollback would restore the wrong file.
+              expectedStamp: atomic && !dryRun ? known.get(resolvedPath)?.stamp : undefined,
+              capturedBackup: backups.get(fileInput),
+              sourceRevision: capturedAtomic ? revisions.get(resolvedPath) : undefined,
+              assertCurrent,
+            });
 
         if (!outcome.ok) {
           errors.push(outcome.error.includes(fileInput.path) ? outcome.error : `${fileInput.path}: ${outcome.error}`);
           logger.warn('write tool: file write failed', { path: fileInput.path, error: outcome.error });
 
           // Atomic transaction: rollback all successfully written files
-          if (transactionMode === 'atomic') return await rollbackAtomic(fileInput.path, outcome.error);
+          if (atomic) return await rollbackAtomic(fileInput.path, outcome.error);
 
           continue;
         }
 
         results.push(outcome.result);
-        // The bytes this write put on disk: exact for a binary payload, the encoded text otherwise.
-        const writtenBytes = () => outcome.result._bytes ?? Buffer.from(outcome.result._content ?? '', (fileInput.encoding as BufferEncoding) ?? 'utf-8');
-        if (authenticated && !dryRun) ownedRevisions.set(outcome.result.resolved_path, captureFileEffectRevision(outcome.result.resolved_path, writtenBytes()));
-        if (captured && !dryRun && (capturedAtomic || options.fileUndoManager)) {
-          revisions.set(outcome.result.resolved_path, captureCapturedToolWriteRevision(outcome.result.resolved_path, writtenBytes()));
+        if (!dryRun) {
+          // The bytes this write put on disk: exact for a binary payload, the encoded text otherwise.
+          const writtenBytes = outcome.result._bytes ?? Buffer.from(outcome.result._content ?? '', (fileInput.encoding as BufferEncoding) ?? 'utf-8');
+          known.set(resolvedPath, { bytes: writtenBytes, stamp: outcome.result._stamp ?? null });
+          if (captured && (capturedAtomic || options.fileUndoManager)) {
+            revisions.set(resolvedPath, captureCapturedToolWriteRevision(resolvedPath, writtenBytes));
+          }
         }
 
         // State integration, only for real writes, not dry runs
@@ -716,7 +874,7 @@ export function createWriteTool(options?: {
           const retainedPath = outcome.result.resolved_path;
           const writeResult = outcome.result;
           async function recordRetainedCapturedWrite(): Promise<void> {
-            if (!captured || !options?.fileUndoManager || !undoable || writeResult._bytes) return;
+            if (!captured || !options?.fileUndoManager || undoSkipReason !== undefined || writeResult._bytes) return;
             // A failed repair can leave its initial write intact. History must
             // only describe bytes still owned under live read/mutation authority.
             try {
@@ -776,16 +934,17 @@ export function createWriteTool(options?: {
             }
 
             // Snapshot for /undo file support
-            if (options?.fileUndoManager && (!undoable || binaryPayload)) {
+            const noUndo = binaryPayload ? 'binary content cannot be restored byte for byte by /undo' : undoSkipReason;
+            if (options?.fileUndoManager && noUndo !== undefined) {
               appendWarning(
                 warnings,
-                `Undo history was not recorded for '${outcome.result.path}': binary content cannot be restored byte for byte by /undo.`,
+                `Undo history was not recorded for '${outcome.result.path}': ${noUndo}.`,
                 outcome.result,
               );
             } else if (options?.fileUndoManager) {
               try {
                 const snapshot = { path: outcome.result.resolved_path, beforeContent, afterContent: content, tool: 'write' as const, call: undoCall };
-                if (transactionMode === 'atomic') pendingUndo.push(snapshot);
+                if (atomic) pendingUndo.push(snapshot);
                 else options.fileUndoManager.snapshot(snapshot);
               } catch (err) {
                 appendWarning(
@@ -859,7 +1018,7 @@ export function createWriteTool(options?: {
                       warnings: [`Auto-heal skipped for '${outcome.result.path}': tool LLM is not configured`],
                     };
                 } catch (error) {
-                  if (transactionMode === 'atomic') {
+                  if (atomic) {
                     const failure = await rollbackAtomic(fileInput.path, `Auto-heal failed: ${summarizeError(error)}`);
                     if (capturedAtomic) return failure;
                     if (failure.warnings?.length && error instanceof Error) {
@@ -887,9 +1046,11 @@ export function createWriteTool(options?: {
                       assertCapturedToolMutationCurrent(outcome.result.resolved_path);
                     }
                     assertCurrent();
-                    if (authenticated) ownedRevisions.get(outcome.result.resolved_path)!();
-                    atomicWrite(outcome.result.resolved_path, healResult.content);
-                    if (authenticated) ownedRevisions.set(outcome.result.resolved_path, captureFileEffectRevision(outcome.result.resolved_path, Buffer.from(healResult.content)));
+                    // The repair replaces only the bytes this call wrote; a file changed during the repair is left alone.
+                    const healedBytes = Buffer.from(healResult.content, 'utf-8');
+                    const stamp = atomicWrite(resolvedPath, healResult.content, 'utf-8', known.get(resolvedPath)?.stamp);
+                    known.set(resolvedPath, { bytes: healedBytes, stamp });
+                    if (captured && (capturedAtomic || options.fileUndoManager)) revisions.set(resolvedPath, captureCapturedToolWriteRevision(resolvedPath, healedBytes));
                     content = healResult.content;
                     outcome.result._content = content;
                     outcome.result.bytes_written = Buffer.byteLength(content, 'utf-8');
@@ -899,7 +1060,7 @@ export function createWriteTool(options?: {
                       method: healResult.method,
                     };
                   } catch (writeErr) {
-                    if (transactionMode === 'atomic') return await rollbackAtomic(fileInput.path, `Auto-heal rewrite failed: ${summarizeError(writeErr)}`);
+                    if (atomic) return await rollbackAtomic(fileInput.path, `Auto-heal rewrite failed: ${summarizeError(writeErr)}`);
                     if (captured) {
                       await recordRetainedCapturedWrite();
                       throw writeErr;
@@ -925,7 +1086,6 @@ export function createWriteTool(options?: {
             }
           }
 
-          if (capturedAtomic) revisions.set(outcome.result.resolved_path, captureCapturedToolWriteRevision(outcome.result.resolved_path, outcome.result._bytes ?? Buffer.from(content, (fileInput.encoding as BufferEncoding) ?? 'utf-8')));
           recordWriteState();
         }
       }
@@ -951,6 +1111,12 @@ export function createWriteTool(options?: {
 
       // Attach partial errors to output if some succeeded and some failed
       const finalOutput: Record<string, unknown> = { ...output };
+      // A file auto-heal rewrote no longer holds what the caller sent; say so whatever the verbosity.
+      const healed = results.flatMap((r) => r.auto_heal?.healed ? [{ path: r.path, method: r.auto_heal.method ?? 'unknown' }] : []);
+      if (healed.length > 0) {
+        finalOutput.healed = healed;
+        finalOutput.healed_notice = `Auto-heal repaired a syntax error and rewrote ${healed.length === 1 ? 'this file' : 'these files'}: the file on disk differs from the content you sent. Read it before editing.`;
+      }
       if (errors.length > 0) {
         finalOutput.errors = errors;
         // count_only carries no file list; on a partial failure the model

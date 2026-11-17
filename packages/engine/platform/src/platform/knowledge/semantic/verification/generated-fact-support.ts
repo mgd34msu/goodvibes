@@ -5,19 +5,31 @@ import { knowledgeClockIso } from '../../store-record-representation.js';
 import { createSupportReferenceLabels } from './structural-references.js';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JsonValue, JudgmentPort } from '@goodvibes-jev/judgment';
-import { generatedFactFieldSupport, generatedFactSubjectAttachment } from './batteries.js';
+import { GENERATED_FACT_SUPPORT_SLOTS as SLOTS, generatedFactBatchSupport as battery, generatedFactSupportState } from './batteries.js';
 import { freezeSupport, projectSupportInput, createSupportOriginalValues, originalSupportValues, releaseOriginalSupportValues, type ProjectedSupportInput } from './projection.js';
 import { GENERATED_FACT_SUPPORT_LIMITS as LIMITS, KnowledgeGeneratedFactSupportHeldError as Held,
   type GeneratedFactSupportInput, type GeneratedFactSupportOptions, type GeneratedFactSupportPlan, type GeneratedFactSupportReceipt } from './types.js';
 export * from './types.js';
 
-type RequestPlan = {
-  readonly projection: ProjectedSupportInput;
-  readonly field: string;
-  readonly subjectId?: string;
-  readonly state: Record<string, JsonValue>;
-  readonly attachment: boolean;
-};
+/** One claim of one source, with the subjects it is attached to, as the reading sees it. */
+interface ClaimJob {
+  readonly claim: JsonValue;
+  readonly subjects: readonly JsonValue[];
+}
+/** One source and extraction, sent once, with every distinct claim read against it. */
+interface SourceGroup {
+  readonly source: JsonValue;
+  readonly extraction: JsonValue;
+  readonly jobs: ClaimJob[];
+  readonly keys: Map<string, number>;
+}
+/** One request: up to SLOTS.length claims of one group. */
+interface BatchRequest {
+  readonly group: SourceGroup;
+  readonly offset: number;
+  readonly count: number;
+}
+interface ClaimSettlement { readonly probability: number; readonly decisionId?: string | undefined }
 function bounded(value: number | undefined, maximum: number): number {
   if (value === undefined) return maximum;
   const result = value;
@@ -38,13 +50,6 @@ function versionsAgree(inputs: readonly ProjectedSupportInput[]): void {
     input.subjects.forEach((subject, index) => compare(`subject:${subject.originalId}`, original.subjects[index]));
   }
 }
-function requestPlans(input: ProjectedSupportInput): RequestPlan[] {
-  const state = input.state as { readonly [key: string]: JsonValue };
-  return [
-    ...input.fields.map((field) => ({ projection: input, field: field.name, state: { ...state, field: { name: field.name, value: field.value } }, attachment: false })),
-    ...input.subjects.map((subject) => ({ projection: input, field: 'subjectAttachment', subjectId: subject.originalId, state: { ...state, subject: subject.state }, attachment: true })),
-  ];
-}
 /** Validate custom ports too: a malformed noul may otherwise accidentally reach an act band. */
 function checkedPort(port: JudgmentPort): JudgmentPort {
   return { ...port, model: port.model, async ask(request) {
@@ -59,17 +64,16 @@ function checkedPort(port: JudgmentPort): JudgmentPort {
     return result;
   } };
 }
-function receipt(request: RequestPlan, probability: number, decisionId?: string): GeneratedFactSupportReceipt {
-  const input = request.projection;
-  const battery = request.attachment ? generatedFactSubjectAttachment : generatedFactFieldSupport;
+function receipt(input: ProjectedSupportInput, field: 'claim' | 'subjectAttachment', subjectId: string | undefined,
+  settled: ClaimSettlement): GeneratedFactSupportReceipt {
   const body = {
-    ...(decisionId === undefined ? {} : { decisionId }), battery: battery.name, batteryVersion: battery.version,
+    ...(settled.decisionId === undefined ? {} : { decisionId: settled.decisionId }), battery: battery.name, batteryVersion: battery.version,
     version: 2 as const, spaceId: input.spaceId, claimId: input.claimId,
-    field: request.field, sourceId: input.sourceId, extractionId: input.extractionId,
+    field, sourceId: input.sourceId, extractionId: input.extractionId,
     extractionUpdatedAt: knowledgeClockIso(input.extractionUpdatedAt),
-    ...(request.subjectId === undefined ? {} : { subjectId: request.subjectId }),
+    ...(subjectId === undefined ? {} : { subjectId }),
     evidenceReference: { extractionId: input.extractionId },
-    verdict: 'yes' as const, outcome: 'act' as const, probability,
+    verdict: 'yes' as const, outcome: 'act' as const, probability: settled.probability,
   };
   // The saved whole receipt and its source/field tuple carry the evidence.
   // Its local label is never recomputed or used to verify that evidence.
@@ -78,8 +82,10 @@ function receipt(request: RequestPlan, probability: number, decisionId?: string)
 
 /**
  * Read-only, whole-pass barrier. Every supplied claim×source and every proposed
- * attachment must settle act/yes before ANY plans are returned. It performs no
- * storage writes; the caller must revalidate its exact read-set at write time.
+ * attachment must settle act/yes before ANY plans are returned. Claims of one
+ * source are read together: one request per twelve claims, the extraction sent
+ * once. It performs no storage writes; the caller must revalidate its exact
+ * read-set at write time.
  */
 export async function prepareGeneratedFactSupport(inputs: readonly GeneratedFactSupportInput[], options: GeneratedFactSupportOptions = {}): Promise<readonly GeneratedFactSupportPlan[]> {
   requireSemanticKnowledge();
@@ -97,41 +103,46 @@ export async function prepareGeneratedFactSupport(inputs: readonly GeneratedFact
   let projections: ProjectedSupportInput[];
   try { projections = inputs.map((input) => {
     const projection = projectSupportInput(input, referenceLabels, originalValues);
-    projectionBytes += new TextEncoder().encode(JSON.stringify(projection)).byteLength;
-    if (projectionBytes > maxBytes) throw new Held('budget');
+    // Measured only against a caller's finite byte budget.
+    if (Number.isFinite(maxBytes)) {
+      projectionBytes += new TextEncoder().encode(JSON.stringify(projection)).byteLength;
+      if (projectionBytes > maxBytes) throw new Held('budget');
+    }
     return projection;
   }); } finally { originalValues.clear(); }
   versionsAgree(projections);
   for (const projection of projections) releaseOriginalSupportValues(projection);
-  const jobs: RequestPlan[] = [], requestsByKey = new Map<string, number>(), parts = new Map<string, number>();
-  // Full original versions already agreed above. Private ID tuples only
-  // distinguish their actual owners; no whole source/metadata serialization is
-  // needed again for request deduplication. These pass-local keys never leave.
-  const part = (value: string): number => {
-    const known = parts.get(value);
-    if (known !== undefined) return known;
-    const next = parts.size; parts.set(value, next); return next;
-  };
+  // Claims of the same source are read together, the extraction sent once per
+  // request; an identical claim with the same subjects is read once.
+  const groups = new Map<string, SourceGroup>();
+  const slotsByInput = projections.map((input) => {
+    const state = input.state as { readonly claim: JsonValue; readonly source: JsonValue; readonly extraction: JsonValue; readonly subjects: readonly JsonValue[] };
+    const groupKey = JSON.stringify([input.sourceId, input.extractionId]);
+    let group = groups.get(groupKey);
+    if (!group) { group = { source: state.source, extraction: state.extraction, jobs: [], keys: new Map() }; groups.set(groupKey, group); }
+    const claimKey = JSON.stringify([input.claimId, state.claim, state.subjects]);
+    let index = group.keys.get(claimKey);
+    if (index === undefined) { index = group.jobs.length; group.keys.set(claimKey, index); group.jobs.push({ claim: state.claim, subjects: state.subjects }); }
+    return { group, index };
+  });
+  const requests: BatchRequest[] = [];
+  const questionBytes = Number.isFinite(maxBytes)
+    ? new TextEncoder().encode(JSON.stringify(Object.fromEntries(Object.entries(battery.items).map(([name, item]) => [name, item.question])))).byteLength : 0;
   let bytes = 0;
-  const planRequests = projections.map((input) => freezeSupport(requestPlans(input)).map((request) => {
-    const key = JSON.stringify([request.attachment, part(`wire:${JSON.stringify(request.state)}`),
-      part(`id:${input.claimId}`), part(`id:${input.sourceId}`), part(`id:${input.extractionId}`),
-      request.subjectId === undefined ? null : part(`id:${request.subjectId}`)]);
-    const previous = requestsByKey.get(key);
-    if (previous !== undefined) return previous;
-    if (jobs.length >= maxRequests) throw new Held('budget');
-    const battery = request.attachment ? generatedFactSubjectAttachment : generatedFactFieldSupport;
-    const questions = Object.fromEntries(Object.entries(battery.items).map(([name, item]) => [name, item.question]));
-    // Include question text plus bounded protocol/context overhead, not just evidence.
-    bytes += new TextEncoder().encode(JSON.stringify({ state: request.state, questions })).byteLength + 1_024;
-    if (bytes > maxBytes) throw new Held('budget');
-    const index = jobs.length;
-    requestsByKey.set(key, index); jobs.push(request);
-    return index;
-  }));
-  parts.clear(); requestsByKey.clear();
+  for (const group of groups.values()) {
+    for (let offset = 0; offset < group.jobs.length; offset += SLOTS.length) {
+      if (requests.length >= maxRequests) throw new Held('budget');
+      const count = Math.min(SLOTS.length, group.jobs.length - offset);
+      if (Number.isFinite(maxBytes)) {
+        bytes += new TextEncoder().encode(JSON.stringify(generatedFactSupportState(group.source, group.extraction, group.jobs.slice(offset, offset + count)))).byteLength
+          + questionBytes + 1_024;
+        if (bytes > maxBytes) throw new Held('budget');
+      }
+      requests.push({ group, offset, count });
+    }
+  }
   if (options.signal?.aborted) throw new Held('aborted');
-  if (jobs.length === 0) return Object.freeze([]);
+  if (requests.length === 0) return Object.freeze([]);
 
   const controller = new AbortController();
   let cancellation: Held | undefined;
@@ -140,9 +151,9 @@ export async function prepareGeneratedFactSupport(inputs: readonly GeneratedFact
   options.signal?.addEventListener('abort', onAbort, { once: true });
   const timeout = timeoutMs > 0 ? setTimeout(() => cancel(new Held('budget')), timeoutMs) : undefined;
   const assertCurrent = () => { if (cancellation) throw cancellation; if (options.signal?.aborted) throw new Held('aborted'); };
-  const settled: GeneratedFactSupportReceipt[] = [];
+  const settled = new Map<SourceGroup, ClaimSettlement[]>();
   let next = 0;
-  async function read(job: RequestPlan, port: JudgmentPort) {
+  async function read(request: BatchRequest, port: JudgmentPort) {
     assertCurrent();
     let removeAbort = () => {};
     // Even a custom port ignoring AbortSignal cannot keep a pass alive forever.
@@ -153,36 +164,42 @@ export async function prepareGeneratedFactSupport(inputs: readonly GeneratedFact
       if (controller.signal.aborted) listener();
     });
     try {
-      const settings = { signal: controller.signal, site: job.attachment ? generatedFactSubjectAttachment.name : generatedFactFieldSupport.name };
-      const pending = job.attachment
-        ? generatedFactSubjectAttachment.run(port, job.state, settings).then((run) => ({ run, reading: run.readings.attached }))
-        : generatedFactFieldSupport.run(port, job.state, settings).then((run) => ({ run, reading: run.readings.supported }));
-      const { run, reading } = await Promise.race([pending, aborted]);
+      const only = SLOTS.slice(0, request.count);
+      const state = generatedFactSupportState(request.group.source, request.group.extraction, request.group.jobs.slice(request.offset, request.offset + request.count));
+      const run = await Promise.race([battery.run(port, state, { signal: controller.signal, site: battery.name, only: [...only] }), aborted]);
       assertCurrent();
-      if (reading.outcome !== 'act' || reading.verdict !== 'yes') {
-        run.recordAction('held: exact generated field or subject attachment is unsupported or unsettled');
-        throw new Held(reading.outcome === 'act' && reading.verdict === 'no' ? 'no-support' : 'unsettled');
+      const readings = only.map((name) => run.readings[name]);
+      if (readings.some((reading) => !reading || reading.outcome !== 'act' || reading.verdict !== 'yes')) {
+        run.recordAction('held: a generated claim or its subject attachment is unsupported or unsettled');
+        throw new Held(readings.some((reading) => reading?.outcome === 'act' && reading.verdict === 'no') ? 'no-support' : 'unsettled');
       }
-      run.recordAction('verified: exact generated field or subject attachment; persistence remains subject to read-set validation');
-      return receipt(job, reading.probability, run.result.decisionId);
+      run.recordAction(`verified: ${request.count} generated claim(s) and their subject attachments; persistence remains subject to read-set validation`);
+      const results = settled.get(request.group) ?? [];
+      readings.forEach((reading, index) => {
+        results[request.offset + index] = { probability: reading!.probability, ...(run.result.decisionId === undefined ? {} : { decisionId: run.result.decisionId }) };
+      });
+      settled.set(request.group, results);
     } finally { removeAbort(); }
   }
   try {
     assertCurrent();
     const port = checkedPort(judgmentPort('engine.knowledge.generated-fact-support'));
-    await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, async () => {
-      while (next < jobs.length) {
+    await Promise.all(Array.from({ length: Math.min(concurrency, requests.length) }, async () => {
+      while (next < requests.length) {
         assertCurrent();
         const index = next++;
-        try { settled[index] = await read(jobs[index]!, port); }
+        try { await read(requests[index]!, port); }
         catch (error) { const held = error instanceof Held ? error : new Held('unavailable'); cancel(held); throw held; }
       }
     }));
     assertCurrent();
-    return freezeSupport(projections.map((input, index) => ({ claim: input.claim, claimId: input.claimId,
-      sourceId: input.sourceId, extractionId: input.extractionId,
-      receipts: planRequests[index]!.map((request) => settled[request]!),
-    })));
+    return freezeSupport(projections.map((input, index) => {
+      const { group, index: job } = slotsByInput[index]!;
+      const result = settled.get(group)?.[job];
+      if (!result) throw new Held('malformed');
+      return { claim: input.claim, claimId: input.claimId, sourceId: input.sourceId, extractionId: input.extractionId,
+        receipts: [receipt(input, 'claim', undefined, result), ...input.subjects.map((subject) => receipt(input, 'subjectAttachment', subject.originalId, result))] };
+    }));
   } catch (error) { throw error instanceof Held ? error : new Held('unavailable'); }
   finally { clearTimeout(timeout); options.signal?.removeEventListener('abort', onAbort); }
 }

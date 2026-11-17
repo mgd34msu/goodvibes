@@ -1,4 +1,3 @@
-import { captureStrictJudgmentJson } from '../../gate/judgment-result.js';
 import { sameKnowledgeRecord } from '../store-record-representation.js';
 import { withStoredKnowledgeSourceReferences, withEngineGeneratedSupportReferences, type EngineGeneratedSupportReferences } from './verification/structural-references.js';
 import type { KnowledgeStore } from '../store.js';
@@ -15,9 +14,6 @@ import {
   type GeneratedFactSupportReceipt,
 } from './verification/types.js';
 
-const nativeApply = Reflect.apply;
-const nativeWeakMapGet = WeakMap.prototype.get, nativeWeakMapSet = WeakMap.prototype.set;
-
 interface NativeGeneratedFactPlanReferences {
   readonly store: KnowledgeStore;
   readonly claimId: string;
@@ -27,7 +23,7 @@ interface NativeGeneratedFactPlanReferences {
 // Only the actual whole-pass reader installs successful plan objects here.
 const nativeGeneratedPlans = new WeakMap<GeneratedFactSupportPlan, NativeGeneratedFactPlanReferences>();
 export function captureNativeGeneratedFactPlanReferences(store: KnowledgeStore, plan: GeneratedFactSupportPlan): NativeGeneratedFactPlanReferences {
-  const proof: NativeGeneratedFactPlanReferences | undefined = nativeApply(nativeWeakMapGet, nativeGeneratedPlans, [plan]);
+  const proof = nativeGeneratedPlans.get(plan);
   if (!proof || proof.store !== store) throw new KnowledgeGeneratedFactSupportHeldError('stale');
   proof.assertCurrent();
   return proof;
@@ -98,15 +94,16 @@ export function createGeneratedFactWritePlanner(
       const originalSource = store.getSource(source.id), originalExtraction = store.getExtractionBySourceId(source.id);
       if (!originalSource || !sameKnowledgeRecord(source, originalSource)
         || !sameKnowledgeRecord(extraction ?? null, originalExtraction ?? null)) throw new KnowledgeGeneratedFactSupportHeldError('stale');
-      const sourceSnapshot = captureStrictJudgmentJson(originalSource), extractionSnapshot = captureStrictJudgmentJson(originalExtraction);
+      // The rows a support reading was read from, held by store generation: a
+      // check is two indexed reads, never a copy or a deep compare.
       const sourceGeneration = store.getSourceGeneration(source.id);
+      const extractionId = originalExtraction?.id ?? null;
       const extractionGeneration = originalExtraction ? store.getRecordGeneration('extraction', originalExtraction.id) : null;
       const claimId = claim.id;
       nativeOwners.push({ claimId, assertCurrent() {
-        if (store.getSource(source.id) !== originalSource || store.getExtractionBySourceId(source.id) !== originalExtraction
-          || !sameKnowledgeRecord(sourceSnapshot, originalSource) || !sameKnowledgeRecord(extractionSnapshot, originalExtraction)
-          || store.getSourceGeneration(source.id) !== sourceGeneration
-          || (originalExtraction ? store.getRecordGeneration('extraction', originalExtraction.id) : null) !== extractionGeneration) {
+        if (store.getSourceGeneration(source.id) !== sourceGeneration
+          || (store.getExtractionBySourceId(source.id)?.id ?? null) !== extractionId
+          || (extractionId ? store.getRecordGeneration('extraction', extractionId) : null) !== extractionGeneration) {
           throw new KnowledgeGeneratedFactSupportHeldError('stale');
         }
       } });
@@ -138,7 +135,7 @@ export function createGeneratedFactWritePlanner(
         // No successful prefix escapes a failed whole-pass source check.
         guard.assertCurrent();
         for (const { proof } of proofs) proof.assertCurrent();
-        for (const { plan, proof } of proofs) nativeApply(nativeWeakMapSet, nativeGeneratedPlans, [plan, proof]);
+        for (const { plan, proof } of proofs) nativeGeneratedPlans.set(plan, proof);
         settled = measured;
       } finally {
         parts.clear(); requestsByParts.clear(); requests.length = 0; nativeOwners.length = 0;

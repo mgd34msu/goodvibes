@@ -1,6 +1,5 @@
 import { BatteryRegistry } from '@goodvibes-jev/judgment';
-import { generatedFactFieldSupport, generatedFactSubjectAttachment } from './batteries.js';
+import { generatedFactBatchSupport } from './batteries.js';
 
 export const registry = new BatteryRegistry();
-registry.register(generatedFactFieldSupport);
-registry.register(generatedFactSubjectAttachment);
+registry.register(generatedFactBatchSupport);

@@ -52,10 +52,22 @@ import {
   uniqueStrings,
 } from './utils.js';
 import { canonicalRepairSubjectNodes } from './repair-subjects.js';
-import { createRepairFactUsefulnessReader, KnowledgeRepairFactUsefulnessHeldError } from './repair-usefulness/reader.js';
+import { KnowledgeRepairFactUsefulnessHeldError } from './repair-usefulness/reader.js';
+import { readFactUsefulnessBatches } from './repair-usefulness/batch.js';
 import { deriveRepairProfileFacts, projectRepairProfileInput, repairProfileSourceText, repairProfileSubject } from './repair-profile.js';
 import { assertSemanticWriteAllowed, createSemanticPrimarySourcePlanner, createSemanticWriteGuard } from './primary-source-plan.js';
 import { prepareSemanticSupersession } from './supersession-plan.js';
+import { KnowledgeSemanticGenerationError } from './llm.js';
+import { knowledgeTerms, selectKnowledgePassages, splitKnowledgePassages } from '../passages.js';
+import { summarizeError } from '../../utils/error-display.js';
+import { logger } from '../../utils/logger.js';
+
+/** Output budget of the one generation request per source. */
+const SEMANTIC_GENERATION_MAX_TOKENS = 4_096;
+/** Characters of the surrounding text a sentence is read with when no generation model is configured. */
+const SENTENCE_CONTEXT_CHARS = 1_200;
+/** Source text shown with the batched usefulness reading: the passages that mention the facts or quote their evidence. */
+const FACT_EVIDENCE_BYTES = 24 * 1024;
 
 const semanticPersistenceGuards = new WeakMap<PersistedSemanticExtraction, () => void>();
 
@@ -90,9 +102,9 @@ export async function enrichKnowledgeSource(
   requireSemanticKnowledge();
   const spaceId = resolveEnrichmentSpaceId(source, options.knowledgeSpaceId);
   const generationGuard = createSemanticWriteGuard(context.store, options.signal, options.shouldStop);
-  generationGuard.watch(`source:${source.id}`, () => context.store.getSource(source.id), source);
+  generationGuard.source(source.id, source);
   const extraction = generationGuard.extraction(source.id);
-  generationGuard.watch('source-subject-edges', () => context.store.listEdges().filter((edge) => edge.fromKind === 'source' && edge.fromId === source.id));
+  generationGuard.edges('source-edges', [`source:${source.id}`]);
   repairSubjectCandidatesForSource(context.store, source, (id) => generationGuard.node(id));
   generationGuard.assertCurrent();
   if (!extraction) return emptyResult(source, true, 'semantic enrichment requires extracted source evidence');
@@ -129,12 +141,6 @@ export async function enrichKnowledgeSource(
   const valueOwner = createSemanticWriteGuard(context.store, options.signal, options.shouldStop);
   valueOwner.source(source.id, source);
   valueOwner.extraction(source.id, extraction);
-  const originalStore = context.store, originalLlm = context.llm, originalGenerate = context.llm?.completeJson;
-  const originalSignal = options.signal, originalStop = options.shouldStop, originalSpace = options.knowledgeSpaceId, originalForce = options.force;
-  valueOwner.watch('extraction-caller-configuration', () => ({ store: context.store === originalStore,
-    llm: context.llm === originalLlm, generation: context.llm?.completeJson === originalGenerate,
-    signal: options.signal === originalSignal, stop: options.shouldStop === originalStop,
-    space: options.knowledgeSpaceId === originalSpace, force: options.force === originalForce }));
   const assertValueOwnerCurrent = () => { valueOwner.assertCurrent(); scopeSelection.assertCurrent(); };
   const extractionValue = prepareKnowledgeExtractionValueReading({
     source: sourceRankingContent(source), text,
@@ -161,8 +167,20 @@ export async function enrichKnowledgeSource(
   assertExtractionCurrent();
   const llmExtraction = await extractSemanticsWithLlm(context.llm ?? null, generationSource, extraction, text, options.signal);
   assertExtractionCurrent();
-  const extracted = normalizeSemanticExtraction(llmExtraction)
-    ?? await deterministicSemanticExtraction(context.store, source, extraction, text, options.signal, options.shouldStop, generationGuard);
+  let extracted: KnowledgeSemanticExtraction;
+  if (context.llm) {
+    // A configured generation that fails or yields nothing usable is reported on
+    // the source; the costlier per-sentence path is for running without one.
+    const normalized = llmExtraction.ok ? normalizeSemanticExtraction(llmExtraction.value) : null;
+    if (!normalized) {
+      const reason = llmExtraction.ok ? 'semantic generation returned no usable facts' : `semantic generation failed: ${llmExtraction.reason}`;
+      await markSourceSemanticState(context.store, source, extraction, { skippedReason: reason, generationFailed: true }, assertExtractionCurrent);
+      return emptyResult(source, true, reason);
+    }
+    extracted = normalized;
+  } else {
+    extracted = await deterministicSemanticExtraction(context.store, source, extraction, text, options.signal, options.shouldStop, generationGuard, generationSubjects);
+  }
   assertExtractionCurrent();
   const semantic = freezeSupport(structuredClone(extracted));
   const persisted = await persistSemanticExtraction(context.store, source, extraction, semantic, {
@@ -170,6 +188,7 @@ export async function enrichKnowledgeSource(
     signal: options.signal,
     shouldStop: options.shouldStop,
     assertCurrent: extractionValue.assertCurrent,
+    subjects: generationSubjects,
   });
   assertSemanticWriteAllowed(options.signal, options.shouldStop);
   const assertPersistenceCurrent = semanticPersistenceGuards.get(persisted)!;
@@ -184,22 +203,42 @@ export async function enrichKnowledgeSource(
   return persisted;
 }
 
+/** The generation's output, or why there is none. */
+type GenerationOutcome = { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly reason: string };
+
 async function extractSemanticsWithLlm(
   llm: KnowledgeSemanticLlm | null,
   generationSource: Record<string, unknown>,
   extraction: KnowledgeExtractionRecord | null,
   text: string,
   signal?: AbortSignal,
-): Promise<unknown | null> {
-  if (!llm) return null;
+): Promise<GenerationOutcome> {
+  if (!llm) return { ok: false, reason: 'no generation model' };
+  try {
+    return { ok: true, value: await generateSemantics(llm, generationSource, extraction, text, signal) };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return { ok: false, reason: error instanceof KnowledgeSemanticGenerationError ? error.reason : summarizeError(error) };
+  }
+}
+
+function generateSemantics(
+  llm: KnowledgeSemanticLlm,
+  generationSource: Record<string, unknown>,
+  extraction: KnowledgeExtractionRecord | null,
+  text: string,
+  signal?: AbortSignal,
+): Promise<unknown> {
   return llm.completeJson({
     purpose: 'knowledge-semantic-enrichment',
+    maxTokens: SEMANTIC_GENERATION_MAX_TOKENS,
     signal,
     systemPrompt: [
       'You extract a durable semantic knowledge graph from source material.',
       'Return only JSON. Do not invent facts. Every fact must be grounded in the supplied source text.',
       'Capture capabilities, features, specifications, procedures, warnings, maintenance items, compatibility, configuration, and troubleshooting facts when present.',
       'Prefer precise facts over broad summaries. Preserve numbers, model names, ports, version names, constraints, and useful procedures. Every `confidence` field is an INTEGER on a 0-100 scale (0 = none, 100 = certain), never a 0-1 probability.',
+      'Every fact `evidence` is an exact quote copied from the source text, so it can be found in it.',
     ].join(' '),
     prompt: JSON.stringify({
       source: generationSource,
@@ -218,7 +257,7 @@ async function extractSemanticsWithLlm(
             title: 'short fact title',
             value: 'precise value when applicable',
             summary: 'source-grounded explanation',
-            evidence: 'short quote or close paraphrase from source',
+            evidence: 'exact short quote copied from the source text',
             confidence: 0,
             labels: ['optional labels'],
             targetHints: ['entities this fact describes'],
@@ -262,13 +301,16 @@ async function deterministicSemanticExtraction(
   signal?: AbortSignal,
   shouldStop?: () => boolean,
   generationGuard?: ReturnType<typeof createSemanticWriteGuard>,
+  subjectSelection?: Awaited<ReturnType<typeof linkedObjectsForSource>>,
 ): Promise<KnowledgeSemanticExtraction> {
   const factText = repairProfileSourceText(extraction) || text;
-  const selection = await linkedObjectsForSource(store, source, new Set(), signal, shouldStop);
-  generationGuard?.watch('deterministic-subject-selection', () => { selection.assertCurrent(); return true; });
+  // The generation step already chose the source's subjects; they are not read again.
+  const selection = subjectSelection ?? await linkedObjectsForSource(store, source, new Set(), signal, shouldStop);
   const subjects = selection.nodes.map(repairProfileSubject);
   const candidates = repairProfileValueCandidates(factText);
-  const states = candidates.map(candidate => ({ candidate: candidate.text, text: factText, subjects }));
+  // Each sentence is read with the text around it, not the whole document again.
+  const states = candidates.map(candidate => ({ candidate: candidate.text,
+    text: factText.slice(Math.max(0, candidate.start - SENTENCE_CONTEXT_CHARS), Math.min(factText.length, candidate.end + SENTENCE_CONTEXT_CHARS)), subjects }));
   assertJudgmentInput(states);
   const current = () => { assertSemanticWriteAllowed(signal, shouldStop); selection.assertCurrent(); generationGuard?.assertCurrent(); };
   const profileOwner = captureJudgmentPort('engine.knowledge.enrichment-profile', { signal, assertCurrent: current });
@@ -322,20 +364,20 @@ async function persistSemanticExtraction(
     readonly assertCurrent?: (() => void) | undefined;
     readonly signal?: AbortSignal | undefined;
     readonly shouldStop?: (() => boolean) | undefined;
+    /** The source's subjects as the generation step chose them. */
+    readonly subjects?: Awaited<ReturnType<typeof linkedObjectsForSource>> | undefined;
   },
 ): Promise<PersistedSemanticExtraction> {
   const spaceId = options.knowledgeSpaceId ?? sourceKnowledgeSpace(source);
   // Preflight every complete generated field before any verification/primary-source request.
   assertJudgmentInput(semantic);
+  // The rows this pass reads, held by generation: the source, its extraction and
+  // the edges at the source. Rows of other documents are not part of it, so a
+  // concurrent enrichment of another source never retires this one.
   const guard = createSemanticWriteGuard(store, options.signal, options.shouldStop);
-  guard.watch(`source:${source.id}`, () => store.getSource(source.id), source);
-  guard.watch(`extraction:${source.id}`, () => store.getExtractionBySourceId(source.id), extraction);
-  // Subject and usefulness readings now precede support planning. Bind the
-  // graph they will consult before the first asynchronous judgment.
-  guard.watch('enrichment-nodes', () => store.listNodesInSpace(spaceId));
-  guard.watch('enrichment-sources', () => store.listSourcesInSpace(spaceId));
-  guard.watch('enrichment-edges', () => store.listEdges());
-  guard.watch('enrichment-extractions', () => store.listExtractions());
+  guard.source(source.id, source);
+  guard.extraction(source.id, extraction);
+  guard.edges('source-edges', [`source:${source.id}`]);
   const planner = createSemanticPrimarySourcePlanner(store, guard, options.signal);
   const support = createGeneratedFactWritePlanner(store, guard, { signal: options.signal });
   const entities: KnowledgeNodeRecord[] = [];
@@ -375,10 +417,12 @@ async function persistSemanticExtraction(
   })).values()].map(nodeSlug);
   const entityIds = new Set(entityPlans.map((entity) => entity.id));
   for (const id of entityIds) guard.node(id);
-  guard.watch('source-subject-edges', () => store.listEdges().filter((edge) => edge.fromKind === 'source' && edge.fromId === source.id));
   // Only exact saved entity roles overlay subjects. An unrelated old hash
   // label is preserved rather than replaced by a new differently titled entity.
-  const subjectSelection = await linkedObjectsForSource(store, source, entityIds, options.signal, options.shouldStop);
+  // The generation step's subject choice stands unless an entity of this pass is one of its candidates.
+  const known = options.subjects;
+  const subjectSelection = known && ![...entityIds].some((id) => known.candidateIds.has(id))
+    ? known : await linkedObjectsForSource(store, source, entityIds, options.signal, options.shouldStop);
   guard.watch('source-subject-selection', () => { subjectSelection.assertCurrent(); return true; });
   const sourceLinkedObjects = subjectSelection.nodes;
   const proposedEntities: KnowledgeNodeRecord[] = entityPlans.map((plan) => {
@@ -386,44 +430,56 @@ async function persistSemanticExtraction(
     return { ...plan, aliases: plan.aliases ?? existing?.aliases ?? [], status: existing?.status ?? 'draft',
       metadata: { ...existing?.metadata, ...plan.metadata }, createdAt: existing?.createdAt ?? 0, updatedAt: existing?.updatedAt ?? 0 };
   });
-  const qualityReader = createRepairFactUsefulnessReader({ signal: options.signal });
   const featureKinds = new Set(['feature', 'capability', 'specification', 'compatibility', 'configuration']);
-  const proposedFacts = semantic.facts;
+  // Support starts in code: a generated fact must quote the text it rests on.
+  // A quote the source does not contain leaves the fact out without a request.
+  const quotable = semantic.extractor === 'llm' ? quoteText(sourceSemanticText({ ...source, ...knowledgeSourceJudgmentUris(source) }, extraction)) : '';
+  const proposedFacts = semantic.extractor === 'llm' ? semantic.facts.filter((fact) => quoteFound(fact.evidence, quotable)) : semantic.facts;
+  const unquotedFacts = semantic.facts.length - proposedFacts.length;
   const subjects = sourceLinkedObjects.map(repairProfileSubject);
   const projected = projectRepairProfileInput({ query: 'Extract useful concrete facts about the supplied subjects from this complete source.',
     source, extraction, subjects, text: repairProfileSourceText(extraction),
     structuralReferences: captureKnowledgeSourceReferences(store, source, extraction) });
-  const qualitySource = store.getSource(source.id), qualityExtraction = store.getExtractionBySourceId(source.id);
-  const qualitySubjects = sourceLinkedObjects.map((subject) => ({ subject, current: store.getNode(subject.id), version: JSON.stringify(subject) }));
-  const evidenceVersion = JSON.stringify({ source, extraction });
+  // The source, its extraction and the subjects, held by row generation: one
+  // indexed read per check instead of re-serialising them.
+  const qualityRows = createSemanticWriteGuard(store, options.signal, options.shouldStop);
+  qualityRows.source(source.id, source);
+  qualityRows.extraction(source.id, extraction);
+  for (const subject of sourceLinkedObjects) qualityRows.node(subject.id, subject);
   const assertQualityCurrent = () => {
-    try { store.assertRecordSnapshotFrame(() => {
-      assertSemanticWriteAllowed(options.signal, options.shouldStop); options.assertCurrent?.(); qualityReader.assertCurrent(); subjectSelection.assertCurrent();
-      if (store.getSource(source.id) !== qualitySource || store.getExtractionBySourceId(source.id) !== qualityExtraction
-        || JSON.stringify({ source: store.getSource(source.id), extraction: store.getExtractionBySourceId(source.id) }) !== evidenceVersion
-        || qualitySubjects.some(({ subject, current, version }) => store.getNode(subject.id) !== current || JSON.stringify(store.getNode(subject.id)) !== version)) {
-        throw new KnowledgeRepairFactUsefulnessHeldError('stale');
-      }
-    }); } catch (error) {
-      if (error instanceof KnowledgeRecordAdmissionHeldError) throw new KnowledgeRepairFactUsefulnessHeldError('stale');
+    try {
+      options.assertCurrent?.(); subjectSelection.assertCurrent(); qualityRows.assertCurrent();
+    } catch (error) {
+      if (error instanceof KnowledgeRecordAdmissionHeldError || (error instanceof Error && error.name === 'KnowledgeSourceQualityHeldError'
+        && (error as { readonly reason?: unknown }).reason === 'stale')) throw new KnowledgeRepairFactUsefulnessHeldError('stale');
       throw error;
     }
   };
-  const qualityInputs = proposedFacts.flatMap((fact, index) => featureKinds.has(fact.kind) ? [{
-    reference: `fact-${index + 1}`, query: projected.query, subjects,
-    fact: { title: fact.title, kind: fact.kind, summary: fact.summary, value: fact.value, evidence: fact.evidence,
-      subject: fact.targetHints, labels: fact.labels, aliases: fact.labels ?? [] },
-    evidence: [{ source: projected.source, extraction: projected.extraction, text: projected.text }],
-  }] : []);
-  const qualityReadings = await qualityReader.read(qualityInputs);
+  // Feature-like facts are read for usefulness in batches of twelve, one
+  // request each, over the passages that mention them, sent once per batch.
+  const featureIndexes = proposedFacts.flatMap((fact, index) => featureKinds.has(fact.kind) ? [index] : []);
+  const featureFacts = featureIndexes.map((index) => proposedFacts[index]!);
+  const usefulness = featureFacts.length === 0 ? { useful: new Set<number>(), unsettled: 0 } : await readFactUsefulnessBatches({
+    query: projected.query, subjects,
+    source: { title: projected.source.title, sourceType: projected.source.sourceType,
+      uri: projected.source.url ?? projected.source.sourceUri ?? projected.source.canonicalUri },
+    text: selectKnowledgePassages(splitKnowledgePassages([[projected.text]], 1_200),
+      knowledgeTerms(featureFacts.flatMap((fact) => [fact.title, fact.value, fact.evidence, fact.summary])), FACT_EVIDENCE_BYTES,
+      featureFacts.flatMap((fact) => typeof fact.evidence === 'string' ? [fact.evidence] : [])).passages.map((passage) => passage.text).join('\n\n'),
+    facts: featureFacts.map((fact) => ({ title: fact.title, kind: fact.kind, summary: fact.summary, value: fact.value, evidence: fact.evidence,
+      subject: fact.targetHints, labels: fact.labels })),
+  }, options.signal);
   guard.assertCurrent(); assertQualityCurrent();
-  const acceptedReferences = new Set(qualityReadings.filter((reading) => reading.useful).map((reading) => reading.reference));
-  const persistedFacts = proposedFacts.filter((fact, index) => !featureKinds.has(fact.kind) || acceptedReferences.has(`fact-${index + 1}`));
+  const usefulIndexes = new Set([...usefulness.useful].map((position) => featureIndexes[position]!));
+  const persistedFacts = proposedFacts.filter((fact, index) => !featureKinds.has(fact.kind) || usefulIndexes.has(index));
+  if (unquotedFacts > 0 || usefulness.unsettled > 0) {
+    logger.info('Semantic enrichment left facts out', { sourceId: source.id, unquoted: unquotedFacts, unsettled: usefulness.unsettled });
+  }
   // Rendering consumes the same settled fact set. Provider page text cannot
   // reintroduce a claim rejected by this complete-pass usefulness reading.
   const { wikiPage: suppliedWikiPage, ...extractedWithoutPage } = semantic;
   semantic = { ...extractedWithoutPage, facts: persistedFacts,
-    ...(persistedFacts.length === proposedFacts.length && suppliedWikiPage ? { wikiPage: suppliedWikiPage } : {}) };
+    ...(persistedFacts.length === semantic.facts.length && suppliedWikiPage ? { wikiPage: suppliedWikiPage } : {}) };
   const factDrafts = await prepareEnrichmentFactDrafts({ signal: options.signal, assertCurrent: assertQualityCurrent, store, source, extraction, spaceId, guard, primary: planner, support,
     allFacts: semantic.facts, persistedFacts,
     sourceSubjects: sourceLinkedObjects, proposedEntities,
@@ -437,8 +493,7 @@ async function persistSemanticExtraction(
   const activeIds = new Set([...entityIds, ...factDrafts.map(fact => fact.factId), ...gapIdentities.map(plan => plan.identity.id), ...(wikiIdentity ? [wikiIdentity.id] : [])]);
   guard.watch('semantic-role-identities', () => { roleIdentities.assertCurrent(); return true; });
   for (const id of activeIds) guard.node(id);
-  guard.watch('active-fact-edges', () => store.listEdges().filter((edge) =>
-    (edge.toKind === 'node' && activeIds.has(edge.toId)) || (edge.fromKind === 'node' && activeIds.has(edge.fromId))));
+  guard.edges('active-fact-edges', [...activeIds].map((id) => `node:${id}`));
   const resolveSupersession = prepareSemanticSupersession(store, source.id, spaceId, activeIds, guard, planner, support, assertQualityCurrent);
   await support.readAll();
   guard.assertCurrent(); assertQualityCurrent();
@@ -529,6 +584,22 @@ async function persistSemanticExtraction(
 }
 
 
+
+function quoteText(value: string): string {
+  return value.normalize('NFKC').toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Whether the source text (already passed through quoteText) contains a
+ * fact's quoted evidence. A quote may skip
+ * text with an ellipsis; every part of eight or more characters must be found.
+ * A fact with no quote, or only short parts, is not decided here.
+ */
+function quoteFound(evidence: unknown, quotable: string): boolean {
+  if (typeof evidence !== 'string') return true;
+  const parts = quoteText(evidence).replace(/^["'\s]+|["'\s]+$/g, '').split(/\s*(?:\.\.\.|\u2026)\s*/).filter((part) => part.length >= 8);
+  return parts.length === 0 || parts.every((part) => quotable.includes(part));
+}
 
 async function markSourceSemanticState(
   store: KnowledgeStore,
@@ -733,7 +804,7 @@ function repairSubjectCandidatesForSource(
   const sourceSpaceId = sourceKnowledgeSpace(source);
   const ids = uniqueStrings([
     ...readStringArray(discovery.linkedObjectIds),
-    ...store.listEdges()
+    ...store.edgesFor('source', source.id)
       .filter((edge) => edge.fromKind === 'source' && edge.fromId === source.id)
       .filter((edge) => edge.toKind === 'node' && edge.relation === 'source_for')
       .filter((edge) => {
@@ -750,17 +821,30 @@ function repairSubjectCandidatesForSource(
   return nodes;
 }
 
+/**
+ * The subjects a source is about, from the links it already has (its
+ * discovery record and `source_for` edges). One linked subject, or none, is
+ * the answer without a reading; only several are read to choose among them.
+ */
 async function linkedObjectsForSource(store: KnowledgeStore, source: KnowledgeSourceRecord,
   entityOverlayIds: ReadonlySet<string>, signal?: AbortSignal, shouldStop?: () => boolean) {
   const guard = createSemanticWriteGuard(store, signal, shouldStop);
-  guard.watch('source-subject-edges', () => store.listEdges().filter(edge => edge.fromKind === 'source' && edge.fromId === source.id && edge.relation === 'source_for'));
+  guard.edges('source-edges', [`source:${source.id}`]);
   const nodes = repairSubjectCandidatesForSource(store, source, id =>
     entityOverlayIds.has(id) ? store.getNode(id) : guard.node(id));
+  const candidateIds: ReadonlySet<string> = new Set(nodes.map((node) => node.id));
+  const usable = nodes.filter((node) => !entityOverlayIds.has(node.id) && node.status !== 'stale' && !readString(node.metadata.semanticKind)
+    && !['fact', 'wiki_page', 'knowledge_gap'].includes(node.kind)
+    && node.metadata.generatedKnowledgePage !== true && node.metadata.generatedProjection !== true);
+  if (usable.length <= 1) {
+    const assertCurrent = () => { store.assertRecordSnapshotFrame(() => { guard.assertCurrent(); }); };
+    assertCurrent(); return { nodes: usable, candidateIds, assertCurrent };
+  }
   const selected = await canonicalRepairSubjectNodes({ store, spaceId: sourceKnowledgeSpace(source), context: { source },
     nodes, excludedNodeIds: [...entityOverlayIds], signal, shouldStop,
     text: `${source.title ?? ''} ${source.summary ?? ''} ${source.description ?? ''}` });
   const assertCurrent = () => { store.assertRecordSnapshotFrame(() => { guard.assertCurrent(); selected.assertCurrent(); }); };
-  assertCurrent(); return { nodes: selected.nodes, assertCurrent };
+  assertCurrent(); return { nodes: selected.nodes, candidateIds, assertCurrent };
 }
 
 function isFact(value: KnowledgeSemanticFactInput | null): value is KnowledgeSemanticFactInput {

@@ -5,3 +5,5 @@ registry.register(repairFactUsefulness);
 
 import { knowledgePageFactUsefulness } from './page-battery.js';
 registry.register(knowledgePageFactUsefulness);
+import { enrichmentFactUsefulness } from './batch.js';
+registry.register(enrichmentFactUsefulness);

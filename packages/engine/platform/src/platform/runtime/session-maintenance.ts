@@ -133,7 +133,9 @@ export function evaluateSessionMaintenance(input: SessionMaintenanceInput): Sess
     level = 'watch';
     reasons.push(staleByMessageGrowth
       ? `Conversation has grown ${messageCount.toLocaleString()} messages since the last maintenance checkpoint.`
-      : `Context usage is climbing toward the ${thresholdPct}% auto-compact threshold.`);
+      : autoCompactEnabled
+        ? `Context usage is climbing toward the ${thresholdPct}% auto-compact threshold.`
+        : `Context usage is high (${usagePct}%) and auto-compaction is off.`);
     nextSteps.push('/panel tokens');
     if (guidanceMode === 'guided') nextSteps.push('/context');
   } else {
@@ -162,7 +164,9 @@ export function evaluateSessionMaintenance(input: SessionMaintenanceInput): Sess
             ? `Context high (${usagePct}% used): auto-compact runs before the next turn.`
             : `Compact now to recover context headroom (${usagePct}% used).`)
           : level === 'watch'
-            ? `Watch context growth (${usagePct}% used, threshold ${thresholdPct}%).`
+            ? (autoCompactEnabled
+              ? `Watch context growth (${usagePct}% used, threshold ${thresholdPct}%).`
+              : `Watch context growth (${usagePct}% used, auto-compaction off).`)
             : 'Session maintenance is stable.';
 
   return {

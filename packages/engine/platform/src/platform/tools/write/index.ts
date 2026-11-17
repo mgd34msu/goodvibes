@@ -7,7 +7,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve as reso
 import { createHash, randomBytes } from 'node:crypto';
 import type { Tool, ToolDefinition, ToolExecuteOptions } from '../../types/tools.js';
 import { WRITE_SCHEMA, WRITE_TEXT_ENCODINGS, type WriteInput, type WriteFileInput, type WriteMode } from './schema.js';
-import { runValidators, capValidatorOutput, describeUndeclaredValidators, undeclaredValidators, type ValidatorName, type ValidatorRunner } from '../shared/validators.js';
+import { runValidators, capValidatorOutput, describeUndeclaredValidators, undeclaredValidators, validatorSettings, type ValidatorName, type ValidatorRunner } from '../shared/validators.js';
 import { FileStateCache } from '../../state/file-cache.js';
 import { ProjectIndex } from '../../state/project-index.js';
 import { FileUndoManager } from '../../state/file-undo.js';
@@ -642,8 +642,9 @@ export function createWriteTool(options?: {
       const requestedValidators = (input.validate?.after ?? []) as ValidatorName[];
       // A validator the project does not declare is reported before anything is written, not after.
       if (!dryRun && requestedValidators.length > 0 && options.validatorRunner) {
-        const missing = undeclaredValidators(requestedValidators, projectRoot);
-        if (missing.length > 0) return { success: false, error: describeUndeclaredValidators(missing, projectRoot) };
+        const settings = validatorSettings(options.configManager);
+        const missing = undeclaredValidators(requestedValidators, projectRoot, undefined, settings);
+        if (missing.length > 0) return { success: false, error: describeUndeclaredValidators(missing, projectRoot, undefined, settings) };
       }
 
       const results: FileWriteResult[] = [];
@@ -1143,7 +1144,8 @@ export function createWriteTool(options?: {
         const validatorNames = requestedValidators;
         logger.debug('write tool: running post-write validators', { validators: validatorNames });
         try {
-          const failures = await runValidators(validatorNames, projectRoot, options.validatorRunner, assertCurrent, executeOptions?.signal);
+          const failures = await runValidators(validatorNames, projectRoot, options.validatorRunner, assertCurrent, executeOptions?.signal,
+            undefined, validatorSettings(options.configManager));
           if (failures.length > 0) {
             finalOutput.validation_failures = failures.map((f) => ({
               validator: f.validator,

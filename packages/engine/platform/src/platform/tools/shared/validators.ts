@@ -2,8 +2,9 @@
  * Shared validator infrastructure for write and edit tools: how a project
  * checks itself, and the sequence runner. Each validator is the project's own
  * declared command (a package.json script through the project's package
- * manager, or the toolchain's own check for a Cargo or Go project); nothing is
- * run when the project declares no command for it. A validator runs only
+ * manager, the toolchain's own check for a Cargo or Go project, a Makefile
+ * target, or a Python tool the pyproject configures), else the owner's
+ * `tools.validators.<name>` setting; nothing is run when neither names one. A validator runs only
  * through a runner the composition supplies, which is the exec tool's own path
  * (exec/runtime.ts createExecValidatorRunner, or the captured runner for a
  * contract view), so the sandbox plan, the containment decision, the
@@ -13,7 +14,9 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { ConfigManager } from '../../config/manager.js';
 import { declaredPackageManager, PACKAGE_MANAGER_LOCKFILES } from '../../utils/project-test-runner.js';
+import { shellSplit } from '../../utils/shell-split.js';
 
 export type ValidatorName = 'typecheck' | 'lint' | 'test' | 'build';
 
@@ -36,6 +39,69 @@ const TOOLCHAIN_COMMANDS: ReadonlyArray<readonly [manifest: string, commands: Pa
 /** The project's command for each validator it declares; absent names have none. */
 export type ProjectValidatorCommands = Partial<Record<ValidatorName, readonly string[]>>;
 
+/** Makefile targets that declare each validator, first match wins. */
+const MAKE_TARGETS: Record<ValidatorName, readonly string[]> = {
+  typecheck: ['typecheck', 'type-check', 'check-types'],
+  lint: ['lint'],
+  test: ['test'],
+  build: ['build'],
+};
+const MAKEFILES: readonly string[] = ['GNUmakefile', 'makefile', 'Makefile'];
+
+function readText(path: string): string | undefined {
+  try { return readFileSync(path, 'utf-8'); } catch { return undefined; }
+}
+
+/** `make <target>` for each validator whose target the project's Makefile defines. */
+function makeCommands(root: string): ProjectValidatorCommands {
+  const file = MAKEFILES.find((name) => existsSync(join(root, name)));
+  const text = file === undefined ? undefined : readText(join(root, file));
+  if (text === undefined) return {};
+  const targets = new Set([...text.matchAll(/^([A-Za-z0-9_.-]+)\s*:(?!=)/gm)].map((match) => match[1]!));
+  const commands: ProjectValidatorCommands = {};
+  for (const name of VALIDATOR_NAMES) {
+    const target = MAKE_TARGETS[name].find((candidate) => targets.has(candidate));
+    if (target) commands[name] = ['make', target];
+  }
+  return commands;
+}
+
+/** The Python tools a project's pyproject.toml (or pytest.ini) configures: pytest, mypy, ruff. */
+function pythonCommands(root: string): ProjectValidatorCommands {
+  const pyproject = readText(join(root, 'pyproject.toml')) ?? '';
+  const commands: ProjectValidatorCommands = {};
+  if (/^\[tool\.pytest/m.test(pyproject) || existsSync(join(root, 'pytest.ini'))) commands.test = ['python', '-m', 'pytest'];
+  if (/^\[tool\.mypy\]/m.test(pyproject) || existsSync(join(root, 'mypy.ini'))) commands.typecheck = ['python', '-m', 'mypy', '.'];
+  if (/^\[tool\.ruff/m.test(pyproject) || existsSync(join(root, 'ruff.toml'))) commands.lint = ['ruff', 'check', '.'];
+  return commands;
+}
+
+/** The owner's setting naming the command of a validator, for a project that declares none. */
+export function validatorSettingKey(name: ValidatorName): `tools.validators.${ValidatorName}` {
+  return `tools.validators.${name}`;
+}
+
+/**
+ * The validator commands the owner set (`tools.validators.<name>`, each a
+ * command line), split into arguments. A value that does not split (an open
+ * quote) is left out. Read on each call, so a changed setting applies to the
+ * next write or edit.
+ */
+export function validatorSettings(configManager: Pick<ConfigManager, 'get'> | undefined): ProjectValidatorCommands {
+  const commands: ProjectValidatorCommands = {};
+  if (!configManager) return commands;
+  for (const name of VALIDATOR_NAMES) {
+    let value: unknown;
+    try { value = configManager.get(validatorSettingKey(name)); } catch { continue; }
+    if (typeof value !== 'string' || value.trim() === '') continue;
+    try {
+      const argv = shellSplit(value.trim(), { strict: true });
+      if (argv.length > 0) commands[name] = argv;
+    } catch { /* an unterminated quote names no command */ }
+  }
+  return commands;
+}
+
 function readManifest(root: string): Record<string, unknown> | undefined {
   let raw: string;
   try { raw = readFileSync(join(root, 'package.json'), 'utf-8'); } catch { return undefined; }
@@ -48,10 +114,13 @@ function readManifest(root: string): Record<string, unknown> | undefined {
 /**
  * Reads how the project at `root` checks itself: its package.json scripts run
  * through its declared package manager (npm when it declares none), then a
- * Cargo or Go toolchain's own commands. `overrides` (from settings) win per
- * validator. Cost: one read of package.json and a few existence checks.
+ * Cargo or Go toolchain's own commands, then its Makefile targets, then the
+ * Python tools its pyproject configures. `overrides` win per validator;
+ * `fallbacks` (the owner's `tools.validators.*` settings) fill a validator the
+ * project declares nothing for. Cost: a read of package.json, the Makefile and
+ * pyproject.toml when present, and a few existence checks.
  */
-export function resolveProjectValidators(root: string, overrides?: ProjectValidatorCommands): ProjectValidatorCommands {
+export function resolveProjectValidators(root: string, overrides?: ProjectValidatorCommands, fallbacks?: ProjectValidatorCommands): ProjectValidatorCommands {
   const commands: ProjectValidatorCommands = {};
   const manifest = readManifest(root);
   const scripts = manifest?.scripts;
@@ -63,11 +132,16 @@ export function resolveProjectValidators(root: string, overrides?: ProjectValida
       if (script) commands[name] = [manager, 'run', script];
     }
   }
-  for (const [file, toolchain] of TOOLCHAIN_COMMANDS) {
-    if (!existsSync(join(root, file))) continue;
+  const declaredSources = [
+    ...TOOLCHAIN_COMMANDS.filter(([file]) => existsSync(join(root, file))).map(([, toolchain]) => toolchain),
+    makeCommands(root),
+    pythonCommands(root),
+    fallbacks ?? {},
+  ];
+  for (const source of declaredSources) {
     for (const name of VALIDATOR_NAMES) {
-      const command = toolchain[name];
-      if (command && !commands[name]) commands[name] = command;
+      const command = source[name];
+      if (command && command.length > 0 && !commands[name]) commands[name] = command;
     }
   }
   for (const name of VALIDATOR_NAMES) {
@@ -77,19 +151,24 @@ export function resolveProjectValidators(root: string, overrides?: ProjectValida
   return commands;
 }
 
-/** The validators asked for that the project declares no command for. */
-export function undeclaredValidators(validators: readonly ValidatorName[], root: string, overrides?: ProjectValidatorCommands): ValidatorName[] {
-  const commands = resolveProjectValidators(root, overrides);
+/** The validators asked for that the project declares no command for (and no setting names). */
+export function undeclaredValidators(
+  validators: readonly ValidatorName[], root: string, overrides?: ProjectValidatorCommands, fallbacks?: ProjectValidatorCommands,
+): ValidatorName[] {
+  const commands = resolveProjectValidators(root, overrides, fallbacks);
   return validators.filter((name) => !commands[name]);
 }
 
-/** The refusal for validators the project does not declare, with what it does declare. */
-export function describeUndeclaredValidators(missing: readonly ValidatorName[], root: string, overrides?: ProjectValidatorCommands): string {
-  const commands = resolveProjectValidators(root, overrides);
+/** The refusal for validators the project does not declare, with what it does declare and the setting that supplies one. */
+export function describeUndeclaredValidators(
+  missing: readonly ValidatorName[], root: string, overrides?: ProjectValidatorCommands, fallbacks?: ProjectValidatorCommands,
+): string {
+  const commands = resolveProjectValidators(root, overrides, fallbacks);
   const declared = VALIDATOR_NAMES.filter((name) => commands[name]).map((name) => `${name} (${commands[name]!.join(' ')})`);
-  return `No ${missing.join(', ')} command is declared for this project (no matching package.json script or toolchain). `
+  return `No ${missing.join(', ')} command is declared for this project (no matching package.json script, Cargo or Go toolchain, Makefile target or pyproject tool). `
     + (declared.length > 0 ? `It declares: ${declared.join(', ')}. ` : 'It declares none. ')
-    + 'Nothing was changed; resend without those validators, or run the check with the exec tool.';
+    + 'Nothing was changed; resend without those validators, run the check with the exec tool, '
+    + `or ask the owner to set ${missing.map(validatorSettingKey).join(', ')} to the command (for example "pnpm -r test") in their own settings.`;
 }
 
 /** The commands resolved for the run in progress; the runners read them through {@link validatorCommand}. */
@@ -142,9 +221,10 @@ export async function runValidators(
   assertCurrent?: () => void,
   signal?: AbortSignal,
   overrides?: ProjectValidatorCommands,
+  fallbacks?: ProjectValidatorCommands,
 ): Promise<ValidatorResult[]> {
   if (!runner) return validators.map((validator) => ({ validator, passed: false, stdout: '', stderr: VALIDATORS_UNAVAILABLE, exitCode: -1 }));
-  const commands = resolveProjectValidators(cwd, overrides);
+  const commands = resolveProjectValidators(cwd, overrides, fallbacks);
   const failures: ValidatorResult[] = [];
   for (const name of validators) {
     assertCurrent?.();

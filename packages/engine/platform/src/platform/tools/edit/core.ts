@@ -40,6 +40,8 @@ import {
   formatValidatorFailure,
   describeUndeclaredValidators,
   undeclaredValidators,
+  validatorSettings,
+  type ProjectValidatorCommands,
   type ValidatorResult,
   type ValidatorRunner,
 } from '../shared/validators.js';
@@ -62,8 +64,11 @@ function failed(error: string, status: EditFailureStatus, output?: string): Edit
 }
 
 
-async function runValidators(validators: ValidatorName[], cwd: string, runner?: ValidatorRunner, assertCurrent?: () => void, signal?: AbortSignal): Promise<ValidatorResult | null> {
-  const failures = await runSharedValidators(validators, cwd, runner, assertCurrent, signal);
+async function runValidators(
+  validators: ValidatorName[], cwd: string, runner?: ValidatorRunner, assertCurrent?: () => void, signal?: AbortSignal,
+  settings?: ProjectValidatorCommands,
+): Promise<ValidatorResult | null> {
+  const failures = await runSharedValidators(validators, cwd, runner, assertCurrent, signal, undefined, settings);
   return failures[0] ?? null;
 }
 
@@ -377,13 +382,14 @@ async function validateAfterTextEdits(
   env: EditExecutionContext,
 ): Promise<{ error?: string; warnings?: string[]; healedPaths?: ReadonlySet<string> }> {
   try {
-    const failure = await runValidators(validators, cwd, env.validatorRunner, env.assertCurrent, env.signal);
+    const settings = validatorSettings(env.configManager);
+    const failure = await runValidators(validators, cwd, env.validatorRunner, env.assertCurrent, env.signal, settings);
     if (!failure) return {};
 
     const failureMessages = [formatValidatorFailure(failure)];
     const repair = await repairAfterValidationFailure(fileContents, workingContents, failureMessages, env);
     if (repair.healed) {
-      const healFailure = await runValidators(validators, cwd, env.validatorRunner, env.assertCurrent, env.signal);
+      const healFailure = await runValidators(validators, cwd, env.validatorRunner, env.assertCurrent, env.signal, settings);
       if (!healFailure) {
         return { warnings: repair.warnings, healedPaths: repair.healedPaths };
       }
@@ -530,12 +536,13 @@ async function executeTextEdits(
     return failed(`validate is not available in this session: it has no exec path to run validators through. Nothing was changed; resend without validate and run the check with the exec tool.`, 'failed');
   }
   if (!dryRun && (validateBefore.length > 0 || validateAfter.length > 0)) {
-    const missing = undeclaredValidators([...new Set([...validateBefore, ...validateAfter])], cwd);
-    if (missing.length > 0) return failed(describeUndeclaredValidators(missing, cwd), 'failed');
+    const settings = validatorSettings(env.configManager);
+    const missing = undeclaredValidators([...new Set([...validateBefore, ...validateAfter])], cwd, undefined, settings);
+    if (missing.length > 0) return failed(describeUndeclaredValidators(missing, cwd, undefined, settings), 'failed');
   }
 
   if (!dryRun && validateBefore.length > 0) {
-    const failure = await runValidators(validateBefore, cwd, env.validatorRunner, env.assertCurrent, env.signal);
+    const failure = await runValidators(validateBefore, cwd, env.validatorRunner, env.assertCurrent, env.signal, validatorSettings(env.configManager));
     if (failure) {
       return failed(`Pre-edit validation failed. ${formatValidatorFailure(failure)}`, 'failed');
     }

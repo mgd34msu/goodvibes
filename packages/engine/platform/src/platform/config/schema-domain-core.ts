@@ -136,6 +136,12 @@ export const coreConfigDefaults = {
     overflowSpillBackend: 'file',
     contractVerification: true,
     outputSchemaFingerprints: false,
+    validators: {
+      typecheck: '',
+      lint: '',
+      test: '',
+      build: '',
+    },
   },
   cache: {
     enabled: true,
@@ -731,6 +737,30 @@ export const coreTailConfigSettings: ConfigSettingDefinition[] = [
     type: 'string',
     default: 'hooks.json',
     description: 'Hook configuration file name, relative to the project working directory (so the default is <project>/hooks.json, not a file under .goodvibes)',
+  },
+  {
+    key: 'tools.validators.typecheck',
+    type: 'string',
+    default: '',
+    description: 'Command the write and edit tools run for validate "typecheck" in a project that declares no typecheck command of its own (no package.json script, Cargo or Go toolchain, Makefile target or pyproject tool), e.g. "pnpm -r typecheck" for a monorepo whose scripts live in its packages. Split like a shell command line, without pipes or substitution, and run through the exec tool\'s own path. Your own settings only: a project settings file cannot set a command. Empty: the validator is refused with what the project does declare.',
+  },
+  {
+    key: 'tools.validators.lint',
+    type: 'string',
+    default: '',
+    description: 'Command the write and edit tools run for validate "lint" in a project that declares no lint command of its own (no package.json script, Cargo or Go toolchain, Makefile target or pyproject tool), e.g. "pnpm -r lint" for a monorepo whose scripts live in its packages. Split like a shell command line, without pipes or substitution, and run through the exec tool\'s own path. Your own settings only: a project settings file cannot set a command. Empty: the validator is refused with what the project does declare.',
+  },
+  {
+    key: 'tools.validators.test',
+    type: 'string',
+    default: '',
+    description: 'Command the write and edit tools run for validate "test" in a project that declares no test command of its own (no package.json script, Cargo or Go toolchain, Makefile target or pyproject tool), e.g. "pnpm -r test" for a monorepo whose scripts live in its packages. Split like a shell command line, without pipes or substitution, and run through the exec tool\'s own path. Your own settings only: a project settings file cannot set a command. Empty: the validator is refused with what the project does declare.',
+  },
+  {
+    key: 'tools.validators.build',
+    type: 'string',
+    default: '',
+    description: 'Command the write and edit tools run for validate "build" in a project that declares no build command of its own (no package.json script, Cargo or Go toolchain, Makefile target or pyproject tool), e.g. "pnpm -r build" for a monorepo whose scripts live in its packages. Split like a shell command line, without pipes or substitution, and run through the exec tool\'s own path. Your own settings only: a project settings file cannot set a command. Empty: the validator is refused with what the project does declare.',
   },
   {
     key: 'tools.overflowSpillBackend',

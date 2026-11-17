@@ -71,7 +71,7 @@ export const WRITE_SCHEMA = {
             type: 'string',
             enum: ['typecheck', 'lint', 'test', 'build'],
           },
-          description: 'Validators to run after writing: the project\'s own typecheck, lint, test or build command (its package.json script through its package manager, or the Cargo/Go toolchain). One the project does not declare is refused before anything is written. A failure makes the call unsuccessful but does NOT undo writes.',
+          description: 'Validators to run after writing: the project\'s own typecheck, lint, test or build command (its package.json script through its package manager, the Cargo/Go toolchain, a Makefile target or a pyproject-configured pytest/mypy/ruff, else the owner\'s tools.validators.<name> setting). One the project does not declare is refused before anything is written. A failure makes the call unsuccessful but does NOT undo writes.',
         },
       },
       additionalProperties: false,

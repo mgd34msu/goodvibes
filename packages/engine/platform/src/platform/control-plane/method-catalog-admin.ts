@@ -19,17 +19,28 @@ import {
 } from './operator-contract-schemas.js';
 
 /**
- * The two-step settings owner lanes `config.set` also serves: `capture`
- * prepares a change and returns a reference, `apply` spends it. Each arm is the
- * only field of its body; the arm's own fields depend on the action.
+ * The settings owner lanes `config.set` also serves (daemon-api
+ * settings-precondition.ts and settings-import-precondition.ts own their
+ * rules). `capture` reads the facts a change would act on; `write` makes the
+ * change, optionally only while the daemon still serves `ifServing` at
+ * configuration incarnation `ifIncarnation`, and a repeated `requestId`
+ * returns the first answer. The import lane also keeps `apply`, which spends
+ * a captured `reference`. Each arm is the only field of its body; the
+ * operation's own fields (key, value, settings) ride beside these.
  */
-function settingsLaneArmSchema(): Record<string, unknown> {
+function settingsLaneArmSchema(actions: readonly string[]): Record<string, unknown> {
   return objectSchema({
     version: NUMBER_SCHEMA,
-    action: stringEnumSchema(['capture', 'apply']),
+    action: stringEnumSchema(actions),
     reference: STRING_SCHEMA,
+    ifIncarnation: { type: 'integer', minimum: 0 },
+    ifServing: STRING_SCHEMA,
+    requestId: STRING_SCHEMA,
   }, ['version', 'action'], { additionalProperties: true });
 }
+
+const SETTINGS_PRECONDITION_ARM_SCHEMA = settingsLaneArmSchema(['capture', 'write']);
+const SETTINGS_IMPORT_PRECONDITION_ARM_SCHEMA = settingsLaneArmSchema(['capture', 'apply', 'write']);
 
 /**
  * `config.set` takes one of three bodies: `{ key, value }` writes a value;
@@ -40,13 +51,13 @@ const CONFIG_SET_INPUT_SCHEMA = branchedSchema(
   bodyEnvelopeSchema({
     key: STRING_SCHEMA,
     value: JSON_VALUE_SCHEMA,
-    settingsPrecondition: settingsLaneArmSchema(),
-    settingsImportPrecondition: settingsLaneArmSchema(),
+    settingsPrecondition: SETTINGS_PRECONDITION_ARM_SCHEMA,
+    settingsImportPrecondition: SETTINGS_IMPORT_PRECONDITION_ARM_SCHEMA,
   }),
   [
     requirementBranch({ key: STRING_SCHEMA, value: JSON_VALUE_SCHEMA }, ['key', 'value']),
-    requirementBranch({ settingsPrecondition: settingsLaneArmSchema() }, ['settingsPrecondition']),
-    requirementBranch({ settingsImportPrecondition: settingsLaneArmSchema() }, ['settingsImportPrecondition']),
+    requirementBranch({ settingsPrecondition: SETTINGS_PRECONDITION_ARM_SCHEMA }, ['settingsPrecondition']),
+    requirementBranch({ settingsImportPrecondition: SETTINGS_IMPORT_PRECONDITION_ARM_SCHEMA }, ['settingsImportPrecondition']),
   ],
 );
 
@@ -207,7 +218,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'config.set',
     title: 'Set Config Value',
-    description: 'Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir swaps the workspace. The same route also serves the settings clients\' two-step lanes, `{ settingsPrecondition }` and `{ settingsImportPrecondition }` (capture, then apply the returned reference), which answer with that lane\'s own object.',
+    description: 'Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is saved for the next start of the daemon. The same route also serves the settings clients\' lanes, which answer with that lane\'s own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer), and `{ settingsImportPrecondition }` takes the same two actions plus `apply`, which spends a captured `reference`.',
     category: 'config',
     scopes: ['write:config'],
     access: 'admin',

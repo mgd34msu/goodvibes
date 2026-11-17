@@ -211,7 +211,7 @@ import { OverflowHandler } from '@goodvibes-jev/engine/platform/platform/tools';
 
 import { ToolLLM } from '@goodvibes-jev/engine/platform/platform/config';
 import { ComponentHealthMonitor } from '@/runtime/index.ts';
-import { bindHealthDomainEvents, createWiredHealthSystem } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
+import { attachComposedInstrumentation, bindHealthDomainEvents, createWiredHealthSystem, installComposedTelemetry, releaseComposedTelemetry } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
 import { SandboxSessionRegistry } from '@/runtime/index.ts';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { createSessionSurface, type SessionSurface } from '@/runtime/index.ts';
@@ -791,6 +791,12 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
     featureFlags.loadFromConfig({ flags: deriveFeatureStates(configManager) });
     disposalScope.registry.add('feature settings bridge', bindFeatureSettingsBridge(configManager, featureFlags));
   }
+  // telemetry.otelMode -> the process tracer, and spans for this bus's turns, tool calls,
+  // permission checks and model requests. Registered early so it closes late: the
+  // tracer sends the spans its exporters still hold.
+  installComposedTelemetry(featureFlags);
+  disposalScope.registry.add('telemetry tracer', () => releaseComposedTelemetry());
+  disposalScope.registry.add('telemetry instrumentation', attachComposedInstrumentation(options.runtimeBus));
   // AGENT-LOCAL DUTY: the in-process dispatch table a loaded plugin registers
   // its verbs into.
   //

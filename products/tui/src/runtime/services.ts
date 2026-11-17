@@ -46,7 +46,7 @@ import { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runtime/op
 import { AutomationDeliveryManager, AutomationManager } from '@goodvibes-jev/engine/platform/platform/automation';
 import { ChannelPolicyManager } from '@goodvibes-jev/engine/platform/platform/channels';
 import { ApprovalBroker, GatewayMethodCatalog, SharedSessionBroker, type SharedSessionContinuationOutcome } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { bindHealthDomainEvents, createWiredHealthSystem } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
+import { attachComposedInstrumentation, bindHealthDomainEvents, createWiredHealthSystem, installComposedTelemetry, releaseComposedTelemetry } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
 import { createClientRuntimeServices } from '@goodvibes-jev/engine/platform/platform/runtime/client-services';
 import { wireIdlePowerAndLiveTurn } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { createAsyncDisposalScope, createRuntimeStopRequests } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
@@ -171,6 +171,12 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     featureFlags.loadFromConfig({ flags: deriveFeatureStates(configManager) });
     disposalScope.registry.add('feature settings bridge', bindFeatureSettingsBridge(configManager, featureFlags));
   }
+  // telemetry.otelMode -> the process tracer, and spans for this bus's turns, tool calls,
+  // permission checks and model requests. Registered early so it closes late: the
+  // tracer sends the spans its exporters still hold.
+  installComposedTelemetry(featureFlags);
+  disposalScope.registry.add('telemetry tracer', () => releaseComposedTelemetry());
+  disposalScope.registry.add('telemetry instrumentation', attachComposedInstrumentation(options.runtimeBus));
 
   // ── The client seams: one resolution of "which daemon", shared by all of them.
   const verbs = createDaemonVerbCaller({ configManager, homeDirectory });

@@ -340,10 +340,9 @@ const BASIC_OWN_COMMAND_EDITOR_SPECS: Readonly<Record<AgentWorkspaceBasicOwnComm
     mode: 'update',
     title: 'Import Agent Support Bundle',
     selectedFieldIndex: 0,
-    message: 'Import non-redacted config values from a reviewed Agent support bundle. Type yes on the final field to confirm.',
+    message: 'Import non-redacted config values from a reviewed Agent support bundle. Submitting lists every setting it would change, current and new, and the one line that applies them; nothing changes until that line is run.',
     fields: [
       { id: 'path', label: 'Bundle path', value: 'goodvibes-agent-bundle.json', required: true, multiline: false, hint: 'Workspace-relative bundle JSON path to import.' },
-      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /bundle import with --yes.' },
     ],
   },
   'subscription-inspect': {

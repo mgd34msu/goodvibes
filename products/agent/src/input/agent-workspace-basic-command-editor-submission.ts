@@ -166,14 +166,13 @@ const BASIC_OWN_COMMAND_SUBMISSION_HANDLERS: Readonly<Record<AgentWorkspaceBasic
     'The workspace handed a support bundle inspect command to the shell-owned command router.',
     'read-only',
   ),
-  'support-bundle-import': (editor, readField) => {
-    if (!isAffirmative(readField('confirm'))) {
-      return unconfirmed(editor, 'Agent support bundle import not confirmed. Type yes, then press Enter.', 'Agent support bundle import not confirmed.');
-    }
+  // The import replaces settings, so it asks once: without --yes the command
+  // lists every change and the line that applies them, and changes nothing.
+  'support-bundle-import': (_editor, readField) => {
     return dispatchCommandEditorSubmission(
-      `/bundle import ${quoteSlashCommandArg(readField('path'))} --yes`,
+      `/bundle import ${quoteSlashCommandArg(readField('path'))}`,
       'Opening Agent support bundle import',
-      'The workspace handed a confirmed support bundle import command to the shell-owned command router.',
+      'The workspace handed a support bundle import preview to the shell-owned command router.',
       'safe',
     );
   },

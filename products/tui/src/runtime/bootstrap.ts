@@ -355,10 +355,10 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // Recovery can await a planner or executor. Let the shell render while it
   // runs, and stop/drain recovery before shutdown releases its dependencies.
   const contractRecovery = resumeContracts(services.contractRunner, services.workingDirectory);
+  // The work-plan writes recovery queued are flushed by the graph's contract-runner disposal, which runs after this.
   bootstrapUnsubs.unshift(async () => {
     services.contractRunner.dispose();
     await contractRecovery;
-    await services.contractRunner.flushWorkPlan?.();
   });
   const commandRegistry = shell.commandRegistry;
   bindControlCommands(services, commandRegistry);

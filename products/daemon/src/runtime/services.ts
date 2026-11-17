@@ -56,10 +56,10 @@ export async function createRuntimeServices(options: RuntimeServicesOptions): Pr
     // Legacy recovery can await planning or execution. Serve the host while
     // that work runs, and abort/drain it before releasing its dependencies.
     const contractRecovery = resumeContracts(services.contractRunner, services.workingDirectory);
+    // The work-plan writes recovery queued are flushed by the graph's own contract-runner disposal, which runs after this.
     scope.registry.add('contract recovery', async () => {
       services.contractRunner.dispose();
       await contractRecovery;
-      await services.contractRunner.flushWorkPlan?.();
     });
     let bootTasks: DaemonBootController | undefined;
     const runtime: RuntimeServices = { ...services, daemonHandlers, get bootTasks() { return bootTasks; }, close, dispose };

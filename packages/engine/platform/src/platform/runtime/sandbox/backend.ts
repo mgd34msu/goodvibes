@@ -92,6 +92,13 @@ export function programReadOnlyPaths(command: string, args: readonly string[], w
     if (SYSTEM_ROOTS.some((root) => within(path, root)) || within(path, workspaceRoot)) return;
     paths.add(path);
   };
+  let resolvedHome: string | undefined;
+  const realHome = (): string => {
+    if (resolvedHome === undefined) {
+      try { resolvedHome = realpathSync(home); } catch { resolvedHome = home; }
+    }
+    return resolvedHome;
+  };
   const executable = isAbsolute(command) ? command : Bun.which(command);
   if (executable) {
     add(installRoot(executable, home));
@@ -99,7 +106,12 @@ export function programReadOnlyPaths(command: string, args: readonly string[], w
   }
   for (const arg of args) {
     if (!isAbsolute(arg) || within(resolve(arg), home) || !existsSync(arg)) continue;
-    try { add(statSync(arg).isDirectory() ? arg : dirname(arg)); } catch { /* unreadable: the program reports it */ }
+    try {
+      // A link outside home that leads into it would bind its target.
+      const target = realpathSync(arg);
+      if ((within(target, home) || within(target, realHome())) && !within(target, workspaceRoot)) continue;
+      add(statSync(arg).isDirectory() ? arg : dirname(arg));
+    } catch { /* unreadable: the program reports it */ }
   }
   return [...paths];
 }

@@ -526,6 +526,14 @@ export class McpClient {
     } catch (error) { for (const response of Object.values(responses)) discardMcpElicitation(response); throw error; }
   }
 
+  #sessionEnd: Promise<void> = Promise.resolve();
+  /**
+   * Settles once the HTTP session end that disconnect() started has been
+   * answered or given up (at once for stdio or no session). Never rejects; a
+   * shutdown waits on it briefly so the request leaves before the process exits.
+   */
+  sessionEnded(): Promise<void> { return this.#sessionEnd; }
+
   /**
    * disconnect, Stop the server process and clean up.
    */
@@ -539,6 +547,7 @@ export class McpClient {
     if (this.http) {
       const http = this.http;
       await http.close();
+      this.#sessionEnd = http.sessionEnded();
       if (this.http === http) { this.http = null; this.negotiated = null; this.#phase = 'closed'; }
       return;
     }

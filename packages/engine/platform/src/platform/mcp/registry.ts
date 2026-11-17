@@ -134,6 +134,8 @@ function mcpAuthRefusal(error: unknown, depth = 0): McpHttpAuthError | undefined
 }
 /** How long a server may take to answer one tool call before the call is cancelled and the server told. */
 const DEFAULT_TOOL_CALL_DEADLINE_MS = 120_000;
+/** How long a shutdown waits, for all servers together, on the HTTP session ends it sent. */
+const SHUTDOWN_SESSION_END_MS = 1_500;
 
 /** Health of one server: whether it answered a short probe, and how long it took. */
 export interface McpServerHealth {
@@ -715,15 +717,26 @@ export class McpRegistry {
   }
 
   /**
-   * disconnectAll, Stop all connected MCP server processes.
+   * disconnectAll, Stop all connected MCP server processes. This is the
+   * shutdown path: the process usually exits right after, so it also waits,
+   * together and briefly, for the HTTP session ends it started to leave, so a
+   * stateful server is told to release its session instead of holding it until
+   * its own expiry. A single reconnect or reload never waits on them.
    */
   async disconnectAll(): Promise<void> {
     // A server waiting for a reconnect has no client or pending connect to stop; its timer is ended here.
     this.#lifecycle.stopAll('the MCP servers were disconnected');
     const names = new Set([...this.clients.keys(), ...this.pendingConnections.keys()]);
+    const closing = [...this.clients.values()];
     // Each disconnect synchronously revokes admission, then owns both the
     // published transport and any still-negotiating transport until cleanup.
     const outcomes = await Promise.allSettled([...names].map(name => this.disconnectServer(name)));
+    let bound: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      Promise.allSettled(closing.map(client => client.sessionEnded())),
+      new Promise<void>(resolve => { bound = setTimeout(resolve, SHUTDOWN_SESSION_END_MS); bound.unref?.(); }),
+    ]);
+    clearTimeout(bound);
     const errors = outcomes.flatMap(outcome => outcome.status === 'rejected' ? [outcome.reason] : []);
     if (errors.length) throw new AggregateError(errors, 'MCP connection cleanup failed');
   }

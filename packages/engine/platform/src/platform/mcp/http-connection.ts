@@ -165,6 +165,8 @@ export class McpHttpConnection {
   private closed = false;
   private nextId = 1;
   private sessionEpoch = 0;
+  /** The session DELETE close() sent; null until one is sent. */
+  private sessionEnd: Promise<void> | null = null;
   private readonly lifetime = new AbortController();
   /** The in-flight replacement of an expired legacy session, shared by every request that finds it expired. */
   #renewing: Promise<void> | undefined;
@@ -297,9 +299,10 @@ export class McpHttpConnection {
 
   /**
    * Best-effort session termination (legacy sessions only). The DELETE is sent
-   * but not awaited: its answer changes nothing here, so a reconnect, reload or
-   * shutdown never waits on a slow server. It is still bounded so a server that
-   * never answers does not hold the request open.
+   * but not awaited: its answer changes nothing here, so a reconnect or reload
+   * never waits on a slow server. It is still bounded so a server that never
+   * answers does not hold the request open. A shutdown, after which the process
+   * exits, waits on sessionEnded() briefly so the request leaves at all.
    */
   async close(): Promise<void> {
     this.closed = true;
@@ -308,15 +311,20 @@ export class McpHttpConnection {
     const sessionId = this.sessionId;
     if (!sessionId) return;
     this.sessionId = null;
-    void Promise.resolve().then(() => this.fetchImpl(this.options.url, {
+    this.sessionEnd = Promise.resolve().then(() => this.fetchImpl(this.options.url, {
       method: 'DELETE',
       headers: this.withConfiguredHeaders({ 'Mcp-Session-Id': sessionId }),
       signal: AbortSignal.timeout(SESSION_CLOSE_TIMEOUT_MS),
     })).then(
-      (response) => response.body?.cancel().catch(() => undefined),
+      async (response) => { await response.body?.cancel().catch(() => undefined); },
       // The server may not support DELETE, or may not answer in time.
       () => undefined,
     );
+  }
+
+  /** Settles once the session DELETE sent by close() is answered or given up; at once when none was sent. Never rejects. */
+  sessionEnded(): Promise<void> {
+    return this.sessionEnd ?? Promise.resolve();
   }
 
   // ---------------------------------------------------------------------------

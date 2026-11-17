@@ -67,7 +67,7 @@ export function createAgentChannelSendTool(
     definition: {
       name: 'agent_channel_send',
       activity: { doing: 'Sending', did: 'sent', object: 'a message', objects: 'messages' },
-      description: 'Preview or deliver one message through one configured Agent target. Exactly one of channel, route or webhook is required. Delivery requires current recorded effect admission.',
+      description: 'Preview or deliver one message through one configured Agent target. Exactly one of channel, route, webhook or link is required. Delivery requires current recorded effect admission.',
       parameters: {
         type: 'object',
         properties: {
@@ -81,15 +81,19 @@ export function createAgentChannelSendTool(
           },
           channel: {
             type: 'string',
-            description: 'Channel target: "<channel>", "<channel>:<route id>" or "<channel>:<route id> | <label>" (the route id is taken whole, colons included). Give exactly one of channel, route or webhook.',
+            description: 'Channel target: "<channel>", "<channel>:<route id>" or "<channel>:<route id> | <label>" (the route id is taken whole, colons included). Give exactly one of channel, route, webhook or link.',
           },
           route: {
             type: 'string',
-            description: 'Route id, or "<route id> | <label>" (the route id is taken whole, colons included). Give exactly one of channel, route or webhook.',
+            description: 'Route id, or "<route id> | <label>" (the route id is taken whole, colons included). Give exactly one of channel, route, webhook or link.',
           },
           webhook: {
             type: 'string',
-            description: 'http(s) webhook URL. Give exactly one of channel, route or webhook.',
+            description: 'http(s) webhook URL. Give exactly one of channel, route, webhook or link.',
+          },
+          link: {
+            type: 'string',
+            description: 'Name for a link: the message is published as a document and its link shown on the owner\'s web surface. Give exactly one of channel, route, webhook or link.',
           },
           confirm: confirmParameter(),
           preview: {
@@ -113,11 +117,6 @@ export function createAgentChannelSendTool(
         ...(readString(args.webhook) ? { webhook: readString(args.webhook) } : {}),
         ...(readString(args.link) ? { link: readString(args.link) } : {}),
       };
-      // No delivery strategy handles a link target, so accepting one would pass
-      // the preview and the safety gate and then fail at delivery.
-      if (input.link) {
-        return failure('agent_channel_send cannot deliver to a link: no delivery strategy handles one. Use exactly one of channel, route or webhook.');
-      }
       let preview: ReturnType<typeof buildAgentChannelDeliveryPreview>;
       try {
         preview = buildAgentChannelDeliveryPreview(input);
@@ -230,7 +229,7 @@ export function createAgentChannelSendTool(
         if (accepted) {
           return output([
             'Agent channel delivery sent',
-            `  target ${input.channel ?? input.route ?? input.webhook}`,
+            `  target ${input.channel ?? input.route ?? input.webhook ?? input.link}`,
             ...(accepted.responseId ? [`  response ${accepted.responseId}`] : []),
             `  note the message was accepted for delivery, then a follow-up check failed (${reason}); no delivery receipt was recorded and the send was not retried. Do not send it again.`,
           ].join('\n'));

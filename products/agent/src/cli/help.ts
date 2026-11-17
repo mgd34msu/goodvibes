@@ -343,7 +343,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'routines receipts',
       'routines reconcile',
       'routines receipt <receipt-id>',
-      'routines promote <id> (--cron <expr>|--every <interval>|--at <iso-time>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route][ | label]>|--delivery-route <route[ | label]>|--delivery-webhook <url>] [--disabled] --yes',
+      'routines promote <id> (--cron <expr>|--every <interval>|--at <iso-time>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route][ | label]>|--delivery-route <route[ | label]>|--delivery-webhook <url>|--delivery-link <name>] [--disabled] --yes',
     ],
     summary:
       'Inspect, create, import, enable, disable, review, mark stale and update Agent-local routines with setup readiness. A routine is promoted to a GoodVibes schedule only once it is enabled and reviewed; an update marks it for review again. Schedule promotion is explicit. Without --yes, promotion only prints the preview.',

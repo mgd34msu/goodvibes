@@ -125,11 +125,11 @@ export function splitForSurface(body: string, limit: number, maxParts: number): 
   return parts;
 }
 
-function buildArtifactContentPath(artifactId: string): string {
+export function buildArtifactContentPath(artifactId: string): string {
   return `/api/artifacts/${encodeURIComponent(artifactId)}/content`;
 }
 
-function buildArtifactContentUrl(configManager: ConfigManager, artifactId: string): string | undefined {
+export function buildArtifactContentUrl(configManager: ConfigManager, artifactId: string): string | undefined {
   // The URL is posted INTO a chat message, so it is read off this host.
   const baseUrl = resolveReachableBaseUrl(configManager, 'off-host');
   if (!baseUrl) return undefined;

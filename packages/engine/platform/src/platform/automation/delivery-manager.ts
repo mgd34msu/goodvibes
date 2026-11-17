@@ -57,11 +57,13 @@ function toDeliveryKind(surfaceKind: RouteSurfaceKind, reply: boolean): Delivery
 /**
  * The surface a delivery goes to, from the target the manager holds: its own
  * surface kind (a route target gets its binding's), else what its delivery
- * mode is. A webhook target is a webhook; an integration or link target
- * without a surface is a service endpoint, never a webhook.
+ * mode is. A webhook target is a webhook; a link target is announced on the
+ * owner's web surface; an integration target without a surface is a service
+ * endpoint, never a webhook.
  */
 function toDeliverySurfaceKind(target: AutomationDeliveryTarget): RouteSurfaceKind {
   if (target.surfaceKind) return target.surfaceKind;
+  if (target.kind === 'link') return 'web';
   return target.kind === 'webhook' ? 'webhook' : 'service';
 }
 
@@ -192,7 +194,7 @@ export class AutomationDeliveryManager {
   }
 
   private isTargetEnabled(target: AutomationDeliveryTarget): boolean {
-    return isSurfaceFeatureGateEnabled(this.featureFlags, target.surfaceKind ?? 'webhook');
+    return isSurfaceFeatureGateEnabled(this.featureFlags, target.surfaceKind ?? (target.kind === 'link' ? 'web' : 'webhook'));
   }
 
   setControlPlaneGateway(gateway: import('../control-plane/gateway.js').ControlPlaneGateway | null): void {

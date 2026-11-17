@@ -284,7 +284,7 @@ async function handleRoutinePromotion(runtime: CliCommandRuntime, args: readonly
       output: json
         ? JSON.stringify(failure, null, 2)
         : [
-            'Usage: goodvibes-agent routines promote <id> (--cron <expr>|--every <interval>|--at <iso-time>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route][ | label]>|--delivery-route <route[ | label]>|--delivery-webhook <url>] [--disabled] --yes',
+            'Usage: goodvibes-agent routines promote <id> (--cron <expr>|--every <interval>|--at <iso-time>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route][ | label]>|--delivery-route <route[ | label]>|--delivery-webhook <url>|--delivery-link <name>] [--disabled] --yes',
             ...parsed.errors.map((error) => `  ${error}`),
           ].join('\n'),
       exitCode: 2,
@@ -733,7 +733,7 @@ export async function handleRoutinesCommand(runtime: CliCommandRuntime): Promise
     return handleRoutinePromotion(runtime, rest);
   }
   return {
-    output: `Usage: goodvibes-agent routines [list|enabled|attention|discover|import-discovered <name> --yes|create --name <name> --description <summary> --steps <steps>|show <id>|enable <id>|disable <id>|review <id>|stale <id> <reason>|update <id> [--name ...] [--description ...] [--steps ...]|delete <id> --yes|receipts|reconcile|receipt <id>|promote <id> (--cron <expr>|--every <interval>|--at <iso-time>) [--delivery-channel <channel>|--delivery-route <route>|--delivery-webhook <url>] --yes]`,
+    output: `Usage: goodvibes-agent routines [list|enabled|attention|discover|import-discovered <name> --yes|create --name <name> --description <summary> --steps <steps>|show <id>|enable <id>|disable <id>|review <id>|stale <id> <reason>|update <id> [--name ...] [--description ...] [--steps ...]|delete <id> --yes|receipts|reconcile|receipt <id>|promote <id> (--cron <expr>|--every <interval>|--at <iso-time>) [--delivery-channel <channel>|--delivery-route <route>|--delivery-webhook <url>|--delivery-link <name>] --yes]`,
     exitCode: 2,
   };
 }

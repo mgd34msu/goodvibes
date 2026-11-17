@@ -103,7 +103,7 @@ async function promoteRoutineSchedule(args: readonly string[], ctx: CommandConte
   const parsed = parseRoutineSchedulePromotionArgs(args);
   if (parsed.errors.length > 0) {
     throw commandRefusal([
-      'Usage: /schedule promote-routine <routine-id> (--cron <expr>|--every <interval>|--at <iso-time>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route][ | label]>|--delivery-route <route[ | label]>|--delivery-webhook <url>] [--disabled] --yes',
+      'Usage: /schedule promote-routine <routine-id> (--cron <expr>|--every <interval>|--at <iso-time>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route][ | label]>|--delivery-route <route[ | label]>|--delivery-webhook <url>|--delivery-link <name>] [--disabled] --yes',
       ...parsed.errors.map((error) => `  ${error}`),
     ].join('\n'));
     return;
@@ -120,7 +120,7 @@ async function createReminder(args: readonly string[], ctx: CommandContext): Pro
   const parsed = parseReminderScheduleArgs(args);
   if (parsed.errors.length > 0) {
     throw commandRefusal([
-      'Usage: /schedule remind (--cron <expr>|--every <interval>|--at <iso-time>) (--message <text>|<text...>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route][ | label]>|--delivery-route <route[ | label]>|--delivery-webhook <url>] [--disabled] --yes',
+      'Usage: /schedule remind (--cron <expr>|--every <interval>|--at <iso-time>) (--message <text>|<text...>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route][ | label]>|--delivery-route <route[ | label]>|--delivery-webhook <url>|--delivery-link <name>] [--disabled] --yes',
       ...parsed.errors.map((error) => `  ${error}`),
     ].join('\n'));
     return;
@@ -255,8 +255,8 @@ export function registerScheduleRuntimeCommands(registry: CommandRegistry): void
         + '  /schedule disable <schedule-id> --yes\n'
         + '  /schedule delete <schedule-id> --yes\n'
         + '  /schedule edit <schedule-id> [--cron <expr>|--every <interval>|--at <iso-time>] [--name <text>] [--prompt <text>|--task <text> --success-criteria <text>] --yes\n'
-        + '  /schedule remind (--cron <expr>|--every <interval>|--at <iso-time>) (--message <text>|<text...>) [--delivery-channel <channel>|--delivery-route <route>|--delivery-webhook <url>] --yes\n'
-        + '  /schedule promote-routine <routine-id> (--cron <expr>|--every <interval>|--at <iso-time>) [--delivery-channel <channel>|--delivery-route <route>|--delivery-webhook <url>] --yes\n'
+        + '  /schedule remind (--cron <expr>|--every <interval>|--at <iso-time>) (--message <text>|<text...>) [--delivery-channel <channel>|--delivery-route <route>|--delivery-webhook <url>|--delivery-link <name>] --yes\n'
+        + '  /schedule promote-routine <routine-id> (--cron <expr>|--every <interval>|--at <iso-time>) [--delivery-channel <channel>|--delivery-route <route>|--delivery-webhook <url>|--delivery-link <name>] --yes\n'
         + '  Local schedule creation remains blocked; schedule lifecycle/edit actions are confirmed connected-host actions.'
       );
     },

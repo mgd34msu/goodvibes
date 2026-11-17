@@ -41,6 +41,7 @@ interface AgentScheduleToolArgs {
   readonly deliveryChannel?: unknown;
   readonly deliveryRoute?: unknown;
   readonly deliveryWebhook?: unknown;
+  readonly deliveryLink?: unknown;
   readonly disabled?: unknown;
   readonly confirm?: unknown;
   readonly explicitUserRequest?: unknown;
@@ -146,6 +147,7 @@ function sharedCreateArgs(args: AgentScheduleToolArgs): Record<string, unknown> 
     deliveryChannel: args.deliveryChannel,
     deliveryRoute: args.deliveryRoute,
     deliveryWebhook: args.deliveryWebhook,
+    deliveryLink: args.deliveryLink,
     disabled: args.disabled,
     confirm: args.confirm,
     explicitUserRequest: args.explicitUserRequest,
@@ -277,6 +279,7 @@ export function createAgentScheduleTool(
           deliveryChannel: { type: 'string', description: 'Optional delivery channel target.' },
           deliveryRoute: { type: 'string', description: 'Optional connected route target.' },
           deliveryWebhook: { type: 'string', description: 'Optional webhook target.' },
+          deliveryLink: { type: 'string', description: 'Optional link target: the result is published as a document under this name and its link shown on the web surface.' },
           disabled: { type: 'boolean', description: 'Create schedule disabled.' },
           query: { type: 'string', description: 'For action:list, show only schedules whose id or name contains this text.' },
           limit: { type: 'number', description: `For action:list, the most schedules to show (default ${DEFAULT_LIST_LIMIT}, max ${MAX_LIST_LIMIT}).` },

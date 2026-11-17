@@ -31,6 +31,7 @@ export interface AgentReminderScheduleToolArgs {
   readonly deliveryChannel?: unknown;
   readonly deliveryRoute?: unknown;
   readonly deliveryWebhook?: unknown;
+  readonly deliveryLink?: unknown;
   readonly disabled?: unknown;
   readonly confirm?: unknown;
   readonly explicitUserRequest?: unknown;
@@ -78,6 +79,7 @@ function buildReminderScheduleArgs(rawArgs: AgentReminderScheduleToolArgs): read
   addOptionalArg(args, '--delivery-channel', rawArgs.deliveryChannel);
   addOptionalArg(args, '--delivery-route', rawArgs.deliveryRoute);
   addOptionalArg(args, '--delivery-webhook', rawArgs.deliveryWebhook);
+  addOptionalArg(args, '--delivery-link', rawArgs.deliveryLink);
   if (readFlag(rawArgs.disabled, 'disabled', false)) args.push('--disabled');
 
   return args;
@@ -143,6 +145,10 @@ export function createAgentReminderScheduleTool(
           deliveryWebhook: {
             type: 'string',
             description: 'Optional http(s) webhook target.',
+          },
+          deliveryLink: {
+            type: 'string',
+            description: 'Optional link target: each result is published as a document on the host under this name and its link shown on the owner\'s web surface.',
           },
           disabled: {
             type: 'boolean',

@@ -10,7 +10,7 @@ import {
   resolveDeliverySurfaceName,
   screenOutboundForCardMaterial,
 } from './payments-channel-guard.js';
-import { parseChannelDeliveryTarget, parseRouteDeliveryTarget, type RoutineScheduleDeliveryTargetSpec } from './schedule-delivery-targets.js';
+import { parseChannelDeliveryTarget, parseLinkDeliveryTarget, parseRouteDeliveryTarget, type RoutineScheduleDeliveryTargetSpec } from './schedule-delivery-targets.js';
 import { randomUUID } from 'node:crypto';
 
 type AgentChannelDeliveryRouter = Pick<ChannelDeliveryRouter, 'deliver' | 'listStrategies'>;
@@ -85,11 +85,12 @@ function parseWebhookTarget(raw: string): AgentChannelDeliveryTarget {
   return { kind: 'webhook', address: normalized };
 }
 
-// No delivery strategy sends to a link, so a link target is refused here, the
-// one parse every immediate send passes through, instead of failing after the
-// outward-effect decision.
-function parseLinkTarget(_raw: string): never {
-  throw new Error('No delivery surface sends to a link. Use exactly one of channel, route or webhook.');
+// A link target publishes the message as a document and announces its link on
+// the owner's web surface; the one parser schedules use names it.
+function parseLinkTarget(raw: string): AgentChannelDeliveryTarget {
+  const parsed = parseLinkDeliveryTarget(raw);
+  if (typeof parsed === 'string') throw new Error(parsed.replace('--delivery-link', 'A link delivery target'));
+  return { kind: 'link', ...(parsed.address ? { address: parsed.address } : {}) };
 }
 
 function selectedTargetInputs(input: Pick<AgentChannelDeliveryInput, 'channel' | 'route' | 'webhook' | 'link'>): readonly string[] {
@@ -97,15 +98,14 @@ function selectedTargetInputs(input: Pick<AgentChannelDeliveryInput, 'channel' |
 }
 
 /**
- * The one rule for a delivery target: exactly one of channel, route or webhook
- * (a link, which no surface delivers, is counted so it is never silently
- * dropped beside another). With none or several, which recipient was meant is
- * unknown, so nothing is sent.
+ * The one rule for a delivery target: exactly one of channel, route, webhook
+ * or link. With none or several, which recipient was meant is unknown, so
+ * nothing is sent.
  */
 export function requireOneDeliveryTarget(input: Pick<AgentChannelDeliveryInput, 'channel' | 'route' | 'webhook' | 'link'>): void {
   const count = selectedTargetInputs(input).length;
-  if (count === 0) throw new Error('No delivery target was given, so nothing was sent. Give exactly one of channel, route or webhook.');
-  if (count > 1) throw new Error(`${count} delivery targets were given, so the recipient is unclear and nothing was sent. Give exactly one of channel, route or webhook.`);
+  if (count === 0) throw new Error('No delivery target was given, so nothing was sent. Give exactly one of channel, route, webhook or link.');
+  if (count > 1) throw new Error(`${count} delivery targets were given, so the recipient is unclear and nothing was sent. Give exactly one of channel, route, webhook or link.`);
 }
 
 export function buildAgentChannelDeliveryPreview(input: AgentChannelDeliveryInput): AgentChannelDeliveryPreview {

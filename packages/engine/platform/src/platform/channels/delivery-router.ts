@@ -11,6 +11,7 @@ import {
   createNtfyDeliveryStrategy,
   createSlackDeliveryStrategy,
   createTelegramDeliveryStrategy,
+  createLinkDeliveryStrategy,
   createWebControlPlaneDeliveryStrategy,
   createWebhookDeliveryStrategy,
 } from './delivery/strategies-core.js';
@@ -111,6 +112,7 @@ export function createDefaultChannelDeliveryStrategies(
     createDiscordDeliveryStrategy(serviceRegistry, configManager, artifactStore, secretsManager),
     createNtfyDeliveryStrategy(configManager, serviceRegistry, artifactStore, secretsManager),
     createWebControlPlaneDeliveryStrategy(configManager, artifactStore, getControlPlaneGateway),
+    createLinkDeliveryStrategy(configManager, artifactStore, getControlPlaneGateway),
     createHomeAssistantDeliveryStrategy(configManager, serviceRegistry, artifactStore, secretsManager),
     createTelegramDeliveryStrategy(configManager, serviceRegistry, artifactStore, secretsManager),
     createGoogleChatDeliveryStrategy(configManager, serviceRegistry, artifactStore, secretsManager),

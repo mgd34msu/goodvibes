@@ -119,7 +119,7 @@ export function reminderOperationRecords(deliveryConfigured: boolean): readonly 
       effect: 'confirmed-effect',
       capability: 'reminder-create',
       requiredFields: ['message', 'scheduleKind', 'scheduleValue'],
-      optionalFields: ['timezone', 'name', 'disabled', 'deliveryChannel', 'deliveryRoute', 'deliveryWebhook'],
+      optionalFields: ['timezone', 'name', 'disabled', 'deliveryChannel', 'deliveryRoute', 'deliveryWebhook', 'deliveryLink'],
       confirmationRequired: true,
     },
     {

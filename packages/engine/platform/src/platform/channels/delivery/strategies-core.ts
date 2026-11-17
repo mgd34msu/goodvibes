@@ -16,6 +16,8 @@ import type { ChannelDeliveryRequest, ChannelDeliveryStrategy } from './types.js
 import {
   appendAttachmentSummary,
   assertPublicWebhookAddress,
+  buildArtifactContentPath,
+  buildArtifactContentUrl,
   deliveryFetch,
   extractResponseId,
   firstNonEmpty,
@@ -366,6 +368,81 @@ export function createWebControlPlaneDeliveryStrategy(
         },
       }));
       return success(published.id);
+    },
+  };
+}
+
+/** A file name for a link's label: lower case words joined by `-`. */
+function linkFileStem(label: string): string {
+  return label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'delivery';
+}
+
+/**
+ * A link target: the result is published as an artifact, and the link to it
+ * goes to the owner's web surface (the web UI and every client reading surface
+ * messages). The target's address names the link. The receipt is the link
+ * itself, so the delivery record says where the result is even when no web
+ * client is connected; in a process that serves no web surface it names the
+ * stored document instead. A notice that cannot be shown does not fail the
+ * delivery, since the result is already published and a retry would publish
+ * it twice.
+ */
+export function createLinkDeliveryStrategy(
+  configManager: ConfigManager,
+  artifactStore: ArtifactStore,
+  getGateway: () => ControlPlaneGateway | null,
+): ChannelDeliveryStrategy {
+  return {
+    id: 'channel-delivery:link',
+    supportsGuardedDelivery: true,
+    supportsAttachments: true,
+    canHandle(request) {
+      return request.target.kind === 'link';
+    },
+    async deliver(request) {
+      assertDeliveryCurrent(request);
+      const label = firstNonEmpty(request.target.address?.trim(), request.target.label?.trim(), request.title) ?? 'GoodVibes delivery';
+      const attachments = await resolveAttachments(request, artifactStore, configManager);
+      assertDeliveryCurrent(request);
+      const artifact = await artifactStore.create({
+        kind: 'document',
+        mimeType: 'text/markdown',
+        filename: `${linkFileStem(label)}-${request.runId}.md`,
+        text: `# ${request.title}\n\n${appendAttachmentSummary(request.body, attachments).trimEnd()}\n`,
+        metadata: {
+          purpose: 'delivery-link',
+          label,
+          jobId: request.jobId,
+          runId: request.runId,
+          ...(request.agentId ? { agentId: request.agentId } : {}),
+          ...(request.status ? { status: request.status } : {}),
+        },
+      }, { signal: request.signal, assertCurrent: () => assertDeliveryCurrent(request) });
+      const gateway = getGateway();
+      if (!gateway) {
+        // Only the host serves artifact links; elsewhere the receipt names the stored document.
+        logger.warn('Delivery document saved, but no web surface is attached to announce its link', { runId: request.runId, artifactId: artifact.id });
+        return success(`artifact:${artifact.id}`);
+      }
+      const link = buildArtifactContentUrl(configManager, artifact.id) ?? buildArtifactContentPath(artifact.id);
+      try {
+        gateway.publishSurfaceMessage({
+          surface: 'web',
+          title: label,
+          body: `${request.title}: ${link}`,
+          level: request.status === 'failed' ? 'error' : request.status === 'completed' ? 'success' : 'info',
+          attachments: [await artifactStore.toAttachment({ artifactId: artifact.id }, { contentUrl: link })],
+          metadata: {
+            jobId: request.jobId,
+            runId: request.runId,
+            agentId: request.agentId,
+            artifactId: artifact.id,
+          },
+        });
+      } catch (error) {
+        logger.warn('Delivery link published, but its notice could not be shown on the web surface', { runId: request.runId, artifactId: artifact.id, error: summarizeError(error) });
+      }
+      return success(link);
     },
   };
 }

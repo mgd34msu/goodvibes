@@ -265,6 +265,24 @@ export function capabilityDisabledReason(
   return null;
 }
 
+/**
+ * The device setting that makes this capability ask the owner on every request,
+ * or null when none does: `device.capabilities.mode = ask-every-time`,
+ * `device.clipboard.readMode = ask-only` for a clipboard read, and
+ * `device.location.precision = ask-precise` for a precise fix. These are the
+ * device owner's explicit rule (someone else may be holding the phone), so
+ * neither a durable grant nor permissions.mode yolo stands in for the prompt.
+ */
+export function askEveryRequestSetting(
+  descriptor: DeviceCapabilityDescriptor,
+  policy: DeviceCapabilityPolicy,
+): string | null {
+  if (policy.mode === 'ask-every-time') return 'device.capabilities.mode = ask-every-time';
+  if (descriptor.id === 'device.clipboard.read' && policy.clipboardReadMode === 'ask-only') return 'device.clipboard.readMode = ask-only';
+  if (descriptor.id === 'device.location.precise' && policy.locationPrecision === 'ask-precise') return 'device.location.precision = ask-precise';
+  return null;
+}
+
 /** Why a settings change ends a request that rests on `authority`, or null when it does not. */
 function endedBySettings(
   descriptor: DeviceCapabilityDescriptor,
@@ -273,8 +291,9 @@ function endedBySettings(
 ): string | null {
   const disabled = capabilityDisabledReason(descriptor, policy);
   if (disabled) return `${disabled} The request was withdrawn before the phone picked it up.`;
-  if (authority === 'existing-grant' && policy.mode !== 'honor-grants') {
-    return 'Durable grants are no longer honoured (device.capabilities.mode = ask-every-time); the request was withdrawn before the phone picked it up. Ask again to be confirmed by the owner.';
+  const askEvery = askEveryRequestSetting(descriptor, policy);
+  if (askEvery && (authority === 'existing-grant' || authority === 'permissions-mode')) {
+    return `This capability now asks the owner on every request (${askEvery}); the request was withdrawn before the phone picked it up. Ask again to be confirmed by the owner.`;
   }
   return null;
 }
@@ -437,7 +456,9 @@ export class DeviceCapabilityService {
     };
 
     try {
-      if (policy.mode === 'honor-grants') {
+      // The device owner's ask-every-request rule outranks a durable grant and permissions.mode yolo.
+      const askEveryRequest = askEveryRequestSetting(descriptor, policy) !== null;
+      if (policy.mode === 'honor-grants' && !askEveryRequest) {
         grant = await this.grants.find({
           nodeId: node.nodeId,
           capabilityId: descriptor.id,
@@ -447,7 +468,7 @@ export class DeviceCapabilityService {
 
       if (grant) {
         authority = 'existing-grant';
-      } else if (this.noGrantAuthority() === 'allow') {
+      } else if (!askEveryRequest && this.noGrantAuthority() === 'allow') {
         authority = 'permissions-mode';
       } else {
         const allowAlwaysOffered = isAllowAlwaysOffered(descriptor, policy);

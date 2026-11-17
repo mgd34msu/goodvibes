@@ -29,6 +29,7 @@ import {
   type DeviceCapabilityId,
 } from './device-capability-contract.js';
 import {
+  askEveryRequestSetting,
   capabilityDisabledReason,
   isAllowAlwaysOffered,
   type DeviceCapabilityOutcome,
@@ -125,8 +126,9 @@ function describeAuthority(
 ): string {
   const disabled = capabilityDisabledReason(descriptor, policy);
   if (disabled) return `refused: ${disabled}`;
+  const askEvery = askEveryRequestSetting(descriptor, policy);
+  if (askEvery) return `asks the owner every time, under permissions.mode yolo too (${askEvery})`;
   if (noGrant === 'allow') return 'runs without asking (permissions.mode is yolo)';
-  if (policy.mode === 'ask-every-time') return 'asks the owner every time (device.capabilities.mode = ask-every-time)';
   return isAllowAlwaysOffered(descriptor, policy)
     ? 'runs at once under a live grant; otherwise asks the owner, who may allow it always'
     : 'runs at once under a live grant; otherwise asks the owner each time';

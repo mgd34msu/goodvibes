@@ -93,6 +93,7 @@ export {
   DeviceCapabilityService,
   DEFAULT_DEVICE_CAPABILITY_POLICY,
   isAllowAlwaysOffered,
+  askEveryRequestSetting,
   capabilityDisabledReason,
   resolveDeviceRequestTimeoutMs,
 } from './device-capability-service.js';

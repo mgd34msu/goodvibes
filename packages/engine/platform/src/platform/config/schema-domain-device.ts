@@ -81,7 +81,7 @@ export const deviceConfigSettings: ConfigSettingDefinition[] = [
     type: 'enum',
     default: 'honor-grants',
     enumValues: ['off', 'ask-every-time', 'honor-grants'],
-    description: 'How a paired phone\'s camera, screen, location, clipboard, and device commands are reached. honor-grants (stock): every capability asks the first time and every time after, unless you chose "always allow" for that one capability on that one phone. ask-every-time: the prompt appears on every single request and no durable grant is ever consulted or offered, use it when someone else is holding the phone. off: no capability request reaches any paired device at all.',
+    description: 'How a paired phone\'s camera, screen, location, clipboard, and device commands are reached. honor-grants (stock): every capability asks the first time and every time after, unless you chose "always allow" for that one capability on that one phone. ask-every-time: the prompt appears on every single request, permissions.mode yolo included, and no durable grant is ever consulted or offered, use it when someone else is holding the phone. off: no capability request reaches any paired device at all.',
   },
   {
     key: 'device.capabilities.allowAlwaysOffer',
@@ -102,14 +102,14 @@ export const deviceConfigSettings: ConfigSettingDefinition[] = [
     type: 'enum',
     default: 'precise-grantable',
     enumValues: ['coarse-only', 'ask-precise', 'precise-grantable'],
-    description: 'How exact a location the phone will report. precise-grantable (stock): both approximate and street-level fixes are available, and either may be granted durably. ask-precise: street-level fixes are available but always ask, and never offer "always allow". coarse-only: street-level fixes are refused entirely; only city-scale approximate location is served.',
+    description: 'How exact a location the phone will report. precise-grantable (stock): both approximate and street-level fixes are available, and either may be granted durably. ask-precise: street-level fixes are available but always ask, permissions.mode yolo included, and neither offer nor honour "always allow". coarse-only: street-level fixes are refused entirely; only city-scale approximate location is served.',
   },
   {
     key: 'device.clipboard.readMode',
     type: 'enum',
     default: 'grantable',
     enumValues: ['off', 'ask-only', 'grantable'],
-    description: 'Whether the agent can read what is on the phone\'s clipboard. grantable (stock): it asks every time and offers "always allow", like every other capability. ask-only: it asks every time and never offers a durable grant. off: clipboard reads are refused; putting text ON the clipboard is unaffected.',
+    description: 'Whether the agent can read what is on the phone\'s clipboard. grantable (stock): it asks every time and offers "always allow", like every other capability. ask-only: it asks every time, permissions.mode yolo included, and neither offers nor honours a durable grant. off: clipboard reads are refused; putting text ON the clipboard is unaffected.',
   },
   {
     key: 'device.capture.retentionHours',

@@ -62,6 +62,12 @@ export interface CalendarGatewayListInput {
   readonly limit?: number | undefined;
 }
 
+/** One bounded read of the calendar: the events returned, and whether the window holds more than the limit allowed. */
+export interface CalendarGatewayEventPage {
+  readonly events: readonly CalendarGatewayEventSummary[];
+  readonly more: boolean;
+}
+
 export interface CalendarGatewayCreateInput {
   readonly title: string;
   readonly start: string;
@@ -138,7 +144,7 @@ export interface CalendarGatewayIcsImport {
  * plausible empty result in place of an error.
  */
 export interface CalendarGatewayService {
-  listEvents(input: CalendarGatewayListInput): Promise<readonly CalendarGatewayEventSummary[]>;
+  listEvents(input: CalendarGatewayListInput): Promise<CalendarGatewayEventPage>;
   getEvent(eventId: string, calendarId?: string | undefined): Promise<CalendarGatewayEventDetail>;
   createEvent(input: CalendarGatewayCreateInput): Promise<CalendarGatewayCreated>;
   /**
@@ -207,8 +213,8 @@ function listInputFrom(params: Record<string, unknown>): CalendarGatewayListInpu
 
 export function createCalendarEventsListHandler(service: CalendarGatewayService): GatewayMethodHandler {
   return async (invocation) => {
-    const events = await service.listEvents(listInputFrom(readInvocationParams(invocation)));
-    return { events };
+    const { events, more } = await service.listEvents(listInputFrom(readInvocationParams(invocation)));
+    return { events, more };
   };
 }
 

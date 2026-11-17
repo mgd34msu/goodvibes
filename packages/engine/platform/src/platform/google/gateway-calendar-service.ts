@@ -347,7 +347,8 @@ export function createGoogleCalendarGatewayService(
       const windowed = input.from === undefined && input.to === undefined
         ? { ...input, from: new Date(now() - DEFAULT_LOOKBACK_MS).toISOString() }
         : input;
-      return (await readEvents(windowed, false)).events.map(toSummary);
+      const { events, more } = await readEvents(windowed, false);
+      return { events: events.map(toSummary), more };
     },
 
     async getEvent(eventId, calendarId) {

@@ -75,7 +75,10 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
       to: STRING_SCHEMA,
       limit: NUMBER_SCHEMA,
     }),
-    outputSchema: listOutputSchema('events', CALENDAR_EVENT_SUMMARY_SCHEMA),
+    outputSchema: objectSchema({
+      events: arraySchema(CALENDAR_EVENT_SUMMARY_SCHEMA),
+      more: BOOLEAN_SCHEMA,
+    }, ['events', 'more'], { additionalProperties: false }),
   }),
   methodDescriptor({
     id: 'calendar.events.get',
@@ -206,7 +209,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'calendar.ics.export',
     title: 'Export iCalendar',
-    description: 'Export events from the configured calendar as raw .ics content within an optional time window.',
+    description: 'Export events from the configured calendar as raw .ics content within an optional time window. With no limit every event in the window is exported; with a limit the export stops there and more: true says the window holds further events.',
     category: 'calendar',
     scopes: ['read:calendar'],
     http: { method: 'GET', path: '/api/calendar/ics/export' },
@@ -214,10 +217,12 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
       calendarId: STRING_SCHEMA,
       from: STRING_SCHEMA,
       to: STRING_SCHEMA,
+      limit: NUMBER_SCHEMA,
     }),
     outputSchema: objectSchema({
       icsContent: STRING_SCHEMA,
       eventCount: NUMBER_SCHEMA,
+      more: BOOLEAN_SCHEMA,
     }, ['icsContent', 'eventCount']),
   }),
 ];

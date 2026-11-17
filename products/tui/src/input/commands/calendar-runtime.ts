@@ -297,7 +297,7 @@ async function listEvents(ctx: CommandContext, gateway: Gateway, limit: number, 
     const result = await gateway.invoke('calendar.events.list', {
       ...READ_INVOCATION_CONTEXT,
       body: { limit, from: new Date().toISOString() },
-    }) as { readonly events?: readonly CalendarEvent[] };
+    }) as { readonly events?: readonly CalendarEvent[]; readonly more?: boolean };
     if (withStatus) {
       ctx.print(renderConnectionStatus({
         surface: 'calendar',
@@ -307,6 +307,11 @@ async function listEvents(ctx: CommandContext, gateway: Gateway, limit: number, 
       }));
     }
     ctx.print(renderAgenda(result.events ?? []));
+    if (result.more === true) {
+      ctx.print(limit < MAX_LIST_LIMIT
+        ? `  More events follow than the ${String(limit)} shown; /calendar list ${String(Math.min(MAX_LIST_LIMIT, limit * 2))} shows more.`
+        : `  More events follow than the ${String(MAX_LIST_LIMIT)} shown.`);
+    }
   });
 }
 

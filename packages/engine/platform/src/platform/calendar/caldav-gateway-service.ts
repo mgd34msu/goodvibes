@@ -44,6 +44,7 @@ import type {
   CalendarGatewayCreated,
   CalendarGatewayDeleted,
   CalendarGatewayEventDetail,
+  CalendarGatewayEventPage,
   CalendarGatewayEventSummary,
   CalendarGatewayIcsExport,
   CalendarGatewayIcsImport,
@@ -644,7 +645,7 @@ export function createCalDavCalendarGatewayService(
       return [{ calendarId: config.defaultCalendarId, displayName: config.defaultCalendarId }];
     },
 
-    async listEvents(input: CalendarGatewayListInput): Promise<readonly CalendarGatewayEventSummary[]> {
+    async listEvents(input: CalendarGatewayListInput): Promise<CalendarGatewayEventPage> {
       // A list is a window of occurrences, so it always has both ends. With no
       // window the answer is what is coming up: from a day ago (a meeting that
       // just started still shows) to thirty days ahead.
@@ -669,11 +670,12 @@ export function createCalDavCalendarGatewayService(
         }
       }
       const sorted = events.sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
-      const page = sorted.slice(0, resolveLimit(input.limit));
+      const limit = resolveLimit(input.limit);
+      const page = sorted.slice(0, limit);
       // Only the page is recorded: it is what the caller actually receives, and
       // recording the rest would claim exposure to text nobody was handed.
       if (page.length > 0) recordEventsRead(calendarId, page);
-      return page.map(toSummary);
+      return { events: page.map(toSummary), more: sorted.length > limit };
     },
 
     async getEvent(
@@ -764,7 +766,11 @@ export function createCalDavCalendarGatewayService(
     async exportIcs(input: CalendarGatewayListInput): Promise<CalendarGatewayIcsExport> {
       // The server's own calendar objects, as stored: series with their
       // overrides, zones, alarms and every property, not a re-serialised subset.
-      const { calendarId, resources } = await readResources(input, false);
+      const { calendarId, resources: all } = await readResources(input, false);
+      // With a limit the export stops at that many stored objects and says when the window holds more.
+      const limit = input.limit === undefined ? undefined : resolveLimit(input.limit);
+      const resources = limit === undefined ? all : all.slice(0, limit);
+      const more = limit !== undefined && all.length > limit;
       const events: ICalComponentBlock[] = [];
       const zones = new Map<string, ICalComponentBlock>();
       const read: CalDavEvent[] = [];
@@ -778,7 +784,7 @@ export function createCalDavCalendarGatewayService(
         read.push(...eventsOfResource(resource, calendarId));
       }
       if (read.length > 0) recordEventsRead(calendarId, read);
-      return { icsContent: buildCalendarObject([...zones.values(), ...events]), eventCount: events.length };
+      return { icsContent: buildCalendarObject([...zones.values(), ...events]), eventCount: events.length, ...(more ? { more: true } : {}) };
     },
 
     async importIcs(

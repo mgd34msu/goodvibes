@@ -1527,6 +1527,25 @@ export class SecretsManager {
     return deletions;
   }
 
+  private deleteFromScopeOwned(key: string, stores: readonly SecretStorePath[]): void {
+    let removed = false;
+    try {
+      for (const store of stores) {
+        const current = store.secure ? this.readEncryptedFile(store.path) : this.readPlaintextFile(store.path);
+        if (!current || !Object.hasOwn(current, key)) continue;
+        const values = Object.assign(Object.create(null) as Record<string, string>, current);
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete values[key];
+        if (store.secure) this.writeEncryptedFile(store.path, values);
+        else this.writePlaintextFile(store.path, values);
+        logger.debug('SecretsManager: removed one tier copy', { key, source: store.source });
+        removed = true;
+      }
+    } finally {
+      if (removed) this.notifyChanged(key);
+    }
+  }
+
   private getPolicy(): SecretStorageMode {
     return this.options.policy ?? loadConfiguredSecretPolicy(this.options.configManager);
   }

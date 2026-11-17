@@ -499,7 +499,7 @@ export class TelegramIngressSupervisor {
         if (!live()) { lifetime.abort(); return this.status; }
         if (managed && !currentCredentials()) {
           lifetime.abort();
-          return this.settle('inactive', 'Telegram credentials changed during webhook setup; restart the Telegram surface');
+          return this.settle('inactive', 'Telegram credentials changed during webhook setup; run the Telegram restart-ingress action to set it up with the current credentials');
         }
         if (!managed && !secret) {
           // Without a secret the webhook route answers 503 to every update, so
@@ -524,7 +524,7 @@ export class TelegramIngressSupervisor {
         if (!live()) { lifetime.abort(); return this.status; }
         if (managed && !currentCredentials()) {
           lifetime.abort();
-          return this.settle('inactive', 'Telegram credentials changed during webhook setup; restart the Telegram surface');
+          return this.settle('inactive', 'Telegram credentials changed during webhook setup; run the Telegram restart-ingress action to set it up with the current credentials');
         }
         if (managed && attachWebhook) attachWebhook({
           secret,
@@ -719,7 +719,7 @@ export class TelegramIngressSupervisor {
     try { store = new TelegramOffsetStore(this.deps.offsetFilePath, api.botId, this.beforeCursorWrite, this.beforeReceiveSpanWrite); }
     catch {
       lifetime.abort();
-      return this.settle('inactive', 'The Telegram bot identity cannot select a saved cursor. Check its bot token before restarting ingress.');
+      return this.settle('inactive', 'The Telegram bot identity cannot select a saved cursor. Check its bot token, then run the Telegram restart-ingress action.');
     }
     const start = store.load();
     const createStore = (): TelegramOffsetStore => new TelegramOffsetStore(this.deps.offsetFilePath, api.botId, this.beforeCursorWrite, this.beforeReceiveSpanWrite);
@@ -1222,7 +1222,7 @@ export class TelegramIngressSupervisor {
         error: summarizeError(error),
         impact: '@mentions in groups will not be recognised, /goodvibes@botname will not be stripped, '
           + 'and a /start addressed to another bot in a shared group may be answered as if it were ours',
-        detail: 'set surfaces.telegram.botUsername manually, or restart the surface to retry getMe',
+        detail: 'set surfaces.telegram.botUsername manually, or run the Telegram restart-ingress action to retry getMe',
       });
       return;
     }

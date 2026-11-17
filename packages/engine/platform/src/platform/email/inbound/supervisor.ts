@@ -197,6 +197,10 @@ export interface InboundMailSupervisorDeps {
 }
 
 const DEFAULT_REVIVE_DELAY_MS = 1_000;
+/** Longest wait before a source whose run loop keeps ending is started again. */
+const MAX_LOOP_REVIVE_DELAY_MS = 5 * 60_000;
+/** A loop that ran this long before it ended counts as having worked: the backoff starts over. */
+const LOOP_HEALTHY_AFTER_MS = 5 * 60_000;
 const DEFAULT_START_UNWIND_BOUND_MS = 15_000;
 
 function realSleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -242,6 +246,10 @@ export class InboundMailSupervisor {
    * rebuilds it instead of delegating.
    */
   private loopEnded = false;
+  /** Run loops that ended in a row without running long; sets the backoff before the next start. */
+  private loopEndings = 0;
+  /** When the held source's run loop started. */
+  private loopStartedAt = 0;
   private currentStatus: InboundMailSupervisorStatus = NOT_STARTED;
   private selection: InboundSourceSelection | null = null;
   private verdict: InboundCapabilityVerdict | null = null;
@@ -483,6 +491,7 @@ export class InboundMailSupervisor {
       return this.settle('inactive', source.retired ? 'The mail source was retired during startup.' : 'stopped');
     }
     this.verdict = verdict;
+    this.loopStartedAt = this.now();
     this.loop = this.watch(source, abort);
     if (verdict.state === 'insufficient') {
       // §3.4b: an insufficient mailbox does not run. The source is still held,
@@ -568,7 +577,18 @@ export class InboundMailSupervisor {
       at: new Date(this.now()).toISOString(),
       notice: null,
     });
-    this.settle('inactive', `${verdict.detail} ${verdict.fix}`);
+    if (!this.wantsRunning) {
+      this.settle('inactive', `${verdict.detail} ${verdict.fix}`);
+      return;
+    }
+    // Not a terminal: a source whose loop ended is started again on a capped
+    // backoff, so the owner does not have to restart the daemon to read mail.
+    if (this.now() - this.loopStartedAt >= LOOP_HEALTHY_AFTER_MS) this.loopEndings = 0;
+    const base = this.deps.reviveDelayMs ?? DEFAULT_REVIVE_DELAY_MS;
+    const delay = Math.min(MAX_LOOP_REVIVE_DELAY_MS, base * 2 ** Math.min(this.loopEndings, 20));
+    this.loopEndings += 1;
+    this.settle('inactive', `${verdict.detail} Reading starts again in ${Math.ceil(delay / 1_000)}s; if it keeps stopping: ${verdict.fix}`);
+    this.scheduleRevive(delay);
   }
 
   /** Record a terminal failure and forward it, without letting the route's failure become ours. */
@@ -623,13 +643,13 @@ export class InboundMailSupervisor {
     this.scheduleRevive();
   }
 
-  private scheduleRevive(): void {
+  private scheduleRevive(delayMs: number = this.deps.reviveDelayMs ?? DEFAULT_REVIVE_DELAY_MS): void {
     if (this.reviveTimer !== null) return;
     const timer = setTimeout(() => {
       if (this.reviveTimer !== timer) return;
       this.reviveTimer = null;
       if (this.wantsRunning && this.starting === null) this.rebuildRetiredSource();
-    }, this.deps.reviveDelayMs ?? DEFAULT_REVIVE_DELAY_MS);
+    }, delayMs);
     (timer as unknown as { unref?: () => void }).unref?.();
     this.reviveTimer = timer;
   }

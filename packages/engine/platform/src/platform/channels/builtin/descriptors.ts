@@ -344,6 +344,8 @@ export function listBuiltinOperatorActions(surface: ChannelSurface): ChannelOper
     })),
   ];
   if (surface === 'telegram') actions.push(
+    { id: 'restart-ingress', surface, label: 'Restart Telegram receiving',
+      description: 'Stop and start Telegram receiving with the current settings and bot token (polling or webhook). Saved positions are kept.', dangerous: false, metadata: {} },
     { id: 'cursor-migration-preview', surface, label: 'Review previous Telegram cursor',
       description: 'Verify the selected bot and review its unbound saved position before explicit migration.', dangerous: false, metadata: {} },
     { id: 'cursor-migration-commit', surface, label: 'Bind previous Telegram cursor',

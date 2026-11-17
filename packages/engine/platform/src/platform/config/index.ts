@@ -331,6 +331,7 @@ export {
   SecretWriteCommittedError,
   SecretStoreUnreadableError,
   describeSecretWriteScope,
+  resolveSecretDeleteScope,
   resolveSecretWriteScope,
   secretWriteScopeWasOverridden,
 } from './secrets.js';

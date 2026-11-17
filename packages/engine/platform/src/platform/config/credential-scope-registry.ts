@@ -176,10 +176,10 @@ export const CREDENTIAL_SCOPE_DECLARATIONS: readonly CredentialScopeDeclaration[
   { key: daemonSecretKeyFor('calendar.microsoft.account'), match: 'exact', scope: 'daemon-needed', why: 'Names the account the daemon acts as on the calendar.' },
   { key: daemonSecretKeyFor('calendar.microsoft.status'), match: 'exact', scope: 'daemon-needed', why: 'The connection health the daemon reports and refreshes from.' },
   {
-    key: 'GOODVIBES_CALENDAR_SUBSCRIPTION_',
+    key: 'GOODVIBES_CALENDAR_SUB_',
     match: 'prefix',
     scope: 'daemon-needed',
-    why: 'A subscribed feed URL grants read access to a calendar the daemon polls on a schedule; the suffix is the name the person gave the subscription.',
+    why: 'A subscribed feed URL grants read access to a calendar the daemon polls on a schedule; the suffix is an upper-snake slug of the name the person gave the subscription (calendar-subscription-registry.ts).',
   },
 
   // ── Payments ─────────────────────────────────────────────────────────────

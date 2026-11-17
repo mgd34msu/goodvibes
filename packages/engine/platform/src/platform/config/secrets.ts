@@ -291,6 +291,15 @@ export function resolveSecretWriteScope(key: string, requested?: SecretScope | u
   return requested ?? defaultScopeForKey(key);
 }
 
+/**
+ * The tiers a delete of `key` sweeps: `undefined` is every tier. A credential
+ * the daemon reads lives in the daemon tier whatever scope the caller named, so
+ * a delete narrowed to that scope would report success and leave the live copy.
+ */
+export function resolveSecretDeleteScope(key: string, requested?: SecretScope | undefined): SecretScope | undefined {
+  return isDaemonNeededSecretKey(key) ? undefined : requested;
+}
+
 /** True when `requested` would have sent a daemon-owned credential somewhere the daemon cannot read. */
 export function secretWriteScopeWasOverridden(key: string, requested?: SecretScope | undefined): boolean {
   return requested !== undefined && requested !== 'daemon' && isDaemonNeededSecretKey(key);
@@ -1472,8 +1481,7 @@ export class SecretsManager {
 
   /** As `delete`, answering which stores held the key; an empty answer means none did and nothing changed. */
   async deleteWithReceipt(key: string, options: SecretDeleteOptions = {}): Promise<readonly SecretDeletion[]> {
-    const daemonNeeded = isDaemonNeededSecretKey(key);
-    const scopeFilter = daemonNeeded ? undefined : options.scope;
+    const scopeFilter = resolveSecretDeleteScope(key, options.scope);
     const stores = this.getAllCandidateStores().filter((store) => {
       if (scopeFilter && store.scope !== scopeFilter) return false;
       if (options.medium && (options.medium === 'secure') !== store.secure) return false;

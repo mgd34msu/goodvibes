@@ -1,7 +1,7 @@
 /**
  * `engine.tools.dangerous-call`: analyze mode `permissions` finds candidate
- * lines with the `engine.tools.dangerous-line` existence check over each
- * block of a file's lines (analyze/scan-lines.ts); these readings decide
+ * lines in code, by a table of risky call shapes (analyze/scan-findings.ts);
+ * these readings decide
  * whether the call on a candidate line is actually risky where it stands
  * (`risky`) and how severe it is (`severity`), in one request. They replace
  * reporting every call-shape match with a severity hand-assigned per pattern

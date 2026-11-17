@@ -1,4 +1,3 @@
-import { editWindow } from '../tools/batteries/edit-window.js';
 import { BatteryRegistry } from '@goodvibes-jev/judgment';
 import { riskFamily } from './batteries/risk-family.js';
 import { sandboxAdvisory } from './batteries/sandbox-advisory.js';
@@ -35,7 +34,6 @@ import { registrySelect } from '../tools/batteries/registry-select.js';
 import { registryCatalogGroupFit } from '../tools/batteries/registry-catalog-group.js';
 
 registry.register(editTarget);
-registry.register(editWindow);
 registry.register(contentRank);
 registry.register(registryRank);
 registry.register(registrySelect);
@@ -66,8 +64,6 @@ registry.register(frontendFinding);
 registry.register(projectTooling);
 
 import { exportBreak } from '../tools/batteries/export-break.js';
-import { secretLine } from '../tools/batteries/secret-line.js';
-import { dangerousLine } from '../tools/batteries/dangerous-line.js';
 import { envTemplate } from '../tools/batteries/env-template.js';
 import { testOfSource } from '../tools/batteries/test-of-source.js';
 import { booleanValue } from '../tools/batteries/boolean-value.js';
@@ -79,8 +75,6 @@ import { apiRoutes } from '../tools/batteries/api-routes.js';
 import { healAcceptance } from '../tools/batteries/heal-acceptance.js';
 
 registry.register(exportBreak);
-registry.register(secretLine);
-registry.register(dangerousLine);
 registry.register(envTemplate);
 registry.register(testOfSource);
 registry.register(booleanValue);
@@ -102,11 +96,10 @@ registry.register(sourceScreeningVerification);
 import { researchReferenceParameterRole } from '../security/source-screening/reference.js';
 registry.register(researchReferenceParameterRole);
 
-import { personalOpsLaneMember, personalOpsSampleField, personalOpsToolLane, personalOpsReceiptStatus, personalOpsResultField } from '../routing/batteries/personal-ops.js';
+import { personalOpsLaneMember, personalOpsSampleField, personalOpsToolLane, personalOpsResultField } from '../routing/batteries/personal-ops.js';
 registry.register(personalOpsLaneMember);
 registry.register(personalOpsToolLane);
 registry.register(personalOpsSampleField);
-registry.register(personalOpsReceiptStatus);
 registry.register(personalOpsResultField);
 
 import { remotePublisherOutcomeKind, remotePublisherSchemaStatus } from '../routing/batteries/remote-publisher.js';

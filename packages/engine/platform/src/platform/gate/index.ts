@@ -10,7 +10,7 @@ export { withExecutionModeOwner, currentExecutionModeOwner, type ExecutionModeOw
 export * from './reading.js';
 export * from './surface-authority.js';
 export { riskFamily, RISK_FAMILY_OPTIONS, type GateRiskFamily } from './batteries/risk-family.js';
-export { sideEffect, SIDE_EFFECT_KIND_OPTIONS, MCP_CAPABILITY_OPTIONS, type SideEffectKind } from './batteries/side-effect.js';
+export { sideEffect, SIDE_EFFECT_KIND_OPTIONS, type SideEffectKind } from './batteries/side-effect.js';
 export { sandboxAdvisory } from './batteries/sandbox-advisory.js';
 export { registry as gateJudgmentRegistry } from './judgment-registry.js';
 

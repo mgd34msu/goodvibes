@@ -118,7 +118,7 @@ export {
   type RouteReadinessLevel,
   type RouteReadinessReading,
 } from './model-readiness.js';
-export { personalOpsLaneMember, personalOpsToolLane, personalOpsSampleField, personalOpsReceiptStatus, personalOpsResultField } from './batteries/personal-ops.js';
+export { personalOpsLaneMember, personalOpsToolLane, personalOpsSampleField, personalOpsResultField } from './batteries/personal-ops.js';
 
 export { localServingStatus, localResourcePressure, localServingSchemaStatus } from './batteries/local-model-diagnostics.js';
 

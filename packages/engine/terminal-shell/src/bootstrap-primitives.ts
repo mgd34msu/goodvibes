@@ -12,6 +12,9 @@ import type { DomainDispatch } from '@goodvibes-jev/engine/platform/platform/run
 import { attachSessionRecoveryState } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
 import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
 import type { Notifier } from '@goodvibes-jev/engine/platform/platform/integrations';
+import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
+import { join } from 'node:path';
+import { holdProcessLock, logger, summarizeError, type HeldProcessLock } from '@goodvibes-jev/engine/platform/platform/utils';
 import { companionMessageToOrchestratorInputOptions } from './companion-input.js';
 const featureFlagBridgeTeardowns = new WeakMap<object, () => void>();
 export function createTerminalFeatureFlags(config: ConfigManager) {
@@ -159,6 +162,64 @@ export function syncTerminalNotifierQueues(
   const stopRows = notifier.onChannelsChanged(syncRows);
   const stopFailures = notifier.onDeadLetter(syncRows);
   return () => { stopRows(); stopFailures(); unsubscribe(); };
+}
+
+/** How many terminals at once keep their failed notifications on disk; one more keeps them in memory. */
+const DEAD_LETTER_SLOTS = 8;
+
+/**
+ * Keep a notifier's failed notifications on disk so `/notify failed` and
+ * `/notify resend` still have them after a restart. Several terminals can run
+ * at once, and each writes its whole list on every change, so each holds one
+ * of a few numbered files under a kernel-released lock instead of sharing one.
+ * At start it takes the first free file (with whatever an earlier terminal
+ * left there) and takes over the list of any other file whose terminal has
+ * exited. Cost: one lock open at start for the own file, plus one per other
+ * file that holds a list; one file write per failed, resent or cleared
+ * notification, nothing on a delivery that succeeds. Returns the release.
+ */
+export function keepTerminalDeadLetters(
+  notifier: { persistDeadLetters(path: string): void },
+  directory: string,
+  kind: string,
+): () => void {
+  const fileFor = (slot: number): string => join(directory, `${kind}-${slot}.json`);
+  const lockFor = (slot: number): string => `${fileFor(slot)}.writer.sqlite`;
+  let own: { readonly slot: number; readonly lock: HeldProcessLock } | null = null;
+  try {
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    for (let slot = 0; slot < DEAD_LETTER_SLOTS && !own; slot++) {
+      const lock = holdProcessLock(lockFor(slot));
+      if (lock) own = { slot, lock };
+    }
+    if (!own) {
+      logger.warn('Failed notifications from this terminal are kept in memory only: every dead-letter file is in use by another terminal', { directory, kind });
+      return () => {};
+    }
+    const adopted: { readonly slot: number; readonly lock: HeldProcessLock }[] = [];
+    for (let slot = 0; slot < DEAD_LETTER_SLOTS; slot++) {
+      if (slot === own.slot || !existsSync(fileFor(slot))) continue;
+      const lock = holdProcessLock(lockFor(slot));
+      if (!lock) continue; // A running terminal keeps that list.
+      try {
+        notifier.persistDeadLetters(fileFor(slot));
+        adopted.push({ slot, lock });
+      } catch (error) {
+        lock.release();
+        logger.warn('A failed-notification list left by an earlier terminal could not be read', { file: fileFor(slot), error: summarizeError(error) });
+      }
+    }
+    // The own file last: the list read so far is written there, and the files taken over are emptied.
+    notifier.persistDeadLetters(fileFor(own.slot));
+    for (const { slot, lock } of adopted) {
+      try { unlinkSync(fileFor(slot)); } catch { /* the entries are in this terminal's file now */ }
+      lock.release();
+    }
+  } catch (error) {
+    logger.warn('Failed notifications will not survive a restart: their file could not be opened', { directory, kind, error: summarizeError(error) });
+  }
+  const held = own;
+  return () => { held?.lock.release(); };
 }
 
 export function initialTerminalRuntimeFields(

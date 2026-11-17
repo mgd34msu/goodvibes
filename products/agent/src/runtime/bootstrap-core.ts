@@ -1,5 +1,5 @@
 import { GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import { initialTerminalRuntimeFields } from '@goodvibes-jev/engine/terminal-shell/bootstrap-primitives';
+import { initialTerminalRuntimeFields, keepTerminalDeadLetters } from '@goodvibes-jev/engine/terminal-shell/bootstrap-primitives';
 import { projectAgentToolDependencies } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
 import {
   createTerminalFeatureFlags,
@@ -367,6 +367,10 @@ export async function initializeBootstrapCore(
       return contract ? { startedAt: contract.createdAt, name: contract.ask } : undefined;
     },
   };
+  // Failed notifications are kept on disk, so /notify failed and /notify resend
+  // still list them after a restart.
+  const deadLetterDirectory = services.shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'notification-dead-letters');
+  runtimeUnsubs.push(keepTerminalDeadLetters(services.webhookNotifier, deadLetterDirectory, 'webhooks'));
   // Always attach the shared notifier (see registerWebhookNotifier), so a URL
   // added mid-session still receives automatic failure notifications.
   registerWebhookNotifier(services.webhookNotifier, webhookUrls, runtimeBus, runtimeUnsubs, runtimeNotifications);
@@ -387,6 +391,7 @@ export async function initializeBootstrapCore(
   }
 
   const notifier = await createRuntimeNotifier(services.serviceRegistry, (key) => readAgentHostSetting(configManager, key), configManager, services.secretsManager);
+  runtimeUnsubs.push(keepTerminalDeadLetters(notifier, deadLetterDirectory, 'chat'));
   runtimeUnsubs.push(
     syncTerminalNotifierQueues(notifier, domainDispatch, () => {
       notifier.attachToRuntimeBus(runtimeBus, runtimeNotifications);

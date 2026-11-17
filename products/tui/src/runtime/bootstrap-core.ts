@@ -1,5 +1,5 @@
 import { REGULAR_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import { initialTerminalRuntimeFields } from '@goodvibes-jev/engine/terminal-shell/bootstrap-primitives';
+import { initialTerminalRuntimeFields, keepTerminalDeadLetters } from '@goodvibes-jev/engine/terminal-shell/bootstrap-primitives';
 import { projectAgentToolDependencies } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
 import {
   createTerminalFeatureFlags,
@@ -68,7 +68,7 @@ import type { SystemMessagePriority } from '../core/system-message-router.ts';
 import { SessionSpineClient, SessionUnionCache, TUI_SPINE_PARTICIPANT } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import { SessionInboundInputPoller, createBootstrapInboundInputPoller } from './session-inbound-inputs.ts';
 import type { WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import { attachTypedRuntimeNotifications, createRuntimeNotifier, syncNotifierQueueIntegrations } from './bootstrap-notifier-sync.ts';
+import { createRuntimeNotifier, syncNotifierQueueIntegrations } from './bootstrap-notifier-sync.ts';
 
 // --- Pre-router buffer ---
 
@@ -511,14 +511,22 @@ export async function initializeBootstrapCore(
   }
   // A workstream's start and ask come from its own record, so one started
   // before a restart is still announced by its request and real duration.
-  const lookupContract = (contractId: string) => {
-    const contract = services.contractRunner.get(contractId);
-    return contract ? { startedAt: contract.createdAt, name: contract.ask } : undefined;
+  const runtimeNotifications = {
+    lookupContract: (contractId: string) => {
+      const contract = services.contractRunner.get(contractId);
+      return contract ? { startedAt: contract.createdAt, name: contract.ask } : undefined;
+    },
   };
-  runtimeUnsubs.push(attachTypedRuntimeNotifications(services.webhookNotifier, runtimeBus, Date.now, lookupContract));
+  // Failed notifications are kept on disk, so /notify failed and /notify resend
+  // still list them after a restart.
+  const deadLetterDirectory = services.shellPaths.resolveUserPath(services.surface.surfaceRoot, 'notification-dead-letters');
+  runtimeUnsubs.push(keepTerminalDeadLetters(services.webhookNotifier, deadLetterDirectory, 'webhooks'));
+  services.webhookNotifier.attachToRuntimeBus(runtimeBus, runtimeNotifications);
+  runtimeUnsubs.push(() => services.webhookNotifier.detach());
 
   const notifier = await createRuntimeNotifier(services.serviceRegistry, () => readTuiNotificationsMetadataOnly(configManager), configManager, services.secretsManager);
-  runtimeUnsubs.push(syncNotifierQueueIntegrations(notifier, runtimeBus, domainDispatch, lookupContract));
+  runtimeUnsubs.push(keepTerminalDeadLetters(notifier, deadLetterDirectory, 'chat'));
+  runtimeUnsubs.push(syncNotifierQueueIntegrations(notifier, runtimeBus, domainDispatch, runtimeNotifications));
 
   await syncConfiguredServices(domainDispatch.syncIntegration, services.serviceRegistry);
 

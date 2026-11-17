@@ -264,14 +264,19 @@ export async function runCalendarRuntimeCommand(args: readonly string[], ctx: Co
  * What each /calendar verb does. Signing an account in or out grants or removes
  * access, and unsubscribing deletes a stored private feed address: those are
  * the owner's to type. Subscribing to a public feed and refreshing one are
- * outward reads the tool admission covers for a model-run command.
+ * outward reads the tool admission covers for a model-run command; letting a
+ * feed be fetched from the owner's private network (--allow-private-host)
+ * loosens the network guard, so that subscription is his to type.
  */
 export const CALENDAR_VERBS: CommandVerbs = {
   defaultVerb: 'list',
   verbs: {
     list: READ_VERB, all: READ_VERB, upcoming: READ_VERB, subscriptions: READ_VERB, subs: READ_VERB, accounts: READ_VERB,
     add: LOCAL_WRITE_VERB, create: LOCAL_WRITE_VERB, delete: LOCAL_WRITE_VERB, remove: LOCAL_WRITE_VERB, import: LOCAL_WRITE_VERB, export: LOCAL_WRITE_VERB,
-    subscribe: OUTWARD_VERB, refresh: OUTWARD_VERB,
+    subscribe: (rest) => rest.some((arg) => arg === '--allow-private-host' || arg.startsWith('--allow-private-host='))
+      ? ownerOnlyVerb('outward', 'lets a feed be fetched from a private-network address')
+      : OUTWARD_VERB,
+    refresh: OUTWARD_VERB,
     unsubscribe: ownerOnlyVerb('local-write', 'removes a stored feed address that cannot be recovered from here'),
     connect: ownerOnlyVerb('credential', 'signs a calendar account in, which grants access'),
     disconnect: ownerOnlyVerb('credential', 'signs a calendar account out and removes its stored credential'),

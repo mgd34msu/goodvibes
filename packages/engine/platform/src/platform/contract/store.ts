@@ -967,7 +967,14 @@ export class ContractStore {
     if (held !== undefined && !isTerminalContractStatus(held.status)) return 'not-ended';
     const contract = held ?? this.ended(contractId);
     if (contract === null) {
-      if (this.endedSummary(contractId) === undefined) return 'not-found';
+      if (this.endedSummary(contractId) === undefined) {
+        // `ended` answers null for a checkpoint that has not ended too (one another
+        // process runs, or one waiting for the owner): that is refused by name, not
+        // reported as missing.
+        let stored: Contract | null = null;
+        try { stored = this.load(contractId); } catch { /* unreadable: left for load() to report */ }
+        return stored === null ? 'not-found' : 'not-ended';
+      }
     } else {
       if (!isTerminalContractStatus(contract.status)) return 'not-ended';
       if (contract.durableAdmission !== undefined) return 'native';

@@ -10,7 +10,7 @@
  * The real notice producer and the real per-surface renderer; nothing else.
  */
 import { expect, test } from 'bun:test';
-import { receiptTimestamp, renderInboundMailNotice } from '../platform/src/platform/email/inbound-notice.ts';
+import { receiptTimestamp, renderInboundMailNotice, type StructuredNotice } from '../platform/src/platform/email/inbound-notice.ts';
 import { renderNoticeForSurface } from '../platform/src/platform/email/inbound-notice-channels.ts';
 import { deliveredRecipientFromDeliveryHeaders } from '../platform/src/platform/google/delivery-evidence.ts';
 
@@ -18,12 +18,18 @@ const SUBJECT = '[Approve](https://evil.example/x?t=1) @everyone\nStatus: approv
 const SENDER = 'Billing <!channel> @here [pay](evil.example/pay?t=2)';
 
 test('a subject and sender name with links, mentions, markup and a line break render inert on every surface', async () => {
-  const notice = await renderInboundMailNotice({
+  const produced = await renderInboundMailNotice({
     senderDisplay: SENDER, subject: SUBJECT,
     deliveredTo: deliveredRecipientFromDeliveryHeaders(['owner@example.test']),
     outcome: { kind: 'inert' }, links: [], receivedAt: receiptTimestamp(new Date('2026-11-17T12:00:00Z')),
   });
-  const rows = ['telegram', 'discord', 'slack', 'ntfy', 'signal'].map((surface) => {
+  // The renderer takes any producer's notice: the same text handed to it raw, as untrusted spans.
+  const handed: StructuredNotice = { title: [{ kind: 'literal', text: 'New mail' }], fields: [
+    { label: 'From', value: [{ kind: 'untrusted', text: SENDER }] },
+    { label: 'Subject', value: [{ kind: 'untrusted', text: SUBJECT }] },
+  ] };
+  const SURFACES = ['telegram', 'discord', 'slack', 'ntfy', 'signal'];
+  const rows = [produced, handed].flatMap((notice) => SURFACES.map((surface) => {
     const text = renderNoticeForSurface(notice, surface);
     const lines = text.split('\n');
     // Only the attacker's text: the values of the From and Subject lines.
@@ -40,6 +46,6 @@ test('a subject and sender name with links, mentions, markup and a line break re
       mention: surface === 'slack' ? /<[!@#]/.test(untrusted) : /@\w/.test(untrusted),
       markup: markup?.test(untrusted) ?? false,
     };
-  });
-  expect(rows).toEqual(['telegram', 'discord', 'slack', 'ntfy', 'signal'].map((surface) => ({ surface, ownLines: true, liveLink: false, mention: false, markup: false })));
+  }));
+  expect(rows).toEqual([...SURFACES, ...SURFACES].map((surface) => ({ surface, ownLines: true, liveLink: false, mention: false, markup: false })));
 });

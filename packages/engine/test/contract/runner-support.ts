@@ -240,7 +240,7 @@ export function makeHarness(options: HarnessOptions): Harness {
     const script = unitId === undefined ? undefined : options.scripts[unitId];
     if (script === undefined) throw new Error(`no script for agent ${record.id} (${unitId ?? 'no unit'})`);
     // A real agent's first act is a model call; nothing happens inside spawn itself.
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setImmediate(resolve));
     const count = (runs.get(record.id) ?? 0) + 1;
     runs.set(record.id, count);
     record.status = 'running';
@@ -395,15 +395,6 @@ export function makeHarness(options: HarnessOptions): Harness {
 /** Starts a contract on the harness's repository. */
 export function startContract(harness: Harness, overrides: Partial<Parameters<ContractRunner['start']>[0]> = {}) {
   return harness.runner.start({ ask: ASK, sessionId: 'session-1', origin: 'cli', projectRoot: harness.root, ...overrides });
-}
-
-/** Waits until `predicate` holds, polling; throws with `what` after `timeoutMs`. */
-export async function waitFor(predicate: () => boolean, what: string, timeoutMs = 5_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
 }
 
 /** The events of one type. */

@@ -2,10 +2,10 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { AgentPersonaRegistry, assertNoSecretLikeText } from './persona-registry.ts';
-import { AgentRoutineRegistry } from './routine-registry.ts';
-import { AgentSkillRegistry } from './skill-registry.ts';
-import { discoverVibeFiles } from './vibe-file.ts';
+import { AgentPersonaRegistry, assertNoSecretLikeText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { discoverVibeFiles } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { discoverPersonas, type DiscoveredPersonaRecord } from './persona-discovery.ts';
 import { discoverRoutines, type DiscoveredRoutineRecord } from './routine-discovery.ts';
 import { discoverSkills, type SkillRecord } from './skill-discovery.ts';

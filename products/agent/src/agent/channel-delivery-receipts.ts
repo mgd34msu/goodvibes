@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { formatJsonStoreWriteReport, readJsonStore, updateJsonStore, type JsonStoreSpec } from '@/utils/store-file.ts';
+import { formatJsonStoreWriteReport, readJsonStore, updateJsonStore, type JsonStoreSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { AgentChannelDeliveryInput, AgentChannelDeliveryResult } from './channel-delivery.ts';
 

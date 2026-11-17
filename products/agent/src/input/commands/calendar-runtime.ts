@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { AgentCalendarRegistry, localIsoDate, UNTITLED_EVENT_TITLE } from '../../agent/calendar-registry.ts';
 import { parseIcs } from '@goodvibes-jev/engine/platform/platform/calendar';
-import { formatJsonStoreWriteReport } from '@/utils/store-file.ts';
+import { formatJsonStoreWriteReport } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { parseAgentLocalLibraryArgs, resolveCommandFilePath } from './agent-local-library-args.ts';
 import { requireShellPaths } from './runtime-services.ts';

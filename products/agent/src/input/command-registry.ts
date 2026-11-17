@@ -28,7 +28,7 @@ import type { OpsApi } from '@/runtime/index.ts';
 import type { OperatorClient } from '@/runtime/index.ts';
 import type { PeerClient } from '@/runtime/index.ts';
 import type { DirectTransport } from '@/runtime/index.ts';
-import type { AgentPromptContextReceiptStore } from '../agent/prompt-context-receipts.ts';
+import type { AgentPromptContextReceiptStore } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { MemoryConsolidationProposal } from '@goodvibes-jev/engine/platform/platform/state';
 
 import type { AgentMemoryDiagnostics, AgentVoiceSetupService } from '../runtime/services.ts';

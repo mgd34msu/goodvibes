@@ -1,9 +1,9 @@
-import { freshReviewPatch, parseAgentReviewState, reviewedReviewPatch, staleReviewPatch } from './review-state.ts';
+import { freshReviewPatch, parseAgentReviewState, reviewedReviewPatch, staleReviewPatch } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { existsSync, readFileSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { writeStoreFile, runStoreFileUpdateSync } from '@/utils/store-file.ts';
+import { writeStoreFile, runStoreFileUpdateSync } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { assertNoSecretLikeText, assertStoreRewritable } from './persona-registry.ts';
+import { assertNoSecretLikeText, assertStoreRewritable } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export type AgentNoteSource = 'user' | 'agent' | 'imported' | 'system';
 export type AgentNoteReviewState = 'fresh' | 'reviewed' | 'stale';

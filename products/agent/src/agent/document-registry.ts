@@ -2,7 +2,7 @@ import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils';
 import { openSqliteFile, type SqliteFile } from '@goodvibes-jev/engine/platform/platform/state';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { assertNoSecretLikeText } from './persona-registry.ts';
+import { assertNoSecretLikeText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type {
   AgentDocumentAttachment,
   AgentDocumentAttachmentInput,

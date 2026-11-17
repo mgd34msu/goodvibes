@@ -4,10 +4,10 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { atomicWriteFileSync, type AtomicWriteOptions } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ShellPathService } from '@/runtime/index.ts';
-import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { assertNoSecretLikeText } from './persona-registry.ts';
-import { parseMarkdownFrontmatter, stripMarkdownFrontmatter } from './markdown-frontmatter.ts';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
+import { assertNoSecretLikeText } from './persona-registry.js';
+import { parseMarkdownFrontmatter, stripMarkdownFrontmatter } from '../markdown-frontmatter.js';
 
 export type AgentVibeScope = 'project' | 'global';
 
@@ -34,8 +34,8 @@ export interface AgentVibeSnapshot {
 }
 
 export interface AgentVibeInitOptions extends Pick<AtomicWriteOptions, 'assertCurrent' | 'onEffect'> {
-  readonly scope?: AgentVibeScope;
-  readonly force?: boolean;
+  readonly scope?: AgentVibeScope | undefined;
+  readonly force?: boolean | undefined;
 }
 
 export interface AgentVibeInitResult {

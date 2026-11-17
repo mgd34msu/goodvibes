@@ -17,7 +17,7 @@ import {
   type AgentRuntimeProfileInfo,
   type AgentRuntimeProfileTemplateSummary,
 } from '../../agent/runtime-profile.ts';
-import { formatAgentRecordSource } from '../../agent/record-labels.ts';
+import { formatAgentRecordSource } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { commandRefusal, requireYesFlag, stripYesFlag } from './confirmation.ts';
 import { requireShellPaths } from './runtime-services.ts';

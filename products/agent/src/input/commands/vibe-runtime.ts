@@ -1,11 +1,11 @@
-import { AgentPersonaRegistry } from '../../agent/persona-registry.ts';
+import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
   discoverVibeFiles,
   formatVibeStatus,
   initVibeFile,
   loadVibeImportSource,
   resolveVibePathReference,
-} from '../../agent/vibe-file.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
   formatVibeConfirmationRouteLines,
   vibeImportPersonaConfirmationRoutes,

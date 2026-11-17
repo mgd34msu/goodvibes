@@ -14,10 +14,10 @@ import {
   updateJsonStore,
   type JsonStoreSpec,
   type JsonStoreWriteReport,
-} from '@/utils/store-file.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { assertNoSecretLikeText } from './persona-registry.ts';
+import { assertNoSecretLikeText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { renderIcs } from './ics-calendar.ts';
 
 // ──────────────────────────────────────────────────────────────────

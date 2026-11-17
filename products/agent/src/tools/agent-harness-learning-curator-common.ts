@@ -1,6 +1,6 @@
 import type { AgentWorkspaceLocalLibraryItem } from '../input/agent-workspace-types.ts';
 import type { LearningCandidateDraft, LearningCandidateStatus, LocalLearningCandidateDomain } from './agent-harness-learning-curator-types.ts';
-import { MIN_PROMPT_MEMORY_CONFIDENCE } from '../agent/memory-prompt.ts';
+import { MIN_PROMPT_MEMORY_CONFIDENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 export { MIN_PROMPT_MEMORY_CONFIDENCE };
 
 /**

@@ -26,7 +26,7 @@ import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { AgentAccountRegistry, type AgentAccountRecord } from '@goodvibes-jev/engine/platform/platform/google';
 import { mintAddressFor } from '@goodvibes-jev/engine/platform/platform/google';
-import { containsSecretLikeText } from '../agent/memory-safety.ts';
+import { containsSecretLikeText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { getSessionExpectationBook, type DaemonExpectationClient } from '../agent/signup/session-expectations.ts';
 import { ConnectedHostVerbError } from '../runtime/client/daemon-verbs.ts';
 import { evaluateOutwardEffect, getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';

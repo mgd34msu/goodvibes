@@ -1,6 +1,6 @@
 import { discoverPersonas, type DiscoveredPersonaRecord } from '../agent/persona-discovery.ts';
-import type { AgentPersonaRecord } from '../agent/persona-registry.ts';
-import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '../agent/record-labels.ts';
+import type { AgentPersonaRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
 import { appendTemporalLabel } from './temporal-label.ts';

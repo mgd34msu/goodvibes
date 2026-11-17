@@ -29,7 +29,7 @@ type ReviewStateLabelKey = keyof typeof REVIEW_STATE_LABELS;
 export interface AgentRecordReference {
   readonly kind: string;
   readonly ref: string;
-  readonly label?: string;
+  readonly label?: string | undefined;
 }
 
 function titleCaseWords(value: string): string {

@@ -1,4 +1,4 @@
-import { buildAgentSkillRequirements, type AgentSkillRequirement } from '../agent/skill-registry.ts';
+import { buildAgentSkillRequirements, type AgentSkillRequirement } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { splitList } from './agent-workspace-editors.ts';
 
 export type AgentWorkspaceEditorFieldReader = (fieldId: string) => string;

@@ -86,16 +86,16 @@ export interface JsonStoreContents<E> {
   /** Entries this build cannot read, written back exactly as found. */
   readonly keptAsFound: readonly unknown[];
   /** Why the file could not be read at all; its bytes are copied aside before the next write. */
-  readonly unreadable?: string;
+  readonly unreadable?: string | undefined;
   /** Set when a newer build wrote the file; writes are refused while it is. */
-  readonly newerVersion?: number;
+  readonly newerVersion?: number | undefined;
 }
 
 export interface JsonStoreWriteReport {
   /** Entries this build could not read, left in the file as they were found. */
   readonly keptAsFound: number;
   /** Where the previous bytes were copied when the file could not be read at all. */
-  readonly copyPath?: string;
+  readonly copyPath?: string | undefined;
 }
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
@@ -193,14 +193,14 @@ export function prepareJsonStoreWrite<E>(
 export interface JsonStoreChange<E, T> {
   readonly value: T;
   /** Omit to write nothing. */
-  readonly entries?: readonly E[];
-  readonly fields?: Readonly<Record<string, unknown>>;
+  readonly entries?: readonly E[] | undefined;
+  readonly fields?: Readonly<Record<string, unknown>> | undefined;
 }
 
 export interface JsonStoreUpdate<T> {
   readonly value: T;
   /** Present when the file was written. */
-  readonly write?: JsonStoreWriteReport;
+  readonly write?: JsonStoreWriteReport | undefined;
 }
 
 /** One locked read-modify-write of a JSON entry store: one read, one parse, at most one write. */

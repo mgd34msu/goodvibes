@@ -35,8 +35,8 @@ import {
   type MemoryVectorStats,
 } from '@goodvibes-jev/engine/platform/platform/state';
 import type { MemoryAccess, MemoryOperationOptions } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import { assertNoSecretLikeMemoryText } from '../agent/memory-safety.ts';
-import { formatAgentRecordReference, formatAgentRecordReviewState } from '../agent/record-labels.ts';
+import { assertNoSecretLikeMemoryText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { formatAgentRecordReference, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
   AGENT_TOOL_PROVENANCE,
   type AgentLocalRegistryToolArgs,

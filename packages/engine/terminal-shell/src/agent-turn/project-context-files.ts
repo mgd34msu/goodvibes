@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import type { ShellPathService } from '@/runtime/index.ts';
-import { assertNoSecretLikeText } from './persona-registry.ts';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { assertNoSecretLikeText } from './persona-registry.js';
 
 export type AgentProjectContextKind =
   | 'hermes'
@@ -54,7 +54,7 @@ interface CandidateContextFile {
 }
 
 export interface AgentProjectContextDiscoveryOptions {
-  readonly targetPath?: string;
+  readonly targetPath?: string | undefined;
 }
 
 

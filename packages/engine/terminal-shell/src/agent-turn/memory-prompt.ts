@@ -2,7 +2,7 @@ import type { MemoryRecord, MemoryRegistry, MemoryVectorStats } from '@goodvibes
 // The recall-honesty floor + eligibility receipt now live in the platform as
 // the ONE cross-surface contract (memory-recall-contract.ts) instead of being defined
 // per surface. This file re-exports them unchanged so every existing agent consumer
-// keeps importing from './memory-prompt.ts', while the platform is the single source of the
+// keeps importing from './memory-prompt.js', while the platform is the single source of the
 // floor (60, the store's own baseline), the flagged-record exclusion, and the honest
 // degraded-state distinction. The per-turn ranking below stays agent-local, it is
 // injection wiring on top of the contract, not the contract itself.
@@ -148,10 +148,10 @@ export async function rankMemoryForTurn(
 }
 
 export interface BuildReviewedMemoryPromptOptions {
-  readonly limit?: number;
+  readonly limit?: number | undefined;
   /** The current turn's raw text (the seam this comes from: TURN_SUBMITTED's `prompt`).
    *  Used only to RANK the already-eligible set, never to admit an otherwise-ineligible record. */
-  readonly turnText?: string | null;
+  readonly turnText?: string | null | undefined;
   /**
    * Pre-fetched record set to use instead of `memoryRegistry.getAll()`, e.g. a
    * memory-spine recall snapshot's records (platform 1.2.0 sync-recall seam; see
@@ -162,7 +162,7 @@ export interface BuildReviewedMemoryPromptOptions {
    * swappable, so the injected prompt text and any receipt describing it are always
    * derived from the exact same record set instead of two independent reads.
    */
-  readonly records?: readonly MemoryRecord[];
+  readonly records?: readonly MemoryRecord[] | undefined;
 }
 
 export async function buildReviewedMemoryPrompt(memoryRegistry: MemoryRegistry, options: BuildReviewedMemoryPromptOptions = {}): Promise<string | null> {

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { PromptContextReceipt, PromptContextTurnOutcome } from './prompt-context-receipts.ts';
+import type { PromptContextReceipt, PromptContextTurnOutcome } from './prompt-context-receipts.js';
 
 /**
  * Reading, parsing, and pruning the prompt-context receipt journal.
@@ -21,12 +21,12 @@ export function isReceipt(value: unknown): value is PromptContextReceipt {
 export function isTurnOutcome(value: unknown): value is PromptContextTurnOutcome {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as {
-    readonly turnId?: unknown;
-    readonly status?: unknown;
-    readonly terminalEvent?: unknown;
-    readonly stopReason?: unknown;
-    readonly completedAt?: unknown;
-    readonly receiptIds?: unknown;
+    readonly turnId?: unknown | undefined;
+    readonly status?: unknown | undefined;
+    readonly terminalEvent?: unknown | undefined;
+    readonly stopReason?: unknown | undefined;
+    readonly completedAt?: unknown | undefined;
+    readonly receiptIds?: unknown | undefined;
   };
   return typeof candidate.turnId === 'string'
     && (candidate.status === 'completed' || candidate.status === 'error' || candidate.status === 'cancelled')

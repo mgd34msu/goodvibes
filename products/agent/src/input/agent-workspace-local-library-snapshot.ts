@@ -1,11 +1,11 @@
 import { memoryRecordTemporalStatus, type MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
 import type { AgentNoteRecord } from '../agent/note-registry.ts';
-import type { AgentPersonaRecord } from '../agent/persona-registry.ts';
-import { formatAgentRecordOrigin } from '../agent/record-labels.ts';
-import { evaluateAgentRoutineReadiness, type AgentRoutineRecord } from '../agent/routine-registry.ts';
+import type { AgentPersonaRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { formatAgentRecordOrigin } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { evaluateAgentRoutineReadiness, type AgentRoutineRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentResearchRunRegistry, researchRunLogTail } from '../agent/research-run-registry.ts';
 import { RoutineScheduleReceiptStore } from '../agent/routine-schedule-receipts.ts';
-import { evaluateAgentSkillBundleReadiness, evaluateAgentSkillReadiness, formatAgentSkillRequirement, type AgentSkillBundleRecord, type AgentSkillRecord } from '../agent/skill-registry.ts';
+import { evaluateAgentSkillBundleReadiness, evaluateAgentSkillReadiness, formatAgentSkillRequirement, type AgentSkillBundleRecord, type AgentSkillRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { listAgentRuntimeProfiles, listAgentRuntimeProfileTemplates } from '../agent/runtime-profile.ts';
 import type { AgentWorkspaceLocalLibraryItem, AgentWorkspaceResearchRunSummary, AgentWorkspaceRoutineScheduleReceiptSummary, AgentWorkspaceRuntimeProfileItem, AgentWorkspaceRuntimeStarterTemplateItem } from './agent-workspace-types.ts';
 

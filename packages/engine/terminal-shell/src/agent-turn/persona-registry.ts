@@ -1,5 +1,5 @@
-import { freshReviewPatch, parseAgentReviewState, reviewedReviewPatch, staleReviewPatch } from './review-state.ts';
-import type { ShellPathService } from '@/runtime/index.ts';
+import { freshReviewPatch, parseAgentReviewState, reviewedReviewPatch, staleReviewPatch } from './review-state.js';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import {
   readJsonStore,
   runStoreFileUpdateSync,
@@ -8,10 +8,10 @@ import {
   type JsonStoreSpec,
   type JsonStoreWriteReport,
   writeStoreFile,
-} from '@/utils/store-file.ts';
-import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { formatAgentRecordReviewState } from './record-labels.ts';
-import { containsSecretLikeText } from './memory-safety.ts';
+} from './store-file.js';
+import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
+import { formatAgentRecordReviewState } from './record-labels.js';
+import { containsSecretLikeText } from './memory-safety.js';
 
 export type AgentPersonaSource = 'user' | 'agent' | 'imported' | 'system';
 export type AgentPersonaReviewState = 'fresh' | 'reviewed' | 'stale';
@@ -26,33 +26,33 @@ export interface AgentPersonaRecord {
   readonly source: AgentPersonaSource;
   readonly provenance: string;
   readonly reviewState: AgentPersonaReviewState;
-  readonly staleReason?: string;
+  readonly staleReason?: string | undefined;
   readonly createdAt: string;
   readonly updatedAt: string;
-  readonly reviewedAt?: string;
+  readonly reviewedAt?: string | undefined;
 }
 
 export interface AgentPersonaCreateInput {
   readonly name: string;
   readonly description: string;
   readonly body: string;
-  readonly tags?: readonly string[];
-  readonly triggers?: readonly string[];
-  readonly source?: AgentPersonaSource;
-  readonly provenance?: string;
+  readonly tags?: readonly string[] | undefined;
+  readonly triggers?: readonly string[] | undefined;
+  readonly source?: AgentPersonaSource | undefined;
+  readonly provenance?: string | undefined;
   /** Make it the active persona in the same write that saves it. */
-  readonly active?: boolean;
+  readonly active?: boolean | undefined;
 }
 
 export interface AgentPersonaUpdateInput {
-  readonly name?: string;
-  readonly description?: string;
-  readonly body?: string;
-  readonly tags?: readonly string[];
-  readonly triggers?: readonly string[];
-  readonly provenance?: string;
+  readonly name?: string | undefined;
+  readonly description?: string | undefined;
+  readonly body?: string | undefined;
+  readonly tags?: readonly string[] | undefined;
+  readonly triggers?: readonly string[] | undefined;
+  readonly provenance?: string | undefined;
   /** true makes it active, false stops it being active, absent leaves the active persona as it is; same write as the edit. */
-  readonly active?: boolean;
+  readonly active?: boolean | undefined;
 }
 
 export interface AgentPersonaSnapshot {

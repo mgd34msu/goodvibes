@@ -6,9 +6,9 @@ import type { MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/sta
 import { MemorySpineClient, type MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import { assertCurrentToolEffect, assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/tools';
 import { noteStorePath } from '../agent/note-registry.ts';
-import { personaStorePath } from '../agent/persona-registry.ts';
-import { routineStorePath } from '../agent/routine-registry.ts';
-import { skillStorePath } from '../agent/skill-registry.ts';
+import { personaStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { routineStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { skillStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { assertAgentMemoryInput } from './agent-memory-input-guard.ts';
 import { captureAgentExportPath } from './agent-artifact-effect.ts';
 

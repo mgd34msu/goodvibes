@@ -44,7 +44,7 @@ export type CapabilityProbe =
     readonly kind: 'json-file-readable';
     readonly path: string;
     readonly label: string;
-    readonly requiredKeys?: readonly string[];
+    readonly requiredKeys?: readonly string[] | undefined;
   }
   /** A directory exists. */
   | { readonly kind: 'directory-present'; readonly path: string; readonly label: string }
@@ -81,8 +81,8 @@ export type CapabilityProbe =
     readonly kind: 'module-resolvable';
     readonly specifier: string;
     readonly label: string;
-    readonly searchDirectories?: readonly string[];
-    readonly requiredFiles?: readonly string[];
+    readonly searchDirectories?: readonly string[] | undefined;
+    readonly requiredFiles?: readonly string[] | undefined;
   }
   /** A configuration key holds a non-empty value. Values are never read out. */
   | { readonly kind: 'config-value-present'; readonly key: string; readonly label: string }
@@ -112,7 +112,7 @@ export interface CapabilityPrerequisite {
    * When true, the capability can still be ready without this. Used for
    * alternatives, e.g. either a saved token or a client-secret file.
    */
-  readonly optional?: boolean;
+  readonly optional?: boolean | undefined;
 }
 
 /** How a capability is actually invoked, once it is ready. */
@@ -153,7 +153,7 @@ export interface CapabilityDeclaration {
    * to catch the exact failure that started this work: credentials present,
    * capability silent.
    */
-  readonly configurationEvidence?: readonly CapabilityProbe[];
+  readonly configurationEvidence?: readonly CapabilityProbe[] | undefined;
 }
 
 export interface ResolvedPrerequisite {

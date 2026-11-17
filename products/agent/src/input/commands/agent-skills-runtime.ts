@@ -8,10 +8,10 @@ import {
   formatAgentSkillRequirement,
   type AgentSkillBundleRecord,
   type AgentSkillRecord,
-} from '../../agent/skill-registry.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { discoverSkills, type SkillRecord } from '../../agent/skill-discovery.ts';
-import { parseSkillStandardMarkdown } from '../../agent/skill-standard.ts';
-import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '../../agent/record-labels.ts';
+import { parseSkillStandardMarkdown } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { parseAgentLocalLibraryArgs, resolveCommandFilePath, type ParsedAgentLocalLibraryArgs } from './agent-local-library-args.ts';
 import { requireShellPaths } from './runtime-services.ts';

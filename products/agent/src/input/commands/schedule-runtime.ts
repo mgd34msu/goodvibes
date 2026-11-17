@@ -10,7 +10,7 @@ import {
   formatReminderSchedulePreview,
   formatReminderScheduleSuccess,
 } from '../../agent/reminder-schedule-format.ts';
-import { AgentRoutineRegistry } from '../../agent/routine-registry.ts';
+import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { resolveAgentConnectedHostConnection } from '../../agent/routine-schedule-promotion.ts';
 import { parseRoutineSchedulePromotionArgs } from '../../agent/routine-schedule-args.ts';
 import {

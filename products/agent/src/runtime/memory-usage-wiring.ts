@@ -1,5 +1,5 @@
 import { MemoryUsageTracker, type MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
-import type { PromptContextReceiptDraft } from '../agent/prompt-context-receipts.ts';
+import type { PromptContextReceiptDraft } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 /**
  * The Agent's feed into the shared memory usage tracker: the ids its prompt

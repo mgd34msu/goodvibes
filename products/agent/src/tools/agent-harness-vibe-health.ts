@@ -1,6 +1,6 @@
 import type { CommandContext } from '../input/command-registry.ts';
-import type { AgentVibeFile, BlockedAgentVibeFile } from '../agent/vibe-file.ts';
-import { discoverVibeFiles } from '../agent/vibe-file.ts';
+import type { AgentVibeFile, BlockedAgentVibeFile } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { discoverVibeFiles } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { homeRelativePath } from './agent-harness-tool-utils.ts';
 

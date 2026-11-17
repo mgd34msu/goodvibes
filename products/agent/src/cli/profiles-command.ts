@@ -20,7 +20,7 @@ import {
 import { existsSync } from 'node:fs';
 import { claimSurfaceHome, SurfaceHomeInUseError } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { formatAgentRecordSource } from '../agent/record-labels.ts';
+import { formatAgentRecordSource } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { CliCommandOutput, GoodVibesCliParseResult } from './types.ts';
 import { appendTemporalLabel } from './temporal-label.ts';
 

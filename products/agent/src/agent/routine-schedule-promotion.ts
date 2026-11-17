@@ -3,9 +3,9 @@ import { classifyConnectedHostError, type ConnectedHostFailure } from './connect
 import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import { connectedHostBaseUrl } from '../config/connected-host-dial.ts';
-import { formatAgentRecordReviewState } from './record-labels.ts';
-import { evaluateAgentRoutineReadiness, type AgentRoutineRecord } from './routine-registry.ts';
-import { formatAgentSkillRequirement } from './skill-registry.ts';
+import { formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { evaluateAgentRoutineReadiness, type AgentRoutineRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { formatAgentSkillRequirement } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
   deliveryModeFromTargets,
   normalizeProviderModel,

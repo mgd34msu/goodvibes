@@ -1,7 +1,7 @@
 import { learningPromotionReference } from '../tools/agent-harness-learning-curator-common.ts';
-import { assertNoSecretLikeText } from './persona-registry.ts';
+import { assertNoSecretLikeText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { LearningCandidate } from '../tools/agent-harness-learning-curator-types.ts';
-import type { AgentSkillCreateInput } from './skill-registry-types.ts';
+import type { AgentSkillCreateInput } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 /**
  * The create-input payload produced for each proposed skill draft.

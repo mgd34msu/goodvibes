@@ -38,7 +38,7 @@ import {
   writeStoreFile,
   type JsonStoreContents,
   type JsonStoreSpec,
-} from '@/utils/store-file.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { retainChannelStoreSource, type ChannelStoreEffectOptions } from './channel-store-lifetime.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';

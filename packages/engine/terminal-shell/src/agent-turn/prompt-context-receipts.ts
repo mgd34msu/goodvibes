@@ -1,20 +1,20 @@
 import { joinPromptParts } from '@goodvibes-jev/engine/terminal-shell/prompt-parts';
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { runStoreFileUpdateSync, writeStoreFile } from '@/utils/store-file.ts';
+import { runStoreFileUpdateSync, writeStoreFile } from './store-file.js';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { MemoryRecord, MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import type { MemoryRecallSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import type { ShellPathService } from '@/runtime/index.ts';
-import type { AgentSkillSnapshot } from './skill-registry-types.ts';
-import type { CapabilityIndexReport } from '../capabilities/capability-types.ts';
-import { buildCapabilitySummaryPrompt } from './capability-summary-prompt.ts';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { AgentSkillSnapshot } from './skill-registry-types.js';
+import type { CapabilityIndexReport } from './capability-types.js';
+import { buildCapabilitySummaryPrompt } from './capability-summary-prompt.js';
 import {
   formatReceiptJournal,
   readReceiptJournal,
   selectReceiptJournalSurvivors,
   type ReceiptJournalSurvivors,
-} from './prompt-context-receipt-journal.ts';
+} from './prompt-context-receipt-journal.js';
 import {
   renderReviewedMemoryPrompt,
   type MemoryTurnRankingResult,
@@ -23,10 +23,10 @@ import {
   rankMemoryForTurn,
   relevanceBand,
   DEFAULT_LIMIT,
-} from './memory-prompt.ts';
-import { AgentPersonaRegistry, buildActivePersonaPrompt, type AgentPersonaSnapshot } from './persona-registry.ts';
-import { buildProjectContextPrompt, discoverProjectContextFiles, type AgentProjectContextSnapshot } from './project-context-files.ts';
-import { AgentRoutineRegistry, type AgentRoutineSnapshot, ENABLED_ROUTINES_PROMPT_LIMIT, buildEnabledRoutinesPrompt, evaluateAgentRoutineReadiness } from './routine-registry.ts';
+} from './memory-prompt.js';
+import { AgentPersonaRegistry, buildActivePersonaPrompt, type AgentPersonaSnapshot } from './persona-registry.js';
+import { buildProjectContextPrompt, discoverProjectContextFiles, type AgentProjectContextSnapshot } from './project-context-files.js';
+import { AgentRoutineRegistry, type AgentRoutineSnapshot, ENABLED_ROUTINES_PROMPT_LIMIT, buildEnabledRoutinesPrompt, evaluateAgentRoutineReadiness } from './routine-registry.js';
 import {
   AgentSkillRegistry,
   ENABLED_SKILLS_PROMPT_LIMIT,
@@ -36,8 +36,8 @@ import {
   skillStoreUnreadableNotice,
   evaluateAgentSkillBundleReadiness,
   evaluateAgentSkillReadiness,
-} from './skill-registry.ts';
-import { buildVibePrompt, discoverVibeFiles, type AgentVibeSnapshot } from './vibe-file.ts';
+} from './skill-registry.js';
+import { buildVibePrompt, discoverVibeFiles, type AgentVibeSnapshot } from './vibe-file.js';
 
 export type PromptContextReceiptStatus = 'active' | 'attention' | 'empty' | 'unavailable';
 export type PromptContextReceiptSource = 'turn' | 'follow_up' | 'manual';
@@ -51,7 +51,7 @@ export interface PromptContextTurnOutcome {
   readonly stopReason: string;
   readonly completedAt: number;
   readonly receiptIds: readonly string[];
-  readonly detail?: string;
+  readonly detail?: string | undefined;
 }
 
 export interface PromptContextReceiptSegment {
@@ -63,9 +63,9 @@ export interface PromptContextReceiptSegment {
   readonly suppressedCount: number;
   readonly promptChars: number;
   readonly approxTokens: number;
-  readonly selected?: readonly Record<string, unknown>[];
-  readonly suppressed?: readonly Record<string, unknown>[];
-  readonly note?: string;
+  readonly selected?: readonly Record<string, unknown>[] | undefined;
+  readonly suppressed?: readonly Record<string, unknown>[] | undefined;
+  readonly note?: string | undefined;
 }
 
 export interface PromptContextReceiptDraft {
@@ -86,13 +86,13 @@ export interface PromptContextReceipt extends PromptContextReceiptDraft {
   readonly receiptId: string;
   readonly createdAt: number;
   readonly sequence: number;
-  readonly turnOutcome?: PromptContextTurnOutcome;
+  readonly turnOutcome?: PromptContextTurnOutcome | undefined;
 }
 
 export interface RuntimePromptCompositionInput {
   readonly sessionId: string;
-  readonly turnId?: string | null;
-  readonly source?: PromptContextReceiptSource;
+  readonly turnId?: string | null | undefined;
+  readonly source?: PromptContextReceiptSource | undefined;
   readonly provider: string;
   readonly model: unknown;
   /** The window a source states, or null when unknown (a guess, or disproven by a larger accepted request). */
@@ -108,11 +108,11 @@ export interface RuntimePromptCompositionInput {
    * Null when the index has not been resolved, the prompt then says the list
    * is unknown rather than implying the agent can do nothing.
    */
-  readonly capabilityIndex?: CapabilityIndexReport | null;
+  readonly capabilityIndex?: CapabilityIndexReport | null | undefined;
   /** The active turn's raw text (TURN_SUBMITTED's `prompt`), used only to rank the
    *  already-eligible memory set by relevance to this turn, see rankMemoryForTurn.
    *  Null/undefined when there is no active turn (e.g. a follow-up composition). */
-  readonly turnText?: string | null;
+  readonly turnText?: string | null | undefined;
   /**
    * The memory spine's cached recall snapshot (platform 1.2.0 sync-recall seam), when the
    * caller has one to offer.
@@ -129,7 +129,7 @@ export interface RuntimePromptCompositionInput {
    * `undefined` falls back to reading `memoryRegistry` directly (e.g. a caller that
    * has not wired the spine, or an existing test), the pre-1.2.0 behavior, unchanged.
    */
-  readonly memoryRecallSnapshot?: MemoryRecallSnapshot;
+  readonly memoryRecallSnapshot?: MemoryRecallSnapshot | undefined;
 }
 
 /**
@@ -616,8 +616,8 @@ export interface PromptContextTurnOutcomeInput {
   readonly status: PromptContextTurnOutcomeStatus;
   readonly terminalEvent: PromptContextTurnTerminalEvent;
   readonly stopReason: string;
-  readonly completedAt?: number;
-  readonly detail?: string;
+  readonly completedAt?: number | undefined;
+  readonly detail?: string | undefined;
 }
 
 /** What a single journal compaction reclaimed, the disclosure record for the reap. */

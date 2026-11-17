@@ -3,14 +3,14 @@ import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes-jev/en
 import { resolve } from 'node:path';
 import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
 import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from './agent-local-state-admission.ts';
-import { AgentPersonaRegistry, personaStorePath } from '../agent/persona-registry.ts';
+import { AgentPersonaRegistry, personaStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
   discoverVibeFiles,
   initVibeFile,
   loadVibeImportSource,
   resolveVibePathReference,
   type AgentVibeFile,
-} from '../agent/vibe-file.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { CommandContext } from '../input/command-registry.ts';
 import { requireShellPaths } from '../input/commands/runtime-services.ts';
 import { previewHarnessText } from './agent-harness-text.ts';

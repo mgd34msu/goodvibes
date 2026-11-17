@@ -32,7 +32,7 @@ import {
   writeJsonStore,
   type JsonStoreContents,
   type JsonStoreSpec,
-} from '@/utils/store-file.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { retainChannelStoreSource, type ChannelStoreEffectOptions } from './channel-store-lifetime.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from './daemon-operator-client.ts';

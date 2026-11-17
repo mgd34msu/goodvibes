@@ -6,7 +6,7 @@ import type {
   CapabilityState,
   ResolvedCapability,
   ResolvedPrerequisite,
-} from './capability-types.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { knownServiceEvidence, type KnownServiceEvidence } from './known-service-evidence.ts';
 
 /**

@@ -10,7 +10,7 @@ import type { CliExternalRuntimeSnapshot } from './external-runtime.ts';
 import type { CliConnectedHostMetricsSnapshot } from './connected-host-metrics.ts';
 import type { CredentialAvailability } from '../config/credential-status.ts';
 import { getProviderIdFromModel } from '../config/provider-model.ts';
-import { formatAgentRecordSource } from '../agent/record-labels.ts';
+import { formatAgentRecordSource } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { formatAgentKnowledgeFailureKind } from './agent-knowledge-format.ts';
 import { readApprovalPostureFromConfig, type ApprovalPosture } from '../permissions/approval-posture.ts';
 import { appendTemporalLabel } from './temporal-label.ts';

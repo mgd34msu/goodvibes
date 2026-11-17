@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { assertCurrentToolEffect, assertCurrentToolExecution, assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/types';
 import { resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
-import { containsSecretLikeText } from '../agent/memory-safety.ts';
+import { containsSecretLikeText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export interface AgentLocalStateTarget {
   readonly root: string;

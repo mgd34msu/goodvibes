@@ -1,5 +1,5 @@
-import type { CapabilityIndexReport } from '../capabilities/capability-types.ts';
-import { UNTRUSTED_CONTENT_RULE } from '../trust/untrusted-content.ts';
+import type { CapabilityIndexReport } from './capability-types.js';
+import { UNTRUSTED_CONTENT_RULE } from '@goodvibes-jev/engine/platform/platform/security';
 
 /**
  * The compact block that tells the agent what it can actually do.

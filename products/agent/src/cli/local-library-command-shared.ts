@@ -1,8 +1,8 @@
 import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 export { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { createShellPathService } from '@/runtime/index.ts';
-import { AgentPersonaRegistry } from '../agent/persona-registry.ts';
-import { AgentSkillRegistry } from '../agent/skill-registry.ts';
+import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
 

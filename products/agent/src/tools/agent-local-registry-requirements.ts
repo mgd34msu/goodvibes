@@ -1,4 +1,4 @@
-import type { AgentSkillRequirement } from '../agent/skill-registry.ts';
+import type { AgentSkillRequirement } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 function readList(value: unknown): readonly string[] {
   if (typeof value === 'string') return value.split(',').map((entry) => entry.trim()).filter(Boolean);

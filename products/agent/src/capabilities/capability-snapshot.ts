@@ -1,4 +1,4 @@
-import type { CapabilityIndexReport } from './capability-types.ts';
+import type { CapabilityIndexReport } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 /**
  * The session's capability index: the one owner of "what can this agent do

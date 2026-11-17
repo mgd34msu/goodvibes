@@ -2,9 +2,9 @@ import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { requireConfirmedAction } from './agent-harness-tool-utils.ts';
 import { AgentNoteRegistry, type AgentNotePromotion } from '../agent/note-registry.ts';
-import { AgentPersonaRegistry } from '../agent/persona-registry.ts';
-import { AgentRoutineRegistry } from '../agent/routine-registry.ts';
-import { AgentSkillRegistry } from '../agent/skill-registry.ts';
+import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { CommandContext } from '../input/command-registry.ts';
 import {
   createKnowledgeUrlEditorFromNote,

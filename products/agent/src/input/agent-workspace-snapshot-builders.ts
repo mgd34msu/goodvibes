@@ -11,10 +11,10 @@ import { listAvailableSubscriptionProviders } from '@goodvibes-jev/engine/platfo
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { CommandContext } from './command-registry.ts';
 import { AgentNoteRegistry } from '../agent/note-registry.ts';
-import { AgentPersonaRegistry } from '../agent/persona-registry.ts';
+import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentResearchRunRegistry } from '../agent/research-run-registry.ts';
 import { AgentResearchSourceRegistry } from '../agent/research-source-registry.ts';
-import { AgentSkillRegistry } from '../agent/skill-registry.ts';
+import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { RoutineScheduleReceiptStore } from '../agent/routine-schedule-receipts.ts';
 import {
   getAgentRuntimeProfilesRoot,

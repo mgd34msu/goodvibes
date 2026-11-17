@@ -1,13 +1,13 @@
-import { freshReviewPatch, parseAgentReviewState, reviewedReviewPatch, staleReviewPatch } from './review-state.ts';
+import { freshReviewPatch, parseAgentReviewState, reviewedReviewPatch, staleReviewPatch } from './review-state.js';
 import {isExecutable as canExecute} from '@goodvibes-jev/engine/terminal-shell/cli-environment';
 import { delimiter, join } from 'node:path';
-import type { ShellPathService } from '@/runtime/index.ts';
-import { readJsonStore, runStoreFileUpdateSync, writeJsonStore, type JsonStoreContents, type JsonStoreSpec, type JsonStoreWriteReport, type writeStoreFile } from '@/utils/store-file.ts';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { readJsonStore, runStoreFileUpdateSync, writeJsonStore, type JsonStoreContents, type JsonStoreSpec, type JsonStoreWriteReport, type writeStoreFile } from './store-file.js';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { assertNoSecretLikeText } from './persona-registry.ts';
-import { parseSkillStandardMarkdown, writeSkillStandardFile } from './skill-standard.ts';
-import { formatAgentRecordReviewState } from './record-labels.ts';
+import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
+import { assertNoSecretLikeText } from './persona-registry.js';
+import { parseSkillStandardMarkdown, writeSkillStandardFile } from './skill-standard.js';
+import { formatAgentRecordReviewState } from './record-labels.js';
 import type {
   AgentSkillBundleCreateInput,
   AgentSkillBundleReadiness,
@@ -20,7 +20,7 @@ import type {
   AgentSkillRequirementKind,
   AgentSkillSnapshot,
   AgentSkillUpdateInput,
-} from './skill-registry-types.ts';
+} from './skill-registry-types.js';
 export type {
   AgentSkillBundleCreateInput,
   AgentSkillBundleReadiness,
@@ -35,7 +35,7 @@ export type {
   AgentSkillSnapshot,
   AgentSkillSource,
   AgentSkillUpdateInput,
-} from './skill-registry-types.ts';
+} from './skill-registry-types.js';
 
 interface SkillStoreFile {
   readonly version: 1;
@@ -681,8 +681,8 @@ export class AgentSkillRegistry {
 }
 
 export function buildAgentSkillRequirements(input: {
-  readonly env?: readonly string[];
-  readonly commands?: readonly string[];
+  readonly env?: readonly string[] | undefined;
+  readonly commands?: readonly string[] | undefined;
 }): readonly AgentSkillRequirement[] {
   return normalizeRequirements([
     ...(input.env ?? []).map((name) => ({ kind: 'env' as const, name })),
@@ -702,7 +702,7 @@ export function evaluateAgentSkillReadiness(
   skill: Pick<AgentSkillRecord, 'requirements'>,
   options: {
     readonly env?: Readonly<Record<string, string | undefined>>;
-    readonly pathValue?: string;
+    readonly pathValue?: string | undefined;
   } = {},
 ): AgentSkillReadiness {
   const env = options.env ?? process.env;
@@ -724,7 +724,7 @@ export function evaluateAgentSkillBundleReadiness(
   skills: readonly AgentSkillRecord[],
   options: {
     readonly env?: Readonly<Record<string, string | undefined>>;
-    readonly pathValue?: string;
+    readonly pathValue?: string | undefined;
   } = {},
 ): AgentSkillBundleReadiness {
   const skillById = new Map(skills.map((skill) => [skill.id, skill]));

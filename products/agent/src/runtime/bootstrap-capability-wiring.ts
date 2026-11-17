@@ -1,7 +1,7 @@
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { runCapabilityBootCheck } from '../capabilities/capability-boot-check.ts';
 import { configValueIsPresent, safeMcpServerPosture, secretValueIsPresent, servedOperatorMethodIds } from '../capabilities/capability-sources.ts';
-import type { CapabilityIndexReport } from '../capabilities/capability-types.ts';
+import type { CapabilityIndexReport } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { CommandContext } from '../input/command-registry.ts';
 
 /**

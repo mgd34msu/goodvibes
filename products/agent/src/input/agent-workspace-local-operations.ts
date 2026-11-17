@@ -1,9 +1,9 @@
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { AgentNoteRegistry } from '../agent/note-registry.ts';
-import { AgentPersonaRegistry } from '../agent/persona-registry.ts';
-import { AgentRoutineRegistry } from '../agent/routine-registry.ts';
-import { AgentSkillRegistry } from '../agent/skill-registry.ts';
+import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { quoteSlashCommandArg } from './slash-command-parser.ts';
 import {
   createKnowledgeUrlEditorFromNote,

@@ -1,17 +1,17 @@
-import { freshReviewPatch, parseAgentReviewState, reviewedReviewPatch, staleReviewPatch } from './review-state.ts';
-import type { ShellPathService } from '@/runtime/index.ts';
-import { readJsonStore, writeJsonStore, type JsonStoreContents, type JsonStoreSpec, type JsonStoreWriteReport, type writeStoreFile } from '@/utils/store-file.ts';
-import { storeFileChangeStamp } from './store-change-stamp.ts';
-import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { assertNoSecretLikeText, runLockedStoreUpdate } from './persona-registry.ts';
-import { formatAgentRecordReviewState } from './record-labels.ts';
+import { freshReviewPatch, parseAgentReviewState, reviewedReviewPatch, staleReviewPatch } from './review-state.js';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { readJsonStore, writeJsonStore, type JsonStoreContents, type JsonStoreSpec, type JsonStoreWriteReport, type writeStoreFile } from './store-file.js';
+import { storeFileChangeStamp } from './store-change-stamp.js';
+import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
+import { assertNoSecretLikeText, runLockedStoreUpdate } from './persona-registry.js';
+import { formatAgentRecordReviewState } from './record-labels.js';
 import {
   evaluateAgentSkillReadiness,
   formatAgentSkillRequirement,
   normalizeAgentSkillRequirements,
   type AgentSkillReadiness,
   type AgentSkillRequirement,
-} from './skill-registry.ts';
+} from './skill-registry.js';
 
 export type AgentRoutineSource = 'user' | 'agent' | 'imported' | 'system';
 export type AgentRoutineReviewState = 'fresh' | 'reviewed' | 'stale';
@@ -30,11 +30,11 @@ export interface AgentRoutineRecord {
   readonly source: AgentRoutineSource;
   readonly provenance: string;
   readonly reviewState: AgentRoutineReviewState;
-  readonly staleReason?: string;
+  readonly staleReason?: string | undefined;
   readonly createdAt: string;
   readonly updatedAt: string;
-  readonly reviewedAt?: string;
-  readonly lastStartedAt?: string;
+  readonly reviewedAt?: string | undefined;
+  readonly lastStartedAt?: string | undefined;
   readonly startCount: number;
 }
 
@@ -42,24 +42,24 @@ export interface AgentRoutineCreateInput {
   readonly name: string;
   readonly description: string;
   readonly steps: string;
-  readonly triggers?: readonly string[];
-  readonly tags?: readonly string[];
-  readonly requirements?: readonly AgentRoutineRequirement[];
-  readonly enabled?: boolean;
-  readonly source?: AgentRoutineSource;
-  readonly provenance?: string;
+  readonly triggers?: readonly string[] | undefined;
+  readonly tags?: readonly string[] | undefined;
+  readonly requirements?: readonly AgentRoutineRequirement[] | undefined;
+  readonly enabled?: boolean | undefined;
+  readonly source?: AgentRoutineSource | undefined;
+  readonly provenance?: string | undefined;
 }
 
 export interface AgentRoutineUpdateInput {
-  readonly name?: string;
-  readonly description?: string;
-  readonly steps?: string;
-  readonly triggers?: readonly string[];
-  readonly tags?: readonly string[];
-  readonly requirements?: readonly AgentRoutineRequirement[];
+  readonly name?: string | undefined;
+  readonly description?: string | undefined;
+  readonly steps?: string | undefined;
+  readonly triggers?: readonly string[] | undefined;
+  readonly tags?: readonly string[] | undefined;
+  readonly requirements?: readonly AgentRoutineRequirement[] | undefined;
   /** Applied in the same write as the field edit. */
-  readonly enabled?: boolean;
-  readonly provenance?: string;
+  readonly enabled?: boolean | undefined;
+  readonly provenance?: string | undefined;
 }
 
 export interface AgentRoutineSnapshot {

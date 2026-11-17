@@ -7,7 +7,7 @@ import {
   type AgentProjectContextSnapshot,
   type AgentProjectContextFile,
   type BlockedAgentProjectContextFile,
-} from '../agent/project-context-files.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { previewHarnessText } from './agent-harness-text.ts';
 
 interface AgentHarnessProjectContextArgs {

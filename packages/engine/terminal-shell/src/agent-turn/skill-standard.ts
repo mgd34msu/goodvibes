@@ -1,8 +1,8 @@
 import { parseMarkdownFrontmatter } from '@goodvibes-jev/engine/terminal-shell/markdown-frontmatter';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { assertNoSecretLikeText } from './persona-registry.ts';
-import type { AgentSkillRecord } from './skill-registry-types.ts';
+import { assertNoSecretLikeText } from './persona-registry.js';
+import type { AgentSkillRecord } from './skill-registry-types.js';
 
 export interface SkillStandardParsed {
   readonly name: string;

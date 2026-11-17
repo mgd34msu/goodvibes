@@ -1,4 +1,4 @@
-import { readJsonStore, updateJsonStore, type JsonStoreSpec } from '@/utils/store-file.ts';
+import { readJsonStore, updateJsonStore, type JsonStoreSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import { formatEveryInterval } from '@goodvibes-jev/engine/platform/platform/automation';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';

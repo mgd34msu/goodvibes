@@ -3,9 +3,9 @@ import { existsSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { defineLifecycle, holdProcessLock, type HeldProcessLock } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { readJsonStore, updateJsonStore, type JsonStoreSpec } from '@/utils/store-file.ts';
+import { readJsonStore, updateJsonStore, type JsonStoreSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { assertNoSecretLikeText } from './persona-registry.ts';
+import { assertNoSecretLikeText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export type AgentResearchRunStatus = 'planned' | 'running' | 'paused' | 'blocked' | 'cancelled' | 'completed' | 'failed';
 /**

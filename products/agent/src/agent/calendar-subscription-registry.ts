@@ -1,6 +1,6 @@
 import { postToPublicWebhook } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { readJsonStore, runStoreFileUpdate, writeJsonStore, type JsonStoreContents, type JsonStoreSpec } from '@/utils/store-file.ts';
+import { readJsonStore, runStoreFileUpdate, writeJsonStore, type JsonStoreContents, type JsonStoreSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
   SubscriptionStore,
   expandEvent,

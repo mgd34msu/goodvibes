@@ -1,5 +1,5 @@
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { containsSecretLikeText } from '../agent/memory-safety.ts';
+import { containsSecretLikeText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 const NOT_PLAIN_DATA = 'The arguments must be plain JSON data: objects, arrays, strings, finite numbers, booleans and null, at most 64 levels deep.';
 const SECRET_LIKE_WRITE = 'Nothing was saved: the arguments contain text that looks like a password, token or private key, and local records do not store secrets. Remove that text, or store the secret in the secret store and record only its key name.';

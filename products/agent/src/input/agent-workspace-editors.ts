@@ -1,6 +1,6 @@
-import type { AgentPersonaRecord } from '../agent/persona-registry.ts';
-import type { AgentRoutineRecord } from '../agent/routine-registry.ts';
-import type { AgentSkillRecord } from '../agent/skill-registry.ts';
+import type { AgentPersonaRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { AgentRoutineRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { AgentSkillRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { AgentNoteRecord } from '../agent/note-registry.ts';
 import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
 import type {

@@ -4,7 +4,7 @@ import { registerBuiltinCapabilities } from './builtin-capabilities.ts';
 import { resolveCapabilityIndex } from './capability-index.ts';
 import { installCapabilityResolver, refreshCapabilityIndex } from './capability-snapshot.ts';
 import type { McpServerPosture, ProbeContext } from './capability-probe-runner.ts';
-import type { CapabilityIndexReport } from './capability-types.ts';
+import type { CapabilityIndexReport } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 /**
  * The boot-time capability check.

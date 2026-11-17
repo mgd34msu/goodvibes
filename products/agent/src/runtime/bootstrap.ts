@@ -61,7 +61,7 @@ import { registerAgentTools } from './bootstrap-agent-tools.ts';
 import { foldLegacySpineStore } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import { reconcileMemorySpineAdoption } from './memory-spine-adoption.ts';
 import { createAgentSessionInputsClient } from './client/session-inputs.ts';
-import { AgentPromptContextReceiptStore, composeRuntimePromptWithReceipt } from '../agent/prompt-context-receipts.ts';
+import { AgentPromptContextReceiptStore, composeRuntimePromptWithReceipt } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { recordCompletedTurnAnchor } from './rewind-anchor-wiring.ts';
 import { createMemoryUsageTracker } from './memory-usage-wiring.ts';
 import { installOccasionsNudging } from './occasions-boot.ts';

@@ -1,7 +1,7 @@
 import { createSubscriptionRuntimeCommands } from '@goodvibes-jev/engine/terminal-shell/subscription-runtime-commands';
 import type { CommandContext } from '../command-registry.ts';
 import { requireSubscriptionManager, requireServiceRegistry, requireSecretsManager, requireShellPaths } from './runtime-services.ts';
-import { formatAgentRecordSource } from '../../agent/record-labels.ts';
+import { formatAgentRecordSource } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 export const { registerSubscriptionRuntimeCommands } = createSubscriptionRuntimeCommands<CommandContext>(
   { requireSubscriptionManager, requireServiceRegistry, requireSecretsManager, requireShellPaths },
   {

@@ -2,7 +2,7 @@ import { presetForMode } from '@goodvibes-jev/engine/platform/platform/gate';
 import { nativeWorkLedgerLines } from './native-work-ledger.ts';
 import type { AgentWorkspace, AgentWorkspaceCategory, AgentWorkspaceLocalEditor, AgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace.ts';
 import { buildAssistantCockpitFromWorkspaceSnapshot, type AssistantCockpitLane, type AssistantCockpitLaneState, type AssistantCockpitStatus } from '../agent/assistant-cockpit.ts';
-import { formatAgentRecordReviewState } from '../agent/record-labels.ts';
+import { formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { truncateDisplay } from '../utils/terminal-width.ts';
 import { WORKSPACE_PALETTE as PALETTE } from './fullscreen-workspace.ts';
 import { setupStatusColor, type AgentWorkspaceContextLine as ContextLine } from './agent-workspace-style.ts';

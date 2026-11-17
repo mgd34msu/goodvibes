@@ -1,10 +1,10 @@
 import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
 import { basename, sep } from 'node:path';
 import type { CommandContext } from './command-registry.ts';
-import { AgentRoutineRegistry } from '../agent/routine-registry.ts';
+import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { memoryRecordTemporalStatus, resolveCanonicalMemoryDbPath } from '@goodvibes-jev/engine/platform/platform/state';
-import { storeFileChangeStamp } from '../agent/store-change-stamp.ts';
-import { describeMemoryPromptEligibility, isPromptActiveMemory } from '../agent/memory-prompt.ts';
+import { storeFileChangeStamp } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { describeMemoryPromptEligibility, isPromptActiveMemory } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { summarizeAgentBehaviorDiscovery } from '../agent/behavior-discovery-summary.ts';
 import { buildAgentWorkspaceChannelSetupGuide, buildAgentWorkspaceChannels } from './agent-workspace-channels.ts';
 import { buildAgentWorkspaceSetupChecklist } from './agent-workspace-setup.ts';

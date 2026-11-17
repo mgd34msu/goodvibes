@@ -15,7 +15,7 @@ import '@goodvibes-jev/engine/platform/platform/config';
 import '@/runtime/index.ts';
 import { mintAgentDevicePairing } from '../agent/device-pairing.ts';
 import type { CliCommandRuntime } from './management.ts';
-import { formatAgentRecordSource } from '../agent/record-labels.ts';
+import { formatAgentRecordSource } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { appendTemporalLabel } from './temporal-label.ts';
 import { createAgentDaemonVerbCaller } from '../runtime/client/daemon-verbs.ts';
 

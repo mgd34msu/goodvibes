@@ -3,7 +3,7 @@ import { promises as fs, constants, existsSync, mkdirSync } from 'fs';
 import { logger } from '../utils/logger.js';
 import { basename, dirname, join } from 'path';
 import { summarizeError } from '../utils/error-display.js';
-import { CORRUPT_QUARANTINE_MAX_FILES, writeFileAtomic } from '../utils/atomic-json-store.js';
+import { CORRUPT_QUARANTINE_MAX_FILES, writeFileAtomicAsync } from '../utils/atomic-json-store.js';
 import { publishFileMutation, type MutationPublication } from '../utils/file-mutation.js';
 
 /**
@@ -61,6 +61,8 @@ export class PersistentStore<T extends Record<string, unknown>> {
   private memoryData: T | null = null;
   /** The directory was made (or found) by this store's first write. */
   private directoryReady = false;
+  /** The last write in flight: writes land in the order persist() was called. */
+  private writeTail: Promise<void> = Promise.resolve();
 
   constructor(filePath: string) {
     this.filePath = filePath;
@@ -171,7 +173,8 @@ export class PersistentStore<T extends Record<string, unknown>> {
    * file is staged and once immediately before the rename, `beforePublish` runs
    * immediately before the rename and `afterPublish` right after it. The
    * rename is always synchronous with those hooks (`synchronousPublish` is
-   * accepted for callers that still ask for it).
+   * accepted for callers that still ask for it). The bytes and the syncs are
+   * written off the event loop; this store's writes land in call order.
    */
   async persist(data: T, options: {
     readonly durable?: boolean;
@@ -195,11 +198,17 @@ export class PersistentStore<T extends Record<string, unknown>> {
       mkdirSync(this.dir, { recursive: true, mode: DIR_MODE });
       this.directoryReady = true;
     }
-    await publishFileMutation(options.withPublication, assertPublicationCurrent => {
+    const write = this.writeTail.then(() => this.write(content, options));
+    this.writeTail = write.catch(() => undefined);
+    await write;
+  }
+
+  private async write(content: string, options: NonNullable<Parameters<PersistentStore<T>['persist']>[1]>): Promise<void> {
+    await publishFileMutation(options.withPublication, async assertPublicationCurrent => {
       // The writer checks its guard before staging and again just before the
       // rename; once the file is staged, that second check is the publish point.
       let staged = false;
-      writeFileAtomic(this.filePath, content, {
+      await writeFileAtomicAsync(this.filePath, content, {
         durable: options.durable === true,
         assertCurrent: () => {
           options.assertCurrent?.(); assertPublicationCurrent();

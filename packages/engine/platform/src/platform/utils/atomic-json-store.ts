@@ -94,6 +94,7 @@ import { randomUUID } from 'node:crypto';
 import { types as nodeTypes } from 'node:util';
 import { basename, dirname, isAbsolute, join, parse, sep } from 'node:path';
 import type { BigIntStats, Stats } from 'node:fs';
+import { open as openFileHandle, type FileHandle } from 'node:fs/promises';
 import { logger } from './logger.js';
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 
@@ -436,74 +437,177 @@ function syncDirectory(path: string): void {
   try { fsyncSync(fd); } finally { closeSync(fd); }
 }
 
+async function syncDirectoryAsync(path: string): Promise<void> {
+  const handle = await openFileHandle(path, constants.O_RDONLY | constants.O_DIRECTORY);
+  try { await handle.sync(); } finally { await handle.close(); }
+}
+
+const ATOMIC_STAGING_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
+
+/**
+ * One atomic write: every step but writing and syncing the staged file, which
+ * {@link writeFileAtomic} does on the calling thread and
+ * {@link writeFileAtomicAsync} off it. The guard check and the rename stay
+ * synchronous with each other in both.
+ */
+class AtomicWriteRun {
+  readonly bytes: Uint8Array;
+  readonly mode: number;
+  readonly durable: boolean;
+  readonly #mkdirp: boolean;
+  readonly #replaceExisting: boolean;
+  readonly #cleanupStaleTemps: boolean;
+  readonly #absolute: string;
+  readonly #dir: string;
+  readonly #leaf: string;
+  readonly #guard: (() => void) | undefined;
+  readonly #onEffect: ((published?: boolean) => void) | undefined;
+  #created: string[] = [];
+  #parentIdentity: string | undefined;
+  // Set only once this write created the file, so a failure never removes another writer's file.
+  #tmpPath: string | undefined;
+  #published = false;
+
+  constructor(readonly filePath: string, contents: string | Uint8Array, options: AtomicWriteOptions) {
+    this.bytes = typeof contents === 'string' ? Buffer.from(contents, 'utf8') : contents;
+    this.#guard = options.assertCurrent?.bind(options);
+    this.#onEffect = options.onEffect?.bind(options);
+    this.mode = options.mode ?? DEFAULT_STORE_FILE_MODE;
+    this.#replaceExisting = options.replaceExisting !== false;
+    this.#cleanupStaleTemps = options.cleanupStaleTemps !== false;
+    this.durable = options.durable === true;
+    this.#mkdirp = options.mkdirp !== false;
+    this.#absolute = isAbsolute(filePath) ? filePath : `${process.cwd()}${sep}${filePath}`;
+    this.#leaf = basename(this.#absolute);
+    this.#dir = dirname(this.#absolute);
+  }
+
+  #check(): void { completeSynchronously(() => this.#guard?.(), 'Atomic file operation currentness is unavailable.'); }
+  #notify(published: boolean): void { completeSynchronously(() => this.#onEffect?.(published), 'Atomic file effect notification must complete synchronously'); }
+
+  /** Validate the target, check the guard, make the parent, reap a dead writer's temp files; the staging path. */
+  prepare(): string {
+    const leaf = this.#leaf, absolute = this.#absolute;
+    if (!leaf || leaf === '.' || leaf === '..' || absolute.endsWith(sep) || absolute.includes('\0')) throw new Error('Atomic publication requires a file target');
+    this.#check();
+    this.#created = ensureAtomicParent(this.#dir, this.#mkdirp, this.#onEffect ? () => this.#notify(false) : undefined);
+    this.#parentIdentity = this.#guard || this.#onEffect ? directoryIdentity(this.#dir) : undefined;
+    if (this.#cleanupStaleTemps && !reapedAtomicTargets.has(absolute)) {
+      reapedAtomicTargets.add(absolute);
+      cleanupStaleTempFiles(this.#dir, absolute, () => {}, undefined);
+    }
+    return createAtomicTempPath(absolute);
+  }
+
+  /** The staging file could not be opened: when the parent was removed since this process first saw it, make it once more. */
+  remakeParent(error: unknown): void {
+    if (!this.#mkdirp || !atomicMissing(error)) throw error;
+    knownAtomicParents.delete(this.#dir);
+    this.#created.push(...ensureAtomicParent(this.#dir, this.#mkdirp, undefined));
+  }
+
+  staged(path: string): void {
+    this.#tmpPath = path;
+    if (this.#onEffect) this.#notify(false);
+  }
+
+  written(count: number): void {
+    if (count !== this.bytes.byteLength) throw new Error(`Incomplete atomic file write: ${count} of ${this.bytes.byteLength} bytes`);
+  }
+
+  /** The one currentness check (the caller's guard and the parent it resolved) and the rename, with nothing between them. */
+  publish(): void {
+    const tmpPath = this.#tmpPath;
+    if (tmpPath === undefined) throw new Error('Atomic publication has no staged file');
+    if (this.#parentIdentity !== undefined) {
+      this.#check();
+      if (directoryIdentity(this.#dir) !== this.#parentIdentity) throw new Error(`Atomic file parent changed before publication: ${this.#dir}`);
+    }
+    if (this.#replaceExisting) { renameSync(tmpPath, this.#absolute); this.#published = true; }
+    else {
+      // A same-directory hard link publishes the complete file only when the name is free (EEXIST otherwise).
+      linkSync(tmpPath, this.#absolute); this.#published = true;
+      unlinkSync(tmpPath);
+    }
+    this.#tmpPath = undefined;
+    // The rename happened: the observer hears of it even if the durability sync below fails.
+    if (this.#onEffect) this.#notify(true);
+  }
+
+  /** Directories whose entries must reach the disk for a durable write: the parent and those holding directories this write made. */
+  durabilityDirectories(): string[] {
+    return [this.#dir, ...this.#created.map((path) => dirname(path))];
+  }
+
+  durabilityFailed(error: unknown): AtomicWriteDurabilityError {
+    return new AtomicWriteDurabilityError(this.filePath, 'published-indeterminate', error);
+  }
+
+  /** Remove this write's own unpublished staging file and raise the failure in the writer's terms. */
+  fail(error: unknown): never {
+    if (this.#tmpPath !== undefined && !this.#published) { try { unlinkSync(this.#tmpPath); } catch { /* nothing was published */ } }
+    if (this.durable && !(error instanceof AtomicWriteDurabilityError)) {
+      throw new AtomicWriteDurabilityError(this.filePath, this.#published ? 'published-indeterminate' : 'before-publication', error);
+    }
+    throw error;
+  }
+}
+
 /**
  * Write `contents` to `filePath` atomically, creating parent directories as
  * needed. See the module docstring for the mechanics and why they matter.
+ * Holds the thread for the write and its sync; a store written while the
+ * process serves requests uses {@link writeFileAtomicAsync}.
  */
 export function writeFileAtomic(filePath: string, contents: string | Uint8Array, options: AtomicWriteOptions = {}): void {
-  const bytes = typeof contents === 'string' ? Buffer.from(contents, 'utf8') : contents;
-  const guard = options.assertCurrent?.bind(options), onEffect = options.onEffect?.bind(options);
-  const mode = options.mode ?? DEFAULT_STORE_FILE_MODE, replaceExisting = options.replaceExisting !== false;
-  const durable = options.durable === true, mkdirp = options.mkdirp !== false;
-  const absolute = isAbsolute(filePath) ? filePath : `${process.cwd()}${sep}${filePath}`;
-  const leaf = basename(absolute), dir = dirname(absolute);
-  const check = () => completeSynchronously(() => guard?.(), 'Atomic file operation currentness is unavailable.');
-  const notify = (published: boolean) => completeSynchronously(() => onEffect?.(published), 'Atomic file effect notification must complete synchronously');
-  // tmpPath is set only once this write created the file, so a failure never removes another writer's file.
-  let tmpPath: string | undefined, fd: number | undefined, published = false;
+  const run = new AtomicWriteRun(filePath, contents, options);
+  let fd: number | undefined;
   try {
-    if (!leaf || leaf === '.' || leaf === '..' || absolute.endsWith(sep) || absolute.includes('\0')) throw new Error('Atomic publication requires a file target');
-    check();
-    const created = ensureAtomicParent(dir, mkdirp, onEffect ? () => notify(false) : undefined);
-    const parentIdentity = guard || onEffect ? directoryIdentity(dir) : undefined;
-    if (options.cleanupStaleTemps !== false && !reapedAtomicTargets.has(absolute)) {
-      reapedAtomicTargets.add(absolute);
-      cleanupStaleTempFiles(dir, absolute, () => {}, undefined);
-    }
-    const staging = createAtomicTempPath(absolute);
-    const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
-    try { fd = openSync(staging, flags, DEFAULT_STORE_FILE_MODE); }
-    catch (error) {
-      // The parent was removed since this process first saw it: make it once more.
-      if (!mkdirp || !atomicMissing(error)) throw error;
-      knownAtomicParents.delete(dir);
-      created.push(...ensureAtomicParent(dir, mkdirp, undefined));
-      fd = openSync(staging, flags, DEFAULT_STORE_FILE_MODE);
-    }
-    tmpPath = staging;
-    if (onEffect) notify(false);
-    fchmodSync(fd, mode);
-    const written = writeSync(fd, bytes, 0, bytes.byteLength, 0);
-    if (written !== bytes.byteLength) throw new Error(`Incomplete atomic file write: ${written} of ${bytes.byteLength} bytes`);
-    if (durable) fsyncSync(fd); else fdatasyncSync(fd);
+    const staging = run.prepare();
+    try { fd = openSync(staging, ATOMIC_STAGING_FLAGS, DEFAULT_STORE_FILE_MODE); }
+    catch (error) { run.remakeParent(error); fd = openSync(staging, ATOMIC_STAGING_FLAGS, DEFAULT_STORE_FILE_MODE); }
+    run.staged(staging);
+    fchmodSync(fd, run.mode);
+    run.written(writeSync(fd, run.bytes, 0, run.bytes.byteLength, 0));
+    if (run.durable) fsyncSync(fd); else fdatasyncSync(fd);
     const done = fd; fd = undefined; closeSync(done);
-    // The one currentness check: the caller's guard and the parent it resolved, just before publication.
-    if (parentIdentity !== undefined) {
-      check();
-      if (directoryIdentity(dir) !== parentIdentity) throw new Error(`Atomic file parent changed before publication: ${dir}`);
-    }
-    if (replaceExisting) { renameSync(tmpPath, absolute); published = true; }
-    else {
-      // A same-directory hard link publishes the complete file only when the name is free (EEXIST otherwise).
-      linkSync(tmpPath, absolute); published = true;
-      unlinkSync(tmpPath);
-    }
-    tmpPath = undefined;
-    // The rename happened: the observer hears of it even if the durability sync below fails.
-    if (onEffect) notify(true);
-    if (durable) {
-      try {
-        syncDirectory(dir);
-        for (const path of created) syncDirectory(dirname(path));
-      } catch (error) { throw new AtomicWriteDurabilityError(filePath, 'published-indeterminate', error); }
+    run.publish();
+    if (run.durable) {
+      try { for (const path of run.durabilityDirectories()) syncDirectory(path); }
+      catch (error) { throw run.durabilityFailed(error); }
     }
   } catch (error) {
     if (fd !== undefined) { try { closeSync(fd); } catch { /* the original error is the diagnostic */ } }
-    if (tmpPath !== undefined && !published) { try { unlinkSync(tmpPath); } catch { /* nothing was published */ } }
-    if (durable && !(error instanceof AtomicWriteDurabilityError)) {
-      throw new AtomicWriteDurabilityError(filePath, published ? 'published-indeterminate' : 'before-publication', error);
+    run.fail(error);
+  }
+}
+
+/**
+ * {@link writeFileAtomic} with the staged write and the disk syncs off the
+ * event loop: the same steps and guarantees, and the guard check, the rename
+ * and the effect notifications still run synchronously with each other.
+ * Callers that may write the same file concurrently order their writes.
+ */
+export async function writeFileAtomicAsync(filePath: string, contents: string | Uint8Array, options: AtomicWriteOptions = {}): Promise<void> {
+  const run = new AtomicWriteRun(filePath, contents, options);
+  let handle: FileHandle | undefined;
+  try {
+    const staging = run.prepare();
+    try { handle = await openFileHandle(staging, ATOMIC_STAGING_FLAGS, DEFAULT_STORE_FILE_MODE); }
+    catch (error) { run.remakeParent(error); handle = await openFileHandle(staging, ATOMIC_STAGING_FLAGS, DEFAULT_STORE_FILE_MODE); }
+    run.staged(staging);
+    await handle.chmod(run.mode);
+    run.written((await handle.write(run.bytes, 0, run.bytes.byteLength, 0)).bytesWritten);
+    if (run.durable) await handle.sync(); else await handle.datasync();
+    const done = handle; handle = undefined; await done.close();
+    run.publish();
+    if (run.durable) {
+      try { for (const path of run.durabilityDirectories()) await syncDirectoryAsync(path); }
+      catch (error) { throw run.durabilityFailed(error); }
     }
-    throw error;
+  } catch (error) {
+    if (handle !== undefined) { try { await handle.close(); } catch { /* the original error is the diagnostic */ } }
+    run.fail(error);
   }
 }
 

@@ -18,7 +18,7 @@ import { mkdirSync, renameSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
-  BatteryRegistry, calibrate, calibrationRecord, createSystemOnePort, formatReport, judgmentConfigFromEnv, readingsOf,
+  BatteryRegistry, CALIBRATION_SITE, calibrate, calibrationRecord, createSystemOnePort, formatReport, judgmentConfigFromEnv, readingsOf,
   SqliteDecisionLog, withDecisionLog,
   type CalibrationReport, type DecisionReport, type NamedDecision,
 } from '@goodvibes-jev/judgment';
@@ -160,10 +160,24 @@ async function main(): Promise<void> {
         check.aspect === 'fidelity' && check.expected === 'fabricated' && check.got === 'fabricated'
         && check.signal === 1 && check.outcome === 'act',
       ).map((check) => check.fixture))];
+      // A composed decision (a rank-recheck, a tournament) asks several
+      // questions per fixture. Its checks judge the composed answer, so
+      // calibrate attaches them to no single call; such a fixture is covered
+      // when every one of its calls was a genuine answered request.
+      const calls = new Map<string, { answered: number; total: number }>();
+      for (const entry of entries) {
+        const { site, battery, batteryVersion, fixture } = entry.context;
+        if (site !== CALIBRATION_SITE || battery !== declared.name || batteryVersion !== declared.version || fixture === undefined) continue;
+        const seen = calls.get(fixture) ?? { answered: 0, total: 0 };
+        seen.total++;
+        if (entry.status === 'answered') seen.answered++;
+        calls.set(fixture, seen);
+      }
+      const composedFixtures = [...calls].filter(([, seen]) => seen.total > 1 && seen.answered === seen.total).map(([fixture]) => fixture);
       return { name: report.name, declaredFixtures: declared.fixtureCount, checkedFixtures,
-        truthRecorded: report.truthRecorded ?? 0, deterministicFixtures,
+        truthRecorded: report.truthRecorded ?? 0, deterministicFixtures, composedFixtures,
         complete: checkedFixtures === declared.fixtureCount
-          && (report.truthRecorded ?? 0) + deterministicFixtures.length === declared.fixtureCount };
+          && (report.truthRecorded ?? 0) + deterministicFixtures.length + composedFixtures.length === declared.fixtureCount };
     });
     const answered = entries.filter((entry) => entry.status === 'answered');
     const logEvidence = {

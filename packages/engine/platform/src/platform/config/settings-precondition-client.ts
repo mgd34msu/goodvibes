@@ -274,6 +274,7 @@ export async function applyRemoteSettingsPrecondition(handle: RemoteSettingsPrec
     ifIncarnation: entry.facts.incarnation, ifServing: entry.serving, requestId: entry.requestId } });
   const send = () => entry.fetchImpl(entry.url, { method: 'POST', headers: entry.headers, redirect: 'error', body, signal: AbortSignal.timeout(entry.timeoutMs) });
   let response: Response;
+  let resent = false;
   try {
     response = await send();
   } catch (error) {
@@ -284,9 +285,19 @@ export async function applyRemoteSettingsPrecondition(handle: RemoteSettingsPrec
     try { response = await send(); } catch {
       return Object.freeze({ status: 'unknown', completedPaths: none, failure: failure.error.refusal });
     }
+    resent = true;
   }
   if (!response.ok || response.redirected) {
     const failure = await settingsApplyFailure(SUBJECT, response, REFUSAL_CODES);
+    if (resent) {
+      // A refusal of the resend says nothing about the first attempt, which may
+      // have been applied before its answer was lost (a daemon that restarted
+      // since no longer knows the request id), so it is never "nothing applied".
+      return Object.freeze({ status: 'unknown', completedPaths: none, ...(failure.reason ? { refusalReason: failure.reason } : {}),
+        failure: { ...failure.refusal,
+          state: 'settings change outcome unknown: the first attempt\'s answer was lost and the resend was refused, so it may or may not have been applied',
+          next: [`Read ${entry.facts.key} on the daemon (goodvibes-daemon config get ${entry.facts.key}) before changing it again.`] } });
+    }
     return Object.freeze({ status: 'unknown', completedPaths: none, ...(failure.refusedBeforeEffect ? { refused: true as const } : {}),
       ...(failure.reason ? { refusalReason: failure.reason } : {}), failure: failure.refusal });
   }

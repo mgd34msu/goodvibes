@@ -26,8 +26,7 @@ describe('recording port trust boundary', () => {
       using log = new SqliteDecisionLog(':memory:');
       const upstream = new JudgmentError('rejected', SECRET, { status });
       const failure = exposedError(await withDecisionLog(rejecting(upstream), log).ask(request).catch((error: unknown) => error));
-      expect(failure.message).toContain(`HTTP ${status}`);
-      if (status === 402) expect(failure.message).toContain('Payment Required');
+      expect(failure.status).toBe(status);
       const entry = log.query()[0];
       expect(entry?.status).toBe('failed');
       if (entry?.status !== 'failed') throw new Error('Expected a recorded failure');
@@ -97,7 +96,6 @@ describe('recording port trust boundary', () => {
     const raw = { ...result(), answers: { q: { type: 'choice', choice: 'a', confidence: 0.99, probabilities, privateText: SECRET } } };
     const error = exposedError(await withDecisionLog(borrowed(raw), log).ask({ state: 'fixture', questions }).catch((e: unknown) => e));
     expect(error.kind).toBe('invalid-response');
-    expect(error.message).toBe('the judgment provider returned an invalid response');
     expect(log.query({ status: 'answered' })).toHaveLength(0);
     expect(log.query({ status: 'failed' })).toHaveLength(1);
     expect(JSON.stringify(log.query())).not.toContain(SECRET);

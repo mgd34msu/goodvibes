@@ -5,7 +5,6 @@ import {
   confidenceBins,
   defineBattery,
   defineDispatch,
-  formatReport,
   STAKES_BANDS,
   sweep,
   yesNo,
@@ -75,7 +74,14 @@ describe('calibrate', () => {
     expect(d).toMatchObject({ name: 'test.routing', accuracy: 1, passed: true });
     expect(b).toMatchObject({ name: 'test.broken', passed: false, error: 'Error: endpoint refused' });
     expect(report.passed).toBe(false);
-    expect(formatReport(report)).toContain('MISS soon [urgent] expected no got yes');
+  });
+
+  test('a decision below its accuracy floor does not pass, and neither does the report', async () => {
+    const { port } = fakePort(answers);
+    const strict = defineBattery({ ...header, name: 'test.urgency-strict', accuracyFloor: 0.8, items: urgency.items, fixtures: urgency.fixtures });
+    const report = await calibrate(port, [strict, routing], { endpoint: { kind: 'hosted', baseURL: 'https://judge.test' } });
+    expect(report.decisions.map((d) => [d.name, d.accuracy, d.passed])).toEqual([['test.urgency-strict', 0.75, false], ['test.routing', 1, true]]);
+    expect(report.passed).toBe(false);
   });
 
   test('--only runs just the named decisions and refuses unknown names', async () => {

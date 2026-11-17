@@ -367,7 +367,6 @@ export type {
   OAuthProviderConfig,
   PendingSubscriptionLogin,
   ProviderSubscription,
-  SubscriptionManagerOptions,
   SubscriptionShellPaths,
   SubscriptionState,
 } from './subscriptions.js';

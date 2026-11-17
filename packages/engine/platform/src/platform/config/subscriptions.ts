@@ -1,5 +1,4 @@
 import { assertSecurityReadSource, fileIdentity } from '../security/read-source.js';
-import { existsSync, readFileSync } from 'node:fs';
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
 import { withSyncFileLock } from './sync-file-lock.js';
@@ -226,6 +225,11 @@ export function subscriptionState(record: Pick<ProviderSubscription, 'expiresAt'
   return record.expiresAt - now <= SUBSCRIPTION_EXPIRING_SOON_MS ? 'expiring' : 'active';
 }
 
+/** A check that the subscription store did not change while a status read ran. */
+export function captureSubscriptionReadSource(owner: SubscriptionManager): () => void {
+  return owner.captureReadSource();
+}
+
 /**
  * SubscriptionManager, OAuth flows for **provider subscriptions**.
  *
@@ -239,22 +243,6 @@ export function subscriptionState(record: Pick<ProviderSubscription, 'expiresAt'
  *
  * @see OAuthClient, OAuth flows for daemon authentication.
  */
-export interface SubscriptionManagerOptions {
-  /**
-   * A surface-scoped store this manager used to own before subscriptions
-   * moved to the shared tier (e.g. the old `~/.goodvibes/<surfaceRoot>/subscriptions.json`).
-   * Folded in once, synchronously, at construction: see {@link SubscriptionManager.foldLegacyStore}.
-   * Omit when there is no legacy surface store to migrate from (a brand-new
-   * install, or a caller that never had a surface-scoped store to begin with).
-   */
-  readonly legacyPath?: string;
-}
-
-/** A check that the subscription store did not change while a status read ran. */
-export function captureSubscriptionReadSource(owner: SubscriptionManager): () => void {
-  return owner.captureReadSource();
-}
-
 export class SubscriptionManager {
   /**
    * A check that the store did not change while a status read ran: this
@@ -354,91 +342,8 @@ export class SubscriptionManager {
     this.assertImportRecord(record, record.facts.beforeGeneration + 2);
   }
 
-  public constructor(path: string, options: SubscriptionManagerOptions = {}) {
+  public constructor(path: string) {
     this.path = path;
-    if (options.legacyPath && options.legacyPath !== path) {
-      this.foldLegacyStore(options.legacyPath);
-    }
-  }
-
-  /**
-   * Best-effort, READ-ONLY parse of a legacy store for migration. Never
-   * throws and never quarantines: quarantining renames the file, and a
-   * legacy path is not this manager's file to touch, an older build still
-   * pointed at it must find it exactly as it left it, corrupt or not. Any
-   * parse failure just yields nothing to fold, which is the same outcome as
-   * "no legacy store existed".
-   */
-  private readLegacyStoreReadOnly(path: string): SubscriptionStore {
-    const empty: SubscriptionStore = { version: 1, subscriptions: {}, pending: {} };
-    try {
-      if (!existsSync(path)) return empty;
-      const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return empty;
-      const store = parsed as Partial<SubscriptionStore>;
-      return {
-        version: 1,
-        subscriptions: (store.subscriptions && typeof store.subscriptions === 'object') ? store.subscriptions : {},
-        pending: (store.pending && typeof store.pending === 'object') ? store.pending : {},
-      };
-    } catch {
-      return empty;
-    }
-  }
-
-  /**
-   * One-time fold of a legacy per-surface store into this (now shared)
-   * store, run synchronously at construction so every code path that reads
-   * `get()`/`resolveAccessToken()` right after construction already sees the
-   * folded result.
-   *
-   * Per provider, the newer `updatedAt` wins; a provider already in the
-   * shared store with an equal-or-newer record is left untouched. That
-   * strict `>` comparison is what makes a second boot a no-op instead of a
-   * re-fold or a downgrade: once the shared record's `updatedAt` is at least
-   * as new as the legacy one (which it is, immediately after the first
-   * fold), the same legacy file folds in nothing on every later boot. Only
-   * `subscriptions` are folded, `pending` OAuth logins carry a verifier tied
-   * to one in-flight browser round trip and are meaningless to resume across
-   * processes or after a restart.
-   *
-   * Never writes to or deletes the legacy file. Writes the shared store, and
-   * logs one info line naming what was adopted, only when something actually
-   * changed.
-   */
-  private foldLegacyStore(legacyPath: string): void {
-    const legacy = this.readLegacyStoreReadOnly(legacyPath);
-    const legacyEntries = Object.entries(legacy.subscriptions);
-    if (legacyEntries.length === 0) return;
-
-    let adopted: string[];
-    try {
-      adopted = this.mutate((shared) => {
-        const taken: string[] = [];
-        for (const [provider, legacyRecord] of legacyEntries) {
-          const sharedRecord = shared.subscriptions[provider];
-          if (!sharedRecord || legacyRecord.updatedAt > sharedRecord.updatedAt) {
-            shared.subscriptions[provider] = legacyRecord;
-            taken.push(provider);
-          }
-        }
-        return taken;
-      }, (taken) => taken.length > 0);
-    } catch (error) {
-      // An unreadable shared store is not an empty one: folding into it would erase it.
-      logger.warn('SubscriptionManager: legacy subscriptions were not folded because the shared store could not be read', {
-        sharedPath: this.path,
-        error: summarizeError(error),
-      });
-      return;
-    }
-    if (adopted.length === 0) return;
-
-    logger.info('SubscriptionManager: folded legacy provider subscriptions into the shared store', {
-      sharedPath: this.path,
-      legacyPath,
-      adopted,
-    });
   }
 
   /**

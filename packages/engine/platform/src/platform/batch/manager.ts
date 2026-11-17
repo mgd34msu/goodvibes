@@ -96,14 +96,12 @@ interface QuarantinedRow {
 
 /**
  * One file per job (`<dir>/<id>.json`) and one per result (`<id>.result.json`),
- * so a change writes one small file and pruning is an unlink. The single
- * `batch-jobs.json` of earlier builds is split into these files on first open.
+ * so a change writes one small file and pruning is an unlink.
  * A row that cannot be used is moved to `batch-jobs.invalid.json` with the
  * reason, and the rest are served.
  */
 class BatchJobFiles {
   readonly dir: string;
-  readonly legacyPath: string;
   readonly invalidPath: string;
   /** Results already on disk; a result is written once, when its job completes. */
   private readonly resultsOnDisk = new Set<string>();
@@ -111,7 +109,6 @@ class BatchJobFiles {
   constructor(storePath: string) {
     const base = storePath.endsWith('.json') ? storePath.slice(0, -'.json'.length) : storePath;
     this.dir = base;
-    this.legacyPath = `${base}.json`;
     this.invalidPath = `${base}.invalid.json`;
   }
 
@@ -128,7 +125,6 @@ class BatchJobFiles {
     mkdirSync(this.dir, { recursive: true });
     const invalid: QuarantinedRow[] = [];
     const badFiles: string[] = [];
-    if (existsSync(this.legacyPath)) this.splitLegacyStore(invalid);
     const jobs: Record<string, DaemonBatchJob> = {};
     const staleBefore = now() - STALE_TEMP_FILE_MIN_AGE_MS;
     for (const name of readdirSync(this.dir)) {
@@ -187,38 +183,6 @@ class BatchJobFiles {
       logger.warn('Batch job is completed but its result file is missing or unreadable', { jobId: job.id, path: this.resultPath(job.id) });
       return job;
     }
-  }
-
-  /** Splits the whole-store file of earlier builds into one file per job, then removes it. */
-  private splitLegacyStore(invalid: QuarantinedRow[]): void {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(readFileSync(this.legacyPath, 'utf-8'));
-    } catch (error) {
-      let text = '';
-      try { text = readFileSync(this.legacyPath, 'utf-8'); } catch { /* reported below */ }
-      invalid.push({ source: this.legacyPath, reason: `not readable JSON: ${summarizeError(error)}`, quarantinedAt: now(), value: text });
-      this.quarantine(invalid.splice(0));
-      unlinkSync(this.legacyPath);
-      return;
-    }
-    const jobs = isRecord(parsed) && isRecord(parsed['jobs']) ? parsed['jobs'] : null;
-    if (!jobs) {
-      invalid.push({ source: this.legacyPath, reason: 'the store has no jobs object', quarantinedAt: now(), value: parsed });
-    } else {
-      for (const [id, value] of Object.entries(jobs)) {
-        const reason = invalidJobReason(id, value);
-        if (reason) {
-          invalid.push({ source: `${this.legacyPath}#${id}`, reason, quarantinedAt: now(), value });
-          continue;
-        }
-        // A job file already there was written after an earlier split stopped part way; it is newer.
-        if (!existsSync(this.jobPath(id))) this.save(value as DaemonBatchJob);
-      }
-    }
-    // Moved aside before the file goes, so nothing is lost if the daemon stops here.
-    this.quarantine(invalid.splice(0));
-    unlinkSync(this.legacyPath);
   }
 
   private quarantine(rows: readonly QuarantinedRow[]): void {

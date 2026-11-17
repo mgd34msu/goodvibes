@@ -485,14 +485,9 @@ function composeClientRuntimeServices(
   // Provider subscriptions (OAuth sessions like the 'openai-subscriber' login)
   // live in the platform's SHARED tier, not this surface's own root: the
   // daemon hosts every conversational turn, and a login completed on another
-  // surface (the TUI, the agent) must be visible to it. `legacyPath` is the
-  // pre-shared-tier per-surface store this surface used to own; the manager
-  // folds any newer records it finds there into the shared store once, at
-  // construction, and never writes to or deletes it.
+  // surface (the TUI, the agent) must be visible to it.
   const judgment = options.judgment ?? composeJudgment({ config: configManager, secrets: secretsManager, env: process.env, stateRoot: shellPaths.resolveProjectPath(surfaceRoot), disposal: disposalScope.registry });
-  const subscriptionManager = new SubscriptionManager(sharedSubscriptionsPath(shellPaths), {
-    legacyPath: shellPaths.resolveUserPath(surfaceRoot, 'subscriptions.json'),
-  });
+  const subscriptionManager = new SubscriptionManager(sharedSubscriptionsPath(shellPaths));
   const serviceRegistry = new ServiceRegistry({ user: shellPaths.resolveUserPath(surfaceRoot, 'services.json'), project: shellPaths.resolveProjectPath(surfaceRoot, 'services.json') }, {
     secretsManager,
     subscriptionManager,

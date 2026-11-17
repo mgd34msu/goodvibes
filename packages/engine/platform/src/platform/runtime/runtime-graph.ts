@@ -200,10 +200,8 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   });
   const judgment = composeJudgment({ config: configManager, secrets: secretsManager, env: process.env, stateRoot: shellPaths.resolveProjectPath(surfaceRoot), disposal: scope.registry });
   // Provider subscriptions live in the SHARED tier so a login completed on one
-  // surface is visible to every other; `legacyPath` is folded in once.
-  const subscriptionManager = new SubscriptionManager(sharedSubscriptionsPath(shellPaths), {
-    legacyPath: shellPaths.resolveUserPath(surfaceRoot, 'subscriptions.json'),
-  });
+  // surface is visible to every other.
+  const subscriptionManager = new SubscriptionManager(sharedSubscriptionsPath(shellPaths));
   const serviceRegistry = new ServiceRegistry({ user: shellPaths.resolveUserPath(surfaceRoot, 'services.json'), project: shellPaths.resolveProjectPath(surfaceRoot, 'services.json') }, {
     secretsManager,
     subscriptionManager,

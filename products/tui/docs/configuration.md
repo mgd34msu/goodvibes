@@ -123,7 +123,7 @@ selecting an execution mode clears it. Per-tool overrides are the separate
 
 `Shift+Tab` cycles the execution modes of the current session in this order:
 `ask-me` → `jev-decides` → `just-vibes` → `yolo` → `ask-me`. The change lasts for the session and
-asks before entering `yolo`; the saved `permissions.mode` changes only through
+asks before entering `yolo` (declining moves on to `ask-me`); the saved `permissions.mode` changes only through
 `/permissions` or Settings. The key is `cycle-permission-mode` in the keybindings file. `/plan` toggles plan mode directly and `/plan off`
 returns to the mode you were in when you ran `/plan on` (it does nothing when plan
 mode is not on); `plan` is outside the cycle, and cycling from it, or leaving a plan mode that

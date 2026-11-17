@@ -100,14 +100,16 @@ export function handleGlobalShortcutToken(state: GlobalShortcutRouteState, token
  * and the footer pill (subscribed to the key in turn-event-wiring) read it at
  * once, and it ends with the session. The saved default changes only in
  * /permissions or Settings. Entering the mode with no approvals asks once
- * (default No); the cycle then stays where it was.
+ * (default No); declining it (or having no dialog to ask in) moves on to the
+ * mode after it, so the key always comes round to the strictest mode.
  */
 async function cycleSessionPermissionMode(state: GlobalShortcutRouteState): Promise<void> {
   const context = state.commandContext;
   const configManager = context?.platform?.configManager;
   if (!context || !configManager) return;
   const current = configManager.get('permissions.mode') as PermissionModeValue | undefined;
-  const next = nextPermissionMode(current);
+  let next = nextPermissionMode(current);
+  let skipped: PermissionModeValue | null = null;
   if (next === 'yolo') {
     const confirmed = await context.confirm?.({
       title: `Switch this session to ${permissionModeLabel(next)}?`,
@@ -116,9 +118,8 @@ async function cycleSessionPermissionMode(state: GlobalShortcutRouteState): Prom
       tone: 'danger',
     }) ?? false;
     if (!confirmed) {
-      context.print(`[Permissions] Mode stays ${permissionModeLabel(current ?? 'ask-me')} for this session.`);
-      state.requestRender();
-      return;
+      skipped = next;
+      next = nextPermissionMode(next);
     }
   }
   // A managed lock on the setting makes the override throw; report it, do not crash the input loop.
@@ -129,6 +130,7 @@ async function cycleSessionPermissionMode(state: GlobalShortcutRouteState): Prom
     state.requestRender();
     return;
   }
-  context.print(`[Permissions] Mode for this session: ${permissionModeLabel(next)} (the saved default is set in /permissions or Settings)`);
+  const skippedNote = skipped ? `${permissionModeLabel(skipped)} skipped. ` : '';
+  context.print(`[Permissions] ${skippedNote}Mode for this session: ${permissionModeLabel(next)} (the saved default is set in /permissions or Settings)`);
   state.requestRender();
 }

@@ -1,7 +1,8 @@
 /**
  * General: appearance (theme with GoodVibes Neon, density), language, the
  * code-block line-number preference (formerly Admin's "Display Preferences"),
- * then the display / ui / behavior / daemon / update config groups.
+ * the connected daemon's own update status, then the display / ui / behavior /
+ * daemon / update config groups.
  */
 import { useTheme } from '../../../../hooks/useTheme';
 import { useWebUiPreferences } from '../../../../lib/ui-preferences';
@@ -11,6 +12,7 @@ import { Toggle } from '../../../ui/Toggle';
 import { ConfigGroupList, useConfigSettings } from '../ConfigSettings';
 import { SettingRow, SettingsBlock } from '../parts';
 import { groupsForSection } from '../sections';
+import { DaemonUpdates } from '../../DaemonUpdates';
 
 type BaseTheme = Exclude<Theme, 'neon'>;
 
@@ -80,6 +82,7 @@ export function GeneralSection() {
           />
         </div>
       </SettingsBlock>
+      <DaemonUpdates />
       <ConfigGroupList groups={groupsForSection('general', groups)} />
     </>
   );

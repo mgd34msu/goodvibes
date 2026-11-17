@@ -34,6 +34,7 @@ import { describeCrashLog, summarizeCrashLog, type CrashLogSummary } from '@good
 import { resolveRemoteDaemonTarget } from '@goodvibes-jev/engine/terminal-shell/cluster-remote-daemon-target';
 import type { DaemonFailureCode, DaemonFetch, DaemonVerbOutcome, RemoteDaemonTarget } from '@goodvibes-jev/engine/terminal-shell';
 import { callDaemonMethod, callDaemonRoute } from '@goodvibes-jev/engine/terminal-shell/raw-reply-route';
+import { formatDaemonUpdateCheckLine, formatDaemonUpdateStatusLines, type DaemonUpdateStatusView } from '@goodvibes-jev/engine/terminal-shell/daemon-update-status';
 import {
   describeLocalDaemonState,
   formatDuration,
@@ -133,24 +134,7 @@ interface ClusterStatusPayload {
 }
 
 /** `update.status`, and `update.check` with what the check did. */
-interface UpdateStatusPayload {
-  readonly armed?: boolean;
-  readonly offReason?: string;
-  readonly currentVersion?: string | null;
-  readonly checkIntervalMs?: number | null;
-  readonly failedCheckCount?: number;
-  readonly lastCheckFailure?: string | null;
-  readonly pendingVersion?: string | null;
-  readonly rejectedVersion?: string | null;
-  readonly recoveryRequired?: boolean;
-  readonly transactionRecovery?: {
-    readonly operation?: string;
-    readonly phase?: string;
-    readonly recoveryPaths?: readonly string[];
-    readonly recoveryErrors?: readonly string[];
-  } | null;
-  readonly check?: 'ran' | 'already-in-flight' | 'loop-off';
-}
+type UpdateStatusPayload = DaemonUpdateStatusView;
 
 interface HostedSessionsPayload {
   readonly sessions?: readonly { readonly id?: string; readonly status?: string }[];
@@ -458,41 +442,6 @@ export interface RunUpdateCommandInput extends RemoteCommandDeps {
   readonly flags: RemoteCommandFlags & { readonly check: boolean };
 }
 
-/** What the daemon says about keeping itself current. */
-function updateStatusLines(update: UpdateStatusPayload): string[] {
-  const lines: string[] = [];
-  if (update.armed === true) {
-    const every = typeof update.checkIntervalMs === 'number' ? `, checking every ${formatDuration(update.checkIntervalMs)}` : '';
-    lines.push(`  updates:  on${every}`);
-  } else {
-    lines.push(`  updates:  off${update.offReason ? `: ${update.offReason}` : ''}`);
-  }
-  const failed = update.failedCheckCount ?? 0;
-  if (failed > 0) {
-    lines.push(`  failing:  ${failed} check${failed === 1 ? '' : 's'} in a row failed${update.lastCheckFailure ? `: ${update.lastCheckFailure}` : ''}`);
-  }
-  if (update.pendingVersion) {
-    lines.push(`  pending:  ${update.pendingVersion} is downloaded and verified; it installs when no work is in flight`);
-  }
-  if (update.rejectedVersion) {
-    lines.push(`  rejected: ${update.rejectedVersion} crash looped and was rolled back; the update loop will not install that version again`);
-  }
-  const recovery = update.transactionRecovery;
-  if (update.recoveryRequired === true || recovery) {
-    lines.push(`  recovery: an interrupted ${recovery?.operation ?? 'update'} stopped the update loop; it stays off until the kept files are dealt with`);
-    for (const path of recovery?.recoveryPaths ?? []) lines.push(`            kept: ${path}`);
-    for (const error of recovery?.recoveryErrors ?? []) lines.push(`            error: ${error}`);
-  }
-  return lines;
-}
-
-function checkLine(check: UpdateStatusPayload['check'], offReason: string | undefined): string[] {
-  if (check === 'ran') return ['  check:    ran now; the lines above are its result'];
-  if (check === 'already-in-flight') return ['  check:    another check was already running, so none was started; the lines above are as of now'];
-  if (check === 'loop-off') return [`  check:    not run, the update loop is off${offReason ? `: ${offReason}` : ''}`];
-  return [];
-}
-
 /** The receipts block alone; the daemon's own answer covers the rest of the history. */
 function receiptLines(state: LocalDaemonState): string[] {
   if (!state.available) return [`  receipts: ${state.unavailableReason}`];
@@ -573,8 +522,8 @@ export async function runUpdateCommand(input: RunUpdateCommandInput): Promise<Da
     lines: [
       `goodvibes daemon updates on ${where}`,
       ...versionLines(identity.data),
-      ...updateStatusLines(update.data),
-      ...(flags.check ? checkLine(update.data.check, update.data.offReason) : []),
+      ...formatDaemonUpdateStatusLines(update.data, input.now?.() ?? Date.now()),
+      ...(flags.check ? formatDaemonUpdateCheckLine(update.data.check, update.data.offReason) : []),
       ...(local.available && local.rolledBack ? ['  rollback: an automatic rollback is in force; no fully-started boot has cleared it yet'] : []),
       ...receiptLines(local),
     ],

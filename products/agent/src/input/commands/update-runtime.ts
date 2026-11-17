@@ -9,6 +9,8 @@ import { checkReleaseUpdate, prepareReleaseUpdate, requireBinaryUpdateInstall, c
 } from '@goodvibes-jev/engine/terminal-shell/release-update-preflight';
 import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../../runtime/workspace-update-policy.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import { createAgentDaemonVerbCaller } from '../../runtime/client/daemon-verbs.ts';
+import { requireShellPaths } from './runtime-services.ts';
 import { VERSION } from '../../version.ts';
 import { resolveAgentBinaryAssetName } from '../../runtime/release-artifacts.ts';
 import { fallbackUpdateCommand, type UpdateFetchLike } from '../../runtime/update-check.ts';
@@ -83,11 +85,12 @@ export function rollbackUpdate(options: RollbackUpdateOptions): void {
 export function registerUpdateCommand(registry: CommandRegistry): void { registry.register(selfUpdateCommand); }
 const selfUpdateCommand = createSelfUpdateCommand<CommandContext>({
   description: 'Check for a newer GoodVibes release and update or restore the installed suite',
-  usage: '[check|apply|rollback]', help: 'Usage: /update [check|apply|rollback]', version: VERSION,
+  usage: '[check|apply|rollback|daemon [check]]', help: 'Usage: /update [check|apply|rollback|daemon [check]]', version: VERSION,
   workspaceDistribution: IS_WORKSPACE_DISTRIBUTION, workspaceGuidance: WORKSPACE_UPDATE_GUIDANCE,
   repairRequired: (version, ctx) => installedSuiteNeedsRepair({ execPath: process.execPath, platform: process.platform, arch: process.arch, version,
     webuiDirectory: retainSuiteUpdateConfiguration(ctx.platform.configManager).webuiDirectory }),
   check: checkForUpdate, onRecovery: (_error, ctx) => ctx.exit(),
   apply: async (options, ctx) => { await applyUpdate({ ...options, configManager: ctx.platform.configManager }); },
   rollback: (options, ctx) => rollbackUpdate({ ...options, configManager: ctx.platform.configManager }),
+  daemon: (ctx) => createAgentDaemonVerbCaller({ configManager: ctx.platform.configManager, homeDirectory: () => requireShellPaths(ctx).homeDirectory }),
 });

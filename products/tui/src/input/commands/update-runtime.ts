@@ -33,6 +33,7 @@ import { resolveArtifactNames } from '../../runtime/release-artifacts.ts';
 import { detectInstallKind, fallbackUpdateCommand, type InstallKind, type UpdateFetchLike } from '../../runtime/update-check.ts';
 import { resolveCliServiceName, type CliServiceNameSource } from '../../cli/service-posture.ts';
 import { requireShellPaths, requireSubscriptionManager } from './runtime-services.ts';
+import { createDaemonVerbCaller } from '../../runtime/client/operator-endpoint.ts';
 
 const REPO_RELEASES_LATEST_URL = DAEMON_REPO_RELEASES_LATEST_URL;
 
@@ -355,8 +356,8 @@ export function registerUpdateCommand(registry: CommandRegistry): void {
 const selfUpdateCommand = createSelfUpdateCommand<CommandContext>({
   description:
     'Check for a newer GoodVibes release and, for binary installs, download/verify/apply it or roll back to the kept previous version',
-  usage: '[check|apply|rollback|review|bundle export <path> [--yes]|bundle inspect <path>]',
-  help: 'Usage: /update [check|apply|rollback|review|bundle export <path> [--yes]|bundle inspect <path>]',
+  usage: '[check|apply|rollback|review|daemon [check]|bundle export <path> [--yes]|bundle inspect <path>]',
+  help: 'Usage: /update [check|apply|rollback|review|daemon [check]|bundle export <path> [--yes]|bundle inspect <path>]',
   version: VERSION,
   workspaceDistribution: IS_WORKSPACE_DISTRIBUTION,
   workspaceGuidance: WORKSPACE_UPDATE_GUIDANCE,
@@ -366,6 +367,7 @@ const selfUpdateCommand = createSelfUpdateCommand<CommandContext>({
   onRecovery: (_error, ctx) => ctx.exit(),
   apply: async (options, ctx) => { await applyUpdate({ ...options, configManager: ctx.platform.configManager }); },
   rollback: (options, ctx) => rollbackUpdate({ ...options, configManager: ctx.platform.configManager }),
+  daemon: (ctx) => createDaemonVerbCaller({ configManager: ctx.platform.configManager, homeDirectory: () => requireShellPaths(ctx).homeDirectory }),
   extra: async (args, ctx) => {
     const sub = args[0] ?? 'check';
     if (sub === 'review') {

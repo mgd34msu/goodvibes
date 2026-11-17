@@ -1,4 +1,5 @@
 import { PREVIOUS_FILE_SUFFIX } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
+import { describeDaemonUpdates, type DaemonUpdateVerbs } from './daemon-update-status.js';
 import { detectInstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/install-kind';
 import type { InstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import {
@@ -127,6 +128,8 @@ export function createSelfUpdateCommand<Context extends { print(message: string)
   readonly onRecovery?: ((error: unknown, context: Context) => void) | undefined;
   readonly repairRequired?: ((tag: string, context: Context) => boolean) | undefined;
   readonly extra?: ((args: string[], context: Context) => Promise<boolean>) | undefined;
+  /** The connected daemon, for `/update daemon [check]`: its own update loop, which this app's update does not cover. */
+  readonly daemon?: ((context: Context) => DaemonUpdateVerbs) | undefined;
 }): import('./command-registry.js').TerminalSlashCommand<Context> {
   return {
     name: 'update',
@@ -135,11 +138,16 @@ export function createSelfUpdateCommand<Context extends { print(message: string)
     description: policy.description,
     usage: policy.usage,
     async handler(args, context) {
+      const sub = args[0] ?? 'check';
+      // Read from the daemon, so it answers in a workspace distribution too.
+      if (sub === 'daemon' && policy.daemon) {
+        context.print(await describeDaemonUpdates(policy.daemon(context), args[1] === 'check'));
+        return;
+      }
       if (policy.workspaceDistribution) {
         context.print(policy.workspaceGuidance);
         return;
       }
-      const sub = args[0] ?? 'check';
       if (sub === 'check') {
         try {
           const result = await policy.check(fetch as UpdateFetchLike, policy.version);

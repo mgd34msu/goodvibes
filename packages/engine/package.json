@@ -3302,6 +3302,11 @@
       "types": "./terminal-shell/dist/release-update-preflight.d.ts",
       "import": "./terminal-shell/dist/release-update-preflight.js"
     },
+    "./terminal-shell/daemon-update-status": {
+      "bun": "./terminal-shell/src/daemon-update-status.ts",
+      "types": "./terminal-shell/dist/daemon-update-status.d.ts",
+      "import": "./terminal-shell/dist/daemon-update-status.js"
+    },
     "./terminal-shell/global-shortcuts": {
       "bun": "./terminal-shell/src/global-shortcuts.ts",
       "types": "./terminal-shell/dist/global-shortcuts.d.ts",

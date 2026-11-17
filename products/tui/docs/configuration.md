@@ -258,6 +258,14 @@ with a single line reading `update check skipped: offline`. Every swap keeps the
 file at `<path>.previous`; `/update rollback` restores it in one command.
 Package-manager and from-source runs never self-update at launch.
 
+The daemon keeps itself current on its own schedule. `/update daemon` shows
+what the connected daemon says about that: whether its update loop is on (and
+why not), checks that keep failing, a release that is downloaded and waiting
+(since when, and behind which work), and a release it rejected after a crash
+loop. `/update daemon check` runs one check now; it never forces an install.
+The same view is in the Agent, in `goodvibes-daemon update`, and in the web
+UI under Settings, General.
+
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `update.autoUpdateAtLaunch` | boolean | `true` | Check for and install a newer release at TUI launch. Set `false` to only update when you run `/update apply` yourself. |

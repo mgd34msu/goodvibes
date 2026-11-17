@@ -47,12 +47,16 @@ export function applyRuntimeConfigDefault(configManager: ConfigManager, key: Con
 
 /**
  * Every front-end-side config default applied at startup, in one place.
- * Currently: show token speed ON (the platform schema default is false).
- * The manager applies it below accepted persisted settings and invocation
+ * Show token speed ON (the platform schema default is false), and system and
+ * operational messages in the transcript: the schema's `panel` default sends
+ * them to the Notifications history only in this product.
+ * The manager applies these below accepted persisted settings and invocation
  * overrides, independent of registration order. No disk read or write.
  */
 export function applyTerminalRuntimeConfigDefaults(configManager: ConfigManager): void {
   applyRuntimeConfigDefault(configManager, 'display.showTokenSpeed', true);
+  applyRuntimeConfigDefault(configManager, 'ui.systemMessages', 'conversation');
+  applyRuntimeConfigDefault(configManager, 'ui.operationalMessages', 'conversation');
 }
 
 /**

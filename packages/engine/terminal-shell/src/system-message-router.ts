@@ -88,6 +88,13 @@ export interface SystemMessagePresentationPolicy {
   readonly typedConversation: boolean;
   readonly forceConversationPrefixes: readonly string[];
   readonly suppressCapturedOutput?: boolean;
+  /**
+   * The panel for a router with no activity feed: lines whose configured target
+   * is `panel` or `both` go here. Bookkeeping (`activity`, `userAction`) never does.
+   */
+  readonly targetPanel?: SystemMessageActivityFeed | undefined;
+  /** Every conversation notice is already recorded in the panel, so a line that reaches the conversation is not pushed to it again. */
+  readonly conversationFeedsPanel?: boolean | undefined;
 }
 export class TerminalSystemMessageRouter<Feed extends SystemMessageActivityFeed = SystemMessageActivityFeed> {
   /** Buffered provider "from last session" replay lines, folded on a microtask. */
@@ -119,11 +126,13 @@ export class TerminalSystemMessageRouter<Feed extends SystemMessageActivityFeed 
       return;
     }
     const target = this.getTargetForKind(kind);
-    const delivery = resolveSystemMessageDelivery(target, this.feed !== null);
-    if (delivery.toPanel) {
-      this.feed?.push(message, priority, activityKindFor(message, kind, runtimeEvent));
+    const panel = this.feed ?? this.presentation.targetPanel ?? null;
+    const delivery = resolveSystemMessageDelivery(target, panel !== null);
+    const toConversation = delivery.toConversation || this.presentation.forceConversationPrefixes.some((prefix) => message.startsWith(prefix));
+    if (delivery.toPanel && !(toConversation && this.presentation.conversationFeedsPanel === true)) {
+      panel?.push(message, priority, activityKindFor(message, kind, runtimeEvent));
     }
-    if (delivery.toConversation || this.presentation.forceConversationPrefixes.some((prefix) => message.startsWith(prefix))) {
+    if (toConversation) {
       if (runtimeEvent === undefined) this.addDeclared(message, priority, this.presentation.typedConversation ? kind : undefined, level);
       // A line restating a runtime event takes that event's declared level.
       else if (this.presentation.typedConversation) this.conversation.addTypedSystemMessage(message, kind, runtimeEvent);

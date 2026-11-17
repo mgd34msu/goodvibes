@@ -73,19 +73,19 @@ export const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
     custom: 'Use the explicit host value in the related host setting.',
   },
   'ui.systemMessages': {
-    panel: 'Kept for older settings files: shows system messages inline in the transcript, same as conversation.',
-    conversation: SHARED_SETTING_ENUM_DESCRIPTIONS['ui.systemMessages']['conversation'],
-    both: 'Shows system messages inline in the transcript, same as conversation.',
+    panel: 'Keep system messages out of the transcript: they go to Notifications only (toast and history). Errors still show in the transcript.',
+    conversation: 'Show system messages in the transcript; each is also kept in Notifications. The default here.',
+    both: 'Same as conversation here: every transcript message is also kept in Notifications.',
   },
   'ui.operationalMessages': {
-    panel: 'Kept for older settings files: shows operational messages inline in the transcript, same as conversation.',
-    conversation: SHARED_SETTING_ENUM_DESCRIPTIONS['ui.operationalMessages']['conversation'],
-    both: 'Shows operational messages inline in the transcript, same as conversation.',
+    panel: 'Keep tool, agent, MCP and plugin activity out of the transcript: it goes to Notifications only (toast and history).',
+    conversation: 'Show operational messages in the transcript; each is also kept in Notifications. The default here.',
+    both: 'Same as conversation here: every transcript message is also kept in Notifications.',
   },
   'ui.contractMessages': {
-    panel: 'Kept for older settings files: shows WRFC messages inline in the transcript, same as conversation.',
-    conversation: 'Show WRFC messages inline in the transcript.',
-    both: 'Shows WRFC messages inline in the transcript, same as conversation.',
+    panel: 'Keep contract updates out of the transcript: they go to Notifications only (toast and history).',
+    conversation: 'Show contract updates in the transcript; each is also kept in Notifications.',
+    both: 'Same as conversation here: every transcript message is also kept in Notifications. The default.',
   },
   'surfaces.telegram.mode': {
     webhook: 'Receive Telegram updates through webhook delivery.',

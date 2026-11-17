@@ -62,7 +62,6 @@ export interface WebSearchRequest {
   readonly includeEvidence?: boolean | undefined;
   readonly evidenceTopN?: number | undefined;
   readonly evidenceExtract?: FetchExtractMode | undefined;
-  readonly trustedHosts?: readonly string[] | undefined;
   readonly blockedHosts?: readonly string[] | undefined;
   readonly metadata?: Record<string, unknown> | undefined;
 }

@@ -51,7 +51,7 @@ const SECURITY_SETTINGS: readonly SecuritySettingEntry[] = [
     enablementEffect:
       'At safe-text (the default) or strict, unknown hosts are sanitized, explicitly blocked hosts are denied, and private/metadata targets are denied before request or redirect follow. Localhost dev servers ask once; approving saves fetch.allowLocalhost in your own settings (a project file cannot turn it on).',
     enablementRequirements: [
-      'Add trusted_hosts only for hosts whose raw content is safe to expose to the model.',
+      'Add a host to fetch.trustedHosts only when its raw content is safe to expose to the model.',
       'Keep fetch.sanitizeMode at safe-text or strict unless the target host is explicitly trusted.',
     ],
     operationalNotes: [

@@ -158,7 +158,6 @@ export class WebSearchService {
       parallel: true,
       verbosity: 'standard',
       // No sanitize_mode: the owner's configured fetch.sanitizeMode (default safe-text) applies, as it does to the fetch tool.
-      ...(request.trustedHosts ? { trusted_hosts: [...request.trustedHosts] } : {}),
       ...(request.blockedHosts ? { blocked_hosts: [...request.blockedHosts] } : {}),
     }, fetchDeps);
 

@@ -255,12 +255,6 @@ export interface FetchInput {
    * Defaults to `'safe-text'` when omitted (rollback-safe default for fetch sanitization).
    */
   sanitize_mode?: FetchSanitizeMode | undefined;
-  /**
-   * Not offered to the model and never read: trusted hosts come from
-   * configuration (fetch.trustedHosts), never from a call. Kept so an internal
-   * caller that still passes it compiles.
-   */
-  trusted_hosts?: string[] | undefined;
   /** Hostnames or glob patterns explicitly blocked. Denied pre-request regardless of other config. */
   blocked_hosts?: string[] | undefined;
 }

@@ -41,9 +41,10 @@ export interface FetchRuntimeDeps {
    */
   readonly defaultSanitizeMode?: FetchSanitizeMode | (() => FetchSanitizeMode | undefined) | undefined;
   /**
-   * Trusted hosts (from config fetch.trustedHosts). A call's own trusted_hosts
-   * is not honoured: trust that lifts sanitization comes from configuration,
-   * not from the model asking for it. A function is read on every call.
+   * Trusted hosts (from config fetch.trustedHosts), the only source: a call
+   * cannot name trusted hosts, since trust that lifts sanitization comes from
+   * configuration, not from the model asking for it. A function is read on
+   * every call.
    */
   readonly defaultTrustedHosts?: readonly string[] | (() => readonly string[] | undefined) | undefined;
   /**

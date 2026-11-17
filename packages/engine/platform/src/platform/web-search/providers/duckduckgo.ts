@@ -241,7 +241,6 @@ export function createDuckDuckGoProvider(options: DuckDuckGoProviderOptions = {}
         verbosity: 'standard',
         sanitize_mode: 'safe-text',
         max_content_length: 250_000,
-        ...(request.trustedHosts ? { trusted_hosts: [...request.trustedHosts] } : {}),
         ...(request.blockedHosts ? { blocked_hosts: [...request.blockedHosts] } : {}),
       };
 

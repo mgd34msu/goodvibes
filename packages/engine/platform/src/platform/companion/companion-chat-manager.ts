@@ -982,6 +982,66 @@ export class CompanionChatManager {
     };
   }
 
+  /**
+   * The messages waiting behind the running reply, in the order they will run
+   * (`companion.chat.queuedMessages.list`): each id, when it was sent and its text.
+   */
+  listQueuedMessages(sessionId: string): Array<{ readonly id: string; readonly queuedAt: number; readonly text: string }> {
+    const session = this.sessions.get(sessionId);
+    if (!session) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'SESSION_NOT_FOUND', status: 404 });
+    const messages = this.transcript(session);
+    return (session.pendingTurns ?? []).flatMap((entry) => {
+      const message = messages.find((candidate) => candidate.id === entry.userMessageId);
+      return message ? [{ id: message.id, queuedAt: message.createdAt, text: message.content }] : [];
+    });
+  }
+
+  /**
+   * Replace the text of a message still waiting for its turn; its attachments
+   * stay. False once it has left the queue (its turn started, or it was removed).
+   */
+  editQueuedMessage(sessionId: string, messageId: string, text: string): boolean {
+    const session = this.sessions.get(sessionId);
+    const queue = session?.pendingTurns;
+    const index = queue?.findIndex((entry) => entry.userMessageId === messageId) ?? -1;
+    if (!session || !queue || index < 0) return false;
+    const messages = this.transcript(session);
+    const at = messages.findIndex((message) => message.id === messageId);
+    if (at < 0) return false;
+    const entry = queue[index]!;
+    const content = entry.providerContent;
+    const providerContent = typeof content === 'string' ? text
+      : [{ type: 'text' as const, text }, ...content.filter((part) => part.type !== 'text')];
+    queue[index] = { ...entry, providerContent };
+    const edited = this.normalizeMessage({ ...messages[at]!, content: text });
+    messages[at] = edited;
+    this.saveInBackground(session, [edited], false);
+    return true;
+  }
+
+  /**
+   * Take a message out of the queue before its turn starts, so it is never
+   * answered. The transcript keeps it as `unanswered` (the state the model's
+   * history and branching already leave out) and its waiter is told. False once
+   * it has left the queue.
+   */
+  deleteQueuedMessage(sessionId: string, messageId: string): boolean {
+    const session = this.sessions.get(sessionId);
+    const queue = session?.pendingTurns;
+    const index = queue?.findIndex((entry) => entry.userMessageId === messageId) ?? -1;
+    if (!session || !queue || index < 0) return false;
+    queue.splice(index, 1);
+    this.resolvePendingReply(messageId, { messageId, error: 'This queued message was removed before it was answered.' });
+    const messages = this.transcript(session);
+    const at = messages.findIndex((message) => message.id === messageId);
+    if (at >= 0) {
+      const removed = this.normalizeMessage({ ...messages[at]!, deliveryState: 'unanswered' });
+      messages[at] = removed;
+      this.saveInBackground(session, [removed], false);
+    }
+    return true;
+  }
+
   // ---------------------------------------------------------------------------
   // Turn execution
   // ---------------------------------------------------------------------------

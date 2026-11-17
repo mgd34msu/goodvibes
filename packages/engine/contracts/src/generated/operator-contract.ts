@@ -35867,6 +35867,193 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "invokable": true
       },
       {
+        "id": "companion.chat.queuedMessages.delete",
+        "title": "Remove a Queued Companion Chat Message",
+        "description": "Take a companion chat message out of the queue before its turn starts, so it is never answered. The transcript keeps it, marked `deliveryState: \"unanswered\"`, and leaves it out of what the model sees. A message whose turn has started (or that was already removed) is 404 MESSAGE_NOT_QUEUED.",
+        "category": "companion",
+        "source": "builtin",
+        "access": "authenticated",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:sessions"
+        ],
+        "http": {
+          "method": "DELETE",
+          "path": "/api/companion/chat/sessions/{sessionId}/queued-messages/{messageId}"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "messageId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId",
+            "messageId"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "deleted": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "sessionId",
+            "id",
+            "deleted"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
+        "invokable": true
+      },
+      {
+        "id": "companion.chat.queuedMessages.edit",
+        "title": "Edit a Queued Companion Chat Message",
+        "description": "Replace the text of a companion chat message still waiting for its turn; its attachments stay. The transcript shows the new text. A message whose turn has started (or that was removed) is 404 MESSAGE_NOT_QUEUED.",
+        "category": "companion",
+        "source": "builtin",
+        "access": "authenticated",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:sessions"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/api/companion/chat/sessions/{sessionId}/queued-messages/{messageId}"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "messageId": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId",
+            "messageId",
+            "text"
+          ],
+          "additionalProperties": true
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId",
+            "id",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
+        "invokable": true
+      },
+      {
+        "id": "companion.chat.queuedMessages.list",
+        "title": "List Queued Companion Chat Messages",
+        "description": "The messages of a companion chat waiting behind the running reply (sent while it was still being written), in the order they will be answered. Each stays editable and removable until its turn starts; a message whose turn has started no longer appears. An unknown chat is 404 SESSION_NOT_FOUND.",
+        "category": "companion",
+        "source": "builtin",
+        "access": "authenticated",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "read:transcripts"
+        ],
+        "http": {
+          "method": "GET",
+          "path": "/api/companion/chat/sessions/{sessionId}/queued-messages"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "messages": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "queuedAt": {
+                    "type": "number"
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "queuedAt",
+                  "text"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "sessionId",
+            "messages"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "read",
+        "invokable": true
+      },
+      {
         "id": "companion.chat.sessions.close",
         "title": "Close Companion Chat Session",
         "description": "Close a companion-chat session (soft close). The session record and its messages are preserved in closed state and remain listable with includeClosed. Distinct from companion.chat.sessions.delete, which permanently removes the record.",
@@ -179686,10 +179873,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       }
     ],
     "schemaCoverage": {
-      "methods": 630,
-      "typedInputs": 625,
+      "methods": 633,
+      "typedInputs": 628,
       "genericInputs": 5,
-      "typedOutputs": 628,
+      "typedOutputs": 631,
       "genericOutputs": 2
     },
     "eventCoverage": {
@@ -179698,8 +179885,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       "withWireEvents": 36
     },
     "validationCoverage": {
-      "methods": 630,
-      "validated": 623,
+      "methods": 633,
+      "validated": 626,
       "skippedGeneric": 0,
       "skippedUntyped": 7
     }

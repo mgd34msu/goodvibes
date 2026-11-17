@@ -160,6 +160,9 @@ export interface OperatorMethodInputMap {
   "companion.chat.messages.retry": ({ sessionId: string; messageId?: string; } & { readonly [key: string]: unknown });
   "companion.chat.messages.search": { query: string; limit?: number; cursor?: string; includeClosed?: boolean; };
   "companion.chat.messages.steer": ({ sessionId: string; clientMessageId?: string; body?: string; content?: string; attachments?: readonly ({ artifactId: string; label?: string; metadata?: {  }; })[]; metadata?: {  }; } & { readonly [key: string]: unknown }) & ({ body: string; } | { content: string; } | { attachments: readonly ({ artifactId: string; label?: string; metadata?: {  }; })[]; });
+  "companion.chat.queuedMessages.delete": { sessionId: string; messageId: string; };
+  "companion.chat.queuedMessages.edit": ({ sessionId: string; messageId: string; text: string; } & { readonly [key: string]: unknown });
+  "companion.chat.queuedMessages.list": { sessionId: string; };
   "companion.chat.sessions.close": { sessionId: string; };
   "companion.chat.sessions.create": ({ title?: string; model?: string; provider?: string; reasoningEffort?: null | "high" | "instant" | "low" | "max" | "medium" | "minimal" | "none" | "xhigh"; systemPrompt?: string; } & { readonly [key: string]: unknown });
   "companion.chat.sessions.delete": { sessionId: string; };
@@ -793,6 +796,9 @@ export interface OperatorMethodOutputMap {
   "companion.chat.messages.retry": { sessionId: string; regeneratedFrom: string; supersededMessageIds: readonly string[]; turnStarted: boolean; };
   "companion.chat.messages.search": { query: string; items: readonly ({ sessionId: string; sessionTitle: string; messageId: string; role: string; snippet: string; createdAt: number; })[]; total: number; hasMore: boolean; nextCursor?: string; };
   "companion.chat.messages.steer": { sessionId: string; messageId: string; steered: boolean; cancelledTurnId?: string; turnStarted: boolean; };
+  "companion.chat.queuedMessages.delete": { sessionId: string; id: string; deleted: boolean; };
+  "companion.chat.queuedMessages.edit": { sessionId: string; id: string; text: string; };
+  "companion.chat.queuedMessages.list": { sessionId: string; messages: readonly ({ id: string; queuedAt: number; text: string; })[]; };
   "companion.chat.sessions.close": { sessionId: string; status: string; };
   "companion.chat.sessions.create": { sessionId: string; createdAt: number; session: { id: string; kind: "companion-chat"; reasoningEffort?: null | "high" | "instant" | "low" | "max" | "medium" | "minimal" | "none" | "xhigh"; title: string; model: null | string; provider: null | string; systemPrompt: null | string; status: "active" | "closed"; createdAt: number; updatedAt: number; closedAt: null | number; messageCount: number; }; };
   "companion.chat.sessions.delete": { sessionId: string; deleted: boolean; };

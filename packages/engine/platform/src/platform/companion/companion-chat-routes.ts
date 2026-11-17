@@ -14,6 +14,9 @@
  *   GET    /api/companion/chat/sessions/:sessionId/messages   (?limit=&before= for one page)
  *   POST   /api/companion/chat/sessions/:sessionId/turns/cancel (stop the in-flight turn)
  *   POST   /api/companion/chat/sessions/:sessionId/messages/steer (interrupt + send now)
+ *   GET    /api/companion/chat/sessions/:sessionId/queued-messages (messages waiting for their turn)
+ *   POST   /api/companion/chat/sessions/:sessionId/queued-messages/:messageId (edit one)
+ *   DELETE /api/companion/chat/sessions/:sessionId/queued-messages/:messageId (remove one)
  *   GET    /api/companion/chat/sessions/:sessionId/events  (SSE)
  *   GET    /api/companion/chat/messages/search  (?query=&limit=&cursor=&includeClosed=)
  *
@@ -78,6 +81,9 @@ export const COMPANION_CHAT_ROUTES: readonly { readonly method: string; readonly
   { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/messages/edit' },
   { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/messages/steer' },
   { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/turns/cancel' },
+  { method: 'GET', path: '/api/companion/chat/sessions/{sessionId}/queued-messages' },
+  { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/queued-messages/{messageId}' },
+  { method: 'DELETE', path: '/api/companion/chat/sessions/{sessionId}/queued-messages/{messageId}' },
   { method: 'GET', path: '/api/companion/chat/sessions/{sessionId}/events' },
   { method: 'GET', path: '/api/companion/chat/messages/search' },
 ];
@@ -164,6 +170,20 @@ export async function dispatchCompanionChatRoutes(
   // POST /api/companion/chat/sessions/:sessionId/messages/steer
   if (sub === 'messages/steer' && req.method === 'POST') {
     return handleSteerMessage(req, sessionId, context);
+  }
+
+  // GET /api/companion/chat/sessions/:sessionId/queued-messages
+  if (sub === 'queued-messages' && req.method === 'GET') {
+    return handleListQueuedMessages(sessionId, context);
+  }
+
+  // POST|DELETE /api/companion/chat/sessions/:sessionId/queued-messages/:messageId
+  const queuedMatch = sub.match(/^queued-messages\/([^/]+)$/);
+  if (queuedMatch && (req.method === 'POST' || req.method === 'DELETE')) {
+    const messageId = decodeURIComponent(queuedMatch[1]!);
+    return req.method === 'POST'
+      ? handleEditQueuedMessage(req, sessionId, messageId, context)
+      : handleDeleteQueuedMessage(sessionId, messageId, context);
   }
 
   // GET /api/companion/chat/sessions/:sessionId/events
@@ -861,6 +881,53 @@ async function handleGetMessages(
   } catch (err: unknown) {
     return respondWithManagerError(err);
   }
+}
+
+// ---------------------------------------------------------------------------
+// /api/companion/chat/sessions/:sessionId/queued-messages[/:messageId]
+// ---------------------------------------------------------------------------
+
+function notQueued(messageId: string): Response {
+  return Response.json({
+    error: `Message ${messageId} is not waiting for its turn (its turn started, or it was removed).`,
+    code: 'MESSAGE_NOT_QUEUED',
+  }, { status: 404 });
+}
+
+function handleListQueuedMessages(sessionId: string, context: CompanionChatRouteContext): Response {
+  try {
+    return Response.json({ sessionId, messages: context.chatManager.listQueuedMessages(sessionId) });
+  } catch (err: unknown) {
+    return respondWithManagerError(err);
+  }
+}
+
+async function handleEditQueuedMessage(
+  req: Request,
+  sessionId: string,
+  messageId: string,
+  context: CompanionChatRouteContext,
+): Promise<Response> {
+  const bodyOrResponse = await context.parseJsonBody(req);
+  if (bodyOrResponse instanceof Response) return bodyOrResponse;
+  const body = bodyOrResponse as Record<string, unknown>;
+  const text = typeof body['text'] === 'string' ? body['text'] : '';
+  if (!text.trim()) return Response.json({ error: 'text must be non-empty', code: 'INVALID_ARGUMENT' }, { status: 400 });
+  if (!context.chatManager.getSession(sessionId)) {
+    return Response.json({ error: `Session not found: ${sessionId}`, code: 'SESSION_NOT_FOUND' }, { status: 404 });
+  }
+  return context.chatManager.editQueuedMessage(sessionId, messageId, text)
+    ? Response.json({ sessionId, id: messageId, text })
+    : notQueued(messageId);
+}
+
+function handleDeleteQueuedMessage(sessionId: string, messageId: string, context: CompanionChatRouteContext): Response {
+  if (!context.chatManager.getSession(sessionId)) {
+    return Response.json({ error: `Session not found: ${sessionId}`, code: 'SESSION_NOT_FOUND' }, { status: 404 });
+  }
+  return context.chatManager.deleteQueuedMessage(sessionId, messageId)
+    ? Response.json({ sessionId, id: messageId, deleted: true })
+    : notQueued(messageId);
 }
 
 // ---------------------------------------------------------------------------

@@ -31,7 +31,10 @@ writeFileSync(join(s.home.daemonHome, 'settings.json'), JSON.stringify({
 await s.restartDaemon();
 
 type PageEvent = { type(): string; text(): string; status(): number; url(): string };
-type Page = { goto(url: string): Promise<unknown>; waitForTimeout(ms: number): Promise<void>; title(): Promise<string>; locator(selector: string): { count(): Promise<number>; first(): { innerText(): Promise<string> } }; on(event: string, listener: (value: PageEvent) => void): void; url(): string };
+type Element = { innerText(): Promise<string>; click(): Promise<void>; fill(value: string): Promise<void> };
+type Locator = Element & { count(): Promise<number>; first(): Element; nth(index: number): Element };
+type Page = { goto(url: string): Promise<unknown>; waitForTimeout(ms: number): Promise<void>; title(): Promise<string>; locator(selector: string): Locator;
+  getByRole(role: string, options: { name: string }): Locator; on(event: string, listener: (value: PageEvent) => void): void; url(): string };
 type Browser = { newPage(): Promise<Page>; close(): Promise<void> };
 const { chromium: playwright } = await import(join(REPO, 'products/webui/node_modules/@playwright/test/index.js')) as { chromium: { launch(options: Record<string, unknown>): Promise<Browser> } };
 
@@ -79,6 +82,49 @@ try {
     `session ${chat.status} ${sessionId}; send ${sent.status} ${short(sent.text, 120)}; approvals answered ${JSON.stringify(approved)}; file written ${written === true}; reply listed ${replied !== undefined}`,
     chat.status < 300 && sent.status < 300 && written === true && replied !== undefined);
   void sendNativeHostedTurn; void nativeTurnStatus;
+
+  // Messages sent while a reply is still being written wait in the chat view's queue,
+  // where the owner edits one and drops another before either is answered.
+  s.model.scriptWrapped('RTJ7SLOW', [{ text: 'The slow reply is done.', delayMs: 15_000 }]);
+  s.model.scriptWrapped('RTJ7QA', [{ text: 'Answered the edited message.' }]);
+  s.model.scriptWrapped('RTJ7QB', [{ text: 'Answered the dropped message.' }]);
+  const chatPath = `/api/companion/chat/sessions/${encodeURIComponent(sessionId)}`;
+  const post = (content: string) => api(s.daemon, device, 'POST', `${chatPath}/messages`, { content, clientMessageId: crypto.randomUUID() });
+  const slow = await post('RTJ7SLOW take your time');
+  await Bun.sleep(1_000);
+  const queuedA = await post('RTJ7QA the first queued message');
+  const queuedB = await post('RTJ7QB the second queued message');
+  const queueBefore = errors.length;
+  await page.goto(`${s.daemon.baseUrl}/?view=chat&session=${encodeURIComponent(sessionId)}`);
+  const shown = await waitFor(async () => await page.locator('.queued-message__text').count() === 2 ? true : undefined, 8_000, 250);
+  const shownText = shown ? (await page.locator('.queued-messages-panel').first().innerText()).replace(/\s+/g, ' ') : '';
+  let edited = false, dropped = false;
+  if (shown) {
+    await page.locator('.queued-message__edit').first().click();
+    await page.locator('textarea[aria-label="Edit queued message"]').first().fill('RTJ7QA the first queued message, edited in the web UI');
+    await page.locator('.queued-message__save').first().click();
+    edited = await waitFor(async () => (await page.locator('.queued-messages-panel').first().innerText()).includes('edited in the web UI') ? true : undefined, 5_000, 250) === true;
+    await page.locator('.queued-message__delete').nth(1).click();
+    await page.getByRole('button', { name: 'Drop message' }).first().click();
+    dropped = await waitFor(async () => await page.locator('.queued-message__text').count() === 1 ? true : undefined, 5_000, 250) === true;
+  }
+  const settled = await waitFor(async () => {
+    const listed = await api(s.daemon, device, 'GET', `${chatPath}/messages`);
+    return listed.text.includes('Answered the edited message.') ? listed : undefined;
+  }, 40_000, 500);
+  await Bun.sleep(2_000);
+  const transcript = (await api(s.daemon, device, 'GET', `${chatPath}/messages`)).body as { messages?: Array<{ id: string; role: string; content: string; deliveryState?: string }> };
+  const idOf = (response: { body: unknown }) => (response.body as { messageId?: string; message?: { id?: string } }).messageId ?? (response.body as { message?: { id?: string } }).message?.id ?? '';
+  const rowA = transcript.messages?.find((message) => message.id === idOf(queuedA));
+  const rowB = transcript.messages?.find((message) => message.id === idOf(queuedB));
+  const answers = (transcript.messages ?? []).filter((message) => message.role === 'assistant').map((message) => message.content);
+  journey.check('the chat view shows messages queued behind a running reply; one is edited and one dropped there',
+    'companion chat: a slow reply, two messages sent behind it; chromium chat view: edit the first, drop the second',
+    `sent ${slow.status} ${queuedA.status} ${queuedB.status}; panel ${short(shownText, 200)}; edited ${edited}; dropped ${dropped}; errors ${JSON.stringify(errors.slice(queueBefore, queueBefore + 3))}; `
+      + `A ${JSON.stringify(rowA?.content)} ${rowA?.deliveryState ?? 'delivered'}; B ${rowB?.deliveryState ?? 'delivered'}; answers ${JSON.stringify(answers.slice(-3))}`,
+    shown === true && edited && dropped && errors.length === queueBefore && settled !== undefined
+      && rowA?.content.includes('edited in the web UI') === true && rowB?.deliveryState === 'unanswered'
+      && answers.includes('The slow reply is done.') && !answers.includes('Answered the dropped message.'));
 
   for (const [label, query] of [
     ['sessions (Work, sessions)', '?view=work&tab=sessions'],

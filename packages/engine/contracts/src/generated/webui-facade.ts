@@ -10,7 +10,7 @@ import type { OperatorMethodId } from './operator-method-ids.js';
  * call sites) hand-written on top of these generated primitives.
  *
  * Contract product version: 3.3.0
- * Methods: 630 total, 523 REST-routed, 107 ws-only invoke.
+ * Methods: 633 total, 526 REST-routed, 107 ws-only invoke.
  */
 
 export type WebuiHttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -619,6 +619,18 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
   "companion.chat.messages.steer": {
     "method": "POST",
     "path": "/api/companion/chat/sessions/{sessionId}/messages/steer"
+  },
+  "companion.chat.queuedMessages.delete": {
+    "method": "DELETE",
+    "path": "/api/companion/chat/sessions/{sessionId}/queued-messages/{messageId}"
+  },
+  "companion.chat.queuedMessages.edit": {
+    "method": "POST",
+    "path": "/api/companion/chat/sessions/{sessionId}/queued-messages/{messageId}"
+  },
+  "companion.chat.queuedMessages.list": {
+    "method": "GET",
+    "path": "/api/companion/chat/sessions/{sessionId}/queued-messages"
   },
   "companion.chat.sessions.close": {
     "method": "POST",
@@ -2409,6 +2421,9 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "companion.chat.messages.retry": "rest",
   "companion.chat.messages.search": "rest",
   "companion.chat.messages.steer": "rest",
+  "companion.chat.queuedMessages.delete": "rest",
+  "companion.chat.queuedMessages.edit": "rest",
+  "companion.chat.queuedMessages.list": "rest",
   "companion.chat.sessions.close": "rest",
   "companion.chat.sessions.create": "rest",
   "companion.chat.sessions.delete": "rest",
@@ -9010,6 +9025,44 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "steered": false,
       "cancelledTurnId": "sample",
       "turnStarted": false
+    }
+  },
+  "companion.chat.queuedMessages.delete": {
+    "input": {
+      "sessionId": "sample",
+      "messageId": "sample"
+    },
+    "output": {
+      "sessionId": "sample",
+      "id": "sample",
+      "deleted": false
+    }
+  },
+  "companion.chat.queuedMessages.edit": {
+    "input": {
+      "sessionId": "sample",
+      "messageId": "sample",
+      "text": "sample"
+    },
+    "output": {
+      "sessionId": "sample",
+      "id": "sample",
+      "text": "sample"
+    }
+  },
+  "companion.chat.queuedMessages.list": {
+    "input": {
+      "sessionId": "sample"
+    },
+    "output": {
+      "sessionId": "sample",
+      "messages": [
+        {
+          "id": "sample",
+          "queuedAt": 0,
+          "text": "sample"
+        }
+      ]
     }
   },
   "companion.chat.sessions.close": {

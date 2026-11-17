@@ -57,5 +57,5 @@ export async function bootstrap(root: HTMLElement): Promise<void> {
     return;
   }
   const { mountApp } = await import('./mount-app');
-  mountApp(root);
+  await mountApp(root);
 }

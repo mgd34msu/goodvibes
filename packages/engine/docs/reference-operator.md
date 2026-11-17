@@ -4,7 +4,7 @@ Generated from the synced GoodVibes operator contract artifact.
 
 ## Summary
 
-- Methods: `630`
+- Methods: `633`
 - Events: `36`
 - Auth modes: `shared-bearer`, `session-login`
 - HTTP status path: `/status`
@@ -36166,6 +36166,202 @@ Send a message that runs IMMEDIATELY, interrupting the in-flight turn if one is 
     "messageId",
     "steered",
     "turnStarted"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `companion.chat.queuedMessages.delete`
+
+Take a companion chat message out of the queue before its turn starts, so it is never answered. The transcript keeps it, marked `deliveryState: "unanswered"`, and leaves it out of what the model sees. A message whose turn has started (or that was already removed) is 404 MESSAGE_NOT_QUEUED.
+
+- Title: `Remove a Queued Companion Chat Message`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: `DELETE /api/companion/chat/sessions/{sessionId}/queued-messages/{messageId}`
+- Scopes: `write:sessions`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string"
+    },
+    "messageId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sessionId",
+    "messageId"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "deleted": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "sessionId",
+    "id",
+    "deleted"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `companion.chat.queuedMessages.edit`
+
+Replace the text of a companion chat message still waiting for its turn; its attachments stay. The transcript shows the new text. A message whose turn has started (or that was removed) is 404 MESSAGE_NOT_QUEUED.
+
+- Title: `Edit a Queued Companion Chat Message`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/companion/chat/sessions/{sessionId}/queued-messages/{messageId}`
+- Scopes: `write:sessions`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string"
+    },
+    "messageId": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sessionId",
+    "messageId",
+    "text"
+  ],
+  "additionalProperties": true
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sessionId",
+    "id",
+    "text"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `companion.chat.queuedMessages.list`
+
+The messages of a companion chat waiting behind the running reply (sent while it was still being written), in the order they will be answered. Each stays editable and removable until its turn starts; a message whose turn has started no longer appears. An unknown chat is 404 SESSION_NOT_FOUND.
+
+- Title: `List Queued Companion Chat Messages`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: `GET /api/companion/chat/sessions/{sessionId}/queued-messages`
+- Scopes: `read:transcripts`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sessionId"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string"
+    },
+    "messages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "queuedAt": {
+            "type": "number"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "queuedAt",
+          "text"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "sessionId",
+    "messages"
   ],
   "additionalProperties": false
 }

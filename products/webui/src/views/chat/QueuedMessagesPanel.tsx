@@ -1,10 +1,9 @@
 /**
  * QueuedMessagesPanel, messages posted while another turn is still running sit
  * queued (not yet delivered to the model) until that turn ends
- * (sessions.queuedMessages.list/edit/delete, platform 1.8.0's interaction-wins
- * round). This panel lets the operator review, edit, or drop a queued message
- * before it is ever sent, renders nothing when there is nothing queued (the
- * common case), never a dead empty section.
+ * (companion.chat.queuedMessages.list/edit/delete). This panel lets the operator
+ * review, edit, or drop a queued message before it is ever sent, renders nothing
+ * when there is nothing queued (the common case), never a dead empty section.
  *
  * No wire event exists for this verb family yet (the same standing gap
  * fleet.* / checkpoints.* / memory.* document in lib/queries.ts), so this
@@ -51,7 +50,7 @@ export function QueuedMessagesPanel({ sessionId, active, onMoveToComposer }: Que
 
   const list = useQuery({
     queryKey: queryKeys.sessionQueuedMessages(sessionId),
-    queryFn: () => platformClient.operator.sessions.queuedMessages.list(sessionId),
+    queryFn: () => platformClient.chat.queuedMessages.list(sessionId),
     enabled: Boolean(sessionId),
     refetchInterval: active ? POLL_INTERVAL_MS : false,
   });
@@ -61,7 +60,7 @@ export function QueuedMessagesPanel({ sessionId, active, onMoveToComposer }: Que
   }
 
   const editMutation = useMutation({
-    mutationFn: ({ id, text }: { id: string; text: string }) => platformClient.operator.sessions.queuedMessages.edit(sessionId, id, text),
+    mutationFn: ({ id, text }: { id: string; text: string }) => platformClient.chat.queuedMessages.edit(sessionId, id, text),
     onSuccess: async (_result, { id }) => {
       // Close only the editor this save belongs to, never another row's.
       if (editingIdRef.current === id) {
@@ -73,7 +72,7 @@ export function QueuedMessagesPanel({ sessionId, active, onMoveToComposer }: Que
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => platformClient.operator.sessions.queuedMessages.delete(sessionId, id),
+    mutationFn: (id: string) => platformClient.chat.queuedMessages.delete(sessionId, id),
     onSuccess: invalidate,
   });
 

@@ -6019,6 +6019,50 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "turnStarted": false
     }
   },
+  "companion.chat.queuedMessages.delete": {
+    "methodId": "companion.chat.queuedMessages.delete",
+    "http": {
+      "method": "DELETE",
+      "path": "/api/companion/chat/sessions/{sessionId}/queued-messages/{messageId}"
+    },
+    "status": 200,
+    "body": {
+      "sessionId": "sample",
+      "id": "sample",
+      "deleted": false
+    }
+  },
+  "companion.chat.queuedMessages.edit": {
+    "methodId": "companion.chat.queuedMessages.edit",
+    "http": {
+      "method": "POST",
+      "path": "/api/companion/chat/sessions/{sessionId}/queued-messages/{messageId}"
+    },
+    "status": 200,
+    "body": {
+      "sessionId": "sample",
+      "id": "sample",
+      "text": "sample"
+    }
+  },
+  "companion.chat.queuedMessages.list": {
+    "methodId": "companion.chat.queuedMessages.list",
+    "http": {
+      "method": "GET",
+      "path": "/api/companion/chat/sessions/{sessionId}/queued-messages"
+    },
+    "status": 200,
+    "body": {
+      "sessionId": "sample",
+      "messages": [
+        {
+          "id": "sample",
+          "queuedAt": 0,
+          "text": "sample"
+        }
+      ]
+    }
+  },
   "companion.chat.sessions.close": {
     "methodId": "companion.chat.sessions.close",
     "http": {

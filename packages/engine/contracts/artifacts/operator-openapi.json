@@ -3,7 +3,7 @@
   "info": {
     "title": "GoodVibes Operator API",
     "version": "3.3.0",
-    "description": "Generated from the operator contract (packages/contracts/artifacts/operator-contract.json). 630 cataloged methods: 523 with dedicated REST bindings, 107 reachable only through the generic invoke endpoint. Regenerate with `bun run openapi:generate`; drift fails `contracts:check`."
+    "description": "Generated from the operator contract (packages/contracts/artifacts/operator-contract.json). 633 cataloged methods: 526 with dedicated REST bindings, 107 reachable only through the generic invoke endpoint. Regenerate with `bun run openapi:generate`; drift fails `contracts:check`."
   },
   "servers": [
     {
@@ -34809,6 +34809,246 @@
             }
           }
         }
+      }
+    },
+    "/api/companion/chat/sessions/{sessionId}/queued-messages/{messageId}": {
+      "delete": {
+        "operationId": "companion.chat.queuedMessages.delete",
+        "summary": "Remove a Queued Companion Chat Message",
+        "description": "Take a companion chat message out of the queue before its turn starts, so it is never answered. The transcript keeps it, marked `deliveryState: \"unanswered\"`, and leaves it out of what the model sees. A message whose turn has started (or that was already removed) is 404 MESSAGE_NOT_QUEUED.",
+        "tags": [
+          "companion"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessionId": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "sessionId",
+                    "id",
+                    "deleted"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-access": "authenticated",
+        "x-transport": [
+          "http",
+          "ws"
+        ],
+        "x-scopes": [
+          "write:sessions"
+        ],
+        "x-effect": "write",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "companion.chat.queuedMessages.edit",
+        "summary": "Edit a Queued Companion Chat Message",
+        "description": "Replace the text of a companion chat message still waiting for its turn; its attachments stay. The transcript shows the new text. A message whose turn has started (or that was removed) is 404 MESSAGE_NOT_QUEUED.",
+        "tags": [
+          "companion"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessionId": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sessionId",
+                    "id",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-access": "authenticated",
+        "x-transport": [
+          "http",
+          "ws"
+        ],
+        "x-scopes": [
+          "write:sessions"
+        ],
+        "x-effect": "write",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "messageId": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "sessionId",
+                  "messageId",
+                  "text"
+                ],
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/companion/chat/sessions/{sessionId}/queued-messages": {
+      "get": {
+        "operationId": "companion.chat.queuedMessages.list",
+        "summary": "List Queued Companion Chat Messages",
+        "description": "The messages of a companion chat waiting behind the running reply (sent while it was still being written), in the order they will be answered. Each stays editable and removable until its turn starts; a message whose turn has started no longer appears. An unknown chat is 404 SESSION_NOT_FOUND.",
+        "tags": [
+          "companion"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessionId": {
+                      "type": "string"
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "queuedAt": {
+                            "type": "number"
+                          },
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "queuedAt",
+                          "text"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "sessionId",
+                    "messages"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-access": "authenticated",
+        "x-transport": [
+          "http",
+          "ws"
+        ],
+        "x-scopes": [
+          "read:transcripts"
+        ],
+        "x-effect": "read",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/api/companion/chat/sessions/{sessionId}/close": {
@@ -165007,6 +165247,30 @@
       "category": "companion",
       "access": "authenticated",
       "rest": "POST /api/companion/chat/sessions/{sessionId}/messages/steer",
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
+      "id": "companion.chat.queuedMessages.delete",
+      "category": "companion",
+      "access": "authenticated",
+      "rest": "DELETE /api/companion/chat/sessions/{sessionId}/queued-messages/{messageId}",
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
+      "id": "companion.chat.queuedMessages.edit",
+      "category": "companion",
+      "access": "authenticated",
+      "rest": "POST /api/companion/chat/sessions/{sessionId}/queued-messages/{messageId}",
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
+      "id": "companion.chat.queuedMessages.list",
+      "category": "companion",
+      "access": "authenticated",
+      "rest": "GET /api/companion/chat/sessions/{sessionId}/queued-messages",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
     },

@@ -1933,6 +1933,15 @@ export const client = {
       cancel: (sessionId: string, input?: Parameters<typeof scopedPlatform.chat.turns.cancel>[1]) =>
         invokeOperator('companion.chat.turns.cancel', { sessionId, ...input }),
     },
+    // A message sent while a reply is still being written waits for its turn; until
+    // it starts, the owner can read, change or drop it (companion.chat.queuedMessages.*).
+    queuedMessages: {
+      list: (sessionId: string) => invokeOperator('companion.chat.queuedMessages.list', { sessionId }),
+      edit: (sessionId: string, messageId: string, text: string) =>
+        invokeOperator('companion.chat.queuedMessages.edit', { sessionId, messageId, text }),
+      delete: (sessionId: string, messageId: string) =>
+        invokeOperator('companion.chat.queuedMessages.delete', { sessionId, messageId }),
+    },
     events: scopedPlatform.chat.events,
   },
   artifacts: scopedPlatform.artifacts,
@@ -2153,10 +2162,28 @@ function isAuthRejection(error: unknown): boolean {
   return record.status === 401 || record.category === 'authentication';
 }
 
+/** A pairing link's token applied before the app's first request, and the credential it replaced. */
+let primedAuthToken: { readonly token: string; readonly previous: Awaited<ReturnType<typeof tokenStore.getTokenEntry>> } | null = null;
+
+/**
+ * Apply a pairing link's token before anything is sent, so the app's first
+ * requests carry it instead of going out with the old credential (or none)
+ * and being refused. It is validated by the hand-off's setExplicitAuthToken,
+ * which restores the credential it replaced when the daemon refuses it.
+ */
+export async function primeAuthToken(rawToken: string): Promise<void> {
+  const token = rawToken.replace(/^Bearer\s+/i, '').trim();
+  if (!token) return;
+  primedAuthToken = { token, previous: await tokenStore.getTokenEntry() };
+  await client.auth.setToken(token);
+}
+
 export async function setExplicitAuthToken(rawToken: string): Promise<unknown> {
   const token = rawToken.replace(/^Bearer\s+/i, '').trim();
   if (!token) throw new Error('Token is required');
-  const previous = await tokenStore.getTokenEntry();
+  // A token primed at start-up already replaced the stored one: the one to restore is what was there before it.
+  const previous = primedAuthToken?.token === token ? primedAuthToken.previous : await tokenStore.getTokenEntry();
+  primedAuthToken = null;
   await client.auth.setToken(token);
   const validationLifetime = getClientLifetime();
   try {

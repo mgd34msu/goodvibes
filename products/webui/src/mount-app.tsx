@@ -13,8 +13,16 @@ import { createRoot } from 'react-dom/client';
 import { IdentityBoundary } from './components/auth/IdentityBoundary';
 import App from './App';
 import { registerServiceWorker } from './lib/pwa/register-sw';
+import { pairingHandoffToken } from './hooks/usePairingHandoff';
+import { primeAuthToken } from './lib/goodvibes';
 
-export function mountApp(root: HTMLElement): void {
+export async function mountApp(root: HTMLElement): Promise<void> {
+  // A pairing link's token is applied before the first query runs, so no request goes out unauthorized.
+  const pairingToken = pairingHandoffToken();
+  if (pairingToken !== null) {
+    try { await primeAuthToken(pairingToken); }
+    catch { /* The hand-off validates the token and reports a failure itself. */ }
+  }
   createRoot(root).render(
     <StrictMode>
       <IdentityBoundary>

@@ -152,7 +152,7 @@ export const queryKeys = {
   // verb yet, so VoiceSettings refetches manually/on install-mutation success, same
   // standing gap fleet.*/checkpoints.*/memory.* document elsewhere in this file.
   voiceLocalStatus: ['voice', 'local', 'status'] as const,
-  // sessions.queuedMessages.list (platform 1.8.0's interaction-wins round). No wire event
+  // companion.chat.queuedMessages.list. No wire event
   // exists for this verb yet, so the Composer's queued-messages panel refetches
   // manually/on mutation success, same standing gap fleet.*/checkpoints.*/memory.*
   // document elsewhere in this file.

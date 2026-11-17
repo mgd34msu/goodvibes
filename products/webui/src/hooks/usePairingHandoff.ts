@@ -95,6 +95,11 @@ function capturePairingHandoff(): { token: string | null; offers: readonly Pairi
 }
 
 /** Test-only: reset the module-level capture between cases. */
+/** The pairing link's token, captured (and the fragment stripped) on first use; null without one. */
+export function pairingHandoffToken(): string | null {
+  return capturePairingHandoff().token;
+}
+
 export function resetPairingCaptureForTest(): void {
   handoff.run = null;
   handoff.outcome = null;

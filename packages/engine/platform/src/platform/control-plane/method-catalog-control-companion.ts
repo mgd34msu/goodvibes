@@ -318,6 +318,58 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
     }, ['sessionId', 'turnId', 'cancelled', 'partialPersisted']),
   }),
   methodDescriptor({
+    id: 'companion.chat.queuedMessages.list',
+    title: 'List Queued Companion Chat Messages',
+    description: 'The messages of a companion chat waiting behind the running reply (sent while it was still being written), in the order they will be answered. Each stays editable and removable until its turn starts; a message whose turn has started no longer appears. An unknown chat is 404 SESSION_NOT_FOUND.',
+    category: 'companion',
+    scopes: ['read:transcripts'],
+    http: { method: 'GET', path: '/api/companion/chat/sessions/{sessionId}/queued-messages' },
+    inputSchema: objectSchema({ sessionId: STRING_SCHEMA }, ['sessionId']),
+    outputSchema: objectSchema({
+      sessionId: STRING_SCHEMA,
+      messages: arraySchema(objectSchema({
+        id: STRING_SCHEMA,
+        queuedAt: NUMBER_SCHEMA,
+        text: STRING_SCHEMA,
+      }, ['id', 'queuedAt', 'text'])),
+    }, ['sessionId', 'messages']),
+  }),
+  methodDescriptor({
+    id: 'companion.chat.queuedMessages.edit',
+    title: 'Edit a Queued Companion Chat Message',
+    description: 'Replace the text of a companion chat message still waiting for its turn; its attachments stay. The transcript shows the new text. A message whose turn has started (or that was removed) is 404 MESSAGE_NOT_QUEUED.',
+    category: 'companion',
+    scopes: ['write:sessions'],
+    http: { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/queued-messages/{messageId}' },
+    inputSchema: bodyEnvelopeSchema({
+      sessionId: STRING_SCHEMA,
+      messageId: STRING_SCHEMA,
+      text: STRING_SCHEMA,
+    }, ['sessionId', 'messageId', 'text']),
+    outputSchema: objectSchema({
+      sessionId: STRING_SCHEMA,
+      id: STRING_SCHEMA,
+      text: STRING_SCHEMA,
+    }, ['sessionId', 'id', 'text']),
+  }),
+  methodDescriptor({
+    id: 'companion.chat.queuedMessages.delete',
+    title: 'Remove a Queued Companion Chat Message',
+    description: 'Take a companion chat message out of the queue before its turn starts, so it is never answered. The transcript keeps it, marked `deliveryState: "unanswered"`, and leaves it out of what the model sees. A message whose turn has started (or that was already removed) is 404 MESSAGE_NOT_QUEUED.',
+    category: 'companion',
+    scopes: ['write:sessions'],
+    http: { method: 'DELETE', path: '/api/companion/chat/sessions/{sessionId}/queued-messages/{messageId}' },
+    inputSchema: objectSchema({
+      sessionId: STRING_SCHEMA,
+      messageId: STRING_SCHEMA,
+    }, ['sessionId', 'messageId']),
+    outputSchema: objectSchema({
+      sessionId: STRING_SCHEMA,
+      id: STRING_SCHEMA,
+      deleted: BOOLEAN_SCHEMA,
+    }, ['sessionId', 'id', 'deleted']),
+  }),
+  methodDescriptor({
     id: 'companion.chat.events.stream',
     title: 'Stream Companion Chat Events',
     description: 'Server-Sent Events stream of turn and agent events scoped to a single companion-chat session.',

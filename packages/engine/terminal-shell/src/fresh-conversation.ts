@@ -39,7 +39,7 @@ export interface FreshConversationContext {
 }
 
 import { saveWorkTreeFolds } from './work-tree-fold-store.js';
-import { removeRecoveryPoint } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { deleteRecoveryFile } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
 export interface FreshConversationResult {
   /** Session id the previous conversation was saved under, or null when there was nothing to keep. */
@@ -114,7 +114,8 @@ export function startFreshConversation(ctx: FreshConversationContext, surface?: 
   });
   try {
     ctx.cancelPendingRecovery?.();
-    if (surface) removeRecoveryPoint(surface, liveId);
+    // The live snapshot goes; a crash snapshot of this session still on offer is kept apart, not deleted.
+    if (surface) deleteRecoveryFile({ surface }, liveId);
   } catch (error) {
     // Memory still holds the conversation, so disk must not say it is empty.
     try { sessionManager?.save(liveId, liveMessages as Parameters<SessionManager['save']>[1], liveMeta, undefined, undefined, liveBranches); } catch { /* the next autosave rewrites it */ }

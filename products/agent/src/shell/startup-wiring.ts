@@ -10,7 +10,7 @@ import {
   writeRecoveryFile,
 } from '@/runtime/index.ts';
 import type { RecoveryFileInfo, SessionSnapshot, SessionSurface } from '@/runtime/index.ts';
-import { closeSessionHere, crashSnapshotTurn, openSessionHere, writeCrashSnapshotAtTurnMoments, type CrashSnapshotTurnMoment } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { closeSessionHere, crashSnapshotTurn, holdOfferedRecoverySnapshot, openSessionHere, writeCrashSnapshotAtTurnMoments, type CrashSnapshotTurnMoment } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { moveLiveSessionArtifacts } from '../core/session-resume-core.ts';
 import { readOnboardingCheckMarker } from '../runtime/onboarding/index.ts';
 import { deriveOnboardingState } from '../runtime/onboarding/onboarding-state.ts';
@@ -247,6 +247,8 @@ export function wireSessionPersistenceAndRecovery(
     // Ctrl+R/Esc handlers in blocking-input.ts consume/remove exactly this
     // snapshot, never a different one that happens to exist on disk.
     recoveryPending = recoveryInfo.sessionId;
+    // Until it is restored or discarded, the live session's writes keep it apart instead of replacing it.
+    holdOfferedRecoverySnapshot(surface, recoveryInfo.sessionId);
   }
 
   // First-start registration prompt (owner-approved design): only when this

@@ -56,6 +56,7 @@
  */
 import { statSync } from 'node:fs';
 import { checkRecoveryFile, checkRecoveryForSession, removeRecoveryPoint } from '@/runtime/index.ts';
+import { holdOfferedRecoverySnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { describeCrashRecovery, type CrashRecoveryReport } from '@goodvibes-jev/engine/terminal-shell/session-crash-recovery';
 import type { RecoveryFileInfo, SessionSurface } from '@/runtime/index.ts';
 import type { SelectionItem, SelectionResult } from '../input/selection-modal.ts';
@@ -283,6 +284,10 @@ export async function offerRecoverySnapshot(deps: RecoveryPromptDeps): Promise<R
     if (!open) return 'none';
     claimed = info.sessionId;
     offeringNow.add(claimed);
+    // Kept or left unanswered, the snapshot must outlive this session's own
+    // writes when it is the live one (a resume after a crash): until it is
+    // restored or removed, those writes keep it apart instead of replacing it.
+    holdOfferedRecoverySnapshot(deps.surface, info.sessionId);
 
     const nowMs = deps.now?.() ?? Date.now();
     const bytes = deps.snapshotBytes ? deps.snapshotBytes(info.sessionId) : defaultSnapshotBytes(deps.surface, info.sessionId);

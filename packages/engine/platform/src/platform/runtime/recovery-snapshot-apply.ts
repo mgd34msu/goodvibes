@@ -40,7 +40,7 @@
  *     conversation refuses stays on disk, and the live conversation is put back.
  */
 
-import { loadRecoveryConversation, removeRecoveryPoint } from './session-recovery.js';
+import { loadRecoveryConversation, releaseOfferedRecoverySnapshot, removeRecoveryPoint } from './session-recovery.js';
 import type { ConversationManager, ConversationMessageSnapshot } from '../core/conversation.js';
 import type { SessionSurface } from './session-surface.js';
 import { logger } from '../utils/logger.js';
@@ -241,6 +241,8 @@ export function applyRecoverySnapshot(options: ApplyRecoverySnapshotOptions): Ap
     logger.warn('[Recovery] The restored session could not be saved; the snapshot is kept for the next launch', { sessionId, error: summarizeError(error) });
   }
   const retired = persisted ? retire() : false;
+  // The live conversation holds it now; the live writer's next snapshot is its copy.
+  releaseOfferedRecoverySnapshot(surface, sessionId);
 
   return {
     applied: true,

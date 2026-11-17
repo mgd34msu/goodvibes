@@ -33,6 +33,14 @@
  * its session's lock from the moment the session is live until it closes; the
  * kernel releases it when the process dies, so a crash relaunched at once is
  * offered at once.
+ *
+ * OFFERED, is the person still deciding about it?
+ * A snapshot this process offered is held until it is restored or discarded.
+ * When the offered session is the live one (a resume after a crash, an offer
+ * left for the next launch), the live writer would otherwise replace it with
+ * the live conversation and the turn-end save would delete it. Before either,
+ * the held snapshot is moved under a session id of its own, so it is still
+ * offered at the next launch and the live session keeps its own snapshot.
  */
 
 import {
@@ -145,6 +153,91 @@ function deleteRecoverySnapshotAt(path: string, expected?: string): boolean {
   } catch { return false; }
 }
 
+/** Write one snapshot file: its header, then one line per message (one temp file, one rename). Throws. */
+function publishRecoverySnapshot(
+  sessionId: string,
+  title: string,
+  timestamp: number,
+  snapshot: SessionSnapshot,
+  options?: SessionPersistenceOptions,
+): void {
+  const lines: string[] = [];
+  lines.push(JSON.stringify({
+    type: 'meta',
+    sessionId,
+    title,
+    timestamp,
+    ...(snapshot.titleSource ? { titleSource: snapshot.titleSource } : {}),
+    ...(snapshot.returnContext ? { returnContext: loadedReturnContext(snapshot.returnContext) } : {}),
+    ...(snapshot.turn ? { turn: snapshot.turn } : {}),
+  }));
+  for (const message of snapshot.messages) {
+    lines.push(JSON.stringify({ type: 'message', ...message }));
+  }
+  if (Buffer.byteLength(lines[0]!, 'utf8') > RECOVERY_HEADER_LIMIT) throw new Error('Recovery header exceeds its supported limit');
+  const directory = resolveRecoveryDirPath(options);
+  const resolve = requireSurface(options).recoveryFile;
+  publishRecoveryPath(directory, sessionId, resolve, (path, assertCurrent) => {
+    writeFileAtomic(path, `${lines.join('\n')}\n`, { assertCurrent, cleanupStaleTemps: false });
+  });
+}
+
+/** Offered snapshots not yet restored or discarded, by recovery directory and session id (see OFFERED above). */
+const heldOffers = new Set<string>();
+
+function heldOfferKey(options: SessionPersistenceOptions | undefined, sessionId: string): string {
+  return `${resolveRecoveryDirPath(options)}\0${sessionId}`;
+}
+
+/**
+ * Hold a snapshot this process is offering: until it is restored or discarded,
+ * writing or deleting that session's snapshot first moves it under a session
+ * id of its own. One set insert.
+ */
+export function holdOfferedRecoverySnapshot(surface: SessionSurface, sessionId: string): void {
+  if (!sessionId.trim()) return;
+  try { heldOffers.add(heldOfferKey({ surface }, sessionId)); } catch { /* no recovery directory: nothing to protect */ }
+}
+
+/** The offered snapshot was restored or discarded: the live writer owns that session's file again. */
+export function releaseOfferedRecoverySnapshot(surface: SessionSurface, sessionId: string): void {
+  try { heldOffers.delete(heldOfferKey({ surface }, sessionId)); } catch { /* nothing was held */ }
+}
+
+/**
+ * When `sessionId`'s snapshot is an offered one still held, copy it under a
+ * new session id (same conversation, title marked, original time) and remove
+ * the original, so the live session's writes neither replace nor delete it.
+ * False when it could not be kept apart: the caller then leaves the file as it
+ * is. A held file that is gone or unreadable holds nothing to keep and is
+ * released. Cost: one set lookup per snapshot write; the copy runs at most
+ * once per offer.
+ */
+function keepHeldSnapshotApart(options: SessionPersistenceOptions | undefined, sessionId: string): boolean {
+  if (heldOffers.size === 0) return true;
+  const key = heldOfferKey(options, sessionId);
+  if (!heldOffers.has(key)) return true;
+  const path = pickRecoverySnapshotPath(options, sessionId);
+  const held = path === undefined ? null : loadRecoveryConversationAt(path, sessionId);
+  if (path === undefined || held === null || held.snapshot.messages.length === 0) {
+    heldOffers.delete(key);
+    return true;
+  }
+  const copyId = crypto.randomUUID();
+  const title = held.snapshot.title?.trim() ? `${held.snapshot.title.trim()} (before the crash)` : 'Session before the crash';
+  try {
+    publishRecoverySnapshot(copyId, title, held.snapshot.timestamp ?? Date.now(), held.snapshot, options);
+  } catch (error) {
+    logger.warn('[Recovery] The offered crash snapshot could not be kept apart from the live session; it is left as it is', { sessionId, error: summarizeError(error) });
+    return false;
+  }
+  heldOffers.delete(key);
+  // The copy holds it now; a delete that does not complete is overwritten by the live write.
+  deleteRecoverySnapshotAt(path, held.physical);
+  logger.info('[Recovery] Kept the offered crash snapshot apart from the live session', { sessionId, copyId });
+  return true;
+}
+
 /**
  * Write `sessionId`'s crash snapshot (one temp file, one rename). Never throws:
  * returns true when the snapshot is on disk, false when the conversation was
@@ -158,25 +251,9 @@ export function writeRecoveryFile(
 ): boolean {
   try {
     if (!snapshot.messages.length) return false;
-    const lines: string[] = [];
-    lines.push(JSON.stringify({
-      type: 'meta',
-      sessionId,
-      title,
-      timestamp: Date.now(),
-      ...(snapshot.titleSource ? { titleSource: snapshot.titleSource } : {}),
-      ...(snapshot.returnContext ? { returnContext: loadedReturnContext(snapshot.returnContext) } : {}),
-      ...(snapshot.turn ? { turn: snapshot.turn } : {}),
-    }));
-    for (const message of snapshot.messages) {
-      lines.push(JSON.stringify({ type: 'message', ...message }));
-    }
-    if (Buffer.byteLength(lines[0]!, 'utf8') > RECOVERY_HEADER_LIMIT) throw new Error('Recovery header exceeds its supported limit');
-    const directory = resolveRecoveryDirPath(options);
-    const resolve = requireSurface(options).recoveryFile;
-    publishRecoveryPath(directory, sessionId, resolve, (path, assertCurrent) => {
-      writeFileAtomic(path, `${lines.join('\n')}\n`, { assertCurrent, cleanupStaleTemps: false });
-    });
+    // An offered snapshot of this session the person has not answered is never replaced.
+    if (!keepHeldSnapshotApart(options, sessionId)) return false;
+    publishRecoverySnapshot(sessionId, title, Date.now(), snapshot, options);
     return true;
   } catch (error) {
     logger.warn('[Recovery] Write failed', { error: summarizeError(error) });
@@ -200,6 +277,8 @@ export function deleteRecoveryFile(options?: SessionPersistenceOptions, sessionI
   try {
     if (sessionId) {
       try {
+        // The turn-end save supersedes the live snapshot, not an offered crash snapshot of the same session.
+        if (!keepHeldSnapshotApart(options, sessionId)) return;
         const path = resolveRecoveryFilePath(options, sessionId);
         const selected = readRecoveryMetaObservation(path);
         if (selected.info.sessionId === sessionId) deleteRecoverySnapshotAt(path, selected.physical);
@@ -510,6 +589,7 @@ export function autoRestoreRecovery(
   // restored (never a directory sweep, and never a path re-derived from the
   // meta's session id, which a snapshot with an empty/foreign id would not
   // resolve back to).
+  heldOffers.delete(heldOfferKey(options, info.sessionId));
   const retired = deleteRecoverySnapshotAt(path, loaded.physical);
   if (!retired) {
     logger.warn('[Recovery] Restored snapshot could not be retired; it will be offered again until the session is saved', { sessionId: info.sessionId });
@@ -536,10 +616,12 @@ export interface RecoveryRemoveResult {
 export function removeRecoveryPoint(surface: SessionSurface, sessionId?: string): RecoveryRemoveResult {
   const options: SessionPersistenceOptions = { surface };
   const path = pickRecoverySnapshotPath(options, sessionId);
+  if (sessionId !== undefined) releaseOfferedRecoverySnapshot(surface, sessionId);
   if (!path) return { removed: false };
   try {
     const selected = readRecoveryMetaObservation(path);
     if (sessionId !== undefined && selected.info.sessionId !== sessionId) return { removed: false };
+    releaseOfferedRecoverySnapshot(surface, selected.info.sessionId);
     return { removed: deleteRecoverySnapshotAt(path, selected.physical) };
   } catch { return { removed: false }; }
 }

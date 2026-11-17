@@ -52,7 +52,7 @@ import type { BootstrapContext } from './runtime/bootstrap.ts';
 import { startFirstRenderFollowups, type DaemonRepairPrompt } from './shell/first-render-followups.ts';
 import './tools/agent-harness-model-routing.ts';
 import './tools/agent-harness-setup-model-helpers.ts';
-import { removeRecoveryPoint } from '@/runtime/index.ts';
+import { deleteRecoveryFile, removeRecoveryPoint } from '@/runtime/index.ts';
 import type { SessionSnapshot } from '@/runtime/index.ts';
 import { buildAgentRecoveryApply } from './shell/recovery-apply.ts';
 import { announceRecoveryOffer } from './shell/startup-wiring.ts';
@@ -67,7 +67,7 @@ import { wireShellUiOpeners } from './shell/ui-openers.ts';
 import { deriveComposerState } from './core/composer-state.ts';
 import { createPowerNoteSource } from './runtime/power-note-source.ts';
 import type { PowerState } from '@goodvibes-jev/engine/platform/platform/power';
-import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { buildPersistedSessionContextFromFacts, holdOfferedRecoverySnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { installFocusModeExitGuard, markFocusModeEnabled, wrapRequestPermissionWithApprovalAlert } from './shell/terminal-focus-mode.ts';
 import { createTerminalLifecycle, installTerminalExitGuards, makeFileEditorOpener } from '@goodvibes-jev/engine/terminal-shell';
 import type { PreparedShellCliRuntime } from './cli/entrypoint.ts';
@@ -471,7 +471,8 @@ async function main(prepared: PreparedShellCliRuntime) {
       buildMessagesSnapshot: () => ({ messages: conversationMessagesAsSessionRecords(conversation.getMessageSnapshot()), timestamp: Date.now(), title: conversation.title, ...conversation.branchState() }),
       shutdown: (saved) => ctx.shutdown(saved),
       // Scoped to this session only, a keyless call would clear every snapshot in the recovery dir.
-      removeRecoveryPoint: () => removeRecoveryPoint(ctx.services.surface, runtime.sessionId),
+      // The clean save supersedes the live snapshot; a crash snapshot of this session still on offer is kept apart.
+      removeRecoveryPoint: () => deleteRecoveryFile({ surface: ctx.services.surface }, runtime.sessionId),
       detach: () => {
         stdin.removeAllListeners('data');
         stdout.removeListener('resize', resizeHandler);
@@ -1397,6 +1398,8 @@ async function main(prepared: PreparedShellCliRuntime) {
   unsubs.push(whenCrashSnapshotFound(conversation, ({ info }) => {
     if (recoveryPending !== info.sessionId) announceRecoveryOffer(info, systemMessageRouter, render);
     recoveryPending = info.sessionId;
+    // The opened session is now live: its writes keep this snapshot apart until it is restored or discarded.
+    holdOfferedRecoverySnapshot(ctx.services.surface, info.sessionId);
     return 'offered';
   }));
   applyInitialTuiCliState({

@@ -40,9 +40,10 @@ export interface GatewayMethodDescriptor {
   /** Set by `methodDescriptor` for every builtin method; see `GatewayMethodEffect`. */
   readonly effect?: GatewayMethodEffect | undefined;
   /**
-   * The owner's own act (answering a purchase window, typing a card security
-   * code): the daemon takes it only with the owner-request signal, and an agent
-   * is refused and told how the owner does it.
+   * The owner's own act (answering a purchase window or the owner inbox, typing
+   * a card security code): the daemon takes it only from the owner's authority
+   * as the transport established it, and an agent is refused and told how the
+   * owner does it.
    */
   readonly ownerOnly?: boolean | undefined;
   /** The header or body field that makes a retry safe; the route that reads it is its owner. */

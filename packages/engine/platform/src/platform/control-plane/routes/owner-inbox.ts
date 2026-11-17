@@ -17,6 +17,7 @@ import {
 } from '../owner-inbox.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
+import { missingScopes } from '@goodvibes-jev/engine/daemon-api/route-helpers';
 
 export type OwnerInboxGatewayService = Pick<OwnerInbox, 'listNow' | 'get' | 'answer' | 'postNow' | 'withdraw' | 'reportDelivery' | 'postedBy' | 'revision' | 'subscribe'>;
 
@@ -88,17 +89,59 @@ export function createOwnerInboxListHandler(inbox: OwnerInboxGatewayService): Ga
   };
 }
 
+/**
+ * A purchase window answered here is the owner's own act, held to the authority
+ * payments.purchase.approve takes for the same answer: the transport's native
+ * owner (an app on the daemon's own machine or a paired device), admin, with
+ * write:payments, current when the answer is recorded. Nothing in the request
+ * body can supply it. Returns the authority to answer under, or throws.
+ */
+function purchaseAnswerAuthority(invocation: GatewayMethodInvocation) {
+  const forbidden = () => new GatewayVerbError('Answering a purchase window is the owner\'s own act: it needs an app on the daemon\'s own machine '
+    + 'or a paired device, with admin and write:payments. Nothing was answered.', 'FORBIDDEN', 403);
+  const context = invocation.context ?? {};
+  const authority = invocation.nativeExecutionAuthority;
+  let expected: ReturnType<NonNullable<typeof authority>['current']> | undefined;
+  try { expected = authority?.current(); } catch { throw forbidden(); }
+  let authorized = false;
+  try { authorized = invocation.isAuthorized?.(['write:payments']) === true; } catch { authorized = false; }
+  if (!authority || !expected || (expected.kind !== 'pairing-token' && expected.kind !== 'local') || context.admin !== true
+    || context.principalKind !== 'token' || context.principalId !== expected.principalId
+    || missingScopes(context.scopes ?? [], ['write:payments']).length > 0
+    || missingScopes(expected.scopes, ['write:payments']).length > 0 || !authorized) throw forbidden();
+  return { authority, expected, forbidden };
+}
+
 export function createOwnerInboxAnswerHandler(inbox: OwnerInboxGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const itemId = requireStringValue(params['itemId'], 'itemId');
     const option = optionalString(params['option'], 'option');
     const text = optionalString(params['text'], 'text');
-    const outcome = await inbox.answer(itemId, {
+    const answer = {
       ...(option !== undefined ? { option } : {}),
       ...(text !== undefined ? { text } : {}),
-    }, answerSource(invocation));
-    return outcomeResponse(outcome, option !== undefined ? 'option' : 'text');
+    };
+    const field = option !== undefined ? 'option' : 'text';
+    if (inbox.get(itemId)?.kind === 'purchase') {
+      const { authority, expected, forbidden } = purchaseAnswerAuthority(invocation);
+      let answering = false;
+      let outcome: OwnerAnswerOutcome;
+      try {
+        outcome = await authority.withCurrent(expected, async (assertCurrent) => {
+          assertCurrent();
+          answering = true;
+          return await inbox.answer(itemId, answer, answerSource(invocation));
+        });
+      } catch (error) {
+        // The owner's authority lapsing before the answer is a refusal; a failure of the answer itself is reported as it is.
+        if (answering || error instanceof GatewayVerbError) throw error;
+        throw forbidden();
+      }
+      return outcomeResponse(outcome, field);
+    }
+    const outcome = await inbox.answer(itemId, answer, answerSource(invocation));
+    return outcomeResponse(outcome, field);
   };
 }
 

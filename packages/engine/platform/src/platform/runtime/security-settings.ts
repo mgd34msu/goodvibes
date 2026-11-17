@@ -1,14 +1,24 @@
-import { FEATURE_FLAG_MAP } from './feature-flags/flags.js';
-import type { FlagState } from './feature-flags/types.js';
+import { CONFIG_SCHEMA } from '../config/schema.js';
+import type { ConfigKey } from '../config/schema-types.js';
 
+/**
+ * One security-relevant setting as it stands: the value read from the
+ * configuration next to the schema default, and whether that value is the
+ * insecure one the entry describes.
+ */
 export interface SecuritySettingReport {
   /** The settings key that controls this behavior. */
-  readonly key: string;
+  readonly key: ConfigKey;
   readonly type: 'setting' | 'configuration';
-  /** Internal capability id used to resolve the live state. */
-  readonly featureId: string;
-  readonly defaultState: FlagState | string;
-  readonly currentState: FlagState | string;
+  /** The schema default, as text (`safe-text`, `true`, ...). */
+  readonly defaultState: string;
+  /** The configured value, as text; the default when no configuration was given. */
+  readonly currentState: string;
+  /** The configured value itself; the default when no configuration was given. */
+  readonly value: unknown;
+  readonly defaultValue: unknown;
+  /** Whether the current value is the one `insecureWhen` describes. */
+  readonly insecure: boolean;
   readonly securityRelevant: true;
   readonly summary: string;
   readonly insecureWhen: string;
@@ -17,17 +27,23 @@ export interface SecuritySettingReport {
   readonly operationalNotes: readonly string[];
 }
 
-export interface SecuritySettingsReporter {
-  getState?(featureId: string): FlagState;
-  isEnabled?(featureId: string): boolean;
+/** Reads a setting's current value (a ConfigManager). */
+export interface SecuritySettingsReader {
+  get(key: ConfigKey): unknown;
 }
 
-const SECURITY_FEATURE_SETTINGS: readonly Omit<SecuritySettingReport, 'currentState'>[] = [
+interface SecuritySettingEntry extends Omit<SecuritySettingReport, 'defaultState' | 'currentState' | 'value' | 'defaultValue' | 'insecure'> {
+  /** True for the value `insecureWhen` describes. */
+  readonly isInsecure: (value: unknown) => boolean;
+}
+
+const isOff = (value: unknown): boolean => value === false;
+
+const SECURITY_SETTINGS: readonly SecuritySettingEntry[] = [
   {
     key: 'fetch.sanitizeMode',
     type: 'setting',
-    featureId: 'fetch-sanitization',
-    defaultState: FEATURE_FLAG_MAP.get('fetch-sanitization')?.defaultState ?? 'enabled',
+    isInsecure: (value) => value === 'none',
     securityRelevant: true,
     summary: 'Controls fetch response sanitization; host trust-tier blocking is always active.',
     insecureWhen:
@@ -47,8 +63,7 @@ const SECURITY_FEATURE_SETTINGS: readonly Omit<SecuritySettingReport, 'currentSt
   {
     key: 'permissions.engine',
     type: 'setting',
-    featureId: 'permissions-policy-engine',
-    defaultState: FEATURE_FLAG_MAP.get('permissions-policy-engine')?.defaultState ?? 'disabled',
+    isInsecure: (value) => value === 'baseline',
     securityRelevant: true,
     summary: 'Selects the layered permission evaluator (policy-engine) for tool execution.',
     insecureWhen:
@@ -66,8 +81,7 @@ const SECURITY_FEATURE_SETTINGS: readonly Omit<SecuritySettingReport, 'currentSt
   {
     key: 'policy.requireSignedBundles',
     type: 'setting',
-    featureId: 'policy-signing',
-    defaultState: FEATURE_FLAG_MAP.get('policy-signing')?.defaultState ?? 'disabled',
+    isInsecure: isOff,
     securityRelevant: true,
     summary: 'Controls HMAC signature validation for managed permission policy bundles.',
     insecureWhen:
@@ -85,8 +99,7 @@ const SECURITY_FEATURE_SETTINGS: readonly Omit<SecuritySettingReport, 'currentSt
   {
     key: 'permissions.simulation',
     type: 'setting',
-    featureId: 'permissions-simulation',
-    defaultState: FEATURE_FLAG_MAP.get('permissions-simulation')?.defaultState ?? 'enabled',
+    isInsecure: isOff,
     securityRelevant: true,
     summary: 'Runs the candidate permission evaluator beside the active evaluator without changing enforcement.',
     insecureWhen:
@@ -103,8 +116,7 @@ const SECURITY_FEATURE_SETTINGS: readonly Omit<SecuritySettingReport, 'currentSt
   {
     key: 'permissions.divergenceDashboard',
     type: 'setting',
-    featureId: 'permission-divergence-dashboard',
-    defaultState: FEATURE_FLAG_MAP.get('permission-divergence-dashboard')?.defaultState ?? 'enabled',
+    isInsecure: isOff,
     securityRelevant: true,
     summary: 'Surfaces permission evaluator divergence and gates enforce-mode rollout.',
     insecureWhen:
@@ -122,8 +134,7 @@ const SECURITY_FEATURE_SETTINGS: readonly Omit<SecuritySettingReport, 'currentSt
   {
     key: 'policy.registryEnabled',
     type: 'setting',
-    featureId: 'policy-as-code',
-    defaultState: FEATURE_FLAG_MAP.get('policy-as-code')?.defaultState ?? 'disabled',
+    isInsecure: isOff,
     securityRelevant: true,
     summary: 'Controls versioned permission policy bundle promotion and rollback.',
     insecureWhen:
@@ -141,8 +152,7 @@ const SECURITY_FEATURE_SETTINGS: readonly Omit<SecuritySettingReport, 'currentSt
   {
     key: 'runtime.toolBudget.enforced',
     type: 'setting',
-    featureId: 'runtime-tools-budget-enforcement',
-    defaultState: FEATURE_FLAG_MAP.get('runtime-tools-budget-enforcement')?.defaultState ?? 'disabled',
+    isInsecure: isOff,
     securityRelevant: true,
     summary: 'Controls runtime budget enforcement for tool execution pipelines.',
     insecureWhen:
@@ -160,8 +170,7 @@ const SECURITY_FEATURE_SETTINGS: readonly Omit<SecuritySettingReport, 'currentSt
   {
     key: 'security.tokenAudit.enabled',
     type: 'setting',
-    featureId: 'token-scope-rotation-audit',
-    defaultState: FEATURE_FLAG_MAP.get('token-scope-rotation-audit')?.defaultState ?? 'enabled',
+    isInsecure: isOff,
     securityRelevant: true,
     summary: 'Audits API tokens for excessive scopes and stale rotation cadence.',
     insecureWhen:
@@ -179,8 +188,7 @@ const SECURITY_FEATURE_SETTINGS: readonly Omit<SecuritySettingReport, 'currentSt
   {
     key: 'tools.contractVerification',
     type: 'setting',
-    featureId: 'tool-contract-verification',
-    defaultState: FEATURE_FLAG_MAP.get('tool-contract-verification')?.defaultState ?? 'enabled',
+    isInsecure: isOff,
     securityRelevant: true,
     summary: 'Validates registered tool contracts, timeout behavior, permission class mapping, and output policy alignment.',
     insecureWhen:
@@ -198,8 +206,7 @@ const SECURITY_FEATURE_SETTINGS: readonly Omit<SecuritySettingReport, 'currentSt
   {
     key: 'permissions.commandParser',
     type: 'setting',
-    featureId: 'shell-ast-normalization',
-    defaultState: FEATURE_FLAG_MAP.get('shell-ast-normalization')?.defaultState ?? 'enabled',
+    isInsecure: (value) => value === 'flat',
     securityRelevant: true,
     summary: 'Controls the parse that refuses an exec command with nothing to run, just before it runs (default ast).',
     insecureWhen:
@@ -218,28 +225,25 @@ const SECURITY_FEATURE_SETTINGS: readonly Omit<SecuritySettingReport, 'currentSt
 ];
 
 export function getSecuritySettingsReport(
-  reporter: SecuritySettingsReporter | null | undefined,
+  config: SecuritySettingsReader | null | undefined,
 ): SecuritySettingReport[] {
-  return SECURITY_FEATURE_SETTINGS.map((setting) => {
-    const currentState = reporter?.getState
-      ? safeGetState(reporter, setting.featureId, setting.defaultState)
-      : reporter?.isEnabled?.(setting.featureId)
-        ? 'enabled'
-        : setting.defaultState;
+  return SECURITY_SETTINGS.map(({ isInsecure, ...setting }) => {
+    const defaultValue = CONFIG_SCHEMA.find((entry) => entry.key === setting.key)?.default;
+    const value = config ? readSetting(config, setting.key, defaultValue) : defaultValue;
     return {
       ...setting,
-      currentState,
+      defaultState: String(defaultValue),
+      currentState: String(value),
+      value,
+      defaultValue,
+      insecure: isInsecure(value),
     };
   });
 }
 
-function safeGetState(
-  reporter: SecuritySettingsReporter,
-  featureId: string,
-  fallback: FlagState | string,
-): FlagState | string {
+function readSetting(config: SecuritySettingsReader, key: ConfigKey, fallback: unknown): unknown {
   try {
-    return reporter.getState?.(featureId) ?? fallback;
+    return config.get(key) ?? fallback;
   } catch {
     return fallback;
   }

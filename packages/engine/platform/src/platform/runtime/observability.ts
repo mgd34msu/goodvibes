@@ -149,7 +149,7 @@ export type {
   LedgerEntry,
 } from './telemetry/exporters/local-ledger.js';
 export { getSecuritySettingsReport } from './security-settings.js';
-export type { SecuritySettingReport, SecuritySettingsReporter } from './security-settings.js';
+export type { SecuritySettingReport, SecuritySettingsReader } from './security-settings.js';
 
 // ── Runtime metrics ────────────────────────────────────────────────────────
 // The process-wide RuntimeMeter snapshot (HTTP/LLM/auth/transport counters,

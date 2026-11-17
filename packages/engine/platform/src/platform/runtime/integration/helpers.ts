@@ -519,7 +519,7 @@ export class IntegrationHelperService {
   }
 
   getSecuritySettingsReport(): readonly SecuritySettingReport[] {
-    return getSecuritySettingsReport(this.context.featureFlags);
+    return getSecuritySettingsReport(this.context.configManager);
   }
 
   getLocalAuthSnapshot(): Record<string, unknown> {

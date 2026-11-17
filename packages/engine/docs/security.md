@@ -197,12 +197,12 @@ flow, the deep-link/QR content, offer set, migration path, and client integratio
 
 platform hosts can expose a user-facing explanation of security-relevant settings with:
 
-- `getSecuritySettingsReport(gates)` from the runtime surface
+- `getSecuritySettingsReport(configManager)` from the runtime surface
 - `IntegrationHelperService.getSecuritySettingsReport()`
 - daemon `GET /api/security-settings`
 - gateway method `security.settings`
 
-Each report entry includes the setting key, default state, current state, what the setting does, why the disabled state is less restrictive, what enabling it changes, and any operational requirements. This is intended for TUI/onboarding flows so users see exactly which security-relevant settings are on, off, and why.
+Each report entry includes the setting key, its configured value (`value`, also as text in `currentState`) next to the schema default (`defaultValue`, `defaultState`), `insecure` (true when the configured value is the one `insecureWhen` describes, for example `fetch.sanitizeMode` set to `none`), what the setting does, what enabling it changes, and any operational requirements. This is intended for TUI/onboarding flows so users see exactly which security-relevant settings are on, off, and why.
 
 The current report covers ten security-sensitive settings, each guarding one
 enforcement mechanism. Their enablement shapes and defaults are in the

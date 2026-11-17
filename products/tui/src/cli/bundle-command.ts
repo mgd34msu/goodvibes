@@ -30,9 +30,6 @@ export const handleBundleCommand = createSupportBundleCommand<
     authPosture: readAuthPaths,
     packageVersion: getPackageVersion,
     onboardingMarkerPath: getOnboardingCheckMarkerPath,
-    applySetting(runtime, key, value) {
-      runtime.configManager.setDynamic(key, value as never);
-    },
   },
   {
     site: 'terminal-shell.support-bundle.export',

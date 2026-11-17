@@ -1,6 +1,6 @@
 import { retainCliConfig } from './cli-config-owner.js';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
@@ -20,7 +20,7 @@ import {
 export interface SupportBundleRuntime {
   readonly workingDirectory: string;
   readonly homeDirectory: string;
-  readonly configManager: Parameters<typeof retainCliConfig>[0];
+  readonly configManager: Parameters<typeof retainCliConfig>[0] & Pick<ConfigManager, 'validateDynamic' | 'setMany'>;
   readonly cli: {
     readonly commandArgs: readonly string[];
     readonly binary: string;
@@ -72,7 +72,6 @@ export function createSupportBundleCommand<
     readonly authPosture: (runtime: Runtime) => unknown;
     readonly packageVersion: () => string;
     readonly onboardingMarkerPath: (paths: ShellPathService, scope: 'user' | 'project') => string;
-    readonly applySetting: (runtime: Runtime, key: ConfigKey, value: unknown) => void;
   },
   policy: {
     readonly site: string;
@@ -246,7 +245,6 @@ export function createSupportBundleCommand<
       const config = parsed.value['config'];
       if (!config || typeof config !== 'object') return { output: 'Bundle has no config object to import.', exitCode: 1 };
       const pending: { key: ConfigKey; value: unknown }[] = [];
-      const failed: { key: string; message: string }[] = [];
       let skippedRedacted = 0;
       for (const setting of bindings.schema) {
         const value = getNestedValue(config, setting.key);
@@ -255,26 +253,29 @@ export function createSupportBundleCommand<
           skippedRedacted++;
           continue;
         }
-        // Check every value before changing any, so a bad key cannot leave a half-imported configuration.
-        try {
-          runtime.configManager.validateDynamic(setting.key, value);
-          pending.push({ key: setting.key, value });
-        } catch (error) {
-          failed.push({ key: setting.key, message: summarizeError(error) });
-        }
+        pending.push({ key: setting.key, value });
       }
       const redactedNote = skippedRedacted ? ` ${skippedRedacted} redacted value${skippedRedacted === 1 ? '' : 's'} skipped.` : '';
-      if (failed.length > 0) {
-        return {
-          output: [
-            `Bundle not imported: ${failed.length} value${failed.length === 1 ? '' : 's'} cannot be applied. Nothing was changed.`,
-            ...failed.map((entry) => `  ${entry.key}: ${entry.message}`),
-          ].join('\n'),
-          exitCode: 1,
-        };
-      }
       const count = pending.length;
       if (!apply) {
+        // The preview names every value the import would refuse, so one --yes run can succeed.
+        const failed: { key: string; message: string }[] = [];
+        for (const entry of pending) {
+          try {
+            runtime.configManager.validateDynamic(entry.key, entry.value);
+          } catch (error) {
+            failed.push({ key: entry.key, message: summarizeError(error) });
+          }
+        }
+        if (failed.length > 0) {
+          return {
+            output: [
+              `Bundle not imported: ${failed.length} value${failed.length === 1 ? '' : 's'} cannot be applied. Nothing was changed.`,
+              ...failed.map((entry) => `  ${entry.key}: ${entry.message}`),
+            ].join('\n'),
+            exitCode: 1,
+          };
+        }
         return {
           output: [
             `Refusing to import ${count} config value${count === 1 ? '' : 's'} without --yes. Nothing was changed.${redactedNote}`,
@@ -284,17 +285,15 @@ export function createSupportBundleCommand<
           exitCode: 2,
         };
       }
-      const applied: string[] = [];
-      try {
-        for (const entry of pending) {
-          bindings.applySetting(runtime, entry.key, entry.value);
-          applied.push(entry.key);
-        }
-      } catch (error) {
+      // One update: every value is admitted before anything is written, so a
+      // bad value leaves the configuration as it was.
+      const result = runtime.configManager.setMany(pending, { kind: 'owner', surface: `${policy.commandBase(runtime)} import` });
+      if (!result.ok) {
         return {
           output: [
-            `Bundle import stopped after ${applied.length} of ${count} value${count === 1 ? '' : 's'}: ${summarizeError(error)}`,
-            ...applied.map((key) => `  applied ${key}`),
+            `Bundle not imported: ${result.refusal.reason} State: ${result.refusal.state}.`,
+            ...result.refusal.next.map((step) => `  ${step}`),
+            ...result.saved.map((key) => `  saved ${key}`),
           ].join('\n'),
           exitCode: 1,
         };

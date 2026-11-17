@@ -53,9 +53,6 @@ export const handleBundleCommand = createSupportBundleCommand<
     authPosture: readAuthPosture,
     packageVersion: getPackageVersion,
     onboardingMarkerPath: getOnboardingCheckMarkerPath,
-    applySetting(runtime, key, value) {
-      runtime.configManager.setDynamic(key, value);
-    },
   },
   {
     site: 'agent.cli.bundle-export',

@@ -597,6 +597,8 @@ export function createDaemonFacadeCollaborators(
     channelPlugins: runtime.channelPlugins,
     routeBindings: runtime.routeBindings,
     runtimeBus: runtime.runtimeBus,
+    // The style the spawn decided (conversation or report) shapes the reply; a contract is only the fallback.
+    replyStyleOf: (agentId) => runtime.agentManager.getStatus(agentId)?.replyStyle,
   });
   const surfaceDeliveryStartedAt = new Map<string, number>();
   const surfaceDeliveryHelper = new DaemonSurfaceDeliveryHelper({

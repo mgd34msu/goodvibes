@@ -9265,7 +9265,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "scope": "sample",
           "secure": false,
           "overriddenByEnv": false,
-          "refSource": "sample"
+          "refSource": "sample",
+          "reference": "not-checked"
         }
       ]
     }

@@ -4,7 +4,7 @@ Generated from the synced GoodVibes operator contract artifact.
 
 ## Summary
 
-- Methods: `630`
+- Methods: `629`
 - Events: `36`
 - Auth modes: `shared-bearer`, `session-login`
 - HTTP status path: `/status`
@@ -71918,47 +71918,6 @@ Authenticate a local control-plane user and create a session token.
     "token",
     "username",
     "expiresAt"
-  ],
-  "additionalProperties": false
-}
-```
-
-#### `control.auth.logout`
-
-End the sign-in session that authenticates this request (its bearer or session cookie) and expire the session cookie. Any signed-in user may end their own session; ending another session is local_auth.sessions.delete (admin). A credential that is not a live sign-in session is answered 401 SESSION_UNKNOWN.
-
-- Title: `Logout`
-- Source: `builtin`
-- Access: `public`
-- Transport: `http`
-- HTTP: `POST /logout`
-- Scopes: none
-- Emits events: none
-- Dangerous: `no`
-- Invokable: `no`
-
-##### Input schema
-
-```json
-{
-  "type": "object",
-  "properties": {},
-  "additionalProperties": false
-}
-```
-
-##### Output schema
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "revoked": {
-      "type": "boolean"
-    }
-  },
-  "required": [
-    "revoked"
   ],
   "additionalProperties": false
 }

@@ -6309,7 +6309,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "scope": "sample",
           "secure": false,
           "overriddenByEnv": false,
-          "refSource": "sample"
+          "refSource": "sample",
+          "reference": "not-checked"
         }
       ]
     }

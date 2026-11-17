@@ -43,27 +43,24 @@ export async function flush(times = 3): Promise<void> {
 }
 
 /**
- * Wait, in real milliseconds, until `predicate` holds.
+ * Let the event loop turn until `predicate` holds, bounded in turns, never in
+ * milliseconds.
  *
- * Real time is unavoidable here because the fake IMAP server is a real
- * loopback socket, so "the watcher has received the response" is genuinely
- * asynchronous. The waits are milliseconds, not minutes: everything with a
- * long duration in it runs on the fake clock instead.
+ * The fake IMAP server is a real loopback socket, so "the watcher has received
+ * the response" is genuinely asynchronous; each turn lets the sockets deliver.
+ * Everything with a duration in it runs on the fake clock instead. A condition
+ * that never holds fails by name once the turns run out.
  */
 export async function waitFor(
   predicate: () => boolean,
   what: string,
-  // Below bun's own per-test timeout on purpose: when a wait never completes,
-  // the useful failure names the condition that never held, and the harness
-  // has to lose that race to the runner for the name to be printed.
-  timeoutMs = 3_000,
+  turns = 40_000,
 ): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  for (let turn = 0; turn < turns; turn += 1) {
     if (predicate()) return;
-    await new Promise<void>((resolve) => { setTimeout(resolve, 2); });
+    await new Promise<void>((resolve) => { setImmediate(resolve); });
   }
-  throw new Error(`Timed out after ${timeoutMs} ms waiting for: ${what}`);
+  if (!predicate()) throw new Error(`Gave up after ${turns} event-loop turns waiting for: ${what}`);
 }
 
 export class FakeClock implements WatcherClock {

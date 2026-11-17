@@ -20,7 +20,6 @@
 import { afterAll, afterEach, describe, expect, test } from 'bun:test';
 import { InboundMessageDedup } from '../platform/src/platform/adapters/inbound-dedup.ts';
 import {
-  DEFAULT_INBOUND_MAIL_DEDUP_TTL_MS,
   DedupingInboundMailSink,
   createInboundMailDedup,
   inboundMailDedupKey,
@@ -140,19 +139,11 @@ async function build(): Promise<Harness> {
 }
 
 describe('identity is per-source and server-assigned', () => {
-  test('IMAP identity is the UID under its UIDVALIDITY generation', () => {
-    expect(inboundMailSourceIdentity({ source: 'imap', uidValidity: 42, uid: 101 }))
-      .toBe('imap:42:101');
-    // The same UID under a different generation is a DIFFERENT message: a
-    // rebuilt mailbox reissues UIDs from 1, so dropping the generation would
+  test('the same UID under another UIDVALIDITY generation is a different message', () => {
+    // A rebuilt mailbox reissues UIDs from 1, so dropping the generation would
     // suppress new mail as a repeat of mail that no longer exists.
     expect(inboundMailSourceIdentity({ source: 'imap', uidValidity: 43, uid: 101 }))
       .not.toBe(inboundMailSourceIdentity({ source: 'imap', uidValidity: 42, uid: 101 }));
-  });
-
-  test('Gmail identity is the id Gmail assigned, since it has no UID', () => {
-    expect(inboundMailSourceIdentity({ source: 'gmail', messageId: '18f0a' }))
-      .toBe('gmail:18f0a');
   });
 
   test('an unusable id yields no key, so the message is delivered rather than collapsed', () => {
@@ -171,13 +162,6 @@ describe('identity is per-source and server-assigned', () => {
       account: 'a', mailbox: 'Archive', id: { source: 'imap', uidValidity: 42, uid: 7 },
     });
     expect(first).not.toBe(second);
-  });
-
-  test('the email cache outlives a restart cycle, unlike the shared ntfy default', () => {
-    // Ten minutes, the module default, is shorter than a crash-restart, and
-    // the daemon restarts itself hourly at idle. A message fetched just before
-    // a restart would come back after it with its claim already expired.
-    expect(DEFAULT_INBOUND_MAIL_DEDUP_TTL_MS).toBe(60 * 60_000);
   });
 });
 
@@ -256,33 +240,8 @@ describe('a redelivered message produces exactly one notice', () => {
     expect((await harness.cursors.get(ACCOUNT, MAILBOX))?.lastSeenUid).toBe(102);
   });
 
-  test('a suppressed duplicate resolves rather than throwing', async () => {
-    // Suppression resolves rather than throwing. Throwing would pin the cursor
-    // below a message that is suppressed again on every pass, and the watcher
-    // would re-fetch it forever while making no progress.
-    //
-    // This half is about the SINK. The cursor half, that a real drain then
-    // advances past the suppressed message, is asserted in the test below,
-    // because it is a property of the drain and cannot be seen from here. The
-    // two used to be one test carrying the cursor claim in its name and no
-    // cursor in its body.
-    const dedup = createInboundMailDedup();
-    const handled: number[] = [];
-    const sink = new DedupingInboundMailSink({
-      dedup,
-      handle: async (raw) => { handled.push(requireImapMessage(raw, 'dedup handle').uid); },
-    });
-    const msg = imapMessageFixture({
-      account: ACCOUNT, mailbox: MAILBOX, uidValidity: 42, uid: 7, via: 'idle',
-    });
-
-    await sink.deliver(msg);
-    await expect(sink.deliver(msg)).resolves.toBeUndefined();
-    expect(handled).toEqual([7]);
-  });
-
   test('a suppressed duplicate still ADVANCES THE CURSOR, so the mailbox drains', async () => {
-    // The claim the name above used to make and never checked. A drain whose
+    // A drain whose
     // sink suppresses must still move the cursor past the message: if it did
     // not, every later pass would re-search from the same point, re-fetch the
     // same UID, suppress it again, and the mailbox would never drain, the

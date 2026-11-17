@@ -96,13 +96,21 @@ const IN_FLIGHT_STATES: readonly ProcessState[] = [
 ];
 
 /**
+ * Node kinds that never hold work a restart would cut short. A watcher is a
+ * standing source the daemon re-arms at start: starting shows as `queued` and
+ * a degraded one as `stalled`, and a restart is usually what clears it.
+ * Observed external sessions are not ours to protect.
+ */
+const NOT_IN_FLIGHT_KINDS: ReadonlySet<ProcessNode['kind']> = new Set(['observed-external', 'watcher']);
+
+/**
  * Ids of the owned work now in flight: agents, contracts, automation runs,
- * watchers, background processes and hosted agents. Empty means the daemon is
- * idle. Observed external sessions are not ours to protect and are left out.
+ * trigger runs, background processes and hosted agents. Empty means the
+ * daemon is idle.
  */
 export function inFlightWorkIds(registry: Pick<ProcessRegistry, 'query'>): string[] {
   return registry.query({ states: IN_FLIGHT_STATES }).nodes
-    .filter((node) => node.kind !== 'observed-external')
+    .filter((node) => !NOT_IN_FLIGHT_KINDS.has(node.kind))
     .map((node) => node.id);
 }
 

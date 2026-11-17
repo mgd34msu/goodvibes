@@ -105,8 +105,12 @@ function readLiveSources(context: CommandContext) {
   let artifacts: readonly ArtifactDescriptor[] = [];
   const store = context.platform.artifactStore;
   if (store) {
-    try { artifacts = store.list(RECEIPT_SCAN_LIMIT).filter(artifact => WATCHER_RECEIPT_PURPOSES.has(artifactMetadataString(artifact, 'purpose'))); }
-    catch { unavailable.push('artifacts'); }
+    // A store that cannot list cannot show its receipts: name it, do not show it empty.
+    if (!store.list) unavailable.push('artifacts');
+    else {
+      try { artifacts = store.list(RECEIPT_SCAN_LIMIT).filter(artifact => WATCHER_RECEIPT_PURPOSES.has(artifactMetadataString(artifact, 'purpose'))); }
+      catch { unavailable.push('artifacts'); }
+    }
   }
   let researchRuns: readonly AgentResearchRunRecord[] = [];
   const shellPaths = context.workspace.shellPaths;

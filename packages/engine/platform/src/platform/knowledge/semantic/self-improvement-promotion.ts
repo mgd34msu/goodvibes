@@ -10,7 +10,7 @@ import { guardKnowledgeEdgeInput } from '../store-edge-writes.js';
 import { createSemanticNodeSlugPlanner } from './node-slug.js';
 import { writeSupportedRepairSubjectLinks } from './repair-subject-write-plan.js';
 import { createGeneratedClaimReferenceScope, type GeneratedClaimRelinking } from './verification/structural-references.js';
-import { withSupportBudget } from './support-budget.js';
+import { runWithBudget, SUPPORT_BUDGET_ERRORS } from './self-improvement-budget.js';
 import { sleep, yieldEvery, yieldToEventLoop } from '../cooperative.js';
 import { getKnowledgeSpaceId } from '../spaces.js';
 import type { KnowledgeObjectProfilePolicy } from '../extensions.js';
@@ -76,7 +76,8 @@ export async function promoteRepairSources(
   task: KnowledgeRefinementTaskRecord,
   deadlineAt: number,
 ): Promise<PromoteRepairSourcesResult> {
-  return withSupportBudget((signal) => promoteRepairSourcesWithinBudget(context, spaceId, gap, sourceIds, task, deadlineAt, signal), deadlineAt - Date.now());
+  return runWithBudget((signal) => promoteRepairSourcesWithinBudget(context, spaceId, gap, sourceIds, task, deadlineAt, signal),
+    deadlineAt - Date.now(), undefined, SUPPORT_BUDGET_ERRORS);
 }
 
 async function promoteRepairSourcesWithinBudget(
@@ -181,8 +182,8 @@ async function promoteRepairSourcesWithinBudget(
       if (remainingMs < 1_000) break;
       try {
         const enrich = context.enrichSource;
-        await withSupportBudget((childSignal) => enrich(sourceId, { knowledgeSpaceId: spaceId, force: true, signal: childSignal, shouldStop: context.shouldStop }),
-          Number.isFinite(remainingMs) ? remainingMs : 0, signal);
+        await runWithBudget((childSignal) => enrich(sourceId, { knowledgeSpaceId: spaceId, force: true, signal: childSignal, shouldStop: context.shouldStop }),
+          remainingMs, signal, SUPPORT_BUDGET_ERRORS);
       } catch (error) {
         // Earlier settled promotion/link passes stand; this hold must not start a fallback pass.
         if (isKnowledgeSourceQualityFailure(error) || error instanceof KnowledgeGeneratedFactSupportHeldError) throw error;

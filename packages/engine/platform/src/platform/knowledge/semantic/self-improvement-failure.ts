@@ -4,8 +4,7 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
 import { isKnowledgeSourceQualityFailure } from '../source-quality.js';
 import { repairFailureCause } from './self-improvement-failure-battery.js';
-import { KnowledgeRepairBudgetError, timerBudgetMs } from './self-improvement-budget.js';
-import { isOwnedSupportBudgetExpiry } from './support-budget.js';
+import { KnowledgeRepairBudgetError, KnowledgeSupportBudgetError, timerBudgetMs } from './self-improvement-budget.js';
 
 const SITE = 'knowledge.self-improvement.failure-cause';
 const CAUSES = ['request_timeout', 'run_budget', 'other', 'unknown'] as const;
@@ -28,7 +27,7 @@ function field(value: unknown, key: string): unknown {
 }
 function structuralCause(error: unknown): { cause: Cause; basis: string } | undefined {
   if (error instanceof KnowledgeRepairBudgetError) return { cause: 'run_budget', basis: 'owned-timer' };
-  if (isOwnedSupportBudgetExpiry(error)) return { cause: 'run_budget', basis: 'owned-support-timer' };
+  if (error instanceof KnowledgeSupportBudgetError) return { cause: 'run_budget', basis: 'owned-support-timer' };
   // A failed/unsettled judgment is not evidence of the repair's budget cause.
   if (isKnowledgeSourceQualityFailure(error)) return { cause: 'other', basis: 'typed-judgment-hold' };
   if (error instanceof GoodVibesError && error.category !== 'unknown') {

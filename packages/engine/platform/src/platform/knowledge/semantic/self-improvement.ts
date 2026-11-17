@@ -20,7 +20,7 @@ import { ACTIVE_REFINEMENT_STATES } from '../types.js';
 import { KnowledgeStoreConflictError } from '../store-conflict.js';
 import { KnowledgeScopeSelectionHeldError } from '../scope-selection.js';
 import { SemanticIdentityHeldError } from '../store-semantic-fact-selector.js';
-import { runWithRepairBudget, timerBudgetMs } from './self-improvement-budget.js';
+import { runWithBudget, timerBudgetMs } from './self-improvement-budget.js';
 import { captureRepairFailureReader, type RepairFailureConclusion } from './self-improvement-failure.js';
 import { captureRepairFailureWrites, KnowledgeRepairFailureWriteStaleError } from './self-improvement-failure-writes.js';
 import { KnowledgeNodeActivationHeldError } from '../activation/types.js';
@@ -631,7 +631,7 @@ async function runGapRepairerWithBudget(input: {
   readonly assertCurrent: () => void;
 }): Promise<GapRepairerResult> {
   const { input: runInput, spaceId, gap, gapContext, gapRepairer, remainingMs } = input;
-  return runWithRepairBudget((signal) => gapRepairer(bindWebGapRepairInvocation(input.store, gapRepairer, {
+  return runWithBudget((signal) => gapRepairer(bindWebGapRepairInvocation(input.store, gapRepairer, {
     spaceId,
     query: gap.title,
     gaps: [gap],

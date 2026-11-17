@@ -3,7 +3,7 @@ import { prepareJudgmentResult } from '../../../gate/judgment-result.js';
 import { captureJudgmentPort, DecisionModelsDisabledError, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { fanOut, toJson, type JsonValue } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput } from '../../../gate/judgment-input.js';
-import { withSupportBudget } from '../../semantic/support-budget.js';
+import { runWithBudget, SUPPORT_BUDGET_ERRORS } from '../../semantic/self-improvement-budget.js';
 import { KnowledgeGeneratedFactSupportHeldError } from '../../semantic/verification/types.js';
 import { HOME_GRAPH_SUBJECT_SLOTS, homeGraphDocumentKind, homeGraphDocumentSubject } from './battery.js';
 
@@ -53,9 +53,9 @@ export function createHomeGraphAutoLinkReader() {
     const slots = HOME_GRAPH_SUBJECT_SLOTS.slice(0, candidates.length);
     const port = installation.port;
     const current = () => { if (options.signal?.aborted) throw new Held('aborted'); options.assertCurrent(); };
-    const asked = await withSupportBudget((signal) => fanOut(port, state, { kind: homeGraphDocumentKind, subject: homeGraphDocumentSubject },
+    const asked = await runWithBudget((signal) => fanOut(port, state, { kind: homeGraphDocumentKind, subject: homeGraphDocumentSubject },
       { signal, beforeAttempt: current, site: homeGraphDocumentSubject.name, only: { subject: slots } }),
-    READING_DEADLINE_MS, AbortSignal.any([installation.signal, ...(options.signal ? [options.signal] : [])]))
+    READING_DEADLINE_MS, AbortSignal.any([installation.signal, ...(options.signal ? [options.signal] : [])]), SUPPORT_BUDGET_ERRORS)
       .then((value) => ({ value }), (error: unknown) => ({ error }));
     if ('error' in asked) {
       const { error } = asked;

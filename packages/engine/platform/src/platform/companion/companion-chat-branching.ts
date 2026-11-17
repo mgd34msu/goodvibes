@@ -45,17 +45,22 @@ function branchError(message: string, code: string, status: number): Error {
   return Object.assign(new Error(message), { code, status });
 }
 
-/** Mark messages[fromIndex..] as superseded in place, returning the ids touched. */
+/**
+ * Mark messages[fromIndex..] as superseded in place, returning the ids touched.
+ * A message `spare` accepts stays active.
+ */
 function supersedeFrom(
   session: BranchingSession,
   fromIndex: number,
   reason: CompanionChatSupersededReason,
   now: number,
+  spare: (message: CompanionChatMessage) => boolean = () => false,
 ): string[] {
   const superseded: string[] = [];
   for (let i = fromIndex; i < session.messages.length; i++) {
     const msg = session.messages[i]!;
     if (msg.supersededAt !== undefined) continue; // already retained history, leave as-is
+    if (spare(msg)) continue;
     session.messages[i] = { ...msg, supersededAt: now, supersededReason: reason };
     superseded.push(msg.id);
   }
@@ -79,7 +84,9 @@ export interface RegeneratePlan {
  * Plan a regenerate. Without an id the anchor is the LAST active user message
  * and whatever follows it (its reply, a failed reply, or nothing) is
  * superseded, so a regenerate whose new turn failed is retried by the identical
- * call instead of rewinding the chat by one exchange. With an id, that active
+ * call instead of rewinding the chat by one exchange. A reply to an EARLIER
+ * active user message stored after the anchor (a message sent while that reply
+ * was running) is not part of the exchange and stays active. With an id, that active
  * assistant message and everything after it are superseded and the nearest
  * active user message before it is the anchor.
  *
@@ -141,8 +148,13 @@ export function planRegenerate(
   }
 
   const anchorUserMessageId = messages[anchorIndex]!.id;
-  const regeneratedFrom = messages.slice(fromIndex).find((m) => m.supersededAt === undefined && m.role === 'assistant')?.id;
-  const supersededMessageIds = supersedeFrom(session, fromIndex, 'regenerate', now);
+  // Without an id: a reply that answers an earlier active user message belongs to that exchange.
+  const earlierUserIds = targetMessageId === undefined
+    ? new Set(messages.slice(0, anchorIndex).filter((m) => m.supersededAt === undefined && m.role === 'user').map((m) => m.id))
+    : new Set<string>();
+  const spare = (m: CompanionChatMessage): boolean => m.role === 'assistant' && m.inReplyTo !== undefined && earlierUserIds.has(m.inReplyTo);
+  const regeneratedFrom = messages.slice(fromIndex).find((m) => m.supersededAt === undefined && m.role === 'assistant' && !spare(m))?.id;
+  const supersededMessageIds = supersedeFrom(session, fromIndex, 'regenerate', now, spare);
   session.lastActivityAt = now;
   return { ...(regeneratedFrom !== undefined ? { regeneratedFrom } : {}), supersededMessageIds, anchorUserMessageId };
 }

@@ -46,7 +46,6 @@ export interface CliRelayStatus {
   readonly configEnabled: boolean;
   readonly featureEnabled: boolean;
   readonly url: string;
-  readonly rendezvousId: string;
   readonly requireStepUpForMutations: boolean;
 }
 
@@ -241,7 +240,7 @@ function renderRelaySection(relay: CliRelayStatus | null): string[] {
     `  configEnabled (relay.enabled): ${yesNo(relay.configEnabled)}`,
     `  featureEnabled (relay-connect flag): ${yesNo(relay.featureEnabled)}`,
     `  url: ${relay.url || '(not set)'}`,
-    `  rendezvousId: ${relay.rendezvousId || '(not yet minted)'}`,
+    '  rendezvousId: derived from the daemon\'s relay identity key; /relay status shows it while the daemon is registered',
     `  requireStepUpForMutations: ${yesNo(relay.requireStepUpForMutations)}`,
     '  Threat model: the relay operator sees only ciphertext and connection metadata; self-host your own relay for full control.',
     '',

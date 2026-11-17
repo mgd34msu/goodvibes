@@ -592,7 +592,7 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'relay.rendezvousId',
     type: 'string',
     default: '',
-    description: 'Stable unguessable rendezvous id the daemon registers under; generated on first enable when empty',
+    description: 'The rendezvous id the daemon registers under on the relay, derived from the daemon\'s relay identity key and recorded here by the daemon; setting it has no effect',
   },
   {
     key: 'relay.label',

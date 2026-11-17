@@ -71,7 +71,6 @@ export async function runStatusCommand(runtime: StatusCommandRuntime): Promise<n
     configEnabled: relayCategory.enabled === true,
     featureEnabled: sandboxFeatureFlags.isEnabled('relay-connect'),
     url: String(relayCategory.url ?? ''),
-    rendezvousId: String(relayCategory.rendezvousId ?? ''),
     requireStepUpForMutations: relayCategory.requireStepUpForMutations === true,
   };
   const statusOptions = {

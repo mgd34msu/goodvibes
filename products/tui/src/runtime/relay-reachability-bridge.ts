@@ -40,6 +40,8 @@ export interface RelayStatusReading {
   readonly status: RelayReadableStatus;
   /** Set only for `'unavailable'`: why the daemon could not be asked. */
   readonly reason?: string;
+  /** The id the daemon is registered under (derived from its identity key), while a registration runs. */
+  readonly rendezvousId?: string;
   /** Set when the relay refused the registration: what is true and what to do. */
   readonly refusal?: RelayRefusal;
 }
@@ -98,9 +100,10 @@ export function createRelayReadAccessors(verbs: DaemonVerbCaller): RelayReadAcce
   return {
     async relayStatus() {
       try {
-        const answer = await verbs.invoke<{ status?: unknown; refusal?: unknown }>('relay.reachability.get', {});
+        const answer = await verbs.invoke<{ status?: unknown; rendezvousId?: unknown; refusal?: unknown }>('relay.reachability.get', {});
         const refusal = refusalOf(answer?.refusal);
-        return { status: statusOf(answer?.status), ...(refusal ? { refusal } : {}) };
+        const rendezvousId = typeof answer?.rendezvousId === 'string' && answer.rendezvousId ? answer.rendezvousId : undefined;
+        return { status: statusOf(answer?.status), ...(rendezvousId ? { rendezvousId } : {}), ...(refusal ? { refusal } : {}) };
       } catch (error) {
         return { status: 'unavailable', reason: failureReason(error) };
       }

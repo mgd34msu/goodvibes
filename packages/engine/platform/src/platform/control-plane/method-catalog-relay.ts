@@ -53,7 +53,7 @@ export const builtinGatewayRelayMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'relay.reachability.get',
     title: 'Relay Reachability',
-    description: 'Whether this daemon is registered with the relay, and what state its registration is in. `disabled` is a distinct answer from every other one and the distinction is the point: it means a gate is off, `relay.enabled`, the relay-connect capability, or an empty `relay.url`, rather than that a connection is failing. `idle` means the gates are open and nothing has started; `connecting`, `registered` and `reconnecting` are the live registration; `refused` means the relay refused the registration for a reason another attempt cannot clear, and the daemon stops dialling until the relay settings or identity change; `stopped` is a controller that was told to stop. `configured` says whether all three gates are open, so a caller can render "turn it on" instead of "it is broken". `refusal`, present after the relay refused the registration, says why (`state`), what to do (`next`) and whether the daemon keeps trying (`retryable`). ws-only invoke verb; no REST binding.',
+    description: 'Whether this daemon is registered with the relay, and what state its registration is in. `disabled` is a distinct answer from every other one and the distinction is the point: it means a gate is off, `relay.enabled`, the relay-connect capability, or an empty `relay.url`, rather than that a connection is failing. `idle` means the gates are open and nothing has started; `connecting`, `registered` and `reconnecting` are the live registration; `refused` means the relay refused the registration for a reason another attempt cannot clear, and the daemon stops dialling until the relay settings or identity change; `stopped` is a controller that was told to stop. `configured` says whether all three gates are open, so a caller can render "turn it on" instead of "it is broken". `rendezvousId`, present while a registration is running, is the id the daemon is registered under, derived from its relay identity key; it is the id a pairing payload carries and a step-up challenge is bound to. `refusal`, present after the relay refused the registration, says why (`state`), what to do (`next`) and whether the daemon keeps trying (`retryable`). ws-only invoke verb; no REST binding.',
     category: 'control-plane',
     scopes: ['read:control-plane'],
     transport: ['ws'],
@@ -63,6 +63,7 @@ export const builtinGatewayRelayMethodDescriptors: readonly GatewayMethodDescrip
     outputSchema: objectSchema({
       status: RELAY_STATUS_SCHEMA,
       configured: { type: 'boolean' },
+      rendezvousId: STRING_SCHEMA,
       refusal: RELAY_REFUSAL_SCHEMA,
     }, ['status', 'configured']),
   }),

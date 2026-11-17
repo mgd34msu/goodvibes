@@ -242,8 +242,10 @@ configured, or with either gate switched off, the relay path is byte-for-byte in
 and the daemon stays LAN-only.
 
 The registration itself is opened when the daemon starts, so enabling relay
-access, or changing `relay.url` or `relay.rendezvousId`, takes effect at the next
-daemon start. Turning `relay.enabled` or the `relay-connect` feature off applies
+access, or changing `relay.url`, takes effect at the next daemon start. The
+rendezvous id is not a choice: the daemon records the id derived from its
+identity key in `relay.rendezvousId`, and `relay.reachability.get` reports it
+while a registration runs. Turning `relay.enabled` or the `relay-connect` feature off applies
 at once to traffic: a request that arrives over an already-open registration is
 answered `503` with code `relay-disabled` (its `next` says to connect directly
 or turn relay access back on) until the daemon is restarted.

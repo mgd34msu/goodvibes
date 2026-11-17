@@ -16,12 +16,11 @@ import type { RelayRefusal, RelayStatusReading } from '../../runtime/relay-reach
  * not be asked, and the reason is printed.
  */
 
-function relayConfigured(ctx: CommandContext): { enabled: boolean; url: string; rendezvousId: string; label: string; flagOn: boolean } {
+function relayConfigured(ctx: CommandContext): { enabled: boolean; url: string; label: string; flagOn: boolean } {
   const config = ctx.platform.configManager;
   return {
     enabled: config.get('relay.enabled') === true,
     url: String(config.get('relay.url') ?? ''),
-    rendezvousId: String(config.get('relay.rendezvousId') ?? ''),
     label: String(config.get('relay.label') ?? ''),
     flagOn: ctx.platform.featureFlagManager?.isEnabled('relay-connect') ?? false,
   };
@@ -34,7 +33,7 @@ function refusalLines(refusal: RelayRefusal | undefined): string[] {
     `  refused by the relay (${refusal.code}): ${refusal.state}${refusal.message ? ` (${refusal.message})` : ''}`,
     refusal.retryable
       ? '  The daemon keeps trying through its reconnect backoff.'
-      : '  The daemon stopped dialling the relay; it tries again when relay.url, relay.rendezvousId or its identity changes, or when the daemon restarts.',
+      : '  The daemon stopped dialling the relay; it tries again when relay.url changes or when the daemon restarts.',
     ...refusal.next.map((step) => `  next: ${step}`),
   ];
 }
@@ -55,7 +54,7 @@ async function renderStatus(ctx: CommandContext): Promise<void> {
     : { status: 'unavailable' as const, reason: 'the background service controller is not running in this build' };
   ctx.print([
     `Relay: ${reading.status}`,
-    `  rendezvous id: ${cfg.rendezvousId || '(not yet minted; start the daemon to generate one)'}`,
+    `  rendezvous id: ${reading.rendezvousId ?? '(none: the daemon has no live registration; it is derived from the daemon\'s relay identity key once one starts)'}`,
     `  url: ${cfg.url || '(not set)'}`,
     `  label: ${cfg.label || '(not set)'}`,
     reading.status === 'unavailable'

@@ -27,9 +27,8 @@ import {
 import {
   deserializeRelayIdentity,
   generateRelayIdentity,
-  randomBytes,
+  relayIdentityRendezvousId,
   serializeRelayIdentity,
-  toBase64Url,
   type RelayKeyPair,
   type RelayPairingPayload,
   type SerializedRelayIdentity,
@@ -60,7 +59,10 @@ export interface RelayReachabilityOptions {
   /** Base URL used to resolve tunneled paths (host is irrelevant; routing is by path). */
   readonly localBaseUrl?: string;
   readonly webSocketImpl?: (url: string) => RelayClientWebSocket;
-  /** Called with a freshly-generated rendezvous id so the caller can persist it. */
+  /**
+   * Called with the rendezvous id derived from the identity key when it differs
+   * from the recorded `relay.rendezvousId`, so the caller can record it.
+   */
   readonly onRendezvousId?: (rid: string) => void;
   readonly logger?: RelayRegistrationLogger;
   readonly onStatusChange?: (status: RelayRegistrationStatus) => void;
@@ -74,14 +76,17 @@ export interface RelayReachability {
   stop(): void;
   /**
    * Bring the registration in line with the current settings: start it when it
-   * has become enabled, stop it when it has been turned off or its relay url or
-   * rendezvous id changed (and start again if still enabled). The daemon calls
-   * this when a `relay.*` setting or the `relay-connect` flag changes.
+   * has become enabled, stop it when it has been turned off or its relay url
+   * changed (and start again if still enabled). The daemon calls this when a
+   * `relay.*` setting or the `relay-connect` flag changes.
    */
   reconcile(): Promise<void>;
   /** Whether the relay settings and gate currently allow reachability. */
   isEnabled(): boolean;
-  /** The rendezvous id of the live registration, or null when none is running. */
+  /**
+   * The rendezvous id the live registration is registered under, derived from
+   * the daemon's relay identity key, or null when none is running.
+   */
   readonly rendezvousId: string | null;
   /** Current status, or `'disabled'` when the relay path is gated off. */
   readonly status: RelayRegistrationStatus | 'disabled';
@@ -92,10 +97,6 @@ export interface RelayReachability {
   readonly lastRefusal: RelayRegistrationRefusal | null;
   /** Mint a pairing payload a surface can scan, or null when disabled. */
   mintPairing(): Promise<RelayPairingPayload | null>;
-}
-
-function generateRendezvousId(): string {
-  return `rid_${toBase64Url(randomBytes(24))}`;
 }
 
 /** Whether all three gates are satisfied. */
@@ -111,10 +112,6 @@ export function createRelayReachability(options: RelayReachabilityOptions): Rela
   const isEnabled = (): boolean => isRelayReachabilityEnabled(readConfig(), readFlag());
   let registration: RelayDaemonRegistration | null = null;
   let registeredWith: { readonly url: string; readonly rid: string } | null = null;
-  // A rendezvous id generated here is kept for this controller's life, so a
-  // stop and start does not mint a second one and strand the pairing payloads
-  // already handed out for the first.
-  let generatedRid = '';
   // One start at a time, and a stop that arrives while one is in flight wins.
   let starting: Promise<void> | null = null;
   let generation = 0;
@@ -142,14 +139,12 @@ export function createRelayReachability(options: RelayReachabilityOptions): Rela
 
   async function startRegistration(myGeneration: number): Promise<void> {
     const loaded = await relayIdentity();
+    // The relay admits the daemon only under the id derived from its public key,
+    // so that id is the one fact; the setting only records it.
+    const rid = await relayIdentityRendezvousId(loaded);
     if (myGeneration !== generation) return;
     const config = readConfig();
-    let rid = config.rendezvousId.trim() || generatedRid;
-    if (!rid) {
-      rid = generateRendezvousId();
-      generatedRid = rid;
-      options.onRendezvousId?.(rid);
-    }
+    if (config.rendezvousId.trim() !== rid) options.onRendezvousId?.(rid);
     const next = createRelayDaemonRegistration({
       relayUrl: config.url,
       rid,
@@ -193,9 +188,9 @@ export function createRelayReachability(options: RelayReachabilityOptions): Rela
         return;
       }
       if (registration && registeredWith) {
-        const config = readConfig();
-        const wantedRid = config.rendezvousId.trim() || generatedRid;
-        if (registeredWith.url === config.url && (wantedRid === '' || registeredWith.rid === wantedRid)) return;
+        // The rendezvous id follows the identity key, which does not change for
+        // this controller's life, so only the relay url can call for a restart.
+        if (registeredWith.url === readConfig().url) return;
         stopRegistration();
         starting = null;
       }

@@ -14,6 +14,8 @@ import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 /** The controller surface these verbs need, declared rather than imported whole. */
 export interface RelayReachabilityService {
   readonly status: string;
+  /** The rendezvous id the live registration is registered under, or null when none is running. */
+  readonly rendezvousId?: string | null | undefined;
   /** The relay's last refusal of the registration, with what is true and what to do. */
   readonly lastRefusal?: RelayRefusalReading | null | undefined;
   mintPairing(): Promise<unknown>;
@@ -48,9 +50,11 @@ export function createRelayReachabilityHandler(accessor: RelayReachabilityAccess
   return () => {
     const service = accessor();
     const refusal = service?.lastRefusal ?? null;
+    const rendezvousId = service?.rendezvousId ?? null;
     return {
       status: statusOf(service),
       configured: isConfigured(service),
+      ...(rendezvousId ? { rendezvousId } : {}),
       ...(refusal ? { refusal: { code: refusal.code, message: refusal.message, state: refusal.state, next: [...refusal.next], retryable: refusal.retryable } } : {}),
     };
   };

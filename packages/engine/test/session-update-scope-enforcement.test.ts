@@ -45,11 +45,11 @@ describe('the event stream grant is decided once, from the descriptors', () => {
     for (const clientKind of ['web', 'tui'] as const) {
       const events: string[] = [];
       const { clientId, domains } = gateway.openWebSocketClient({
-        clientKind, scopes: NON_ADMIN_SCOPES, admin: false, domains: ['config', 'turn', 'tools', 'tasks'],
+        clientKind, scopes: NON_ADMIN_SCOPES, admin: false, domains: ['config', 'turn', 'tools', 'tasks', 'automation'],
       }, (event) => events.push(event));
       publishAdminOnly(gateway);
       gateway.publishEvent('remote-peer', { peer: 'p' });
-      expect(domains).toEqual(['tasks']);
+      expect(domains).toEqual(['automation']);
       for (const event of ADMIN_ONLY_BROADCASTS) expect(events).not.toContain(event);
       expect(events).not.toContain('conversation.followup.companion');
       expect(events).toContain('remote-peer');
@@ -80,7 +80,7 @@ describe('the event stream grant is decided once, from the descriptors', () => {
   test('a principal that loses admin stops receiving admin-only domains and events', () => {
     const { gateway } = makeGateway();
     const events: string[] = [];
-    const { clientId } = gateway.openWebSocketClient({ clientKind: 'web', scopes: NON_ADMIN_SCOPES, admin: true, domains: ['config', 'tasks'] }, (event) => events.push(event));
+    const { clientId } = gateway.openWebSocketClient({ clientKind: 'web', scopes: NON_ADMIN_SCOPES, admin: true, domains: ['config', 'automation'] }, (event) => events.push(event));
     gateway.regrantClient(clientId, { admin: false, scopes: NON_ADMIN_SCOPES });
     events.length = 0;
     publishAdminOnly(gateway);

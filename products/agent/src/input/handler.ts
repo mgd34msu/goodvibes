@@ -499,12 +499,15 @@ export class InputHandler extends TerminalInputHandlerState {
       const executeCommand = context.executeCommand;
       void captureCommandPrint(context, () => executeCommand(name, [...args])).then((outcome) => {
         if (!outcome.ok) {
-          // A command that refuses throws its refusal: show its reason and next step.
+          // A command that refuses throws its refusal: show its reason and next
+          // step, then whatever it printed before it stopped.
           const refused = readRefusal(outcome.error);
+          const reason = refused ? formatRefusal(refused) : outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
+          printLongOutput(outcome.lines);
           this.agentWorkspace.lastActionResult = {
             kind: 'error',
             title: refused ? `${displayCommand} was refused` : `${displayCommand} failed`,
-            detail: refused ? formatRefusal(refused) : outcome.error instanceof Error ? outcome.error.message : String(outcome.error),
+            detail: outcome.lines.length > 0 ? `${reason}\n\nPrinted before it stopped:\n${buildCapturedDetail(outcome.lines)}` : reason,
             command: displayCommand,
           };
         } else if (outcome.value === false) {

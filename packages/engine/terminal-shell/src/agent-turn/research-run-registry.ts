@@ -329,7 +329,12 @@ function releaseProcessSession(storePath: string): void {
   rmSync(path, { force: true });
 }
 
-/** True when the session is gone: no run marker, or its lock can be taken. */
+/**
+ * True when the session is gone: no run marker, or its lock can be taken. A
+ * marker left by a killed session is removed while the probe still holds its
+ * lock, so a live session that takes its lock again afterwards gets a new
+ * file and is never left holding a lock on an unlinked one.
+ */
 function sessionEnded(storePath: string, session: string | undefined): boolean {
   if (session === PROCESS_SESSION) return false;
   if (!session) return true;
@@ -337,8 +342,7 @@ function sessionEnded(storePath: string, session: string | undefined): boolean {
   if (!existsSync(path)) return true;
   const lock = holdProcessLock(path);
   if (!lock) return false;
-  lock.release();
-  rmSync(path, { force: true });
+  try { rmSync(path, { force: true }); } finally { lock.release(); }
   return true;
 }
 

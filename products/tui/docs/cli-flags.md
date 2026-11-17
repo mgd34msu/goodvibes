@@ -375,7 +375,7 @@ The GitHub Action passes `--timeout 30m --max-turns 50` to a prompt run unless i
 | `model`, `provider`, `events` | no | Present when a model turn ran. |
 | `kind` | no | On failures: `outcome-unknown` (the host may have acted) or `unavailable` (nothing was sent). |
 | `cause` | no | With `kind`, a non-secret reason code: `journal_conflict`, `journal`, `principal`, `network`, `schema`, `host_changed`, `unknown`. |
-| `native` | no | The native intake state: `status`, `message`, `request`, `result`, `execution`. |
+| `native` | no | The native intake state: `status`, `message`, `request`, `result`, `execution`; `nextStep` (`retry`, `resume`, `cancel` or `inspect`: run `--intake-<nextStep>`, with `inspect` meaning `--intake-status`) when an earlier input must be moved forward first; `notSent: true` when this run's own text was not sent because of that earlier input; `hostedTurn` (`state`, `sessionId`, and on `failed` a `failure` with `summary` and `retryable`) when the host runs the reply. |
 | `refusal` | no | Present when the run was refused before it started: `code`, `state`, `reason`, `next`. |
 | `recovery` | no | Present when the run restored its session from a crash snapshot: `sessionId`, `applied`, `refusal` (when not applied: `no-snapshot`, `unusable-snapshot`, `apply-failed`), `snapshotAt` (ISO time the snapshot was written), `snapshotKept` (still on disk), `messages`, `turns` (prompts), `interruptedTurn` (`prompt` masked and cut at 1000 characters, `toolResults` already obtained, `interruptedToolCalls` as `{ callId, tool }`, `partialReply` when a reply was cut off), `lost` (what could not be brought back, one sentence each). |
 

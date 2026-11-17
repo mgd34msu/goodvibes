@@ -181,24 +181,13 @@ export async function executeNativeHeadless(options: NativeHeadlessOptions, poli
                 return resultForState(unavailable(host.reason), options.mode);
             const before = nativeSubmissionIdentity(host, '');
             const currentHost = () => { const current = options.resolveHost(); return !('reason' in current) && nativeSubmissionIdentity(current, '') === before; };
-            const discovery = new AbortController();
-            const operator = createOperatorApiClient({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current: () => !options.signal.aborted && !discovery.signal.aborted && currentHost() }) });
-            const guard = () => { try {
-                if (!currentHost())
-                    discovery.abort();
-            }
-            catch {
-                discovery.abort();
-            } };
-            const timer = setInterval(guard, 100);
-            timer.unref?.();
+            // The host fetch asks currentHost() around its request, so a changed selection stops discovery there.
+            const operator = createOperatorApiClient({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current: () => !options.signal.aborted && currentHost() }) });
             let projectId: string;
             try {
-                guard();
-                projectId = await getOperatorWorkLedgerProject(operator, { signal: AbortSignal.any([options.signal, discovery.signal, AbortSignal.timeout(5000)]) });
+                projectId = await getOperatorWorkLedgerProject(operator, { signal: AbortSignal.any([options.signal, AbortSignal.timeout(5000)]) });
             }
             finally {
-                clearInterval(timer);
                 operator.dispose();
             }
             if (options.signal.aborted)
@@ -308,7 +297,10 @@ export function writeNativeHeadlessResult(result: NativeHeadlessResult, format: 
     const error = turn.error === undefined ? undefined : headlessRecoveryText(turn.error);
     const execution = native?.execution ? { ...native.execution, message: headlessRecoveryText(native.execution.message) } : undefined;
     // Capabilities remain process-local. Never spread the state containing its permit.
-    const state = native ? { status: native.status, message: headlessRecoveryText(native.message), ...(native.cause ? { cause: native.cause } : {}), request: native.request, result: native.result, execution } : undefined;
+    // nextStep names the one flag that moves an earlier input forward (--intake-<nextStep>); notSent says this
+    // invocation's own text was not sent; hostedTurn carries a hosted reply's state and failure.
+    const state = native ? { status: native.status, message: headlessRecoveryText(native.message), ...(native.cause ? { cause: native.cause } : {}), request: native.request, result: native.result, execution,
+        ...(native.nextStep ? { nextStep: native.nextStep } : {}), ...(native.notSent ? { notSent: true } : {}), ...(native.hostedTurn ? { hostedTurn: native.hostedTurn } : {}) } : undefined;
     if (format === 'json' || format === 'stream-json') {
         // sessionId and usage are always present (null before a model turn) so every final frame has one shape.
         stdout(JSON.stringify({ ...(format === 'stream-json' ? { type: alwaysNativeType || state ? 'NATIVE_INTAKE_RESULT' : 'TURN_RESULT' } : {}), schemaVersion: HEADLESS_SCHEMA_VERSION, ok: exitCode === 0,

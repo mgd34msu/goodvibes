@@ -30,6 +30,7 @@ import {
   readClusterSettings,
   type ClusterConsumerGate,
   type ClusterClock,
+  type ClusterSecretSource,
   type ClusterTransport,
 } from '@goodvibes-jev/engine/platform/platform/cluster';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -67,6 +68,8 @@ export function createClusterComposition(options: {
    * mismatch rather than document one.
    */
   readonly configManager: Pick<ConfigManager, 'getCategory'>;
+  /** Reads `cluster.secret` when the setting holds its secret-store reference. */
+  readonly secrets?: ClusterSecretSource | undefined;
   readonly shellPaths: ShellPathService;
   /**
    * The datagram transport to coordinate over.
@@ -84,7 +87,7 @@ export function createClusterComposition(options: {
   readonly clock?: ClusterClock | undefined;
 }): ClusterCoordinator {
   return new ClusterCoordinator({
-    settings: readClusterSettings(options.configManager),
+    settings: readClusterSettings(options.configManager, options.secrets),
     version: VERSION,
     // Surface-scoped, alongside this surface's other durable state: the node
     // identity is per-surface and must not leak across surface roots.

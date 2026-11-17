@@ -1,12 +1,10 @@
-import { createSecretConfigKeyRegistry, createSecretBackedConfigWriter, isGoodVibesSecretReferenceValue as isSecretReferenceValue, type ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import { createSecretBackedConfigWriter, isGoodVibesSecretReferenceValue as isSecretReferenceValue } from '@goodvibes-jev/engine/platform/platform/config';
 import { routeDaemonOwnedCredentialWrite } from './daemon-credential-routing.ts';
 import { routeDaemonOwnedConfigWrite } from './daemon-config-routing.ts';
 export { normalizeSecretKeyPart, buildGoodVibesSecretKey, buildGoodVibesSecretRef, isGoodVibesSecretReferenceValue as isSecretReferenceValue, isMalformedGoodVibesSecretReferenceValue, getSecretWriteMedium, buildSecretBackedConfigUpdate, defaultSecretBackedScope } from '@goodvibes-jev/engine/platform/platform/config';
 export type { SecretBackedConfigUpdate, SecretBackedConfigManager, SecretBackedSecretStore } from '@goodvibes-jev/engine/platform/platform/config';
-export const { SECRET_CONFIG_KEYS, isSecretConfigKey } = createSecretConfigKeyRegistry([
-  'calendar.google.clientSecretRef' as ConfigKey,
-  'calendar.microsoft.clientSecretRef' as ConfigKey,
-]);
+// The set of keys that route through the secret store is the engine's declared list.
+export { SECRET_CONFIG_KEYS, isSecretConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 export const persistSecretBackedConfigValue = createSecretBackedConfigWriter(async (configKey, rawValue, update) => {
   // Explicit scopes deliberately select local storage. Otherwise a connected
   // daemon owns its credential/config pair and a refusal must propagate.

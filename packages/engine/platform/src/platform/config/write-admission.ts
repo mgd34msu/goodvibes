@@ -8,7 +8,8 @@ import { readDotPath } from './shared-config-tier.js';
 import { resolveEffectiveSystemRamMb, validateMemoryPolicy, type MemoryPolicyValues } from '../runtime/memory/memory-governor.js';
 import { ConfigError } from '../types/errors.js';
 import { coerceSchemaValue } from './manager-bootstrap.js';
-import { isProjectRestrictedKey } from './config-key-facts.js';
+import { configKeyFacts, isProjectRestrictedKey } from './config-key-facts.js';
+import { isSecretReferenceValue } from './secret-bearing-config-keys.js';
 import { restrictProjectLayer } from './project-layer-restrictions.js';
 import { writeRawDotPath } from './settings-io.js';
 
@@ -39,7 +40,6 @@ const PRODUCT_OWNED_LEAVES: ReadonlySet<string> = new Set([
   'behavior.terminalNotifyApprovalWait', 'behavior.terminalNotifyTurnEnd', 'behavior.notificationsMetadataOnly',
   'tools.hostedResearchScreening', 'memory.projection.dir', 'storage.codeIndexEnabled',
   'permissions.execEnvScrubAllowlist',
-  'payments.cardNumber', 'payments.cardExpiry', 'payments.cardCvv', 'payments.cardholderName',
   'payments.shippingAddress', 'payments.billingAddress',
 ]);
 
@@ -57,6 +57,26 @@ export function nonSchemaKeyRefusal(key: string, _value: unknown, config?: unkno
   if (OPEN_KEY_PREFIXES.some(prefix => key.startsWith(prefix))) return null;
   if (readDotPath(config, key).present) return null;
   return 'no such setting; check the spelling against the settings list';
+}
+
+/**
+ * Why `value` may not be written at `key` because of what the key holds, or
+ * null: card material is never a setting, and a credential key holds only a
+ * `goodvibes://secrets/` reference, never the credential. One owner of the rule
+ * for every writer (`set`, `setDynamic`, `setMany`, prepared imports). The
+ * reason never quotes the value. Cost: one facts lookup.
+ */
+export function credentialValueRefusal(key: string, value: unknown): { readonly code: 'CONFIG_CARD_MATERIAL' | 'CONFIG_SECRET_LITERAL'; readonly reason: string; readonly next: string } | null {
+  const facts = configKeyFacts(key);
+  if (facts.cardMaterial) {
+    return { code: 'CONFIG_CARD_MATERIAL', reason: `${key} is card material, which is kept only in the daemon's card store, never in a settings file.`,
+      next: 'Enter the card with /payments card in a terminal app, or under Payments in the web UI.' };
+  }
+  if (facts.secret && typeof value === 'string' && value.trim() !== '' && !isSecretReferenceValue(value)) {
+    return { code: 'CONFIG_SECRET_LITERAL', reason: `${key} holds a credential, and a settings file keeps only a reference to it.`,
+      next: `Save the credential with /secrets set <KEY> <value> (or the credentials route), then set ${key} to goodvibes://secrets/goodvibes/<KEY>.` };
+  }
+  return null;
 }
 
 /** The memory settings as they would be with `value` written at `key`. */
@@ -146,6 +166,8 @@ export function admitSettingValue(
   } catch (error) {
     return { ok: false, reason: error instanceof ConfigError ? error.message : 'not a value a settings file can hold' };
   }
+  const credential = credentialValueRefusal(key, next);
+  if (credential) return { ok: false, reason: `${credential.reason} ${credential.next}` };
   if (schema?.validate && !schema.validate(frozenCopy(next))) return { ok: false, reason: schema.validationHint ?? 'rejected by its schema' };
   if (schema?.type === 'enum') {
     if (!schema.enumValues?.includes(next as string)) return { ok: false, reason: `allowed: ${schema.enumValues?.join(', ') ?? 'none'}` };

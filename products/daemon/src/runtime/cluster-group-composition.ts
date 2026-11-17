@@ -83,7 +83,7 @@ const KEY_LOST_REJOIN_MIN_GAP_MS = 60_000;
 export function createClusterGroupComposition(options: {
   readonly configManager: ConfigManager;
   readonly shellPaths: ShellPathService;
-  readonly secretsManager: Pick<SecretsManager, 'get' | 'set' | 'delete'> & Partial<Pick<SecretsManager, 'onDidChange'>>;
+  readonly secretsManager: Pick<SecretsManager, 'get' | 'set' | 'delete'> & Partial<Pick<SecretsManager, 'onDidChange' | 'resolveLocalSecretSync'>>;
   /** Optional host/test seams; defaults preserve the real UDP/system-clock path. */
   readonly transport?: ClusterTransport | undefined;
   readonly clock?: ClusterClock | undefined;
@@ -105,7 +105,9 @@ export function createClusterGroupComposition(options: {
    */
   readonly surfaceHoldings?: (() => readonly ClusterSurfaceHolding[]) | undefined;
 }): ClusterGroupComposition {
-  const settings = readClusterSettings(options.configManager);
+  const { resolveLocalSecretSync } = options.secretsManager;
+  const settings = readClusterSettings(options.configManager,
+    resolveLocalSecretSync ? { resolveLocalSecretSync: (key: string) => resolveLocalSecretSync.call(options.secretsManager, key) } : undefined);
   const groupSettings = resolveClusterGroupSettings(
     (options.configManager as { getCategory?: (name: string) => unknown }).getCategory?.('cluster'),
   );
@@ -263,7 +265,7 @@ export function createClusterGroupComposition(options: {
 export function createClusterServices(options: {
   readonly configManager: ConfigManager;
   readonly shellPaths: ShellPathService;
-  readonly secretsManager: Pick<SecretsManager, 'get' | 'set' | 'delete'> & Partial<Pick<SecretsManager, 'onDidChange'>>;
+  readonly secretsManager: Pick<SecretsManager, 'get' | 'set' | 'delete'> & Partial<Pick<SecretsManager, 'onDidChange' | 'resolveLocalSecretSync'>>;
   /** Optional host/test seams; defaults preserve the real UDP/system-clock path. */
   readonly transport?: ClusterTransport | undefined;
   readonly clock?: ClusterClock | undefined;
@@ -278,8 +280,10 @@ export function createClusterServices(options: {
     // held, so this machine holds nothing.
     surfaceHoldings: () => coordinator?.surfaceHoldings() ?? [],
   });
+  const { resolveLocalSecretSync } = options.secretsManager;
   coordinator = createClusterComposition({
     configManager: options.configManager,
+    ...(resolveLocalSecretSync ? { secrets: { resolveLocalSecretSync: (key: string) => resolveLocalSecretSync.call(options.secretsManager, key) } } : {}),
     shellPaths: options.shellPaths,
     transport: clusterGroup.electionTransport,
     ...(options.clock ? { clock: options.clock } : {}),

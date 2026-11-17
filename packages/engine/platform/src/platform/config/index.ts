@@ -461,7 +461,7 @@ export type { RemoteSettingsImportPrecondition, RemoteSettingsImportPrecondition
 export { DEFAULT_DECISION_ROUTER_SETTINGS, captureDecisionRouterSettings } from './decision-router-settings.js';
 export type { DecisionRouterSettings, DecisionRouterTarget, DecisionRouterCategory } from './decision-router-settings.js';
 
-export { SECRET_CONFIG_KEYS, createSecretConfigKeyRegistry, createSecretBackedConfigWriter, isSecretConfigKey, normalizeSecretKeyPart, buildGoodVibesSecretKey, buildGoodVibesSecretRef, isGoodVibesSecretReferenceValue, isMalformedGoodVibesSecretReferenceValue, getSecretWriteMedium, buildSecretBackedConfigUpdate, defaultSecretBackedScope, persistSecretBackedConfigValue } from './secret-backed-config.js';
+export { SECRET_CONFIG_KEYS, createSecretBackedConfigWriter, isSecretConfigKey, normalizeSecretKeyPart, buildGoodVibesSecretKey, buildGoodVibesSecretRef, isGoodVibesSecretReferenceValue, isMalformedGoodVibesSecretReferenceValue, getSecretWriteMedium, buildSecretBackedConfigUpdate, defaultSecretBackedScope, persistSecretBackedConfigValue } from './secret-backed-config.js';
 export type { SecretBackedConfigUpdate, SecretBackedConfigManager, SecretBackedSecretStore, DaemonCredentialWriter, SecretBackedConfigRoute } from './secret-backed-config.js';
 export { PAYMENTS_CARD_NUMBER_CONFIG_KEY, PAYMENTS_CARD_EXPIRY_CONFIG_KEY, PAYMENTS_CARD_CVV_CONFIG_KEY, PAYMENTS_CARD_CARDHOLDER_NAME_CONFIG_KEY, PAYMENTS_CVV_HANDLING_CONFIG_KEY, PAYMENTS_ADDRESS_FIELD_SUFFIXES, PAYMENTS_SYNTHETIC_CONFIG_KEYS, paymentsAddressConfigKey, paymentsAddressConfigKeys, isPaymentsSyntheticConfigKey } from './payment-config-keys.js';
 export type { PaymentsAddressKind } from './payment-config-keys.js';

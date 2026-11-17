@@ -73,7 +73,7 @@ export {
   signMessage,
   type ClusterDecodeResult,
 } from './protocol.js';
-export { readClusterSettings } from './config-read.js';
+export { readClusterSettings, type ClusterSecretSource } from './config-read.js';
 // ── group identity, membership and keys ─────────────────────────────────────
 export {
   generateGroupId,

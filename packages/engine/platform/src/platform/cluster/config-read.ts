@@ -17,8 +17,33 @@
  * dependency at all.
  */
 import type { ConfigManager } from '../config/manager.js';
+import type { SecretsManager } from '../config/secrets.js';
+import { isSecretReferenceValue } from '../config/secret-bearing-config-keys.js';
+import { normalizeSecretRef } from '../config/secret-refs.js';
+import { logger } from '../utils/logger.js';
 import { resolveClusterSettings } from './settings.js';
 import type { ClusterSettings } from './types.js';
+
+/** Where `cluster.secret` is read from when the setting holds its secret-store reference. */
+export type ClusterSecretSource = Pick<SecretsManager, 'resolveLocalSecretSync'>;
+
+/**
+ * `cluster.secret` is a credential, so the settings file holds a
+ * `goodvibes://secrets/` reference and the phrase lives in the secret store.
+ * Read it here, once, so the election never signs with the reference text.
+ */
+function resolveClusterSecret(value: string, secrets: ClusterSecretSource | undefined): string {
+  if (!isSecretReferenceValue(value)) return value;
+  const ref = normalizeSecretRef(value.trim());
+  if (secrets && ref?.source === 'goodvibes') {
+    const stored = secrets.resolveLocalSecretSync(ref.id);
+    if (stored.state === 'resolved') return stored.value;
+  }
+  logger.warn('cluster.secret names a stored secret that could not be read; election traffic outside a group runs unsigned', {
+    next: 'store the phrase with /secrets set and point cluster.secret at it, or clear cluster.secret',
+  });
+  return '';
+}
 
 /**
  * Resolved cluster settings for this host.
@@ -27,10 +52,13 @@ import type { ClusterSettings } from './types.js';
  * an absent section is not a misconfiguration, and refusing to start over one
  * would take inbound messaging down for an install that never opted in.
  */
-export function readClusterSettings(configManager: Pick<ConfigManager, 'getCategory'>): ClusterSettings {
+export function readClusterSettings(configManager: Pick<ConfigManager, 'getCategory'>, secrets?: ClusterSecretSource): ClusterSettings {
+  let settings: ClusterSettings;
   try {
-    return resolveClusterSettings(configManager.getCategory('cluster'));
+    settings = resolveClusterSettings(configManager.getCategory('cluster'));
   } catch {
-    return resolveClusterSettings(undefined);
+    settings = resolveClusterSettings(undefined);
   }
+  const secret = resolveClusterSecret(settings.secret, secrets);
+  return secret === settings.secret ? settings : { ...settings, secret };
 }

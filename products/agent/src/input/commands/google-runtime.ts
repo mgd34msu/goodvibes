@@ -32,6 +32,7 @@ import { CREDENTIAL_VERB, READ_VERB, ownerOnlyVerb, withCommandVerbs, type Comma
 import { renderGoogleSetupReport } from '@goodvibes-jev/engine/platform/platform/google';
 import { renderGoogleSetupRunbook } from '@goodvibes-jev/engine/platform/platform/google';
 import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes-jev/engine/platform/platform/google';
+import { buildGoodVibesSecretRef } from '../../config/secret-config.ts';
 import {
   adoptGoogleCredentials,
   connectGoogle,
@@ -194,7 +195,7 @@ async function setCalendarAddress(args: readonly string[], ctx: CommandContext, 
   }
   // The setup status reads this key to say a calendar address is present.
   await googleSecretPort(ctx).set(GOOGLE_SECRET_KEYS.calendarIcsUrl, url);
-  googleConfigPort(ctx).set(GOOGLE_CONFIG_KEYS.calendarIcsUrl, GOOGLE_CONFIG_KEYS.calendarIcsUrl);
+  googleConfigPort(ctx).set(GOOGLE_CONFIG_KEYS.calendarIcsUrl, buildGoodVibesSecretRef(GOOGLE_SECRET_KEYS.calendarIcsUrl));
   ctx.print(`Stored the private calendar address in the encrypted secret store and subscribed to it as '${subscribed.name}' (${subscribed.eventCount} events loaded). Update it with: /calendar refresh`);
 }
 

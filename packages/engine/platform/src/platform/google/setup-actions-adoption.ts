@@ -17,6 +17,7 @@
  */
 
 import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from './setup-plan.js';
+import { secretReferenceFor } from '../config/plaintext-credential-sweep.js';
 import type { GoogleConfigPort, GoogleSecretPort } from './types.js';
 import { adoptGmailMcpCredentials, gmailMcpLayout, type GoogleFilePort } from './credential-adoption.js';
 
@@ -110,7 +111,7 @@ export async function adoptExistingGoogleCredentials(deps: {
   }
 
   deps.config.set(GOOGLE_CONFIG_KEYS.oauthClientId, credentials.clientId);
-  deps.config.set(GOOGLE_CONFIG_KEYS.oauthClientSecretRef, GOOGLE_CONFIG_KEYS.oauthClientSecretRef);
+  deps.config.set(GOOGLE_CONFIG_KEYS.oauthClientSecretRef, secretReferenceFor(GOOGLE_SECRET_KEYS.oauthClientSecret));
   await deps.secrets.set(GOOGLE_SECRET_KEYS.oauthClientSecret, credentials.clientSecret);
   await deps.secrets.set(GOOGLE_SECRET_KEYS.oauthRefreshToken, credentials.refreshToken);
 

@@ -1,62 +1,20 @@
-import { PAYMENTS_SYNTHETIC_CONFIG_KEYS } from './payment-config-keys.js';
+import { SECRET_BEARING_CONFIG_PATHS, isSecretBearingConfigKey } from './secret-bearing-config-keys.js';
 import { isSecretRefInput } from './secret-refs.js';
 import { isDaemonOwnedConfigKey } from './config-ownership.js';
 import { daemonSecretKeyFor } from './daemon-secret-keys.js';
 export { normalizeSecretKeyPart } from './daemon-secret-keys.js';
 import type { ConfigKey } from './schema.js';
 import type { SecretScope, SecretStorageMedium } from './secrets.js';
-export const SECRET_CONFIG_KEYS = new Set<ConfigKey>([
-    // Mailbox and CalDAV credentials. Their own CONFIG_SCHEMA descriptions read
-    // "Stored in the daemon secret tier, never in config", and until they were
-    // listed here that sentence was aspirational: the settings modal wrote them
-    // as plain strings into a config JSON file, because membership in this set is
-    // the thing that routes an edit through the secret manager instead.
-    //
-    // The daemon reads each of these back with
-    // resolveConfigSecret('<key>') → GOODVIBES_<KEY>, which is exactly the store
-    // key buildGoodVibesSecretKey() writes, see
-    // daemon/handlers/inbox/providers/email.ts.
-    'surfaces.email.password',
-    'surfaces.email.imap.password',
-    'surfaces.email.smtp.password',
-    'surfaces.calendar.caldavPassword',
-    // Telephony delivery credentials, same shape, same file, same gap.
-    'surfaces.telephony.authToken',
-    'surfaces.telephony.token',
-    'surfaces.telephony.webhookSecret',
-    'surfaces.slack.signingSecret',
-    'surfaces.slack.botToken',
-    'surfaces.slack.appToken',
-    'surfaces.discord.botToken',
-    'surfaces.ntfy.token',
-    'surfaces.webhook.secret',
-    'surfaces.homeassistant.accessToken',
-    'surfaces.homeassistant.webhookSecret',
-    'surfaces.telegram.botToken',
-    'surfaces.telegram.webhookSecret',
-    'surfaces.googleChat.verificationToken',
-    // Outbound URLs that carry their own posting token. Their delivery paths
-    // resolve a stored reference before posting, so they route like any credential.
-    'surfaces.googleChat.webhookUrl',
-    'surfaces.webhook.defaultTarget',
-    'surfaces.signal.token',
-    'surfaces.whatsapp.accessToken',
-    'surfaces.whatsapp.verifyToken',
-    'surfaces.whatsapp.signingSecret',
-    'surfaces.imessage.token',
-    'surfaces.msteams.appPassword',
-    'surfaces.msteams.webhookSecret',
-    'surfaces.bluebubbles.password',
-    'surfaces.mattermost.botToken',
-    'surfaces.mattermost.webhookSecret',
-    'surfaces.matrix.accessToken',
-    'surfaces.matrix.webhookSecret',
-    ...PAYMENTS_SYNTHETIC_CONFIG_KEYS,
-]);
-export function createSecretConfigKeyRegistry(extraKeys: readonly ConfigKey[]) {
-    const keys = new Set<ConfigKey>([...SECRET_CONFIG_KEYS, ...extraKeys]);
-    return { SECRET_CONFIG_KEYS: keys, isSecretConfigKey: (key: string): key is ConfigKey => keys.has(key as ConfigKey) };
-}
+/**
+ * The settings whose value is a credential: a write of one stores the value in
+ * the secret store and leaves a `goodvibes://secrets/` reference in the
+ * settings file. The same declaration as {@link isSecretBearingConfigKey}
+ * (secret-bearing-config-keys.ts), which masking, redaction and the settings
+ * admission read, so a key that is masked is always routed and the reverse.
+ * Card material is not a setting at all: the settings admission refuses it and
+ * cards are kept in the daemon's card store (`/payments card`).
+ */
+export const SECRET_CONFIG_KEYS: ReadonlySet<ConfigKey> = new Set(SECRET_BEARING_CONFIG_PATHS as readonly ConfigKey[]);
 export interface SecretBackedConfigUpdate {
     readonly configValue: string;
     readonly secretKey?: string | undefined;
@@ -79,7 +37,7 @@ export interface SecretBackedSecretStore {
     } | undefined) => Promise<void>) | undefined;
 }
 export function isSecretConfigKey(key: string): key is ConfigKey {
-    return SECRET_CONFIG_KEYS.has(key as ConfigKey);
+    return isSecretBearingConfigKey(key);
 }
 /** The config and daemon credential paths use the same canonical store-key derivation. */
 export const buildGoodVibesSecretKey = daemonSecretKeyFor;

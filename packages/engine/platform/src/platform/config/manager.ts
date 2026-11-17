@@ -45,7 +45,6 @@ import { DEFAULT_CONFIG_SNAPSHOT, cloneDefaultConfig, coerceSchemaValue, ensureS
 import { resolveWithProfileFallback, type ConfigProfileFallbackReader } from './profile-fallback.js';
 import { ingestManagerSettings, toConfigLoadFailure, UnknownSettingFormsQueue, type IngestionNoticeSink, type SettingsIngestionNotice } from './manager-ingestion.js';
 import { persistCategoryKeyRemoval, persistCategoryPatch, type CategoryIoDeps } from './manager-category-io.js';
-import { isSecretReferenceValue } from './secret-bearing-config-keys.js';
 import { configKeyFacts } from './config-key-facts.js';
 import { refusal as buildRefusal, type Refusal } from '@goodvibes-jev/engine/errors';
 import type { ToolDecision } from '../types/tools.js';
@@ -55,7 +54,7 @@ import { ConfigRuntimeState, captureRuntimeValue } from './manager-runtime-state
 import { announceIngestionNotice } from './settings-ingestion.js';
 import { SETTINGS_FLOOR_MARKER_KEY } from './settings-reader-floor.js';
 import { isProjectRestrictedKey, restrictProjectLayer } from './project-layer-restrictions.js';
-import { memoryBudgetRefusal, memoryTierOrderRefusal, nonSchemaKeyRefusal, schemaTypeRefusal } from './write-admission.js';
+import { credentialValueRefusal, memoryBudgetRefusal, memoryTierOrderRefusal, nonSchemaKeyRefusal, schemaTypeRefusal } from './write-admission.js';
 import { revisionSource, type RevisionSource } from '../utils/revision.js';
 import { freezePreparedData, normalizePreparedValue, preparedMutationLifecycle, preparedSchemaSignature, PreparedMutationRefusal, type PreparedMutationRecord,
   type PreparedConfigMutation, type PreparedConfigMutationTransition, type PreparedConfigMutationRequest,
@@ -1148,6 +1147,8 @@ export class ConfigManager {
   private validateSetValue(key: ConfigKey, value: unknown, options: ConfigSetOptions, purePolicyRead: boolean): unknown {
     const schema = this.hostSettings.schema(key) ?? CONFIG_SCHEMA.find(s => s.key === key);
     value = coerceSchemaValue(key, schema, value);
+    const credential = credentialValueRefusal(key, value);
+    if (credential) throw new ConfigError(`${credential.reason} ${credential.next}`);
     if (schema?.validate && !schema.validate(value)) {
       const hint = schema.validationHint ? ` (${schema.validationHint})` : '';
       if (key === 'provider.decisionRouter' || key === 'judgment.fallbacks' || key === 'judgment.backend' || key === 'judgment.keyName') {
@@ -1306,7 +1307,8 @@ export class ConfigManager {
       const key = change.key;
       const facts = configKeyFacts(key);
       if (facts.cardMaterial) {
-        return refuse({ code: 'CONFIG_CARD_MATERIAL', reason: `${key} is card material, which is kept only in the daemon's card store, never in a settings file.`, next: ['Enter the card with /payments card in a terminal app.'], status: 400 });
+        const card = credentialValueRefusal(key, change.value)!;
+        return refuse({ code: card.code, reason: card.reason, next: [card.next], status: 400 });
       }
       const schema = this.hostSettings.schema(key) ?? SCHEMA_BY_KEY.get(key);
       let value: unknown;
@@ -1331,10 +1333,8 @@ export class ConfigManager {
       }
       try { this.#resolvePath(key); }
       catch { return invalid(key, 'no such setting; check the spelling against the settings list'); }
-      if (facts.secret && typeof value === 'string' && value.trim() !== '' && !isSecretReferenceValue(value)) {
-        return refuse({ code: 'CONFIG_SECRET_LITERAL', reason: `${key} holds a credential, and a settings file keeps only a reference to it.`,
-          next: ['Save the credential with /secrets set, then set the setting to its goodvibes://secrets/ reference.'], status: 400 });
-      }
+      const credential = credentialValueRefusal(key, value);
+      if (credential) return refuse({ code: credential.code, reason: credential.reason, next: [credential.next], status: 400 });
       if (by.kind === 'agent' && facts.loosens?.(readDotPath(this.#config, key).value, value) && !ownerSettled(by.decision)) {
         return refuse({ code: 'OWNER_ONLY', reason: `Changing ${key} would ${facts.loosening ?? 'loosen security'}, which only the owner decides.`,
           next: ['Ask the owner to make this change, or to approve it when asked.'], status: 403 });
@@ -2003,9 +2003,20 @@ export class ConfigManager {
     // Every field is admitted before any is written: the same lock and schema
     // checks as set(), so this path cannot change what set() would refuse.
     const previous = new Map<string, unknown>();
+    // A credential or card field nested anywhere in the patch is refused like a
+    // scalar write of it: one facts lookup per leaf.
+    const refuseCredentialLeaves = (path: string, value: unknown): void => {
+      if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+        for (const [field, child] of Object.entries(value)) refuseCredentialLeaves(`${path}.${field}`, child);
+        return;
+      }
+      const credential = credentialValueRefusal(path, value);
+      if (credential) throw new ConfigError(`${credential.reason} ${credential.next}`);
+    };
     for (const [field, value] of Object.entries(ownedPatch)) {
       if (value === undefined) continue;
       const path = `${String(category)}.${field}`;
+      refuseCredentialLeaves(path, value);
       const schema = CONFIG_SCHEMA.find(setting => setting.key === path);
       if (schema) {
         const refusal = (schema.validate && !schema.validate(value) ? 'does not satisfy this setting\'s rules' : null)

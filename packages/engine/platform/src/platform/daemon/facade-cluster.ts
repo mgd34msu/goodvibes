@@ -155,7 +155,7 @@ export function buildDaemonClusterCoordinator(
   collaborators: DaemonFacadeCollaborators,
 ): ClusterCoordinator {
   const coordinator = config.clusterCoordinator ?? new ClusterCoordinator({
-    settings: readClusterSettings(runtime.configManager),
+    settings: readClusterSettings(runtime.configManager, runtime.runtimeServices?.secretsManager),
     version: VERSION,
     // Alongside the Telegram poll cursor: node identity is per-surface state
     // and must not leak across surface roots.

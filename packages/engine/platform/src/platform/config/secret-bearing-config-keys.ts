@@ -23,9 +23,11 @@
  * aspirational: the settings modal wrote both as plain strings into a config
  * JSON file, and the generic `/config set` had no detection at all.
  *
- * A product can still add to this, a surface may have a credential the platform
- * knows nothing about, but the platform's own set lives in one place, next to
- * the ownership rules that decide where the value it points at is filed.
+ * This is the one list: `isSecretConfigKey` and `SECRET_CONFIG_KEYS`
+ * (secret-backed-config.ts), which route a settings write into the store, are
+ * this list, and `configKeyFacts(key).secret` reads it for the settings
+ * admission, which refuses a literal value for any key here. Card material is
+ * declared beside it as `PAYMENTS_SYNTHETIC_CONFIG_KEYS` and is never a setting.
  *
  * ── Why it is a list rather than a name pattern ─────────────────────────────
  *

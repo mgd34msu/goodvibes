@@ -298,6 +298,8 @@ export class KnowledgeStore {
   private readonly jobRuns = this.#tables.jobRuns;
   private readonly refinementTasks = this.#tables.refinementTasks;
   private readonly usageRecords = this.#tables.usageRecords;
+  /** Usage rows as last counted plus what appendUsageRecords wrote since; undefined until first counted. */
+  #usageCount: number | undefined;
   private readonly consolidationCandidates = this.#tables.consolidationCandidates;
   private readonly consolidationReports = this.#tables.consolidationReports;
   private readonly schedules = this.#tables.schedules;
@@ -1833,6 +1835,39 @@ export class KnowledgeStore {
     if (this.usageRecords.size > MAX_RETAINED_USAGE_RECORDS + USAGE_RETENTION_SLACK) this.pruneUsageRecords(MAX_RETAINED_USAGE_RECORDS);
     await this.save();
     return record;
+  }
+
+  /**
+   * Appends usage records in one statement (one transaction with its commit)
+   * and returns how many were written. The retained count is read at most
+   * once per process until it nears the cap, then kept by adding what this
+   * process writes; pruning reads it again before deleting anything.
+   */
+  async appendUsageRecords(inputs: readonly KnowledgeUsageUpsertInput[]): Promise<number> {
+    await this.init();
+    if (inputs.length === 0) return 0;
+    const createdAt = nowMs();
+    const rows = inputs.map((input) => {
+      const task = stableText(input.task);
+      const sessionId = stableText(input.sessionId);
+      return [input.id ?? `kuse-${crypto.randomUUID()}`, input.targetKind, input.targetId, input.usageKind, task, sessionId,
+        typeof input.score === 'number' && Number.isFinite(input.score) ? Number(input.score) : null,
+        JSON.stringify({ ...(input.metadata ?? {}) }), createdAt] as const;
+    });
+    // Nine values a row; a chunk stays far below SQLite's bound-value limit.
+    for (let start = 0; start < rows.length; start += 500) {
+      const chunk = rows.slice(start, start + 500);
+      this.sqlite.run(`INSERT OR REPLACE INTO knowledge_usage_records (
+        id, target_kind, target_id, usage_kind, task, session_id, score, metadata, created_at
+      ) VALUES ${chunk.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}`, chunk.flat());
+    }
+    this.#usageCount = this.#usageCount === undefined ? undefined : this.#usageCount + rows.length;
+    if ((this.#usageCount ??= this.usageRecords.size) > MAX_RETAINED_USAGE_RECORDS + USAGE_RETENTION_SLACK) {
+      this.pruneUsageRecords(MAX_RETAINED_USAGE_RECORDS);
+      this.#usageCount = undefined;
+    }
+    await this.save();
+    return rows.length;
   }
 
   /** Delete the oldest usage records beyond `keep`: one ordered read over the created_at index and one DELETE. */

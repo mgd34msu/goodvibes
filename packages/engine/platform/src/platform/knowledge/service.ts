@@ -191,6 +191,8 @@ export class KnowledgeService {
   private readonly unsubscribeMemory: (() => void) | undefined;
   private memoryMirror: Promise<void> = Promise.resolve();
   private memorySync: Promise<unknown> = Promise.resolve();
+  /** Uses recorded in this turn, written together at its end. */
+  private pendingUsage: { readonly input: Parameters<KnowledgeService['recordUsage']>[0]; readonly assertCurrent?: (() => void) | undefined }[] = [];
   private memoryMirrorRunning = false;
   private memoryMirrorPending = false;
   private runtimeBus: RuntimeEventBus | null;
@@ -1133,16 +1135,32 @@ export class KnowledgeService {
     readonly score?: number | undefined;
     readonly metadata?: Record<string, unknown> | undefined;
   }, assertCurrent?: () => void): void {
+    this.pendingUsage.push({ input, assertCurrent });
+    if (this.pendingUsage.length > 1) return;
+    // Every use recorded in this turn is written together: one statement and its commit.
     queueMicrotask(() => {
-      void this.recordUsage(input, assertCurrent).catch((error: unknown) => {
-        logger.warn('Knowledge usage recording failed', {
-          targetKind: input.targetKind,
-          targetId: input.targetId,
-          usageKind: input.usageKind,
-          error: summarizeError(error),
-        });
-      });
+      const batch = this.pendingUsage;
+      this.pendingUsage = [];
+      void this.writeUsage(batch);
     });
+  }
+
+  private async writeUsage(batch: readonly { readonly input: Parameters<KnowledgeService['recordUsage']>[0]; readonly assertCurrent?: (() => void) | undefined }[]): Promise<void> {
+    const failed = (input: Parameters<KnowledgeService['recordUsage']>[0], error: unknown) => logger.warn('Knowledge usage recording failed', {
+      targetKind: input.targetKind,
+      targetId: input.targetId,
+      usageKind: input.usageKind,
+      error: summarizeError(error),
+    });
+    try { await this.store.init(); }
+    catch (error) { for (const { input } of batch) failed(input, error); return; }
+    // A use whose view is no longer current is left out, as recordUsage would refuse it.
+    const current = batch.filter(({ input, assertCurrent }) => {
+      try { assertCurrent?.(); return true; }
+      catch (error) { failed(input, error); return false; }
+    });
+    try { await this.store.appendUsageRecords(current.map(({ input }) => input)); }
+    catch (error) { for (const { input } of current) failed(input, error); }
   }
 
   /** Mirror passes never overlap: two at once would each find the other's writes stale. */

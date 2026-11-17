@@ -2,23 +2,6 @@ import { isLoopbackHost } from '@goodvibes-jev/engine/terminal-shell';
 import type { OnboardingVerificationItem } from '../../runtime/onboarding/index.ts';
 
 /**
- * Extract an OAuth authorization code from a callback URL or raw code string.
- * Returns the `code` query parameter if input is a URL, or the trimmed string
- * itself if it looks like a raw code.  Returns null for empty input.
- */
-export function extractAuthorizationCode(input: string): string | null {
-  const trimmed = input.trim();
-  if (!trimmed) return null;
-
-  try {
-    const url = new URL(trimmed);
-    return url.searchParams.get('code');
-  } catch {
-    return trimmed;
-  }
-}
-
-/**
  * The platform's one loopback rule (localhost, *.localhost, 127.0.0.0/8, ::1 in
  * any spelling), so onboarding agrees with `goodvibes status` about which binds
  * are local. Null, undefined and empty values are not loopback.

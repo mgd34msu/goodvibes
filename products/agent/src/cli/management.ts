@@ -5,8 +5,8 @@ import { createCliProviderViews } from '@goodvibes-jev/engine/terminal-shell/cli
 import { openBrowser } from '@goodvibes-jev/engine/terminal-shell/cli-environment';
 import { stableUrlHostForBindHost } from '@goodvibes-jev/engine/platform/platform/pairing';
 export { openBrowser } from '@goodvibes-jev/engine/terminal-shell/cli-environment';
-import { hasCommandFlag, isPresentConfigValue, extractAuthorizationCode } from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
-export { hasCommandFlag, isPresentConfigValue, extractAuthorizationCode } from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
+import { hasCommandFlag, isPresentConfigValue } from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
+export { hasCommandFlag, isPresentConfigValue } from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
 import { probeTcp as probe } from '@goodvibes-jev/engine/terminal-shell/service-io';
 import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
 import { runSetupPairingCommand, runSetupUnpairCommand } from './setup-pair-command.ts';

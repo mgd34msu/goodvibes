@@ -2,6 +2,7 @@ import { createOAuthLocalListener, readConnectedDaemonOrigin, resolveDaemonEnabl
 import { getBuiltinSubscriptionProvider, type OAuthProviderConfig } from '@goodvibes-jev/engine/platform/platform/config';
 import { summarizeError, openExternalUrl } from '@goodvibes-jev/engine/platform/platform/utils';
 import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
+import { readAuthorizationInput } from '@goodvibes-jev/engine/terminal-shell/settings-subscriptions';
 import { collectOnboardingSnapshotForHandler } from './handler-interactions.ts';
 import { recordFeatureEnablement } from './onboarding/onboarding-feature-units.ts';
 import { handleConnectExistingDaemonForHandler, handleMigrateLegacyDaemonServiceForHandler } from './handler-onboarding-daemon-adopt.ts';
@@ -12,7 +13,6 @@ import type { OnboardingApplyRequest, OnboardingVerificationItem } from '../runt
 import { beginOnboardingOperation, endOnboardingOperation } from './onboarding-operation.ts';
 import {
   dedupeOnboardingVerificationItems,
-  extractAuthorizationCode,
   formatOnboardingApplyCompletionMessage,
   isLoopbackHostValue,
 } from './onboarding/onboarding-verification-helpers.ts';
@@ -541,22 +541,26 @@ export async function handleOpenAiSubscriptionFinishForHandler(handler: InputHan
       beginOnboardingOperation(handler, 'Finish OpenAI sign-in');
       return;
     }
-    const code = extractAuthorizationCode(handler.onboardingWizard.getTextFieldValue('providers.openai-callback-code'));
-    if (!code) {
-      handler.commandContext?.print?.('OpenAI subscription sign-in needs a callback code or URL.');
+    const manager = handler.uiServices.platform.subscriptionManager;
+    const pending = manager.getPending('openai');
+    if (!pending) {
+      handler.commandContext?.print?.('No pending OpenAI subscription sign-in exists in onboarding. Start the sign-in again.');
+      handler.requestRender();
+      return;
+    }
+    // The same reading `/subscription login openai finish` uses: a provider
+    // error in the pasted address is reported, and an address from another
+    // login attempt (its state differs) is refused.
+    const authorization = readAuthorizationInput(handler.onboardingWizard.getTextFieldValue('providers.openai-callback-code'), pending.state);
+    if (!authorization.ok) {
+      handler.commandContext?.print?.(`OpenAI subscription sign-in was not finished: ${authorization.reason}`);
       handler.requestRender();
       return;
     }
 
     handler.onboardingOperation = 'Finish OpenAI sign-in';
     try {
-      const manager = handler.uiServices.platform.subscriptionManager;
-      if (!manager.getPending('openai')) {
-        handler.commandContext?.print?.('No pending OpenAI subscription sign-in exists in onboarding.');
-        handler.requestRender();
-        return;
-      }
-      const record = await manager.completeOAuthLogin('openai', openAiSubscriptionOAuth(), code);
+      const record = await manager.completeOAuthLogin('openai', openAiSubscriptionOAuth(), authorization.code);
       printSignInCompleted(handler, record);
       await handler.refreshOnboardingHydration({ preserveValues: true, targetStepId: 'provider-access' });
     } catch (error) {

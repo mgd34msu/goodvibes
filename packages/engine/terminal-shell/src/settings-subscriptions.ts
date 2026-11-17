@@ -119,18 +119,6 @@ export function inferSubscriptionRouteReason(entry: SubscriptionEntry): string |
   return undefined;
 }
 
-export function extractAuthorizationCode(input: string): string | null {
-  const trimmed = input.trim();
-  if (!trimmed) return null;
-
-  try {
-    const url = new URL(trimmed);
-    return url.searchParams.get('code');
-  } catch {
-    return null;
-  }
-}
-
 export type AuthorizationInput =
   | { readonly ok: true; readonly code: string }
   | { readonly ok: false; readonly reason: string };

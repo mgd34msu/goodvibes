@@ -9,7 +9,6 @@ import {
   hasCommandFlag,
   commandValues,
   isPresentConfigValue,
-  extractAuthorizationCode,
 } from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
 export {
   splitCommandOption,
@@ -18,7 +17,6 @@ export {
   hasCommandFlag,
   commandValues,
   isPresentConfigValue,
-  extractAuthorizationCode,
 } from '@goodvibes-jev/engine/terminal-shell/cli-arguments';
 import { runNativeHeadlessCommand } from './native-headless-command.ts';
 /**

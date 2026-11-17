@@ -49,14 +49,6 @@ export function isPresentConfigValue(value: unknown): boolean {
   if (typeof value === 'string') return value.trim().length > 0;
   return value !== undefined && value !== null && value !== false;
 }
-export function extractAuthorizationCode(input: string): string {
-  try {
-    const url = new URL(input);
-    return url.searchParams.get('code') ?? input;
-  } catch {
-    return input;
-  }
-}
 
 export function readNonemptyOptionValue(args: readonly string[], name: string): string | undefined {
   return readOptionValue(args, name, false);

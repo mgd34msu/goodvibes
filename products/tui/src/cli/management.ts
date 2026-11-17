@@ -61,7 +61,6 @@ export {
   yesNo,
   formatJsonOrText,
   hasCommandFlag,
-  extractAuthorizationCode,
   isPresentConfigValue,
   getNestedValue,
   urlHostForBindHost,

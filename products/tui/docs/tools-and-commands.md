@@ -145,6 +145,7 @@ HTTP client with extraction modes, service registry auth, and batch operations.
 - Named service registry: configure API credentials once in `~/.goodvibes/tui/services.json`, reference by name in fetch calls (a project's `.goodvibes/tui/services.json` adds services only when they name keys in your secret store; references and `oauth` blocks are used only from your own file)
 - Inline auth: `bearer`, `basic`, `api-key` per request
 - Batch parallel fetches in a single tool call
+- A call whose every request is `GET`, `HEAD` or `OPTIONS` is a read and runs beside the other reads of the same response; a call with a `POST`, `PUT`, `PATCH` or `DELETE` runs alone, in the model's order, and is decided as a change (plan mode refuses it)
 
 ### web_search
 
@@ -224,7 +225,7 @@ Structured execution and coordination beyond a single conversation turn.
 
 Product-control tools that expose runtime breadth directly. See [MCP integration](#mcp-integration) below for the connection and config model.
 
-- `mcp`: call a connected server's tool (`mode: "call"` with `qualifiedName` and `input`), and inspect MCP servers, tools, schemas, schema freshness, security posture, auth posture, and quarantine controls
+- `mcp`: call a connected server's tool (`mode: "call"` with `qualifiedName` and `input`), and inspect MCP servers, tools, schemas, schema freshness, security posture, auth posture, and quarantine controls. The inspecting modes, and calls of server tools the server marks read-only (`readOnlyHint`), run beside the other reads of the same response; any other call runs alone
 - `remote`: inspect and manage distributed peers, node-host contracts, work queues, artifacts, and review flows
 - `control`: list this app's own slash commands (every visible one, with its description) and views, built-in subscription providers, and sandbox presets; a session with no command surface answers `available: false`
 

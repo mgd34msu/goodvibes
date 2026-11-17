@@ -150,7 +150,7 @@ export class BoundWorkLedgerModel {
       // A failed read keeps this binding and the rows already read: the reader keeps
       // polling, says why, and says when it resumes, when the snapshot is read again.
       const unsubscribe = client.subscribe(
-        (snapshot) => this.accept(snapshot, epoch),
+        (snapshot) => this.accept(snapshot, epoch, true),
         (reason) => {
           if (epoch !== this.epoch || this.client !== client) return;
           this.publish(this.state.status === 'ready' ? { ...this.state, reason } : { status: 'unavailable', reason });
@@ -207,13 +207,25 @@ export class BoundWorkLedgerModel {
     }, RETRY_AFTER_FAILED_READ_MS);
     this.retryTimer.unref?.();
   }
-  private accept(snapshot: WorkLedgerReadSnapshot, epoch: number): void {
+  /** `fromReader`: the reader's own ordered notification, not the answer to a read this view made. */
+  private accept(snapshot: WorkLedgerReadSnapshot, epoch: number, fromReader = false): void {
     if (epoch !== this.epoch || !this.client) return;
     if (snapshot.projectId !== this.client.projectId) {
       this.fail(new LedgerViewError('Host project binding changed.'), epoch);
       return;
     }
-    if (snapshot.cursor < this.highestSnapshotCursor) return;
+    if (snapshot.cursor < this.highestSnapshotCursor) {
+      // A read this view made that a newer one overtook is dropped. The reader announcing a
+      // lower cursor means the host ledger was restored or replaced: the rows read so far
+      // describe a ledger that no longer exists, so the view starts over from the new one
+      // (the bump discards a page an in-flight read brings back for the old one).
+      if (!fromReader) return;
+      this.history = [];
+      this.cursor = 0;
+      this.highestSnapshotCursor = 0;
+      this.pending = undefined;
+      this.projectionEpoch += 1;
+    }
     if (snapshot.provenance !== undefined && snapshot.provenance !== this.provenance) {
       const prior = this.provenance;
       this.provenance = snapshot.provenance;

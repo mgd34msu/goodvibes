@@ -121,6 +121,8 @@ interface DaemonSurfaceDeliveryContext {
    * broker's remote update when wired.
    */
   readonly recordApprovalPromptUndelivered?: ((approvalId: string, detail: ApprovalPromptUndelivered) => Promise<unknown>) | undefined;
+  /** Syncs a finished agent's task record; used when a reply is registered after its agent already ended. */
+  readonly syncFinishedAgentTask?: ((record: import('../tools/agent/index.js').AgentRecord) => void) | undefined;
 }
 
 /** What `metadata.promptDelivery` holds on an approval whose prompt did not reach its conversation. */
@@ -210,7 +212,26 @@ export class DaemonSurfaceDeliveryHelper {
       targetId: binding.channelId ?? binding.externalId ?? binding.id,
       phase: 'queued',
     });
+    this.settleIfAlreadyFinished(input.agentId);
     return true;
+  }
+
+  /**
+   * A reply registered after its agent already ended (one that failed at once:
+   * no usable model, a refused spawn) has no terminal event still coming, so it
+   * is settled here: the person gets the answer or the failure. One status
+   * read per registration; after the current event's handlers, like the
+   * event-driven settlement, so an end being announced right now settles once.
+   */
+  private settleIfAlreadyFinished(agentId: string): void {
+    const status = this.context.agentManager.getStatus(agentId)?.status;
+    if (status !== 'completed' && status !== 'failed' && status !== 'cancelled') return;
+    const sync = this.context.syncFinishedAgentTask ?? (() => {});
+    setTimeout(() => {
+      void this.settleFinishedAgent(agentId, sync).catch((error: unknown) => {
+        logger.warn('A channel reply registered after its agent ended could not be settled', { agentId, error: summarizeError(error) });
+      });
+    }, 0);
   }
 
   /**
@@ -485,6 +506,7 @@ export class DaemonSurfaceDeliveryHelper {
     };
     this.context.pendingSurfaceReplies.set(input.agentId, pending);
     this.context.channelReplyPipeline.trackPending(pending);
+    this.settleIfAlreadyFinished(input.agentId);
   }
 
   /**

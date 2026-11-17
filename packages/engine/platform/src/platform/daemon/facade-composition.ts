@@ -633,6 +633,7 @@ export function createDaemonFacadeCollaborators(
       note: `The approval prompt could not be shown in its conversation (${detail.reason}).`,
       metadata: { promptDelivery: { ...detail } },
     }),
+    syncFinishedAgentTask: options.syncFinishedAgentTask,
   });
   // Every reply the pipeline could not put on a channel becomes a visible
   // failed delivery rather than an absence.

@@ -262,11 +262,15 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): EmailInb
   const deliverGmail = async (message: GmailInboundMessage, target: PushedProviderSink): Promise<void> => {
     const id = gmailItemId(message.resourceId);
     if (held(id, target)) return;
+    if (message.unreadable) {
+      rows.push(unreadableRow(id, message.unreadable.reason, message.unreadable.senderDomain));
+      return;
+    }
     const body = message.bodyAvailability === 'full'
       ? message.body
       : 'The connected Google account does not grant message bodies, so only the subject is shown here.';
     await screenAndStage({
-      id, from: message.from, subject: message.subject, body, sentAt: messageTime(message.claimedDate, Date.now(), message.arrivedAt), unread: true,
+      id, from: message.from, subject: message.subject, body, sentAt: messageTime(message.claimedDate, Date.now(), message.arrivedAt), unread: message.unread ?? true,
       parts: [`From: ${message.from}\r\nSubject: ${message.subject}\r\n\r\n`, '', message.bodyAvailability === 'full' ? message.body : ''],
     });
   };

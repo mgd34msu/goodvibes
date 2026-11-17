@@ -51,6 +51,15 @@
  * discard, re-establish, disclose, and do NOT replay the mailbox. There is one
  * implementation of that rule and this file does not add a second.
  *
+ * **The first-run history window is the IMAP one.** When a consumer that shows
+ * the mailbox (the inbox) wants it, the newest 50 messages already in the
+ * label are kept as history: one `users.messages.list` call names them, their
+ * ids go into the cursor record (`historyMessageIds`), and they are handed on
+ * flagged `history`, which no notice announces. Each id leaves the record once
+ * every consumer took it; one Google would not hand over is tried on three
+ * polls and then handed on as a stand-in saying it could not be read. Once,
+ * at first run or when such a consumer attaches unseeded; nothing afterwards.
+ *
  * What this file cannot do
  * ────────────────────────
  * It cannot open, hydrate, widen or extend an expectation. Whether one is open
@@ -88,13 +97,17 @@ import type {
 } from './ports.js';
 import { isHistoryId } from './source-cursor.js';
 import type { InboundMailSource, SourceLatency } from './source.js';
+import { HISTORY_WINDOW_MESSAGES } from './watcher.js';
 import type {
   GmailMessageBody,
   GmailMessageMetadata,
   GoogleApiFailure,
   GoogleApiResult,
+  RecentMessageIds,
 } from '../../google/api-client.js';
 import {
+  GMAIL_BODY_SCOPES,
+  GMAIL_HISTORY_SCOPES,
   collectHistoryDelta,
   type GmailHistoryDelta,
   type HistoryDeltaDeps,
@@ -121,6 +134,9 @@ const MAX_CONSECUTIVE_DELIVERY_FAILURES = 3;
  * mail behind it, for ever.
  */
 const MAX_PERMANENT_UNREADABLE_PASSES = 5;
+
+/** Polls a history message may fail to read before it is handed on as a stand-in; the IMAP reader's bound. */
+const HISTORY_READ_ATTEMPTS = 3;
 
 /**
  * "Is somebody waiting on a message right now?"
@@ -151,7 +167,7 @@ export type ExpectationPresence = () => boolean;
 export type GmailCursorPort = Pick<
   MailboxCursorStore,
   'getGmail' | 'resolveGmail' | 'advanceGmail'
->;
+> & Partial<Pick<MailboxCursorStore, 'recordGmailHistory'>>;
 
 export interface GmailMailSourceDeps {
   /** Config account id, not an address. */
@@ -173,6 +189,11 @@ export interface GmailMailSourceDeps {
    * and a `resync-required` recovery.
    */
   readonly currentHistoryId: () => Promise<GoogleApiResult<string>>;
+  /**
+   * The newest message ids of the label, newest first: `users.messages.list`,
+   * asked only to keep the first-run history window. Absent: no window.
+   */
+  readonly listRecentMessageIds?: ((labelId: string, maxResults: number) => Promise<GoogleApiResult<RecentMessageIds>>) | undefined;
   readonly cursors: GmailCursorPort;
   readonly sink: InboundMailSink;
   readonly clock: WatcherClock;
@@ -228,6 +249,12 @@ export class GmailMailSource implements InboundMailSource {
    * first poll, and written only when the position moves.
    */
   private position: string | null = null;
+  /** A consumer that shows the mailbox wants the history window kept. */
+  private historyRequested = false;
+  /** The history window still to hand on, oldest first, as the cursor record holds it. */
+  private historyWindow: { readonly ids: readonly string[]; readonly skipped: number } | null = null;
+  /** Polls in a row each history message failed to read; bounded by the window. */
+  private readonly historyReadFailures = new Map<string, number>();
 
   constructor(deps: GmailMailSourceDeps) {
     this.deps = deps;
@@ -347,6 +374,14 @@ export class GmailMailSource implements InboundMailSource {
     this.recheckWake?.abort();
   }
 
+  /**
+   * Keep the history window for a consumer that attached after the position
+   * was established. Applied at the next poll.
+   */
+  requestHistory(): void {
+    this.historyRequested = true;
+  }
+
   /** Stop polling. Safe to call twice, and safe to call before `start`. */
   async stop(): Promise<void> {
     this.halt.abort();
@@ -401,9 +436,11 @@ export class GmailMailSource implements InboundMailSource {
 
     if (this.position === null) {
       const cursor = await this.deps.cursors.getGmail(this.deps.account, this.deps.mailbox);
-      if (cursor === null) return this.establish(false);
+      if (cursor === null) return this.establish(false, signal);
       this.position = cursor.historyId;
+      this.historyWindow = windowOf(cursor);
     }
+    await this.history(signal);
 
     const result = await collectHistoryDelta(this.deps.history, {
       startHistoryId: this.position,
@@ -420,7 +457,7 @@ export class GmailMailSource implements InboundMailSource {
     if ('unavailable' in result) {
       // The stored position aged out of Gmail's retention window. Same event as
       // a changed UIDVALIDITY, same resolution path, and no replay.
-      if (result.unavailable === 'resync-required') return this.establish(true);
+      if (result.unavailable === 'resync-required') return this.establish(true, signal);
       return this.refuse(result);
     }
     return this.recordFailure(result);
@@ -430,12 +467,14 @@ export class GmailMailSource implements InboundMailSource {
    * Establish the position at the current high-water mark, for a first run or
    * after a `resync-required`.
    *
-   * Never backfills on either path. A newly watched label starts listening now
-   * rather than retroactively deciding about mail that arrived before it was
-   * asked to, and an expired cursor is not an invitation to re-announce a week
-   * of old mail because Google rotated its history window.
+   * Never backfills notices on either path. A newly watched label starts
+   * listening now rather than retroactively deciding about mail that arrived
+   * before it was asked to, and an expired cursor is not an invitation to
+   * re-announce a week of old mail because Google rotated its history window.
+   * On a first run a consumer that shows the mailbox gets the history window
+   * (see the header); it is never announced.
    */
-  private async establish(afterExpiry: boolean): Promise<InboundCapabilityVerdict> {
+  private async establish(afterExpiry: boolean, signal: AbortSignal): Promise<InboundCapabilityVerdict> {
     const fresh = await this.deps.currentHistoryId();
     if (!fresh.ok) return this.recordFailure(fresh);
     if (!isHistoryId(fresh.value)) {
@@ -457,6 +496,7 @@ export class GmailMailSource implements InboundMailSource {
       historyExpired: afterExpiry,
     });
     this.position = resolution.cursor.historyId;
+    this.historyWindow = windowOf(resolution.cursor);
 
     if (resolution.kind === 'history-expired') {
       this.note('cursor-reset',
@@ -467,9 +507,150 @@ export class GmailMailSource implements InboundMailSource {
     } else if (resolution.kind === 'first-run') {
       this.note('cursor-established',
         `Listening from historyId ${resolution.cursor.historyId} onwards. Mail already in `
-        + `'${this.deps.mailbox}' is not read: the daemon starts listening now rather than backfilling.`);
+        + `'${this.deps.mailbox}' is not announced: the daemon starts listening now rather than backfilling; `
+        + 'a consumer that shows the mailbox keeps the newest of it as history.');
+      this.historyRequested = true;
+      await this.history(signal);
     }
     return this.record(capabilityVerdict('polling-configured', this.pollingDetail()));
+  }
+
+  /**
+   * How the grant lets a history message be read: in full, by its headers
+   * only (a `gmail.metadata` grant under `notice-only`), or not at all (the
+   * delta refuses such a grant, and the window waits for one that reads).
+   */
+  private historyReads(): 'full' | 'metadata-only' | null {
+    const granted = new Set(this.deps.history.scopes());
+    if (!GMAIL_HISTORY_SCOPES.some((scope) => granted.has(scope))) return null;
+    if (GMAIL_BODY_SCOPES.some((scope) => granted.has(scope))) return 'full';
+    return this.capabilityPolicy === 'notice-only' ? 'metadata-only' : null;
+  }
+
+  /** Keep and hand on the history window. Its failure is noted and never fails the poll: new mail is still read. */
+  private async history(signal: AbortSignal): Promise<void> {
+    if (!this.historyRequested && this.historyWindow === null) return;
+    try {
+      await this.keepHistory();
+      await this.deliverHistory(signal);
+    } catch (error) {
+      this.note('delivery-failed', `The history window of '${this.deps.mailbox}' was not handed on this poll: ${errorText(error)}`);
+    }
+  }
+
+  /**
+   * Keep the newest messages already in the label as history, once, when a
+   * consumer that shows the mailbox wants it: one `users.messages.list` call
+   * and one cursor write. A failed list keeps nothing; new mail is still read.
+   */
+  private async keepHistory(): Promise<void> {
+    if (!this.historyRequested) return;
+    this.historyRequested = false;
+    const list = this.deps.listRecentMessageIds;
+    const record = this.deps.cursors.recordGmailHistory?.bind(this.deps.cursors);
+    if (list === undefined || record === undefined || this.position === null) return;
+    if (this.deps.sink.wantsHistory?.() !== true || this.historyReads() === null) return;
+    const listed = await list(this.deps.mailbox, HISTORY_WINDOW_MESSAGES);
+    if (!listed.ok) {
+      this.note('cursor-established',
+        `The messages already in '${this.deps.mailbox}' could not be listed, so none are kept as history: ${listed.problem}`);
+      return;
+    }
+    // Google lists newest first; the window is handed on oldest first.
+    const ids = listed.value.ids.slice(0, HISTORY_WINDOW_MESSAGES).reverse();
+    const skipped = listed.value.more ? Math.max(0, listed.value.estimate - ids.length) : 0;
+    await record({ account: this.deps.account, mailbox: this.deps.mailbox }, { messageIds: ids, skippedOlderMessages: skipped });
+    this.historyWindow = ids.length > 0 ? { ids, skipped } : null;
+    this.note('cursor-established',
+      `${String(ids.length)} message(s) already in '${this.deps.mailbox}' are kept as history for the inbox `
+      + `and are not announced${skipped > 0 ? `; about ${String(skipped)} older one(s) are left out` : ''}.`);
+  }
+
+  /**
+   * Hand the history window's messages on, flagged `history`, and drop from
+   * the cursor record each one every consumer took. A message Google answers
+   * is gone (404) leaves the window; one it would not hand over is tried on
+   * the next poll and, on the third, handed on as a stand-in saying it could
+   * not be read. A refused credential, a usage limit or no answer is the
+   * account's state, not the message's: the delta reports it and it does not
+   * count. New mail is never held behind the window.
+   */
+  private async deliverHistory(signal: AbortSignal): Promise<void> {
+    const window = this.historyWindow;
+    const position = this.position;
+    if (window === null || position === null || signal.aborted) return;
+    const reads = this.historyReads();
+    if (reads === null) return;
+    const messages: GmailInboundMessage[] = [];
+    const done = new Set<string>();
+    for (const id of window.ids) {
+      if (signal.aborted) return;
+      let failure: GoogleApiFailure | null = null;
+      if ((this.historyReadFailures.get(id) ?? 0) < HISTORY_READ_ATTEMPTS) {
+        if (reads === 'full') {
+          const read = await this.deps.history.getMessage(id);
+          if (read.ok) {
+            messages.push({ ...this.toInboundMessage(read.value, position, { availability: 'full', text: read.value.body }), history: true });
+            continue;
+          }
+          failure = read;
+        } else {
+          const read = await this.deps.history.readMessageMetadata(id);
+          if (read.ok) {
+            messages.push({ ...this.toInboundMessage(read.value, position, { availability: 'metadata-only' }), history: true });
+            continue;
+          }
+          failure = read;
+        }
+        if (failure.status === 404) { done.add(id); continue; }
+        if (failure.status === null || failure.status === 401 || failure.status === 403 || failure.status === 429) continue;
+        const attempts = (this.historyReadFailures.get(id) ?? 0) + 1;
+        this.historyReadFailures.set(id, attempts);
+        if (attempts < HISTORY_READ_ATTEMPTS) continue;
+        this.note('message-stepped-over',
+          `Message ${id} of the history window could not be read on ${String(attempts)} polls in a row `
+          + `(${failure.problem}); the inbox shows that it exists and it is not read again.`);
+      }
+      messages.push(this.historyStandIn(id, position));
+    }
+    const outcome = signal.aborted ? null : await deliverToSink(this.deps.sink, messages, signal);
+    if (outcome === null || signal.aborted) return;
+    for (const message of messages.slice(0, outcome.done)) done.add(message.resourceId);
+    if (outcome.failed) {
+      this.note('delivery-failed',
+        `History message ${messages[outcome.done]?.resourceId ?? '(unknown)'} was not taken; it and the history `
+        + `after it are handed on again at the next poll: ${errorText(outcome.error)}`);
+    }
+    if (done.size === 0) return;
+    for (const id of done) this.historyReadFailures.delete(id);
+    const rest = window.ids.filter((id) => !done.has(id));
+    await this.deps.cursors.recordGmailHistory?.(
+      { account: this.deps.account, mailbox: this.deps.mailbox },
+      { messageIds: rest, skippedOlderMessages: window.skipped },
+    );
+    this.historyWindow = rest.length > 0 ? { ids: rest, skipped: window.skipped } : null;
+  }
+
+  /** The stand-in for a history message that could not be read: it exists, nothing of it is shown. */
+  private historyStandIn(id: string, historyId: string): GmailInboundMessage {
+    return {
+      source: 'gmail',
+      account: this.deps.account,
+      mailbox: this.deps.mailbox,
+      from: '',
+      subject: '',
+      claimedDate: '',
+      messageId: '',
+      deliveredTo: [],
+      unverifiedToHeaderClaim: '',
+      resourceId: id,
+      historyId,
+      body: '',
+      bodyAvailability: 'metadata-only',
+      via: 'poll',
+      history: true,
+      unreadable: { reason: 'repeated-read-failure' },
+    };
   }
 
   /**
@@ -877,6 +1058,7 @@ export class GmailMailSource implements InboundMailSource {
       unverifiedToHeaderClaim: message.to,
       resourceId: message.id,
       ...(message.receivedAt === undefined ? {} : { arrivedAt: message.receivedAt }),
+      unread: message.unread,
       historyId,
       // `''` on the metadata arm because there is no text to put there, the
       // argument type has no field for one. `bodyAvailability` below is what
@@ -919,6 +1101,12 @@ export class GmailMailSource implements InboundMailSource {
       // An observer that throws must not stop the mail being read.
     }
   }
+}
+
+/** The history window a cursor record holds, or null when none is left to hand on. */
+function windowOf(cursor: { readonly historyMessageIds?: readonly string[] | undefined; readonly skippedOlderMessages?: number | undefined }): { readonly ids: readonly string[]; readonly skipped: number } | null {
+  const ids = cursor.historyMessageIds;
+  return ids !== undefined && ids.length > 0 ? { ids, skipped: cursor.skippedOlderMessages ?? 0 } : null;
 }
 
 /** A batch to the sink, one message at a time for a sink that takes no batches. */

@@ -60,7 +60,19 @@ export interface GmailMailboxCursor {
   readonly historyId: string;
   /** ISO 8601. */
   readonly updatedAt: string;
+  /**
+   * The history window kept when the position was established, Gmail's form
+   * of the IMAP cursor's `historyThrough`: the ids of the newest messages
+   * already in the label still to be handed on flagged `history`, oldest
+   * first (empty once all were), and how many older ones were left out
+   * (Google's estimate). Absent: no window was kept.
+   */
+  readonly historyMessageIds?: readonly string[] | undefined;
+  readonly skippedOlderMessages?: number | undefined;
 }
+
+/** Most message ids a Gmail history window may hold; the reader keeps 50. */
+export const MAX_GMAIL_HISTORY_WINDOW = 500;
 
 export type InboundSourceCursor = ImapMailboxCursor | GmailMailboxCursor;
 
@@ -159,12 +171,21 @@ export function validateGmailCursor(value: unknown): GmailMailboxCursor | null {
   if (!isNonEmptyTrimmedString(record.mailbox, 512)) return null;
   if (!isHistoryId(record.historyId)) return null;
   if (!isParsableIsoDate(record.updatedAt)) return null;
+  // The history window is all or nothing: a torn window is dropped, never the cursor.
+  const ids = record.historyMessageIds;
+  const skipped = record.skippedOlderMessages;
+  const window = Array.isArray(ids) && ids.length <= MAX_GMAIL_HISTORY_WINDOW
+    && ids.every((id) => isNonEmptyTrimmedString(id, 256))
+    && typeof skipped === 'number' && Number.isSafeInteger(skipped) && skipped >= 0
+    ? { historyMessageIds: ids as readonly string[], skippedOlderMessages: skipped }
+    : {};
   return {
     source: 'gmail',
     account: (record.account as string).trim(),
     mailbox: (record.mailbox as string).trim(),
     historyId: record.historyId,
     updatedAt: record.updatedAt as string,
+    ...window,
   };
 }
 

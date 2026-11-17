@@ -456,6 +456,8 @@ export function composeInboundMail(
       mailbox: input.mailbox,
       history: resolution.reader.history,
       currentHistoryId: resolution.reader.currentHistoryId,
+      // The first-run history window for a consumer that shows the mailbox (the inbox).
+      ...(resolution.reader.listRecentMessageIds ? { listRecentMessageIds: resolution.reader.listRecentMessageIds } : {}),
       cursors,
       sink: input.sink,
       clock: systemWatcherClock,

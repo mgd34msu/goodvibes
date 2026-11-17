@@ -76,7 +76,7 @@ export function isConsumerUnavailable(error: unknown): boolean {
 
 /** A message the reader stepped over, or one already in the mailbox at establishment. */
 export function isHistoryOrStandIn(message: InboundMailboxMessage): boolean {
-  return message.source === 'imap' && (message.history === true || message.unreadable !== undefined);
+  return message.history === true || message.unreadable !== undefined;
 }
 
 /** The reader's sink: every consumer, in order, over each batch. */

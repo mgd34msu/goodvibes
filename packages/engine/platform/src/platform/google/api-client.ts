@@ -97,6 +97,15 @@ export interface GoogleListPage<T> {
   readonly more: boolean;
 }
 
+/** The newest message ids of one label, newest first (`GoogleApiClient.listRecentMessageIds`). */
+export interface RecentMessageIds {
+  readonly ids: readonly string[];
+  /** Older messages exist past these. */
+  readonly more: boolean;
+  /** Google's approximate count of messages in the label. */
+  readonly estimate: number;
+}
+
 /** Message summaries read side by side for one mail list; the list stays in Google's order. */
 const MESSAGE_SUMMARY_CONCURRENCY = 4;
 
@@ -601,6 +610,29 @@ export class GoogleApiClient {
       };
     }
     return { ok: true, value: { items: summaries, more } };
+  }
+
+  /**
+   * The ids of the newest messages in one label, newest first: one
+   * `users.messages.list` call, no message read. `more` says older messages
+   * exist past this page and `estimate` is Google's own approximate count of
+   * the label (`resultSizeEstimate`). A `gmail.metadata` grant may make it.
+   */
+  async listRecentMessageIds(labelId: string, maxResults: number): Promise<GoogleApiResult<RecentMessageIds>> {
+    const params = new URLSearchParams();
+    params.set('labelIds', labelId);
+    params.set('maxResults', String(Math.max(1, Math.min(500, Math.floor(maxResults)))));
+    const listed = await this.request(`${GMAIL_BASE}/messages?${params.toString()}`);
+    if (!listed.ok) return listed;
+    const page = isRecord(listed.value) ? listed.value : {};
+    const entries = Array.isArray(page.messages) ? page.messages : [];
+    const ids = entries
+      .map((entry) => (isRecord(entry) ? readString(entry.id) : ''))
+      .filter((id) => id.length > 0);
+    const estimate = typeof page.resultSizeEstimate === 'number' && Number.isSafeInteger(page.resultSizeEstimate) && page.resultSizeEstimate >= 0
+      ? page.resultSizeEstimate
+      : ids.length;
+    return { ok: true, value: { ids, more: readString(page.nextPageToken).length > 0, estimate } };
   }
 
   /** Read one message including its plain-text body. */

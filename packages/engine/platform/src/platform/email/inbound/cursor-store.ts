@@ -70,6 +70,7 @@ import {
   isHistoryId,
   isImapUid,
   isImapUidValidity,
+  MAX_GMAIL_HISTORY_WINDOW,
   MAX_IMAP_UID,
   validateInboundSourceCursor,
   validateMailboxCursorFields,
@@ -607,6 +608,11 @@ export class MailboxCursorStore {
         mailbox: input.mailbox,
         historyId: input.currentHistoryId,
         updatedAt: new Date(now).toISOString(),
+        // Message ids outlive an expired history position, so a window still
+        // being handed on is kept: those messages are still to come.
+        ...(existing?.historyMessageIds !== undefined
+          ? { historyMessageIds: existing.historyMessageIds, skippedOlderMessages: existing.skippedOlderMessages ?? 0 }
+          : {}),
       };
       const next = establishAt(cursors, index, established);
 
@@ -696,6 +702,39 @@ export class MailboxCursorStore {
         historyThrough: through,
         historyFloorUid: Math.min(input.floorUid, existing.historyFloorUid ?? input.floorUid),
         skippedOlderMessages: input.skippedOlderMessages,
+        updatedAt: new Date(now).toISOString(),
+      };
+      return { next: cursors.map((c, i) => (i === index ? updated : c)), result: updated };
+    });
+  }
+
+  /**
+   * Record the Gmail history window: the ids of the newest messages already in
+   * the label still to hand on (oldest first), and how many older ones were
+   * left out. Written once when the window is kept and again as its messages
+   * are handed on, until the list is empty; the position is not touched.
+   */
+  async recordGmailHistory(
+    key: { readonly account: string; readonly mailbox: string },
+    window: { readonly messageIds: readonly string[]; readonly skippedOlderMessages: number },
+  ): Promise<GmailMailboxCursor> {
+    if (window.messageIds.length > MAX_GMAIL_HISTORY_WINDOW
+      || window.messageIds.some((id) => typeof id !== 'string' || id.trim().length === 0 || id.length > 256)
+      || !Number.isSafeInteger(window.skippedOlderMessages) || window.skippedOlderMessages < 0) {
+      throw new Error(`Refusing a Gmail history window for ${key.account}:${key.mailbox}.`);
+    }
+    const now = this.now();
+    return this.mutate(async (cursors) => {
+      const index = indexOfKey(cursors, key.account, key.mailbox);
+      const stored = index >= 0 ? cursors[index] : undefined;
+      const existing = stored !== undefined && stored.source === 'gmail' ? stored : undefined;
+      if (!existing) {
+        throw new Error(`No Gmail cursor established for ${key.account}:${key.mailbox}; call resolveGmail() first.`);
+      }
+      const updated: GmailMailboxCursor = {
+        ...existing,
+        historyMessageIds: [...window.messageIds],
+        skippedOlderMessages: window.skippedOlderMessages,
         updatedAt: new Date(now).toISOString(),
       };
       return { next: cursors.map((c, i) => (i === index ? updated : c)), result: updated };

@@ -510,6 +510,19 @@ export interface GmailInboundMessage extends InboundMessageCommon {
    * "pushed" for a Gmail message by accident.
    */
   readonly via: 'poll';
+  /** Whether Google labels it unread; absent when not read. */
+  readonly unread?: boolean | undefined;
+  /**
+   * Already in the label when the reader established its position: one of
+   * the history window, kept so a consumer that shows the mailbox starts with
+   * it, never announced. The same flag as on an IMAP message.
+   */
+  readonly history?: boolean | undefined;
+  /**
+   * Set on a stand-in for a history message the reader could not read after
+   * its bounded attempts; the other fields are empty. As on IMAP.
+   */
+  readonly unreadable?: { readonly reason: string; readonly senderDomain?: string | undefined } | undefined;
 }
 
 /**

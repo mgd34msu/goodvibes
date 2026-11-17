@@ -55,7 +55,7 @@
 
 import { openGoogleConnection, type GoogleConnectionSources } from './connection.js';
 import type { GoogleConnectionOwner } from './connection-owner.js';
-import type { GoogleApiFetchPort, GoogleApiResult } from './api-client.js';
+import type { GoogleApiFetchPort, GoogleApiResult, RecentMessageIds } from './api-client.js';
 import type { GoogleFetchPort } from './oauth-loopback.js';
 import type { HistoryDeltaDeps } from './history-delta.js';
 
@@ -82,6 +82,8 @@ export interface GmailInboundReader {
   readonly history: HistoryDeltaDeps;
   /** `users.getProfile().historyId`, see `GoogleApiClient.currentHistoryId`. */
   readonly currentHistoryId: () => Promise<GoogleApiResult<string>>;
+  /** The newest message ids of a label, for the first-run history window; see `GoogleApiClient.listRecentMessageIds`. */
+  readonly listRecentMessageIds?: ((labelId: string, maxResults: number) => Promise<GoogleApiResult<RecentMessageIds>>) | undefined;
 }
 
 /** Why there is no Gmail reader, in words a selection can hand to the owner. */
@@ -187,6 +189,7 @@ export async function resolveGmailInboundReader(
       address: profile.value.emailAddress,
       history: client.historyDeltaPort(),
       currentHistoryId: () => client.currentHistoryId(),
+      listRecentMessageIds: (labelId, maxResults) => client.listRecentMessageIds(labelId, maxResults),
     },
   };
 }

@@ -29,7 +29,12 @@ attached, and does not sign in otherwise.
 - First run, or a changed UIDVALIDITY: the position starts at the newest
   message, and the newest 50 already there are kept as history: shown in the
   inbox, never announced. An inbox attached to a mailbox that already has a
-  position asks for that history once.
+  position asks for that history once. A mailbox read through Gmail gets the
+  same window on its first run: one `users.messages.list` call names the newest
+  50 in the label, their ids are kept in the cursor record and each leaves it
+  once the inbox took it; nothing is listed afterwards. A history message Gmail
+  answers is gone is dropped; one it would not hand over is tried on three polls
+  and then shown as a row saying it could not be read.
 - A message that cannot be read is tried on three drains, then stepped over:
   the inbox shows a row saying it could not be read, the daemon log records it,
   and the messages after it arrive.

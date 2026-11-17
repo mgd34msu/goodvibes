@@ -818,7 +818,13 @@ async function main(prepared: PreparedShellCliRuntime) {
   );
 
   // Routine notifications wait in the history while the person types, when the print level allows it.
-  ctx.services.notificationDispatcher.setTypingProbe(() => modeManager.getHITLPreset().quietWhileTyping && input.prompt.length > 0);
+  // Typing means a key reached the composer within the last few seconds; a draft left sitting holds nothing.
+  const TYPING_IDLE_MS = 3_000;
+  let lastComposerKeyAt = 0;
+  ctx.services.notificationDispatcher.setTypingProbe(() =>
+    modeManager.getHITLPreset().quietWhileTyping
+    && input.prompt.length > 0
+    && Date.now() - lastComposerKeyAt < TYPING_IDLE_MS);
   orchestratorRefs.getViewportHeight = getViewportHeight;
   orchestratorRefs.scrollToEnd = scrollToEnd;
   const views = new SessionViews({
@@ -1551,6 +1557,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       render,
     })) return;
 
+    lastComposerKeyAt = Date.now();
     input.feed(data);
   };
   const routeInput = (data: string): void => {

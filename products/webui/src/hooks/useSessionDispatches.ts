@@ -166,8 +166,9 @@ export function useSessionDispatches(lifetime: ClientLifetime, sessionId: string
             if (current()) void client.invalidateQueries({ queryKey: queryKeys.sessions });
             return;
           }
-          if (validReceipt(data?.input, sessionId)) {
-            settle((entry) => adopt(entry, data.input));
+          const receipt: unknown = data?.input;
+          if (validReceipt(receipt, sessionId)) {
+            settle((entry) => adopt(entry, receipt));
             void client.invalidateQueries({ queryKey: queryKeys.sessions });
             return;
           }

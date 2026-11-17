@@ -10,7 +10,8 @@
  */
 
 import type { GoogleBrowserElement, GoogleBrowserPort } from './types.js';
-import { preserveGoogleDecisionFailure } from './decision-work.js';
+import { googleCallerCurrent, preserveGoogleDecisionFailure } from './decision-work.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { googleSetupControl, googleSignInPage, googleTwoStepPage, googleAppPasswordPage, googleControlSnapshot, admitGoogleControlMetadata, googleReadingOwner, GoogleReadingError, latestGoogleSnapshot, type GoogleReadingOptions } from './browser-readings.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { StaleElementError } from '../browser/index.js';
@@ -49,20 +50,46 @@ export async function findElement(
     const candidates = snapshot.filter(element => element.disabled !== true && (!query.role || element.role.toLowerCase() === query.role.toLowerCase())
       && (!query.tag || element.tag.toLowerCase() === query.tag.toLowerCase())
       && (!pattern || pattern.test(element.name)));
-    const owner = googleReadingOwner('google.setup.control', options);
     if (!candidates.length) return null;
-    const reading = await googleSetupControl.select(owner.port, context as never,
-      candidates.map((element, index) => ({ id: `control_${index}`, content: { role: element.role, name: element.name, tag: element.tag } })),
-      { site: 'google.setup.control', signal: owner.signal });
-    if (reading.outcome !== 'act') throw new GoogleReadingError();
-    if (reading.chosen === undefined) { reading.recordAction('no suitable Google setup control'); return null; }
-    const index = candidates.findIndex((_, index) => `control_${index}` === reading.chosen);
-    if (index < 0) throw new GoogleReadingError();
-    const element = Object.freeze({ ...candidates[index]! });
-    reading.recordAction('selected an offered Google setup control');
-    selected.set(element, { browser: options.browser, source: elements, signal: owner.signal, assertOwner: owner.assertCurrent });
+    const chosen = await decisionOrClassic<{ readonly element: GoogleBrowserElement; readonly signal: AbortSignal | undefined; readonly assertOwner: () => void } | null>(async () => {
+      const owner = googleReadingOwner('google.setup.control', options);
+      const reading = await googleSetupControl.select(owner.port, context as never,
+        candidates.map((element, index) => ({ id: `control_${index}`, content: { role: element.role, name: element.name, tag: element.tag } })),
+        { site: 'google.setup.control', signal: owner.signal });
+      if (reading.outcome !== 'act') throw new GoogleReadingError();
+      if (reading.chosen === undefined) { reading.recordAction('no suitable Google setup control'); return null; }
+      const index = candidates.findIndex((_, index) => `control_${index}` === reading.chosen);
+      if (index < 0) throw new GoogleReadingError();
+      reading.recordAction('selected an offered Google setup control');
+      return { element: candidates[index]!, signal: owner.signal, assertOwner: owner.assertCurrent };
+    }, () => {
+      const element = controlByLabel(candidates, query);
+      return element === null ? null : { element, signal: options.signal, assertOwner: googleCallerCurrent(options) };
+    });
+    if (chosen === null) return null;
+    const element = Object.freeze({ ...chosen.element });
+    selected.set(element, { browser: options.browser, source: elements, signal: chosen.signal, assertOwner: chosen.assertOwner });
     return element;
   } catch (error) { preserveGoogleDecisionFailure(error, options); throw new GoogleReadingError(); }
+}
+
+const foldLabel = (text: string): string => text.normalize('NFC').toLocaleLowerCase().replace(/\s+/gu, ' ').replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+
+/**
+ * The code reading of a control, with no decision model in use: the one
+ * eligible control whose label is the query's `nameIncludes` text, else the one
+ * whose label contains it (case and spacing ignored). Two or more equally
+ * matching controls, or a query that names only a purpose, choose none, so the
+ * step reports what the page showed and the manual step instead of guessing.
+ */
+function controlByLabel(candidates: readonly GoogleBrowserElement[], query: GoogleElementQuery): GoogleBrowserElement | null {
+  if (query.nameIncludes === undefined) return query.namePattern !== undefined && candidates.length === 1 ? candidates[0]! : null;
+  const wanted = foldLabel(query.nameIncludes);
+  if (!wanted) return null;
+  const exact = candidates.filter(element => foldLabel(element.name) === wanted);
+  if (exact.length > 0) return exact.length === 1 ? exact[0]! : null;
+  const containing = candidates.filter(element => foldLabel(element.name).includes(wanted));
+  return containing.length === 1 ? containing[0]! : null;
 }
 
 /**
@@ -165,14 +192,28 @@ export async function requireElement(
 /** A settled typed page reading. Unknown/unavailable is never "signed in". */
 export async function looksLikeGoogleSignIn(url: string, elements: readonly GoogleBrowserElement[], options: GoogleReadingOptions = {}): Promise<boolean> {
   try {
-    const state = snapshotJudgmentInput({ url, elements: googleControlSnapshot(elements) });
-    const owner = googleReadingOwner('google.setup.sign-in-page', options);
-    const run = await googleSignInPage.run(owner.port, state as never, { site: 'google.setup.sign-in-page', signal: owner.signal });
-    const reading = run.readings.signIn;
-    if (reading.outcome !== 'act' || reading.verdict === 'uncertain') throw new GoogleReadingError();
-    run.recordAction('returned settled Google sign-in page state');
-    return reading.verdict === 'yes';
+    return await decisionOrClassic(async () => {
+      const state = snapshotJudgmentInput({ url, elements: googleControlSnapshot(elements) });
+      const owner = googleReadingOwner('google.setup.sign-in-page', options);
+      const run = await googleSignInPage.run(owner.port, state as never, { site: 'google.setup.sign-in-page', signal: owner.signal });
+      const reading = run.readings.signIn;
+      if (reading.outcome !== 'act' || reading.verdict === 'uncertain') throw new GoogleReadingError();
+      run.recordAction('returned settled Google sign-in page state');
+      return reading.verdict === 'yes';
+    }, () => signInByAddress(url));
   } catch (error) { preserveGoogleDecisionFailure(error, options); throw new GoogleReadingError(); }
+}
+
+/**
+ * The code reading of a sign-in wall: Google sends every sign-in, account
+ * choice and reauthentication to accounts.google.com, and serves the account,
+ * console and calendar pages from other hosts. An address that does not parse
+ * is not read as either.
+ */
+function signInByAddress(url: string): boolean {
+  let host: string;
+  try { host = new URL(url).hostname.toLowerCase(); } catch { throw new GoogleReadingError(); }
+  return host === 'accounts.google.com';
 }
 
 /** One observation of a setup page: its address, its controls and its text, read once. */
@@ -199,28 +240,61 @@ function pageState(page: GooglePageCapture): unknown {
 /** Read the observed setting without changing it. */
 export async function readGoogleTwoStepState(browser: GoogleBrowserPort, options: GoogleReadingOptions & { readonly page?: GooglePageCapture } = {}): Promise<'on' | 'off' | 'unknown'> {
   try {
-    const owner = googleReadingOwner(googleTwoStepPage.name, options);
-    const state = pageState(options.page ?? await captureGooglePage(browser));
-    const run = await googleTwoStepPage.run(owner.port, state as never, { site: googleTwoStepPage.name, signal: owner.signal });
-    const { enabled, disabled } = run.readings;
-    const on = enabled.verdict === 'yes' && enabled.outcome === 'act';
-    const off = disabled.verdict === 'yes' && disabled.outcome === 'act';
-    const setting = on === off ? 'unknown' : on ? 'on' : 'off';
-    run.recordAction('Report the observed 2-Step Verification setting; no account setting was changed.');
-    return setting;
+    const page = options.page ?? await captureGooglePage(browser);
+    return await decisionOrClassic<'on' | 'off' | 'unknown'>(async () => {
+      const owner = googleReadingOwner(googleTwoStepPage.name, options);
+      const state = pageState(page);
+      const run = await googleTwoStepPage.run(owner.port, state as never, { site: googleTwoStepPage.name, signal: owner.signal });
+      const { enabled, disabled } = run.readings;
+      const on = enabled.verdict === 'yes' && enabled.outcome === 'act';
+      const off = disabled.verdict === 'yes' && disabled.outcome === 'act';
+      const setting = on === off ? 'unknown' : on ? 'on' : 'off';
+      run.recordAction('Report the observed 2-Step Verification setting; no account setting was changed.');
+      return setting;
+    }, () => twoStepByText(page));
   } catch (error) { preserveGoogleDecisionFailure(error, options); return 'unknown'; }
 }
 
-export async function readGoogleAppPasswordState(browser: GoogleBrowserPort, label: string, options: GoogleReadingOptions & { readonly page?: GooglePageCapture } = {}) {
-  const labelState = snapshotJudgmentInput({ label });
-  const owner = googleReadingOwner(googleAppPasswordPage.name, options);
-  const state = pageState(options.page ?? await captureGooglePage(browser));
-  const run = await googleAppPasswordPage.run(owner.port, { ...(state as object), ...(labelState as object) },
-    { site: googleAppPasswordPage.name, signal: owner.signal });
-  const { twoStepRequired, labelExists } = run.readings;
-  if ([twoStepRequired, labelExists].some(reading => reading.outcome !== 'act' || reading.verdict === 'uncertain')) throw new GoogleReadingError();
-  run.recordAction('Observe app-password prerequisites and label presence; browser writes require separate control selection.');
-  return { twoStepRequired: twoStepRequired.verdict === 'yes', labelExists: labelExists.verdict === 'yes' };
+/**
+ * The code reading of the 2-Step Verification setting: Google's own status
+ * sentence ("2-Step Verification is on" / "is off") or its "Turn on 2-Step
+ * Verification" control. A page in another language, or one stating both, reads
+ * as unknown.
+ */
+function twoStepByText(page: GooglePageCapture): 'on' | 'off' | 'unknown' {
+  const on = /\b2-Step Verification is on\b/i.test(page.text);
+  const off = /\b2-Step Verification is off\b/i.test(page.text)
+    || page.elements.some(element => foldLabel(element.name) === 'turn on 2-step verification');
+  return on === off ? 'unknown' : on ? 'on' : 'off';
+}
+
+export async function readGoogleAppPasswordState(browser: GoogleBrowserPort, label: string, options: GoogleReadingOptions & { readonly page?: GooglePageCapture } = {}): Promise<{ readonly twoStepRequired: boolean; readonly labelExists: boolean }> {
+  const page = options.page ?? await captureGooglePage(browser);
+  return decisionOrClassic(async () => {
+    const labelState = snapshotJudgmentInput({ label });
+    const owner = googleReadingOwner(googleAppPasswordPage.name, options);
+    const state = pageState(page);
+    const run = await googleAppPasswordPage.run(owner.port, { ...(state as object), ...(labelState as object) },
+      { site: googleAppPasswordPage.name, signal: owner.signal });
+    const { twoStepRequired, labelExists } = run.readings;
+    if ([twoStepRequired, labelExists].some(reading => reading.outcome !== 'act' || reading.verdict === 'uncertain')) throw new GoogleReadingError();
+    run.recordAction('Observe app-password prerequisites and label presence; browser writes require separate control selection.');
+    return { twoStepRequired: twoStepRequired.verdict === 'yes', labelExists: labelExists.verdict === 'yes' };
+  }, () => appPasswordPageByLabels(page, label));
+}
+
+/**
+ * The code reading of the app-password page: an existing entry is a control
+ * other than a text field whose label carries the requested label; 2-Step
+ * Verification blocks creation only when there is no "App name" field and the
+ * page says to turn it on or that it is off.
+ */
+function appPasswordPageByLabels(page: GooglePageCapture, label: string): { readonly twoStepRequired: boolean; readonly labelExists: boolean } {
+  const wanted = foldLabel(label);
+  const form = page.elements.some(element => element.role === 'textbox' && foldLabel(element.name).includes('app name'));
+  const labelExists = wanted.length > 0 && page.elements.some(element => element.role !== 'textbox' && foldLabel(element.name).includes(wanted));
+  const twoStepRequired = !form && /\b(?:turn on|set up) 2-Step Verification\b|\b2-Step Verification is off\b/i.test(page.text);
+  return { twoStepRequired, labelExists };
 }
 
 /**

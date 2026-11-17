@@ -1,4 +1,3 @@
-import { isClassicOperation, requireDecisionFeature } from '../runtime/decision-policy.js';
 /**
  * The Cloud-project half of the OAuth path: gcloud and the console pages.
  *
@@ -166,18 +165,16 @@ function brandingRunner(deps: GoogleSetupActionDeps, state: GcloudState): Google
       return alreadyDone('An OAuth client is stored, which Google allows only once the consent screen is filled in.');
     }
     const browser = await deps.browser();
-    if (!isClassicOperation()) {
-      const status = await readPublishingStatus(browser);
-      if (status.kind === 'ok' && status.status !== 'unknown') {
-        state.publishing = status.status;
-        deps.config.set(GOOGLE_CONFIG_KEYS.oauthPublishingStatus, status.status);
-        return alreadyDone('The consent screen is filled in: the Google Auth Platform shows this app\'s publishing status.');
-      }
-      // A sign-in wall or an unselected project says nothing about the
-      // consent screen; it is what stands in the way, so it is what is asked.
-      if (status.kind === 'needs-human') {
-        return needsHuman('The Google Auth Platform console could not be read yet.', status.problem, status.fix);
-      }
+    const status = await readPublishingStatus(browser);
+    if (status.kind === 'ok' && status.status !== 'unknown') {
+      state.publishing = status.status;
+      deps.config.set(GOOGLE_CONFIG_KEYS.oauthPublishingStatus, status.status);
+      return alreadyDone('The consent screen is filled in: the Google Auth Platform shows this app\'s publishing status.');
+    }
+    // A sign-in wall or an unselected project says nothing about the
+    // consent screen; it is what stands in the way, so it is what is asked.
+    if (status.kind === 'needs-human') {
+      return needsHuman('The Google Auth Platform console could not be read yet.', status.problem, status.fix);
     }
     if (spec.url !== undefined) await browser.navigate(spec.url);
     return needsHuman(
@@ -195,7 +192,6 @@ function brandingRunner(deps: GoogleSetupActionDeps, state: GcloudState): Google
  */
 function audienceProductionRunner(deps: GoogleSetupActionDeps, state: GcloudState): GoogleStepRunner {
   return async () => {
-    requireDecisionFeature('automatic publishing-status interpretation; check and publish the app manually in Google settings');
     const browser = await deps.browser();
     // Read once per run: the consent-screen step may already have read it.
     let current = state.publishing;

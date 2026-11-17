@@ -1,4 +1,4 @@
-import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { isClassicOperation } from '../runtime/decision-policy.js';
 import { ownGoogleSetupDeps, ownGoogleSetupRunners } from './setup-reading-scope.js';
 /** Binds Google setup steps to their implementations through injected ports.
  * Steps requiring a person report needs-human. Credentials go to the encrypted
@@ -102,7 +102,6 @@ function browserReadyRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
  */
 function signedInRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
   return async (spec) => {
-    requireDecisionFeature('automatic Google account page interpretation; complete this step manually in Google settings');
     const browser = await deps.browser();
     const url = spec.url;
     if (url !== undefined) await browser.navigate(url);
@@ -115,13 +114,14 @@ function signedInRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
         'Sign in to the Google account you want the agent to use in the open browser window, complete any 2-Step prompt, then re-run. The sign-in is remembered from then on.',
       );
     }
-    return done('Signed in to Google in the browser profile this flow uses.');
+    return done(isClassicOperation()
+      ? 'Signed in to Google in the browser profile this flow uses (read from the page address; no decision model is in use).'
+      : 'Signed in to Google in the browser profile this flow uses.');
   };
 }
 
 function twoStepRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
   return async (spec) => {
-    requireDecisionFeature('automatic Google account page interpretation; complete this step manually in Google settings');
     const browser = await deps.browser();
     if (spec.url !== undefined) await browser.navigate(spec.url);
     const state = await readGoogleTwoStepState(browser, { signal: deps.signal, assertCurrent: deps.assertCurrent });
@@ -134,6 +134,12 @@ function twoStepRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
         'Google only offers app passwords on accounts with 2-Step Verification enabled, and this account has it off.',
         `Open ${spec.url ?? 'the 2-Step Verification settings'}, click "Turn on 2-Step Verification", follow the prompts, then re-run.`,
       );
+    }
+    // Without a decision model only Google's English status sentence is read. The
+    // app-password page states the same block itself, so the run goes on and that
+    // step reports it, rather than stopping here on every re-run.
+    if (isClassicOperation()) {
+      return done('The 2-Step Verification state was not read (no decision model is in use, and the page did not show Google\'s English status sentence); the app-password step reports it if it is off.');
     }
     // An unreadable page is not proof of either state, so it is not claimed as one.
     return needsHuman(
@@ -157,7 +163,6 @@ function appPasswordRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
         'Unlock or repair the secret store, then re-run.',
       );
     }
-    requireDecisionFeature('automatic Google app-password creation; create and store the credential through secure manual setup');
     const browser = await deps.browser();
     const result = await createAppPassword(browser, { label: APP_PASSWORD_LABEL });
     if (result.kind === 'needs-human') {
@@ -305,7 +310,6 @@ async function obtainClientCredentials(deps: GoogleSetupActionDeps, choice: Goog
     return readClientCredentialsFromJson(collected.file.contents);
   }
 
-  requireDecisionFeature('automatic OAuth client creation; use manual entry or an exact downloaded client JSON file');
   const browser = await deps.browser();
   const created = await createDesktopOAuthClient(browser, { name: 'goodvibes agent' });
   if (created.kind === 'needs-human') return { ok: false, problem: created.problem, fix: created.fix };

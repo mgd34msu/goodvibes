@@ -159,7 +159,7 @@ export async function createAppPassword(
 
     const nameFieldLookup = await requireElement(elements, { role: 'textbox', purpose: 'Name the new Google app password', nameIncludes: 'app name' }, { browser });
     if (!nameFieldLookup.found) {
-      const createLookup = await requireElement(elements, { role: 'button', purpose: 'Create the app password using the completed app-name form' }, { browser });
+      const createLookup = await requireElement(elements, { role: 'button', purpose: 'Create the app password using the completed app-name form', nameIncludes: 'create' }, { browser });
       if (!createLookup.found) return { kind: 'needs-human', reason: 'create-form-not-found', problem: 'The app-password creation form is unavailable; the page does not establish why.', fix: `Open ${pageUrl} and review the account’s app-password availability.` };
       return {
         kind: 'failed', reason: 'create-form-not-found', problem: nameFieldLookup.message,
@@ -169,7 +169,7 @@ export async function createAppPassword(
 
     await consumeGoogleElement(browser, nameFieldLookup.element, label);
     elements = await browser.snapshot();
-    const createButtonLookup = await requireElement(elements, { role: 'button', purpose: 'Create the app password using the completed app-name form' }, { browser });
+    const createButtonLookup = await requireElement(elements, { role: 'button', purpose: 'Create the app password using the completed app-name form', nameIncludes: 'create' }, { browser });
     if (!createButtonLookup.found) return { kind: 'failed', reason: 'create-form-not-found', problem: createButtonLookup.message, fix: 'Review the app-password form by hand.' };
     const textBeforeCreate = wordsOnPage(await browser.readText());
     await consumeGoogleElement(browser, createButtonLookup.element);

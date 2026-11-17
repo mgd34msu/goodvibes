@@ -108,6 +108,7 @@ export async function captureIcsAddress(
 
     const calendarLookup = await requireElement(elements, {
       purpose: calendarName ? `Open the calendar requested as ${calendarName} in calendar settings` : 'Open the primary calendar under Settings for my calendars',
+      ...(calendarName ? { nameIncludes: calendarName } : {}),
     }, { browser });
     const calendarElement = calendarLookup.found ? calendarLookup.element : null;
 

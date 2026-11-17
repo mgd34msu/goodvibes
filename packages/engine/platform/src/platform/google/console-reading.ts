@@ -1,4 +1,5 @@
 import { withGoogleDecisionWork } from './decision-work.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { prepareJudgmentResult } from '../gate/judgment-result.js';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { defineBattery, oneOf, yesNo, STAKES_BANDS } from '@goodvibes-jev/judgment';
@@ -19,7 +20,7 @@ export const consoleStatus = defineBattery({
   ],
 });
 export async function readConsoleStatus(text: string, options: JudgmentReadingOptions = {}) {
-  return withGoogleDecisionWork(options, async () => {
+  return withGoogleDecisionWork(options, () => decisionOrClassic(async () => {
     assertJudgmentInput({ text });
     if (text.length > 160_000) throw new JudgmentInputError('unsupported-input');
     const owner = captureJudgmentPort(consoleStatus.name, { ...options, prepareResultCapture: prepareJudgmentResult });
@@ -30,5 +31,18 @@ export async function readConsoleStatus(text: string, options: JudgmentReadingOp
     const status = requireActingReading(run.readings.status).choice;
     run.recordAction('Read console state; browser action and post-action verification remain separate.');
     return { projectMissing, status };
-  });
+  }, () => consoleStatusByText(text)));
+}
+
+/**
+ * The code reading of the audience page: the status Google prints after its
+ * "Publishing status" heading ("Testing" or "In production"). With neither, a
+ * project is missing only when the page asks to select or create one and names
+ * no current project; anything else is unknown.
+ */
+function consoleStatusByText(text: string): { readonly projectMissing: boolean; readonly status: 'testing' | 'in-production' | 'unknown' } {
+  const shown = /\bpublishing status\b\s*:?\s*(testing|in production)\b/i.exec(text)?.[1]?.toLowerCase();
+  const status = shown === 'testing' ? 'testing' : shown === 'in production' ? 'in-production' : 'unknown';
+  const projectMissing = status === 'unknown' && /\b(?:select|create) a project\b/i.test(text) && !/\bcurrent project\b/i.test(text);
+  return { projectMissing, status };
 }

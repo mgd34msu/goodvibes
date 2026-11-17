@@ -5,7 +5,7 @@ import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev
 import { types as nodeTypes } from 'node:util';
 import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import type { GoogleBrowserElement, GoogleBrowserPort } from './types.js';
-import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { isClassicOperation } from '../runtime/decision-policy.js';
 import { googleCallerCurrent } from './decision-work.js';
 
 // Match findElement's eligible control descriptors, including structural evidence.
@@ -100,8 +100,8 @@ export function googleControlSnapshot(elements: readonly GoogleBrowserElement[])
 export interface GoogleReadingOptions extends JudgmentReadingOptions {
   readonly browser?: GoogleBrowserPort | undefined;
 }
+/** The decision-model port for one page reading; asked only while a decision model is in use. */
 export function googleReadingOwner(site: string, options: GoogleReadingOptions) {
-  requireDecisionFeature('automatic Google page interpretation; complete the step manually in Google settings');
   const owner = captureJudgmentPort(site, { signal: options.signal, assertCurrent: options.assertCurrent });
   const port: JudgmentPort = { ...owner.port, async ask(request) {
     const result = await owner.port.ask(request);
@@ -111,8 +111,13 @@ export function googleReadingOwner(site: string, options: GoogleReadingOptions) 
   return { ...owner, port };
 }
 
-/** Carry the first observation owner through browser awaits and later writes. */
+/**
+ * Carry the first observation owner through browser awaits and later writes.
+ * With no decision model in use the page readings are code's, so the caller's
+ * own lifetime owns the browser.
+ */
 export function ownGoogleBrowser(browser: GoogleBrowserPort, options: JudgmentReadingOptions = {}): { browser: GoogleBrowserPort; assertCurrent: () => void; consumeObservation: () => { readonly assertCurrent: () => void } } {
+  if (isClassicOperation()) return ownGoogleManualBrowser(browser, options);
   return wrapGoogleBrowser(browser, googleReadingOwner('google.setup.flow', options));
 }
 

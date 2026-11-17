@@ -204,7 +204,7 @@ function summarize(
 export function renderGoogleSetupReport(report: GoogleSetupReport): string {
   const lines: string[] = [];
   lines.push(report.summary);
-  if (report.provenance === 'classic') lines.push('No decision model: native setup results only; automatic semantic page interpretation is unavailable.');
+  if (report.provenance === 'classic') lines.push('No decision model is in use: Google pages were read by code (page addresses and Google\'s English labels); a page it cannot read stops at that step with what to do by hand.');
   lines.push('');
 
   for (const step of report.steps) {

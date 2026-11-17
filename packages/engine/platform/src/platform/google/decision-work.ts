@@ -1,9 +1,7 @@
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { DecisionModelsDisabledError, JudgmentPortMissingError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { activateClassicFallback, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
-
-const GOOGLE_AUTOMATION = 'automatic Google page interpretation or verification selection; complete the step manually using Google settings or provide the exact credential through secure setup';
+import { withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 
 /** Native lifetime remains binding when a decision endpoint is unavailable. */
 export function googleCallerCurrent(options: JudgmentReadingOptions): () => void {
@@ -16,17 +14,18 @@ export function googleCallerCurrent(options: JudgmentReadingOptions): () => void
   };
 }
 
-/** Own the complete flow, including its effects. Never restart it after an outage. */
+/**
+ * Own the complete flow, including its effects. Never restart it after an outage.
+ * Each page reading inside it is asked of the decision model or read by code
+ * (`decisionOrClassic`): with no decision model in use the flow runs on the code
+ * readings, and a Hybrid outage moves the rest of the flow to them.
+ */
 export function withGoogleDecisionWork<T>(options: JudgmentReadingOptions, work: () => Promise<T>): Promise<T> {
   return withConfiguredDecisionModelPolicy(async () => {
     const current = googleCallerCurrent(options);
-    current(); requireDecisionFeature(GOOGLE_AUTOMATION);
+    current();
     try { const result = await work(); current(); return result; }
-    catch (error) {
-      current();
-      if (activateClassicFallback(error)) requireDecisionFeature(GOOGLE_AUTOMATION);
-      throw error;
-    }
+    catch (error) { current(); throw error; }
   });
 }
 

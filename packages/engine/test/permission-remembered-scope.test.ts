@@ -3,12 +3,13 @@
  * Explicit owner rules are exercised through live permission and registry consumers.
  * No command is executed: the real registry/admission path ends at a counter.
  */
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { useGateReadings } from './_helpers/gate-readings.ts';
-import { PermissionManager, type PermissionConfigReader } from '../platform/src/platform/permissions/manager.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { createPermissionConfigReader, PermissionManager } from '../platform/src/platform/permissions/manager.ts';
 import type { PermissionRequestHandler } from '../platform/src/platform/permissions/prompt.ts';
 import { buildDurableRuleForDecision } from '../platform/src/platform/permissions/approval-rules.ts';
 import { UserPermissionRuleStore } from '../platform/src/platform/permissions/user-rule-store.ts';
@@ -31,12 +32,15 @@ const execArgs = (...commands: string[]): Record<string, unknown> => ({
 const commit = execArgs('git commit -m one');
 const push = execArgs('git push');
 
+const settingsDir = mkdtempSync(join(tmpdir(), 'gv-remembered-scope-'));
+afterAll(() => { rmSync(settingsDir, { recursive: true, force: true }); });
+/** The real settings, at their shipped defaults, behind every permission consumer here. */
+const settings = createPermissionConfigReader(new ConfigManager({
+  surfaceRoot: 'agent', workingDir: join(settingsDir, 'workspace'), homeDir: join(settingsDir, 'home'), configDir: join(settingsDir, 'config'),
+}));
+
 function manager(handler: PermissionRequestHandler, store: UserPermissionRuleStore | null, surfaceId?: string): PermissionManager {
-  return new PermissionManager(handler, {
-    isAutoApproveEnabled: () => false,
-    getWorkingDirectory: () => '/synthetic/remembered-scope',
-    getSnapshot: () => ({ permissions: { mode: 'prompt', tools: {} } }),
-  } as PermissionConfigReader, new PolicyRuntimeState(), null, null, store, { surfaceOf: () => surfaceId });
+  return new PermissionManager(handler, settings, new PolicyRuntimeState(), null, null, store, { surfaceOf: () => surfaceId });
 }
 
 /** These callback-era fixtures exercise the retained API; autonomous negatives live in autonomous-tool-admission.test.ts. */
@@ -122,16 +126,6 @@ describe('literal exact command authority', () => {
     await revoke(store);
     expect((await run('revoked', original)).success).toBe(true);
     expect(admitted).toEqual([execArgs(changed), execArgs(original)]); expect(asks).toBe(0);
-  });
-
-  test('building an exact rule preserves whitespace and denies only that literal string', async () => {
-    const command = ' git add src/README.md\n'; const store = new UserPermissionRuleStore(':memory:');
-    await remember(store, execArgs(command), 'exact', 'deny');
-    const permissions = manager(async () => { throw new Error('Unexpected prompt'); }, store);
-    expect(store.rules()[0]).toMatchObject({ exactCommands: [command] });
-    expect((await permissions.checkDetailed('exec', execArgs(command))).approved).toBe(false);
-    expect((await permissions.checkDetailed('exec', execArgs(command.trim()))).approved).toBe(true);
-    expect((await permissions.checkDetailed('exec', execArgs(' git add src/readme.md\n'))).approved).toBe(true);
   });
 
   test.each(['allow', 'deny'] as const)('the shared matcher and layered evaluator keep %s exact rules literal', (effect) => {

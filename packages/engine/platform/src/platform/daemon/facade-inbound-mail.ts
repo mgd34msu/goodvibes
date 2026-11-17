@@ -70,6 +70,7 @@ import {
   resolveWatcherSettings,
   systemWatcherClock,
   type GmailSourceBuilder,
+  type InboundMailHealthEntry,
   type InboundMailObserver,
   type InboundMailSourceFactory,
   type InboundWatcherSettings,
@@ -81,7 +82,9 @@ import type {
   GmailInboundReaderResolution,
 } from '../google/gmail-inbound-reader.js';
 import { nodeEmailTransport } from '../email/node.js';
-import { configReaderWithOrigins, readSurfaceEmailSettings } from '../email/surface-config.js';
+import { configReaderWithOrigins, readSurfaceEmailSettings, type ConfigReaderWithOrigins } from '../email/surface-config.js';
+import { parseEmailSecretRef } from '../email/email-config.js';
+import { isLoopbackHost } from '../utils/reachable-base-url.js';
 import { registerEmailExpectationGatewayMethods } from '../control-plane/routes/email-expectations.js';
 import { registerEmailInboundStatusGatewayMethod } from '../control-plane/routes/email-inbound-status.js';
 import { logger } from '../utils/logger.js';
@@ -94,7 +97,7 @@ import type { ShellPathService } from '../runtime/shell-paths.js';
 import type { StructuredNotice } from '../email/inbound-notice.js';
 import type { SurfaceNoticeDelivery } from './types.js';
 
-/** How many accounts one supervisor watches. One, today, see `readWatchedAccounts`. */
+/** The folder a mailbox is read from when its settings name none. */
 const DEFAULT_MAILBOX = 'INBOX';
 
 export interface InboundMailCompositionOptions {
@@ -145,14 +148,15 @@ export interface InboundMailCompositionOptions {
 }
 
 /**
- * The account this node watches.
+ * The accounts this node watches.
  *
- * `surfaces.email.inbound.accounts` is a JSON array so the design can grow to
- * several mailboxes; today one supervisor watches the first entry, and an
- * empty list is honest about watching nothing rather than defaulting to a
- * mailbox nobody named.
+ * `surfaces.email.inbound.accounts` is a JSON array: the first entry is the
+ * daemon's own mailbox, and each further one is watched over IMAP with the
+ * connection `surfaces.email.inbound.mailboxes` gives it. An empty list is
+ * honest about watching nothing rather than defaulting to a mailbox nobody
+ * named.
  */
-function readWatchedAccounts(configManager: ConfigManager): { readonly account: string; readonly ignored: readonly string[] } | null {
+function readWatchedAccounts(configManager: ConfigManager): { readonly account: string; readonly further: readonly string[] } | null {
   const raw = configManager.get('surfaces.email.inbound.accounts');
   if (typeof raw !== 'string' || raw.trim().length === 0) return null;
   try {
@@ -162,7 +166,7 @@ function readWatchedAccounts(configManager: ConfigManager): { readonly account: 
       .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
       .map((entry) => entry.trim());
     const [account, ...rest] = named;
-    return account === undefined ? null : { account, ignored: [...new Set(rest.filter((entry) => entry !== account))] };
+    return account === undefined ? null : { account, further: [...new Set(rest.filter((entry) => entry !== account))] };
   } catch {
     // A malformed list is a configuration error, not a mailbox. Reported by
     // the supervisor's status rather than guessed at here.
@@ -278,7 +282,7 @@ export function composeInboundMail(
   const { configManager, shellPaths } = options;
   const watched = readWatchedAccounts(configManager);
   if (watched === null) return null;
-  const { account, ignored: ignoredAccounts } = watched;
+  const { account } = watched;
 
   const mailbox = readSurfaceEmailSettings(configReaderWithOrigins(configManager)).mailbox
     ?? DEFAULT_MAILBOX;
@@ -286,8 +290,10 @@ export function composeInboundMail(
   const storePath = (name: string): string => shellPaths.resolveUserPath('daemon', name);
   const cursors = new MailboxCursorStore(storePath('email-inbound-cursors.json'), {
     // Reaping a cursor whose account left the config is the store's first
-    // rule, and it needs to know what "in config" means.
-    isAccountConfigured: (candidate) => candidate === account,
+    // rule, and it needs to know what "in config" means: any listed account,
+    // read now, so a further mailbox keeps its place while it is listed.
+    isAccountConfigured: (candidate) => candidate === account
+      || (readWatchedAccounts(configManager)?.further.includes(candidate) ?? false),
   });
   const records = new InboundMailStore(storePath('email-inbound-records.json'), {
     policy: {
@@ -475,10 +481,25 @@ export function composeInboundMail(
     });
   };
 
+  // One intake for every watched mailbox: the same records, expectations and notice route.
+  const handle = createInboundMailIntake({
+    expectations: expectations.matcher,
+    records,
+    notices: {
+      resolveBinding: () => resolveNoticeRoute(configManager, options.routeBindings),
+      send: (notice) => options.deliverStructuredNotice(
+        noticeBindingFor(configManager, options.routeBindings),
+        notice,
+      ),
+    },
+    noticeMode: () => readNoticeMode(configManager),
+    now: () => new Date(),
+    noticeHealth,
+  });
+
   supervisor = new InboundMailSupervisor({
     config: configManager,
     account,
-    ignoredAccounts,
     mailbox,
     sources: options.sources ?? createInboundMailSourceFactory({
       getConfigurationIncarnation: () => configManager.getConfigurationIncarnation?.(),
@@ -521,20 +542,7 @@ export function composeInboundMail(
     expectationPolicy: expectationStore,
     housekeeper,
     noticeHealth,
-    handle: createInboundMailIntake({
-      expectations: expectations.matcher,
-      records,
-      notices: {
-        resolveBinding: () => resolveNoticeRoute(configManager, options.routeBindings),
-        send: (notice) => options.deliverStructuredNotice(
-          noticeBindingFor(configManager, options.routeBindings),
-          notice,
-        ),
-      },
-      noticeMode: () => readNoticeMode(configManager),
-      now: () => new Date(),
-      noticeHealth,
-    }),
+    handle,
     // §3.4b: a terminal state is ANNOUNCED, not merely recorded. This used to
     // be a `logger.error` and nothing else, the once-per-transition tracker
     // built, and its sink a log line, for the one condition that means no mail
@@ -565,11 +573,67 @@ export function composeInboundMail(
       releaseBackground = null;
     };
   };
+  // Each further account is its own supervisor over the same stores and intake,
+  // built from its own entry in surfaces.email.inbound.mailboxes. Its failures
+  // reach the owner through an announcer of its own; they do not fail open
+  // expectations, which the first mailbox can still satisfy.
+  const furtherObserver = (): InboundMailObserver => {
+    const own = createInboundTerminalFailureAnnouncer({
+      send: (notice) => options.deliverStructuredNotice(noticeBindingFor(configManager, options.routeBindings), notice),
+    });
+    return {
+      terminalFailure: (failure) => { own.terminalFailure(failure); },
+      stateChanged: (transition) => { own.stateChanged(transition); },
+      note: (note) => { observer.note?.(note); },
+    };
+  };
+  const further = new FurtherMailboxes(configManager, (entry) => new InboundMailSupervisor({
+    config: { get: entry.config as unknown as ConfigManager['get'] },
+    account: entry.account,
+    mailbox: entry.mailbox,
+    sources: options.sources ?? createInboundMailSourceFactory({
+      getConfigurationIncarnation: () => configManager.getConfigurationIncarnation?.(),
+      onDidChangeConfiguration: (listener) => configManager.onDidChangeIncarnation?.(listener) ?? (() => {}),
+      getConfig: entry.config,
+      secrets: options.secretsManager,
+      password: { ref: entry.passwordRef, setting: `surfaces.email.inbound.mailboxes.${entry.account}.passwordRef` },
+      transport: nodeEmailTransport,
+      cursors,
+      settings,
+    }),
+    // Read over IMAP only: the Google credential reads the daemon's own mailbox.
+    selectionFacts: async () => ({ googleAdopted: false, mailAccountIsGmail: false }),
+    cursors,
+    records,
+    expectations,
+    expectationPolicy: expectationStore,
+    housekeeper,
+    // The first mailbox's start sweeps the shared stores and restores expectations.
+    restoresStores: false,
+    noticeHealth,
+    handle,
+    observer: furtherObserver(),
+  }));
+
   const startSupervisor = supervisor.start.bind(supervisor);
   const stopSupervisor = supervisor.stop.bind(supervisor);
-  supervisor.start = () => { attachBackground(); return startSupervisor(); };
+  const recheckSupervisor = supervisor.recheckNow.bind(supervisor);
+  const supervisorHealth = supervisor.health.bind(supervisor);
+  const describeSupervisor = supervisor.describeStatus.bind(supervisor);
+  supervisor.start = async () => {
+    attachBackground();
+    const [status] = await Promise.all([startSupervisor(), further.start()]);
+    return status;
+  };
   supervisor.stop = async () => {
-    try { await stopSupervisor(); } finally { releaseBackground?.(); }
+    try { await Promise.all([stopSupervisor(), further.stop()]); } finally { releaseBackground?.(); }
+  };
+  supervisor.recheckNow = () => { recheckSupervisor(); further.recheckNow(); };
+  supervisor.health = () => further.foldHealth(supervisorHealth());
+  // The snapshot's health is read through `health()` above, so it already names the further mailboxes.
+  supervisor.describeStatus = async () => {
+    const snapshot = await describeSupervisor();
+    return { ...snapshot, reason: snapshot.health.reason };
   };
 
   registerEmailExpectationGatewayMethods(options.gatewayMethods, expectations, () => supervisor?.status ?? { running: false, reason: 'The inbound mail supervisor is not available.' });
@@ -578,6 +642,234 @@ export function composeInboundMail(
   // minutes, so the expectation sweep runs on its own cadence.
   attachBackground();
   return supervisor;
+}
+
+/** One further account's mailbox, read from `surfaces.email.inbound.mailboxes`. */
+interface FurtherMailboxEntry {
+  readonly account: string;
+  readonly mailbox: string;
+  readonly passwordRef: string;
+  /** The mailbox settings as this account's supervisor and source read them; see `furtherMailboxConfig`. */
+  readonly config: ConfigReaderWithOrigins;
+  /** Changes when anything that decides how this mailbox is reached changes. */
+  readonly signature: string;
+}
+
+type FurtherMailboxReading =
+  | { readonly kind: 'watch'; readonly entry: FurtherMailboxEntry }
+  | { readonly kind: 'unwatched'; readonly account: string; readonly reason: string };
+
+/** The secret a further account's password is read from when its entry names none. */
+export function furtherMailboxPasswordKey(account: string): string {
+  const name = account.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  return `GOODVIBES_EMAIL_INBOUND_${name.length > 0 ? name : 'ACCOUNT'}_PASSWORD`;
+}
+
+/** Every account after the first, each with the mailbox it is watched on or why it is not watched. */
+function readFurtherMailboxes(configManager: ConfigManager): readonly FurtherMailboxReading[] {
+  const names = readWatchedAccounts(configManager)?.further ?? [];
+  if (names.length === 0) return [];
+  const raw = configManager.get('surfaces.email.inbound.mailboxes');
+  let table: Record<string, unknown> = {};
+  if (typeof raw === 'string' && raw.trim().length > 0) {
+    let parsed: unknown = null;
+    try { parsed = JSON.parse(raw); } catch { parsed = null; }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return names.map((account): FurtherMailboxReading => ({
+        kind: 'unwatched',
+        account,
+        reason: 'surfaces.email.inbound.mailboxes is not a JSON object; set it to {"<account>":{"host":"…","user":"…"}}',
+      }));
+    }
+    table = parsed as Record<string, unknown>;
+  }
+  return names.map((account) => readFurtherMailbox(configManager, account, table[account]));
+}
+
+function readFurtherMailbox(configManager: ConfigManager, account: string, value: unknown): FurtherMailboxReading {
+  const unwatched = (reason: string): FurtherMailboxReading => ({ kind: 'unwatched', account, reason });
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return unwatched(`it has no entry in surfaces.email.inbound.mailboxes; add "${account}": {"host":"…","user":"…"} there`);
+  }
+  const fields = value as Record<string, unknown>;
+  const text = (key: string): string | undefined => {
+    const field = fields[key];
+    return typeof field === 'string' && field.trim().length > 0 ? field.trim() : undefined;
+  };
+  const host = text('host');
+  const user = text('user');
+  if (host === undefined || user === undefined) {
+    return unwatched('its entry in surfaces.email.inbound.mailboxes needs both host and user');
+  }
+  const secure = fields['secure'] !== false;
+  if (!secure && !isLoopbackHost(host)) {
+    return unwatched(`its entry sets secure to false for ${host}, which would send the password in plain text and is allowed only for a loopback host; set secure to true`);
+  }
+  const rawPort = fields['port'];
+  if (rawPort !== undefined && !(typeof rawPort === 'number' && Number.isInteger(rawPort) && rawPort >= 1 && rawPort <= 65_535)) {
+    return unwatched('the port in its entry must be a whole number from 1 to 65535');
+  }
+  const port = typeof rawPort === 'number' ? rawPort : undefined;
+  const mailbox = text('mailbox') ?? DEFAULT_MAILBOX;
+  const passwordRef = text('passwordRef') ?? `goodvibes://secrets/goodvibes/${encodeURIComponent(furtherMailboxPasswordKey(account))}`;
+  const parsedRef = parseEmailSecretRef(`surfaces.email.inbound.mailboxes.${account}.passwordRef`, passwordRef);
+  if ('problem' in parsedRef) return unwatched(parsedRef.problem);
+  return {
+    kind: 'watch',
+    entry: {
+      account,
+      mailbox,
+      passwordRef,
+      config: furtherMailboxConfig(configManager, { account, host, port, secure, user, mailbox }),
+      signature: JSON.stringify([host, port ?? null, secure, user, mailbox, passwordRef]),
+    },
+  };
+}
+
+/**
+ * The mailbox settings a further account's supervisor and source read: the
+ * `surfaces.email.*` keys that say which mailbox and how to reach it answer
+ * from the account's own entry (forced to IMAP, keyed on its own account
+ * name), and every inbound behaviour setting answers from the shared config,
+ * so all mailboxes are watched the same way.
+ */
+function furtherMailboxConfig(
+  configManager: ConfigManager,
+  mailbox: {
+    readonly account: string;
+    readonly host: string;
+    readonly port: number | undefined;
+    readonly secure: boolean;
+    readonly user: string;
+    readonly mailbox: string;
+  },
+): ConfigReaderWithOrigins {
+  const shared = configReaderWithOrigins(configManager);
+  const own: Readonly<Record<string, unknown>> = {
+    'surfaces.email.host': mailbox.host,
+    'surfaces.email.imap.host': mailbox.host,
+    'surfaces.email.imap.port': mailbox.port,
+    'surfaces.email.imap.secure': mailbox.secure,
+    'surfaces.email.user': mailbox.user,
+    'surfaces.email.imap.user': mailbox.user,
+    'surfaces.email.from': mailbox.user,
+    'surfaces.email.imap.mailbox': mailbox.mailbox,
+    // The first mailbox's password settings never apply here; the source is given this account's own.
+    'surfaces.email.password': '',
+    'surfaces.email.imap.password': '',
+    'surfaces.email.inbound.source': 'imap',
+    'surfaces.email.inbound.accounts': JSON.stringify([mailbox.account]),
+  };
+  const read = (key: string): unknown => (key in own ? own[key] : shared(key));
+  return Object.assign(read, {
+    isSet: (key: string): boolean => {
+      if (key === 'surfaces.email.imap.port') return mailbox.port !== undefined;
+      return key in own || (shared.isSet?.(key) ?? false);
+    },
+  });
+}
+
+/**
+ * The supervisors of the accounts after the first, kept in step with
+ * `surfaces.email.inbound.accounts` and `surfaces.email.inbound.mailboxes`.
+ * Read again on every recheck (each settings write asks for one), so a mailbox
+ * added, changed or removed takes effect without a restart; an account whose
+ * entry is missing or unusable is named in the health entry with its fix.
+ */
+class FurtherMailboxes {
+  private readonly held = new Map<string, { readonly signature: string; readonly supervisor: InboundMailSupervisor }>();
+  private unwatched: readonly { readonly account: string; readonly reason: string }[] = [];
+  private wanted = false;
+  /** Reconciles run one after another, so two quick settings writes never build one account twice. */
+  private settling: Promise<void> = Promise.resolve();
+
+  constructor(
+    private readonly configManager: ConfigManager,
+    private readonly build: (entry: FurtherMailboxEntry) => InboundMailSupervisor,
+  ) {}
+
+  start(): Promise<void> {
+    this.wanted = true;
+    return this.reconcile();
+  }
+
+  stop(): Promise<void> {
+    this.wanted = false;
+    return this.reconcile();
+  }
+
+  recheckNow(): void {
+    if (!this.wanted) return;
+    void this.reconcile().catch((error: unknown) => {
+      logger.error('Further inbound mailboxes could not be brought in line with the settings', {
+        surface: 'email-inbound',
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
+
+  private reconcile(): Promise<void> {
+    const next = this.settling.then(() => this.apply());
+    this.settling = next.catch(() => undefined);
+    return next;
+  }
+
+  private async apply(): Promise<void> {
+    const readings = this.wanted ? readFurtherMailboxes(this.configManager) : [];
+    const unwatched: { readonly account: string; readonly reason: string }[] = [];
+    const desired = new Map<string, FurtherMailboxEntry>();
+    for (const reading of readings) {
+      if (reading.kind === 'watch') desired.set(reading.entry.account, reading.entry);
+      else unwatched.push({ account: reading.account, reason: reading.reason });
+    }
+    this.unwatched = unwatched;
+    const stopping: Promise<void>[] = [];
+    for (const [account, held] of this.held) {
+      if (desired.get(account)?.signature === held.signature) continue;
+      this.held.delete(account);
+      stopping.push(held.supervisor.stop());
+    }
+    await Promise.all(stopping);
+    const starting: Promise<unknown>[] = [];
+    for (const [account, entry] of desired) {
+      const held = this.held.get(account);
+      if (held) {
+        held.supervisor.recheckNow();
+        continue;
+      }
+      const supervisor = this.build(entry);
+      this.held.set(account, { signature: entry.signature, supervisor });
+      starting.push(supervisor.start());
+    }
+    await Promise.all(starting);
+  }
+
+  /** The first mailbox's health entry with every further mailbox's state folded into it. */
+  foldHealth(first: InboundMailHealthEntry): InboundMailHealthEntry {
+    if (first.state === 'disabled' || (this.held.size === 0 && this.unwatched.length === 0)) return first;
+    const others = [...this.held.values()].map(({ supervisor }) => supervisor.health());
+    const clauses = [
+      ...others.map((health) => `${health.account} (${health.mailbox}) is ${health.state}: ${health.reason}`),
+      ...this.unwatched.map((entry) => `${entry.account} is not watched: ${entry.reason}`),
+    ];
+    const allHealthy = this.unwatched.length === 0 && others.every((health) => health.state === 'healthy');
+    return {
+      ...first,
+      state: first.state === 'healthy' && !allHealthy ? 'degraded' : first.state,
+      reason: `${first.reason} Further mailboxes: ${clauses.join('; ')}.`,
+      metadata: {
+        ...first.metadata,
+        mailboxes: others.map((health) => ({
+          account: health.account,
+          mailbox: health.mailbox,
+          state: health.state,
+          mode: health.mode,
+          reason: health.reason,
+        })),
+        unwatchedAccounts: this.unwatched,
+      },
+    };
+  }
 }
 
 function readInboundMode(configManager: ConfigManager): 'idle' | 'poll' | 'auto' {

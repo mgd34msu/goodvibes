@@ -142,6 +142,12 @@ export interface InboundMailSourceFactoryDeps {
   /** Where the mail password is read from. One store, see `resolveEmailPassword`. */
   readonly secrets: SecretReader;
   /**
+   * The password's secret reference and the setting named when it is missing.
+   * Absent: the daemon's own mailbox password. A further inbound account names
+   * its own, so it never logs in with the first mailbox's password.
+   */
+  readonly password?: { readonly ref: string; readonly setting: string } | undefined;
+  /**
    * The real sockets. A test passes one whose members throw.
    *
    * `connectImapPlain` rides along because `surfaces.email.imap.secure` governs
@@ -257,7 +263,9 @@ function liveConnectionPort(
       assertImapReadingCurrent(reading);
       const settings = readSurfaceEmailSettings(deps.getConfig);
       if (settings.imapHost === undefined || settings.username === undefined) throw new ImapReadingError();
-      const password = await resolveEmailPassword(SURFACE_EMAIL_PASSWORD_REF, secrets);
+      const password = deps.password === undefined
+        ? await resolveEmailPassword(SURFACE_EMAIL_PASSWORD_REF, secrets)
+        : await resolveEmailPassword(deps.password.ref, secrets, deps.password.setting);
       assertImapReadingCurrent(reading);
       return imapMailboxConnectionPort({
         connect: () => imapSocketFactoryFor(deps.transport, settings.imapSecure ? 'tls' : 'plaintext', 'surfaces.email.imap.secure')(settings.imapHost!, settings.imapPort),
@@ -277,7 +285,24 @@ function liveConnectionPort(
  */
 function sourceIdentity(deps: InboundMailSourceFactoryDeps): string {
   const settings = readSurfaceEmailSettings(deps.getConfig);
-  return JSON.stringify([settings.username, settings.mailbox, deps.getConfig('surfaces.email.inbound.accounts')]);
+  return JSON.stringify([settings.username, settings.mailbox, firstInboundAccount(deps.getConfig('surfaces.email.inbound.accounts'))]);
+}
+
+/**
+ * The account this source watches: the first name in the list. A name added
+ * or removed after it is another mailbox's business, so it does not make this
+ * source's identity change.
+ */
+function firstInboundAccount(raw: unknown): unknown {
+  if (typeof raw !== 'string') return raw;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return raw;
+    const first = parsed.find((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
+    return first?.trim() ?? null;
+  } catch {
+    return raw;
+  }
 }
 
 export function createInboundMailSourceFactory(

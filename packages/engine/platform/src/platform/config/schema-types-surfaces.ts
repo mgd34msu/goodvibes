@@ -205,6 +205,12 @@ export interface InboundEmailConfig {
    * type, the same convention `DaemonCalendarConfig.calendars` already uses.
    */
   accounts: string;
+  /**
+   * JSON-encoded object giving each account after the first its own IMAP
+   * mailbox: `{ "<account>": { host, port?, secure?, user, mailbox?, passwordRef? } }`.
+   * The first account is the daemon's mailbox (`surfaces.email.*`).
+   */
+  mailboxes: string;
   source: InboundEmailSource;
   /** Gmail poll interval while an expectation is open. Ignored on IMAP. */
   gmailPollSecondsExpecting: number;

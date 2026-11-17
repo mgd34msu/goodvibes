@@ -138,8 +138,6 @@ export interface InboundMailSupervisorDeps {
   /** Config account id and mailbox this supervisor watches. */
   readonly account: string;
   readonly mailbox: string;
-  /** Further accounts the owner listed that this supervisor does not watch; named in `status.reason` so they are not silently ignored. */
-  readonly ignoredAccounts?: readonly string[] | undefined;
   readonly sources: InboundMailSourceFactory;
   /**
    * The facts `selectInboundMailSource` needs and this module cannot know: is a
@@ -160,6 +158,12 @@ export interface InboundMailSupervisorDeps {
    */
   readonly expectationPolicy: Pick<PersistedExpectationStore, 'getPolicy' | 'getCorruption'>;
   readonly housekeeper: InboundMailHousekeeper;
+  /**
+   * Whether a start sweeps the stores and restores open expectations. False for
+   * a further mailbox sharing the stores of the first one, whose start already
+   * did both; doing them again would restore the same expectations twice.
+   */
+  readonly restoresStores?: boolean | undefined;
   /** What a found message goes through. Injected: the supervisor owns lifecycle, not intake. */
   readonly handle: (message: InboundMailboxMessage) => Promise<void>;
   /**
@@ -413,28 +417,24 @@ export class InboundMailSupervisor {
     // failed is a strictly worse outcome than a mailbox read with a stale
     // record in a file. Both failures are carried into `status` instead.
     const degradations: string[] = [];
-    try {
-      await this.deps.housekeeper.runRecoverySweep();
-    } catch (error) {
-      logger.error('Inbound mail recovery sweep failed', { error: summarizeError(error) });
-      degradations.push(
-        'The recovery sweep of the inbound stores did not run (details are in the daemon log); '
-        + 'the watcher started anyway and the stores keep whatever they held.');
-    }
-    try {
-      await this.deps.expectations.hydrate();
-    } catch (error) {
-      logger.error('Inbound mail expectations could not be restored', { error: summarizeError(error) });
-      degradations.push(
-        'Open expectations could not be restored (details are in the daemon log); a verification '
-        + 'opened before this restart cannot be matched, and the workstream waiting on it '
-        + 'will report that no mail arrived.');
-    }
-    const ignored = this.deps.ignoredAccounts ?? [];
-    if (ignored.length > 0) {
-      degradations.push(
-        `Only ${this.deps.account} is watched; the other account${ignored.length === 1 ? '' : 's'} in surfaces.email.inbound.accounts `
-        + `(${ignored.join(', ')}) ${ignored.length === 1 ? 'is' : 'are'} ignored. Remove ${ignored.length === 1 ? 'it' : 'them'} from the list or watch ${ignored.length === 1 ? 'it' : 'them'} from another node.`);
+    if (this.deps.restoresStores !== false) {
+      try {
+        await this.deps.housekeeper.runRecoverySweep();
+      } catch (error) {
+        logger.error('Inbound mail recovery sweep failed', { error: summarizeError(error) });
+        degradations.push(
+          'The recovery sweep of the inbound stores did not run (details are in the daemon log); '
+          + 'the watcher started anyway and the stores keep whatever they held.');
+      }
+      try {
+        await this.deps.expectations.hydrate();
+      } catch (error) {
+        logger.error('Inbound mail expectations could not be restored', { error: summarizeError(error) });
+        degradations.push(
+          'Open expectations could not be restored (details are in the daemon log); a verification '
+          + 'opened before this restart cannot be matched, and the workstream waiting on it '
+          + 'will report that no mail arrived.');
+      }
     }
     this.degradations = degradations;
 

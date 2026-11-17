@@ -318,6 +318,7 @@ export class BuiltinChannelRuntime {
       'surfaces.email.imap.mailbox',
       'surfaces.email.inbound.source',
       'surfaces.email.inbound.accounts',
+      'surfaces.email.inbound.mailboxes',
     ] as const;
     const recheck = (): void => {
       if (this.inboundMailRecheckTimer) clearTimeout(this.inboundMailRecheckTimer);

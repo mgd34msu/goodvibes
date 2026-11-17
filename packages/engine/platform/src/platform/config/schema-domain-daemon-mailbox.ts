@@ -88,6 +88,7 @@ export const daemonMailboxConfigDefaults = {
     inbound: {
       enabled: false,
       accounts: '[]',
+      mailboxes: '{}',
       source: 'auto',
       gmailPollSecondsExpecting: 5,
       gmailPollSecondsIdle: 60,
@@ -231,8 +232,29 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
     description: 'JSON array of configured mailbox account identifiers to watch for inbound mail, e.g. '
       + '["primary"]. Empty means no mailbox is watched even when enabled is true. A list rather than a single '
       + 'switch because one address for signups and another for the owner\'s real mail is the expected shape. '
-      + 'Only the first entry is watched today; any further entries are accepted but not watched.',
+      + 'The first entry is the daemon\'s own mailbox (surfaces.email.*, or Gmail when Google is connected); '
+      + 'every further entry is watched over IMAP with the connection surfaces.email.inbound.mailboxes gives it, '
+      + 'and one without an entry there is reported in inbound mail status rather than watched.',
     ...jsonText((parsed) => Array.isArray(parsed) && parsed.every((entry) => typeof entry === 'string'), 'a JSON array of account names, e.g. ["primary"]'),
+  },
+  {
+    key: 'surfaces.email.inbound.mailboxes',
+    type: 'string',
+    default: '{}',
+    description: 'JSON object giving each account after the first in surfaces.email.inbound.accounts its own IMAP '
+      + 'mailbox, e.g. {"signups":{"host":"imap.example.com","user":"signups@example.com"}}. Fields: host and user '
+      + '(required), port (default 993, or 143 when secure is false), secure (default true; false only for a loopback '
+      + 'host), mailbox (default INBOX) and passwordRef, a goodvibes://secrets/goodvibes/<KEY> reference whose key '
+      + 'contains EMAIL, MAIL or IMAP as a word. Without passwordRef the password is read from the secret '
+      + 'GOODVIBES_EMAIL_INBOUND_<ACCOUNT>_PASSWORD (the account name upper-cased, other characters as _). '
+      + 'Each mailbox is watched with the same inbound settings as the first, and a change here takes effect without a restart.',
+    ...jsonText(
+      (parsed) => parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+        && Object.values(parsed as Record<string, unknown>).every((entry) => entry !== null && typeof entry === 'object' && !Array.isArray(entry)
+          && typeof (entry as Record<string, unknown>)['host'] === 'string'
+          && typeof (entry as Record<string, unknown>)['user'] === 'string'),
+      'a JSON object mapping account names to {"host":"…","user":"…"}, with optional port, secure, mailbox and passwordRef',
+    ),
   },
   {
     key: 'surfaces.email.inbound.source',

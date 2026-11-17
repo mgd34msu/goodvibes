@@ -1,5 +1,5 @@
 import { createCommandModeTokenHandler } from '@goodvibes-jev/engine/terminal-shell/command-mode-route';
-import { strictArgumentsRefusal, strictCommandArguments } from '@goodvibes-jev/engine/terminal-shell/command-arguments';
+import { splitSlashCommand } from '@goodvibes-jev/engine/terminal-shell/slash-command-parser';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CommandContext, CommandRegistry } from './command-registry.ts';
 import type { AutocompleteEngine } from './autocomplete.ts';
@@ -66,15 +66,14 @@ export const handleCommandModeToken = createCommandModeTokenHandler<CommandConte
   unknownCommand: (name) => `Unknown command: /${name}. Type /help for available commands.`,
   commandError: (error, name) => `Command /${name} failed: ${summarizeError(error)}`,
   prepare(context, state, raw) {
-    const parts = raw.slice(1).trim().split(/\s+/),
-      name = parts[0] ?? '';
-    const args = state.commandRegistry?.get(name)?.strictArgs ? strictCommandArguments(raw.slice(1)) : parts.slice(1);
-    if (!args) {
+    // One split for both apps: an unclosed quote refuses the line instead of being closed silently.
+    const split = splitSlashCommand(raw, (name) => state.commandRegistry?.get(name));
+    if (!split.ok) {
       context.commandReadings?.cancelAll();
-      context.print(strictArgumentsRefusal(name));
+      context.print(split.reason);
       state.requestRender();
       return undefined;
     }
-    return { name, args, context: withComposerBindings(context, state) };
+    return { name: split.name, args: split.args, context: withComposerBindings(context, state) };
   },
 });

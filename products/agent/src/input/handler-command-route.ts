@@ -6,8 +6,7 @@ import type { AutocompleteEngine } from './autocomplete.ts';
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ConversationManager } from '../core/conversation';
 import { handleClipboardPaste, type ClipboardPasteSource } from './handler-content-actions.ts';
-import { parseSlashCommand } from './slash-command-parser.ts';
-import { strictArgumentsRefusal, strictCommandArguments } from '@goodvibes-jev/engine/terminal-shell/command-arguments';
+import { splitSlashCommand } from './slash-command-parser.ts';
 import { activeTokens } from '../renderer/theme.ts';
 
 export type CommandModeRouteState = {
@@ -15,7 +14,6 @@ export type CommandModeRouteState = {
   prompt: string;
   cursorPos: number;
   autocomplete: AutocompleteEngine | null;
-  modalStack: string[];
   commandRegistry: CommandRegistry | null;
   commandContext?: CommandContext;
   conversationManager: ConversationManager | null;
@@ -64,18 +62,13 @@ export const handleCommandModeToken = createCommandModeTokenHandler<CommandConte
   unknownCommand: (name) => `Unknown command /${name}. Type /help for available commands.`,
   commandError: (error) => summarizeCommandError(error),
   prepare(context, state, raw) {
-    const { name, args } = parseSlashCommand(raw);
-    if (state.commandRegistry?.get(name)?.strictArgs) {
-      // A command whose words are fields is refused when its quoting is incomplete or has an
-      // empty word, rather than closing the quote silently and shifting the words that follow.
-      const strict = strictCommandArguments(raw.slice(1));
-      if (!strict) {
-        context.print(strictArgumentsRefusal(name));
-        state.requestRender();
-        return undefined;
-      }
-      return { name, args: strict, context: withComposerBindings(context, state) };
+    // One split for both apps: an unclosed quote refuses the line instead of being closed silently.
+    const split = splitSlashCommand(raw, (name) => state.commandRegistry?.get(name));
+    if (!split.ok) {
+      context.print(split.reason);
+      state.requestRender();
+      return undefined;
     }
-    return { name, args: [...args], context: withComposerBindings(context, state) };
+    return { name: split.name, args: split.args, context: withComposerBindings(context, state) };
   },
 });

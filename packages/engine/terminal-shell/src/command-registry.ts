@@ -1,5 +1,6 @@
 /** Platform command lookup, dispatch and exact one-dispatch terminal owner provenance. */
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { SlashCommandRawRest } from './slash-command-parser.js';
 import { captureNativeConversationInput, type NativeConversationInput } from './native/native-conversation-input.js';
 export interface TerminalSlashCommand<Context> {
   name: string;
@@ -11,12 +12,17 @@ export interface TerminalSlashCommand<Context> {
   /** Typed arguments that carry a secret; the input history stores `<redacted>` in their place. */
   secretArgs?: CommandSecretArgs | undefined;
   /**
-   * Quoting is part of this command's grammar: the typed line is split by
-   * `strictCommandArguments`, and a line with an unclosed quote, a trailing
-   * lone backslash or an empty quoted word is refused instead of shifting
-   * words into the wrong fields.
+   * The command's words are fields: besides the unclosed quote every command
+   * refuses (slash-command-parser.ts), an empty quoted word is refused instead
+   * of shifting the words after it into the wrong fields.
    */
   strictArgs?: boolean | undefined;
+  /**
+   * Free text: from this argument position on (or the position the function
+   * returns for the arguments read so far) the handler receives the rest of
+   * the typed line untouched, as one argument.
+   */
+  rawRest?: SlashCommandRawRest | undefined;
   handler: (args: string[], context: Context) => void | Promise<void>;
 }
 /**

@@ -4,7 +4,6 @@
  * never taken as the value), so a flag spelt one way works in every command.
  * Callers own which flags they allow and what a value may change.
  */
-import { shellSplit } from '@goodvibes-jev/engine/platform/platform/utils';
 import { readOptionValue, readOptionValues, readPositiveInt, readStringList } from './cli-arguments.js';
 
 export { readOptionValue as readFlag, readPositiveInt as readPositiveIntFlag, readOptionValues as readRepeatedFlagValues };
@@ -54,23 +53,4 @@ export function readKnowledgeAskArguments(args: readonly string[], allowKnowledg
     includeLinkedObjects: true,
     ...(allowKnowledgeSpace ? { knowledgeSpaceId: readOptionValue(args, '--space') ?? readOptionValue(args, '--knowledge-space') } : {}),
   } as const;
-}
-
-/**
- * The arguments of a typed line (without its leading `/`) for a command that
- * declares `strictArgs`: split with strict shell quoting, refused (undefined)
- * on an unclosed quote, a trailing lone backslash or an empty quoted word.
- */
-export function strictCommandArguments(command: string): string[] | undefined {
-  try {
-    const words = shellSplit(command, { strict: true });
-    return words.includes('') ? undefined : words.slice(1);
-  } catch {
-    return undefined;
-  }
-}
-
-/** The refusal printed when a `strictArgs` command's line does not split. */
-export function strictArgumentsRefusal(name: string): string {
-  return `Not run: /${name} has an unclosed quote, a trailing backslash or an empty quoted word, so its words could land in the wrong fields. Close the quote or fill the empty word, then run it again.`;
 }

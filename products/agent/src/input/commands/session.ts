@@ -50,6 +50,8 @@ export const sessionCommand: SlashCommand = {
   description: 'Session continuity and read-only cross-session graph inspection.',
   usage: '<subcommand> [args]',
   argsHint: 'list|resume|save|events|groups|hotspots|graph',
+  // A new name is the rest of the line exactly as typed.
+  rawRest: (args) => (args[0] === 'rename' && args.length === 1 ? 1 : undefined),
   handler: async (args: string[], context: CommandContext): Promise<void> => {
     const [sub, ...rest] = args;
 

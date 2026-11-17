@@ -15,7 +15,7 @@ import {
 import { captureNativeConversationInput } from './native/native-conversation-input.js';
 import { commandHistoryLine } from './command-registry.js';
 import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
-import { strictArgumentsRefusal, strictCommandArguments } from './command-arguments.js';
+import { splitSlashCommand } from './slash-command-parser.js';
 import type { NativeConversationInput } from './native/native-conversation-input.js';
 export interface FeedCommandContext {
   readonly print: (message: string) => void;
@@ -368,14 +368,15 @@ export function createFeedTokenRoutes<
           state.commandRegistry &&
           state.commandContext?.executeCommand
         ) {
-          const parts = text.slice(1).trim().split(/\s+/);
-          const name = parts[0];
-          const args = name && state.commandRegistry.get(name)?.strictArgs ? strictCommandArguments(text.slice(1)) : parts.slice(1);
+          const registry = state.commandRegistry;
+          const split = splitSlashCommand(text, (commandName) => registry.get(commandName));
+          const name = split.name;
+          const args = split.ok ? split.args : undefined;
           prompt = '';
           cursorPos = 0;
-          if (!args) {
+          if (!split.ok || !args) {
             state.commandContext.commandReadings?.cancelAll();
-            state.commandContext.print(strictArgumentsRefusal(name ?? ''));
+            state.commandContext.print(split.ok ? '' : split.reason);
             state.requestRender();
             return { handled: true, prompt, cursorPos, inputScrollTop, commandMode, indicatorFocused };
           }

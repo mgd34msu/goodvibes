@@ -103,6 +103,8 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
     description: 'Show or set the conversation title',
     usage: '[text]',
     argsHint: '[text]',
+    // The title is the rest of the line exactly as typed.
+    rawRest: 0,
     handler(args, ctx) {
       if (!args.length)
         ctx.print(ctx.session.conversationManager.title ? policy.title(ctx.session.conversationManager.title) : 'No title set.');
@@ -119,6 +121,8 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
     description: policy.retryDescription,
     usage: '[modified text]',
     argsHint: '[modified text]',
+    // The modified message is sent exactly as typed.
+    rawRest: 0,
     handler(args, ctx) {
       const last = ctx.session.conversationManager.getLastUserMessage();
       if (!last) {

@@ -311,6 +311,8 @@ export const sessionCommand: SlashCommand = {
   description: 'Session lifecycle and orchestration: list, resume, fork, save, export, link-task, handoff, graph, cancel',
   usage: '<subcommand> [args]',
   argsHint: 'list|rename|resume|fork|save|info|export|search|delete|events|groups|hotspots|link-task|handoff|graph|cancel',
+  // A new name is the rest of the line exactly as typed.
+  rawRest: (args) => (args[0] === 'rename' && args.length === 1 ? 1 : undefined),
   subcommands: SESSION_SUBCOMMAND_ARG_HINTS,
   handler: async (args: string[], context: CommandContext): Promise<void> => {
     const [sub, ...rest] = args;

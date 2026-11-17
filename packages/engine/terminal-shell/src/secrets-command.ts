@@ -184,7 +184,13 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
           });
           return;
         }
-        const value = parts.join(' ');
+        // A value is one word, stored exactly as typed. Several words would have
+        // to be re-joined with guessed spacing, so they are refused instead.
+        if (parts.length > 1) {
+          context.print(`[secrets] Nothing was stored: the value for ${key} is more than one word. Put it in quotes ("…") to keep its spaces exactly.\nUsage: ${mutationUsage(subcommand)}`);
+          return;
+        }
+        const value = parts[0] ?? '';
         if (!value.length) {
           context.print(`[secrets] Nothing was stored: no value given for ${key}.\nUsage: ${mutationUsage(subcommand)}`);
           return;

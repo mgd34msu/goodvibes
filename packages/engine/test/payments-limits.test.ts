@@ -1,5 +1,7 @@
 // Proves: The agent spends past a limit the owner set, or without asking when no limit is set.
 // Red when: Spend is not read back from the budget file, the ceiling or the card's cap is compared with the item price, tax and fees escape the overage budget, the owner's maximum is ignored or misread, an approved overdraw raises the limit past the shortfall, or a limit of 0 or a typed answer is misread.
+// Proves: A checkout priced in another currency meets the budget number for number.
+// Red when: A total stated in EUR is compared with a USD budget, or a price written "€99.00" with no currency code is read as 99.00 of the budget currency.
 /**
  * The owner's spending limits. Inside them the agent buys without asking; over
  * one it stops and names the limit and the amounts; the per-purchase ceiling is
@@ -19,6 +21,7 @@ import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { OwnerInbox, type OwnerItem } from '../platform/src/platform/control-plane/owner-inbox.ts';
 import { QuestionStore } from '../platform/src/platform/control-plane/question-store.ts';
 import { admitApprovedItemOverdraw, type BudgetLimits } from '../platform/src/platform/payments/budget.ts';
+import { extractCheckout, type RawCheckoutReading } from '../platform/src/platform/payments/checkout-extraction.ts';
 import { decidePurchase, type DecisionInput } from '../platform/src/platform/payments/decide.ts';
 import { DurableBudgetLedger } from '../platform/src/platform/payments/host/budget-store.ts';
 import { createLimitOffers, limitOfferKey, type OfferableLimitSetting } from '../platform/src/platform/payments/host/limit-offer.ts';
@@ -159,4 +162,15 @@ test('the shipped defaults ask every time, offer once to set the limit, and the 
   expect(manager.get('payments.budget.dailyItem')).toBe(50);
   setLimits({ dailyOverage: 20, ceiling: 50 });
   expect(decidePurchase(quote(1_000)).kind).toBe('within-budget');
+});
+
+test('a checkout in another currency, by its code or only by its sign, is never counted against the budget', () => {
+  setLimits({ dailyItem: 1_000, dailyOverage: 100, ceiling: 1_000 });
+  const eur = parseCurrencyCode('EUR') as CurrencyCode;
+  const inEuros = quote();
+  expect(decidePurchase({ ...inEuros, quoted: { ...inEuros.quoted, currency: eur } })).toMatchObject({ kind: 'refuse', code: 'currency-mismatch' });
+  const page = (unitPrice: string): RawCheckoutReading => ({ lines: [{ label: 'Kettle', quantity: '1', unitPrice }], tax: null, fees: [],
+    shippingOptions: [{ label: 'Standard', cost: '0.00' }], statedTotal: null, currency: null, orderSummaryText: 'Kettle' });
+  expect(extractCheckout(page('€99.00'), usd)).toMatchObject({ ok: false, field: 'currency' });
+  expect(extractCheckout(page('$99.00'), usd)).toMatchObject({ ok: true, checkout: { currency: 'USD', itemMinorUnits: 9_900 } });
 });

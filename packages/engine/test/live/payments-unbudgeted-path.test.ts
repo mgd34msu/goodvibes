@@ -1,5 +1,7 @@
 // Proves: An agent places an order with ordinary browser actions (a merchant's saved payment method), around every spending limit.
 // Red when: The browser click path stops asking whether a control places an order or loses its name, Enter or a submitting type in the order form is not treated as an order, or a key pressed on the order control itself is not refused.
+// Proves: After the daemon typed the card into a real page, a snapshot, text read, extract or screenshot through the browser tool returns the number to the model.
+// Red when: The browser engine's screenshot stops asking the card guard while the card is live on the page, so the typed number goes out as an image.
 /**
  * An order cannot be placed around the spending limits. A merchant's saved
  * payment method lets one click on "Place order" charge the card, so the
@@ -29,7 +31,7 @@ import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { createBrowserProvisionIo } from '../../platform/src/platform/browser/browser-provision-io.ts';
 import { ConfigManager } from '../../platform/src/platform/config/manager.ts';
 import type { ConfigKey } from '../../platform/src/platform/config/schema.ts';
-import { composeDaemonBrowser, type DaemonBrowserGatewayService } from '../../platform/src/platform/control-plane/routes/browser-composition.ts';
+import { composeDaemonBrowser, type BrowserCheckoutSeam, type DaemonBrowserGatewayService } from '../../platform/src/platform/control-plane/routes/browser-composition.ts';
 import { executeToolCalls, type ToolExecutionDeps } from '../../platform/src/platform/core/orchestrator-tool-runtime.ts';
 import { HeldForOwnerLedger } from '../../platform/src/platform/permissions/held-for-owner.ts';
 import { createPermissionConfigReader, PermissionManager } from '../../platform/src/platform/permissions/manager.ts';
@@ -47,6 +49,7 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = join(root, 'browsers');
 const CHECKOUT = `<!doctype html><title>Checkout</title><h1>Checkout</h1>
 <form method="post" action="/order">
   <label for="note">Gift note</label> <input id="note" name="note">
+  <label for="cc">Card number</label> <input id="cc" name="cardnumber" autocomplete="cc-number">
   <button type="submit">Place order</button>
 </form>
 <a href="#" onclick="fetch('/order', { method: 'POST', body: 'buy-now' }); return false;">Buy now</a>
@@ -81,6 +84,7 @@ function startMerchant() {
 
 let merchant: ReturnType<typeof startMerchant>;
 let browser: DaemonBrowserGatewayService;
+let seam: BrowserCheckoutSeam | undefined;
 let call: (args: Record<string, unknown>) => Promise<ToolResult>;
 let ownerAsked = 0;
 let previousPort: ReturnType<typeof installJudgmentPort>;
@@ -101,7 +105,7 @@ beforeAll(async () => {
   const permissions = new PermissionManager(async () => { ownerAsked++; return { approved: false }; },
     createPermissionConfigReader(config), new PolicyRuntimeState(), null, null, null, { heldForOwner: new HeldForOwnerLedger(), surfaceOf: () => undefined });
   const registry = new ToolRegistry(permissions);
-  browser = composeDaemonBrowser({ homeDirectory })!;
+  browser = composeDaemonBrowser({ homeDirectory, onBrowserCheckout: composed => { seam = composed; } })!;
   registerAgentBrowserTool(registry, { browser: () => browser });
   // The model has loaded the browser tool's full parameters, as it does before its first call.
   registry.deferredCallRefusal('load', 'browser');
@@ -168,4 +172,20 @@ test('Enter in the order form, text typed with submit and a key on the order con
   expectOrderRefusal(await call({ action: 'press', ref: refs.get('Pay now'), key: 'Space' }));
   await expectNoOrderReachedTheMerchant(refs);
   expect(ownerAsked).toBe(0);
+});
+
+test('once the daemon has typed the card into the page, a screenshot through the browser tool is refused', async () => {
+  const pan = '4539578763621486';
+  expect((await call({ action: 'navigate', url: merchant.url })).success).toBe(true);
+  const snapshot = await call({ action: 'snapshot' });
+  const page = JSON.parse(snapshot.output!) as { sessionId: string; pageId: string; elements: { ref: string; name: string }[] };
+  const card = page.elements.find(element => element.name === 'Card number')!.ref;
+  // As the payment flow does it: arm the guard, then type through the checkout seam's driver.
+  seam!.cardFieldGuard.arm(page.sessionId, page.pageId, [{ kind: 'number', value: pan }]);
+  await seam!.driverFor(page.sessionId, page.pageId).fillSecrets([{ target: card, value: pan, kind: 'number' }], { assertCurrent: () => {} });
+
+  // Text reads are scrubbed of the number on the way out; an image cannot be, so the capture itself is refused.
+  const capture = await call({ action: 'screenshot' });
+  expect(capture.success).toBe(false);
+  expect(JSON.stringify(capture).replace(/\D/g, '')).not.toContain(pan);
 });

@@ -252,7 +252,7 @@ export function requireConfirmedAction(args: Record<string, unknown>, options: P
   if (!harnessCatalogInvocationAuthority(args, options)) return admissionRefusal(action);
   const mode = args.mode;
   const outward = typeof mode === 'string' && ['run_local_model_smoke', 'run_memory_refinement',
-    'remote_pair_approve', 'remote_pair_reject', 'remote_peers_invoke', 'remote_work_cancel'].includes(mode);
+    'remote_pair_approve', 'remote_pair_reject', 'remote_peers_invoke', 'remote_work_cancel', 'inbox_labels_apply'].includes(mode);
   return harnessCatalogInvocationAuthority(args, options, outward ? 'send' : 'write')
     ? null : admissionRefusal(action);
 }

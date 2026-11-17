@@ -14,6 +14,8 @@ export interface SlackSurfaceConfig {
   defaultChannel: string;
   workspaceId: string;
   inboxUserId: string;
+  /** Triage labels are written back to Slack as reactions. */
+  inboxTagging: boolean;
   setupVersion: number;
 }
 
@@ -24,6 +26,8 @@ export interface DiscordSurfaceConfig {
   applicationId: string;
   inboxBotUserId: string;
   inboxChannelIds: string;
+  /** Triage labels are written back to Discord as reactions or forum tags. */
+  inboxTagging: boolean;
   defaultChannelId: string;
   guildId: string;
   setupVersion: number;
@@ -249,6 +253,8 @@ export interface DaemonMailboxConfig {
   from: string;
   /** Held in the daemon secret tier, never written to a settings file. */
   password: string;
+  /** Triage labels are written back to the mailbox as IMAP keywords. */
+  inboxTagging: boolean;
   /** What differs for reading mail; `host` and `user` above apply when unset. */
   imap: {
     host: string;

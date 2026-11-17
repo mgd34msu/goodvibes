@@ -662,6 +662,38 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
     }, ['items', 'total', 'truncated', 'hasMore', 'providers', 'partial']),
   }),
   methodDescriptor({
+    id: 'channels.inbox.applyLabels',
+    title: 'Apply Inbox Labels',
+    description:
+      'Write triage labels to inbox messages at their provider: an IMAP keyword on mail, a reaction on Slack, a reaction or forum tag on Discord. `itemIds` are ids from channels.inbox.list (up to 100); `labels` are GoodVibes/Spam, GoodVibes/Priority or GoodVibes/Normal (writing one takes the other two off), or a custom label name. Writes only for accounts whose owner switch is on (surfaces.slack.inboxTagging, surfaces.discord.inboxTagging, surfaces.email.inboxTagging). Returns one result per message: `applied` (every label is on it now), `refused` (nothing was written, with the reason and what to do) or `failed` (the provider did not take a label; `effects` says which mark was written or not).',
+    category: 'channels',
+    scopes: ['write:channels'],
+    access: 'admin',
+    http: { method: 'POST', path: '/api/channels/inbox/labels' },
+    inputSchema: bodyEnvelopeSchema({
+      itemIds: arraySchema(STRING_SCHEMA),
+      labels: arraySchema(STRING_SCHEMA),
+    }, ['itemIds', 'labels']),
+    outputSchema: objectSchema({
+      results: arraySchema(objectSchema({
+        itemId: STRING_SCHEMA,
+        state: STRING_SCHEMA,
+        applied: arraySchema(STRING_SCHEMA),
+        effects: arraySchema(objectSchema({
+          tag: STRING_SCHEMA,
+          action: STRING_SCHEMA,
+          outcome: STRING_SCHEMA,
+          reason: STRING_SCHEMA,
+        }, ['tag', 'action', 'outcome'])),
+        reason: STRING_SCHEMA,
+        changedDuringWrite: BOOLEAN_SCHEMA,
+      }, ['itemId', 'state', 'applied'])),
+      applied: NUMBER_SCHEMA,
+      refused: NUMBER_SCHEMA,
+      failed: NUMBER_SCHEMA,
+    }, ['results', 'applied', 'refused', 'failed']),
+  }),
+  methodDescriptor({
     id: 'channels.routing.list',
     title: 'List Channel Routing Rules',
     description: 'Return the daemon-persisted channel-to-profile routing table.',

@@ -1,7 +1,8 @@
 /** Root-owned, least-capability mail and explicit tagging constructors. */
 import { EmailService } from '@goodvibes-jev/engine/platform/platform/email';
-import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { createInactiveInboxRetentionOwner, INBOX_ITEM_TTL_MS, INBOX_ITEM_CAP, type InactiveInboxRetentionOwner, type OwnedInboxTagging } from '@goodvibes-jev/engine/platform/platform/intake';
+import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { createInactiveInboxRetentionOwner, INBOX_APPLY_LABELS_METHOD_ID, INBOX_ITEM_TTL_MS, INBOX_ITEM_CAP, registerInboxLabelsMethod,
+  type InactiveInboxRetentionOwner, type OwnedInboxTagging } from '@goodvibes-jev/engine/platform/platform/intake';
 import { composeMailDeps } from './mail-composition.js';
 import { createDaemonTriageTaggingFactory, type DaemonTriagePermissionHost, type DaemonTriageTaggingRequest } from './tagged-inbox-composition.js';
 import type { SecretsManager } from '../config/secrets.js';
@@ -32,6 +33,10 @@ export async function registerOwnedMailInbox(factory: DaemonInboxFactory, contex
   mailInput: MailInput, triageHost?: DaemonTriagePermissionHost): Promise<OwnedHandlerSurface> {
   const mailClosers = new Set<() => void>();
   const taggingOwners: OwnedInboxTagging[] = [];
+  // The label writer of each provider's live account source, newest first;
+  // channels.inbox.applyLabels writes through it.
+  const taggingByProvider = new Map<string, OwnedInboxTagging>();
+  let unregisterLabels: (() => void) | undefined;
   const screeningAcquisitions = new Set<HostedInboxScreeningAcquisition>();
   const lifetime = new AbortController();
   const listeners = new Set<() => void>();
@@ -146,7 +151,23 @@ export async function registerOwnedMailInbox(factory: DaemonInboxFactory, contex
         assertCurrent(); return subscribeConfig(key, listener);
       } } satisfies Pick<DaemonInboxControls, 'onConfigurationChange'> : {}),
       ...(createTagging ? { createTriageTagging(request: DaemonTriageTaggingRequest) {
-        assertCurrent(); const owner = createTagging(request); taggingOwners.push(owner); return owner;
+        assertCurrent();
+        // The owner's per-account switch, read at each label write.
+        const settingKey = request.settingKey ?? `surfaces.${request.provider}.inboxTagging`;
+        const owner = createTagging({ ...request, settingKey,
+          enabled: request.enabled ?? (() => context.configManager.get(settingKey as ConfigKey) === true) });
+        taggingOwners.push(owner);
+        const handle: OwnedInboxTagging = {
+          applyTags: owner.applyTags.bind(owner),
+          async close() {
+            if (taggingByProvider.get(request.provider) === handle) taggingByProvider.delete(request.provider);
+            const at = taggingOwners.indexOf(owner);
+            if (at >= 0) taggingOwners.splice(at, 1);
+            await owner.close();
+          },
+        };
+        taggingByProvider.set(request.provider, handle);
+        return handle;
       } } : {}),
       createEmailService() {
         if (retired) throw new Error('Inbox mail constructor is retired');
@@ -172,6 +193,9 @@ export async function registerOwnedMailInbox(factory: DaemonInboxFactory, contex
       },
     });
     const ownedRegistration = registration;
+    if (createTagging && context.catalog.get(INBOX_APPLY_LABELS_METHOD_ID)) {
+      unregisterLabels = registerInboxLabelsMethod(context.catalog, provider => taggingByProvider.get(provider));
+    }
     // The native root establishes the historical policy for its reserved
     // provider-mirror namespace. Custom persisted policies remain authoritative.
     retention = createInactiveInboxRetentionOwner({ workingDirectory: context.workingDirectory,
@@ -188,6 +212,7 @@ export async function registerOwnedMailInbox(factory: DaemonInboxFactory, contex
       if (closing) return closing;
       const deferred = Promise.withResolvers<void>(); closing = deferred.promise;
       lifetime.abort();
+      try { unregisterLabels?.(); } catch { /* The handler is gone with the catalog. */ }
       // Stop background storage admission immediately, while all actual cleanup
       // and source reads remain owned until the enclosing close drains them.
       const storageClosing = retainedStorage.close();
@@ -208,6 +233,7 @@ export async function registerOwnedMailInbox(factory: DaemonInboxFactory, contex
     return { ready, close };
   } catch (error) {
     lifetime.abort();
+    try { unregisterLabels?.(); } catch { /* The handler is gone with the catalog. */ }
     await Promise.allSettled([retention?.close(), registration?.close(), drainTagging()]);
     try { await drainScreening(); } finally { closeMail(); }
     throw error;

@@ -69,6 +69,8 @@ export function createConfiguredDiscordDaemonInboxSourceFactory(
     readonly operation: { readonly signal: AbortSignal; assertCurrent(): void };
     /** Triage asks on the route screening was admitted on, like Slack and email. */
     readonly triageAuthority?: InboxTriageAuthority | undefined;
+    /** Label write-back for this account, as Slack and email receive it. */
+    readonly triageTagging?: DiscordDaemonInboxOptions['triageTagging'] | undefined;
   },
 ): DaemonInboxSourceFactory {
   return async (context, routing, controls) => {
@@ -121,6 +123,7 @@ export function createConfiguredDiscordDaemonInboxSourceFactory(
         channels: { channelIds: [...channelIds], signal, assertCurrent: current, revision },
         screening,
         ...(selected?.triageAuthority ? { triageAuthority: selected.triageAuthority } : {}),
+        ...(selected?.triageTagging ? { triageTagging: selected.triageTagging } : {}),
       }, factories, true, selected !== undefined)(context, routing, controls);
       current();
       return { ...source, close, unregister() { void close().catch(() => {}); } };

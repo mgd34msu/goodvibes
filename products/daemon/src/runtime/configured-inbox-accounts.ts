@@ -137,13 +137,18 @@ export function createConfiguredHostedInboxSourceFactory(provider: 'slack' | 'em
       // Triage asks on the same model route screening was admitted on, and stops with it.
       const triageAuthority = triageAuthorityFromScreening(provider, undefined, screening);
       const operation = selection.operation;
+      // Label write-back: the daemon's tagging owner keeps each account's label
+      // writer for channels.inbox.applyLabels (owned-inbox-mail.ts), and every
+      // write checks the owner's surfaces.<provider>.inboxTagging switch.
+      const triageTagging = controls.createTriageTagging && controls.onAccountInvalidation
+        ? { triageTagging: { onReady: () => { /* held by the tagging owner since construction */ } } } : {};
       if (provider === 'slack' && 'workspaceId' in selection.account) {
-        source = await createSlackDaemonInboxSourceFactory({ account: selection.account, screening, triageAuthority, operation }, factories.slack)(context, routing, controls);
+        source = await createSlackDaemonInboxSourceFactory({ account: selection.account, screening, triageAuthority, operation, ...triageTagging }, factories.slack)(context, routing, controls);
       } else if (provider === 'email' && 'host' in selection.account) {
-        source = await createEmailDaemonInboxSourceFactory({ account: selection.account, screening, triageAuthority, operation }, factories.email)(context, routing, controls);
+        source = await createEmailDaemonInboxSourceFactory({ account: selection.account, screening, triageAuthority, operation, ...triageTagging }, factories.email)(context, routing, controls);
       } else if (provider === 'discord' && 'channelIds' in selection.account) {
         source = await createConfiguredDiscordDaemonInboxSourceFactory(screening, factories.discord,
-          { account: selection.account, operation, triageAuthority })(context, routing, controls);
+          { account: selection.account, operation, triageAuthority, ...triageTagging })(context, routing, controls);
       } else throw new Error('Configured inbox account family changed');
       selection.operation.assertCurrent();
       return { ...source, close, unregister() { void close().catch(() => {}); } };

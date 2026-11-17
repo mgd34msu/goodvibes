@@ -202,6 +202,8 @@ export interface AgentHarnessCommsArgs {
   readonly explicitUserRequest?: unknown;
   readonly target?: unknown;
   readonly query?: unknown;
+  readonly itemIds?: unknown;
+  readonly labels?: unknown;
 }
 
 function readString(value: unknown): string {
@@ -784,5 +786,67 @@ export async function channelRoutingRemoveHandoff(
           ? 'Assignment removed from the daemon and the local mirror.'
           : 'Assignment removed locally; the daemon was never told about it, so it holds nothing to withdraw.'
         : 'The assignment was already gone; nothing was changed.',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// INBOX, inbox_labels_apply (effect)
+// ---------------------------------------------------------------------------
+
+/** The daemon method that writes triage labels to inbox messages at their provider. */
+export const INBOX_APPLY_LABELS_METHOD = 'channels.inbox.applyLabels';
+
+/**
+ * Put triage labels on inbox messages at their provider (an IMAP keyword, a
+ * Slack reaction, a Discord reaction or forum tag) through the daemon, which
+ * holds the accounts. The daemon writes only for accounts whose owner switch
+ * (`surfaces.<provider>.inboxTagging`) is on, and answers per message.
+ */
+export async function inboxLabelsApplyHandoff(
+  context: CommandContext,
+  args: Record<string, unknown>,
+  options?: Parameters<Tool['execute']>[1],
+): Promise<EffectResult | string> {
+  const confirmationError = requireConfirmedAction(args, options, 'Inbox label write');
+  if (confirmationError) return confirmationError;
+  const itemIds = readStringArray(args.itemIds);
+  if (!itemIds) return 'inbox_labels_apply requires itemIds: ids from the inbox (agent_harness mode:"unified_inbox" or channels.inbox.list).';
+  if (itemIds.length > 100) return 'inbox_labels_apply takes at most 100 itemIds per call; split the list.';
+  const labels = readStringArray(args.labels);
+  if (!labels) return 'inbox_labels_apply requires labels: GoodVibes/Spam, GoodVibes/Priority or GoodVibes/Normal (or a custom label name).';
+  const invoke = commsDaemonInvoke(context);
+  if (!invoke) {
+    return {
+      mode: 'inbox_labels_apply',
+      status: 'unavailable',
+      done: false,
+      error: 'No daemon connection in this shell; the daemon holds the inbox accounts, so labels can only be written through it. Nothing was written.',
+    };
+  }
+  const result = await invoke(INBOX_APPLY_LABELS_METHOD, { itemIds, labels }, { signal: options?.signal, explicitUserRequest: false });
+  if (!result.ok) {
+    return {
+      mode: 'inbox_labels_apply',
+      status: 'not_applied',
+      done: false,
+      error: result.error,
+      ...(result.applied === undefined ? {} : { applied: result.applied }),
+    };
+  }
+  const body = result.body && typeof result.body === 'object' ? result.body as Record<string, unknown> : {};
+  const results = Array.isArray(body.results) ? body.results : [];
+  const count = (key: string): number => typeof body[key] === 'number' ? body[key] as number : 0;
+  const applied = count('applied'), refused = count('refused'), failed = count('failed');
+  return {
+    mode: 'inbox_labels_apply',
+    status: applied === itemIds.length ? 'applied' : applied > 0 ? 'partial' : 'not_applied',
+    done: applied === itemIds.length,
+    applied,
+    refused,
+    failed,
+    results,
+    policy: refused > 0 || failed > 0
+      ? 'Each result names what was written and, for a refused or failed message, why and what to do; a refusal wrote nothing to that message.'
+      : 'Every label is on its message at the provider.',
   };
 }

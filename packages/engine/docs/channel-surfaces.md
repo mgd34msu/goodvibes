@@ -416,8 +416,13 @@ the inbox never asks a model. Spam wins over priority: a message that reads as
 both is labelled spam.
 
 Labels are not written back to Slack, Discord or the mailbox unless the owner
-turns that on for the account. When they are, the three labels exclude each
-other: writing one takes the other two off the message (a Slack or Discord
+turns that on for the account: `surfaces.slack.inboxTagging`,
+`surfaces.discord.inboxTagging` or `surfaces.email.inboxTagging` (off by
+default; read at each write, so switching it does not restart the inbox). A
+label is written with `channels.inbox.applyLabels { itemIds, labels }` (the
+Agent's `agent_harness mode:"inbox_labels_apply"`), which answers per message
+`applied`, `refused` (nothing written, with the setting or step to take) or
+`failed`. When they are written, the three labels exclude each other: writing one takes the other two off the message (a Slack or Discord
 reaction, a Discord forum tag, an IMAP keyword) once the new one is on, and the
 answer says, label by label, what was added, already there, removed, skipped
 (no forum tag mapped) or refused and why.

@@ -238,6 +238,7 @@ export const FEATURE_FLAG_CONFIG: Readonly<Record<string, FeatureFlagConfigAssoc
       'surfaces.slack.defaultChannel',
       'surfaces.slack.workspaceId',
       'surfaces.slack.inboxUserId',
+      'surfaces.slack.inboxTagging',
     ],
   },
   'discord-surface': {
@@ -249,6 +250,7 @@ export const FEATURE_FLAG_CONFIG: Readonly<Record<string, FeatureFlagConfigAssoc
       'surfaces.discord.applicationId',
       'surfaces.discord.defaultChannelId',
       'surfaces.discord.guildId',
+      'surfaces.discord.inboxTagging',
     ],
   },
   'ntfy-surface': {

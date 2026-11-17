@@ -173,6 +173,7 @@ export const HARNESS_MODE_DESCRIPTORS: readonly HarnessModeDescriptor[] = [
   { id: 'channel_routing', kind: 'discover', family: 'comms', summary: 'List or inspect channel-to-profile routing rules.', next: 'Use surfaceKind/routeId to inspect one route.', keywords: ['channel routing', 'profile routing', 'routing rules', 'channel profile', 'surface routing'], parameters: ['surfaceKind', 'draftRoute', 'target', 'query', 'limit'] },
   { id: 'channel_routing_assign', kind: 'effect', family: 'comms', summary: 'Assign a channel surface to a profile route.', next: 'Check channel_routing to see saved assignments.', keywords: ['assign channel', 'profile assign', 'routing assign', 'channel to profile', 'route assign'], parameters: ['surfaceKind', 'profileId', 'draftRoute', 'routeLabel'] },
   { id: 'channel_routing_remove', kind: 'effect', family: 'comms', summary: 'Remove a channel-to-profile routing assignment.', next: 'Check channel_routing after removal.', keywords: ['remove routing', 'delete routing', 'routing remove', 'profile unassign', 'unassign channel'], parameters: ['assignmentId', 'surfaceKind', 'draftRoute', 'target'] },
+  { id: 'inbox_labels_apply', kind: 'effect', family: 'comms', summary: 'Write triage labels to inbox messages at their provider (IMAP keyword, Slack reaction, Discord reaction or tag).', next: 'Each result says applied, refused (with the setting or step) or failed; surfaces.<provider>.inboxTagging must be on.', keywords: ['label inbox', 'tag message', 'mark spam', 'triage label', 'apply labels', 'inbox tagging'], parameters: ['itemIds', 'labels'] },
 ] as const;
 
 /**
@@ -206,6 +207,7 @@ const EXPLICIT_REQUIRED_PARAMETERS: Readonly<Partial<Record<AgentHarnessMode, re
   channel_draft_send: ['draftId|target'],
   channel_routing_assign: ['surfaceKind', 'profileId'],
   channel_routing_remove: ['assignmentId|surfaceKind|draftRoute|target'],
+  inbox_labels_apply: ['itemIds', 'labels'],
   cli_command: [],
   command: ['command|target|query'],
   mode: ['target|query'],

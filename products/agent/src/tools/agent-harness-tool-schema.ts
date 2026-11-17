@@ -40,6 +40,7 @@ export const AGENT_HARNESS_MODES = [
   'unified_inbox',
   'channel_drafts', 'channel_draft_save', 'channel_draft_send',
   'channel_routing', 'channel_routing_assign', 'channel_routing_remove',
+  'inbox_labels_apply',
 ] as const;
 
 const BACKGROUND_PROCESS_ACTION_VALUES = [
@@ -435,5 +436,15 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
   routeLabel: {
     type: 'string',
     description: 'Optional label for channel_routing_assign.',
+  },
+  itemIds: {
+    type: 'array',
+    items: { type: 'string' },
+    description: 'Inbox item ids (from unified_inbox or channels.inbox.list) for inbox_labels_apply; up to 100.',
+  },
+  labels: {
+    type: 'array',
+    items: { type: 'string' },
+    description: 'Labels for inbox_labels_apply: GoodVibes/Spam, GoodVibes/Priority or GoodVibes/Normal (writing one takes the other two off), or a custom label name.',
   },
 } as const;

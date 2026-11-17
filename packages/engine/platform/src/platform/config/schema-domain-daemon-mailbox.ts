@@ -64,6 +64,7 @@ export const daemonMailboxConfigDefaults = {
     user: '',
     from: '',
     password: '',
+    inboxTagging: false,
     imap: {
       host: '',
       port: 993,
@@ -141,6 +142,13 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
     type: 'string',
     default: '',
     description: 'Mailbox password or app password. Stored in the daemon secret tier, never in config',
+  },
+  {
+    key: 'surfaces.email.inboxTagging',
+    type: 'boolean',
+    default: false,
+    description: 'Write triage labels (GoodVibes/Spam, Priority, Normal) back to the mailbox as IMAP keywords on the messages they label. '
+      + 'Off: labels stay in GoodVibes and channels.inbox.applyLabels refuses for this account.',
   },
   {
     key: 'surfaces.email.imap.host',

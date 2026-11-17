@@ -65,6 +65,8 @@ export type { InboxTriageAuthority, InboxTriageState, OwnedTriagedInboxOptions, 
 export { createTriageTagger } from './triage/tagger/index.js';
 export type { TriageTagger, TriageTaggerOptions, PreparedTriageTags, TriageTagEffect, TriageProviderTag, TaggerGuard, TriageEffectResult, TriageTagWrite, ImapStoreArgs, ImapStoreFlag, ImapStoreResult, ImapRetryOptions } from './triage/tagger/index.js';
 export { createOwnedInboxTagging } from './triage/tagged-owned.js';
+export { INBOX_APPLY_LABELS_METHOD_ID, MAX_INBOX_LABEL_ITEMS, inboxItemProvider, registerInboxLabelsMethod } from './triage/apply-labels-method.js';
+export type { InboxApplyLabelsInput, InboxApplyLabelsOutput } from './triage/apply-labels-method.js';
 export type { OwnedInboxTagging, OwnedInboxTaggingOptions, OwnedInboxTagOperation, OwnedInboxTagResult } from './triage/tagged-owned.js';
 
 // Explicit account-bound Discord channels; no implicit catalog or external polling.

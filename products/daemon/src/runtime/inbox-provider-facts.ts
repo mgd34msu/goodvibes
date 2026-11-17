@@ -1,6 +1,6 @@
 /**
  * What one inbox source depends on, so it is replaced only when one of those
- * facts changes: every `surfaces.<provider>.*` setting, the cluster switch that
+ * facts changes: every `surfaces.<provider>.*` setting it reads when built, the cluster switch that
  * decides how its poller is elected, the hosted-screening consent, the
  * provider's own credentials (`GOODVIBES_SURFACES_<PROVIDER>_*`) and the two
  * screening credentials. A secret store rewritten by another process is
@@ -28,10 +28,18 @@ export const SCREENING_FACTS: InboxFactScope = Object.freeze({
   secret: (key: string) => SCREENING_SECRET_KEYS.has(key),
 });
 
+/**
+ * Settings under the provider's prefix that its running source reads at the
+ * moment of use, so a write to one must not rebuild the source: the label
+ * write-back switch is read on every label write (tagged-owned.ts).
+ */
+const READ_AT_USE_SUFFIXES: readonly string[] = ['.inboxTagging'];
+
 /** One provider's facts, screening included (its source screens with it). */
 export function inboxProviderFacts(provider: InboxProvider): InboxFactScope {
   const prefix = `surfaces.${provider}.`;
-  const keys = [...new Set([...[...CONFIG_KEYS].filter((key) => key.startsWith(prefix)), 'cluster.enabled', SCREENING_CONSENT_KEY])] as ConfigKey[];
+  const keys = [...new Set([...[...CONFIG_KEYS].filter((key) => key.startsWith(prefix) && !READ_AT_USE_SUFFIXES.some((suffix) => key.endsWith(suffix))),
+    'cluster.enabled', SCREENING_CONSENT_KEY])] as ConfigKey[];
   const secretPrefix = `${daemonSecretKeyFor(`surfaces.${provider}`)}_`;
   return Object.freeze({
     keys: Object.freeze(keys),

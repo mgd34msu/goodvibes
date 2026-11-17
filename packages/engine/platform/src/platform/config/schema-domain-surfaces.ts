@@ -19,6 +19,7 @@ export const surfaceConfigDefaults = {
     defaultChannel: '',
     workspaceId: '',
     inboxUserId: '',
+    inboxTagging: false,
     setupVersion: 0,
   },
   discord: {
@@ -28,6 +29,7 @@ export const surfaceConfigDefaults = {
     applicationId: '',
     inboxBotUserId: '',
     inboxChannelIds: '',
+    inboxTagging: false,
     defaultChannelId: '',
     guildId: '',
     setupVersion: 0,
@@ -224,6 +226,13 @@ export const surfaceConfigSettings: ConfigSettingDefinition[] = [
     validationHint: 'a Slack user ID such as U012ABCDEF, or empty to keep the inbox unconfigured',
   },
   {
+    key: 'surfaces.slack.inboxTagging',
+    type: 'boolean',
+    default: false,
+    description: 'Write triage labels (GoodVibes/Spam, Priority, Normal) back to Slack as reactions on the inbox messages they label. '
+      + 'Off: labels stay in GoodVibes and channels.inbox.applyLabels refuses for this account.',
+  },
+  {
     key: 'surfaces.discord.enabled',
     type: 'boolean',
     default: false,
@@ -267,6 +276,13 @@ export const surfaceConfigSettings: ConfigSettingDefinition[] = [
       return ids.length <= 200 && ids.every(isDiscordSnowflake) && new Set(ids).size === ids.length;
     },
     validationHint: '1-200 unique Discord snowflake IDs separated by commas (at most 4300 characters), or empty',
+  },
+  {
+    key: 'surfaces.discord.inboxTagging',
+    type: 'boolean',
+    default: false,
+    description: 'Write triage labels (GoodVibes/Spam, Priority, Normal) back to Discord as reactions (or forum tags) on the inbox messages they label. '
+      + 'Off: labels stay in GoodVibes and channels.inbox.applyLabels refuses for this account.',
   },
   {
     key: 'surfaces.discord.defaultChannelId',

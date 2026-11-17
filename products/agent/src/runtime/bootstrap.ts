@@ -36,6 +36,7 @@ import type { Compositor } from '../renderer/compositor.ts';
 import type { RuntimeContext, BootstrapOptions } from './context.ts';
 import '@/runtime/index.ts';
 import { createTaskManager, emitSessionResumed } from '@/runtime/index.ts';
+import { ProcessTaskAdapter } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { emitSessionRecoveryFailed } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 import '@/runtime/index.ts';
@@ -416,7 +417,11 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // match the behaviour every install has always shipped (true/enabled), so
   // threading the flag manager here changes nothing for an existing install
   // and only makes turning the setting off now actually turn it off.
-  const opsTaskManager = createTaskManager(store, runtimeBus, userSessionId, services.featureFlags);
+  // Background processes are tasks from start to exit, and a task cancel stops the process.
+  const processTaskAdapter = new ProcessTaskAdapter(store, services.processManager);
+  runtimeUnsubs.push(processTaskAdapter.attach({ sessionId: userSessionId }));
+  const opsTaskManager = createTaskManager(store, runtimeBus, userSessionId, services.featureFlags,
+    (task) => task.kind === 'exec' ? processTaskAdapter.controllerFor(task.id) : undefined);
 
   // Surface-bound closure, not the raw multi-arg platform function, see
   // the platform's bindWriteLastSessionPointerToSurface for why that matters.

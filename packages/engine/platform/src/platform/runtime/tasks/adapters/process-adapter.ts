@@ -3,12 +3,13 @@
  * unified RuntimeTask registry.
  *
  * Each spawned background process gets a corresponding RuntimeTask of kind
- * 'exec'. The adapter tracks the pid→taskId mapping and reconciles state
- * on demand via sync().
+ * 'exec'. `attach()` observes the manager, so a process becomes a task when it
+ * starts and reaches its terminal state when it exits or is stopped; the task
+ * surface cancels one through `controllerFor`.
  *
- * NOTE: This adapter writes directly to the Zustand store for performance,
- * bypassing TaskManager. Lifecycle validation is the caller's responsibility.
- * This is intentional, adapters are authoritative sources for their subsystem.
+ * NOTE: This adapter writes directly to the runtime store, bypassing
+ * TaskManager. This is intentional, adapters are authoritative sources for
+ * their subsystem.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -16,7 +17,8 @@ import { createDomainDispatch } from '../../store/index.js';
 import type { RuntimeStore, DomainDispatch } from '../../store/index.js';
 import type { RuntimeTask } from '../../store/domains/tasks.js';
 import { isTerminalStatus } from '../lifecycle.js';
-import { ProcessManager } from '../../../tools/shared/process-manager.js';
+import type { TaskController } from '../manager.js';
+import type { ProcessManager, ProcessLifecycleEvent } from '../../../tools/shared/process-manager.js';
 
 /** Owner context supplied when wrapping a process. */
 export interface ProcessOwner {
@@ -26,15 +28,26 @@ export interface ProcessOwner {
   agentId?: string | undefined;
 }
 
+type ProcessOutcome = { readonly status: 'completed' | 'failed'; readonly exitCode?: number | undefined; readonly error?: string | undefined };
+
+/** What a finished process means for its task: exit 0 completes it, anything else fails it with the reason. */
+function outcomeOf(exitCode: number | null, signal: string | null, timedOut: boolean): ProcessOutcome {
+  if (exitCode === 0 && !timedOut) return { status: 'completed', exitCode: 0 };
+  const reason = timedOut
+    ? `Process ran past its timeout${signal ? ` and was ended by ${signal}` : ''}`
+    : signal ? `Process was ended by ${signal}` : exitCode === null ? 'Process ended without an exit code' : `Process exited with code ${exitCode}`;
+  return { status: 'failed', ...(exitCode === null ? {} : { exitCode }), error: reason };
+}
+
 /**
  * Bridges ProcessManager background processes into the RuntimeTask registry.
  *
  * @example
  * ```ts
- * const adapter = new ProcessTaskAdapter(store);
- * const taskId = adapter.wrapProcess(proc.pid, 'npm run build', { sessionId: 'sess_1' });
- * // later...
- * adapter.handleProcessExit(proc.pid, 0);
+ * const adapter = new ProcessTaskAdapter(store, processManager);
+ * const detach = adapter.attach({ sessionId });
+ * // ... a cancel from the task surface: adapter.controllerFor(taskId)?.cancel?.()
+ * detach();
  * ```
  */
 export class ProcessTaskAdapter {
@@ -57,6 +70,34 @@ export class ProcessTaskAdapter {
   }
 
   // ── Core API ────────────────────────────────────────────────────────────────
+
+  /**
+   * Keep the task list in step with the manager: processes already running
+   * become tasks now, later ones when they start, and each reaches its
+   * terminal state when it exits or is stopped. Returns the detach function.
+   * Cost: one store write when a process starts and one when it ends.
+   */
+  attach(owner: ProcessOwner = { sessionId: 'system' }): () => void {
+    this.sync(owner);
+    return this._manager.observeLifecycle((event) => this._onLifecycle(event, owner));
+  }
+
+  /**
+   * The task surface's controller for a process task this adapter owns. Its
+   * cancel stops the process and leaves the task's transition to the task
+   * manager that asked, so the row moves once.
+   */
+  controllerFor(taskId: string): TaskController | undefined {
+    if (!this._taskToId.has(taskId)) return undefined;
+    return {
+      cancel: () => {
+        const processId = this._taskToId.get(taskId);
+        if (processId === undefined) return;
+        this._release(processId);
+        this._manager.stop(processId);
+      },
+    };
+  }
 
   /**
    * Wrap a spawned process as a RuntimeTask.
@@ -112,16 +153,7 @@ export class ProcessTaskAdapter {
   handleProcessExit(pid: number, exitCode: number): void {
     const processId = this._pidToId.get(pid);
     if (processId === undefined) return;
-
-    const taskId = this._idToTask.get(processId);
-    if (taskId === undefined) return;
-
-    this._pidToId.delete(pid);
-
-    this._transitionTask(taskId, exitCode === 0 ? 'completed' : 'failed', {
-      exitCode,
-      error: exitCode !== 0 ? `Process exited with code ${exitCode}` : undefined,
-    });
+    this._settle(processId, outcomeOf(exitCode, null, false));
   }
 
   /**
@@ -133,14 +165,10 @@ export class ProcessTaskAdapter {
   cancelProcess(taskId: string): void {
     const processId = this._taskToId.get(taskId);
     if (processId === undefined) return;
-
-    // Look up the pid before stopping so we can clean up _pidToId
-    const entry = this._manager.getStatus(processId);
+    // Released first, so the stop the manager publishes finds no task to settle.
+    this._release(processId);
     this._manager.stop(processId);
-    if (entry !== undefined) {
-      this._pidToId.delete(entry.pid);
-    }
-    this._transitionTask(taskId, 'cancelled', {});
+    if (!this._isTerminal(taskId)) this._transitionTask(taskId, 'cancelled', {});
   }
 
   /**
@@ -157,46 +185,65 @@ export class ProcessTaskAdapter {
     const liveProcesses = this._manager.list();
     const liveIds = new Set(liveProcesses.map((p) => p.id));
 
-    // Handle processes not yet tracked
     for (const proc of liveProcesses) {
-      if (!this._idToTask.has(proc.id)) {
-        // Use the real pid from list() for accurate _pidToId tracking
-        this.wrapProcess(proc.id, proc.pid, proc.cmd, defaultOwner);
-      }
-
       const entry = this._manager.getStatus(proc.id);
-      if (entry?.done) {
-        const taskId = this._idToTask.get(proc.id);
-        // Apply the outcome once: a task already finished (completed/failed, or
-        // cancelled by cancelProcess) is final and must not be re-stamped each sync.
-        const current = taskId === undefined ? undefined : this._store.getState().tasks.tasks.get(taskId);
-        if (taskId !== undefined && current !== undefined && !isTerminalStatus(current.status)) {
-          const exitCode = entry.exitCode ?? 1;
-          this._transitionTask(taskId, exitCode === 0 ? 'completed' : 'failed', {
-            exitCode,
-            error: exitCode !== 0 ? `Process exited with code ${exitCode}` : undefined,
-          });
-        }
+      if (!this._idToTask.has(proc.id)) {
+        // A process that already finished before it was ever seen is not a task to show.
+        if (entry?.done) continue;
+        this.wrapProcess(proc.id, proc.pid, proc.cmd, { sessionId: defaultOwner.sessionId, agentId: proc.startedBy ?? defaultOwner.agentId });
       }
+      if (entry?.done) this._settle(proc.id, outcomeOf(entry.exitCode, entry.signal ?? null, entry.timedOut === true));
     }
 
-    // Clean up stale mappings for processes no longer tracked by the manager
-    const staleProcessIds: string[] = [];
-    for (const [processId] of this._idToTask.entries()) {
-      if (!liveIds.has(processId)) staleProcessIds.push(processId);
-    }
-    for (const processId of staleProcessIds) {
-      const taskId = this._idToTask.get(processId)!;
-      this._idToTask.delete(processId);
-      this._taskToId.delete(taskId);
-    }
-    // A process the manager no longer lists never reports an exit; its pid entry would stay.
-    for (const [pid, processId] of [...this._pidToId.entries()]) {
-      if (!liveIds.has(processId)) this._pidToId.delete(pid);
+    // A process the manager no longer lists was stopped or expired; its task ends as cancelled if still open.
+    for (const processId of [...this._idToTask.keys()]) {
+      if (!liveIds.has(processId)) this._settleStopped(processId);
     }
   }
 
   // ── Private helpers ─────────────────────────────────────────────────────────
+
+  private _onLifecycle(event: ProcessLifecycleEvent, owner: ProcessOwner): void {
+    if (event.kind === 'started') {
+      this.wrapProcess(event.id, event.pid, event.cmd, { sessionId: owner.sessionId, agentId: event.startedBy ?? owner.agentId });
+    } else if (event.kind === 'finished') {
+      this._settle(event.id, outcomeOf(event.exitCode, event.signal, event.timedOut));
+    } else {
+      this._settleStopped(event.id);
+    }
+  }
+
+  /** Apply a finished process's outcome once: a task already terminal (cancelled, say) is left as it is. */
+  private _settle(processId: string, outcome: ProcessOutcome): void {
+    const taskId = this._idToTask.get(processId);
+    if (taskId === undefined) return;
+    this._release(processId);
+    if (this._isTerminal(taskId)) return;
+    this._transitionTask(taskId, outcome.status, { exitCode: outcome.exitCode, error: outcome.error });
+  }
+
+  private _settleStopped(processId: string): void {
+    const taskId = this._idToTask.get(processId);
+    if (taskId === undefined) return;
+    this._release(processId);
+    if (this._isTerminal(taskId)) return;
+    this._transitionTask(taskId, 'cancelled', {});
+  }
+
+  /** Forget a process whose task has reached its end, so the maps hold only open tasks. */
+  private _release(processId: string): void {
+    const taskId = this._idToTask.get(processId);
+    this._idToTask.delete(processId);
+    if (taskId !== undefined) this._taskToId.delete(taskId);
+    for (const [pid, id] of this._pidToId) {
+      if (id === processId) { this._pidToId.delete(pid); break; }
+    }
+  }
+
+  private _isTerminal(taskId: string): boolean {
+    const current = this._store.getState().tasks.tasks.get(taskId);
+    return current === undefined || isTerminalStatus(current.status);
+  }
 
   private _upsertTask(task: RuntimeTask): void {
     this._dispatch.syncRuntimeTask(task, 'process-adapter');
@@ -205,7 +252,7 @@ export class ProcessTaskAdapter {
   private _transitionTask(
     taskId: string,
     status: 'completed' | 'failed' | 'cancelled',
-    extras: { exitCode?: number; error?: string | undefined },
+    extras: { exitCode?: number | undefined; error?: string | undefined },
   ): void {
     this._dispatch.transitionRuntimeTask(
       taskId,

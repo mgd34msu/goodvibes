@@ -54,6 +54,7 @@ import { handleInteractiveApprovalAction } from './facade-approval-action.js';
 import { isChannelOwner } from '../channels/policy-manager.js';
 import { assertCanConfirm } from '../gate/surface-authority.js';
 import { AgentTaskAdapter } from '../runtime/tasks/adapters/agent-adapter.js';
+import { ProcessTaskAdapter } from '../runtime/tasks/adapters/process-adapter.js';
 import {
   configureDaemonSessionContinuation,
   createDaemonFacadeCollaborators,
@@ -216,6 +217,8 @@ export class DaemonServer {
   private relayReachability: RelayReachability | null = null;
   private agentTaskAdapter: import('../runtime/tasks/adapters/agent-adapter.js').AgentTaskAdapter | null = null;
   private agentTaskAdapterUnsub: (() => void) | null = null;
+  /** Detaches the background-process task rows from the process manager. */
+  private processTaskAdapterUnsub: (() => void) | null = null;
   private tlsState: ResolvedInboundTlsContext | null = null;
   private approvalBrokerUnsubscribe: (() => void) | null = null;
   /** Unsubscribe from controlPlane config key watchers; cleared on stop(). */
@@ -395,6 +398,9 @@ export class DaemonServer {
     this.agentTaskAdapter = new AgentTaskAdapter(this.runtimeStore);
     this.agentTaskAdapterUnsub = this.agentTaskAdapter.attachRuntimeBus(this.runtimeBus);
     this.agentTaskAdapter.reconcileOnRestart(); // marks tasks running at startup as aborted after daemon restart
+    // Background processes the daemon's turns start are task rows from start to exit.
+    this.processTaskAdapterUnsub = new ProcessTaskAdapter(this.runtimeStore, this.runtimeServices.processManager)
+      .attach({ sessionId: 'daemon' });
 
     configureDaemonSessionContinuation({
       sessionBroker: this.sessionBroker,
@@ -1131,6 +1137,8 @@ export class DaemonServer {
     // Tear down the adapter bus subscription and session broker GC interval.
     this.agentTaskAdapterUnsub?.();
     this.agentTaskAdapterUnsub = null;
+    this.processTaskAdapterUnsub?.();
+    this.processTaskAdapterUnsub = null;
     await close(() => this.sessionBroker.stop());
     try {
       await this.runtimeServices.powerManager.stop();

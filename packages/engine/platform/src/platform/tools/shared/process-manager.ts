@@ -127,6 +127,21 @@ function assertSynchronousAdmission(check: (() => void) | undefined, operation =
   assertSynchronousJudgmentGuard(check, () => new Error(`Process ${operation} currentness must be synchronous and return void`));
 }
 
+/**
+ * A background process started, finished, or was stopped and its record
+ * dropped. Published to `observeLifecycle` listeners for host processes the
+ * manager spawned (captured boundary executions belong to their authority).
+ */
+export type ProcessLifecycleEvent =
+  | { readonly kind: 'started'; readonly id: string; readonly pid: number; readonly cmd: string; readonly startedBy?: string | undefined }
+  | {
+    readonly kind: 'finished'; readonly id: string; readonly pid: number;
+    readonly exitCode: number | null; readonly signal: string | null; readonly timedOut: boolean;
+  }
+  | { readonly kind: 'stopped'; readonly id: string; readonly pid: number };
+
+export type ProcessLifecycleListener = (event: ProcessLifecycleEvent) => void;
+
 export interface ProcessInputOptions {
   readonly signal?: AbortSignal | undefined;
   /** Restricts an existing managed pipe; never grants authority to another child. */
@@ -266,6 +281,10 @@ export class ProcessManager {
   private _closing: Promise<void> | undefined;
   /** Callers of `whenSettled`, woken when their process finishes or its record goes. */
   private readonly _settledWaiters = new Map<string, Set<() => void>>();
+  /** Lifecycle observers (the task list's process adapter). */
+  private readonly _lifecycleListeners = new Set<ProcessLifecycleListener>();
+  /** Processes announced as started and not yet as finished or stopped, with their pid. */
+  private readonly _announced = new Map<string, number>();
 
   // ─── Private helpers ────────────────────────────────────────────────────────
 
@@ -273,7 +292,36 @@ export class ProcessManager {
     return `bg_${++this._counter}_${Date.now()}`;
   }
 
+  private announce(event: ProcessLifecycleEvent): void {
+    for (const listener of this._lifecycleListeners) {
+      try { listener(event); } catch (error: unknown) {
+        logger.warn('Background process lifecycle observer failed', { processId: event.id, kind: event.kind, error: summarizeError(error) });
+      }
+    }
+  }
+
+  /** A record leaving before its process was seen finished: tell observers it was stopped. */
+  private announceStopped(id: string): void {
+    const pid = this._announced.get(id);
+    if (pid === undefined) return;
+    this._announced.delete(id);
+    this.announce({ kind: 'stopped', id, pid });
+  }
+
   // ─── Public API ─────────────────────────────────────────────────────────────
+
+  /**
+   * Observe host processes starting, finishing and being stopped. Processes
+   * started before the listener was added are not replayed (`list()` has them).
+   * With no listener nothing is tracked, so an unobserved manager pays nothing.
+   */
+  observeLifecycle(listener: ProcessLifecycleListener): () => void {
+    this._lifecycleListeners.add(listener);
+    return () => {
+      this._lifecycleListeners.delete(listener);
+      if (this._lifecycleListeners.size === 0) this._announced.clear();
+    };
+  }
 
   /**
    * Spawn a background process and start collecting its output.
@@ -476,6 +524,10 @@ export class ProcessManager {
     }
 
     entry.pid = proc.pid;
+    if (this._lifecycleListeners.size > 0) {
+      this._announced.set(id, proc.pid);
+      this.announce({ kind: 'started', id, pid: proc.pid, cmd, startedBy: entry.startedBy });
+    }
 
     // Async collection with timeout escalation, SIGTERM then SIGKILL
     // Cast stdout/stderr to ReadableStream, Bun guarantees these are ReadableStream
@@ -853,6 +905,7 @@ export class ProcessManager {
       logger.warn('Background process stop failed', { processId: id, error: summarizeError(error) });
     }).then(() => this.releaseSpills(id));
     else void this.releaseSpills(id);
+    if (!entry.done) this.announceStopped(id);
     // Preserve bg_stop's immediate record removal, but retain the owned handle
     // until exit/output collection completes so close() can still drain it.
     this._processes.delete(id);
@@ -870,6 +923,8 @@ export class ProcessManager {
   async stopConfirmed(id: string): Promise<'stopped' | 'unconfirmed' | 'unknown'> {
     const entry = this._processes.get(id);
     if (!entry) return 'unknown';
+    // Observers hear the stop when it is asked for, not as an exit with the stop signal.
+    if (!entry.done) this.announceStopped(id);
     const owner = this._shutdowns.get(id);
     let confirmed = true;
     if (owner) {
@@ -1010,6 +1065,15 @@ export class ProcessManager {
    * kept record expires; no read prunes.
    */
   private pruneCompletedProcesses(now = Date.now()): void {
+    // Every path that finishes a process prunes, so this is where observers
+    // hear it finished, before an expired record could be dropped below.
+    for (const [id, pid] of this._announced) {
+      const entry = this._processes.get(id);
+      if (entry && !entry.done) continue;
+      this._announced.delete(id);
+      if (!entry) { this.announce({ kind: 'stopped', id, pid }); continue; }
+      this.announce({ kind: 'finished', id, pid, exitCode: entry.exitCode, signal: entry.signal ?? null, timedOut: entry.timedOut === true });
+    }
     const completed = [...this._processes.values()]
       .filter((entry) => entry.done)
       .sort((a, b) => (b.completedAt ?? b.startTime) - (a.completedAt ?? a.startTime));

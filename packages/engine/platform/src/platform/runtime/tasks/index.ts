@@ -40,6 +40,10 @@ export {
   type TaskVerb,
 } from './manager.js';
 
+// ── Adapters ──────────────────────────────────────────────────────────────────
+// Background processes as tasks; constructed beside each composition's ProcessManager.
+export { ProcessTaskAdapter, type ProcessOwner } from './adapters/process-adapter.js';
+
 // ── Factory ───────────────────────────────────────────────────────────────────
 import type { RuntimeStore } from '../store/index.js';
 import type { RuntimeEventBus } from '../events/index.js';

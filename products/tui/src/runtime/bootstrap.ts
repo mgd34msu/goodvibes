@@ -50,7 +50,7 @@ import {
   type ExternalServicesHandle,
   createDeferredStartupCoordinator,
 } from '@/runtime/index.ts';
-import { bindWriteLastSessionPointerToSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { bindWriteLastSessionPointerToSurface, ProcessTaskAdapter } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { deriveSpineFooterStatus, type SessionSpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import { transportRetryHooks } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
 import { bindControlCommands } from './control-surfaces.ts';
@@ -303,9 +303,13 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   const acpTaskAdapter = new AcpTaskAdapter(store);
   bootstrapUnsubs.push(acpTaskAdapter.attachRuntimeBus(runtimeBus));
   orchestrator.registerDelegateTool(acpManager);
+  // Background processes are tasks from start to exit, and a task cancel stops the process.
+  const processTaskAdapter = new ProcessTaskAdapter(store, services.processManager);
+  bootstrapUnsubs.push(processTaskAdapter.attach({ sessionId: userSessionId }));
   // An ACP task row's owner is its subagent id; the ACP manager can stop it and nothing else.
   const opsTaskManager = createTaskManager(store, runtimeBus, userSessionId, services.featureFlags,
-    (task) => task.kind === 'acp' ? { cancel: () => acpManager.cancel(task.owner) } : undefined);
+    (task) => task.kind === 'acp' ? { cancel: () => acpManager.cancel(task.owner) }
+      : task.kind === 'exec' ? processTaskAdapter.controllerFor(task.id) : undefined);
   // Operator interventions ride the control-plane gateway capability
   // (controlPlane.gateway, on by default; the old never-registered gate id shipped this dead).
   const opsControlPlane = services.featureFlags.isEnabled(CONTROL_PLANE_FEATURE_FLAG)

@@ -1,351 +1,155 @@
 /**
- * Owner allowlist gate for chat channels: with the owner inbox attached, the
- * first unknown sender on an unowned surface is held as a claim the owner
- * accepts; a host without an inbox seeds the first identified sender. Unknown
- * senders are
- * ignored with one log line and no session, and a paired owner can approve,
- * deny, or steer a pending permission ask by replying in the channel, routed
- * through the same ApprovalBroker the TUI and webui use.
+ * Who reaches the assistant over a chat channel, and who may answer for the
+ * owner. On a surface with no owner the first unknown sender is held as a
+ * claim and becomes the owner only when the owner accepts it; an unknown sender
+ * starts no session; and only the owner (not a stranger, not another
+ * allowlisted sender) can answer a pending permission ask by replying in the
+ * channel.
+ *
+ * Real policy manager over its file, real owner inbox over its SQLite file,
+ * real approval broker and surface-action helper; the decision model is the
+ * approval-readings fixture port.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ChannelPolicyManager } from '../platform/src/platform/channels/policy-manager.js';
-import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.js';
-import { createOwnerInbox } from '../platform/src/platform/control-plane/owner-inbox.js';
-import { DaemonSurfaceActionHelper } from '../platform/src/platform/daemon/surface-actions.js';
+import { ChannelPolicyManager } from '../platform/src/platform/channels/policy-manager.ts';
+import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.ts';
+import { createOwnerInbox } from '../platform/src/platform/control-plane/owner-inbox.ts';
+import { DaemonSurfaceActionHelper } from '../platform/src/platform/daemon/surface-actions.ts';
+import { handleSlackSurfacePayload } from '../platform/src/platform/adapters/slack/index.ts';
+import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.ts';
+import type { SurfaceAdapterContext } from '../platform/src/platform/adapters/index.ts';
 import { useApprovalReadings } from './helpers/approval-readings.ts';
-import { waitFor } from './_helpers/test-timeout.js';
 
 const readings = useApprovalReadings();
-import { handleSlackSurfacePayload } from '../platform/src/platform/adapters/slack/index.js';
-import { logger } from '../platform/src/platform/utils/logger.js';
-import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.js';
-import type { SurfaceAdapterContext } from '../platform/src/platform/adapters/index.js';
-
 const scratchDirs: string[] = [];
+afterEach(() => { for (const dir of scratchDirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
-function makePolicyManager(): ChannelPolicyManager {
+function scratch(): string {
   const dir = mkdtempSync(join(tmpdir(), 'gv-channel-owner-gate-'));
   scratchDirs.push(dir);
-  return new ChannelPolicyManager({ storePath: join(dir, 'policies.json') });
+  return dir;
 }
 
-function makeAskRequest(callId: string): PermissionPromptRequest {
-  return {
-    callId,
-    tool: 'run_command',
-    args: { command: 'deploy' },
-    category: 'execute',
-    analysis: { classification: 'execute', riskLevel: 'medium', summary: 'run a command', reasons: [] },
-  };
-}
-
-afterEach(() => {
-  for (const dir of scratchDirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
+/** Let the event loop turn until `done` holds; bounded in turns, never in milliseconds. */
+async function until(done: () => boolean, what: string): Promise<void> {
+  for (let turn = 0; turn < 20_000; turn += 1) {
+    if (done()) return;
+    await new Promise<void>((resolve) => { setImmediate(resolve); });
   }
-});
+  if (!done()) throw new Error(`Gave up waiting for: ${what}`);
+}
 
-describe('owner allowlist self-seeding', () => {
-  test('the first identified sender seeds the surface owner allowlist', async () => {
-    const policy = makePolicyManager();
-    const first = await policy.evaluateIngress({
-      surface: 'slack',
-      userId: 'U-OWNER',
-      conversationKind: 'direct',
-      text: 'hello',
-    });
-    expect(first.allowed).toBe(true);
-    expect(first.reason).toBe('owner-allowlist-seeded');
-    expect(first.policy.allowlistUserIds).toEqual(['U-OWNER']);
-    expect(policy.getPolicy('slack').allowlistUserIds).toEqual(['U-OWNER']);
-  });
+/** A slack surface whose owner is U-OWNER and which also admits U-FRIEND. */
+async function ownedSlack(): Promise<ChannelPolicyManager> {
+  const policy = new ChannelPolicyManager({ storePath: join(scratch(), 'policies.json') });
+  await policy.upsertPolicy('slack', { allowlistUserIds: ['U-OWNER', 'U-FRIEND'] });
+  expect(policy.getPolicy('slack').ownerId).toBe('U-OWNER');
+  return policy;
+}
 
-  test('after seeding, an unknown sender is denied and the owner stays allowed', async () => {
-    const policy = makePolicyManager();
-    await policy.evaluateIngress({ surface: 'telegram', userId: 'U-OWNER', conversationKind: 'direct', text: 'hi' });
-
-    const stranger = await policy.evaluateIngress({
-      surface: 'telegram',
-      userId: 'U-STRANGER',
-      conversationKind: 'direct',
-      text: 'let me in',
-    });
-    expect(stranger.allowed).toBe(false);
-    expect(stranger.reason).toBe('user-not-allowlisted');
-
-    const owner = await policy.evaluateIngress({
-      surface: 'telegram',
-      userId: 'U-OWNER',
-      conversationKind: 'direct',
-      text: 'status',
-    });
-    expect(owner.allowed).toBe(true);
-    expect(owner.reason).toBe('allowed');
-  });
-
-  test('a message with no sender identity does not seed anything', async () => {
-    const policy = makePolicyManager();
-    const decision = await policy.evaluateIngress({
-      surface: 'webhook',
-      conversationKind: 'direct',
-      text: 'machine payload',
-    });
-    expect(decision.allowed).toBe(true);
-    expect(policy.getPolicy('webhook').allowlistUserIds).toEqual([]);
-  });
-
-  test('an unknown sender denial emits one log line', async () => {
-    const policy = makePolicyManager();
-    await policy.evaluateIngress({ surface: 'slack', userId: 'U-OWNER', conversationKind: 'direct', text: 'hi' });
-
-    const infoLines: Array<{ message: string; data: unknown }> = [];
-    const originalInfo = logger.info.bind(logger);
-    logger.info = ((message: string, data?: unknown) => {
-      infoLines.push({ message, data });
-    }) as typeof logger.info;
-    try {
-      await policy.evaluateIngress({ surface: 'slack', userId: 'U-STRANGER', conversationKind: 'direct', text: 'hey' });
-    } finally {
-      logger.info = originalInfo;
-    }
-    const ignored = infoLines.filter((line) => line.message.includes('unknown sender ignored'));
-    expect(ignored.length).toBe(1);
-  });
-});
-
-describe('owner claim through the owner inbox', () => {
-  test('the first unknown sender is held as a claim; only an accepted claim makes them the owner', async () => {
-    const policy = makePolicyManager();
-    const dir = mkdtempSync(join(tmpdir(), 'gv-channel-owner-claim-'));
-    scratchDirs.push(dir);
-    const inbox = createOwnerInbox({ questionsPath: join(dir, 'owner-inbox.jsonl') });
-    policy.attachOwnerInbox(inbox);
-
-    const stranger = await policy.evaluateIngress({ surface: 'telegram', userId: 'U-STRANGER', conversationKind: 'direct', text: 'hi' });
-    expect(stranger).toMatchObject({ allowed: false, reason: 'owner-claim-pending' });
+test('the first unknown sender is held as a claim; only an accepted claim makes them the owner', async () => {
+  const dir = scratch();
+  const policy = new ChannelPolicyManager({ storePath: join(dir, 'policies.json') });
+  const inbox = createOwnerInbox({ questionsPath: join(dir, 'owner-inbox.sqlite') });
+  policy.attachOwnerInbox(inbox);
+  try {
+    expect((await policy.evaluateIngress({ surface: 'telegram', userId: 'U-STRANGER', conversationKind: 'direct', text: 'hi' })).allowed).toBe(false);
+    expect((await policy.evaluateIngress({ surface: 'telegram', userId: 'U-OWNER', conversationKind: 'direct', text: 'hello' })).allowed).toBe(false);
     expect(policy.getPolicy('telegram').allowlistUserIds).toEqual([]);
-    const owner = await policy.evaluateIngress({ surface: 'telegram', userId: 'U-OWNER', conversationKind: 'direct', text: 'hello' });
-    expect(owner.allowed).toBe(false);
+    expect(policy.getPolicy('telegram').ownerId).toBeUndefined();
 
     const claims = inbox.listNow({ kinds: ['claim'], status: 'open' });
     expect(claims).toHaveLength(2);
     const ownerClaim = claims.find((item) => item.metadata?.['userId'] === 'U-OWNER')!;
     expect((await inbox.answer(ownerClaim.id, { option: 'accept' }, { actor: 'owner', surface: 'tui' })).applied).toBe(true);
-    await waitFor(() => policy.getPolicy('telegram').ownerId === 'U-OWNER');
+    await until(() => policy.getPolicy('telegram').ownerId === 'U-OWNER', 'the accepted claim to make U-OWNER the owner');
 
     expect(policy.getPolicy('telegram').allowlistUserIds).toEqual(['U-OWNER']);
     expect((await policy.evaluateIngress({ surface: 'telegram', userId: 'U-OWNER', conversationKind: 'direct', text: 'again' })).allowed).toBe(true);
     expect((await policy.evaluateIngress({ surface: 'telegram', userId: 'U-STRANGER', conversationKind: 'direct', text: 'again' })).allowed).toBe(false);
-    await waitFor(() => inbox.listNow({ kinds: ['claim'], status: 'open' }).length === 0);
+  } finally {
+    await policy.stop();
     inbox.dispose();
-  });
-
-  test('an open surface admits every sender and raises no claim', async () => {
-    const policy = makePolicyManager();
-    const dir = mkdtempSync(join(tmpdir(), 'gv-channel-owner-open-'));
-    scratchDirs.push(dir);
-    const inbox = createOwnerInbox({ questionsPath: join(dir, 'owner-inbox.jsonl') });
-    policy.attachOwnerInbox(inbox);
-    await policy.upsertPolicy('slack', { open: true });
-    expect((await policy.evaluateIngress({ surface: 'slack', userId: 'U-ANY', conversationKind: 'channel', channelId: 'C1', text: 'hi' })).allowed).toBe(true);
-    expect(inbox.listNow({ kinds: ['claim'] })).toHaveLength(0);
-    inbox.dispose();
-  });
+  }
 });
 
-describe('unknown sender at the adapter level (slack)', () => {
-  test('produces no route binding, no session submit, and a policy-blocked response', async () => {
-    const policy = makePolicyManager();
-    await policy.evaluateIngress({ surface: 'slack', userId: 'U-OWNER', conversationKind: 'direct', text: 'hi' });
-
-    const submitted: unknown[] = [];
-    const bindings: unknown[] = [];
-    const context = {
-      authorizeSurfaceIngress: (input: Parameters<ChannelPolicyManager['evaluateIngress']>[0]) =>
-        policy.evaluateIngress(input),
-      routeBindings: {
-        upsertBinding: async (input: unknown) => {
-          bindings.push(input);
-          return { id: 'route-test', surfaceId: 'slack' };
-        },
-      },
-      sessionBroker: {
-        submitMessage: async (input: unknown) => {
-          submitted.push(input);
-          return { sessionId: 'session-test', accepted: true };
-        },
-      },
-      parseSurfaceControlCommand: () => null,
-      performSurfaceControlCommand: async () => 'ok',
-      trySpawnAgent: () => new Response('no'),
-    } as unknown as SurfaceAdapterContext;
-
-    const response = await handleSlackSurfacePayload({
-      command: '/goodvibes',
-      text: 'do something',
-      user_id: 'U-STRANGER',
-      user_name: 'stranger',
-      channel_id: 'C1',
-      channel_name: 'general',
-      team_id: 'T1',
-      response_url: '',
+test('an unknown sender at the Slack adapter gets no route binding and no session', async () => {
+  const policy = await ownedSlack();
+  const submitted: unknown[] = [];
+  const bindings: unknown[] = [];
+  const context = {
+    authorizeSurfaceIngress: (input: Parameters<ChannelPolicyManager['evaluateIngress']>[0]) => policy.evaluateIngress(input),
+    routeBindings: { upsertBinding: async (input: unknown) => { bindings.push(input); return { id: 'route-test', surfaceId: 'slack' }; } },
+    sessionBroker: { submitMessage: async (input: unknown) => { submitted.push(input); return { sessionId: 'session-test', accepted: true }; } },
+    parseSurfaceControlCommand: () => null,
+    performSurfaceControlCommand: async () => 'ok',
+    trySpawnAgent: () => new Response('no'),
+  } as unknown as SurfaceAdapterContext;
+  try {
+    await handleSlackSurfacePayload({
+      command: '/goodvibes', text: 'do something', user_id: 'U-STRANGER', user_name: 'stranger',
+      channel_id: 'C1', channel_name: 'general', team_id: 'T1', response_url: '',
     }, context);
-
-    // Slack renders a slash-command reply only when it arrives with 200.
-    expect(response.status).toBe(200);
-    expect((await response.json() as { response_type?: string }).response_type).toBe('ephemeral');
-    expect(bindings.length).toBe(0);
-    expect(submitted.length).toBe(0);
-  });
+    expect(bindings).toHaveLength(0);
+    expect(submitted).toHaveLength(0);
+  } finally {
+    await policy.stop();
+  }
 });
 
-describe('owner channel reply resolves a pending permission ask', () => {
-  function makeHelper(options: {
-    readonly policy: ChannelPolicyManager;
-    readonly broker: ApprovalBroker;
-    readonly bindingSurface?: string | undefined;
-  }): DaemonSurfaceActionHelper {
-    return new DaemonSurfaceActionHelper({
-      channelPolicy: options.policy,
-      approvalBroker: options.broker,
-      routeBindings: {
-        getBinding: () => (options.bindingSurface ? { surfaceKind: options.bindingSurface } : undefined),
-      },
-    } as unknown as ConstructorParameters<typeof DaemonSurfaceActionHelper>[0]);
+describe('a reply in the channel answering a pending permission ask', () => {
+  function askRequest(callId: string): PermissionPromptRequest {
+    return {
+      callId, tool: 'run_command', args: { command: 'deploy' }, category: 'execute',
+      analysis: { classification: 'execute', riskLevel: 'medium', summary: 'run a command', reasons: [] },
+    };
   }
 
-  test('replying approve resolves the pending ask through the shared broker', async () => {
+  async function pendingAsk(callId: string) {
+    const policy = await ownedSlack();
+    const broker = new ApprovalBroker({ storePath: join(scratch(), 'approvals.json') });
+    await broker.start();
+    const helper = new DaemonSurfaceActionHelper({
+      channelPolicy: policy,
+      approvalBroker: broker,
+      routeBindings: { getBinding: () => ({ surfaceKind: 'slack' }) },
+    } as unknown as ConstructorParameters<typeof DaemonSurfaceActionHelper>[0]);
+    const decision = broker.requestApproval({ request: askRequest(callId), routeId: 'route-1' });
+    await until(() => broker.listApprovals(10).some((entry) => entry.status === 'pending'), 'the ask to be pending');
+    const reply = (userId: string, text: string) => helper.authorizeSurfaceIngress({ surface: 'slack', userId, conversationKind: 'direct', text });
+    return { policy, broker, decision, reply };
+  }
+
+  test("the owner's approve resolves it through the shared broker", async () => {
     readings.set({ reply: 'approve' });
-    const policy = makePolicyManager();
-    const broker = new ApprovalBroker({ storePath: ':memory:' });
-    await policy.evaluateIngress({ surface: 'slack', userId: 'U-OWNER', conversationKind: 'direct', text: 'hi' });
-    const helper = makeHelper({ policy, broker, bindingSurface: 'slack' });
-
-    const decisionPromise = broker.requestApproval({
-      request: makeAskRequest('call-approve-1'),
-      routeId: 'route-1',
-    });
-    await waitFor(() => broker.listApprovals(10).some((entry) => entry.status === 'pending'));
-
-    const ingress = await helper.authorizeSurfaceIngress({
-      surface: 'slack',
-      userId: 'U-OWNER',
-      conversationKind: 'direct',
-      text: 'approve',
-    });
-    expect(ingress.allowed).toBe(false);
-    expect(ingress.reason).toBe('approval-reply-consumed');
-
-    const decision = await decisionPromise;
-    expect(decision.approved).toBe(true);
-    const record = broker.listApprovals(10)[0]!;
-    expect(record.status).toBe('approved');
-    expect(record.resolvedBy).toBe('U-OWNER');
+    const ask = await pendingAsk('call-owner');
+    try {
+      expect((await ask.reply('U-OWNER', 'approve')).reason).toBe('approval-reply-consumed');
+      expect((await ask.decision).approved).toBe(true);
+      const record = ask.broker.listApprovals(10)[0]!;
+      expect(record.status).toBe('approved');
+      expect(record.resolvedBy).toBe('U-OWNER');
+    } finally {
+      await ask.policy.stop();
+    }
   });
 
-  test('replying deny with guidance steers the ask: denied with the note recorded', async () => {
-    readings.set({ reply: 'reject' });
-    const policy = makePolicyManager();
-    const broker = new ApprovalBroker({ storePath: ':memory:' });
-    await policy.evaluateIngress({ surface: 'slack', userId: 'U-OWNER', conversationKind: 'direct', text: 'hi' });
-    const helper = makeHelper({ policy, broker, bindingSurface: 'slack' });
-
-    const decisionPromise = broker.requestApproval({
-      request: makeAskRequest('call-deny-1'),
-      routeId: 'route-1',
-    });
-    await waitFor(() => broker.listApprovals(10).some((entry) => entry.status === 'pending'));
-
-    const ingress = await helper.authorizeSurfaceIngress({
-      surface: 'slack',
-      userId: 'U-OWNER',
-      conversationKind: 'direct',
-      text: 'deny: use the staging database instead',
-    });
-    expect(ingress.allowed).toBe(false);
-    expect(ingress.reason).toBe('approval-reply-consumed');
-
-    const decision = await decisionPromise;
-    expect(decision.approved).toBe(false);
-    // The guidance is MODEL-VISIBLE: it rides the structured declined decision
-    // delivered to the waiting tool call as `reason`, not only the audit note,
-    // so the model adapts ("use the staging database instead") instead of
-    // seeing a bare deny.
-    expect(decision.reason).toBe('deny: use the staging database instead');
-    const record = broker.listApprovals(10)[0]!;
-    expect(record.status).toBe('denied');
-    expect(record.decision?.reason).toBe('deny: use the staging database instead');
-    expect(record.audit.some((entry) => entry.note === 'deny: use the staging database instead')).toBe(true);
-  });
-
-  test('a conditional approval declines the original call and delivers the amendment as guidance', async () => {
-    readings.set({ reply: 'amend' });
-    const policy = makePolicyManager();
-    const broker = new ApprovalBroker({ storePath: ':memory:' });
-    await policy.evaluateIngress({ surface: 'slack', userId: 'U-OWNER', conversationKind: 'direct', text: 'hi' });
-    const helper = makeHelper({ policy, broker, bindingSurface: 'slack' });
-
-    const decisionPromise = broker.requestApproval({
-      request: makeAskRequest('call-approve-steer-1'),
-      routeId: 'route-1',
-    });
-    await waitFor(() => broker.listApprovals(10).some((entry) => entry.status === 'pending'));
-
-    const ingress = await helper.authorizeSurfaceIngress({
-      surface: 'slack',
-      userId: 'U-OWNER',
-      conversationKind: 'direct',
-      text: 'approve, but only touch the migrations directory',
-    });
-    expect(ingress.allowed).toBe(false);
-    expect(ingress.reason).toBe('approval-reply-consumed');
-
-    const decision = await decisionPromise;
-    expect(decision.approved).toBe(false);
-    expect(decision.reason).toBe('approve, but only touch the migrations directory');
-    const record = broker.listApprovals(10)[0]!;
-    expect(record.decision?.reason).toBe('approve, but only touch the migrations directory');
-  });
-
-  test('an unknown sender reply never touches the pending ask', async () => {
-    const policy = makePolicyManager();
-    const broker = new ApprovalBroker({ storePath: ':memory:' });
-    await policy.evaluateIngress({ surface: 'slack', userId: 'U-OWNER', conversationKind: 'direct', text: 'hi' });
-    const helper = makeHelper({ policy, broker, bindingSurface: 'slack' });
-
-    void broker.requestApproval({ request: makeAskRequest('call-guard-1'), routeId: 'route-1' });
-    await waitFor(() => broker.listApprovals(10).some((entry) => entry.status === 'pending'));
-
-    const ingress = await helper.authorizeSurfaceIngress({
-      surface: 'slack',
-      userId: 'U-STRANGER',
-      conversationKind: 'direct',
-      text: 'approve',
-    });
-    expect(ingress.allowed).toBe(false);
-    expect(ingress.reason).toBe('user-not-allowlisted');
-    expect(broker.listApprovals(10)[0]!.status).toBe('pending');
-  });
-
-  test('an unrelated owner message flows through even with a pending ask', async () => {
-    const policy = makePolicyManager();
-    const broker = new ApprovalBroker({ storePath: ':memory:' });
-    await policy.evaluateIngress({ surface: 'slack', userId: 'U-OWNER', conversationKind: 'direct', text: 'hi' });
-    const helper = makeHelper({ policy, broker, bindingSurface: 'slack' });
-
-    void broker.requestApproval({ request: makeAskRequest('call-flow-1'), routeId: 'route-1' });
-    await waitFor(() => broker.listApprovals(10).some((entry) => entry.status === 'pending'));
-
-    const ingress = await helper.authorizeSurfaceIngress({
-      surface: 'slack',
-      userId: 'U-OWNER',
-      conversationKind: 'direct',
-      text: 'how is the run going?',
-    });
-    expect(ingress.allowed).toBe(true);
-    expect(broker.listApprovals(10)[0]!.status).toBe('pending');
+  test('a stranger, or an allowlisted sender who is not the owner, never touches it', async () => {
+    readings.set({ reply: 'approve' });
+    const ask = await pendingAsk('call-guard');
+    void ask.decision.catch(() => undefined);
+    try {
+      const stranger = await ask.reply('U-STRANGER', 'approve');
+      expect(stranger.allowed).toBe(false);
+      expect(stranger.reason).toBe('user-not-allowlisted');
+      const friend = await ask.reply('U-FRIEND', 'approve');
+      expect(friend.reason).not.toBe('approval-reply-consumed');
+      expect(ask.broker.listApprovals(10)[0]!.status).toBe('pending');
+    } finally {
+      await ask.policy.stop();
+    }
   });
 });

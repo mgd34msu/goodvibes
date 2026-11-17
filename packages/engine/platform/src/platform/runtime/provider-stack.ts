@@ -33,10 +33,7 @@ import { ProviderOptimizer } from '../providers/optimizer.js';
 import { ProviderRegistry } from '../providers/registry.js';
 import type { RuntimeEventBus } from './events/index.js';
 import type { FeatureFlagManager } from './feature-flags/index.js';
-import {
-  applyProviderOptimizerConfigMode,
-  bindProviderOptimizerFeatureFlag,
-} from './provider-optimizer-wiring.js';
+import { bindProviderOptimizerConfig } from './provider-optimizer-wiring.js';
 import type { ShellPathService } from './shell-paths.js';
 
 /** The registry constructor's own option bag, named so a factory can be typed against it. */
@@ -169,12 +166,12 @@ export function createProviderStack(options: ProviderStackOptions): ProviderStac
     runtimeBus: options.runtimeBus,
   });
   const providerOptimizer = new ProviderOptimizer(providerRegistry, providerCapabilityRegistry, false);
-  const unbindOptimizerFlag = bindProviderOptimizerFeatureFlag(options.featureFlags, providerOptimizer);
-  applyProviderOptimizerConfigMode(configManager, providerOptimizer);
-  // A disposed composition (a test, a one-shot command) must stop reacting to later secret and flag changes.
+  // The two optimizer settings decide its state at start and on every later change.
+  const unbindOptimizerConfig = bindProviderOptimizerConfig(configManager, providerOptimizer);
+  // A disposed composition (a test, a one-shot command) must stop reacting to later secret and setting changes.
   options.registerDispose?.(() => {
     stopCredentialWatch();
-    unbindOptimizerFlag();
+    unbindOptimizerConfig();
     liveCredentialRegistries.delete(providerRegistry);
     // Server-side resources a provider created (Gemini's prompt caches) are released, not left to expire.
     void providerRegistry.disposeProviders();

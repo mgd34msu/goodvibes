@@ -271,7 +271,7 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
     type: 'enum',
     default: 'off',
     description:
-      'Provider routing optimizer: off (optimizer inactive, default), manual (optimizer active but never auto-routes), auto (selects the best capable provider per request via capability contracts), or pinned (force one model, see provider.optimizerPinnedModel). Runtime /provider commands and pin/unpin still override for the session.',
+      'Provider routing optimizer: off (optimizer inactive, default), manual (optimizer active but never auto-routes), auto (selects the best capable provider per request via capability contracts), or pinned (force one model, see provider.optimizerPinnedModel). Applies at once from any settings path; /provider-opt commands write this setting.',
     enumValues: ['off', 'manual', 'auto', 'pinned'],
   },
   {
@@ -279,7 +279,7 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
     type: 'string',
     default: '',
     description:
-      'Provider-qualified model id (e.g. anthropic:claude-sonnet-4) pinned by the provider optimizer at startup when provider.optimizerMode is "pinned". Empty leaves the optimizer unpinned (falls back to manual).',
+      'Provider-qualified model id (e.g. anthropic:claude-sonnet-4) the provider optimizer routes to while provider.optimizerMode is "pinned"; a change applies at once. Empty leaves the optimizer unpinned (falls back to manual).',
   },
   {
     key: 'behavior.autoApprove',

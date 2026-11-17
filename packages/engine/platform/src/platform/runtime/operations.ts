@@ -305,8 +305,10 @@ export {
 export type { CodeIndexServices, CodeIndexServicesDeps } from './code-index-services.js';
 
 export {
-  applyProviderOptimizerConfigMode,
-  bindProviderOptimizerFeatureFlag,
+  applyProviderOptimizerSettings,
+  bindProviderOptimizerConfig,
+  readProviderOptimizerSettings,
+  type ProviderOptimizerSettings,
 } from './provider-optimizer-wiring.js';
 
 export {

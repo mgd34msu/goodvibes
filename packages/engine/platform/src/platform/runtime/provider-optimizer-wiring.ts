@@ -1,50 +1,55 @@
 /**
- * provider-optimizer-wiring.ts, bind the provider optimizer to its gate and
- * seed its persisted routing mode at startup. Split out of services.ts so the
- * composition monolith stays under its line ceiling.
+ * provider-optimizer-wiring.ts, the one owner of the mapping from the two
+ * provider optimizer settings to the live optimizer. `provider.optimizerMode`
+ * decides whether it is on and how it routes; `provider.optimizerPinnedModel`
+ * names the target in pinned mode. The provider stack applies them at start
+ * and again whenever either key changes, from any settings path.
  */
 import type { ConfigManager } from '../config/manager.js';
-import type { ProviderOptimizer } from '../providers/optimizer.js';
-import type { FeatureFlagManager } from './feature-flags/index.js';
+import type { OptimizerMode, ProviderOptimizer } from '../providers/optimizer.js';
 
-export function bindProviderOptimizerFeatureFlag(
-  featureFlags: Pick<FeatureFlagManager, 'isEnabled' | 'subscribe'>,
-  providerOptimizer: Pick<ProviderOptimizer, 'setEnabled'>,
-): () => void {
-  providerOptimizer.setEnabled(featureFlags.isEnabled('provider-optimizer'));
-  return featureFlags.subscribe((flagId, state) => {
-    if (flagId === 'provider-optimizer') {
-      providerOptimizer.setEnabled(state === 'enabled');
-    }
-  });
+/** What the two settings ask of the optimizer. */
+export interface ProviderOptimizerSettings {
+  readonly enabled: boolean;
+  readonly mode: OptimizerMode;
+  readonly pin: { readonly providerId: string; readonly modelId: string } | null;
 }
 
 /**
- * Apply the persistent provider-optimizer routing mode from config at startup.
- * provider.optimizerMode 'off' keeps the optimizer inactive (its gate derives
- * from the same key); this only seeds the mode/pin so an operator can persist
- * "auto" or a pinned model without re-issuing a /provider command each
- * session. Runtime pin/unpin/setMode still override for the live session.
+ * `off` is an inactive optimizer in manual mode; `manual`, `auto` and
+ * `pinned` are active. Pinned with no valid `provider:model` target stays
+ * manual, since there is nothing to pin.
  */
-export function applyProviderOptimizerConfigMode(
-  configManager: Pick<ConfigManager, 'get'>,
-  providerOptimizer: Pick<ProviderOptimizer, 'setMode' | 'pin'>,
-): void {
+export function readProviderOptimizerSettings(configManager: Pick<ConfigManager, 'get'>): ProviderOptimizerSettings {
   const mode = configManager.get('provider.optimizerMode');
-  if (mode === 'off') {
-    providerOptimizer.setMode('manual'); // inert baseline while inactive
-    return;
-  }
-  if (mode === 'pinned') {
-    const pinned = configManager.get('provider.optimizerPinnedModel').trim();
-    const sep = pinned.indexOf(':');
-    if (sep > 0 && sep < pinned.length - 1) {
-      providerOptimizer.pin(pinned.slice(0, sep), pinned.slice(sep + 1));
-    } else {
-      // Pinned mode requested without a valid provider-qualified model, stay manual.
-      providerOptimizer.setMode('manual');
-    }
-  } else {
-    providerOptimizer.setMode(mode);
-  }
+  if (mode === 'off') return { enabled: false, mode: 'manual', pin: null };
+  if (mode !== 'pinned') return { enabled: true, mode, pin: null };
+  const pinned = configManager.get('provider.optimizerPinnedModel').trim();
+  const sep = pinned.indexOf(':');
+  if (sep <= 0 || sep >= pinned.length - 1) return { enabled: true, mode: 'manual', pin: null };
+  return { enabled: true, mode: 'pinned', pin: { providerId: pinned.slice(0, sep), modelId: pinned.slice(sep + 1) } };
+}
+
+export function applyProviderOptimizerSettings(
+  providerOptimizer: Pick<ProviderOptimizer, 'setEnabled' | 'setMode' | 'pin'>,
+  settings: ProviderOptimizerSettings,
+): void {
+  providerOptimizer.setEnabled(settings.enabled);
+  if (settings.pin) providerOptimizer.pin(settings.pin.providerId, settings.pin.modelId);
+  else providerOptimizer.setMode(settings.mode === 'pinned' ? 'manual' : settings.mode);
+}
+
+/** Applies the settings now and on every change to either key; returns the unsubscribe. */
+export function bindProviderOptimizerConfig(
+  configManager: Pick<ConfigManager, 'get' | 'subscribe'>,
+  providerOptimizer: Pick<ProviderOptimizer, 'setEnabled' | 'setMode' | 'pin'>,
+): () => void {
+  const apply = (): void => applyProviderOptimizerSettings(providerOptimizer, readProviderOptimizerSettings(configManager));
+  apply();
+  const stopMode = configManager.subscribe('provider.optimizerMode', apply);
+  const stopPin = configManager.subscribe('provider.optimizerPinnedModel', apply);
+  return () => {
+    stopMode();
+    stopPin();
+  };
 }

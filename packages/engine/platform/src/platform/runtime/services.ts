@@ -427,8 +427,10 @@ export interface RuntimeServices {
 }
 
 export {
-  applyProviderOptimizerConfigMode,
-  bindProviderOptimizerFeatureFlag,
+  applyProviderOptimizerSettings,
+  bindProviderOptimizerConfig,
+  readProviderOptimizerSettings,
+  type ProviderOptimizerSettings,
 } from './provider-optimizer-wiring.js';
 
 /**

@@ -93,14 +93,12 @@ function handleOptimizerToggle(
 
   const enable = sub === 'on';
   const wasEnabled = optimizer.enabled;
-  optimizer.setEnabled(enable);
 
-  // Persist to config so the setting survives restart: the optimizer is
-  // governed by the provider.optimizerMode settings key (off = disabled;
-  // manual/auto/pinned = active), and the settings bridge forwards the same
-  // write to the runtime gate.
+  // provider.optimizerMode owns the optimizer's state (off = disabled;
+  // manual/auto/pinned = active); the provider stack applies the write to the
+  // live optimizer, and it survives restart.
   const write = featureEnablementWrite(PROVIDER_OPTIMIZER_FLAG, enable);
-  if (write) context.platform.configManager.setDynamic(write.key, write.value);
+  if (write && enable !== wasEnabled) context.platform.configManager.setDynamic(write.key, write.value);
 
   if (enable && !wasEnabled) {
     out.push('[provider] Optimizer enabled.');
@@ -136,22 +134,13 @@ function handleRoute(
     return;
   }
 
-  if (!optimizer.enabled) {
-    out.push(
-      '[provider] Optimizer is off: routing mode recorded but failover will not fire until optimizer is enabled.',
-    );
-    out.push('  Enable with: /provider-opt optimizer on');
-  }
-
-  optimizer.setMode(sub);
-  out.push(`[provider] Routing mode → ${sub}`);
-  // While the optimizer is off, writing "auto"/"manual" would switch it on at
-  // the next start, so the mode is persisted only when it is already active.
-  if (optimizer.enabled) {
-    context.platform.configManager.setDynamic('provider.optimizerMode', sub);
-  } else {
-    out.push('  This mode is not saved until the optimizer is on; it is lost on restart.');
-  }
+  const wasEnabled = optimizer.enabled;
+  // provider.optimizerMode owns the mode; the provider stack applies the write
+  // to the live optimizer. A routing mode is an active optimizer, so choosing
+  // one while it is off turns it on.
+  context.platform.configManager.setDynamic('provider.optimizerMode', sub);
+  out.push(`[provider] Routing mode → ${optimizer.mode} (saved: survives restart)`);
+  if (!wasEnabled && optimizer.enabled) out.push('  The optimizer was off and is now on. Turn it off with: /provider-opt optimizer off');
 
   if (sub === 'auto') {
     out.push(
@@ -281,13 +270,12 @@ async function handlePin(
     return;
   }
 
-  // Enable optimizer if it's off
+  // Pinned mode is an active optimizer, so pinning while it is off turns it on.
   if (!optimizer.enabled) {
-    optimizer.setEnabled(true);
     out.push('⚠ Optimizer was disabled: enabling it for pin to take effect (saved: stays on after restart).');
   }
 
-  optimizer.pin(match.providerId, match.modelId);
+  // The settings own the pin; the provider stack applies them to the live optimizer.
   context.platform.configManager.setDynamic('provider.optimizerPinnedModel', `${match.providerId}:${match.modelId}`);
   context.platform.configManager.setDynamic('provider.optimizerMode', 'pinned');
   out.push(`[provider] Pinned → ${match.providerId}/${match.modelId} (saved: survives restart)`);

@@ -24,6 +24,8 @@ const CHECK_ONLY: readonly TscStep[] = [
   { label: 'tsc -p packages/judgment/tsconfig.tests.json', args: ['--project', 'packages/judgment/tsconfig.tests.json'], emits: false },
   { label: 'tsc -p packages/engine/tsconfig.tests.json (test/ and scripts/)', args: ['--project', 'packages/engine/tsconfig.tests.json'], emits: false },
   { label: 'tsc -p packages/engine/tsconfig.type-tests.json', args: ['--project', 'packages/engine/tsconfig.type-tests.json'], emits: false },
+  // The installer scripts and their tests at the repository root.
+  { label: 'tsc -p scripts/tsconfig.json (installer)', args: ['--project', 'scripts/tsconfig.json'], emits: false },
 ];
 
 // Scoped iteration: `--project <name>` runs one `tsc -b` WITHOUT `--force`, so a
@@ -36,6 +38,7 @@ const SCOPED_PROJECTS: Readonly<Record<string, TscStep>> = {
   engine: engineSourcesBuild(false),
   'engine-tests': { label: 'tsc -b packages/engine/tsconfig.tests.json (test/ and scripts/)', args: ['-b', 'packages/engine/tsconfig.tests.json'], emits: true },
   'type-tests': { label: 'tsc -b packages/engine/tsconfig.type-tests.json', args: ['-b', 'packages/engine/tsconfig.type-tests.json'], emits: true },
+  installer: CHECK_ONLY[3]!,
 };
 const PRODUCTS = ['agent', 'tui', 'daemon', 'webui'] as const;
 const PROJECT_NAMES = [...Object.keys(SCOPED_PROJECTS), ...PRODUCTS];

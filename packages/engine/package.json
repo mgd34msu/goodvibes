@@ -4172,7 +4172,7 @@
     "access": "public"
   },
   "scripts": {
-    "test": "bun scripts/test.ts",
+    "test": "bun scripts/test.ts test",
     "test:workers": "bun scripts/test.ts test/workers/workers.test.ts",
     "contract-proof": "bun scripts/contract-proof.ts",
     "delivery:proof": "bun scripts/delivery-proof.ts",

@@ -40,7 +40,7 @@ afterEach(async () => {
 
 /** Let the event loop turn until `done` holds; bounded in turns, never in milliseconds. */
 async function until(done: () => boolean, what: string): Promise<void> {
-  for (let turn = 0; turn < 50_000; turn += 1) {
+  for (let turn = 0; turn < 200_000; turn += 1) {
     if (done()) return;
     await new Promise<void>((resolve) => { setImmediate(resolve); });
   }

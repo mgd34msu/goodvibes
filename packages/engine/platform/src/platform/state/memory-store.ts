@@ -9,7 +9,6 @@
  */
 
 import { captureMemoryOperation, assertMemoryOperationCurrent, awaitMemoryOperation, type MemoryOperationOptions } from './memory-operation.js';
-import { statSync } from 'node:fs';
 import { rankReviewQueue, rankSemanticSearch, rerankRetrieved } from './memory-search-ranking.js';
 import { MEMORY_ID_SHAPE, newMemoryId } from './memory-id.js';
 import { SQLiteStore } from './sqlite-store.js';
@@ -290,38 +289,6 @@ export interface MemoryDoctorReport {
 
 export { MemoryRegistry } from './memory-registry.js';
 
-/**
- * A write was refused because the memory file on disk is no longer the image
- * this process loaded: another process (the daemon, another surface, the
- * memory CLI) saved it since. Writing would put the old image back over that
- * process's records, so nothing was written. Retryable: the store reloads the
- * file, and the same call succeeds once it has.
- */
-export class MemoryStoreChangedOnDiskError extends Error {
-  readonly retryable = true;
-  constructor(readonly path: string, phase: 'reloaded' | 'reloading' | 'save') {
-    super(phase === 'save'
-      ? `Memory file ${path} changed on disk after this change was made; it was not saved, so the other process's records are intact. This process reloads the file before its next write.`
-      : `Memory file ${path} was changed by another process since this process loaded it; nothing was written. ${phase === 'reloaded' ? 'The store has reloaded the file' : 'The store is reloading the file'}; retry the operation.`);
-    this.name = 'MemoryStoreChangedOnDiskError';
-  }
-}
-
-/** Identity of the file as last loaded or saved here; any other process's save changes it. */
-function memoryFileIdentity(path: string): string {
-  try {
-    const info = statSync(path, { bigint: true });
-    return [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'absent';
-    throw error;
-  }
-}
-
-function isFileBackedPath(path: string | null): path is string {
-  return Boolean(path) && path !== ':memory:' && !/^file:.*(?:^|[?&])mode=memory(?:&|$)/.test(path!);
-}
-
 // ── MemoryStore ───────────────────────────────────────────────────────────────
 
 export class MemoryStore {
@@ -335,10 +302,10 @@ export class MemoryStore {
   private mutationRevision = 0;
   private backendEpoch = 0;
   private readonly operations = new WeakMap<MemoryOperationOptions, { revision: number }>();
-  /** File identity as this process last loaded or saved it; undefined while loading or for an in-memory store. */
-  private diskIdentity: string | undefined;
-  private saveAdmitted = false;
-  private reloading: Promise<void> | null = null;
+  /** SQLite's data_version as of the last look; another connection's commit changes it. */
+  private seenDataVersion = 0;
+  /** Counts the times another process was seen to have committed to the memory file. */
+  private foreignCommits = 0;
   /** Writes applied to the image whose save failed and has not been followed by a successful one. */
   private unsavedChanges = 0;
 
@@ -358,9 +325,8 @@ export class MemoryStore {
   async init(): Promise<void> {
     if (this.ready) return;
     this.backendEpoch++;
-    this.diskIdentity = undefined;
     await this.initBackend(this.sqlite);
-    this.diskIdentity = this.currentDiskIdentity(this.sqlite);
+    this.seenDataVersion = this.sqlite.dataVersion();
     this.ready = true;
     await this.vectorIndex?.init();
     this.syncVectorIndexInBackground();
@@ -411,8 +377,6 @@ export class MemoryStore {
    * (see {@link MemoryAddInsert}); a staged add returns the record as a read does.
    */
   async add(opts: MemoryAddOptions, options?: MemoryOperationOptions, insert: MemoryAddInsert = {}): Promise<MemoryRecord> {
-    // Checked without yielding, so an unchanged file keeps the write synchronous.
-    if (this.imageIsStale()) await this.refuseStaleImage();
     const operation = this.captureOperation(options);
     assertMemoryOperationCurrent(operation);
     if (!this.ready) throw new Error('MemoryStore: not initialized');
@@ -464,7 +428,6 @@ export class MemoryStore {
       await this.persistNow();
     } catch (error) {
       this.withdrawUnsavedAdd(id);
-      if (error instanceof MemoryStoreChangedOnDiskError) throw error;
       const cause = error instanceof Error && error.cause !== undefined ? error.cause : error;
       throw new Error(`MemoryStore: the memory could not be saved to disk (${summarizeError(cause)}); nothing was stored. Retry once the disk can be written.`, { cause });
     }
@@ -678,8 +641,6 @@ export class MemoryStore {
    * trusted.
    */
   async importBundle(bundle: MemoryBundle, options?: MemoryOperationOptions): Promise<MemoryImportResult> {
-    // Checked without yielding, so an unchanged file keeps the write synchronous.
-    if (this.imageIsStale()) await this.refuseStaleImage();
     const operation = this.captureOperation(options);
     assertMemoryOperationCurrent(operation);
     if (!this.ready) throw new Error('MemoryStore: not initialized');
@@ -773,8 +734,6 @@ export class MemoryStore {
 
   /** Create a directed link between two records. */
   async link(fromId: string, toId: string, relation: string, options?: MemoryOperationOptions): Promise<MemoryLink | null> {
-    // Checked without yielding, so an unchanged file keeps the write synchronous.
-    if (this.imageIsStale()) await this.refuseStaleImage();
     const operation = this.captureOperation(options);
     assertMemoryOperationCurrent(operation);
     if (!this.ready) return null;
@@ -973,7 +932,6 @@ export class MemoryStore {
    */
   async recordUsage(change: MemoryUsageChange, at: number = Date.now()): Promise<void> {
     if (!this.ready) return;
-    if (this.imageIsStale()) await this.reloadIfChanged();
     const apply = (ids: readonly string[] | undefined, assignments: string, params: (string | number)[]): boolean => {
       const unique = [...new Set((ids ?? []).filter((id) => id.trim()))];
       if (unique.length === 0) return false;
@@ -1014,7 +972,6 @@ export class MemoryStore {
 
   writeMeta(key: string, value: string): void {
     if (!this.ready) return;
-    this.refuseStaleImageSync();
     this.sqlite.run('INSERT OR REPLACE INTO memory_meta (key, value) VALUES (?, ?)', [key, value]);
     this.persist();
   }
@@ -1026,7 +983,6 @@ export class MemoryStore {
    */
   addConsolidationProposals(proposals: readonly MemoryConsolidationProposal[], at: number = Date.now()): MemoryConsolidationProposal[] {
     if (!this.ready || proposals.length === 0) return [];
-    this.refuseStaleImageSync();
     const added: MemoryConsolidationProposal[] = [];
     for (const proposal of proposals) {
       const key = consolidationProposalKey(proposal);
@@ -1064,7 +1020,7 @@ export class MemoryStore {
       if (!holds) { settled.push(String(key)); continue; }
       standing.push({ kind: kind as MemoryConsolidationProposal['kind'], ids, route: String(route), reason: String(reason) });
     }
-    if (settled.length > 0 && !this.imageIsStale()) {
+    if (settled.length > 0) {
       for (const key of settled) this.sqlite.run('DELETE FROM memory_proposals WHERE key = ?', [key]);
       this.persist();
     }
@@ -1159,48 +1115,30 @@ export class MemoryStore {
   }
 
   /**
-   * Reload the file when another process saved it since this process loaded
-   * it, so later reads see that process's records and later writes do not
-   * erase them. The current image keeps serving reads until the new one is
-   * loaded; writes are refused meanwhile. A no-op when the file is unchanged.
+   * How many times this store has seen another process commit to the memory
+   * file (the daemon beside a terminal, the memory CLI). Reads already see
+   * those rows, since every read is a statement on the shared file; the count
+   * is for panels that show a listing and need to know when to read it again.
+   */
+  get externalRevision(): number { return this.foreignCommits; }
+
+  /**
+   * Notices another process's commits since the last look (one PRAGMA) and
+   * brings the vector index up to the rows. Nothing is reloaded: the SQLite
+   * file is shared, and a write by either process lands on the current rows.
    */
   reloadIfChanged(): Promise<void> {
-    if (this.reloading) return this.reloading;
-    const sqlite = this.sqlite, path = sqlite.databasePath;
-    if (!this.ready || this.diskIdentity === undefined || !isFileBackedPath(path)
-      || this.currentDiskIdentity(sqlite) === this.diskIdentity) return Promise.resolve();
-    const epoch = this.backendEpoch;
-    const reload = (async () => {
-      const next = this.openBackend(path);
-      try {
-        await this.initBackend(next);
-      } catch (error) {
-        next.close();
-        throw error;
-      }
-      // A close or re-root while loading owns the store now; drop this image.
-      if (this.sqlite !== sqlite || this.backendEpoch !== epoch || !this.ready) {
-        next.close();
-        return;
-      }
-      if (this.unsavedChanges > 0) {
-        logger.warn('MemoryStore: reloading the changed memory file drops changes that were never saved', { path, unsavedChanges: this.unsavedChanges });
-        this.unsavedChanges = 0;
-      }
-      this.backendEpoch++;
-      this.sqlite = next;
-      this.diskIdentity = this.currentDiskIdentity(next);
-      sqlite.close();
-      this.syncVectorIndexInBackground();
-      logger.info('MemoryStore: reloaded the memory file after another process saved it', { path });
-    })().finally(() => { this.reloading = null; });
-    this.reloading = reload;
-    return reload;
+    if (!this.ready) return Promise.resolve();
+    const version = this.sqlite.dataVersion();
+    if (version === this.seenDataVersion) return Promise.resolve();
+    this.seenDataVersion = version;
+    this.foreignCommits += 1;
+    this.syncVectorIndexInBackground();
+    return Promise.resolve();
   }
 
   close(): void {
     this.backendEpoch++;
-    this.diskIdentity = undefined;
     this.sqlite.close();
     this.vectorIndex?.close();
     this.ready = false;
@@ -1223,7 +1161,6 @@ export class MemoryStore {
     this.ready = false;
     this.rebuildVectorIndexPromise = null;
     this.rebuildVectorIndexAgain = null;
-    this.diskIdentity = undefined;
     this.sqlite = this.openBackend(newDbPath);
     this.vectorIndex = new SqliteVecMemoryIndex(
       resolveMemoryVectorDbPath(newDbPath),
@@ -1237,8 +1174,7 @@ export class MemoryStore {
   // ── Private helpers ──────────────────────────────────────────────────────────
 
   private openBackend(dbPath: string | undefined): SQLiteStore {
-    const store: SQLiteStore = new SQLiteStore(dbPath, { beforePersist: () => this.admitSave(store) });
-    return store;
+    return new SQLiteStore(dbPath);
   }
 
   private initBackend(sqlite: SQLiteStore): Promise<void> {
@@ -1248,61 +1184,9 @@ export class MemoryStore {
     });
   }
 
-  private currentDiskIdentity(sqlite: SQLiteStore): string | undefined {
-    const path = sqlite.databasePath;
-    return isFileBackedPath(path) ? memoryFileIdentity(path) : undefined;
-  }
-
-  /** Whether the file on disk is no longer the image this process holds. */
-  private imageIsStale(): boolean {
-    if (this.diskIdentity === undefined) return false;
-    return this.reloading !== null || this.currentDiskIdentity(this.sqlite) !== this.diskIdentity;
-  }
-
-  /** Called synchronously by SQLiteStore right before it writes the file. */
-  private admitSave(sqlite: SQLiteStore): void {
-    // Saves made while loading (a schema stamp) and saves of a retired image
-    // are not this store's current image; they need no identity check.
-    if (sqlite !== this.sqlite || this.diskIdentity === undefined) return;
-    if (this.currentDiskIdentity(sqlite) !== this.diskIdentity) {
-      throw new MemoryStoreChangedOnDiskError(sqlite.databasePath ?? '', 'save');
-    }
-    this.saveAdmitted = true;
-  }
-
-  /** Save the image and adopt the identity of the file this process just wrote. */
+  /** Commit what this turn wrote to the shared file. */
   private saveImage(): Promise<boolean> {
-    const sqlite = this.sqlite;
-    this.saveAdmitted = false;
-    // A non-coordinated SQLiteStore writes synchronously inside save(), so
-    // the file stat right after is this process's own write.
-    const pending = sqlite.save();
-    if (this.saveAdmitted && sqlite === this.sqlite) this.diskIdentity = this.currentDiskIdentity(sqlite);
-    this.saveAdmitted = false;
-    return pending;
-  }
-
-  /** Async writes: when the image is stale, finish reloading first, then refuse so the caller retries on the fresh image. */
-  private async refuseStaleImage(): Promise<void> {
-    if (!this.imageIsStale()) return;
-    const path = this.sqlite.databasePath ?? '';
-    try {
-      await this.reloadIfChanged();
-    } catch (error) {
-      logger.warn('MemoryStore: reloading the changed memory file failed', { path, error: summarizeError(error) });
-      throw new MemoryStoreChangedOnDiskError(path, 'reloading');
-    }
-    throw new MemoryStoreChangedOnDiskError(path, 'reloaded');
-  }
-
-  /** Synchronous writes cannot wait for the reload: start it and refuse. */
-  private refuseStaleImageSync(): void {
-    if (!this.imageIsStale()) return;
-    const path = this.sqlite.databasePath ?? '';
-    void this.reloadIfChanged().catch((error: unknown) => {
-      logger.warn('MemoryStore: reloading the changed memory file failed', { path, error: summarizeError(error) });
-    });
-    throw new MemoryStoreChangedOnDiskError(path, 'reloading');
+    return this.sqlite.save();
   }
 
   /** The row's revision as its trigger stamped it, read on this connection: a committed write may not be saved to disk yet. */
@@ -1328,7 +1212,6 @@ export class MemoryStore {
    */
   private runMutation(sql: Parameters<SQLiteStore['run']>[0], params: Parameters<SQLiteStore['run']>[1], operation: MemoryOperationOptions, onPublished?: () => void): void {
     assertMemoryOperationCurrent(operation);
-    this.refuseStaleImageSync();
     const state = this.operations.get(operation);
     if (!state) throw new Error('Memory operation is not owned by this store');
     const revision = ++this.mutationRevision;
@@ -1362,9 +1245,8 @@ export class MemoryStore {
 
   /**
    * Save in the background, for the synchronous writes (update, review,
-   * delete) that cannot wait. A failed save is counted: the change is in this
-   * process's image only, and the next successful save writes it, but a reload
-   * of a changed file would drop it, which is logged when it happens.
+   * delete) that cannot wait. A failed commit is counted and logged; the
+   * write it carried is not on disk.
    */
   private persist(): void {
     void this.startSave().then(() => { this.unsavedChanges = 0; }, (err: unknown) => {
@@ -1376,8 +1258,7 @@ export class MemoryStore {
   /**
    * Save and wait, for the async writes (add, import, link): a save that did
    * not happen is reported to the caller instead of returning the record as
-   * remembered. A refusal because another process saved the file keeps its own
-   * error, which already says to retry. The caller's lifecycle is not consulted:
+   * remembered. The caller's lifecycle is not consulted:
    * the write is published, so only the save's own outcome counts.
    */
   private async persistNow(): Promise<void> {
@@ -1385,17 +1266,15 @@ export class MemoryStore {
       await this.startSave();
       this.unsavedChanges = 0;
     } catch (err) {
-      if (err instanceof MemoryStoreChangedOnDiskError) throw err;
       this.unsavedChanges += 1;
-      throw new Error(`MemoryStore: the change was applied in memory but could not be saved to disk, so it may be lost when the store reloads: ${summarizeError(err)}`, { cause: err });
+      throw new Error(`MemoryStore: the change could not be saved to disk: ${summarizeError(err)}`, { cause: err });
     }
   }
 
   /**
    * An add whose save failed is taken back out of the image, so the error the
    * caller gets means nothing was stored and a retry stores the record once.
-   * Runs outside runMutation: after a changed-on-disk refusal the image is
-   * stale, and the reload would drop the row anyway.
+   * Runs outside runMutation: it takes back a row, it is not a caller's write.
    */
   private withdrawUnsavedAdd(id: string): void {
     try {

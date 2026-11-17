@@ -268,16 +268,14 @@ export class MemoryRegistry {
   }
 
   /**
-   * Reload the store when another process saved the memory file since this
-   * process loaded it (see MemoryStore.reloadIfChanged), then tell listeners
-   * so panels show that process's records.
+   * Tells listeners when another process committed to the memory file since
+   * the last look (see MemoryStore.reloadIfChanged), so panels show that
+   * process's records.
    */
   async reloadIfChanged(): Promise<void> {
-    const store = this.store, before = store.captureOperationScope();
+    const store = this.store, before = store.externalRevision;
     await store.reloadIfChanged();
-    try { before(); } catch {
-      for (const fn of this.listeners) fn();
-    }
+    if (store.externalRevision !== before) for (const fn of this.listeners) fn();
   }
 }
 

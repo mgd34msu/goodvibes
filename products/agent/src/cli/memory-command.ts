@@ -448,10 +448,8 @@ class MemoryUsageError extends Error {
 
 function errorOutput(runtime: CliCommandRuntime, error: unknown): CliCommandOutput {
   if (error instanceof MemoryHostUnavailableError) return failure(runtime, 'connected_host_unavailable', error.message, 1);
-  // The store refuses to overwrite a file another process (the daemon) saved meanwhile; nothing was written.
-  const changedOnDisk = error instanceof Error && error.name === 'MemoryStoreChangedOnDiskError';
-  const message = (error instanceof Error ? error.message : String(error)) + (changedOnDisk ? ' Nothing was written; rerun the command.' : '');
-  return failure(runtime, changedOnDisk ? 'memory_store_changed' : 'agent.memory.error', message, error instanceof MemoryUsageError ? 2 : 1);
+  const message = error instanceof Error ? error.message : String(error);
+  return failure(runtime, 'agent.memory.error', message, error instanceof MemoryUsageError ? 2 : 1);
 }
 
 async function handleList(runtime: CliCommandRuntime, store: MemoryCommandStore, args: readonly string[]): Promise<CliCommandOutput> {

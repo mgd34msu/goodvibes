@@ -5,8 +5,6 @@ import type { KnowledgeStore } from './store.js';
 import { slugify } from './shared.js';
 import { knowledgeTopicSlug } from './topic-slug.js';
 import type { KnowledgeEdgeRecord, KnowledgeNodeRecord } from './types.js';
-import { logger } from '../utils/logger.js';
-import { summarizeError } from '../utils/error-display.js';
 
 export async function syncKnowledgeMemoryNodes(
   store: KnowledgeStore,
@@ -14,15 +12,9 @@ export async function syncKnowledgeMemoryNodes(
 ): Promise<void> {
   await registry.getStore().init();
   await store.init();
-  // Another process (the daemon this surface is attached to) may have saved
-  // memory since this image loaded. Mirroring a stale image would delete its
-  // new records from the shared graph and revert its edits, so a failed
-  // reload skips the mirror instead of trusting the old image.
-  try { await registry.reloadIfChanged?.(); }
-  catch (error) {
-    logger.warn('Knowledge memory mirror skipped: the memory store could not be reloaded', { error: summarizeError(error) });
-    return;
-  }
+  // Reads see the shared file's current rows, including the daemon's; this
+  // tells memory listeners about its commits.
+  await registry.reloadIfChanged?.();
   const edgesByFrom = new Map<string, KnowledgeEdgeRecord[]>();
   for (const edge of store.listEdges()) {
     if (edge.fromKind !== 'node') continue;

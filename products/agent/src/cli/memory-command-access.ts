@@ -94,9 +94,8 @@ export async function withMemoryCommandStore<T>(
 
 /**
  * Open this machine's canonical store, run `fn`, then save only when `save` is
- * set. The save is the step the store refuses (MemoryStoreChangedOnDiskError)
- * when another process wrote the file meanwhile, so a read never saves and a
- * read's answer is never turned into an error by it.
+ * set, so a read never writes and a read's answer is never turned into an
+ * error by a failed commit.
  */
 export async function withMemory<T>(
   runtime: CliCommandRuntime,

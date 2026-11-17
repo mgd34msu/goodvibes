@@ -304,9 +304,9 @@ export class MemorySpineClient implements MemoryAccess {
 
   /**
    * Release the daemon (mode lost / daemon stopped): return to owned-local access.
-   * The daemon wrote the shared memory file while this surface was its client,
-   * so the local image loaded at boot is stale: reload it before any local
-   * operation reads it or writes it back over the daemon's records.
+   * The daemon wrote the shared memory file while this surface was its client;
+   * the local store notices those commits before the next local operation, so
+   * listings refresh and the vector index catches up.
    */
   deactivate(reason: string): void {
     if (this.transport === null) return;
@@ -317,7 +317,6 @@ export class MemorySpineClient implements MemoryAccess {
     if (!reload) return;
     const pending: Promise<void> = reload
       .catch((error: unknown) => {
-        // The store itself still refuses to write over a file it did not load.
         logger.warn('memory spine: reloading the local memory store after detach failed', { error: error instanceof Error ? error.message : String(error) });
       })
       .finally(() => { if (this.localReload === pending) this.localReload = null; });

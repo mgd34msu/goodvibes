@@ -446,6 +446,15 @@ export class ConversationManager {
     return this.messages.length;
   }
 
+  /**
+   * The message at `index`, read in place without copying the history (a
+   * turn's rewind anchor keys its boundary by its last message); undefined
+   * outside the conversation. Callers must not change it.
+   */
+  public getMessageAt(index: number): Readonly<Message> | undefined {
+    return this.messages[index];
+  }
+
   public removeMessagesAfter(count: number, options: { readonly preserveCompletedTools?: boolean } = {}): void {
     if (count < this.messages.length) {
       let keptPositions: Map<number, number> | undefined;

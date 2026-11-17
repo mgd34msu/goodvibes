@@ -5,7 +5,7 @@ import { writeCrashSnapshotIfChanged } from '../runtime/recovery-autosave.ts';
 import { markConversationDurable } from './session-resume-core.ts';
 import { buildCompactionReceiptBlock } from './compaction-receipt.ts';
 import { workstreamFailureNotification } from './workstream-notification.ts';
-import { persistTurnAnchors, recordTurnAnchor, summarizeTurnLabel } from '@goodvibes-jev/engine/platform/platform/rewind';
+import { captureTurnAnchor, persistTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { HookDispatcher, HookPhase, HookCategory, HookEventPath } from '@goodvibes-jev/engine/platform/platform/hooks';
@@ -430,16 +430,12 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
       }
       // Record this turn's rewind anchor: pair the turnId (shared with the
       // workspace checkpoint the turn engine snapshots for this same turn) with
-      // the live conversation message count, so a later message-anchored /rewind
-      // can truncate the conversation to exactly this boundary, the join key
-      // between conversation and files rewind (see core/rewind-turn-anchors.ts).
+      // the live conversation message count and a key of the turn's last
+      // message, so a later message-anchored /rewind cuts the conversation at
+      // exactly this boundary, or says the turn was compacted away, never at an
+      // unrelated message (see platform/rewind/turn-anchors.ts).
       try {
-        recordTurnAnchor(runtime.sessionId, {
-          turnId: evt.turnId,
-          label: summarizeTurnLabel(conversation.getLastUserMessage()),
-          messageCount: conversation.getMessageCount(),
-          at: _clock(),
-        });
+        recordTurnAnchor(runtime.sessionId, captureTurnAnchor(evt.turnId, conversation, _clock()));
         // Mirror the anchors to the session's sidecar so message-anchored /rewind
         // survives a resume (the in-memory registry alone is process-local).
         persistTurnAnchors(runtime.sessionId, surface);

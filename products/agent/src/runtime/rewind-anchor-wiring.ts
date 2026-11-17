@@ -16,14 +16,16 @@
  * Every path is best-effort. A missed anchor must never break the turn that
  * produced it.
  */
-import { persistTurnAnchors, recordTurnAnchor, summarizeTurnLabel } from '@goodvibes-jev/engine/platform/platform/rewind';
+import { captureTurnAnchor, persistTurnAnchors, recordTurnAnchor, type TurnAnchorSource } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { SessionSurface } from '@/runtime/index.ts';
 
-/** The conversation facts an anchor is built from, read at the moment of capture. */
-export interface RewindAnchorConversationView {
-  getLastUserMessage(): string | null | undefined;
-  getMessageCount(): number;
+/**
+ * The conversation facts an anchor is built from, read at the moment of
+ * capture: its length, its last prompt and the turn's last message, whose key
+ * lets a rewind find this boundary again after a compaction.
+ */
+export interface RewindAnchorConversationView extends TurnAnchorSource {
   /** When present, said once per session, as a warning, if a rewind point could not be saved. */
   addNotice?(message: string, meta: { readonly level: 'warning' }): void;
 }
@@ -44,12 +46,7 @@ export function recordCompletedTurnAnchor(input: {
   readonly surface: SessionSurface;
 }): void {
   try {
-    recordTurnAnchor(input.sessionId, {
-      turnId: input.turnId,
-      label: summarizeTurnLabel(input.conversation.getLastUserMessage()),
-      messageCount: input.conversation.getMessageCount(),
-      at: Date.now(),
-    });
+    recordTurnAnchor(input.sessionId, captureTurnAnchor(input.turnId, input.conversation));
     // persistTurnAnchors logs its own cause; false means the sidecar was not written.
     if (!persistTurnAnchors(input.sessionId, input.surface)) {
       tellOnceThatAnchorWasNotSaved(input, 'the session sidecar could not be written', '/rewind will not offer this turn after the session is resumed');

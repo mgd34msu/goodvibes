@@ -574,6 +574,17 @@ export class PlatformServiceManager {
     return this.drive(this.installFlow());
   }
 
+  /**
+   * Write the current definition and register it with the service manager
+   * (systemd `daemon-reload`, the Windows task), the way {@link install}
+   * does, but without changing login lingering. Nothing is started or
+   * stopped: a running service keeps its current launch until it restarts,
+   * and a stopped one stays stopped.
+   */
+  refresh(): ManagedServiceStatus {
+    return this.drive(this.installFlow(false));
+  }
+
   uninstall(): ManagedServiceStatus {
     return this.drive(this.uninstallFlow(false));
   }
@@ -652,9 +663,9 @@ export class PlatformServiceManager {
     };
   }
 
-  private *installFlow(): ServiceFlow<ManagedServiceStatus> {
+  private *installFlow(ensureLinger = true): ServiceFlow<ManagedServiceStatus> {
     this.assertCurrent();
-    this.requireEnabled('install service');
+    this.requireEnabled(ensureLinger ? 'install service' : 'refresh service');
     const platform = detectPlatform(String(this.configManager.get('service.platform')));
     const serviceName = resolveServiceName(this.configManager, this.defaultServiceName);
     const definition = this.resolveDefinition();
@@ -675,7 +686,7 @@ export class PlatformServiceManager {
     try { chmodSync(path, 0o600); } catch { /* a platform without POSIX modes */ }
     // Without the reload, systemd keeps acting on the previously loaded unit.
     const registrationError = yield* this.registerInstalledDefinitionFlow(platform, definition);
-    const lingerNote = platform === 'systemd' ? yield* this.ensureLingerFlow() : undefined;
+    const lingerNote = platform === 'systemd' && ensureLinger ? yield* this.ensureLingerFlow() : undefined;
     return {
       ...(yield* this.statusFlow()),
       lastAction: 'install',

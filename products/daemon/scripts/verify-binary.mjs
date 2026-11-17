@@ -108,7 +108,7 @@ try {
   // Relocating release payloads is not an installed native ownership receipt.
   // The shipped runtime is composed, so activation reaches installation
   // admission and fails closed before any service or selected-home effects.
-  for (const argv of [['install-service'], ['start-service'], ['restart-service']]) {
+  for (const argv of [['install-service'], ['refresh-service'], ['start-service'], ['restart-service']]) {
     const result = await run(argv);
     assert.equal(result.code, 1, argv.join(' ')); assert.equal(result.stdout, '', argv.join(' '));
     assert(result.stderr.startsWith('Daemon command failed\n'), argv.join(' '));

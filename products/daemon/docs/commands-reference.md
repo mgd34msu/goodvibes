@@ -33,8 +33,9 @@ The same numbers mean different things in the other programs; see [Exit codes](.
 | `0` | the command did what it says |
 | `1` | it ran and failed, the reason is printed |
 | `2` | the command line was wrong: an unknown command, an unknown flag, a flag this command does not take, or a missing value |
-| `3` | `service-status` only: installed, but not running |
-| `4` | `service-status` only: not installed |
+| `3` | service commands: installed, but not running (`service-status`, `install-service`) |
+| `4` | service commands: not installed (`service-status`, `uninstall-service`, `start-service`, `stop-service`, `restart-service`) |
+| `5` | `install-service`, `refresh-service`, `uninstall-service`: the service definition at that path was not written by GoodVibes, so nothing was changed |
 
 ## The remote-target convention
 
@@ -105,15 +106,40 @@ These overlays are not persisted. See [CLI dispatch and overrides](cli-and-packa
 goodvibes-daemon install-service
 ```
 
-When admitted by an embedding launcher, write the platform service definition and start it.
-Login/boot behavior depends on the platform user-service setup; do not assume a system-wide
-service or Linux lingering was enabled. The shipped launcher lacks the required
-`serviceBinaryPath` and refuses install/start/restart before activation. Refuses an
-explicit `--hostname`/`--port` (the installed unit carries no endpoint flags; use
-`config set controlPlane.host` / `controlPlane.port` instead). Exits `0` when the
+Write the platform service definition and start it. Only an installed native daemon
+(a release install) is admitted: a source run or a relocated copy refuses before any
+service is touched. On systemd it also enables login lingering when it can, and says
+whether it did; do not assume a system-wide service. Refuses an explicit
+`--hostname`/`--port` (the installed unit carries no endpoint flags; use
+`config set controlPlane.host` / `controlPlane.port` instead). A definition already at
+the service's path that GoodVibes did not write is left as it is. Exits `0` when the
 service is installed and running, `3` when it was installed but is not running (the
-start failed or the daemon exited at once; the receipt says why), and `1` when it was
-not installed.
+start failed or the daemon exited at once; the receipt says why), `5` when a definition
+GoodVibes did not write is in the way, and `1` when it was not installed.
+
+The release installer runs this on a first install.
+
+### `refresh-service`
+
+```
+goodvibes-daemon refresh-service
+```
+
+Write the current service definition for this binary over the one GoodVibes wrote
+earlier, or where none exists, and register it with the service manager (systemd
+`daemon-reload`). Nothing is started or stopped: a running service keeps its previous
+launch until `restart-service`, and a stopped one stays stopped. Lingering is not
+changed. A definition that already matches is left untouched; a rewritten one is first
+copied to `<path>.bak.<YYYYMMDDHHMMSS>` and keeps the working directory it named (unless
+`--working-dir` or `GOODVIBES_WORKING_DIR` names another). A definition GoodVibes did not
+write (no GoodVibes description or installer marker, or a link) is never written over.
+Exits `0` when the definition is current (rewritten, written or already so), `5` when it
+was not written by GoodVibes, and `1` when it could not be read, backed up or written.
+Admitted like `install-service`.
+
+The release installer runs this on every upgrade, so a unit written by an older release
+(pinned `--hostname`/`--port`, an explicit `--daemon-home`, a moved binary) is brought to
+the current launch.
 
 ### `uninstall-service`
 
@@ -123,8 +149,10 @@ goodvibes-daemon uninstall-service
 
 Stop and unregister the service (`systemctl --user disable --now`, `launchctl unload`,
 or ending and deleting the Scheduled Task), then delete its definition file. A service
-that is already stopped is uninstalled the same way. Exits `0` when removed, `4` when
-nothing was installed, and `1` when removal failed or the service is still running.
+that is already stopped is uninstalled the same way. A definition GoodVibes did not write
+is left in place. Exits `0` when removed, `4` when nothing was installed, `5` when the
+definition there was not written by GoodVibes, and `1` when removal failed or the service
+is still running.
 
 ### `service-status`
 
@@ -132,8 +160,9 @@ nothing was installed, and `1` when removal failed or the service is still runni
 goodvibes-daemon service-status [--json]
 ```
 
-Report the platform, the service name, the definition path, and whether the service
-is installed and currently running (queried live, not inferred from a pid file). Exit
+Report the platform, the service name, the definition path, who wrote the definition
+(`definitionOwner` in `--json`: `product`, `other`, `absent` or `unreadable`), and whether
+the service is installed and currently running (queried live, not inferred from a pid file). Exit
 codes: `0` installed and running, `3` installed but not running, `4` not installed,
 `1` the platform refused the query (the error is printed).
 

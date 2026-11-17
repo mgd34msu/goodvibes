@@ -10,8 +10,9 @@ and never branch on a code without knowing which program produced it.
 | `0` | Completed, or admitted work was recorded. | The contract passed, or the command did what it says. `reply` follows the contract it answered, so its code is the contract's; `reply --no-follow` exits `0` once the reply is read. | The command did what it says. |
 | `1` | Failed: model or provider error, empty response, `--max-turns` reached, or the host unavailable, blocked or refused the input. | Failed, was refused, or was cancelled. | It ran and failed; the reason is printed. |
 | `2` | Invalid input: bad usage, a missing prompt, or a prompt given with a recovery flag. | Waiting on the owner with no terminal to ask on: answer with `goodvibes-contract reply <id> "<text>"`. | The command line was wrong: unknown command or flag, a flag this command does not take, a missing value. |
-| `3` | Outcome unknown: the input may have taken effect. Run `run --intake-status` before retrying. | not used | `service-status` only: installed but not running. |
-| `4` | not used | not used | `service-status` only: not installed. |
+| `3` | Outcome unknown: the input may have taken effect. Run `run --intake-status` before retrying. | not used | Service commands: installed but not running. |
+| `4` | not used | not used | Service commands: not installed. |
+| `5` | not used | not used | `install-service`, `refresh-service`, `uninstall-service`: the definition at the service's path was not written by GoodVibes; nothing was changed. |
 | `64` | not used | Usage error. | not used |
 | `124` | `--timeout` reached; the run was cancelled. | not used | not used |
 | `130` | Cancelled: Ctrl-C, SIGTERM, or the saved input was cancelled. | Stopped following (Ctrl-C): nothing is cancelled; `goodvibes-contract resume` continues the contracts and `goodvibes-contract cancel <id>` cancels one. | not used |

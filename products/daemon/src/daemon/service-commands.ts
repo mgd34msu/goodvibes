@@ -1,6 +1,14 @@
 /**
  * Service-lifecycle subcommands, `goodvibes-daemon install-service |
- * uninstall-service | service-status`.
+ * refresh-service | uninstall-service | service-status | start-service |
+ * stop-service | restart-service`.
+ *
+ * The daemon is the one writer of its service definition: the release
+ * installer (scripts/install.sh) runs `install-service` on a first install and
+ * `refresh-service` on an upgrade, and asks `service-status --json` for the
+ * unit's name, path and whether the definition there is this product's. None
+ * of these commands writes over, or removes, a definition this product did not
+ * write (exit 5).
  *
  * The daemon is a SYSTEM SERVICE. These subcommands install it as a durable host
  * service (systemd user unit on Linux, launchd agent on macOS, a Scheduled Task
@@ -24,10 +32,14 @@
  * `uninstall-service` calls it once.
  */
 
+import { copyFileSync } from 'node:fs';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { PlatformServiceManager, type ManagedServiceStatus } from '@goodvibes-jev/engine/platform/platform/daemon';
 import {
   buildManagedDaemonServiceManager,
+  readDefinitionWorkingDirectory,
+  readManagedDefinitionOwner,
+  type ManagedDefinitionOwner,
   type ManagedServiceActionRunner,
 } from '../runtime/managed-daemon-service.js';
 
@@ -42,6 +54,7 @@ export type { ManagedServiceActionRunner } from '../runtime/managed-daemon-servi
 
 export const DAEMON_SERVICE_SUBCOMMANDS = [
   'install-service',
+  'refresh-service',
   'uninstall-service',
   'service-status',
   'start-service',
@@ -64,6 +77,11 @@ export function isDaemonServiceSubcommand(value: string | undefined): value is D
 export const SERVICE_STATUS_EXIT_RUNNING = 0;
 export const SERVICE_STATUS_EXIT_INSTALLED_NOT_RUNNING = 3;
 export const SERVICE_STATUS_EXIT_NOT_INSTALLED = 4;
+/**
+ * `install-service`, `refresh-service` and `uninstall-service`: a definition
+ * this product did not write is at the service's path, so nothing was changed.
+ */
+export const SERVICE_EXIT_NOT_OURS = 5;
 
 export interface DaemonServiceCliInput {
   readonly subcommand: DaemonServiceSubcommand;
@@ -86,6 +104,13 @@ export interface DaemonServiceCliInput {
   readonly unitHomeDir: string;
   /** Defaults to `homeDir`, overridable so tests can scope both to one tempdir. */
   readonly workingDirectory?: string | undefined;
+  /**
+   * The working directory was named for this command (`--working-dir`,
+   * GOODVIBES_WORKING_DIR). Otherwise `refresh-service` keeps the one the
+   * existing definition names: a refresh re-derives the launch, not the
+   * workspace the owner chose.
+   */
+  readonly workingDirectoryExplicit?: boolean | undefined;
   /** Injected in tests; a real `ConfigManager` rooted at `homeDir` otherwise. */
   readonly configManager?: ConfigManager | undefined;
   /** Injectable systemctl/launchctl/schtasks runner so tests never touch the host. */
@@ -246,8 +271,12 @@ export function serviceStatusExitCode(status: ManagedServiceStatus): number {
   return status.running ? SERVICE_STATUS_EXIT_RUNNING : SERVICE_STATUS_EXIT_INSTALLED_NOT_RUNNING;
 }
 
-/** The `--json` document for `service-status`: the status fields plus the code. */
-export function serviceStatusJson(status: ManagedServiceStatus): string {
+/**
+ * The `--json` document for `service-status`: the status fields, who wrote the
+ * definition at `path` (`definitionOwner`, see `ManagedDefinitionOwner`) when
+ * known, plus the code.
+ */
+export function serviceStatusJson(status: ManagedServiceStatus, definitionOwner?: ManagedDefinitionOwner): string {
   return JSON.stringify(
     {
       ok: true,
@@ -255,6 +284,7 @@ export function serviceStatusJson(status: ManagedServiceStatus): string {
         platform: status.platform,
         serviceName: status.serviceName,
         path: status.path,
+        ...(definitionOwner === undefined ? {} : { definitionOwner }),
         installed: status.installed,
         running: status.running,
         autostart: status.autostart,
@@ -283,7 +313,7 @@ function ok(action: 'install' | 'uninstall' | 'status', status: ManagedServiceSt
   return { ok: true, exitCode: 0, lines, status };
 }
 
-function failed(action: 'install' | 'uninstall' | 'status', status: ManagedServiceStatus): DaemonServiceCliResult {
+function failed(action: 'install' | 'refresh' | 'uninstall' | 'status', status: ManagedServiceStatus): DaemonServiceCliResult {
   return {
     ok: false,
     exitCode: 1,
@@ -292,12 +322,96 @@ function failed(action: 'install' | 'uninstall' | 'status', status: ManagedServi
   };
 }
 
+/**
+ * The refusal for a definition this product did not write (or could not read):
+ * nothing is written over or removed, and the receipt says how to hand the path
+ * to the daemon.
+ */
+function notOurs(action: 'install' | 'refresh' | 'uninstall', owner: 'other' | 'unreadable', status: ManagedServiceStatus): DaemonServiceCliResult {
+  if (owner === 'unreadable') {
+    return { ok: false, exitCode: 1, status, lines: [`service ${action} failed: ${status.path} could not be read, so nothing was changed.`] };
+  }
+  return {
+    ok: false,
+    exitCode: SERVICE_EXIT_NOT_OURS,
+    status,
+    lines: [
+      `${status.path} is a ${status.platform} service definition GoodVibes did not write (or a link to one), so it was left as it is and nothing was ${action === 'uninstall' ? 'removed' : 'written'}.`,
+      action === 'uninstall'
+        ? 'Remove it yourself if it is no longer wanted.'
+        : `To let goodvibes-daemon manage the service, move that file aside and run goodvibes-daemon ${action}-service again.`,
+    ],
+  };
+}
+
+/**
+ * Who wrote the definition at the status's path. The Windows task and manual
+ * definitions live in the service's own state directory, which nothing else
+ * writes; a systemd unit or LaunchAgent is read (see `readManagedDefinitionOwner`).
+ */
+function definitionOwner(status: ManagedServiceStatus, binaryPath: string): ManagedDefinitionOwner {
+  if (status.platform !== 'systemd' && status.platform !== 'launchd') return status.installed ? 'product' : 'absent';
+  return readManagedDefinitionOwner(status.path, binaryPath);
+}
+
+/** `<path>.bak.<YYYYMMDDHHMMSS>`: a rewrite never destroys the previous content, which may hold the owner's own edits. */
+function backupDefinition(path: string, now: Date = new Date()): string {
+  const stamp = now.toISOString().replace(/[-:T]/g, '').slice(0, 14);
+  const backup = `${path}.bak.${stamp}`;
+  copyFileSync(path, backup);
+  return backup;
+}
+
+/**
+ * `refresh-service`: write the current definition over this product's own
+ * (or where none exists), without starting, stopping or changing lingering.
+ * An existing definition that already matches is left untouched; a rewritten
+ * one is backed up first and keeps the working directory it named.
+ */
+function refreshService(input: DaemonServiceCliInput, initial: PlatformServiceManager): DaemonServiceCliResult {
+  const before = initial.status();
+  const owner = definitionOwner(before, input.binaryPath);
+  if (owner === 'other' || owner === 'unreadable') return notOurs('refresh', owner, before);
+  const kept = owner === 'product' && input.workingDirectoryExplicit !== true ? readDefinitionWorkingDirectory(before.path) : undefined;
+  const manager = kept === undefined || kept === (input.workingDirectory ?? input.homeDir)
+    ? initial
+    : buildManager({ ...input, workingDirectory: kept });
+  if (owner === 'product' && manager.installedDefinitionMatches()) {
+    return { ok: true, exitCode: 0, status: before,
+      lines: [`the ${before.platform} service definition at ${before.path} is already current; nothing was changed.`] };
+  }
+  let backup: string | undefined;
+  if (owner === 'product') {
+    try {
+      backup = backupDefinition(before.path);
+    } catch (error) {
+      return { ok: false, exitCode: 1, status: before,
+        lines: [`service refresh failed: ${before.path} could not be backed up (${error instanceof Error ? error.message : String(error)}), so it was not rewritten.`] };
+    }
+  }
+  const written = manager.refresh();
+  const wrote = backup === undefined
+    ? `wrote the ${written.platform} service definition at ${written.path} (not started)`
+    : `rewrote ${written.path} with the current launch; the previous file is kept at ${backup}`;
+  if (written.actionError) {
+    return { ok: false, exitCode: 1, status: written, lines: [wrote, `service refresh failed: ${written.actionError}`] };
+  }
+  const lines = [wrote];
+  if (before.running) {
+    lines.push(`the running service keeps its previous launch until it restarts: goodvibes-daemon restart-service`);
+  }
+  return { ok: true, exitCode: 0, status: written, lines };
+}
+
 /** Dispatch a daemon service subcommand to the platform's `PlatformServiceManager`. */
 export async function runDaemonServiceCli(input: DaemonServiceCliInput): Promise<DaemonServiceCliResult> {
   input.assertCurrent?.();
   const manager = buildManager(input);
   switch (input.subcommand) {
     case 'install-service': {
+      const existing = manager.status();
+      const owner = definitionOwner(existing, input.binaryPath);
+      if (owner === 'other' || owner === 'unreadable') return notOurs('install', owner, existing);
       const installed = manager.install();
       if (installed.actionError) return failed('install', installed);
       const started = manager.start();
@@ -309,9 +423,13 @@ export async function runDaemonServiceCli(input: DaemonServiceCliInput): Promise
         : ok('install', started);
       return result.status.running ? result : { ...result, ok: false, exitCode: SERVICE_STATUS_EXIT_INSTALLED_NOT_RUNNING };
     }
+    case 'refresh-service':
+      return refreshService(input, manager);
     case 'uninstall-service': {
       const before = manager.status();
       if (before.actionError) return failed('uninstall', before);
+      const owner = definitionOwner(before, input.binaryPath);
+      if (owner === 'other' || owner === 'unreadable') return notOurs('uninstall', owner, before);
       if (!before.installed) {
         return {
           ok: false,
@@ -353,15 +471,18 @@ export async function runDaemonServiceCli(input: DaemonServiceCliInput): Promise
     case 'service-status': {
       const status = manager.status();
       if (status.actionError) return failed('status', status);
+      const owner = definitionOwner(status, input.binaryPath);
       if (input.json) {
         return {
           ok: true,
           exitCode: serviceStatusExitCode(status),
-          lines: [serviceStatusJson(status)],
+          lines: [serviceStatusJson(status, owner)],
           status,
         };
       }
-      const result = ok('status', status);
+      const result = ok('status', status, status.installed
+        ? [`definition: ${owner === 'product' ? 'written by GoodVibes' : owner === 'other' ? 'not written by GoodVibes (the service commands leave it as it is)' : 'unreadable'}`]
+        : []);
       // The status verb reports; it does not fail. `ok` is still true, the
       // question was answered, while the exit code carries the answer itself
       // (0 running / 3 installed-not-running / 4 not installed), so a script

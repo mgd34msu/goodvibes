@@ -111,11 +111,12 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         },
       }));
     }
-    const needsRuntime = ['serve', 'install-service', 'start-service', 'restart-service'].includes(cli.command);
+    const needsRuntime = ['serve', 'install-service', 'refresh-service', 'start-service', 'restart-service'].includes(cli.command);
     const runtime = options.runtime ?? (needsRuntime ? await options.createRuntime?.() : undefined);
     if (cli.command === 'serve' && typeof runtime?.inboxFactory !== 'function') return refuse(PARTIAL);
     let serviceExecutable: ShippedServiceExecutable | undefined;
-    if (['install-service', 'start-service', 'restart-service'].includes(cli.command)) {
+    // refresh-service writes the same launch install-service does, so it is admitted the same way.
+    if (['install-service', 'refresh-service', 'start-service', 'restart-service'].includes(cli.command)) {
       if (typeof runtime?.inboxFactory !== 'function') return refuse(PARTIAL);
       serviceExecutable = await options.resolveServiceExecutable?.();
       if (!serviceExecutable && !options.serviceBinaryPath) return refuse(`${PARTIAL} Service activation requires an explicitly composed executable.`);
@@ -247,7 +248,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         const { resolveServiceUnitHome } = await import('@goodvibes-jev/engine/platform/platform/daemon/daemon-service-default');
         if (!isDaemonServiceSubcommand(cli.command)) return refuse('This command has no migrated dispatcher.');
         const servicePlatform = config.get('service.platform');
-        if (configuration.isOverridden && ['install-service', 'start-service', 'restart-service'].includes(cli.command)
+        if (configuration.isOverridden && ['install-service', 'refresh-service', 'start-service', 'restart-service'].includes(cli.command)
           && servicePlatform !== 'systemd' && !(servicePlatform === 'auto' && process.platform === 'linux')) {
           return refuse('Service activation with selected tree or daemon homes currently requires systemd. No service was changed.');
         }
@@ -256,6 +257,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
           binaryPath: serviceExecutable?.binaryPath ?? options.serviceBinaryPath ?? resolveInstalledDaemonBinary({ moduleUrl: import.meta.url }),
           ...(serviceExecutable ? { assertCurrent: serviceExecutable.assertCurrent } : {}),
           configManager: config, homeDir: homeDirectory, daemonHomeDirectory, unitHomeDir: resolveServiceUnitHome(env), workingDirectory,
+          workingDirectoryExplicit: cli.flags.workingDir !== undefined || env.GOODVIBES_WORKING_DIR !== undefined,
           requireInstalledDefinitionMatch: configuration.isOverridden || cli.flags.workingDir !== undefined
             || env.GOODVIBES_WORKING_DIR !== undefined, actionRunner: options.serviceActionRunner,
           json: cli.flags.json,

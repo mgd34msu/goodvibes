@@ -32,6 +32,7 @@ import { WEBUI_BINDING_QUERY } from './machine-contracts.ts';
 export type DaemonCommand =
   | 'serve'
   | 'install-service'
+  | 'refresh-service'
   | 'uninstall-service'
   | 'service-status'
   | 'start-service'
@@ -352,7 +353,32 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
       'comes back after a reboot without anyone logging in.',
       '',
       'Exit codes: 0 installed and running; 3 installed but not running (the start',
-      'failed or the daemon exited at once; the receipt says why); 1 not installed.',
+      'failed or the daemon exited at once; the receipt says why); 5 a service',
+      'definition GoodVibes did not write is already there, so nothing was changed;',
+      '1 not installed.',
+      ...SERVICE_DETAIL_TAIL,
+    ],
+    flags: [],
+    passthrough: false,
+    subcommands: [],
+  },
+  {
+    name: 'refresh-service',
+    aliases: [],
+    summary: 'Rewrite the service definition to the current launch without starting it.',
+    usage: 'goodvibes-daemon refresh-service',
+    detail: [
+      'Write the current service definition for this binary over the one GoodVibes',
+      'wrote earlier (or where none exists), and register it with the service manager',
+      '(systemd daemon-reload). Nothing is started or stopped: a running service keeps',
+      'its previous launch until `restart-service`, and a stopped one stays stopped.',
+      'A definition that is already current is left untouched; a rewritten one is',
+      'backed up beside itself first and keeps the working directory it named.',
+      'The release installer runs this on every upgrade.',
+      '',
+      'Exit codes: 0 the definition is current (rewritten, written, or already so);',
+      '5 the definition there was not written by GoodVibes, so it was left as it is;',
+      '1 it could not be read, backed up or written (the receipt says which).',
       ...SERVICE_DETAIL_TAIL,
     ],
     flags: [],
@@ -369,7 +395,8 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
       'unload`, or ending and deleting the Scheduled Task), then delete its definition',
       'file. A service that is already stopped is uninstalled the same way.',
       '',
-      'Exit codes: 0 removed; 4 nothing was installed; 1 removal failed or the',
+      'Exit codes: 0 removed; 4 nothing was installed; 5 the definition there was',
+      'not written by GoodVibes, so it was left in place; 1 removal failed or the',
       'service is still running (the receipt says which).',
       ...SERVICE_DETAIL_TAIL,
     ],
@@ -383,9 +410,11 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
     summary: 'Report whether the daemon service is installed and running.',
     usage: 'goodvibes-daemon service-status [--json]',
     detail: [
-      'Report the platform, the service name, the definition path, and whether the',
-      'service is installed and currently running. systemd and launchd are queried',
-      'live rather than inferred from a pid file.',
+      'Report the platform, the service name, the definition path, whether the',
+      'definition there was written by GoodVibes (`definitionOwner` in --json:',
+      'product, other, absent or unreadable), and whether the service is installed',
+      'and currently running. systemd and launchd are queried live rather than',
+      'inferred from a pid file.',
       '',
       'Exit codes, so a script never has to read the prose:',
       '  0  installed and running',

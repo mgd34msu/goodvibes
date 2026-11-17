@@ -57,10 +57,12 @@ import type { HookEvent } from '../hooks/types.js';
 import { McpPermissionManager, captureMcpDecisionHistoryReadSource } from '../runtime/mcp/permissions.js';
 import { McpSchemaFreshnessTracker } from '../runtime/mcp/schema-freshness.js';
 import { McpLifecycleManager } from '../runtime/mcp/manager.js';
+import { McpHttpAuthError } from './http-connection.js';
 import type { McpDecisionRecord, McpReconnectStatus, McpServerRole, McpTrustMode, QuarantineReason, SchemaFreshness } from '../runtime/mcp/types.js';
 import type { McpEvent } from '../../events/mcp.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import {
+  emitMcpAuthRequired,
   emitMcpConfigured,
   emitMcpConnected,
   emitMcpConnecting,
@@ -131,6 +133,16 @@ export function captureMcpSecurityDecisionReadSource(registry: McpRegistry): () 
 
 /** Servers connected at once while applying a configuration. */
 const MCP_CONNECT_CONCURRENCY = 4;
+
+/** The credential refusal behind a failed connect, if that is what it was (also inside a cause or an aggregate). */
+function mcpAuthRefusal(error: unknown, depth = 0): McpHttpAuthError | undefined {
+  if (error instanceof McpHttpAuthError) return error;
+  if (depth >= 4 || !(error instanceof Error)) return undefined;
+  if (error instanceof AggregateError) {
+    for (const inner of error.errors) { const found = mcpAuthRefusal(inner, depth + 1); if (found) return found; }
+  }
+  return mcpAuthRefusal(error.cause, depth + 1);
+}
 /** How long a server may take to answer one tool call before the call is cancelled and the server told. */
 const DEFAULT_TOOL_CALL_DEADLINE_MS = 120_000;
 
@@ -1148,7 +1160,13 @@ export class McpRegistry {
       if (this.serverConfigs.get(name) === serverConfig) {
         this.freshness.markFailed(name, summarizeError(err));
         this.connectFailures.set(name, summarizeError(err));
-        if (stillWanted()) this.#lifecycle.failed(name, summarizeError(err));
+        if (stillWanted()) {
+          this.#lifecycle.failed(name, summarizeError(err));
+          const auth = mcpAuthRefusal(err);
+          if (auth && this.runtimeBus) {
+            emitMcpAuthRequired(this.runtimeBus, { sessionId: 'mcp-registry', traceId: `mcp-registry:${name}:mcp_auth_required`, source: 'mcp-registry' }, { serverId: name, authType: auth.authType });
+          }
+        }
       }
       logger.error('McpRegistry: failed to connect server', { name, err: summarizeError(err) });
       if (pending.cleanupErrors.length) throw new AggregateError([err, ...pending.cleanupErrors], 'MCP connection cleanup failed');

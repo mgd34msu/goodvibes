@@ -36,6 +36,21 @@ import {
   type McpNegotiatedProtocol,
 } from './protocol.js';
 
+/**
+ * The server refused the request for its credentials (HTTP 401 or 403). `authType`
+ * is the scheme its WWW-Authenticate header names (Bearer, Basic, ...), or
+ * 'unknown' when it names none, so the owner is told what the server wants.
+ */
+export class McpHttpAuthError extends Error {
+  readonly authType: string;
+  constructor(serverName: string, method: string, readonly status: 401 | 403, challenge: string | null) {
+    const scheme = challenge?.trim().split(/[\s,]/, 1)[0] ?? '';
+    super(`MCP server '${serverName}': HTTP ${status} for '${method}': the server ${status === 401 ? 'wants credentials' : 'refused these credentials'}${scheme ? ` (${scheme})` : ''}. Set the server's credentials, then reconnect it.`);
+    this.name = 'McpHttpAuthError';
+    this.authType = scheme || 'unknown';
+  }
+}
+
 export interface McpHttpServerMessageHandlers {
   /** Server-to-client notification observed on a response stream. */
   onNotification?: ((method: string, params?: unknown) => void) | undefined;
@@ -381,6 +396,9 @@ export class McpHttpConnection {
           await this.renewSession(sessionAtSend);
           if (!options.resent) throw RESEND_ON_NEW_SESSION;
           throw new Error(`MCP server '${this.options.serverName}': its session expired again (HTTP 404 for '${method}') right after it was renewed; the request was not run. Check the server, then call again.`);
+        }
+        if (response.status === 401 || response.status === 403) {
+          throw new McpHttpAuthError(this.options.serverName, method, response.status, response.headers.get('www-authenticate'));
         }
         const errorBody = await executePolicyCheck(() => readBoundedJson(response!, signal), signal).catch(() => { signal.throwIfAborted(); return null; });
         const rpcError = parseJsonRpcError(errorBody);

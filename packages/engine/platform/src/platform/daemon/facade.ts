@@ -70,6 +70,7 @@ import {
 } from '../runtime/network/index.js';
 import { createRuntimeServices, type RuntimeServices } from '../runtime/services.js';
 import { readCompanionTokenValue, replaceCompanionToken } from '../pairing/companion-token.js';
+import { publicBaseUrlIsOwnOrigin } from '../pairing/web-origin.js';
 import { createAsyncDisposalScope, type AsyncDisposalScope } from '../runtime/async-disposal.js';
 import type { McpServerConfig } from '../mcp/config.js';
 import { isSurfaceFeatureGateEnabled } from '../runtime/feature-flags/index.js';
@@ -1593,14 +1594,25 @@ export class DaemonServer {
    * A public address is configured for this daemon (a tunnel or reverse proxy
    * publishes it). A same-machine proxy can rewrite Host and add no forwarding
    * header, so then no loopback request is taken as the owner's own machine:
-   * the apps there pair like any other device. Three in-memory config reads,
-   * only for a direct loopback request.
+   * the apps there pair like any other device. `web.publicBaseUrl` holding the
+   * daemon's own derived origin (which the daemon and the apps store for links)
+   * publishes nothing. Three in-memory config reads, only for a direct loopback
+   * request; the web URL's verdict is computed once per value and listener.
    */
   private publishedElsewhere(): boolean {
-    const named = (value: unknown): boolean => typeof value === 'string' && value.trim().length > 0;
-    return named(this.configManager.get('controlPlane.publicBaseUrl'))
-      || named(this.configManager.get('web.publicBaseUrl'))
-      || named(this.configManager.get('cloudflare.daemonHostname'));
+    const named = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
+    if (named(this.configManager.get('controlPlane.publicBaseUrl')) || named(this.configManager.get('cloudflare.daemonHostname'))) return true;
+    const web = this.configManager.get('web.publicBaseUrl');
+    return named(web) && !this.webUrlIsOwnOrigin(web);
+  }
+  private ownWebUrlVerdict: { readonly key: string; readonly own: boolean } | undefined;
+  private webUrlIsOwnOrigin(value: string): boolean {
+    const bound = { host: this.boundHost, port: this.boundPort, scheme: this.boundScheme };
+    const key = `${value}\u0000${bound.scheme}://${bound.host}:${bound.port}`;
+    if (this.ownWebUrlVerdict?.key === key) return this.ownWebUrlVerdict.own;
+    const verdict = publicBaseUrlIsOwnOrigin(this.configManager, bound);
+    if (verdict.settled) this.ownWebUrlVerdict = { key, own: verdict.own };
+    return verdict.own;
   }
   private trustProxyEnabled(): boolean {
     return this.tlsState?.trustProxy ?? Boolean(this.configManager.get('controlPlane.trustProxy'));

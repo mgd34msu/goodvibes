@@ -12,7 +12,7 @@
 import type { ConfigManager } from '../config/manager.js';
 import { resolveHostBinding, resolveWebPort } from '../daemon/host-resolver.js';
 import { isLoopbackHost } from './origin-posture.js';
-import { isWildcardBindHost, stableUrlHostForBindHost, type ResolvedStableHost, type StableHostInputs } from './stable-host.js';
+import { isWildcardBindHost, probeStableHostInputs, stableUrlHostForBindHost, type ResolvedStableHost, type StableHostInputs } from './stable-host.js';
 
 export interface PairingWebOrigin {
   readonly origin: string;
@@ -175,6 +175,15 @@ export function resolvePairingWebOrigin(
       fromPublicBaseUrl: true,
     };
   }
+  return derivedPairingWebOrigin(configManager, probe, boundControlPlane);
+}
+
+/** The web origin this daemon derives for itself, whatever `web.publicBaseUrl` holds. */
+function derivedPairingWebOrigin(
+  configManager: Pick<ConfigManager, 'get'>,
+  probe?: () => StableHostInputs,
+  boundControlPlane?: BoundListener,
+): PairingWebOrigin {
   if (configManager.get('controlPlane.webui.serve') === true) {
     const served = resolveControlPlaneOrigin(configManager, probe, boundControlPlane);
     return {
@@ -195,6 +204,29 @@ export function resolvePairingWebOrigin(
     fromPublicBaseUrl: false,
     ...(resolvedHost.alternateHost ? { alternateOrigin: formatHttpOrigin(resolvedHost.alternateHost, binding.port) } : {}),
   };
+}
+
+/**
+ * Whether `web.publicBaseUrl` holds nothing but this daemon's own derived web
+ * origin (the value {@link ensurePublicBaseUrl} stores, or the address beside
+ * it), or is empty or the shipped placeholder: then no tunnel or reverse proxy
+ * publishes the daemon through it. Any other value (a tunnel, a proxy, a
+ * Tailscale serve URL) is not. `settled` is false while the answer could still
+ * change once this process has its slow host facts (the Tailscale name, the
+ * `.local` lookup). Reads cached host facts and the network interfaces; no
+ * lookup is made.
+ */
+export function publicBaseUrlIsOwnOrigin(
+  configManager: Pick<ConfigManager, 'get'>,
+  boundControlPlane?: BoundListener,
+  probe: () => StableHostInputs = probeStableHostInputs,
+): { readonly own: boolean; readonly settled: boolean } {
+  const stored = explicitPublicBaseUrl(configManager);
+  if (!stored) return { own: true, settled: true };
+  const inputs = probe();
+  const derived = derivedPairingWebOrigin(configManager, () => inputs, boundControlPlane);
+  const own = stored === derived.origin || stored === derived.alternateOrigin;
+  return { own, settled: own || inputs.mdnsResolvesToThisHost !== undefined };
 }
 
 function hostnameOf(origin: string): string {

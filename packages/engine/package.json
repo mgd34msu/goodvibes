@@ -1742,11 +1742,6 @@
       "types": "./terminal-shell/dist/work-tree-input.d.ts",
       "import": "./terminal-shell/dist/work-tree-input.js"
     },
-    "./platform/platform/runtime/store/domains/ui-perf": {
-      "bun": "./platform/src/platform/runtime/store/domains/ui-perf.ts",
-      "types": "./platform/dist/platform/runtime/store/domains/ui-perf.d.ts",
-      "import": "./platform/dist/platform/runtime/store/domains/ui-perf.js"
-    },
     "./terminal-shell/delete-key-policy": {
       "bun": "./terminal-shell/src/delete-key-policy.ts",
       "types": "./terminal-shell/dist/delete-key-policy.d.ts",

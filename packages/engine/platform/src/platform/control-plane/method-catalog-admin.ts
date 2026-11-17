@@ -1,5 +1,5 @@
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
-import { EMPTY_OBJECT_SCHEMA, JSON_VALUE_SCHEMA, NUMBER_SCHEMA, STRING_SCHEMA, branchedSchema, objectSchema, listOutputSchema, entityOutputSchema, bodyEnvelopeSchema, methodDescriptor, requirementBranch, stringEnumSchema } from './method-catalog-shared.js';
+import { BOOLEAN_SCHEMA, EMPTY_OBJECT_SCHEMA, JSON_VALUE_SCHEMA, NUMBER_SCHEMA, STRING_SCHEMA, arraySchema, branchedSchema, objectSchema, listOutputSchema, entityOutputSchema, bodyEnvelopeSchema, methodDescriptor, requirementBranch, stringEnumSchema } from './method-catalog-shared.js';
 import {
   CONFIG_SET_OUTPUT_SCHEMA,
   CONFIG_SNAPSHOT_SCHEMA,
@@ -49,6 +49,22 @@ const CONFIG_SET_INPUT_SCHEMA = branchedSchema(
     requirementBranch({ settingsImportPrecondition: settingsLaneArmSchema() }, ['settingsImportPrecondition']),
   ],
 );
+
+const CONFIG_SET_MANY_INPUT_SCHEMA = objectSchema({
+  entries: arraySchema(objectSchema({ key: STRING_SCHEMA, value: JSON_VALUE_SCHEMA }, ['key', 'value'])),
+}, ['entries']);
+
+const CONFIG_SET_MANY_OUTPUT_SCHEMA = objectSchema({
+  success: BOOLEAN_SCHEMA,
+  revision: NUMBER_SCHEMA,
+  entries: arraySchema(objectSchema({
+    key: STRING_SCHEMA,
+    value: JSON_VALUE_SCHEMA,
+    persistedTo: STRING_SCHEMA,
+    tier: STRING_SCHEMA,
+    daemonOwned: BOOLEAN_SCHEMA,
+  }, ['key'])),
+}, ['success', 'revision', 'entries']);
 
 export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
@@ -198,6 +214,17 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
     http: { method: 'POST', path: '/config' },
     inputSchema: CONFIG_SET_INPUT_SCHEMA,
     outputSchema: CONFIG_SET_OUTPUT_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'config.setMany',
+    title: 'Set Several Config Values',
+    description: 'Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is set on its own with config.set.',
+    category: 'config',
+    scopes: ['write:config'],
+    access: 'admin',
+    http: { method: 'POST', path: '/config/many' },
+    inputSchema: CONFIG_SET_MANY_INPUT_SCHEMA,
+    outputSchema: CONFIG_SET_MANY_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
     id: 'config.reset',

@@ -5,7 +5,7 @@
  * tts.voice keys now resolve from the surface-root-independent shared tier
  * (~/.goodvibes/shared/settings.json, ConfigManager's shared-config-tier.ts), so every
  * surface reads and writes the same voice regardless of its own surface root. This
- * popover READS those keys (config.get) and WRITES them (config.set) through the daemon,
+ * popover READS those keys (config.get) and WRITES them (config.set, config.setMany) through the daemon,
  * whose ConfigManager persists to that same shared file, so choosing a voice here
  * changes it on the TUI, desktop, and agent too, never a web-only voice. Availability and
  * the provider list come straight from voice.status, rendered with the shared
@@ -90,17 +90,15 @@ export function VoiceSettings() {
 
   const setKey = useMutation({
     mutationFn: async ({ key, value, clearVoice }: { key: string; value: string; clearVoice?: boolean }) => {
-      // A voice id belongs to its provider. It is cleared first, so a failure between the
-      // two writes leaves the old provider on its default voice, never a new provider
-      // holding an id it cannot use.
-      if (clearVoice) await invokeMethod('config.set', { key: 'tts.voice', value: '' });
+      // A voice id belongs to its provider: a provider change clears the voice in the
+      // same update, so a refusal leaves both as they were.
+      if (clearVoice) return platformClient.operator.config.setMany([['tts.voice', ''], [key, value]]);
       return invokeMethod('config.set', { key, value });
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.config });
     },
-    // A refused write (or a refused second write after the voice was cleared) still
-    // changes what the host holds: re-read it, and the alert below says why.
+    // Re-read what the host holds after a refusal; the alert below says why.
     onError: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.config });
     },

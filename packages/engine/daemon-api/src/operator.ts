@@ -399,6 +399,7 @@ async function dispatchOperatorRoutesInner(
   if (pathname === '/config' && method === 'GET') return handlers.getConfig(req);
   if (pathname === '/config' && method === 'POST') return handlers.postConfig(req);
   if (pathname === '/config/reset' && method === 'POST') return handlers.postConfigReset(req);
+  if (pathname === '/config/many' && method === 'POST') return handlers.postConfigMany(req);
 
   return null;
 }

@@ -86,6 +86,8 @@ interface ConfigSettingsValue {
   refused: boolean;
   degraded: boolean;
   commit: (key: string, value: unknown) => Promise<void>;
+  /** Write settings that belong together as one update (config.setMany): none changes unless all do. */
+  commitMany: (entries: readonly (readonly [string, unknown])[]) => Promise<void>;
   /** Remove one key's explicit value on the daemon so it reads as its default again. */
   reset: (key: string) => Promise<void>;
   /** The daemon's current value for one key, for editors whose write replaces a whole object. */
@@ -174,6 +176,28 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
     [queryClient, toast],
   );
 
+  const commitMany = useCallback(
+    async (entries: readonly (readonly [string, unknown])[]): Promise<void> => {
+      const keys = entries.map(([key]) => key);
+      try {
+        const outcome = await platformClient.operator.config.setMany(entries);
+        setPersistedByKey((prev) => ({
+          ...prev,
+          ...Object.fromEntries(outcome.entries.map((entry) => [entry.key, { ...entry, success: outcome.success }] as const)),
+        }));
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: queryKeys.config }),
+          keys.some((key) => RESTART_GATED_KEYS.has(key)) ? queryClient.invalidateQueries({ queryKey: FEATURE_RESTART_STATUS_KEY }) : undefined,
+        ]);
+        toast({ title: 'Config saved', description: `${keys.join(' and ')} updated together.`, tone: 'success' });
+      } catch (error) {
+        toast({ title: 'Failed to save config', description: formatError(error), tone: 'danger' });
+        throw error;
+      }
+    },
+    [queryClient, toast],
+  );
+
   const reset = useCallback(
     async (key: string): Promise<void> => {
       try {
@@ -204,11 +228,12 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
     refused,
     degraded,
     commit,
+    commitMany,
     reset,
     readLatest,
     persistedByKey,
     pendingRestart,
-  }), [config, groups, currency, refused, degraded, commit, reset, readLatest, persistedByKey, pendingRestart]);
+  }), [config, groups, currency, refused, degraded, commit, commitMany, reset, readLatest, persistedByKey, pendingRestart]);
 
   return <ConfigSettingsContext.Provider value={value}>{children}</ConfigSettingsContext.Provider>;
 }
@@ -232,7 +257,7 @@ export function ConfigGroupList({
   /** Shown when there is nothing to render (after the search). */
   emptyText?: string;
 }) {
-  const { config, refused, degraded, commit, reset, readLatest, persistedByKey, pendingRestart, currency } = useConfigSettings();
+  const { config, refused, degraded, commit, commitMany, reset, readLatest, persistedByKey, pendingRestart, currency } = useConfigSettings();
   const shown = useMemo(() => filterSettingsModel([...groups], query), [groups, query]);
   // One level under the section heading when the list sits inside a titled section.
   const GroupHeading = useContext(SettingsHeadingLevel) === 4 ? 'h4' : 'h3';
@@ -286,6 +311,7 @@ export function ConfigGroupList({
               key={unit.feature.id}
               unit={unit}
               onCommit={commit}
+              onCommitMany={commitMany}
               onReset={reset}
               persistedByKey={persistedByKey}
               pendingRestart={pendingRestart.get(unit.feature.id) ?? null}
@@ -299,6 +325,7 @@ export function ConfigGroupList({
                   key={field.key}
                   field={field}
                   onCommit={commit}
+                  onCommitMany={commitMany}
                   onReset={reset}
                   readLatest={readLatest}
                   persisted={persistedByKey[field.key]}

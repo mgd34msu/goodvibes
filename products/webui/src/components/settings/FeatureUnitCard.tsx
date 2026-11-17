@@ -37,6 +37,7 @@ import { useToast } from '../../lib/toast';
 import { Button } from '../ui/Button';
 import { useConfirm } from '../ui/ConfirmDialog';
 import { SettingsField } from './SettingsField';
+import type { CommitSettings } from './JudgmentModelFields';
 import { Chip } from '../ui/Chip';
 import { Select } from '../ui/Select';
 import { StatusDot } from '../ui/StatusDot';
@@ -45,6 +46,8 @@ import { Toggle } from '../ui/Toggle';
 interface FeatureUnitCardProps {
   readonly unit: FeatureUnitModel;
   readonly onCommit: (key: string, value: unknown) => Promise<void>;
+  /** Writes settings that belong together as one update; forwarded to each field. */
+  readonly onCommitMany: CommitSettings;
   /** Removes one key's explicit value so it reads as its default; forwarded to each field. */
   readonly onReset?: (key: string) => Promise<void>;
   /** What the daemon reported for the last successful config.set of each key this session
@@ -61,6 +64,7 @@ interface FeatureUnitCardProps {
 export function FeatureUnitCard({
   unit,
   onCommit,
+  onCommitMany,
   onReset,
   persistedByKey,
   pendingRestart,
@@ -177,6 +181,7 @@ export function FeatureUnitCard({
               key={field.key}
               field={field}
               onCommit={onCommit}
+              onCommitMany={onCommitMany}
               {...(onReset ? { onReset } : {})}
               persisted={persistedByKey[field.key]}
               currency={currency}

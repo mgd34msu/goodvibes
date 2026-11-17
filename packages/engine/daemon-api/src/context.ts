@@ -243,6 +243,8 @@ export interface DaemonSystemRouteHandlers {
   postConfig(req: Request): MaybeResponse;
   /** `config.reset`, admin + write:config: remove one key's explicit value so it reads as its default. */
   postConfigReset(req: Request): MaybeResponse;
+  /** `config.setMany`, admin + write:config: several settings admitted together and saved as one update. */
+  postConfigMany(req: Request): MaybeResponse;
   /**
    * `credentials.get`, admin + read:config. Returns secret-free credential
    * STATUS metadata for the daemon's shared store (never plaintext). An optional

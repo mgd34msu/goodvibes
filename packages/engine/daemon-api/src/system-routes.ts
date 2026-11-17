@@ -373,6 +373,70 @@ export function createDaemonSystemRouteHandlers(
           ...(source.effectiveOrigin ? { effectiveOrigin: source.effectiveOrigin } : {}) } : {}),
       });
     },
+    postConfigMany: async (req) => {
+      const admin = context.requireAdmin(req);
+      if (admin) return admin;
+      const payload = await context.parseJsonBody(req);
+      if (payload instanceof Response) return payload;
+      // Body parsing yields. Reacquire current admin before the write.
+      const currentAdmin = context.requireAdmin(req);
+      if (currentAdmin) return currentAdmin;
+      const unchanged = 'nothing was saved';
+      const entries = payload.entries;
+      if (!Array.isArray(entries) || entries.length === 0) {
+        return jsonErrorResponse({ error: 'The request names no settings to write.', code: 'INVALID_ARGUMENT', state: unchanged,
+          next: ['Send { "entries": [{ "key": "<config key>", "value": <value> }] }; config.get lists the keys.'] }, { status: 400 });
+      }
+      const changes: { readonly key: string; readonly value: unknown }[] = [];
+      for (const entry of entries) {
+        const key = isJsonRecord(entry) && typeof entry.key === 'string' ? entry.key : '';
+        if (!key || !isJsonRecord(entry) || !Object.hasOwn(entry, 'value')) {
+          return jsonErrorResponse({ error: 'Every entry needs a key and a value.', code: 'INVALID_ARGUMENT', state: unchanged,
+            next: ['Send each entry as { "key": "<config key>", "value": <value> }.'] }, { status: 400 });
+        }
+        // The workspace root moves through the swap manager, one move per request.
+        if (key === 'runtime.workingDir') {
+          return jsonErrorResponse({ error: 'runtime.workingDir moves the workspace and is not part of a multi-setting update.', code: 'INVALID_ARGUMENT',
+            state: unchanged, next: ['Set runtime.workingDir on its own with config.set, and send the other settings without it.'] }, { status: 400 });
+        }
+        if (!context.isValidConfigKey(key)) {
+          return jsonErrorResponse({ error: `${key} is not a config key this daemon knows.`, code: 'INVALID_ARGUMENT', state: unchanged,
+            next: ['Check the key name; config.get lists the keys.'] }, { status: 400 });
+        }
+        if (context.isSecretBearingConfigKey?.(key) && !isSecretReference(entry.value)) {
+          return jsonErrorResponse({ error: `Config key ${key} holds a credential and is not written to the config file as plain text.`,
+            code: 'SECRET_CONFIG_KEY', state: unchanged,
+            next: [`Store it with credentials.set { "key": "${key}", "value": "<secret>" }, then send its goodvibes://secrets/ reference here.`] },
+          { status: 400 });
+        }
+        changes.push({ key, value: entry.value });
+      }
+      if (!context.configManager.setMany) {
+        return jsonErrorResponse({ error: 'This host cannot write several settings as one update.', code: 'CONFIG_SET_MANY_UNSUPPORTED', state: unchanged,
+          next: ['Send each setting with config.set.'] }, { status: 409 });
+      }
+      // One admission, one write per settings file, one revision and one change event per key.
+      const result = context.configManager.setMany(changes, { kind: 'owner', surface: 'daemon-api' });
+      if (!result.ok) {
+        const { refusal } = result;
+        return jsonErrorResponse({ error: refusal.reason, code: refusal.code, state: refusal.state, next: [...refusal.next],
+          ...(refusal.retryable ? { recoverable: true } : {}) }, { status: refusal.status ?? 409 });
+      }
+      return Response.json({
+        success: true,
+        revision: result.revision,
+        entries: changes.map(({ key }) => {
+          const source = context.configManager.describeConfigKeySource?.(key);
+          const persistedTo = (source?.daemonOwned ? source.daemonTierPath : null) ?? context.configManager.getConfigPath?.();
+          return {
+            key,
+            value: context.configManager.get(key),
+            ...(persistedTo ? { persistedTo } : {}),
+            ...(source ? { tier: source.tier, daemonOwned: source.daemonOwned } : {}),
+          };
+        }),
+      });
+    },
     postConfigReset: async (req) => {
       const admin = context.requireAdmin(req);
       if (admin) return admin;

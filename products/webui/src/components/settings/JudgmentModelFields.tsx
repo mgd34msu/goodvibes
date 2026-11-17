@@ -6,32 +6,18 @@ import {
 import { Select } from "../ui/Select";
 import { Input } from "../ui/Field";
 import { Button } from "../ui/Button";
+import { formatError } from "../../lib/errors";
 
-/** Raised when the credential source was already reset but the destination write that follows was refused. */
-export class JudgmentDestinationChangeError extends Error {}
+/** Writes settings that belong together as one update (config.setMany). */
+export type CommitSettings = (entries: readonly (readonly [string, unknown])[]) => Promise<void>;
 
 /**
- * Changing where decision calls go resets the credential source first, so a
- * credential never reaches a destination the owner has not re-approved. The
- * two writes are separate, so a refused second write leaves the source reset
- * while the old destination stays; the error says so. The source is not
- * restored: a lost response may mean the new destination was stored.
+ * Changing where decision calls go resets the credential source in the same
+ * update, so a credential never reaches a destination the owner has not
+ * re-approved, and a refusal leaves both settings as they were.
  */
-export async function commitJudgmentDestination(
-  onCommit: (key: string, value: unknown) => Promise<void>,
-  key: string,
-  value: unknown,
-  noun: string,
-): Promise<void> {
-  await onCommit("judgment.keySource", "none");
-  try {
-    await onCommit(key, value);
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    throw new JudgmentDestinationChangeError(
-      `The decision credential source was reset to none, but the ${noun} was not saved (${reason}). Decision calls will not authenticate until you choose the credential source again.`,
-    );
-  }
+export async function commitJudgmentDestination(onCommitMany: CommitSettings, key: string, value: unknown): Promise<void> {
+  await onCommitMany([["judgment.keySource", "none"], [key, value]]);
 }
 
 export function JudgmentModelField({
@@ -101,10 +87,10 @@ export function JudgmentModelField({
 
 export function JudgmentProviderField({
   value,
-  onCommit,
+  onCommitMany,
 }: {
   readonly value: unknown;
-  readonly onCommit: (key: string, value: unknown) => Promise<void>;
+  readonly onCommitMany: CommitSettings;
 }) {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -120,21 +106,16 @@ export function JudgmentProviderField({
     try {
       // Protocol changes never carry a credential into an unconfigured destination.
       await commitJudgmentDestination(
-        onCommit,
+        onCommitMany,
         "judgment.backend",
         captureJudgmentBackendSettings({
           ...backend,
           adapter,
           responseModels: adapter === "laya" ? ["laya-rl-agent"] : [],
         }),
-        "provider",
       );
     } catch (err) {
-      setError(
-        err instanceof JudgmentDestinationChangeError
-          ? err.message
-          : "Unable to save the decision provider. Check the settings connection.",
-      );
+      setError(`The decision provider was not saved: ${formatError(err)}`);
     } finally {
       setSaving(false);
     }

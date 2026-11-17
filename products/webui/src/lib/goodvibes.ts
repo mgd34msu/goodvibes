@@ -976,6 +976,8 @@ export type StepUpCredentialSummary = OperatorMethodOutput<'stepup.credentials.l
 
 /** config.set's and config.reset's outcome: where the value landed (`persistedTo`), its tier, and whether the daemon owns the key. */
 export type ConfigSetOutcome = OperatorMethodOutput<'config.set'>;
+/** config.setMany's outcome: the configuration revision and, per key, what the host now holds and where. */
+export type ConfigSetManyOutcome = OperatorMethodOutput<'config.setMany'>;
 /** Where credentials.set put the credential, never the value. */
 export type CredentialSetOutcome = OperatorMethodOutput<'credentials.set'>;
 
@@ -1074,12 +1076,15 @@ export const client = {
     // speaks in the same voice as the TUI and agent; the model/config
     // workspace browses the same snapshot, callers there MUST run it through
     // src/lib/config-redaction.ts before rendering, never display it raw.
-    // set() writes one key at a time and reports where it landed (persistedTo, tier,
-    // daemonOwned).
+    // set() writes one key and reports where it landed (persistedTo, tier,
+    // daemonOwned); setMany() writes settings that belong together as one update,
+    // so a refusal leaves none of them half-applied.
     config: {
       get: () => invokeOperator('config.get'),
       set: async (key: string, value: unknown): Promise<ConfigSetOutcome> =>
         invokeOperator('config.set', { key, value: configSetValue(key, value) }),
+      setMany: async (entries: readonly (readonly [string, unknown])[]): Promise<ConfigSetManyOutcome> =>
+        invokeOperator('config.setMany', { entries: entries.map(([key, value]) => ({ key, value: configSetValue(key, value) })) }),
       // Removes the key's explicit value so it reads as its default again; the
       // outcome reports the value the daemon now holds and the file it came from.
       reset: (key: string): Promise<ConfigSetOutcome> => invokeOperator('config.reset', { key }),

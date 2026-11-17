@@ -85,25 +85,6 @@ function ModelFigures({ model }: { model: CatalogModel }) {
   );
 }
 
-/** A multi-key target write that stopped part-way: names the key that failed and the keys already stored. */
-class PartialModelWriteError extends Error {
-  constructor(
-    readonly failedKey: string,
-    readonly written: readonly string[],
-    cause: unknown,
-  ) {
-    super(formatError(cause));
-    this.name = 'PartialModelWriteError';
-  }
-
-  describe(): string {
-    const stored = this.written.length > 0
-      ? ` Already stored: ${this.written.join(', ')}; the rest was not changed.`
-      : ' Nothing was changed.';
-    return `Could not set ${this.failedKey}: ${this.message}.${stored}`;
-  }
-}
-
 export interface ModelWorkspaceModalProps {
   open: boolean;
   onClose: () => void;
@@ -179,19 +160,9 @@ export function ModelWorkspaceModal({ open, onClose }: ModelWorkspaceModalProps)
         return platformClient.operator.models.current.set(model.registryKey);
       }
       const entries = buildTargetWriteEntries(target, model.provider, model.id) ?? [];
-      // Sequential, not Promise.all: the daemon's /config route accepts one key at a
-      // time (see src/lib/goodvibes.ts's config.set comment), writing several keys
-      // for one target (e.g. helper.globalProvider + helper.globalModel + helper.enabled)
-      // means several awaited config.set calls in a row.
-      const written: string[] = [];
-      for (const [key, value] of entries) {
-        try {
-          await platformClient.operator.config.set(key, value);
-        } catch (error) {
-          throw new PartialModelWriteError(key, written, error);
-        }
-        written.push(key);
-      }
+      // A target's keys (e.g. helper.globalProvider + helper.globalModel + helper.enabled)
+      // are one update: the daemon admits them together, so a refusal changes none.
+      if (entries.length > 0) await platformClient.operator.config.setMany(entries);
       return { entries };
     },
     onSuccess: async (_data, model) => {
@@ -203,15 +174,10 @@ export function ModelWorkspaceModal({ open, onClose }: ModelWorkspaceModalProps)
       toast({ title: `${TARGET_LABELS[target]} updated`, description: model.label, tone: 'success' });
     },
     onError: (error: unknown) => {
-      // A later key can fail after an earlier one was stored: re-read so the dialog
-      // shows what the daemon holds now, not the routing from before the attempt.
+      // Re-read so the dialog shows what the daemon holds now; the refusal says what, if anything, was saved.
       void queryClient.invalidateQueries({ queryKey: ['config'] });
       void queryClient.invalidateQueries({ queryKey: ['models'] });
-      toast({
-        title: error instanceof PartialModelWriteError && error.written.length > 0 ? 'Model selection partly applied' : 'Model selection failed',
-        description: error instanceof PartialModelWriteError ? error.describe() : formatError(error),
-        tone: 'danger',
-      });
+      toast({ title: 'Model selection failed', description: formatError(error), tone: 'danger' });
     },
   });
 

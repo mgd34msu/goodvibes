@@ -1,6 +1,6 @@
 import { validEndpointURL } from '@goodvibes-jev/judgment/decisions';
 import { JudgmentFallbackEditor } from "./JudgmentFallbackEditor";
-import { JudgmentModelField, JudgmentProviderField, commitJudgmentDestination } from "./JudgmentModelFields";
+import { JudgmentModelField, JudgmentProviderField, commitJudgmentDestination, type CommitSettings } from "./JudgmentModelFields";
 import { DecisionRouterEditor } from "./DecisionRouterEditor";
 /**
  * SettingsField, one typed config editor row, driven by the platform schema. Laid
@@ -69,6 +69,8 @@ import { CvvHandlingField } from "./CvvHandlingField";
 interface SettingsFieldProps {
   readonly field: ConfigFieldModel;
   readonly onCommit: (key: string, value: unknown) => Promise<void>;
+  /** Writes settings that belong together (a decision destination and its credential source) as one update. */
+  readonly onCommitMany: CommitSettings;
   /** Removes this key's explicit value on the daemon so it reads as its default again. */
   readonly onReset?: (key: string) => Promise<void>;
   /** What the daemon reported for the last successful config.set of THIS key this
@@ -112,7 +114,7 @@ function scalarToText(v: unknown): string {
   return JSON.stringify(v);
 }
 
-export function SettingsField({ field, onCommit, onReset, persisted, currency, readLatest }: SettingsFieldProps) {
+export function SettingsField({ field, onCommit, onCommitMany, onReset, persisted, currency, readLatest }: SettingsFieldProps) {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   // Secret replacements are write-only: never seed them from live config.
@@ -155,7 +157,7 @@ export function SettingsField({ field, onCommit, onReset, persisted, currency, r
         />
       );
     if (field.key === "judgment.backend")
-      return <JudgmentProviderField value={effectiveValue(field)} onCommit={onCommit} />;
+      return <JudgmentProviderField value={effectiveValue(field)} onCommitMany={onCommitMany} />;
     // Object-typed keys get structured editors (see module header).
     if (field.type === "object") {
       if (field.key === "judgment.fallbacks")
@@ -332,7 +334,7 @@ export function SettingsField({ field, onCommit, onReset, persisted, currency, r
             // Changing a destination never implicitly forwards the previous
             // target's credential. The owner selects its source explicitly.
             if (value !== effectiveValue(field)) {
-              await commitJudgmentDestination(onCommit, field.key, value, "endpoint");
+              await commitJudgmentDestination(onCommitMany, field.key, value);
               return;
             }
           }

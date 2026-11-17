@@ -1,3 +1,4 @@
+import type { Refusal } from '@goodvibes-jev/engine/errors';
 import type { JsonRecord } from './route-helpers.js';
 import { AUTOMATION_SURFACE_KINDS, type AutomationSurfaceKind } from './runtime-route-types.js';
 export type { AutomationSurfaceKind };
@@ -39,6 +40,16 @@ export interface ConfigManagerLike {
   get(key: string): unknown;
   getAll(): Record<string, unknown>;
   setDynamic(key: string, value: unknown): void;
+  /**
+   * Several settings as one update: every change is admitted before anything
+   * is written, each settings file is written once, and the revision moves once.
+   */
+  setMany?(
+    changes: readonly { readonly key: string; readonly value: unknown }[],
+    by: { readonly kind: 'owner'; readonly surface: string },
+  ):
+    | { readonly ok: true; readonly revision: number; readonly saved: readonly string[] }
+    | { readonly ok: false; readonly refusal: Refusal; readonly saved: readonly string[] };
   /** Remove the explicit value of one key (every key when omitted) so it reads as its default again, in every tier that holds it. */
   reset?(key?: string): void;
   /**

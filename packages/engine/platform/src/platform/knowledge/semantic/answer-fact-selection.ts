@@ -4,6 +4,7 @@ import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { assertJudgmentInput } from '../../gate/judgment-input.js';
 import type { AnswerUnsettledTally } from './answer-source-ranking.js';
 import { answerFactRerank, answerQueryIntent } from './ranking/fact-rerank.js';
+import { rankClassicCatalog } from '../../runtime/classic-catalog.js';
 import type { KnowledgeNodeRecord } from '../types.js';
 import { readString } from './utils.js';
 
@@ -12,14 +13,30 @@ export class KnowledgeFactSelectionHeldError extends Error {
   constructor() { super('Knowledge fact relevance did not settle; no fact was selected.'); }
 }
 
-/** Facts a reading says bear on the query. A fact whose reading does not settle is left out and counted in `tally`. */
+/** At most this many facts are read for one question; the rest are ranked out locally by the words they share with it. */
+export const ANSWER_FACT_SHORTLIST = 16;
+
+/**
+ * Facts a reading says bear on the query. Code shortlists at most
+ * {@link ANSWER_FACT_SHORTLIST} of them first (most words shared with the
+ * question, then listing order); a fact whose reading does not settle is left
+ * out and counted in `tally`.
+ */
 export async function filterFactsForQuery(query: string, facts: readonly KnowledgeNodeRecord[], signal?: AbortSignal,
   tally?: AnswerUnsettledTally): Promise<KnowledgeNodeRecord[]> {
   requireSemanticKnowledge();
   assertAnswerVerificationActive(signal);
   const byId = new Map(facts.filter((fact) => fact.status === 'active').map((fact) => [fact.id, fact]));
-  const shortlist = [...byId.values()];
-  if (shortlist.length === 0) return [];
+  const active = [...byId.values()];
+  if (active.length === 0) return [];
+  const shortlist = active.length <= ANSWER_FACT_SHORTLIST ? active : (() => {
+    const ranked = rankClassicCatalog(active, query, (fact) => ({ id: fact.title,
+      description: [fact.summary, readString(fact.metadata.value), readString(fact.metadata.evidence)].filter(Boolean).join('\n') }))
+      .map((match) => match.entry);
+    const chosen = new Set(ranked.slice(0, ANSWER_FACT_SHORTLIST));
+    for (const fact of active) { if (chosen.size >= ANSWER_FACT_SHORTLIST) break; chosen.add(fact); }
+    return [...chosen];
+  })();
   const candidates = shortlist.map((fact) => ({ id: fact.id, content: {
     title: fact.title, summary: fact.summary ?? '', value: readString(fact.metadata.value) ?? '',
     evidence: readString(fact.metadata.evidence) ?? '', kind: readString(fact.metadata.factKind) ?? 'note',

@@ -16,6 +16,9 @@ export interface AnswerSourceRankingEvidence {
   readonly excerptSpans?: readonly unknown[] | undefined;
 }
 
+/** At most this many sources of one answer are read for ranking. */
+export const ANSWER_SOURCE_SHORTLIST = 24;
+
 /** Readings that did not settle in one answer; each left its candidate out. */
 export interface AnswerUnsettledTally { unsettled: number }
 
@@ -38,7 +41,8 @@ export async function readAnswerSourceRanking(
   const sources = uniqueSources(evidence.flatMap((item) => item.source ? [item.source] : []))
     .filter((source) => source.status !== 'failed' && source.status !== 'stale');
   const realSources = sources.filter((source) => !isGeneratedKnowledgeSource(source));
-  const shortlist = (realSources.length > 0 ? realSources : sources);
+  // Evidence arrives best first; the ranking reads at most ANSWER_SOURCE_SHORTLIST of its sources.
+  const shortlist = (realSources.length > 0 ? realSources : sources).slice(0, ANSWER_SOURCE_SHORTLIST);
   if (shortlist.length === 0) return [];
   const candidates = shortlist.map((source) => ({
     id: source.id,

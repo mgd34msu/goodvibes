@@ -67,11 +67,25 @@ function knowledgePromptTask(record: AgentRecord): string {
   return knowledgeQueryText(record.task);
 }
 
+/** Packets prepared for recent agents, by agent id, per knowledge service; a sub-agent reuses its parent's. */
+const preparedPackets = new WeakMap<object, Map<string, PreparedKnowledgePromptPacket>>();
+const PREPARED_PACKETS_PER_SERVICE = 64;
+
+/**
+ * The knowledge packet is prepared once per task: an agent started by another
+ * agent works on part of that agent's task and reuses its packet, so a fan-out
+ * of sub-agents costs one packet, not one each.
+ */
 async function prepareDecisionOrchestratorPromptContext(record: AgentRecord, deps?: PromptContextDeps, signal?: AbortSignal): Promise<PromptContextDeps | undefined> {
   if (!deps?.knowledgeService) return deps;
-  const preparedKnowledgePrompt = await deps.knowledgeService.preparePromptPacket(
+  let packets = preparedPackets.get(deps.knowledgeService);
+  if (!packets) { packets = new Map(); preparedPackets.set(deps.knowledgeService, packets); }
+  const inherited = record.parentAgentId ? packets.get(record.parentAgentId) : undefined;
+  const preparedKnowledgePrompt = inherited ?? await deps.knowledgeService.preparePromptPacket(
     knowledgePromptTask(record), record.writeScope ?? [], undefined, { ...(signal ? { signal } : {}) },
   );
+  packets.delete(record.id); packets.set(record.id, preparedKnowledgePrompt);
+  while (packets.size > PREPARED_PACKETS_PER_SERVICE) packets.delete(packets.keys().next().value!);
   return { ...deps, preparedKnowledgePrompt };
 }
 

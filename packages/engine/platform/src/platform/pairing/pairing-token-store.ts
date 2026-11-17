@@ -1734,12 +1734,15 @@ export class PairingTokenManager {
 
   /**
    * Revoke the shared operator token; report only persisted success. Every
-   * copy handed out stops signing in. In the serving daemon (a bound
-   * {@link SharedTokenCustody}) the token is replaced in the same step: the
-   * new value is recorded here, written to the daemon home where this
-   * machine's apps read it, and served from then on, so those apps stay
-   * signed in. Without a bound daemon only the revocation is recorded, and
-   * the daemon writes the replacement when it next reads this store.
+   * copy handed out stops signing in, and each revoke ends the value in use:
+   * once the token was revoked, revoking again replaces the replacement, so a
+   * copy of it taken off this machine stops signing in too. In the serving
+   * daemon (a bound {@link SharedTokenCustody}) the token is replaced in the
+   * same step: the new value is recorded here, written to the daemon home
+   * where this machine's apps read it, and served from then on, so those apps
+   * stay signed in. Without a bound daemon only the revocation is recorded
+   * (the current replacement is forgotten), and the daemon writes a new
+   * replacement when it next reads this store.
    *
    * The owner's own machine's native identity and its grants end with the old
    * value; the next native use after the replacement makes a new one.
@@ -1751,17 +1754,17 @@ export class PairingTokenManager {
     const custody = this.#sharedCustody;
     const served = custody?.current() ?? null;
     if (custody && served !== null) {
-      // Already revoked and the served value is the replacement: nothing is left to do.
-      if (this.isLegacyRevoked() && !this.refusesSharedToken(served)) return;
       const refusal = custody.replacementRefusal();
       if (refusal !== null) throw new SharedTokenNotReplaceableError(refusal);
       this.#replaceSharedToken(custody);
       return;
     }
     this.mutate(snapshot => {
-      const changed = snapshot.legacyRevoked !== true || snapshot.localOwner !== undefined;
+      const changed = snapshot.legacyRevoked !== true || snapshot.localOwner !== undefined || snapshot.localSharedHash !== undefined;
       snapshot.legacyRevoked = true;
       delete snapshot.localOwner;
+      // The replacement in use ends too; the serving daemon writes a new one when it reads this.
+      delete snapshot.localSharedHash;
       return { value: undefined, changed };
     });
   }

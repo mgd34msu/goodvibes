@@ -17,7 +17,8 @@
  *     consequence: the daemon replaces it, so every device still on the old
  *     value is signed out at once (this browser too if it has not migrated
  *     yet), while the apps on the daemon's machine read the new value and stay
- *     signed in. Hidden once legacySharedRevoked is already true.
+ *     signed in. Once legacySharedRevoked is true the same act replaces the
+ *     replacement, for when a copy of it may have left the daemon's machine.
  */
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -113,12 +114,14 @@ export function PairingTokensSettings() {
   });
 
   const revokeShared = useMutation({
-    mutationFn: () => platformClient.operator.pairing.tokens.revokeShared(),
-    onSuccess: async () => {
-      toast({ title: 'Shared token revoked', description: 'Any device still using it is now signed out.', tone: 'success' });
+    mutationFn: (_replacing: boolean) => platformClient.operator.pairing.tokens.revokeShared(),
+    onSuccess: async (_result, replacing) => {
+      toast(replacing
+        ? { title: 'Shared token replaced', description: 'The previous value no longer signs in anywhere; the apps on the daemon\'s machine read the new one.', tone: 'success' }
+        : { title: 'Shared token revoked', description: 'Any device still using it is now signed out.', tone: 'success' });
       await invalidateTokens();
     },
-    onError: (error: unknown) => toast({ title: 'Revoke failed', description: formatError(error), tone: 'danger' }),
+    onError: (error: unknown, replacing) => toast({ title: replacing ? 'Replace failed' : 'Revoke failed', description: formatError(error), tone: 'danger' }),
   });
 
   async function handleRevoke(token: PublicPairingToken): Promise<void> {
@@ -151,7 +154,18 @@ export function PairingTokensSettings() {
       tone: 'danger',
     });
     if (!ok) return;
-    revokeShared.mutate();
+    revokeShared.mutate(false);
+  }
+
+  async function handleReplaceShared(): Promise<void> {
+    const ok = await confirm.ask({
+      title: 'Replace the shared token?',
+      description: 'The value the daemon\'s own machine holds stops signing in everywhere, including any copy that left that machine. The daemon writes a new one there, so the terminal, the Agent and the daemon CLI stay signed in.',
+      confirmLabel: 'Replace the shared token',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    revokeShared.mutate(true);
   }
 
   const [relayPairing, setRelayPairing] = useState(() => getStoredRelayPairing());
@@ -286,9 +300,21 @@ export function PairingTokensSettings() {
       <SettingsBlock
         title="Shared token"
         description={legacySharedRevoked
-          ? 'The shared token was revoked and replaced. Only the apps on the daemon\'s own machine hold the new one; every other device uses its own token.'
+          ? 'The shared token was revoked and replaced. Only the apps on the daemon\'s own machine hold the new one; every other device uses its own token. Replace it again if a copy may have left that machine.'
           : 'Older devices may still be signed in with one shared token. Give each its own token before revoking the shared one: revoking signs out every device still using it, while the apps on the daemon\'s own machine get a new one and stay signed in.'}
       >
+        {legacySharedRevoked && (
+          <div className="pairing-tokens-legacy__actions">
+            <Button
+              variant="danger"
+              className="pairing-tokens-legacy__revoke"
+              disabled={revokeShared.isPending}
+              onClick={() => void handleReplaceShared()}
+            >
+              {revokeShared.isPending ? 'Replacing…' : 'Replace the shared token'}
+            </Button>
+          </div>
+        )}
         {!legacySharedRevoked && (
           <div className="pairing-tokens-legacy__actions">
             <Button disabled={migrate.isPending} onClick={() => void handleMigrate()}>

@@ -78,7 +78,8 @@ class DevicesModalSurface implements ConfigModalSurface {
     { key: 'm', id: 'migrateShared', label: 'migrate off shared token', confirm: true, enabledFor: () => !this.deps.pairingTokens.isLegacyRevoked() },
     { key: 'v', id: 'toggleReveal', label: 'reveal minted token', enabledFor: () => this.minted !== null },
     { key: 'c', id: 'copyMinted', label: 'copy minted token', enabledFor: () => this.minted !== null && Boolean(this.deps.copyToClipboard) },
-    { key: 's', id: 'revokeShared', label: 'revoke shared token', confirm: true, enabledFor: () => !this.deps.pairingTokens.isLegacyRevoked() },
+    // Once revoked, the same action replaces the replacement, so a copy of it taken off this machine stops signing in.
+    { key: 's', id: 'revokeShared', label: 'revoke or replace shared token', confirm: true, enabledFor: () => true },
   ];
 
   onOpen(requestRender: () => void): void {
@@ -115,7 +116,7 @@ class DevicesModalSurface implements ConfigModalSurface {
     rows.push(infoRow(
       'legacy',
       legacyRevoked
-        ? 'Shared token: revoked and replaced; only the apps on this machine hold it.'
+        ? 'Shared token: revoked and replaced; only the apps on this machine hold it. Ctrl+S replaces it again if a copy may have left this machine; the apps here read the new one and stay signed in.'
         : 'Shared token: active. This machine\'s own apps (this terminal, the Agent, the daemon CLI) sign in with it, as do devices paired before per-device tokens. Move a device to its own token with Ctrl+G then m. Revoking it (Ctrl+S) signs out every other device still using it; the daemon writes a new one for this machine, so its apps stay signed in.',
       legacyRevoked ? { fg: MODAL_TONES.dim } : { fg: MODAL_TONES.reasoning },
     ));
@@ -174,10 +175,12 @@ class DevicesModalSurface implements ConfigModalSurface {
     }
 
     if (id === 'revokeShared') {
-      if (tokens.isLegacyRevoked()) { ctx.setStatus('The shared token is already revoked; only this machine holds its replacement.'); return; }
+      const replacing = tokens.isLegacyRevoked();
       const revokeShared = this.deps.revokeShared;
       if (!revokeShared) { ctx.setStatus('The shared token is revoked by the daemon, and no daemon is reachable from here.'); return; }
-      ctx.setStatus('Asking the daemon to revoke and replace the shared token...');
+      ctx.setStatus(replacing
+        ? 'Asking the daemon to replace the shared token this machine holds...'
+        : 'Asking the daemon to revoke and replace the shared token...');
       void revokeShared().then(
         (outcome) => { ctx.setStatus(outcome.message); this.requestRender(); },
         (error: unknown) => { ctx.setStatus(`The shared token was not revoked: ${error instanceof Error ? error.message : String(error)}`); this.requestRender(); },

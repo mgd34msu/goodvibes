@@ -61,6 +61,10 @@ export function readingsPort(options: { readonly gate?: GateReadingTable; readon
   const tools = toolReadingsPort([], options.gate ?? [['"tool":"read"', READ_ONLY], ['"tool":"find"', READ_ONLY]]);
   const fallback = fakePort((_name, question) => neutral(question));
   const included = fakePort((_name, question) => question.type === 'noul' ? noulAnswer(0.97) : neutral(question));
+  // Knowledge relevance: the measured searches ask about deploying the service; a source titled for it is useful evidence.
+  const relevant = fakePort((_name, question, state) => question.type === 'noul'
+    ? noulAnswer(/deploying the service/i.test(String((state as { candidate?: { title?: unknown } } | undefined)?.candidate?.title ?? '')) ? 0.97 : 0.03)
+    : neutral(question));
   return {
     model: intake.port.model,
     ask(request) {
@@ -75,6 +79,7 @@ export function readingsPort(options: { readonly gate?: GateReadingTable; readon
       if (battery === 'contract.request-route') return intake.port.ask(request);
       // Knowledge scope: every measured source is ordinary content that belongs in the view.
       if (battery === 'engine.knowledge.scope-selection') return included.port.ask(request);
+    if (battery === 'engine.knowledge.answer-evidence-relevance') return relevant.port.ask(request);
       if (battery?.startsWith('engine.gate.') || battery?.startsWith('engine.tools.')) return tools.port.ask(request);
       const key = battery ?? request.context?.site ?? '(unnamed)';
       decisionCounts.unrouted[key] = (decisionCounts.unrouted[key] ?? 0) + 1;

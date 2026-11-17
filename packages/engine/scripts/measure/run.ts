@@ -1,5 +1,8 @@
 /**
- * Performance measurement harness. Measures, prints and writes JSON; it asserts nothing.
+ * Performance measurement harness. Measures, prints and writes JSON. Every
+ * scenario checks that its operation succeeded (harness.ts assertOutcome); a
+ * scenario that failed reports its reason instead of numbers, and the run
+ * exits 1 naming each failure.
  *
  *   bun packages/engine/scripts/measure/run.ts [--only <name>[,<name>...]] [--out <file.json>]
  *
@@ -132,6 +135,15 @@ async function main(): Promise<void> {
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, `${JSON.stringify(result, null, 2)}\n`);
     console.log(`\nwrote ${out}`);
+  }
+  const failures = [
+    ...reports.filter((report): report is { name: string; error: string } => 'error' in report && typeof report.error === 'string'),
+    ...startup.filter((report) => report.error !== undefined).map((report) => ({ name: report.name, error: report.error! })),
+  ];
+  if (failures.length > 0) {
+    console.error(`\n${failures.length} scenario(s) failed; their numbers are not reported:`);
+    for (const failure of failures) console.error(`- ${failure.name}: ${failure.error.split('\n')[0]}`);
+    process.exitCode = 1;
   }
 }
 

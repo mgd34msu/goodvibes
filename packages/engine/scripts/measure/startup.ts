@@ -16,6 +16,8 @@ export interface StartupScenario {
   /** A line on stdout that means ready; absent means "the process exited". */
   readonly readyPattern?: RegExp;
   readonly allowLoopback?: boolean;
+  /** What the output must show for the run to count as a success. */
+  readonly expect?: RegExp;
   readonly note: string;
 }
 
@@ -32,11 +34,11 @@ const RUNS = 3;
 
 export const STARTUP_SCENARIOS: readonly StartupScenario[] = [
   { name: 'startup-bun-floor', entry: 'packages/engine/scripts/measure/instrument.ts', args: [], note: 'reference: bun plus this harness preload, no product code' },
-  { name: 'startup-tui-version', entry: 'products/tui/src/main.ts', args: ['--version'], note: 'spawn to exit; loads the interactive module graph first' },
+  { name: 'startup-tui-version', entry: 'products/tui/src/main.ts', args: ['--version'], expect: /\d+\.\d+\.\d+/, note: 'spawn to exit; loads the interactive module graph first' },
   { name: 'startup-tui-status', entry: 'products/tui/src/main.ts', args: ['status'], note: 'spawn to exit; config, sandbox probe, report' },
-  { name: 'startup-agent-version', entry: 'products/agent/src/main.ts', args: ['--version'], note: 'spawn to exit; metadata fast path' },
+  { name: 'startup-agent-version', entry: 'products/agent/src/main.ts', args: ['--version'], expect: /\d+\.\d+\.\d+/, note: 'spawn to exit; metadata fast path' },
   { name: 'startup-agent-status', entry: 'products/agent/src/main.ts', args: ['status'], note: 'spawn to exit; full graph, report' },
-  { name: 'startup-daemon-version', entry: 'products/daemon/src/cli/entrypoint.ts', args: ['--version'], note: 'spawn to exit' },
+  { name: 'startup-daemon-version', entry: 'products/daemon/src/cli/entrypoint.ts', args: ['--version'], expect: /\d+\.\d+\.\d+/, note: 'spawn to exit' },
   {
     name: 'startup-daemon-serve', entry: 'products/daemon/src/cli/entrypoint.ts',
     args: (port) => ['serve', '--port', String(port), '--hostname', '127.0.0.1'],
@@ -86,6 +88,8 @@ async function once(scenario: StartupScenario, repo: string, envFor: (root: stri
     await readStdout;
     output += await stderr;
     if (scenario.readyPattern && ms === undefined) throw new Error(`no ready line (exit ${code}): ${output.slice(-400)}`);
+    if (!scenario.readyPattern && code !== 0) throw new Error(`exited ${code}: ${output.slice(-400)}`);
+    if (scenario.expect && !scenario.expect.test(output)) throw new Error(`output does not show ${scenario.expect}: ${output.slice(-400)}`);
     return { ms: ms ?? exitMs, code: scenario.readyPattern ? 0 : code, output };
   } finally {
     rmSync(root, { recursive: true, force: true });

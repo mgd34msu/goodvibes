@@ -1,9 +1,10 @@
 /**
  * The Agent product's `route` plan and catalog search, on the tool registry
- * the Agent registers at start-up (runtime/bootstrap-agent-tools.ts), composed
- * the way products/agent/src/test/tools/agent-harness-catalog-bootstrap.test.ts
- * composes it. Product modules are imported by computed path so the engine's
- * typecheck does not pull the Agent sources into its program.
+ * the Agent's start-up builds: composeAgentToolRegistry (the platform tools,
+ * the tools every Agent turn has, the policy guard, definition compaction) as
+ * runtime/bootstrap-core.ts calls it, then registerAgentTools as
+ * runtime/bootstrap.ts does. Product modules are imported by computed path so
+ * the engine's typecheck does not pull the Agent sources into its program.
  */
 import { join, resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
@@ -14,7 +15,7 @@ import { ConfigManager } from '../../../platform/src/platform/config/manager.ts'
 import { RuntimeEventBus } from '../../../platform/src/platform/runtime/events/index.ts';
 import { ToolRegistry } from '../../../platform/src/platform/tools/registry.ts';
 import { countingPort, readingsPort } from '../fakes.ts';
-import type { Instance, MeasureEnv, Scenario } from '../harness.ts';
+import { assertOutcome, type Instance, type MeasureEnv, type Scenario } from '../harness.ts';
 
 const AGENT = resolve(import.meta.dir, '../../../../../products/agent/src');
 const A = 'products/agent/src';
@@ -22,6 +23,8 @@ const load = <T>(path: string): Promise<T> => import(join(AGENT, path)) as Promi
 
 interface AgentServices {
   readonly shellPaths: unknown;
+  readonly localReadSourceOwner: unknown;
+  readonly researchReportSourceOwner: unknown;
   readonly providerRegistry: unknown;
   readonly judgment: { port: JudgmentPort; readonly decisionLog?: Parameters<typeof withDecisionLog>[1] };
   close(): Promise<void>;
@@ -30,6 +33,8 @@ interface ExecuteResult { readonly success: boolean; readonly output?: string; r
 
 const ROUTE_QUERY = 'fix the failing tests in parallel';
 const CATALOG_QUERY = 'search my inbox for the invoice from last week';
+/** The registered tool that reads the owner's mail. */
+const INBOX_TOOL = 'personal_ops';
 
 interface AgentFloor {
   readonly registry: ToolRegistry;
@@ -39,9 +44,8 @@ interface AgentFloor {
 
 async function openAgent(env: MeasureEnv): Promise<AgentFloor> {
   const { createPreparedAgentRuntimeServices } = await load<{ createPreparedAgentRuntimeServices(options: Record<string, unknown>): Promise<AgentServices> }>('test/helpers/prepared-runtime-services.ts');
-  const { researchScreeningFixture, cleanupResearchScreeningFixtures } = await load<{ researchScreeningFixture(options?: Record<string, unknown>): { owner: unknown }; cleanupResearchScreeningFixtures(): Promise<void> }>('test/helpers/research-screening.ts');
   const { taskRoutePort } = await load<{ taskRoutePort(fixtures: Record<string, unknown>): { port: JudgmentPort } }>('test/helpers/task-route-readings.ts');
-  const { bindAgentResearchSourceOwner } = await import('@goodvibes-jev/engine/terminal-shell/agent-turn') as { bindAgentResearchSourceOwner(registry: ToolRegistry, owner: unknown): void };
+  const { composeAgentToolRegistry } = await load<{ composeAgentToolRegistry(deps: Record<string, unknown>): { toolRegistry: ToolRegistry; dispose(): unknown } }>('runtime/agent-tool-registry.ts');
   const { CommandRegistry } = await load<{ CommandRegistry: new () => unknown }>('input/command-registry.ts');
   const { registerAgentTools } = await load<{ registerAgentTools(deps: Record<string, unknown>): void }>('runtime/bootstrap-agent-tools.ts');
   const { createRuntimeStore } = await load<{ createRuntimeStore(): unknown }>('runtime/store/index.ts');
@@ -50,11 +54,12 @@ async function openAgent(env: MeasureEnv): Promise<AgentFloor> {
   mkdirSync(join(root, '.goodvibes', 'agent'), { recursive: true });
   const configManager = new ConfigManager({ surfaceRoot: 'agent', workingDir: root, homeDir: env.home });
   const services = await createPreparedAgentRuntimeServices({ configManager, runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), workingDir: root, homeDirectory: env.home, modelDiscovery: 'skip' });
-  // The protected research-source owner talks to an in-process loopback fake of
-  // the screening service (test helper); its requests are counted as fixtureRequests.
-  const screening = researchScreeningFixture({ recordCalls: false });
-  const registry = new ToolRegistry();
-  bindAgentResearchSourceOwner(registry, screening.owner);
+  // As runtime/bootstrap-core.ts composes the main conversation's registry.
+  const composed = composeAgentToolRegistry({
+    services, configManager, homeDirectory: env.home, resolveSessionId: () => 'measure-agent',
+    researchReportSourceOwner: services.researchReportSourceOwner, researchSourceOwner: services.localReadSourceOwner,
+  });
+  const registry = composed.toolRegistry;
   const context = {
     workspace: { shellPaths: services.shellPaths },
     provider: { providerRegistry: services.providerRegistry },
@@ -91,19 +96,27 @@ async function openAgent(env: MeasureEnv): Promise<AgentFloor> {
   return {
     registry,
     toolCount: registry.list().length,
-    async close() { await services.close(); await cleanupResearchScreeningFixtures(); },
+    async close() { await Promise.resolve(composed.dispose()); await services.close(); },
   };
 }
 
-function agentScenario(name: string, drives: string, entries: string[], args: Record<string, unknown>): Scenario {
+/** Returns why the tool's output is not the expected answer, or undefined when it is. */
+type OutputCheck = (output: Record<string, unknown>, registry: ToolRegistry) => string | undefined;
+
+function agentScenario(name: string, drives: string, entries: string[], args: Record<string, unknown>, check: OutputCheck): Scenario {
   return {
     name, drives, entries, runs: 3,
-    testOnly: 'the protected research-source owner points at the test helper\'s in-process loopback screening service (products/agent/src/test/helpers/research-screening.ts)',
     async setup(env): Promise<Instance> {
       const agent = await openAgent(env);
       return {
         async op() {
           const result = await agent.registry.execute('measure-agent', String(args['tool']), args['input'] as Record<string, unknown>) as ExecuteResult;
+          assertOutcome(result.success, `${String(args['tool'])} failed: ${String(result.error ?? result.output ?? '').slice(0, 300)}`);
+          let parsed: Record<string, unknown> | undefined;
+          try { parsed = JSON.parse(result.output ?? '') as Record<string, unknown>; } catch { parsed = undefined; }
+          assertOutcome(parsed !== undefined, `${String(args['tool'])} answered text that is not its JSON result: ${String(result.output).slice(0, 200)}`);
+          const wrong = check(parsed, agent.registry);
+          assertOutcome(wrong === undefined, `${String(args['tool'])} answered, but ${wrong}`);
           return { succeeded: result.success ? 1 : 0, registeredTools: agent.toolCount, outputChars: (result.output ?? result.error ?? '').length };
         },
         dispose: () => agent.close(),
@@ -115,8 +128,22 @@ function agentScenario(name: string, drives: string, entries: string[], args: Re
 export const scenarios: Scenario[] = [
   agentScenario('agent-route-plan', `ToolRegistry.execute('route', { action: 'plan', query: '${ROUTE_QUERY}' }) on the Agent's full start-up registry.`,
     [`${A}/tools/agent-route-tool.ts:73 createAgentRouteTool (registered at :121)`, `${A}/tools/agent-route-planner.ts planAgentTaskRoute`, `${A}/runtime/bootstrap-agent-tools.ts:68 registerAgentTools`],
-    { tool: 'route', input: { action: 'plan', query: ROUTE_QUERY } }),
+    { tool: 'route', input: { action: 'plan', query: ROUTE_QUERY } },
+    (output) => {
+      const preferred = (output['preferred'] as { id?: unknown } | undefined)?.id;
+      if (output['status'] !== 'ready') return `the plan's status is ${String(output['status'])}`;
+      // The route readings pick build-work with the delegated slot for this query.
+      return preferred === 'delegated-build-work' ? undefined : `the preferred route is ${String(preferred)}, not delegated-build-work`;
+    }),
   agentScenario('agent-catalog-search', `ToolRegistry.execute('agent_harness', { mode: 'tools', query: '${CATALOG_QUERY}' }) (the catalog search) on the Agent's full start-up registry.`,
     [`${A}/tools/agent-harness-tool.ts:162 createAgentHarnessTool (mode tools -> searchHarnessModelTools)`, `${A}/runtime/bootstrap-agent-tools.ts:68 registerAgentTools`],
-    { tool: 'agent_harness', input: { mode: 'tools', query: CATALOG_QUERY } }),
+    { tool: 'agent_harness', input: { mode: 'tools', query: CATALOG_QUERY } },
+    (output, registry) => {
+      const names = Array.isArray(output['tools']) ? (output['tools'] as Array<{ name?: unknown }>).map((tool) => String(tool.name)) : [];
+      if (names.length === 0) return 'it listed no tools';
+      const unknown = names.filter((tool) => !registry.has(tool));
+      if (unknown.length > 0) return `it listed tools that are not registered: ${unknown.join(', ')}`;
+      // The tool that reads the owner's inbox must be among the matches for an inbox question.
+      return names.includes(INBOX_TOOL) ? undefined : `${INBOX_TOOL} is not among the matches: ${names.join(', ')}`;
+    }),
 ];

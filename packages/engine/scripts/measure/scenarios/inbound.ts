@@ -11,8 +11,9 @@ import { ChannelPolicyManager } from '../../../platform/src/platform/channels/po
 import { refuseCardShapedIngress } from '../../../platform/src/platform/daemon/surface-card-gate.ts';
 import { ConfigManager } from '../../../platform/src/platform/config/manager.ts';
 import { createShellPathService } from '../../../platform/src/platform/runtime/shell-paths.ts';
+import { SharedSessionBroker } from '../../../platform/src/platform/control-plane/session-broker.ts';
 import { openBroker } from './stores.ts';
-import type { Instance, Scenario } from '../harness.ts';
+import { assertOutcome, type Instance, type Scenario } from '../harness.ts';
 
 const P = 'packages/engine/platform/src/platform';
 const SECRET = 'measure-webhook-secret';
@@ -56,17 +57,32 @@ const inboundMessage: Scenario = {
       signWebhookPayload: (body, secret) => `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`,
       queueWebhookReply: () => {},
     };
+    let externalId = '';
     return {
       async op(run) {
         spawned = 0;
-        const externalId = `conversation-${run}-${createHash('sha1').update(String(Date.now())).digest('hex').slice(0, 8)}`;
+        externalId = `conversation-${run}-${createHash('sha1').update(String(Date.now())).digest('hex').slice(0, 8)}`;
         const response = await handleGenericWebhookSurface(new Request('http://127.0.0.1/webhook', {
           method: 'POST',
           headers: { 'content-type': 'application/json', 'x-goodvibes-webhook-secret': SECRET },
           body: JSON.stringify({ message: 'Please summarise the open pull requests for me.', externalId, userId: 'owner' }),
         }), context);
-        await response.arrayBuffer();
+        const body = await response.text();
+        assertOutcome(response.status === 200, `the webhook answered HTTP ${response.status}: ${body.slice(0, 300)}`);
+        assertOutcome(spawned === 1, `the message was accepted but ${spawned} turns were dispatched`);
         return { httpStatus: response.status, turnsDispatched: spawned, sessionStoreBytes: Bun.file(b.path).size };
+      },
+      async verify() {
+        // What a restarted daemon loads: a second broker over the same store holds the message in a session.
+        const reopened = new SharedSessionBroker({ storePath: b.path, routeBindings: b.routeBindings, agentStatusProvider: { getStatus: () => null },
+          messageSender: { send: () => true } as unknown as ConstructorParameters<typeof SharedSessionBroker>[0]['messageSender'] });
+        await reopened.start();
+        try {
+          const holder = reopened.listSessions(10_000).find((session) => JSON.stringify(session).includes(externalId));
+          const messages = holder ? reopened.getMessages(holder.id, 10_000) : [];
+          assertOutcome(messages.some((message) => message.body === 'Please summarise the open pull requests for me.'),
+            `the message of ${externalId} is not in the stored sessions${holder ? ` (session ${holder.id} holds ${messages.length} messages)` : ' (no session names it)'}`);
+        } finally { await reopened.stop(); }
       },
       async dispose() { await b.broker.stop(); b.restore(); },
     };

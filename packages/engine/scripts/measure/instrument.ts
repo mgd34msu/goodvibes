@@ -139,6 +139,42 @@ wrap(fsp, 'readdir', 'readdirs');
 wrap(fsp, 'mkdir', 'mkdirs');
 wrap(fsp, 'mkdtemp', 'mkdirs');
 for (const name of ['unlink', 'rm', 'rmdir']) wrap(fsp, name, 'removes');
+
+// Simulated slow storage, for scenarios that measure overlap: a read of a path
+// the scenario names takes that much longer. A synchronous read blocks the
+// thread for the delay, as a slow disk does; an asynchronous one waits without
+// blocking. Nothing in product code sleeps.
+let slowReadDelay: ((path: string) => number) | undefined;
+export function setSlowReads(delayOf: ((path: string) => number) | undefined): void { slowReadDelay = delayOf; }
+function readDelayOf(target: unknown): number {
+  if (!slowReadDelay) return 0;
+  const path = typeof target === 'string' ? target : target instanceof URL ? target.pathname : Buffer.isBuffer(target) ? target.toString() : undefined;
+  return path === undefined ? 0 : Math.max(0, slowReadDelay(path));
+}
+const blockFor = (ms: number): void => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); };
+const waitFor = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+{
+  const countedSync = fs.readFileSync as AnyFunction;
+  (fs as unknown as Record<string, unknown>)['readFileSync'] = function (this: unknown, ...args: unknown[]): unknown {
+    const ms = readDelayOf(args[0]);
+    if (ms > 0) blockFor(ms);
+    return countedSync.apply(this, args);
+  };
+  const countedCallback = fs.readFile as AnyFunction;
+  (fs as unknown as Record<string, unknown>)['readFile'] = function (this: unknown, ...args: unknown[]): unknown {
+    const ms = readDelayOf(args[0]);
+    if (ms <= 0) return countedCallback.apply(this, args);
+    setTimeout(() => countedCallback.apply(this, args), ms);
+    return undefined;
+  };
+  const countedPromise = fsp.readFile as AnyFunction;
+  (fsp as unknown as Record<string, unknown>)['readFile'] = async function (this: unknown, ...args: unknown[]): Promise<unknown> {
+    const ms = readDelayOf(args[0]);
+    if (ms > 0) await waitFor(ms);
+    return countedPromise.apply(this, args);
+  };
+}
+
 let fileHandlePatched = false;
 const originalOpen = fsp.open;
 const patchedOpen = async function (...args: Parameters<typeof fsp.open>) {
@@ -186,6 +222,8 @@ try {
       try {
         Object.defineProperty(file, name, { configurable: true, value: (...inner: unknown[]) => {
           counters.fileReads++;
+          const ms = readDelayOf(args[0]);
+          if (ms > 0) return waitFor(ms).then(() => (method as AnyFunction).apply(file, inner));
           return (method as AnyFunction).apply(file, inner);
         } });
       } catch { /* left uncounted */ }

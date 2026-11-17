@@ -12,8 +12,10 @@ export interface MeasureEnv {
 export interface Instance {
   /** Unmeasured preparation before each run (run -1 is the warm-up). */
   prepare?(run: number): Promise<void> | void;
-  /** The measured operation; may return scenario-specific counts. */
+  /** The measured operation; may return scenario-specific counts. Checks that cost nothing (its own return value) belong here. */
   op(run: number): Promise<Record<string, number> | void>;
+  /** Checks of the operation's outcome that read stores or files: run after the counters are taken, so they are not counted. */
+  verify?(run: number): Promise<void> | void;
   dispose?(): Promise<void> | void;
 }
 
@@ -59,6 +61,21 @@ export interface ScenarioReport {
   readonly error?: string;
 }
 
+/**
+ * Thrown by a scenario whose operation did not do what it claims (a tool call
+ * failed, a search found nothing it should have, a write did not land). The
+ * scenario then reports this reason instead of numbers, and run.ts exits
+ * non-zero, so a time is never reported for an operation that failed.
+ */
+export class ScenarioFailure extends Error {
+  constructor(message: string) { super(message); this.name = 'ScenarioFailure'; }
+}
+
+/** Every scenario checks its own outcome with this after each run, the warm-up included. */
+export function assertOutcome(condition: unknown, reason: string): asserts condition {
+  if (!condition) throw new ScenarioFailure(reason);
+}
+
 /** Work an operation starts but does not await (debounced saves, decision log records) is counted if it lands within this window. */
 export const SETTLE_MS = 150;
 
@@ -91,19 +108,23 @@ async function measureOnce(instance: Instance, run: number, base: KernelIo): Pro
   // Requests to an in-process fixture server standing in for a remote model service.
   if (fixtureTraffic.requests > 0) Object.assign(extra, { fixtureRequests: fixtureTraffic.requests, fixtureBytes: fixtureTraffic.bytes });
   const k1 = readKernelIo();
+  const counted = snapshotCounters();
+  const decisions = { requests: decisionCounts.requests, bytes: decisionCounts.bytes };
+  const provider = { requests: providerCounts.requests, bytes: providerCounts.bytes };
+  await instance.verify?.(run);
   return {
     wallMs,
-    counters: snapshotCounters(),
+    counters: counted,
     kernel: {
       osReadCalls: k1.osReadCalls - k0.osReadCalls - base.osReadCalls,
       osWriteCalls: k1.osWriteCalls - k0.osWriteCalls - base.osWriteCalls,
       osBytesRead: k1.osBytesRead - k0.osBytesRead - base.osBytesRead,
       osBytesWritten: k1.osBytesWritten - k0.osBytesWritten - base.osBytesWritten,
     },
-    decisionRequests: decisionCounts.requests,
-    decisionBytes: decisionCounts.bytes,
-    providerRequests: providerCounts.requests,
-    providerBytes: providerCounts.bytes,
+    decisionRequests: decisions.requests,
+    decisionBytes: decisions.bytes,
+    providerRequests: provider.requests,
+    providerBytes: provider.bytes,
     extra,
   };
 }

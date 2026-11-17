@@ -355,7 +355,7 @@ async function readBenchmarkMembership(source: { readonly artifact: ReturnType<t
 
 function benchmarkArtifactDescriptor(record: ArtifactDescriptor): ArtifactDescriptor {
   return { id: record.id, kind: record.kind, mimeType: record.mimeType, filename: record.filename,
-    sizeBytes: record.sizeBytes, sha256: record.sha256, createdAt: record.createdAt,
+    sizeBytes: record.sizeBytes, createdAt: record.createdAt,
     ...(typeof record.expiresAt === 'number' ? { expiresAt: record.expiresAt } : {}),
     ...(typeof record.sourceUri === 'string' ? { sourceUri: record.sourceUri } : {}),
     acquisitionMode: record.acquisitionMode, fetchMode: record.fetchMode, metadata: record.metadata };

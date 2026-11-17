@@ -138,7 +138,6 @@ function artifactSearchText(artifact: ArtifactDescriptor): string {
     artifact.mimeType,
     artifact.filename ?? '',
     artifact.sourceUri ?? '',
-    artifact.sha256,
     metadataText(artifact.metadata),
   ].join('\n').toLowerCase();
 }
@@ -197,7 +196,6 @@ function describeArtifact(artifact: ArtifactDescriptor, options: { readonly incl
     `  created ${isoTime(artifact.createdAt)}`,
     `  purpose ${purpose || '(none)'}`,
     `  source ${source || sanitizeArtifactSourceUri(artifact.sourceUri) || '(none)'}`,
-    ...(artifact.sha256 ? [`  recorded checksum ${artifact.sha256}`] : []),
     ...(options.includeRoute ? [`  inspect agent_artifacts mode:"show" artifactId:"${artifact.id}" includeContent:true`] : []),
     ...(options.includeRoute ? [`  export agent_artifacts mode:"export" artifactId:"${artifact.id}" destinationPath:"${exportPath}"`] : []),
   ];
@@ -313,7 +311,6 @@ async function exportArtifactToFile(
     `  bytes ${record.sizeBytes}`,
     `  mime ${record.mimeType}`,
     `  filename ${record.filename ?? '(none)'}`,
-    ...(record.sha256 ? [`  recorded checksum ${record.sha256}`] : []),
     `  overwrite ${overwrite ? 'yes' : 'no'}`,
     '  policy exact artifact bytes copied; artifact retained; content not printed',
   ].join('\n');
@@ -357,7 +354,6 @@ class PackageManifest {
       mimeType: record.mimeType,
       sizeBytes: record.sizeBytes,
       copiedBytes,
-      sha256: record.sha256,
       createdAt: isoTime(record.createdAt),
       expiresAt: record.expiresAt ? isoTime(record.expiresAt) : null,
       acquisitionMode: record.acquisitionMode,
@@ -667,7 +663,7 @@ export function createAgentArtifactsTool(
           },
           query: {
             type: 'string',
-            description: 'Search id, filename, MIME, source URI, sha256, and metadata.',
+            description: 'Search id, filename, MIME, source URI, and metadata.',
           },
           kind: {
             type: 'string',

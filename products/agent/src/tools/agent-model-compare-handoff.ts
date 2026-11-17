@@ -383,7 +383,6 @@ export async function buildComparisonHandoffArchivePayload(input: {
       mimeType: artifact.record.mimeType,
       sizeBytes: artifact.record.sizeBytes,
       copiedBytes: artifact.buffer.byteLength,
-      sha256: artifact.record.sha256,
       createdAt: new Date(artifact.record.createdAt).toISOString(),
       expiresAt: artifact.record.expiresAt ? new Date(artifact.record.expiresAt).toISOString() : null,
       acquisitionMode: artifact.record.acquisitionMode,

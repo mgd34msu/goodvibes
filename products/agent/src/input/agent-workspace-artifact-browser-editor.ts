@@ -54,7 +54,7 @@ export function createAgentArtifactBrowserEditor(): AgentWorkspaceLocalEditor {
     selectedFieldIndex: 0,
     message: 'List saved uploads, exports, generated media, source artifacts, and comparison artifacts from the shared Agent artifact store. This is read-only.',
     fields: [
-      { id: 'query', label: 'Search', value: '', required: false, multiline: false, hint: 'Optional search across id, filename, MIME type, source, sha256, and redacted metadata.' },
+      { id: 'query', label: 'Search', value: '', required: false, multiline: false, hint: 'Optional search across id, filename, MIME type, source, and redacted metadata.' },
       { id: 'kind', label: 'Kind', value: '', required: false, multiline: false, hint: 'Optional exact kind: file, image, audio, video, document, archive, or data.' },
       { id: 'mimeType', label: 'MIME type', value: '', required: false, multiline: false, hint: 'Optional MIME substring such as markdown, json, image, or pdf.' },
       { id: 'purpose', label: 'Purpose', value: '', required: false, multiline: false, hint: 'Optional artifact metadata purpose such as agent-model-compare.' },

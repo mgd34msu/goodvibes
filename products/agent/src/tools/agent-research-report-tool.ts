@@ -623,7 +623,6 @@ export function createAgentResearchReportTool(
           readBoolean(args.visualReport) ? '  visualReport markdown-visual-report-packet' : '',
           coverage ? `  citationCoverage ${coverage.citedSourceIds.length}/${coverage.sourceCount} cited; uncited ${coverage.missingSourceIds.length}; unknown ${coverage.unknownCitationIds.length}` : '',
           coverage && coverage.repairSuggestions.length > 0 ? `  citationRepair ${coverage.repairSuggestions.join(' ')}` : '',
-          ...(descriptor.sha256 ? [`  recorded checksum ${descriptor.sha256}`] : []),
           ...(settled?.lines ?? []),
           '  nextRoutes',
           ...reportNextRouteLines(descriptor, args, settled ? settled.runOpen : Boolean(runId)),

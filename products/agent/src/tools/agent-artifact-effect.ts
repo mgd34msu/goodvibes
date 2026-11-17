@@ -59,7 +59,7 @@ export function assertAgentArtifactBytes(descriptor: ArtifactDescriptor, buffer:
 export function captureAgentArtifactSource(store: Partial<Pick<ArtifactStore, 'get' | 'list' | 'readContent'>>, descriptor: ArtifactDescriptor, readCurrent?: (() => void) | undefined): () => void {
   const fingerprintOf = (source: ArtifactDescriptor) => JSON.stringify({
     id: source.id, kind: source.kind, mimeType: source.mimeType, filename: source.filename,
-    sizeBytes: source.sizeBytes, sha256: source.sha256, createdAt: source.createdAt,
+    sizeBytes: source.sizeBytes, createdAt: source.createdAt,
     expiresAt: source.expiresAt, sourceUri: source.sourceUri, acquisitionMode: source.acquisitionMode,
     fetchMode: source.fetchMode, metadata: source.metadata,
   });

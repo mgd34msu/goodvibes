@@ -24,12 +24,9 @@ import { OpenAICompatProvider, type OpenAICompatOptions } from './openai-compat.
 import { LOCAL_SERVER_EFFORT } from './discovered-traits.js';
 import { reasoningEffortLevels } from './reasoning-effort.js';
 import { toOpenAITools } from './tool-formats.js';
-import { getErrorStatus, normalizeProviderError } from './provider-error.js';
+import { isOtherApiFailure, normalizeProviderError } from './provider-error.js';
 import { OLLAMA_DONE_REASON_MAP } from './stop-reason-maps.js';
 import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
-
-/** Statuses that say the native endpoint is missing or refuses the method. */
-const OLLAMA_OTHER_API_STATUSES: ReadonlySet<number> = new Set([404, 405, 501]);
 
 type NativeFetch = (
   input: RequestInfo | URL,
@@ -114,7 +111,7 @@ export class OllamaProvider implements LLMProvider {
             // Once the stream has produced output the other API would answer from the start again.
             if (err instanceof ProviderError && err.phase === 'stream') throw err;
             // Only a missing endpoint sends the request to the other API; any other failure is the provider's own answer.
-            if (!OLLAMA_OTHER_API_STATUSES.has(getErrorStatus(err) ?? 0)) {
+            if (!isOtherApiFailure(err)) {
               throw normalizeProviderError(err, this.name, 'chat', 'request');
             }
             return null;

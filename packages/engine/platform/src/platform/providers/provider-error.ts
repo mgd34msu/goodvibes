@@ -5,12 +5,8 @@
  * llama-cpp.ts, and ollama.ts into a single definition.
  */
 
-import { captureJudgmentPort, categoryForCode, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { captureNormalizationSource, readNormalizedError, toProviderError } from '../utils/error-display.js';
+import { toProviderError } from '../utils/error-display.js';
 import type { ProviderError } from '../types/errors.js';
-import { readsAsAlternateApi } from '../routing/provider-readings.js';
-import { JudgmentInputError } from '../gate/judgment-input.js';
-import { decisionOrClassic } from '../runtime/decision-policy.js';
 
 /**
  * Extract an HTTP status code from an error object.
@@ -43,47 +39,17 @@ export function normalizeProviderError(
   });
 }
 
-/** Statuses that say the endpoint itself is missing or refuses the method: the other API decides on its own. */
+/** Statuses that say the endpoint itself is missing or refuses the method. */
 const OTHER_API_STATUSES: ReadonlySet<number> = new Set([404, 405, 501]);
 
 /**
  * Whether a local server's failure on one of its APIs means the same request
  * should go through its other API (Ollama native chat or OpenAI-compatible;
- * LM Studio native, responses or OpenAI-compatible). A missing endpoint's
- * status decides in code, as does a connection errno, which no other API on
- * the same server would fix; the wording of anything else is read by
- * routing.alternate-api.
+ * LM Studio native, responses or OpenAI-compatible). Decided by the status
+ * alone: a missing endpoint or method sends the request on, and any other
+ * failure is the server's own answer, shown as it wrote it.
  */
-export async function shouldUseOtherApi(err: unknown, site: string, options: JudgmentReadingOptions = {}): Promise<boolean> {
-  return decisionOrClassic(() => shouldUseDecisionOtherApi(err, site, options), () => {
-    const current = captureNormalizationSource(err, options); current();
-    const status = getErrorStatus(err);
-    current();
-    return status !== undefined && OTHER_API_STATUSES.has(status);
-  });
-}
-async function shouldUseDecisionOtherApi(err: unknown, site: string, options: JudgmentReadingOptions): Promise<boolean> {
-  const descriptors = Object.getOwnPropertyDescriptors(options);
-  const prototype: unknown = Object.getPrototypeOf(options);
-  if (typeof site !== 'string' || !site.trim() || (prototype !== Object.prototype && prototype !== null)
-    || Object.getOwnPropertySymbols(options).length || Object.values(descriptors).some((field) => !('value' in field)))
-    throw new JudgmentInputError('unsupported-input');
-  const sourceCurrent = captureNormalizationSource(err, options);
-  sourceCurrent();
+export function isOtherApiFailure(err: unknown): boolean {
   const status = getErrorStatus(err);
-  if (status !== undefined && OTHER_API_STATUSES.has(status)) { sourceCurrent(); return true; }
-  const code = err && typeof err === 'object' && typeof (err as { code?: unknown }).code === 'string' ? (err as { code: string }).code : undefined;
-  if (categoryForCode(code) !== undefined) { sourceCurrent(); return false; }
-  sourceCurrent();
-  const owner = captureJudgmentPort(site, { ...options, assertCurrent: sourceCurrent });
-  owner.assertCurrent();
-  const normalized = await readNormalizedError(err, { ...options, site, source: 'provider', signal: owner.signal,
-    assertCurrent: owner.assertCurrent });
-  owner.assertCurrent();
-  const message = normalized.message;
-  if (!message.trim() || message === '[REDACTED]') return false;
-  const result = await readsAsAlternateApi({ status, message }, site, { ...options, signal: owner.signal,
-    assertCurrent: owner.assertCurrent });
-  owner.assertCurrent();
-  return result;
+  return status !== undefined && OTHER_API_STATUSES.has(status);
 }

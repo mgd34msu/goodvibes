@@ -78,6 +78,8 @@ interface GeminiCandidate {
 
 interface GeminiResponseBody {
   candidates?: GeminiCandidate[] | undefined;
+  /** Set when Gemini refused the prompt itself; such a response carries no candidates. */
+  promptFeedback?: { blockReason?: string | undefined; blockReasonMessage?: string | undefined } | undefined;
   usageMetadata?: {
     promptTokenCount?: number | undefined;
     candidatesTokenCount?: number | undefined;
@@ -436,6 +438,7 @@ export class GeminiProvider implements LLMProvider {
       let outputTokens = 0;
       let cacheReadTokens = 0;
       let lastFinishReason = '';
+      let promptBlock: { reason: string; message?: string | undefined } | undefined;
       let streamedText = '';
 
       const reader = res.body?.getReader();
@@ -469,6 +472,10 @@ export class GeminiProvider implements LLMProvider {
 
         // Observe every parsed chunk, including metadata-only chunks and the final flush.
         responseIdentity.observe(chunk);
+        const blockReason = chunk.promptFeedback?.blockReason;
+        if (blockReason && blockReason !== 'BLOCK_REASON_UNSPECIFIED') {
+          promptBlock = { reason: blockReason, message: chunk.promptFeedback?.blockReasonMessage };
+        }
         const candidate = chunk.candidates?.[0];
         if (candidate) {
           const parts = candidate.content?.parts ?? [];
@@ -511,6 +518,23 @@ export class GeminiProvider implements LLMProvider {
         for (const line of sseBuffer.flush()) processSseLine(line);
       } finally {
         reader.releaseLock();
+      }
+
+      // A refused prompt is Gemini's answer, not a cut connection: the same
+      // prompt is refused again, so it is final and names the reason.
+      if (promptBlock && !lastFinishReason) {
+        throw new ProviderError(
+          `Gemini refused the prompt (${promptBlock.reason})${promptBlock.message ? `: ${promptBlock.message}` : '.'}`,
+          {
+            statusCode: 400,
+            category: 'bad_request',
+            guidance: 'Gemini blocks a prompt it reads as unsafe or prohibited. Rephrase the request or remove the flagged content, or switch to another model.',
+            providerCode: promptBlock.reason,
+            provider: this.name,
+            operation: 'chat',
+            phase: 'response',
+          },
+        );
       }
 
       // Gemini closes every candidate with a finishReason; a stream that ends

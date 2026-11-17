@@ -18,7 +18,7 @@ import {
   toAnthropicTools,
 } from './tool-formats.js';
 import { assembleAnthropicContentBlocks, oneHourCacheWriteTokens, withOneHourCacheWrites } from './anthropic-sse-assembler.js';
-import { resolveCompletedStopReason, withProviderStopReason } from './provider-stop-reason.js';
+import { withProviderStopReason } from './provider-stop-reason.js';
 import { ProviderError } from '../types/errors.js';
 import { withRetry } from '../utils/retry.js';
 import { trackDeliveredOutput } from './stream-delivery.js';
@@ -221,7 +221,7 @@ export class AnthropicMessagesProvider implements LLMProvider {
             ...(finalMessage.usage.cache_creation_input_tokens != null ? { cacheWriteTokens: finalMessage.usage.cache_creation_input_tokens } : {}),
             ...withOneHourCacheWrites(oneHourCacheWriteTokens(finalMessage.usage)),
           },
-          stopReason: resolveCompletedStopReason(stopReason, parsed.text),
+          stopReason,
           ...withProviderStopReason(rawStopReason),
           ...(rateLimit ? { rateLimit } : {}),
         };
@@ -232,7 +232,7 @@ export class AnthropicMessagesProvider implements LLMProvider {
           phase: 'stream',
         });
       }
-    }, { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), canRetry }, params.onRetry);
+    }, { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), ...(params.maxRetries !== undefined ? { maxRetries: params.maxRetries } : {}), canRetry }, params.onRetry);
   }
 
   async describeRuntime(deps: ProviderRuntimeMetadataDeps): Promise<ProviderRuntimeMetadata> {

@@ -41,7 +41,7 @@ import {
   toRecord,
 } from './lm-studio-helpers.js';
 import { toolCallArgumentFields } from './tool-formats.js';
-import { shouldUseOtherApi } from './provider-error.js';
+import { isOtherApiFailure } from './provider-error.js';
 import { mapLmStudioStopReason } from './stop-reason-maps.js';
 
 const DELEGATE_TO_COMPAT = Symbol('lm-studio-delegate-to-compat');
@@ -108,7 +108,7 @@ export class LMStudioProvider implements LLMProvider {
             return await this.chatViaNativeChat(attemptParams, model, nativeContext);
           } catch (err: unknown) {
             if (err instanceof ProviderAttemptDeniedError) throw err;
-            if (emitted || !(await shouldUseOtherApi(err, 'providers.lm-studio.native-chat'))) {
+            if (emitted || !isOtherApiFailure(err)) {
               throw normalizeProviderError(err, this.name, 'chat', 'request');
             }
           }
@@ -118,13 +118,13 @@ export class LMStudioProvider implements LLMProvider {
           return await this.chatViaResponses(attemptParams, model);
         } catch (err: unknown) {
           if (err instanceof ProviderAttemptDeniedError) throw err;
-          if (emitted || !(await shouldUseOtherApi(err, 'providers.lm-studio.responses'))) {
+          if (emitted || !isOtherApiFailure(err)) {
             throw normalizeProviderError(err, this.name, 'chat', 'request');
           }
         }
 
         return DELEGATE_TO_COMPAT;
-      }, { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), canRetry }, params.onRetry),
+      }, { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), ...(params.maxRetries !== undefined ? { maxRetries: params.maxRetries } : {}), canRetry }, params.onRetry),
       {
         provider: this.name,
         model: params.model || this.defaultModel,
@@ -394,7 +394,8 @@ export class LMStudioProvider implements LLMProvider {
     if (params.beforeAttempt) await revalidateProviderAttempt(params.beforeAttempt);
     let stream: LMStudioResponsesStream;
     try {
-      stream = await this.responsesClient.create(body, { ...(params.signal !== undefined ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt, maxRetries: 0 } : {}) });
+      // withRetry in chat() is the one retry owner; the SDK's own retries would multiply the requests made.
+      stream = await this.responsesClient.create(body, { ...(params.signal !== undefined ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), maxRetries: 0 });
     } catch (err: unknown) {
       if (err instanceof ProviderAttemptDeniedError) throw err;
       throw normalizeProviderError(err, this.name, 'chat', 'request');

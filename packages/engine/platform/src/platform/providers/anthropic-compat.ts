@@ -17,8 +17,7 @@ import {
   type LiveModelDiscoveryResult,
 } from './live-model-discovery.js';
 import { applyAnthropicReasoning, isAnthropicThinkingEnabled } from './anthropic-stream.js';
-import { prepareReasoningEffort } from './reasoning-effort-families.js';
-import { describeReasoningRejection } from './reasoning-effort.js';
+import { reasoningRejectionHint } from './reasoning-rejection-hint.js';
 import { ProviderError } from '../types/errors.js';
 import { withRetry, type RetryConfig } from '../utils/retry.js';
 import { instrumentedLlmCall } from '../runtime/llm-observability.js';
@@ -28,7 +27,7 @@ import {
 } from './tool-formats.js';
 import { toProviderError } from '../utils/error-display.js';
 import { createAnthropicSSEState, readAnthropicSSEStream, assembleAnthropicContentBlocks } from './anthropic-sse-assembler.js';
-import { resolveCompletedStopReason, withProviderStopReason } from './provider-stop-reason.js';
+import { withProviderStopReason } from './provider-stop-reason.js';
 import { parseRateLimitHeaders } from './rate-limit-headers.js';
 import { trackDeliveredOutput } from './stream-delivery.js';
 import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
@@ -277,7 +276,6 @@ export class AnthropicCompatProvider implements LLMProvider {
         body['tools'] = toAnthropicTools(tools);
       }
 
-      await prepareReasoningEffort(reasoningEffort, { provider: this.name, modelId: resolvedModel, ...(params.reasoningEffortSpec ? { spec: params.reasoningEffortSpec } : {}) }, 'providers.anthropic-compat.reasoning-family');
       const resolvedEffort = applyAnthropicReasoning(
         body,
         { provider: this.name, model: resolvedModel, reasoningEffort, ...(params.reasoningEffortSpec ? { reasoningEffortSpec: params.reasoningEffortSpec } : {}) },
@@ -323,7 +321,7 @@ export class AnthropicCompatProvider implements LLMProvider {
         const retryAfterMs = parseRateLimitHeaders(res.headers)?.retryAfterMs;
         throw new ProviderError(
           `AnthropicCompat(${this.name}) API error ${res.status}: ${text}`
-            + ((await describeReasoningRejection(res.status, text, resolvedEffort.value, 'providers.anthropic-compat.reasoning-rejection')) ?? ''),
+            + reasoningRejectionHint(res.status, text, resolvedEffort.value),
           {
             statusCode: res.status,
             ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
@@ -357,11 +355,11 @@ export class AnthropicCompatProvider implements LLMProvider {
         content: text,
         toolCalls,
         usage: { inputTokens: state.inputTokens, outputTokens: state.outputTokens, cacheReadTokens: state.cacheReadTokens, cacheWriteTokens: state.cacheWriteTokens, ...(state.cacheWriteLongTokens > 0 ? { cacheWriteLongTokens: state.cacheWriteLongTokens } : {}) },
-        stopReason: resolveCompletedStopReason(state.stopReason, text),
+        stopReason: state.stopReason,
         ...withProviderStopReason(state.rawStopReason),
         ...(rateLimit ? { rateLimit } : {}),
       };
-    }, { ...this.retryConfig, ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), canRetry }, onRetry), { provider: this.name, model: model ?? this.defaultModel })).result;
+    }, { ...this.retryConfig, ...(signal ? { signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), ...(params.maxRetries !== undefined ? { maxRetries: params.maxRetries } : {}), canRetry }, onRetry), { provider: this.name, model: model ?? this.defaultModel })).result;
   }
 
   async describeRuntime(deps: ProviderRuntimeMetadataDeps): Promise<ProviderRuntimeMetadata> {

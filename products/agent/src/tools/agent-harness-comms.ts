@@ -505,9 +505,16 @@ export async function channelDraftSendHandoff(
   // The outward-effect decision is taken on exactly what would be sent, before
   // the draft is marked queued: a send it holds leaves the draft as it was.
   const hold: { decision?: { readonly reason: string; readonly fix?: string } } = {};
+  // What is checked is all the text that leaves: the fields as sent, and each
+  // attachment's label and artifact id.
+  const outwardEffectContent = (deliveryInput: Parameters<NonNullable<Parameters<typeof queueDraftToSend>[3]>>[0]): Readonly<Record<string, string | undefined>> => {
+    const { attachments, ...fields } = deliveryInput;
+    if (!attachments || attachments.length === 0) return fields;
+    return { ...fields, attachments: attachments.map((attachment) => (attachment.label ? `${attachment.label} (${attachment.artifactId})` : attachment.artifactId)).join('\n') };
+  };
   const admit = async (deliveryInput: Parameters<NonNullable<Parameters<typeof queueDraftToSend>[3]>>[0]): Promise<void> => {
     const decision = await evaluateOutwardEffect({ request: { toolName: 'agent_harness', action: 'channel_draft_send', description: 'delivering the captured channel draft' },
-      ledger: owner.ledger, content: { ...deliveryInput },
+      ledger: owner.ledger, content: outwardEffectContent(deliveryInput),
       taintOptions: { signal: options?.signal, exactMatchFields: ['channel', 'route', 'webhook', 'link'] } });
     assertCurrent();
     if (!decision.allowed) {

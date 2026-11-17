@@ -1097,7 +1097,7 @@ export class SettingsModal extends TerminalSettingsModalState<
    * modal was closed or reopened meanwhile, so the owner's last change is never
    * dropped; only the row update and the message need the modal still open.
    */
-  private _routeHostWrite(key: AgentSettingKey, value: unknown, opened: number): boolean {
+  private _routeHostWrite(key: ConfigKey, value: unknown, opened: number): boolean {
     const write: { next?: { readonly value: unknown } } = {};
     const live = () => this.active && opened === this.secretWriteSession;
     const routed = routeSettingWriteToConnectedHost(key, value, (update) => {

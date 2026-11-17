@@ -1,11 +1,21 @@
 import { assertCurrentToolEffect, assertCurrentToolExecution } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import type { AgentModelCompareArtifactStore, AgentModelCompareToolDeps } from './model-compare-types.js';
 import { agentResearchSourceOwner } from './protected-research-report.js';
 
+/** One comparison run: its dependencies bound to the owner frame, and the checks every step repeats. */
+export interface ComparisonOperation {
+  deps: AgentModelCompareToolDeps;
+  sourceOwner: ProtectedSourceOwner | undefined;
+  assertCurrent: () => void;
+  assertWrite: () => void;
+  assertSend: () => void;
+}
+
 /** Every asynchronous comparison dependency stays inside its original owner frame. */
-export function createComparisonOperation(source: AgentModelCompareToolDeps, args: Record<string, unknown>, options?: ToolExecuteOptions) {
+export function createComparisonOperation(source: AgentModelCompareToolDeps, args: Record<string, unknown>, options?: ToolExecuteOptions): ComparisonOperation {
   // Only the artifacts this operation read are pinned, by id and size: a listing pins nothing, so the
   // cost of a check does not grow with the store, and an unrelated artifact cannot fail the call.
   const read = new Map<string, number>();

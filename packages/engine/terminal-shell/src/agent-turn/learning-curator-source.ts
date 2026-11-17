@@ -115,6 +115,9 @@ function projectMemoryRecord(record: unknown): unknown {
   return projected;
 }
 
+/** The caller's ranking options bound to one learning source: its currency check, and only preserved sources. */
+export type LearningCuratorScopedOptions = Readonly<CatalogRankingOptions & { readonly assertCurrent: () => void; readonly requirePreservedSource: true }>;
+
 /**
  * One read of every learning store for one call: memory, notes, personas,
  * skills, routines, research runs, the work plan, the saved-session list and
@@ -192,7 +195,7 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
     routine: (routineSnapshot?.routines ?? []).map(record => ({ item: summarizeRoutineItem(record), record })),
   };
   const curation = LearningCurationStore.forPaths(shellPaths);
-  const scoped = Object.freeze({ ...options, assertCurrent, requirePreservedSource: true });
+  const scoped: LearningCuratorScopedOptions = Object.freeze({ ...options, assertCurrent, requirePreservedSource: true });
   return { source, libraries, curation, loadSession, assertCurrent, prepareTransition, options: scoped };
 }
 

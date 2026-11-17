@@ -686,7 +686,8 @@ function footerText(workspace: AgentWorkspace): string {
   if (workspace.actionSearchActive) {
     return 'Up/Down results · Enter open · Backspace edit search · Esc clear';
   }
-  return workspace.selectedActionCategory.id === 'work' ? (workspace.lastActionResult ? 'PgUp/PgDn result · Ctrl+PgUp/PgDn ledger · Esc close · R refresh' : 'PgUp/PgDn ledger · Up/Down actions · Enter open · Esc close · R refresh') : 'Up/Down move · Left/Right pane · Enter open · / search · Ctrl+] next area · R refresh';
+  // A printable key closes the workspace into the composer, so refresh is Ctrl+R.
+  return workspace.selectedActionCategory.id === 'work' ? (workspace.lastActionResult ? 'PgUp/PgDn result · Ctrl+PgUp/PgDn ledger · Esc close · Ctrl+R refresh · type to chat' : 'PgUp/PgDn ledger · Up/Down actions · Enter open · Esc close · Ctrl+R refresh · type to chat') : 'Up/Down move · Left/Right pane · Enter open · / search · Ctrl+] next area · Ctrl+R refresh · type to chat';
 }
 
 export function renderAgentWorkspace(workspace: AgentWorkspace, width: number, height: number): SurfaceLayer {

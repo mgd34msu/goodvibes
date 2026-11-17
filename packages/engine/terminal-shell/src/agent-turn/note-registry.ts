@@ -1,9 +1,8 @@
 import { freshReviewPatch, parseAgentReviewState, reviewedReviewPatch, staleReviewPatch } from './review-state.js';
-import { existsSync, readFileSync } from 'node:fs';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { writeStoreFile, runStoreFileUpdateSync } from './store-file.js';
+import { readJsonStore, runStoreFileUpdateSync, writeJsonStore, type JsonStoreContents, type JsonStoreSpec, type JsonStoreWriteReport, type writeStoreFile } from './store-file.js';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
-import { assertNoSecretLikeText, assertStoreRewritable } from './persona-registry.js';
+import { assertNoSecretLikeText } from './persona-registry.js';
 
 export type AgentNoteSource = 'user' | 'agent' | 'imported' | 'system';
 export type AgentNoteReviewState = 'fresh' | 'reviewed' | 'stale';
@@ -137,22 +136,12 @@ function parseNote(value: unknown): AgentNoteRecord | null {
   };
 }
 
-function parseStore(raw: string, forWrite = false): NoteStoreFile {
-  const parsed: unknown = JSON.parse(raw);
-  if (!isRecord(parsed)) {
-    if (forWrite) assertStoreRewritable(parsed, 'notes', 0, STORE_VERSION);
-    return { version: STORE_VERSION, notes: [] };
-  }
-  const notes = Array.isArray(parsed.notes)
-    ? parsed.notes.map(parseNote).filter((entry): entry is AgentNoteRecord => entry !== null)
-    : [];
-  if (forWrite) assertStoreRewritable(parsed, 'notes', notes.length, STORE_VERSION);
-  return { version: STORE_VERSION, notes };
-}
-
-function formatStore(store: NoteStoreFile): string {
-  return `${JSON.stringify(store, null, 2)}\n`;
-}
+const NOTE_STORE: JsonStoreSpec<AgentNoteRecord> = {
+  label: 'note store',
+  entriesKey: 'notes',
+  version: STORE_VERSION,
+  parseEntry: parseNote,
+};
 
 type AgentLocalStorePaths = Pick<ShellPathService, 'resolveUserPath'>;
 
@@ -161,6 +150,9 @@ export function noteStorePath(shellPaths: AgentLocalStorePaths): string {
 }
 
 export class AgentNoteRegistry {
+  private held: JsonStoreContents<AgentNoteRecord> | null = null;
+  private lastWrite: JsonStoreWriteReport | undefined;
+
   public constructor(private readonly storePath: string, private readonly effects?: Parameters<typeof writeStoreFile>[2]) {}
 
   public static fromShellPaths(shellPaths: AgentLocalStorePaths, effects?: Parameters<typeof writeStoreFile>[2]): AgentNoteRegistry {
@@ -200,8 +192,8 @@ export class AgentNoteRegistry {
   }
 
   public create(input: AgentNoteCreateInput): AgentNoteRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const title = normalizeTitle(input.title);
       const body = input.body.trim();
       this.validateRequired(title, body);
@@ -228,8 +220,8 @@ export class AgentNoteRegistry {
   }
 
   public update(idOrTitle: string, input: AgentNoteUpdateInput): AgentNoteRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findInStore(store, idOrTitle);
       if (!existing) throw new Error(`Unknown note ${idOrTitle}`);
       const title = input.title === undefined ? existing.title : normalizeTitle(input.title);
@@ -258,8 +250,8 @@ export class AgentNoteRegistry {
   }
 
   public markReviewed(idOrTitle: string): AgentNoteRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findInStore(store, idOrTitle);
       if (!existing) throw new Error(`Unknown note ${idOrTitle}`);
       const updated: AgentNoteRecord = {
@@ -276,8 +268,8 @@ export class AgentNoteRegistry {
   }
 
   public markStale(idOrTitle: string, reason: string): AgentNoteRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findInStore(store, idOrTitle);
       if (!existing) throw new Error(`Unknown note ${idOrTitle}`);
       const updated: AgentNoteRecord = {
@@ -295,8 +287,8 @@ export class AgentNoteRegistry {
 
   /** Records on the note that a record was made from it. The note's content and review state are unchanged. */
   public recordPromotion(idOrTitle: string, promotion: Omit<AgentNotePromotion, 'at'>): AgentNoteRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findInStore(store, idOrTitle);
       if (!existing) throw new Error(`Unknown note ${idOrTitle}`);
       const updated: AgentNoteRecord = {
@@ -313,8 +305,8 @@ export class AgentNoteRegistry {
   }
 
   public deleteNote(idOrTitle: string): AgentNoteRecord {
-    return runStoreFileUpdateSync(this.storePath, () => {
-      const store = this.readStore(true);
+    return this.locked(() => {
+      const store = this.readStore();
       const existing = this.findInStore(store, idOrTitle);
       if (!existing) throw new Error(`Unknown note ${idOrTitle}`);
       this.writeStore({
@@ -347,16 +339,32 @@ export class AgentNoteRegistry {
     return store.notes.find((note) => note.id.toLowerCase() === lookup || note.title.toLowerCase() === lookup) ?? null;
   }
 
-  private readStore(forWrite = false): NoteStoreFile {
-    if (!existsSync(this.storePath)) return { version: STORE_VERSION, notes: [] };
-    try {
-      return parseStore(readFileSync(this.storePath, 'utf-8'), forWrite);
-    } catch (error) {
-      throw new Error(`Could not read Agent note store ${error instanceof Error ? error.message : String(error)}`);
-    }
+  /** What the last write reported: notes this version cannot read that were kept, or a copy of an unreadable file. */
+  public lastWriteReport(): JsonStoreWriteReport | undefined {
+    return this.lastWrite;
+  }
+
+  private readStore(): NoteStoreFile {
+    return { version: STORE_VERSION, notes: [...(this.held ?? readJsonStore(this.storePath, NOTE_STORE)).entries] };
+  }
+
+  /**
+   * One locked read-modify-write; the file is read once, and a note this
+   * version cannot read is written back as found instead of refusing the save.
+   */
+  private locked<T>(update: () => T): T {
+    return runStoreFileUpdateSync(this.storePath, () => {
+      this.held = readJsonStore(this.storePath, NOTE_STORE);
+      try {
+        return update();
+      } finally {
+        this.held = null;
+      }
+    });
   }
 
   private writeStore(store: NoteStoreFile): void {
-    writeStoreFile(this.storePath, formatStore(store), this.effects);
+    const read = this.held ?? readJsonStore(this.storePath, NOTE_STORE);
+    this.lastWrite = writeJsonStore(read, NOTE_STORE, { entries: store.notes }, this.effects);
   }
 }

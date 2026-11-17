@@ -130,25 +130,6 @@ export function runLockedStoreUpdate<T>(path: string, effects: { readonly onEffe
   });
 }
 
-/**
- * A store file is rewritten whole by every save, so a save must not follow a
- * read that silently left something out. Call this on the parsed file before a
- * mutator builds on it: it throws when entries failed their parser (hand edit,
- * newer version) or the file was written by a newer store version, because the
- * save would erase them. Reads stay tolerant; only the write path refuses.
- */
-export function assertStoreRewritable(parsed: unknown, key: string, kept: number, supportedVersion: number): void {
-  if (!isRecord(parsed)) throw new Error('the store file is not a JSON object; repair or remove it before saving, or a save would replace it.');
-  if (typeof parsed.version === 'number' && parsed.version > supportedVersion) {
-    throw new Error(`the store file is version ${parsed.version} but this release writes version ${supportedVersion}; upgrade before saving, or a save would drop newer data.`);
-  }
-  const entries = parsed[key];
-  const total = Array.isArray(entries) ? entries.length : 0;
-  if (total > kept) {
-    throw new Error(`${total - kept} of ${total} stored entries cannot be read by this release; repair or remove them in the store file before saving, or a save would erase them.`);
-  }
-}
-
 function parsePersona(value: unknown): AgentPersonaRecord | null {
   if (!isRecord(value)) return null;
   const id = readString(value.id).trim();

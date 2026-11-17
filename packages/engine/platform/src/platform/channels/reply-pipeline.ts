@@ -15,7 +15,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 
 import { markEventsDelivered, selectUndeliveredEvents } from './reply-delta.js';
-import { buildRenderedFinalParts, buildRenderedText, normalizeChannelRenderEventFromRuntime, type ChannelReplyRenderOptions, type ChannelReplyStyle } from './reply-render.js';
+import { buildRenderedFinalParts, buildRenderedText, normalizeChannelRenderEventFromRuntime, type ChannelRenderSources, type ChannelReplyRenderOptions, type ChannelReplyStyle } from './reply-render.js';
 import { DEFAULT_POLICY } from './reply-policy.js';
 import type { ChannelRenderAudience } from './render-audience.js';
 
@@ -104,6 +104,12 @@ interface ReplyPipelineDeps {
   readonly replyStyleOf?: ((agentId: string) => ChannelReplyStyle | undefined) | undefined;
   /** Pause between attempts at a final reply; defaults to a timer. */
   readonly waitBeforeRetry?: ((ms: number) => Promise<void>) | undefined;
+  /**
+   * The task of a contract, read from its record, so every line about a
+   * workstream names it, also after a restart or once its remembered phrase
+   * was evicted.
+   */
+  readonly contractAsk?: ((contractId: string) => string | undefined) | undefined;
 }
 
 /** Pauses before the second and third attempt at a final reply a channel refused with a transient error. */
@@ -176,6 +182,7 @@ export class ChannelReplyPipeline {
   private deliveredReporter: DeliveredChannelReplyReporter | null;
   private readonly replyStyleOf: ((agentId: string) => ChannelReplyStyle | undefined) | null;
   private readonly waitBeforeRetry: (ms: number) => Promise<void>;
+  private readonly renderSources: ChannelRenderSources;
 
   constructor(deps: ReplyPipelineDeps) {
     this.channelPlugins = deps.channelPlugins;
@@ -185,6 +192,7 @@ export class ChannelReplyPipeline {
     this.deliveredReporter = deps.onDelivered ?? null;
     this.replyStyleOf = deps.replyStyleOf ?? null;
     this.waitBeforeRetry = deps.waitBeforeRetry ?? ((ms) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }));
+    this.renderSources = deps.contractAsk ? { contractAsk: deps.contractAsk } : {};
     this.attachRuntimeBus(deps.runtimeBus ?? null);
   }
 
@@ -554,7 +562,7 @@ export class ChannelReplyPipeline {
     if (!agentId) return;
     const state = this.buffers.get(agentId);
     if (!state) return;
-    const events = normalizeChannelRenderEventFromRuntime(envelope);
+    const events = normalizeChannelRenderEventFromRuntime(envelope, this.renderSources);
     if (events.length === 0) return;
     state.events.push(...events);
     if (state.events.length > MAX_BUFFERED_EVENTS) {
@@ -602,7 +610,7 @@ export class ChannelReplyPipeline {
       this.contracts.delete(contractId);
       return;
     }
-    const events = normalizeChannelRenderEventFromRuntime(envelope);
+    const events = normalizeChannelRenderEventFromRuntime(envelope, this.renderSources);
     if (events.length === 0) return;
     state.events.push(...events);
     if (state.events.length > MAX_BUFFERED_EVENTS) {

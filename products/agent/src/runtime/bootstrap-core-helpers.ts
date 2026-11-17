@@ -12,7 +12,7 @@ export {companionMessageToOrchestratorInputOptions,type CompanionMessagePayload}
  * bootstrap-core.ts re-exports all four names, so every existing importer is
  * unaffected.
  */
-import { WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
+import { WebhookNotifier, type RuntimeNotificationOptions } from '@goodvibes-jev/engine/platform/platform/integrations';
 
 import { RuntimeEventBus } from '@/runtime/index.ts';
 
@@ -27,15 +27,17 @@ import { RuntimeEventBus } from '@/runtime/index.ts';
  * detach() cleanup into runtimeUnsubs for shutdown. The attach happens even
  * with no URL configured: a URL added mid-session is read by the same shared
  * instance, and a notifier with no URLs sends nothing, so skipping the attach
- * would leave failure notifications dead until restart.
+ * would leave failure notifications dead until restart. `options` names a
+ * workstream from its own record (see RuntimeNotificationOptions).
  */
 export function registerWebhookNotifier(
   webhookNotifier: WebhookNotifier,
   webhookUrls: string[],
   runtimeBus: RuntimeEventBus,
   runtimeUnsubs: Array<() => void>,
+  options: RuntimeNotificationOptions = {},
 ): void {
   if (webhookUrls.length > 0) webhookNotifier.setUrls(webhookUrls);
-  webhookNotifier.attachToRuntimeBus(runtimeBus);
+  webhookNotifier.attachToRuntimeBus(runtimeBus, options);
   runtimeUnsubs.push(() => webhookNotifier.detach());
 }

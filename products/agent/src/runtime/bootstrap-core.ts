@@ -359,9 +359,17 @@ export async function initializeBootstrapCore(
   providerRegistry.startWatching(runtimeBus);
 
   const webhookUrls = (configManager.getCategory('notifications') as { webhookUrls?: string[] }).webhookUrls ?? [];
+  // A workstream's start and ask come from its own record, so one started
+  // before a restart is still announced by its request and real duration.
+  const runtimeNotifications = {
+    lookupContract: (contractId: string) => {
+      const contract = services.contractRunner.get(contractId);
+      return contract ? { startedAt: contract.createdAt, name: contract.ask } : undefined;
+    },
+  };
   // Always attach the shared notifier (see registerWebhookNotifier), so a URL
   // added mid-session still receives automatic failure notifications.
-  registerWebhookNotifier(services.webhookNotifier, webhookUrls, runtimeBus, runtimeUnsubs);
+  registerWebhookNotifier(services.webhookNotifier, webhookUrls, runtimeBus, runtimeUnsubs, runtimeNotifications);
   if (webhookUrls.length > 0) {
     domainDispatch.syncIntegration(
       {
@@ -381,7 +389,7 @@ export async function initializeBootstrapCore(
   const notifier = await createRuntimeNotifier(services.serviceRegistry, (key) => readAgentHostSetting(configManager, key), configManager, services.secretsManager);
   runtimeUnsubs.push(
     syncTerminalNotifierQueues(notifier, domainDispatch, () => {
-      notifier.attachToRuntimeBus(runtimeBus);
+      notifier.attachToRuntimeBus(runtimeBus, runtimeNotifications);
       return () => notifier.detach();
     }),
   );

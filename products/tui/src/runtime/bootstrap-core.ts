@@ -509,10 +509,16 @@ export async function initializeBootstrapCore(
       'bootstrap.webhooks',
     );
   }
-  runtimeUnsubs.push(attachTypedRuntimeNotifications(services.webhookNotifier, runtimeBus));
+  // A workstream's start and ask come from its own record, so one started
+  // before a restart is still announced by its request and real duration.
+  const lookupContract = (contractId: string) => {
+    const contract = services.contractRunner.get(contractId);
+    return contract ? { startedAt: contract.createdAt, name: contract.ask } : undefined;
+  };
+  runtimeUnsubs.push(attachTypedRuntimeNotifications(services.webhookNotifier, runtimeBus, Date.now, lookupContract));
 
   const notifier = await createRuntimeNotifier(services.serviceRegistry, () => readTuiNotificationsMetadataOnly(configManager), configManager, services.secretsManager);
-  runtimeUnsubs.push(syncNotifierQueueIntegrations(notifier, runtimeBus, domainDispatch));
+  runtimeUnsubs.push(syncNotifierQueueIntegrations(notifier, runtimeBus, domainDispatch, lookupContract));
 
   await syncConfiguredServices(domainDispatch.syncIntegration, services.serviceRegistry);
 

@@ -1,6 +1,6 @@
 import { syncTerminalNotifierQueues } from '@goodvibes-jev/engine/terminal-shell/bootstrap-primitives';
 import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { Notifier, type WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
+import { Notifier, type RuntimeNotificationWork, type WebhookNotifier } from '@goodvibes-jev/engine/platform/platform/integrations';
 import { readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/platform/runtime/notification-privacy';
 import type { NotificationDelivery, TurnNotificationFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
@@ -17,8 +17,13 @@ type DomainDispatch = ReturnType<typeof createDomainDispatch>;
  * bus when any queue exists. Extracted from bootstrap-core to keep that file
  * within the module size budget.
  */
-export function syncNotifierQueueIntegrations(notifier: Notifier, runtimeBus: RuntimeEventBus, domainDispatch: DomainDispatch): () => void {
-  return syncTerminalNotifierQueues(notifier, domainDispatch, () => attachTypedRuntimeNotifications(notifier, runtimeBus));
+export function syncNotifierQueueIntegrations(
+  notifier: Notifier,
+  runtimeBus: RuntimeEventBus,
+  domainDispatch: DomainDispatch,
+  lookupContract?: (contractId: string) => RuntimeNotificationWork | undefined,
+): () => void {
+  return syncTerminalNotifierQueues(notifier, domainDispatch, () => attachTypedRuntimeNotifications(notifier, runtimeBus, Date.now, lookupContract));
 }
 
 /**
@@ -47,12 +52,15 @@ export function createRuntimeNotifier(
  * the platform snapshots them synchronously and owns privacy changes across recipients,
  * retries and dead letters. No event object or getter enters a delivery queue.
  * Contract endings and agent cancellation carry no duration. They notify only
- * when this adapter observed the start, rather than inventing a zero duration.
+ * when the start is known, rather than inventing a zero duration: observed by
+ * this adapter, or for a workstream read from its own record (`lookupContract`,
+ * the contract runner's `get`), so one started before a restart is announced.
  */
 export function attachTypedRuntimeNotifications(
   notifier: Notifier | WebhookNotifier,
   runtimeBus: RuntimeEventBus,
   clock: () => number = Date.now,
+  lookupContract?: (contractId: string) => RuntimeNotificationWork | undefined,
 ): () => void {
   let active = true;
   const events = createUiRuntimeEvents(runtimeBus);
@@ -67,6 +75,12 @@ export function attachTypedRuntimeNotifications(
     const value = names.get(key);
     names.delete(key);
     return value;
+  };
+  const takeContract = (contractId: string): { readonly started: number; readonly name: () => string } | undefined => {
+    const seen = take(`contract:${contractId}`);
+    if (seen) return seen;
+    const record = lookupContract?.(contractId);
+    return record ? { started: record.startedAt, name: () => record.name } : undefined;
   };
   const send = (facts: TurnNotificationFacts): void => {
     if (!active) return;
@@ -119,7 +133,7 @@ export function attachTypedRuntimeNotifications(
     }),
     events.contracts.on('CONTRACT_CREATED', (payload) => remember(`contract:${payload.contractId}`, () => payload.ask)),
     events.contracts.on('CONTRACT_PASSED', (payload) => {
-      const work = take(`contract:${payload.contractId}`);
+      const work = takeContract(payload.contractId);
       if (!work) return; // The public fact contract cannot represent an unknown elapsed time.
       send({
         outcome: 'completed',
@@ -131,7 +145,7 @@ export function attachTypedRuntimeNotifications(
       });
     }),
     events.contracts.on('CONTRACT_FAILED', (payload) => {
-      const work = take(`contract:${payload.contractId}`);
+      const work = takeContract(payload.contractId);
       if (!work) return; // The public fact contract cannot represent an unknown elapsed time.
       send({
         outcome: 'failed',
@@ -150,7 +164,7 @@ export function attachTypedRuntimeNotifications(
       });
     }),
     events.contracts.on('CONTRACT_CANCELLED', (payload) => {
-      const work = take(`contract:${payload.contractId}`);
+      const work = takeContract(payload.contractId);
       if (!work) return; // The public fact contract cannot represent an unknown elapsed time.
       send({
         outcome: 'cancelled',

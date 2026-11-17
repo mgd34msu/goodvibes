@@ -607,6 +607,8 @@ export function createDaemonFacadeCollaborators(
     runtimeBus: runtime.runtimeBus,
     // The style the spawn decided (conversation or report) shapes the reply; a contract is only the fallback.
     replyStyleOf: (agentId) => runtime.agentManager.getStatus(agentId)?.replyStyle,
+    // A workstream is named from its own record, so one started before a restart still reads as its request.
+    contractAsk: (contractId) => runtime.runtimeServices.contractRunner.get(contractId)?.ask,
   });
   const surfaceDeliveryStartedAt = new Map<string, number>();
   const surfaceDeliveryHelper = new DaemonSurfaceDeliveryHelper({

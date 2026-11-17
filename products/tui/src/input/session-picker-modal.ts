@@ -148,7 +148,8 @@ export class SessionPickerModal extends SavedSessionPickerState {
 
     const sessionId = session.name;
     dismiss();
-    const task = Promise.resolve().then(() => resumeSession(sessionId));
+    // The resume routine prints its own outcome; the picker only waits for it to settle.
+    const task = Promise.resolve().then(async () => { await resumeSession(sessionId); });
     this.resumeTask = task;
     const finished = (): void => {
       if (this.resumeTask === task) this.resumeTask = null;

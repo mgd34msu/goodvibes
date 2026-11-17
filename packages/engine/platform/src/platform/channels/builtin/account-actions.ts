@@ -156,16 +156,21 @@ export async function runBuiltinAccountAction(
       if (surface === 'telegram' && account.enabled && context.restartTelegramIngress) {
         const status = await context.restartTelegramIngress();
         const refreshed = await context.buildAccount(surface);
-        const receiving = status !== null && status.kind !== 'inactive' && status.kind !== 'stopped';
+        // Restarted means receiving, or failing on a backoff that recovers by itself. A blocked
+        // receiver (cursor review, another receiver, undeliverable webhook) needs the owner first.
+        const restarted = status !== null && (status.kind === 'receiving' || status.kind === 'retrying');
         return {
           ...base,
-          ok: receiving,
+          ok: restarted,
           account: refreshed,
           state: refreshed.state,
           authState: refreshed.authState,
           message: status === null
             ? 'Telegram receiving is not available on this node: the host keeps no cursor storage for it.'
-            : receiving ? `Telegram receiving restarted: ${status.reason}` : `Telegram receiving did not start: ${status.reason}`,
+            : status.kind === 'receiving' ? `Telegram receiving restarted: ${status.reason}`
+              : status.kind === 'retrying' ? `Telegram receiving restarted but is not receiving yet; it retries by itself: ${status.reason}`
+                : status.kind === 'blocked' ? `Telegram is not receiving: ${status.reason.trim().replace(/\.+$/, '')}. Clear that, then start Telegram again.`
+                  : `Telegram receiving did not start: ${status.reason}`,
           metadata: { ingress: status },
         };
       }

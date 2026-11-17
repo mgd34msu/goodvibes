@@ -1,3 +1,4 @@
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { AgentDocumentRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/document-registry';
@@ -5,9 +6,6 @@ import { type AgentDocumentRecord } from '@goodvibes-jev/engine/terminal-shell/a
 import { hasPurpose, PURPOSE_MODEL_COMPARE_ROUTE_DECISION } from '@goodvibes-jev/engine/terminal-shell/agent-turn/review-packet-presets-core';
 import type { ReviewerReadinessCheck, ReviewerReadinessChecklist, ReviewerReadinessStatus } from './agent-harness-document-ops-types.ts';
 
-function readMetadataString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function readMetadataStringList(value: unknown): readonly string[] {
   if (typeof value === 'string') {
@@ -18,21 +16,21 @@ function readMetadataStringList(value: unknown): readonly string[] {
 }
 
 function artifactPurpose(artifact: ArtifactDescriptor): string {
-  return readMetadataString(artifact.metadata.purpose);
+  return readString(artifact.metadata.purpose);
 }
 
 function isModelCompareArtifact(artifact: ArtifactDescriptor): boolean {
   const purpose = artifactPurpose(artifact);
   if (purpose === 'agent-model-compare') return true;
   if (purpose) return false;
-  return readMetadataString(artifact.filename).startsWith('blind-model-comparison-cmp_');
+  return readString(artifact.filename).startsWith('blind-model-comparison-cmp_');
 }
 
 function isModelCompareJudgmentArtifact(artifact: ArtifactDescriptor): boolean {
   const purpose = artifactPurpose(artifact);
   if (purpose === 'agent-model-compare-judgment') return true;
   if (purpose) return false;
-  return readMetadataString(artifact.filename).startsWith('blind-model-comparison-judgment-');
+  return readString(artifact.filename).startsWith('blind-model-comparison-judgment-');
 }
 
 function isModelCompareRouteDecisionArtifact(artifact: ArtifactDescriptor): boolean {
@@ -43,7 +41,7 @@ function isModelCompareHandoffArtifact(artifact: ArtifactDescriptor): boolean {
   const purpose = artifactPurpose(artifact);
   if (purpose === 'agent-model-compare-handoff') return true;
   if (purpose) return false;
-  return readMetadataString(artifact.filename).startsWith('blind-model-comparison-handoff-');
+  return readString(artifact.filename).startsWith('blind-model-comparison-handoff-');
 }
 
 /** How many artifacts one readiness pass inspects; a store holding more is reported as only partly checked. */
@@ -117,9 +115,9 @@ function reviewerReadinessStatus(checks: readonly ReviewerReadinessCheck[]): Rev
  * data the program has. With neither, the route decision is what is left.
  */
 function hiddenJudgmentRepairRoute(judgment: Pick<ArtifactDescriptor, 'id' | 'metadata'>): string {
-  const sourceArtifactId = readMetadataString(judgment.metadata.sourceArtifactId);
+  const sourceArtifactId = readString(judgment.metadata.sourceArtifactId);
   if (sourceArtifactId) return `agent_model_compare reveal artifactId:"${sourceArtifactId}"`;
-  const comparisonId = readMetadataString(judgment.metadata.comparisonId);
+  const comparisonId = readString(judgment.metadata.comparisonId);
   if (comparisonId) return `agent_model_compare reveal comparisonId:"${comparisonId}"`;
   return `agent_model_compare apply artifactId:"${judgment.id}" or agent_model_compare routeDecision artifactId:"${judgment.id}" decision:"left-unchanged"`;
 }
@@ -147,28 +145,28 @@ export function buildReviewerReadinessChecklist(
   const handoffs = artifacts.filter(isModelCompareHandoffArtifact);
   const revealedJudgments = judgments.filter((artifact) => (
     artifact.metadata.revealIncludedInJudgment === true
-    && readMetadataString(artifact.metadata.winnerModel).length > 0
+    && readString(artifact.metadata.winnerModel).length > 0
   ));
   const hiddenJudgments = judgments.filter((artifact) => (
     artifact.metadata.revealIncludedInJudgment !== true
-    || readMetadataString(artifact.metadata.winnerModel).length === 0
+    || readString(artifact.metadata.winnerModel).length === 0
   ));
-  const routeDecisionComparisonIds = new Set(routeDecisions.map((artifact) => readMetadataString(artifact.metadata.comparisonId)).filter(Boolean));
-  const routeDecisionJudgmentArtifactIds = new Set(routeDecisions.map((artifact) => readMetadataString(artifact.metadata.judgmentArtifactId)).filter(Boolean));
+  const routeDecisionComparisonIds = new Set(routeDecisions.map((artifact) => readString(artifact.metadata.comparisonId)).filter(Boolean));
+  const routeDecisionJudgmentArtifactIds = new Set(routeDecisions.map((artifact) => readString(artifact.metadata.judgmentArtifactId)).filter(Boolean));
   // apply reads the winner model from the judged comparison, so a blind judgment waits on the same decision.
   const judgmentsWaitingOnRouteDecision = judgments.filter((artifact) => {
-    const comparisonId = readMetadataString(artifact.metadata.comparisonId);
+    const comparisonId = readString(artifact.metadata.comparisonId);
     return !routeDecisionJudgmentArtifactIds.has(artifact.id) && (!comparisonId || !routeDecisionComparisonIds.has(comparisonId));
   });
-  const revealedComparisonIds = new Set(revealedJudgments.map((artifact) => readMetadataString(artifact.metadata.comparisonId)).filter(Boolean));
+  const revealedComparisonIds = new Set(revealedJudgments.map((artifact) => readString(artifact.metadata.comparisonId)).filter(Boolean));
   const unrevealedComparisons = comparisons.filter((artifact) => {
-    const comparisonId = readMetadataString(artifact.metadata.comparisonId);
+    const comparisonId = readString(artifact.metadata.comparisonId);
     return artifact.metadata.revealIncludedInTranscript !== true && (!comparisonId || !revealedComparisonIds.has(comparisonId));
   });
   const handoffsMissingRelatedArtifacts = handoffs.filter((artifact) => readMetadataStringList(artifact.metadata.relatedArtifactIds).length === 0).length;
   const comparisonSourceMissing = comparisons.filter((artifact) => (
-    !readMetadataString(artifact.metadata.sourceArtifactId)
-    && !readMetadataString(artifact.metadata.documentId)
+    !readString(artifact.metadata.sourceArtifactId)
+    && !readString(artifact.metadata.documentId)
   )).length;
   const missingSourceArtifacts = documentsMissingSourceArtifacts + comparisonSourceMissing;
   const firstOpenCommentDocument = reviewDocuments.find((document) => document.comments.some((comment) => comment.status === 'open'));
@@ -268,7 +266,7 @@ export function buildReviewerReadinessChecklist(
         ? `agent_model_compare review artifactId:"${firstHandoffMissingRelated.id}"`
         : 'agent_model_compare review',
       repairRoute: firstHandoffMissingRelated
-        ? `agent_model_compare handoff artifactId:"${readMetadataString(firstHandoffMissingRelated.metadata.sourceArtifactId) || firstHandoffMissingRelated.id}" relatedArtifactIds:"..."`
+        ? `agent_model_compare handoff artifactId:"${readString(firstHandoffMissingRelated.metadata.sourceArtifactId) || firstHandoffMissingRelated.id}" relatedArtifactIds:"..."`
         : undefined,
     },
   ];

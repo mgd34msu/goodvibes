@@ -9,9 +9,8 @@ import { mcpSchemaRoute } from './agent-harness-personal-ops-routes.ts';
 import type { McpSchemaSummary, McpToolRecord, McpToolSchema, OperatorContractMethod, PersonalOpsConnectorSignal, PersonalOpsConnectorTool, PersonalOpsWorkflow, PersonalOpsWorkflowStatus } from './agent-harness-personal-ops-types.ts';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 
-export function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
+export { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 export function readLimit(value: unknown, fallback: number): number {
   return clampReadLimit(value, fallback, 12);

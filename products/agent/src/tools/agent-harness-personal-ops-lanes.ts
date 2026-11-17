@@ -1,7 +1,7 @@
 import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import type { CommandContext } from '../input/command-registry.ts';
-import { buildAgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-snapshot.ts';
+import { buildAgentWorkspacePersonalOpsPart } from '../input/agent-workspace-snapshot.ts';
 import { googleConnectionState, type AgentGoogleConnectionState } from '@goodvibes-jev/engine/terminal-shell/agent-turn/google-tool';
 import { calendarWorkflows, connectorSignals, contractLaneMethods, inboxWorkflows, NO_CONNECTORS, readConnectorInventory, reminderWorkflows, taskWorkflows, type ConnectorInventory, type GoogleLaneRoute } from './agent-harness-personal-ops-discovery.ts';
 import { NOTE_CAPTURE_ROUTE } from './agent-harness-personal-ops-routes.ts';
@@ -44,7 +44,7 @@ function googleSignal(state: AgentGoogleConnectionState, route: GoogleLaneRoute 
   return 'No Google account connected';
 }
 
-function notesLane(snapshot: ReturnType<typeof buildAgentWorkspaceRuntimeSnapshot>): PersonalOpsLane {
+function notesLane(snapshot: ReturnType<typeof buildAgentWorkspacePersonalOpsPart>): PersonalOpsLane {
   return {
     id: 'notes',
     label: 'Notes',
@@ -94,7 +94,7 @@ function remindersLane(scheduleMethods: readonly string[],
 }
 
 function inboxLane({ snapshot, google, emailMethods, unavailableEmailMethods, emailConnectors, inboxArtifactRecords, inboxReviewQueueRecords, inboxEffectReceiptRecords, refreshableInboxQueueRecords, readyChannels }: {
-  readonly snapshot: ReturnType<typeof buildAgentWorkspaceRuntimeSnapshot>;
+  readonly snapshot: ReturnType<typeof buildAgentWorkspacePersonalOpsPart>;
   readonly google: GoogleLanes;
   readonly emailMethods: readonly string[];
   readonly unavailableEmailMethods: readonly string[];
@@ -175,7 +175,8 @@ async function ownedBuildLanes(
   exactLane?: 'notes' | 'reminders' | 'inbox',
 ): Promise<readonly PersonalOpsLane[]> {
   options.signal?.throwIfAborted();
-  const snapshot = buildAgentWorkspaceRuntimeSnapshot(context);
+  // Only the stores the lanes read (channels, notes, routines and their receipts), not the whole workspace.
+  const snapshot = buildAgentWorkspacePersonalOpsPart(context);
   if (exactLane === 'notes') return [notesLane(snapshot)];
   // A lane's reads are skipped when the caller asked for another lane alone.
   const wants = (lane: 'inbox' | 'calendar' | 'tasks' | 'reminders') => exactLane === undefined || exactLane === lane;

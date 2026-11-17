@@ -1,3 +1,4 @@
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 import { factsFor } from '@goodvibes-jev/engine/platform/platform/routing';
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { readTierPromptSupplement } from '@goodvibes-jev/engine/platform/platform/providers';
@@ -79,9 +80,6 @@ interface CompactPromptContextReceipt {
   }[];
 }
 
-function readPromptString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function readPromptLimit(value: unknown, fallback: number): number {
   const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
@@ -348,8 +346,8 @@ function promptContextReceiptSummary(context: CommandContext, args: PromptContex
       note: 'Prompt-context receipt storage is unavailable in this runtime.',
     };
   }
-  const receiptId = readPromptString(args.receiptId);
-  const turnId = readPromptString(args.turnId);
+  const receiptId = readString(args.receiptId);
+  const turnId = readString(args.turnId);
   const outcomeStatus = readOutcomeStatus(args.outcomeStatus);
   const hasFilter = Boolean(receiptId || turnId || outcomeStatus);
   const limit = readPromptLimit(args.limit, includeParameters ? 5 : 3);

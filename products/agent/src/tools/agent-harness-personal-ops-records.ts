@@ -3,7 +3,7 @@ import { protectPersonalOpsData } from './agent-harness-personal-ops-source.ts';
 import { readRecord } from './agent-harness-model-routing-utils.ts';
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { CommandContext } from '../input/command-registry.ts';
-import { buildAgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-snapshot.ts';
+import type { buildAgentWorkspacePersonalOpsPart } from '../input/agent-workspace-snapshot.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { LANE_IDS } from './agent-harness-personal-ops-types.ts';
 import type { PersonalOpsConnectorSignal, PersonalOpsConnectorTool, PersonalOpsLane, PersonalOpsLaneId, PersonalOpsLiveRecord, PersonalOpsRecordFreshness, PersonalOpsStatus, PersonalOpsWorkflow, PersonalOpsWorkflowStatus } from './agent-harness-personal-ops-types.ts';
@@ -157,7 +157,7 @@ export function describeLane(lane: PersonalOpsLane, includeParameters: boolean):
   };
 }
 
-export function localRecord(domain: 'note' | 'routine', item: ReturnType<typeof buildAgentWorkspaceRuntimeSnapshot>['localNotes'][number]): PersonalOpsLiveRecord {
+export function localRecord(domain: 'note' | 'routine', item: ReturnType<typeof buildAgentWorkspacePersonalOpsPart>['localNotes'][number]): PersonalOpsLiveRecord {
   return {
     id: item.id,
     label: item.name,
@@ -169,7 +169,7 @@ export function localRecord(domain: 'note' | 'routine', item: ReturnType<typeof 
   };
 }
 
-export function routineReceiptRecord(receipt: ReturnType<typeof buildAgentWorkspaceRuntimeSnapshot>['latestRoutineScheduleReceipt']): PersonalOpsLiveRecord | null {
+export function routineReceiptRecord(receipt: ReturnType<typeof buildAgentWorkspacePersonalOpsPart>['latestRoutineScheduleReceipt']): PersonalOpsLiveRecord | null {
   if (!receipt) return null;
   return {
     id: receipt.id,
@@ -181,7 +181,7 @@ export function routineReceiptRecord(receipt: ReturnType<typeof buildAgentWorksp
   };
 }
 
-export function channelRecords(snapshot: ReturnType<typeof buildAgentWorkspaceRuntimeSnapshot>): readonly PersonalOpsLiveRecord[] {
+export function channelRecords(snapshot: ReturnType<typeof buildAgentWorkspacePersonalOpsPart>): readonly PersonalOpsLiveRecord[] {
   return snapshot.channels.map((channel) => ({
     id: channel.id,
     label: channel.label,

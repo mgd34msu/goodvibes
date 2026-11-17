@@ -1,3 +1,4 @@
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn/protected-research-report';
 import { withModelReadingSource, captureModelReadingInput, assertModelReadingInputCurrent } from './agent-harness-model-reading-source.ts';
 /** Preferred settings and compatibility harness share one exact effect-owner plan. */
@@ -29,7 +30,6 @@ export function preferredSettingsMutation(name: string, args: Record<string, unk
   const action = readSettingsAction(args);
   return action === 'set' || action === 'reset' ? action : undefined;
 }
-const text = (value: unknown) => typeof value === 'string' ? value.trim() : '';
 const posture = (value: unknown) => Object.freeze({ redacted: true, configured: value !== undefined && value !== null && value !== '' });
 interface Capture {
   readonly argsJson: string;
@@ -107,8 +107,8 @@ export function createPreferredSettingsProjector(platform: Pick<CommandContext['
       retainCurrent: (guard: () => void, key?: string) => { if (!retained.has(key ?? guard)) retained.set(key ?? guard, guard); } };
 
     const lookupArgs = {
-      key: text(original.key) || text(original.setting), target: text(original.target), query: text(original.query),
-      category: text(original.category), prefix: text(original.prefix), includeHidden: original.includeHidden === true,
+      key: readString(original.key) || readString(original.setting), target: readString(original.target), query: readString(original.query),
+      category: readString(original.category), prefix: readString(original.prefix), includeHidden: original.includeHidden === true,
     };
     // Resolve/coerce before admission, never reinterpret an alias or a value in the body.
     const input = lookupArgs.key || lookupArgs.target || lookupArgs.query;

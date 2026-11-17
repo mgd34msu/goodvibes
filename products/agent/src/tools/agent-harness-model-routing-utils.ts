@@ -14,10 +14,6 @@ export function readFiniteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
-export function readBoolean(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined;
-}
-
 export function readStringArray(value: unknown): readonly string[] {
   return Array.isArray(value) ? value.map((entry) => readString(entry)).filter(Boolean) : [];
 }

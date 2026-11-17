@@ -78,6 +78,12 @@ function installRoot(executable: string, home: string): string {
  * boundary does not already provide: the install root of the executable (and
  * of its link target), and every absolute path argument (a script or a data
  * directory). Bound read-only. A program on the system paths needs none.
+ *
+ * A path argument inside the home directory the boundary hides is never bound:
+ * an argument such as ~/.ssh/id_rsa would otherwise expose its directory to a
+ * boundary that promises $HOME private. Such a path is seen only when it lies
+ * in the workspace or in sandbox.workspaceWritable, which the boundary binds
+ * itself.
  */
 export function programReadOnlyPaths(command: string, args: readonly string[], workspaceRoot: string, home: string = homedir()): string[] {
   const paths = new Set<string>();
@@ -92,7 +98,7 @@ export function programReadOnlyPaths(command: string, args: readonly string[], w
     try { add(installRoot(realpathSync(executable), home)); } catch { /* a dangling link starts nothing; the spawn reports it */ }
   }
   for (const arg of args) {
-    if (!isAbsolute(arg) || !existsSync(arg)) continue;
+    if (!isAbsolute(arg) || within(resolve(arg), home) || !existsSync(arg)) continue;
     try { add(statSync(arg).isDirectory() ? arg : dirname(arg)); } catch { /* unreadable: the program reports it */ }
   }
   return [...paths];

@@ -1,8 +1,9 @@
 import type { TerminalSlashCommand } from './command-registry.js';
 import type { CommandSubcommandHints } from './command-args-hint.js';
+import { settingsTargetNotFoundMessage, type SettingsTargetOutcome } from './settings-navigation.js';
 interface EntryContext {
   print(message: string): void;
-  readonly openSettingsModal?: ((target?: string) => void) | undefined;
+  readonly openSettingsModal?: ((target?: string) => SettingsTargetOutcome | 'unreported' | void) | undefined;
 }
 export function createWelcomeCommand<Context extends EntryContext>(policy: {
   readonly description: string;
@@ -51,8 +52,13 @@ export function createConfigWorkspaceCommand<Context extends EntryContext>(polic
         await policy.set(args, context);
         return;
       }
-      if (context.openSettingsModal) context.openSettingsModal(args[0]);
-      else context.print('Fullscreen config workspace is not available in this runtime.');
+      if (!context.openSettingsModal) {
+        context.print('Fullscreen config workspace is not available in this runtime.');
+        return;
+      }
+      const target = args[0];
+      const landed = context.openSettingsModal(target);
+      if (target && landed === 'not-found') context.print(settingsTargetNotFoundMessage(target));
     },
   };
 }

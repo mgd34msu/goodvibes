@@ -5,6 +5,7 @@ import {
   createErrorNavigationCommands,
 } from '@goodvibes-jev/engine/terminal-shell/context-inspection-command';
 import { createInteractionModeCommand } from '@goodvibes-jev/engine/terminal-shell/interaction-mode-command';
+import { settingsTargetNotFoundMessage } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { ToolContractVerifier } from '@/runtime/index.ts';
 import type { ReplaySnapshotInput } from '@/runtime/index.ts';
@@ -21,10 +22,16 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
   registry.register({
     name: 'settings',
     aliases: ['cfg-ui'],
-    description: 'Open the fullscreen configuration workspace',
-    handler(_args, ctx) {
-      if (ctx.openSettingsModal) ctx.openSettingsModal();
-      else ctx.print('Configuration workspace is not available in this runtime.');
+    description: 'Open the fullscreen configuration workspace, at a category or setting when one is named',
+    usage: '[category|key]',
+    handler(args, ctx) {
+      if (!ctx.openSettingsModal) {
+        ctx.print('Configuration workspace is not available in this runtime.');
+        return;
+      }
+      const target = args[0];
+      const landed: unknown = ctx.openSettingsModal(target);
+      if (target && landed === 'not-found') ctx.print(settingsTargetNotFoundMessage(target));
     },
   });
 

@@ -3,6 +3,7 @@ import {
   createErrorNavigationCommands,
 } from '@goodvibes-jev/engine/terminal-shell/context-inspection-command';
 import { createInteractionModeCommand } from '@goodvibes-jev/engine/terminal-shell/interaction-mode-command';
+import { settingsTargetNotFoundMessage } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
 import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn/protected-research-report';
 import { captureTranscriptSource } from './transcript-reading.ts';
 import type { CommandContext, CommandRegistry, SlashCommand } from '../command-registry.ts';
@@ -203,8 +204,12 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
         return;
       }
 
-      if (ctx.openSettingsModal) ctx.openSettingsModal(sub);
-      else ctx.print('Configuration workspace is not available in this runtime.');
+      if (!ctx.openSettingsModal) {
+        ctx.print('Configuration workspace is not available in this runtime.');
+        return;
+      }
+      const landed: unknown = ctx.openSettingsModal(sub);
+      if (landed === 'not-found') ctx.print(settingsTargetNotFoundMessage(sub));
     },
   };
   nativeSettingsCommands.set(settingsCommand, settingsCommand.handler);

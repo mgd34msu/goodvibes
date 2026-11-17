@@ -2,7 +2,7 @@ import { SETTINGS_CHOICE_ACTIONS, type SettingsChoiceAction } from '@goodvibes-j
 import { selectedSettingsCategoryEntry } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
 import { cycleSettingChoice, adjustedSettingValue } from '@goodvibes-jev/engine/terminal-shell/settings-behavior';
 import { TerminalSettingsModalState } from '@goodvibes-jev/engine/terminal-shell/settings-modal-state';
-import { moveSettingsSelection, selectSettingsTarget } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
+import { moveSettingsSelection, selectSettingsTarget, type SettingsTargetOutcome } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
 import { hasActiveExecutionMode, readExecutionMode, refreshExecutionMode, setExecutionMode } from '../permissions/execution-mode.ts';
 /** SettingsModal state for the /settings and /config fullscreen workspace. */
 
@@ -373,12 +373,14 @@ export class SettingsModal extends TerminalSettingsModalState<
     return this._currentItems();
   }
 
-  selectTarget(target?: string): void {
-    selectSettingsTarget(this, target, SETTINGS_CATEGORIES, this.groups, {
+  /** Lands on a category or setting; any other text becomes the search, and the outcome says which. */
+  selectTarget(target?: string): SettingsTargetOutcome {
+    return selectSettingsTarget(this, target, SETTINGS_CATEGORIES, this.groups, {
       resetScroll: false,
       focusSettings: () => {
         this.focusPane = 'settings';
       },
+      search: (query) => this.setSearchQuery(query),
     });
   }
 

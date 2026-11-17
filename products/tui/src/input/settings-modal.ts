@@ -6,7 +6,7 @@ import type {
   SettingsModalChangeHandler as PlatformSettingsModalChangeHandler,
 } from '@goodvibes-jev/engine/terminal-shell/settings-model-types';
 import { TerminalSettingsModalState } from '@goodvibes-jev/engine/terminal-shell/settings-modal-state';
-import { moveSettingsSelection, selectSettingsTarget } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
+import { moveSettingsSelection, selectSettingsTarget, type SettingsTargetOutcome } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
 /**
  * SettingsModal, state management for the /settings and /config fullscreen workspace.
  *
@@ -463,12 +463,14 @@ export class SettingsModal extends TerminalSettingsModalState<
     return this._currentItems();
   }
 
-  selectTarget(target?: string): void {
-    selectSettingsTarget(this, target, SETTINGS_CATEGORIES, this.groups, {
+  /** Lands on a category or setting; any other text becomes the search, and the outcome says which. */
+  selectTarget(target?: string): SettingsTargetOutcome {
+    return selectSettingsTarget(this, target, SETTINGS_CATEGORIES, this.groups, {
       resetScroll: true,
       focusSettings: () => {
         this.focusRegion = 'settings';
       },
+      search: (query) => this.setSearchQuery(query),
     });
   }
 

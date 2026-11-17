@@ -41,6 +41,11 @@ export function moveSettingsSelection(
 /** Where a settings target landed. `not-found`: no category or key has that name, so the text became the search. */
 export type SettingsTargetOutcome = 'category' | 'setting' | 'not-found' | 'none';
 
+/** What `/settings <target>` and `/config <target>` print when the target named no category or setting. */
+export function settingsTargetNotFoundMessage(target: string): string {
+  return `No setting or category is named "${target}"; the settings workspace is showing a search for it.`;
+}
+
 export function selectSettingsTarget<Category extends string>(
   state: { categoryIndex: number; selectedIndex: number; contextScroll: number },
   target: string | undefined,

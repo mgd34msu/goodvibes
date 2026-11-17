@@ -22,8 +22,6 @@ export function createCommonShellUiOpeners<Context>(options: {
   readonly input: CommonUiInput<Context>;
   readonly commandContext: Context;
   readonly render: () => void;
-  /** Not read: both overlays open and repaint the same way in every product. */
-  readonly renderHelpToggle?: boolean;
 }) {
   const { input, render, commandContext } = options;
   const open = (modal: CommonModal) => {

@@ -1,4 +1,5 @@
 import type { ModelPickerTarget } from './model-picker-types.js';
+import type { SettingsTargetOutcome } from './settings-navigation.js';
 import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
 import type { OpenSelection } from '@goodvibes-jev/engine/terminal-shell/selection-modal';
 import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
@@ -78,7 +79,8 @@ export interface TerminalCommandShellUiOpeners<Target extends ModelPickerTarget>
   scrollToLine?: (line: number) => void;
   openHelpOverlay?: () => void;
   openSelection?: OpenSelection;
-  openSettingsModal?: (target?: string) => void;
+  /** Opens settings at `target`; the outcome says where it landed (`not-found`: the text became the search). */
+  openSettingsModal?: (target?: string) => SettingsTargetOutcome | 'unreported' | void;
   openSessionPicker?: () => void;
   openProfilePicker?: () => void;
   openShortcutsOverlay?: () => void;

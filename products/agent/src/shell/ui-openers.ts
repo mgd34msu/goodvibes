@@ -201,7 +201,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     };
   };
 
-  Object.assign(commandContext, createCommonShellUiOpeners({ input, commandContext, render, renderHelpToggle: false }));
+  Object.assign(commandContext, createCommonShellUiOpeners({ input, commandContext, render }));
 
   commandContext.openProcessModal = () => {
     input.processModal.open();

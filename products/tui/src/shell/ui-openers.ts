@@ -251,7 +251,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     render();
   };
 
-  Object.assign(commandContext, createCommonShellUiOpeners({ input, commandContext, render, renderHelpToggle: true }));
+  Object.assign(commandContext, createCommonShellUiOpeners({ input, commandContext, render }));
 
   commandContext.openOnboardingWizard = (modeOrOptions) => {
     input.openOnboardingWizard(modeOrOptions);

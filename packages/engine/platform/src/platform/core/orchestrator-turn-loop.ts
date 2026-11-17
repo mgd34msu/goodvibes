@@ -45,10 +45,7 @@ import type { ContractEvent } from '../../events/contract.js';
 import { computeUsageCostUsdCents, usageCostSource } from '../providers/model-pricing.js';
 import { HelperModel } from '../config/helper-model.js';
 import type { ModelDefinition } from '../providers/registry.js';
-import {
-  resolveEffortForModel,
-  setActiveReasoningEffortOptions,
-} from '../providers/reasoning-effort.js';
+import { resolveEffortForModel } from '../providers/reasoning-effort.js';
 import { resolveReasoningEffortSpec } from '../providers/reasoning-effort-families.js';
 
 import type { FavoritesStore } from '../providers/favorites.js';
@@ -93,26 +90,18 @@ const PROGRESS_CHECK_RECENT_MESSAGES = 6;
  *
  * A model that does not reason is sent nothing at all, the configured level
  * has a default, so an unconditional pass-through used to hand a reasoning
- * parameter to models that reject one. Publishing the resolved levels here is
- * also what lets `provider.reasoningEffort` be validated at set-time against
- * the model actually in use, published under this session's own id, so a
- * daemon running several sessions on different models does not let the one that
- * ran a turn most recently decide what is valid on the others.
+ * parameter to models that reject one. The configured level is snapped down
+ * to what this model accepts.
  */
 function resolveTurnReasoning(
   model: ModelDefinition,
   configured: string | undefined,
-  sessionId: string,
 ): Pick<ChatRequest, 'reasoningEffort' | 'reasoningEffortSpec'> {
-  if (!model.capabilities.reasoning) {
-    setActiveReasoningEffortOptions(null, sessionId);
-    return {};
-  }
+  if (!model.capabilities.reasoning) return {};
   const spec = resolveReasoningEffortSpec({
     provider: model.provider, modelId: model.id,
     ...(model.reasoningEffort ? { spec: model.reasoningEffort } : {}),
   });
-  setActiveReasoningEffortOptions(spec.values, sessionId);
   const { value } = resolveEffortForModel(configured || 'medium', {
     id: model.id,
     displayName: model.displayName,
@@ -306,7 +295,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
   const provider: LLMProvider = decisionRoute?.provider ?? selectedProvider;
   const turnReasoning = () => decisionRoute
     ? { reasoningEffort: decisionRoute.effort.value, reasoningEffortSpec: decisionRoute.effort.spec }
-    : resolveTurnReasoning(model, context.configManager.get('provider.reasoningEffort'), context.sessionId);
+    : resolveTurnReasoning(model, context.configManager.get('provider.reasoningEffort'));
   if (decisionRoute) {
     context.conversation.addNotice(describeDecisionRoute(decisionRoute.info), { level: 'info', kind: 'operational' });
     context.requestRender();

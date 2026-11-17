@@ -42,7 +42,6 @@ export function createModelSelectionAction(
   policy: {
     readonly setToolEnabled: () => void;
     readonly effortModel: (model: TerminalModelSelection['model']) => EffortModelLike;
-    readonly publishEffortOptions: (model: EffortModelLike) => void;
     readonly alwaysShowEffort: boolean;
     readonly noteColor: () => string;
   },
@@ -122,10 +121,6 @@ export function createModelSelectionAction(
         // their provenance instead (describeServingEffort) rather than the
         // preference being corrupted to match.
         const effortModel = policy.effortModel(def);
-        // Publish this model's real levels first, so both the preference
-        // write below and a later `config set provider.reasoningEffort` are
-        // validated against them.
-        policy.publishEffortOptions(effortModel);
         if (effortChosenByUser && effort) write('provider.reasoningEffort', effort);
         const serving = resolveRequestedEffortForServingModel(configManager, effortModel);
         runtime.reasoningEffort = serving.effective ?? '';
@@ -179,7 +174,6 @@ export function createModelSelectionAction(
       runtime.model = def.registryKey;
       runtime.provider = def.provider;
       const effortModel = policy.effortModel(def);
-      policy.publishEffortOptions(effortModel);
       const serving = resolveRequestedEffortForServingModel(configManager, effortModel);
       runtime.reasoningEffort = serving.effective ?? '';
       const effortNote =
@@ -203,7 +197,12 @@ export function createModelSelectionAction(
     try {
       const def = providerRegistry.getCurrentModel();
       const effortModel = policy.effortModel(def);
-      runtime.reasoningEffort = resolveRequestedEffortForServingModel(configManager, effortModel).effective ?? '';
+      const serving = resolveRequestedEffortForServingModel(configManager, effortModel);
+      runtime.reasoningEffort = serving.effective ?? '';
+      // Any level on the ladder is stored; say when this model will send a different one.
+      if (serving.capped) {
+        conversation.log(`Reasoning effort saved; this model uses ${describeServingEffort(serving, effortModel)}.`, { fg: policy.noteColor() });
+      }
     } catch (error) {
       conversation.log(`Reasoning effort setting not applied to this session: ${summarizeError(error)}.`, { fg: policy.noteColor() });
     }

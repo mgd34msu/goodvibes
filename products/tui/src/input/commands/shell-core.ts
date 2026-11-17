@@ -2,7 +2,6 @@ import { createShellCoreActions } from '@goodvibes-jev/engine/terminal-shell/she
 import { createBasicShellCommands, createShellNavigationCommands } from '@goodvibes-jev/engine/terminal-shell/basic-shell-commands';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { SelectionItem } from '../selection-modal.ts';
-import { publishActiveEffortOptions } from '../../providers/reasoning-effort-surface.ts';
 import { executeCommitAll } from './quit-shared.ts';
 import { startFreshConversation } from './fresh-conversation.ts';
 import { CompactBusyError, compactConversation, requireKeybindingsManager, requireProviderApi, requireSessionMemoryStore } from './runtime-services.ts';
@@ -25,7 +24,6 @@ const coreActions = createShellCoreActions<CommandContext>(
     shortcutOverlay: true,
     unsupportedEffortAdvice: true,
     beforeSelection: ensureProviderKeyThenSelect,
-    publishEffort: (_ctx, model) => publishActiveEffortOptions(model),
     modelSelected: (model, provider) => 'Switched to model: ' + model + ' (' + provider + ')',
     effortMessage: (level, changed) => (changed ? 'Reasoning effort set to: ' : 'Reasoning effort: ') + level,
     error: (detail) => 'Error: ' + detail,

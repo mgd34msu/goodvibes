@@ -44,7 +44,6 @@ export function createShellCoreActions<Context extends ShellCoreContext>(
     readonly shortcutOverlay: boolean;
     readonly unsupportedEffortAdvice: boolean;
     readonly beforeSelection: (context: Context, provider: string, complete: () => void) => void;
-    readonly publishEffort: (context: Context, model: ReturnType<typeof toEffortModel>) => void;
     readonly modelSelected: (model: string, provider: string) => string;
     readonly effortMessage: (level: string, changed: boolean) => string;
     readonly error: (detail: string) => string;
@@ -95,7 +94,6 @@ export function createShellCoreActions<Context extends ShellCoreContext>(
               // only the session's effective level. Writing the snapped value back
               // over the preference is what used to make the downgrade permanent.
               const switchedTo = toEffortModel(ctx.provider.providerRegistry.getCurrentModel());
-              policy.publishEffort(ctx, switchedTo);
               const serving = resolveRequestedEffortForServingModel(ctx.platform.configManager, switchedTo);
               ctx.session.runtime.reasoningEffort = serving.effective ?? '';
               if (serving.requested !== '') {
@@ -130,9 +128,6 @@ export function createShellCoreActions<Context extends ShellCoreContext>(
         const definition = ctx.provider.providerRegistry.getCurrentModel();
         const model = toEffortModel(definition);
         const presentation = effortPresentationForModel(model);
-        // Validation of provider.reasoningEffort now happens against these real
-        // levels rather than a fixed four-value list.
-        policy.publishEffort(ctx, model);
 
         if (!presentation.configurable) {
           ctx.print(presentation.headline);

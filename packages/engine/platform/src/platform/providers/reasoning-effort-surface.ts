@@ -32,7 +32,6 @@ import {
   describeReasoningWire,
   reasoningEffortLevels,
   resolveEffortForModel,
-  setActiveReasoningEffortOptions,
   type ReasoningEffortSpec,
   type ResolvedReasoningEffort,
 } from './reasoning-effort.js';
@@ -98,19 +97,6 @@ export function effortLevelsForModel(model: EffortModelLike): readonly string[] 
 export function offersConfigurableEffort(model: EffortModelLike): boolean {
   const spec = effortSpecForModel(model);
   return spec.values.length > 0 && spec.source !== 'fallback';
-}
-
-/**
- * Publish the current model's real levels to the platform so a
- * `provider.reasoningEffort` write is validated against them rather than
- * against a fixed list. Pass no model to clear.
- */
-export function publishActiveEffortOptions(model: EffortModelLike | null | undefined, sessionId?: string): void {
-  if (!model) {
-    setActiveReasoningEffortOptions(null, sessionId);
-    return;
-  }
-  setActiveReasoningEffortOptions(effortLevelsForModel(model), sessionId);
 }
 
 /** Map a requested level onto what a model accepts (snapping down, never up). */

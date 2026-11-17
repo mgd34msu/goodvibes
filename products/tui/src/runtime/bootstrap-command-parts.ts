@@ -9,7 +9,7 @@ import { projectCommandProviderServices } from '@goodvibes-jev/engine/terminal-s
 import { EvalRegistry } from '@goodvibes-jev/engine/platform/platform/observe';
 import { activeTokens } from '../renderer/theme.ts';
 import { getConfigSnapshot } from '@goodvibes-jev/engine/platform/platform/config';
-import { publishActiveEffortOptions, toEffortModel } from '../providers/reasoning-effort-surface.ts';
+import { toEffortModel } from '../providers/reasoning-effort-surface.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { AdaptivePlanner } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ConversationManager } from '../core/conversation';
@@ -213,7 +213,6 @@ export function createBootstrapCommandActions(
         {
           setToolEnabled: () => configManager.setDynamic('tools.llmEnabled' as never, true),
           effortModel: (model) => toEffortModel(model),
-          publishEffortOptions: (model) => publishActiveEffortOptions(model),
           alwaysShowEffort: true,
           noteColor: () => activeTokens().warning,
         },

@@ -6,8 +6,6 @@ import { REASONING_EFFORT_SEVERITY, reasoningEffortRank } from '../config/reason
 export {
   REASONING_EFFORT_SEVERITY,
   reasoningEffortRank,
-  setActiveReasoningEffortOptions,
-  getActiveReasoningEffortOptions,
   isAcceptableReasoningEffortSetting,
 } from '../config/reasoning-effort-setting.js';
 

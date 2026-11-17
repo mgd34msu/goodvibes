@@ -184,6 +184,7 @@ export function isPeerEndpointId(value: string): value is (typeof PEER_ENDPOINT_
 export * from './zod-schemas/index.js';
 
 export { WEBUI_CODE_LANGUAGES, type WebuiCodeLanguage } from './browser-code-languages.js';
+export { REASONING_EFFORT_SEVERITY } from './reasoning-effort-levels.js';
 
 export { toolActionClass, toolActivityFallback, toolActivityPhrase, toolCallActivity } from './tool-activity.js';
 export type { ToolActionClass, ToolActivity, ToolActivityWords } from './tool-activity.js';

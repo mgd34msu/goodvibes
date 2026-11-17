@@ -5,7 +5,7 @@ import { createSemanticFactIdentityIndex, SemanticIdentityHeldError, type Semant
 import { savedGeneratedProjectionIdentity, projectionIdentityParams, KnowledgeProjectionIdentityHeldError, type GeneratedProjectionIdentity } from './store-generated-projection-selector.js';
 import { createKnowledgeRowRevisions } from './store-row-revisions.js';
 import { withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { KnowledgeRecordAdmissionHeldError, knowledgeEdgeSnapshotFromRows, knowledgeRecordGenerationFromRows, knowledgeRecordSnapshotFromRows, type KnowledgeRecordSnapshot } from './store-record-snapshot.js';
 import { sameKnowledgeRecord, captureKnowledgeStoreInput, copyKnowledgeRepresentation, prepareKnowledgeOwnedClocks } from './store-record-representation.js';
 import { JudgmentInputError, snapshotJudgmentInput } from '../gate/judgment-input.js';
@@ -194,11 +194,7 @@ const MAX_RETAINED_USAGE_RECORDS = 10_000;
 const USAGE_RETENTION_SLACK = MAX_RETAINED_USAGE_RECORDS / 10;
 
 function assertKnowledgeWriteCurrent(assertCurrent: (() => void) | undefined): void {
-  const result: unknown = assertCurrent?.();
-  if (result !== undefined) {
-    drainOwned(result);
-    throw new KnowledgeNodeActivationHeldError('stale');
-  }
+  assertSynchronousJudgmentGuard(assertCurrent, () => new KnowledgeNodeActivationHeldError('stale'));
 }
 
 const nativePublicationApply = Reflect.apply;

@@ -1,4 +1,4 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { assertSecurityReadSource, captureSecurityReadBindings, captureSecurityReadFiles, captureSecurityReadData } from '../security/read-source.js';
 /**
  * SecretsManager, hierarchy-aware secret resolution and persistence.
@@ -962,8 +962,7 @@ export class SecretsManager {
    */
   async getOrCreateDaemonSecret(key: string, create: () => string, assertCurrent?: () => void): Promise<string> {
     const guard = () => {
-      const result: unknown = assertCurrent?.();
-      if (result !== undefined) { drainOwned(result); throw new Error('Daemon key ownership must be checked synchronously.'); }
+      assertSynchronousJudgmentGuard(assertCurrent, () => new Error('Daemon key ownership must be checked synchronously.'));
     };
     guard();
     const policy = this.getPolicy();
@@ -1206,8 +1205,7 @@ export class SecretsManager {
   async set(key: string, value: string, options: SecretWriteOptions = {}): Promise<void> {
     const assertCurrent = options.assertCurrent;
     const current = () => {
-      const result: unknown = assertCurrent?.();
-      if (result !== undefined) { drainOwned(result); throw new Error('Secret write ownership must be checked synchronously.'); }
+      assertSynchronousJudgmentGuard(assertCurrent, () => new Error('Secret write ownership must be checked synchronously.'));
     };
     current();
     const scope = resolveSecretWriteScope(key, options.scope);
@@ -1244,8 +1242,7 @@ export class SecretsManager {
       assertTransition();
       const owner = effect(transition), assertEffect = owner.assertCurrent, committed = owner.committed;
       const checkEffect = () => {
-        const result: unknown = assertEffect();
-        if (result !== undefined) { drainOwned(result); throw new Error('Secret write effect ownership must be synchronous.'); }
+        assertSynchronousJudgmentGuard(assertEffect, () => new Error('Secret write effect ownership must be synchronous.'));
       };
       checkEffect(); assertTransition();
       phase = 'pending';
@@ -1263,8 +1260,7 @@ export class SecretsManager {
       });
       phase = 'committed'; assertTransition();
       // Receipt is consumed only after the matching settlement generation.
-      const settled: unknown = committed();
-      if (settled !== undefined) { drainOwned(settled); throw new Error('Secret write settlement must be synchronous.'); }
+      assertSynchronousJudgmentGuard(committed, () => new Error('Secret write settlement must be synchronous.'));
     } catch (error) {
       phase = 'failed';
       if (published) throw new SecretWriteCommittedError();

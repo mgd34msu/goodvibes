@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 import { mkdtemp, open, rm, type FileHandle } from 'node:fs/promises';
 import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
@@ -475,8 +475,7 @@ export class ProcessManager {
     const publishOutput = (stream: 'stdout' | 'stderr') => (chunk: string): void => {
       if (!outputObserver || observerFailed) return;
       try {
-        const returned: unknown = outputObserver(chunk, stream);
-        if (returned !== undefined) { drainOwned(returned); throw new Error(); }
+        assertSynchronousJudgmentGuard(() => outputObserver(chunk, stream), () => new Error());
       } catch {
         observerFailed = true;
         void processOwner?.stop().catch(() => logger.warn('Managed output observer child cleanup could not be confirmed', { processId: id }));

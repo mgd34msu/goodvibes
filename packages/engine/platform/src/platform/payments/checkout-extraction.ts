@@ -112,6 +112,23 @@ function fail(field: string, reason: string): ExtractionResult {
 }
 
 /**
+ * The decimal mark a reading's own amounts show (`pageDecimalMark` over every
+ * amount it holds). `extractCheckout` reads every amount by it; a caller that
+ * parses more text from the same page passes it to `parseMinorUnits` so that
+ * text is read the same way.
+ */
+export function readingDecimalMark(raw: RawCheckoutReading, currency: CurrencyCode | string): ReturnType<typeof pageDecimalMark> {
+  return pageDecimalMark([
+    ...raw.lines.map(line => line.unitPrice),
+    ...(raw.tax === null ? [] : [raw.tax]),
+    ...raw.fees.map(fee => fee.amount),
+    ...(raw.discounts ?? []).map(discount => discount.amount),
+    ...raw.shippingOptions.map(option => option.cost),
+    ...(raw.statedTotal === null ? [] : [raw.statedTotal]),
+  ], currency);
+}
+
+/**
  * Turn a reading into integers, or refuse and say which field defeated it.
  *
  * `fallbackCurrency` is the budget's currency, used only when the page states
@@ -137,14 +154,7 @@ export function extractCheckout(
 
   // In a three-decimal currency "1.234" is a price of 1.234 or of 1234; the
   // page's other amounts decide which, and every amount is read the same way.
-  const layout = pageDecimalMark([
-    ...raw.lines.map(line => line.unitPrice),
-    ...(raw.tax === null ? [] : [raw.tax]),
-    ...raw.fees.map(fee => fee.amount),
-    ...(raw.discounts ?? []).map(discount => discount.amount),
-    ...raw.shippingOptions.map(option => option.cost),
-    ...(raw.statedTotal === null ? [] : [raw.statedTotal]),
-  ], currency);
+  const layout = readingDecimalMark(raw, currency);
   if (!layout.ok) {
     return fail(
       'amounts',

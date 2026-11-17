@@ -42,11 +42,15 @@
  *
  * Three-decimal currencies (KWD, BHD, OMR, ...) are where those two facts
  * collide: "0.750" and "12.500" are how those prices are printed, and they have
- * the thousands-group shape. There, one separator with exactly three digits
- * after it is a fraction, the same reading the owner's own maximum gets, unless
- * the page itself shows that it groups thousands with that mark
- * (`pageDecimalMark`). A page that gives no sign either way while also writing
- * bare whole numbers is refused rather than guessed at.
+ * the thousands-group shape. The page's own amounts decide first
+ * (`pageDecimalMark`): "0.750", "1,234.500" or "1234.500" show the mark, and
+ * every split on that page is read by it. When nothing shows it, a dot split
+ * is a fraction, the reading the owner's own maximum gets and how these
+ * currencies are written wherever a dot is the decimal mark; a comma split is
+ * refused, because "KD 1,234" (whole dinars, grouped) and "12,500 DT" (a
+ * fraction) are both written that way, and reading the first as the second
+ * would put a thousandth of the price against the budget. A page that shows no
+ * mark while also writing bare whole numbers beside a split is refused too.
  */
 import type { CurrencyCode, MinorUnits } from './types.js';
 
@@ -163,9 +167,10 @@ function revealedDecimalMark(number: string): DecimalMark | undefined {
  * Only three-decimal currencies need this; for every other currency the
  * grammar in `parseMinorUnits` decides alone and the answer is `{ ok: true }`.
  * Refused (`ok: false`) when two amounts on the page show different decimal
- * marks, or when nothing shows one and the page writes both three-digit splits
- * ("1,234") and bare whole numbers ("5"): "1,234" + "5" adds up to 6.234 or to
- * 1239 and the page gives no way to tell which.
+ * marks, or when nothing shows one and the page writes either a comma split
+ * ("1,234": whole dinars grouped, or a fraction where a comma is the decimal
+ * mark) or both three-digit splits and bare whole numbers ("1.234" + "5" adds
+ * up to 6.234 or to 1239), since the page gives no way to tell which.
  */
 export function pageDecimalMark(
   amounts: readonly string[],
@@ -174,6 +179,7 @@ export function pageDecimalMark(
   if (minorUnitExponent(currency) !== 3) return { ok: true };
   let mark: DecimalMark | undefined;
   let split: string | undefined;
+  let commaSplit: string | undefined;
   let whole = false;
   for (const raw of amounts) {
     // Discount lines may carry a sign; the layout of the digits is what counts.
@@ -184,10 +190,13 @@ export function pageDecimalMark(
     if (shown !== undefined) {
       if (mark !== undefined && mark !== shown) return { ok: false, example: number };
       mark = shown;
-    } else if (THREE_DIGIT_SPLIT.test(number)) split ??= number;
-    else if (/^\d+$/.test(number) && Number(number) !== 0) whole = true;
+    } else if (THREE_DIGIT_SPLIT.test(number)) {
+      split ??= number;
+      if (number.includes(',')) commaSplit ??= number;
+    } else if (/^\d+$/.test(number) && Number(number) !== 0) whole = true;
   }
   if (mark !== undefined) return { ok: true, mark };
+  if (commaSplit !== undefined) return { ok: false, example: commaSplit };
   if (split !== undefined && whole) return { ok: false, example: split };
   return { ok: true };
 }
@@ -206,8 +215,9 @@ export function pageDecimalMark(
  *
  * `decimalMark` is the page's mark from `pageDecimalMark`. In a three-decimal
  * currency it decides a three-digit split, and an amount that shows the other
- * mark is refused; without it a three-digit split is a fraction, the reading
- * `parseRequestedMaximum` gives the owner's own figure.
+ * mark is refused; without it a dot split is a fraction, the reading
+ * `parseRequestedMaximum` gives the owner's own figure, and a comma split is
+ * refused as a whole-or-fraction guess.
  */
 export function parseMinorUnits(
   raw: string,
@@ -224,6 +234,7 @@ export function parseMinorUnits(
     if (decimalMark !== undefined && shown !== undefined && shown !== decimalMark) return null;
     if (THREE_DIGIT_SPLIT.test(number)) {
       const separator = number.charAt(number.length - 4);
+      if (decimalMark === undefined && separator === ',') return null;
       const [major = '', minor = ''] = number.split(separator);
       const grouped = decimalMark !== undefined && decimalMark !== separator;
       return exactMinorUnits(grouped ? `${major}${minor}` : major, grouped ? '' : minor, exponent);

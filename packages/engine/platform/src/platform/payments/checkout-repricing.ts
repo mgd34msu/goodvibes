@@ -9,8 +9,8 @@ import { askAs, checkEachFixture, choice, decisionHeader, fixtureCheck, noul, re
   NONE, STAKES_BANDS, toJson, type CallOptions, type ChoiceReading, type EntryType, type JudgmentPort, type NamedDecision, type Outcome, type Question, type YesNoReading } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, captureOwnedJson } from '../gate/judgment-input.js';
 import { sanitizeNoticeField } from '../security/notice-text.js';
-import { extractCheckout, type RawCheckoutReading } from './checkout-extraction.js';
-import { parseMinorUnits } from './money-parsing.js';
+import { extractCheckout, readingDecimalMark, type RawCheckoutReading } from './checkout-extraction.js';
+import { parseMinorUnits, type DecimalMark } from './money-parsing.js';
 import { checkoutTerms, checkoutTermsView } from './batteries/checkout-terms.js';
 import type { CheckoutTerms } from './checkout-page.js';
 
@@ -144,7 +144,7 @@ function labelBefore(text: string, start: number): string {
 const MAX_AMOUNT_CANDIDATES = 192;
 
 /** Syntax only: extract exact numeric spans; models decide which, if any, are prices. */
-export function checkoutAmountCandidates(texts: readonly string[], currency: string): readonly AmountCandidate[] | null {
+export function checkoutAmountCandidates(texts: readonly string[], currency: string, decimalMark?: DecimalMark): readonly AmountCandidate[] | null {
   const candidates: AmountCandidate[] = [];
   for (const [document, text] of texts.entries()) {
     const spans = new Map<string, { readonly start: number; readonly end: number; readonly literal: string }>();
@@ -164,7 +164,7 @@ export function checkoutAmountCandidates(texts: readonly string[], currency: str
       if (start < claimedUntil) { claimedUntil = Math.max(claimedUntil, end); continue; }
       claimedUntil = end;
       if (/^[-−‐-―﹣－(]/.test(literal) || literal.endsWith(')')) continue;
-      if (parseMinorUnits(literal, currency) === null) continue;
+      if (parseMinorUnits(literal, currency, decimalMark) === null) continue;
       if (candidates.length >= MAX_AMOUNT_CANDIDATES) return null;
       const nearby = text.slice(Math.max(0, start - 100), Math.min(text.length, end + 100));
       candidates.push({ id: `amount-${candidates.length}`, content: { literal, document, start, end, nearby, label: labelBefore(text, start) } });
@@ -212,7 +212,10 @@ export async function readRepricedCheckout(input: {
   const current = captureOwnedJson(input.current);
   if (!current || typeof current !== 'object' || Array.isArray(current)) return null;
   const texts = checkoutTexts(current); if (!texts) return null;
-  const candidates = checkoutAmountCandidates(texts, previous.currency); if (!candidates) return null;
+  // The same page: its amounts are read by the decimal mark the notified
+  // reading showed, so a three-decimal split is not read a thousand times off.
+  const priorLayout = readingDecimalMark(reading, previous.currency);
+  const candidates = checkoutAmountCandidates(texts, previous.currency, priorLayout.ok ? priorLayout.mark : undefined); if (!candidates) return null;
   const options = { site: 'payments.reprice', ...(signal === undefined ? {} : { signal }) };
   const original = checkoutTermsView(previous, current);
   const deliveryOptions = reading.shippingOptions.map(option => option.label);
@@ -265,7 +268,9 @@ export async function readRepricedCheckout(input: {
   const selected = extracted.checkout.shippingOptions.find(option => option.rawLabel === previous.shippingLabel);
   if (!selected) return null;
   const payable = extracted.checkout.subtotalMinorUnits + selected.costMinorUnits;
-  if (!Number.isSafeInteger(payable) || payable !== parseMinorUnits(total, previous.currency)) return null;
+  // Read by the mark extraction read the new quote with.
+  const nextLayout = readingDecimalMark(next, previous.currency);
+  if (!nextLayout.ok || !Number.isSafeInteger(payable) || payable !== parseMinorUnits(total, previous.currency, nextLayout.mark)) return null;
   const expected: CheckoutTerms = { ...previous, lines: extracted.checkout.lines,
     taxMinorUnits: extracted.checkout.taxMinorUnits, feesMinorUnits: extracted.checkout.feesMinorUnits,
     feeLabels: extracted.checkout.feeLabels, ...(extracted.checkout.discounts.length > 0 ? { discounts: extracted.checkout.discounts } : { discounts: undefined }), shippingMinorUnits: selected.costMinorUnits, totalMinorUnits: payable };

@@ -50,11 +50,16 @@ export function wireSessionAmbience(deps: SessionAmbienceDeps): SessionAmbience 
     configManager, cwd: deps.workingDir, turns: deps.events.turns, onChange: () => render(),
   });
   // Titles are supporting work: a dedicated helper route writes them when one is configured, and
-  // their spend is reported with the session's other helper calls; otherwise the tool LLM does.
+  // their spend is reported with the session's other helper calls; otherwise the tool LLM does,
+  // and with the tool LLM off the main model does, as the helper settings say.
   const titleModel = {
-    chat: async (prompt: string, options?: { maxTokens?: number; systemPrompt?: string }): Promise<string> =>
-      (await deps.orchestrator.helperModel.chat('session_title', prompt, { ...options, helperOnly: true }))
-        ?? await deps.toolLLM.chat(prompt, options),
+    chat: async (prompt: string, options?: { maxTokens?: number; systemPrompt?: string }): Promise<string> => {
+      const helper = deps.orchestrator.helperModel;
+      const helped = await helper.chat('session_title', prompt, { ...options, helperOnly: true });
+      if (helped !== null) return helped;
+      if (configManager.get('tools.llmEnabled') === true) return deps.toolLLM.chat(prompt, options);
+      return (await helper.chat('session_title', prompt, options)) ?? '';
+    },
   };
   const sessionAutoTitler = createSessionAutoTitler({
     conversation: deps.conversation, model: titleModel, configManager, turns: deps.events.turns,

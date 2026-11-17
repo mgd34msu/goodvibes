@@ -222,8 +222,9 @@ export async function maybeAssistReturnContextSummary(
     `Tool results: ${summary.toolResultCount}`,
   ].join('\n');
 
-  // Only a dedicated helper route writes this line; without one the resume shows the plain summary.
-  const response = ((await helperModel.chat('resume_summary', prompt, { maxTokens: 80, helperOnly: true })) ?? '').trim();
+  // The owner chose the assisted summary: the helper route writes it, or the
+  // main model when no helper route is set, as the helper settings say.
+  const response = ((await helperModel.chat('resume_summary', prompt, { maxTokens: 80 })) ?? '').trim();
   if (!response) return summary;
   return {
     ...summary,

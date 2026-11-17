@@ -740,9 +740,11 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   // Memory consolidation writes the store, so it runs where this product's
   // choice says the writer is; power owns the sleep edge.
   const runsRoutines = seams.runsRoutines ?? ((): boolean => true);
-  const { memoryConsolidationScheduler, powerManager, sessionLiveTurnControls } = wireIdlePowerAndLiveTurn({
+  const { memoryConsolidationScheduler, memoryUsageTracker, stopMemoryUsage, powerManager, sessionLiveTurnControls } = wireIdlePowerAndLiveTurn({
     configManager,
     memoryRegistry: seams.consolidationTarget?.(memoryRegistry, memorySpine) ?? memoryRegistry,
+    // Every turn of this process counts its memory use on the store, whichever process consolidates.
+    usageRegistry: memoryRegistry,
     runtimeBus,
     isIdle: () => (seams.busySessionCount?.() ?? sessionBroker.countBusySessions()) === 0
       && !pauseController.isPaused('memory-consolidation')
@@ -755,6 +757,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     ...(seams.onConsolidationReceipt ? { onConsolidationReceipt: seams.onConsolidationReceipt } : {}),
   });
   scope.ownUntilRegistered('memory consolidation scheduler', () => memoryConsolidationScheduler.stop());
+  scope.registry.add('memory usage', stopMemoryUsage);
   scope.registry.add('runtime power', () => powerManager.stop());
   // The memory governor (on by default, a safety feature) with real cache
   // adapters, then the late-bound admission gate the expensive entry points captured.
@@ -945,6 +948,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     startWakeHousekeeping,
     stopWakeHousekeeping,
     memoryConsolidationScheduler,
+    memoryUsageTracker,
     powerManager,
     voiceSetup,
     serviceRegistry,

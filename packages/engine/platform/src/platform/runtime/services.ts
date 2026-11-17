@@ -29,6 +29,7 @@ import type { CodeIndexStore } from '../state/code-index-store.js';
 import type { CodeIndexReindexScheduler } from '../state/code-index-reindex.js';
 import type { StoreSnapshotScheduler } from '../state/store-snapshots.js';
 import type { MemoryConsolidationScheduler } from '../state/memory-consolidation-scheduler.js';
+import type { MemoryUsageTracker } from '../state/memory-usage-detection.js';
 import type { MemoryConsolidationRunReceipt } from '../state/index.js';
 import type { FileStateCache } from '../state/file-cache.js';
 import type { ProjectIndex } from '../state/project-index.js';
@@ -397,6 +398,12 @@ export interface RuntimeServices {
   readonly appendOnlyRetentionScheduler: AppendOnlyRetentionScheduler;
   /** Idle+schedule memory consolidation driver (this runtime is the store's single writer); unref'd timers, stop() on teardown. */
   readonly memoryConsolidationScheduler: MemoryConsolidationScheduler;
+  /**
+   * The process's one per-turn memory usage tracker, following every turn on
+   * the runtime bus; a product whose own prompt injects memories adds their ids
+   * with `onComposed`. Consolidation's decay reads the counters it writes.
+   */
+  readonly memoryUsageTracker: MemoryUsageTracker;
   /** Sleep ownership: work inhibition, keep-awake toggle, sleep-edge hooks (platform/power). */
   readonly powerManager: PowerManager;
   readonly serviceRegistry: ServiceRegistry;

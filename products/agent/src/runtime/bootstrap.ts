@@ -63,7 +63,7 @@ import { reconcileMemorySpineAdoption } from './memory-spine-adoption.ts';
 import { createAgentSessionInputsClient } from './client/session-inputs.ts';
 import { AgentPromptContextReceiptStore, composeRuntimePromptWithReceipt } from '@goodvibes-jev/engine/terminal-shell/agent-turn/prompt-context-receipts';
 import { recordCompletedTurnAnchor } from './rewind-anchor-wiring.ts';
-import { createMemoryUsageTracker } from './memory-usage-wiring.ts';
+import { extractInjectedMemoryIds } from './memory-usage-wiring.ts';
 import { installOccasionsNudging } from './occasions-boot.ts';
 import { watchOccasionAnnouncements } from './client/occasion-announcements.ts';
 import { createRuntimeShutdown } from './bootstrap-shutdown.ts';
@@ -201,11 +201,9 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // runtime/services.ts the way the platform's own RuntimeServices composition
   // constructs it: a standing 5-minute tick, not turn-settled events). This
   // repo's old turn-settled-driven local wiring is retired.
-  // Usage-outcome instrumentation: the memories injected into a turn and, at its
-  // end, one Jev reading of which the response used, written as one counter
-  // update on the memory records. Consolidation's decay reads those counters
-  // from the store, so every product sharing the store orders decay the same way.
-  const memoryUsageTracker = createMemoryUsageTracker(services.memoryRegistry);
+  // Usage-outcome instrumentation is the graph's (services.memoryUsageTracker,
+  // following every turn's end on the bus, as in the TUI and the daemon); the
+  // Agent adds the memories its own prompt injected, from the prompt receipt.
   // Occasion reminders reach this conversation by the pull: at the end of each
   // turn, when the host announces one while no turn runs, and once per sweep
   // interval while idle (runtime/occasions-boot.ts).
@@ -246,9 +244,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
         activePromptTurnId = null;
         activePromptTurnText = null;
       }
-      void memoryUsageTracker.onTurnCompleted(event.payload.turnId, event.payload.response).catch((error) => {
-        logger.debug('Memory usage reference reading failed', { error: summarizeError(error) });
-      });
       // Raise anything outstanding, now that the transcript is quiet. Appending
       // the agent's own line while a response was still streaming would
       // interleave two voices in one transcript, which is why this rides the
@@ -270,7 +265,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
         activePromptTurnId = null;
         activePromptTurnText = null;
       }
-      memoryUsageTracker.onTurnAborted(event.payload.turnId);
     }),
     runtimeBus.on<Extract<TurnEvent, { type: 'TURN_CANCEL' }>>('TURN_CANCEL', (event) => {
       promptContextReceipts.recordTurnOutcome({
@@ -284,7 +278,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
         activePromptTurnId = null;
         activePromptTurnText = null;
       }
-      memoryUsageTracker.onTurnAborted(event.payload.turnId);
     }),
   );
   const { automationManager, hookDispatcher, pluginManager } = services;
@@ -343,7 +336,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
           const composed = await composeRuntimePromptWithReceipt({ ...captured, memoryRecallSnapshot, tierPrompt });
           signal?.throwIfAborted();
           promptContextReceipts.record(composed.receipt);
-          recordComposedPromptUsage(() => memoryUsageTracker.onComposed(turnId, composed.receipt));
+          recordComposedPromptUsage(() => services.memoryUsageTracker.onComposed(turnId, extractInjectedMemoryIds(composed.receipt)));
           return composed.prompt;
         })();
         if (signal) systemPromptBySignal.set(signal, composedPrompt);

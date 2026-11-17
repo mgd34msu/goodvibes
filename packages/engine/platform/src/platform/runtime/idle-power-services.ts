@@ -14,7 +14,10 @@
 
 import type { ConfigManager } from '../config/index.js';
 import type { MemoryConsolidationRunReceipt, MemoryRegistry } from '../state/index.js';
-import { MemoryConsolidationScheduler } from '../state/index.js';
+import { MemoryConsolidationScheduler, MemoryUsageTracker } from '../state/index.js';
+import type { TurnEvent } from '../../events/turn.js';
+import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 import { SessionLiveTurnControlsHolder } from '../control-plane/index.js';
 import { PowerManager, wireRuntimePower, createUnavailablePowerSeam } from '../power/index.js';
 import { FeatureAnnouncementStore, featureAnnouncementsPath } from './feature-announcements.js';
@@ -24,6 +27,8 @@ import { formatConsolidationReceipt } from '../state/consolidation-receipt.js';
 export interface IdlePowerServicesDeps {
   readonly configManager: ConfigManager;
   readonly memoryRegistry: MemoryRegistry;
+  /** The store a turn's memory use is counted on (consolidation's decay reads the counters); absent: `memoryRegistry`. */
+  readonly usageRegistry?: MemoryRegistry | undefined;
   readonly runtimeBus: RuntimeEventBus;
   /** True when no session is busy, the consolidation scheduler's idle gate. */
   readonly isIdle: () => boolean;
@@ -49,8 +54,37 @@ export interface IdlePowerServicesDeps {
 
 export interface IdlePowerServices {
   readonly memoryConsolidationScheduler: MemoryConsolidationScheduler;
+  /**
+   * The one per-turn memory usage tracker of this process, fed by every turn
+   * on the bus: a completed turn's injected memories (its `metadata.memory`)
+   * get one usage reading and one counter update. A product whose own prompt
+   * injects memories adds their ids with `onComposed` before the turn ends.
+   */
+  readonly memoryUsageTracker: MemoryUsageTracker;
+  /** Stops following turns for memory usage. */
+  readonly stopMemoryUsage: () => void;
   readonly powerManager: PowerManager;
   readonly sessionLiveTurnControls: SessionLiveTurnControlsHolder;
+}
+
+/**
+ * Count memory use for every turn on `bus`, so decay ranks memories the same
+ * way in every product. Costs one decision-model request per completed turn
+ * that carried memories (none with decision models off: the injections are
+ * counted unassessed), and one counter update per turn.
+ */
+function followTurnMemoryUsage(bus: RuntimeEventBus, tracker: MemoryUsageTracker): () => void {
+  const unsubscribes = [
+    bus.on<Extract<TurnEvent, { type: 'TURN_COMPLETED' }>>('TURN_COMPLETED', ({ payload }) => {
+      tracker.onComposed(payload.turnId, payload.metadata?.memory?.recordIds ?? []);
+      void tracker.onTurnCompleted(payload.turnId, payload.response).catch((error: unknown) => {
+        logger.debug('Memory usage reading failed', { error: summarizeError(error) });
+      });
+    }),
+    bus.on<Extract<TurnEvent, { type: 'TURN_ERROR' }>>('TURN_ERROR', ({ payload }) => tracker.onTurnAborted(payload.turnId)),
+    bus.on<Extract<TurnEvent, { type: 'TURN_CANCEL' }>>('TURN_CANCEL', ({ payload }) => tracker.onTurnAborted(payload.turnId)),
+  ];
+  return () => { for (const unsubscribe of unsubscribes.splice(0)) unsubscribe(); };
 }
 
 /** Construct (and start) the idle-consolidation scheduler, power manager, and live-turn holder. */
@@ -66,6 +100,8 @@ export function wireIdlePowerAndLiveTurn(deps: IdlePowerServicesDeps): IdlePower
     }),
   });
   memoryConsolidationScheduler.start();
+  const memoryUsageTracker = new MemoryUsageTracker(deps.usageRegistry ?? deps.memoryRegistry);
+  const stopMemoryUsage = followTurnMemoryUsage(deps.runtimeBus, memoryUsageTracker);
   const sessionLiveTurnControls = new SessionLiveTurnControlsHolder();
   const powerManager = wireRuntimePower({
     readConfig: (key) => deps.configManager.get(key as Parameters<typeof deps.configManager.get>[0]),
@@ -84,5 +120,5 @@ export function wireIdlePowerAndLiveTurn(deps: IdlePowerServicesDeps): IdlePower
     // wireRuntimePower would otherwise pick for an undefined seam.
     seam: deps.powerSeam ?? createUnavailablePowerSeam('runtime services constructed without a host power seam'),
   });
-  return { memoryConsolidationScheduler, powerManager, sessionLiveTurnControls };
+  return { memoryConsolidationScheduler, memoryUsageTracker, stopMemoryUsage, powerManager, sessionLiveTurnControls };
 }

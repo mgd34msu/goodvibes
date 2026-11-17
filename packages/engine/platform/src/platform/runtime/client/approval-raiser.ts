@@ -41,7 +41,9 @@
  *    what runs: when another surface answered first, its answer stands. When
  *    the daemon does not answer within a short bound, the local answer runs
  *    and the write-back finishes on its own. A local answer given before the
- *    raise landed is written back once the record's id is known.
+ *    raise landed waits for the record's id inside the same bound and is
+ *    arbitrated the same way. A write-back the daemon refused reads the record
+ *    back, so a decision recorded elsewhere still wins.
  *
  * An ask the daemon expired or cancelled is a deny whose reason names that
  * state and says to ask again, never a bare deny.
@@ -410,13 +412,13 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
       const answered = await options.verbs.invoke<{ approval?: RaisedRecord } | null>(method, input);
       return answered?.approval?.id === approvalId ? answered.approval : null;
     } catch (error) {
-      // The local answer stands; a failed write-back is a record-consistency
-      // problem, not a reason to re-ask the user.
       logger.warn('[approvals] recording this surface\'s decision on the daemon failed', {
         approvalId,
         error: summarizeError(error),
       });
-      return null;
+      // The write was refused or lost: the record, if the daemon can be read,
+      // still says whether another surface decided first. Not re-asking the user.
+      return await readRaised(approvalId, new AbortController().signal);
     }
   };
 
@@ -425,8 +427,13 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
    * decided: the local answer when the record agrees or the daemon did not
    * answer in time, the record's own decision when another surface answered first.
    */
-  const arbitrateLocalDecision = async (approvalId: string, local: PermissionPromptDecision): Promise<PermissionPromptDecision> => {
-    const reporting = reportLocalDecision(approvalId, local);
+  const arbitrateLocalDecision = async (
+    raised: Promise<RaisedOnDaemon | null> | RaisedOnDaemon,
+    local: PermissionPromptDecision,
+  ): Promise<PermissionPromptDecision> => {
+    // An answer given before the raise landed waits for its id too, inside the
+    // same bound: the record may be one another surface already answered.
+    const reporting = Promise.resolve(raised).then((record) => record ? reportLocalDecision(record.id, local) : null, () => null);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<'deadline'>((resolve) => {
       timer = setTimeout(() => resolve('deadline'), options.arbiterWaitMs ?? DEFAULT_ARBITER_WAIT_MS);
@@ -512,10 +519,9 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
       assertPermissionActive(signal);
       decided = true;
       if (winner.source === 'remote') return winner.decision;
-      if (raisedOnDaemon) return await arbitrateLocalDecision(raisedOnDaemon.id, winner.decision);
-      // Answered before the raise landed: the record is told once its id is known.
-      void raising.then((raised) => { if (raised) void reportLocalDecision(raised.id, winner.decision); }, () => {});
-      return winner.decision;
+      // The daemon decides: the local answer is sent there and the record's
+      // final state is what runs (the local answer when no daemon answers in time).
+      return await arbitrateLocalDecision(raisedOnDaemon ?? raising, winner.decision);
     } finally {
       settled = true;
       left = true;

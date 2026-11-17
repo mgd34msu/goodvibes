@@ -193,6 +193,12 @@
   color: var(--text-2);
 }
 
+/* A reply that ended in an error says why under its partial text. */
+.message-failure {
+  margin: 8px 0 0;
+  color: var(--bad);
+}
+
 /* The read-aloud button joins the ghost icon row. */
 .message-actions .voice-speak-btn {
   display: inline-grid;

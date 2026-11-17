@@ -47,8 +47,10 @@ export interface ChatMessage {
   }[];
   /** Some server shapes use 'artifacts' instead of 'attachments'. */
   artifacts?: readonly Record<string, unknown>[];
-  /** Optimistic delivery state (local messages only). */
+  /** Delivery state: optimistic on local messages; the daemon's honesty marker on stored ones. */
   deliveryState?: string;
+  /** On a reply whose deliveryState is 'failed': why it failed. */
+  failureReason?: string;
   /** Alternative state keys from server shapes. */
   status?: string;
   state?: string;

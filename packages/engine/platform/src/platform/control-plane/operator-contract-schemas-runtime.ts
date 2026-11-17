@@ -184,8 +184,12 @@ export const COMPANION_CHAT_MESSAGE_SCHEMA = objectSchema({
   // was stopped mid-generation; 'queued' = a user message whose turn has not
   // started yet; 'unanswered' = a queued user message whose turn can never
   // run because the chat closed, the service shut down or the daemon
-  // restarted. Absent = normally delivered.
-  deliveryState: enumSchema(['cancelled', 'queued', 'unanswered']),
+  // restarted; 'failed' = an assistant reply that ended in an error or was
+  // cut off by a daemon stop (content is the partial, possibly empty).
+  // Absent = normally delivered.
+  deliveryState: enumSchema(['cancelled', 'queued', 'unanswered', 'failed']),
+  // On a 'failed' reply: why it failed.
+  failureReason: STRING_SCHEMA,
   // On assistant messages: the user message this reply answers (the
   // transcript is append-ordered, so pairing needs an explicit link).
   inReplyTo: STRING_SCHEMA,

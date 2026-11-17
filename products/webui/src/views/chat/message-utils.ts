@@ -253,12 +253,13 @@ export function isActiveTurnState(state: TurnState): boolean {
 
 /**
  * Where a turn stands once the message list is read after the stream could
- * not report it (a reconnect, or the slow refresh while paused): `completed`
- * or `stopped` when a reply follows the message the turn answers, otherwise
+ * not report it (a reconnect, or the slow refresh while paused): `completed`,
+ * `stopped` or `error` (a reply stored as failed) when a reply follows the
+ * message the turn answers, otherwise
  * null (still running, or nothing to tell yet). `anchorId` is the user message
  * this tab sent; without one the newest user message is the anchor.
  */
-export function settledFromList(allMessages: readonly unknown[], anchorId: string): 'completed' | 'stopped' | null {
+export function settledFromList(allMessages: readonly unknown[], anchorId: string): 'completed' | 'stopped' | 'error' | null {
   // History a regenerate or edit superseded is not this turn's reply.
   const messages = allMessages.filter((message) => !asRecord(message).supersededAt);
   let anchor = -1;
@@ -272,7 +273,8 @@ export function settledFromList(allMessages: readonly unknown[], anchorId: strin
   if (anchor < 0) return null;
   const reply = messages.slice(anchor + 1).find((message) => messageTone(message) === 'assistant');
   if (!reply) return null;
-  return deliveryState(reply) === 'cancelled' ? 'stopped' : 'completed';
+  const replyState = deliveryState(reply);
+  return replyState === 'cancelled' ? 'stopped' : replyState === 'failed' ? 'error' : 'completed';
 }
 
 /**

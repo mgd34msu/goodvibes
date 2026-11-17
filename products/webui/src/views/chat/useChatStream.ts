@@ -175,8 +175,8 @@ export function useChatStream({
     ReadonlyMap<string, readonly CompletedToolCall[]>
   >(new Map());
   // Accumulates completed tool calls for the turn CURRENTLY in flight, flushed into
-  // toolActivityByMessageId (keyed by assistantMessageId) on turn.completed/
-  // turn.cancelled, and discarded on turn.error (no assistant message to attach to).
+  // toolActivityByMessageId (keyed by assistantMessageId) on turn.completed,
+  // turn.cancelled and turn.error (the daemon stores a failed reply too).
   const turnToolActivityRef = useRef<CompletedToolCall[]>([]);
   // toolCallId -> {toolName, toolInput} captured at turn.tool_call time, so the
   // matching turn.tool_result can build a full CompletedToolCall without the daemon
@@ -492,8 +492,14 @@ export function useChatStream({
         if (type === 'turn.error') {
           setLiveText('');
           liveTextRef.current = '';
-          // No assistant message was produced, the accumulated tool activity has
-          // nothing to attach to and is honestly discarded, not held onto.
+          // The daemon stores the failed reply (deliveryState 'failed', with its
+          // partial and reason) under assistantMessageId; this turn's completed
+          // tool calls fold onto it as they do on a stopped reply.
+          const failedReplyId = firstString(payload, ['assistantMessageId']);
+          const completedCalls = turnToolActivityRef.current;
+          if (failedReplyId && completedCalls.length) {
+            setToolActivityByMessageId((current) => withToolActivity(current, failedReplyId, completedCalls));
+          }
           turnToolActivityRef.current = [];
           pendingToolInputRef.current.clear();
           syncedSetTurnState('error');

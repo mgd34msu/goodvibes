@@ -72,7 +72,12 @@ export const MessageItem = memo(function MessageItem({
   const state = deliveryState(message);
   const text = messageText(message);
   const { openArtifacts } = useArtifactsPanel();
-  const canRetry = Boolean(text) && (tone === 'user' || tone === 'assistant');
+  // A reply that ended in an error: the partial it had (possibly none) and why it failed.
+  const failedReply = tone === 'assistant' && state === 'failed';
+  const failureReason = failedReply
+    ? (typeof message.failureReason === 'string' && message.failureReason.trim()) || 'the daemon recorded no reason'
+    : '';
+  const canRetry = (Boolean(text) && (tone === 'user' || tone === 'assistant')) || failedReply;
   // Never an epoch or "unknown" time: a missing or zero time shows nothing.
   const timestamp = messageTimestamp(message);
   const timestampTitle = messageTimestampTitle(message);
@@ -183,7 +188,12 @@ export const MessageItem = memo(function MessageItem({
           ))}
         </div>
       )}
-      {!text && attachments.length === 0 && <p>{JSON.stringify(asRecord(message))}</p>}
+      {failedReply && (
+        <p className="message-failure" role="note">
+          Reply failed: {failureReason}. Regenerate to try again.
+        </p>
+      )}
+      {!text && attachments.length === 0 && !failedReply && <p>{JSON.stringify(asRecord(message))}</p>}
     </div>
   );
 
@@ -195,7 +205,7 @@ export const MessageItem = memo(function MessageItem({
           <span
             className={`delivery-indicator ${state}`}
             title={
-              state === 'failed' ? 'Not sent'
+              state === 'failed' ? (failedReply ? `Reply failed: ${failureReason}` : 'Not sent')
                 : state === 'local' ? 'Pending'
                   : state === 'cancelled' ? 'Stopped before completion: this is the partial reply that existed when the turn was stopped'
                     : state === 'queued' ? 'Queued: will run after the current reply finishes'
@@ -203,7 +213,7 @@ export const MessageItem = memo(function MessageItem({
                         : 'Sent'
             }
           >
-            {state === 'failed' ? <><X size={12} aria-hidden="true" /> Not sent</>
+            {state === 'failed' ? <><X size={12} aria-hidden="true" /> {failedReply ? 'Reply failed' : 'Not sent'}</>
               : state === 'cancelled' ? <><X size={12} aria-hidden="true" /> Stopped</>
                 : state === 'queued' ? <><Clock size={12} aria-hidden="true" /> Queued</>
                   : state === 'unanswered' ? <><X size={12} aria-hidden="true" /> Not answered</>

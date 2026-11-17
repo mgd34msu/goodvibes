@@ -108,8 +108,16 @@ export class BrowserEngine {
   private approval: OwnerApproval | null;
   /** The provision report whose setup receipt was last handed to a caller. */
   private receiptDelivered: BrowserProvisionReport | null = null;
-  /** Local or private origins a page was allowed to open, per session:page, so reading that page again is not a new reach. */
-  private readonly localReach = new Map<string, Set<string>>();
+  /**
+   * Local or private origins a page was allowed to open, per session:page, so
+   * reading that page again is not a new reach. Bound to the main-frame origin
+   * they were allowed under: once the tab's main frame is seen on another
+   * origin the allowance is gone, so a later page in the tab that redirects to
+   * or frames the same local origin is checked again.
+   */
+  private readonly localReach = new Map<string, { readonly mainOrigin: string; readonly origins: Set<string> }>();
+  /** Pages whose main-frame navigations are observed (in-process pages emit them; a host-backed page does not). */
+  private readonly watchedPages = new WeakSet<Page>();
   /** Credential-page verdicts, one per snapshot: the page is read for its purpose at most once per snapshot. */
   private readonly credentialVerdicts = new WeakMap<BrowserSnapshot, 'yes' | 'no'>();
 
@@ -355,7 +363,7 @@ export class BrowserEngine {
    * submit: refused when this turn has read page content, unless the owner
    * approved it. Cloud metadata addresses are never opened.
    */
-  private async requireNavigationAllowed(url: string, page?: { readonly sessionId: string; readonly pageId: string }): Promise<string | null> {
+  private async requireNavigationAllowed(url: string, page?: { readonly sessionId: string; readonly pageId: string; readonly mainOrigin: string }): Promise<string | null> {
     const reach = classifyNavigationTarget(url);
     if (reach === 'public') return null;
     const origin = this.untrusted.originOf(url);
@@ -365,34 +373,61 @@ export class BrowserEngine {
         'Use a public address, or ask the owner to open it in their own browser.',
       );
     }
-    if (page && this.localReach.get(`${page.sessionId}:${page.pageId}`)?.has(origin)) return origin;
+    if (page) {
+      const allowed = this.localReach.get(`${page.sessionId}:${page.pageId}`);
+      if (allowed?.mainOrigin === page.mainOrigin && allowed.origins.has(origin)) return origin;
+    }
     await this.requireOutwardEffectAllowed('browser.navigate-local', `open ${origin} (a local file or private-network address) in the browser`);
-    if (page) this.rememberLocalReach(page.sessionId, page.pageId, origin);
+    if (page) this.rememberLocalReach(page.sessionId, page.pageId, page.mainOrigin, origin);
     return origin;
   }
 
-  private rememberLocalReach(sessionId: string, pageId: string, origin: string | null): void {
+  private rememberLocalReach(sessionId: string, pageId: string, mainOrigin: string, origin: string | null): void {
     if (origin === null) return;
     const key = `${sessionId}:${pageId}`;
-    const origins = this.localReach.get(key) ?? new Set<string>();
-    origins.add(origin);
-    this.localReach.set(key, origins);
+    const existing = this.localReach.get(key);
+    const entry = existing?.mainOrigin === mainOrigin ? existing : { mainOrigin, origins: new Set<string>() };
+    entry.origins.add(origin);
+    this.localReach.set(key, entry);
+  }
+
+  /**
+   * Records where a page's main frame is. An allowance granted under another
+   * main-frame origin is dropped, so leaving an allowed local page and coming
+   * back to it through another page is a new reach.
+   */
+  private observeMainFrame(sessionId: string, pageId: string, mainUrl: string): string {
+    const mainOrigin = this.untrusted.originOf(mainUrl);
+    const key = `${sessionId}:${pageId}`;
+    if (this.localReach.get(key)?.mainOrigin !== mainOrigin) this.localReach.delete(key);
+    return mainOrigin;
+  }
+
+  /** Observes every main-frame navigation of an in-process page, including ones between tool calls. */
+  private watchMainFrame(sessionId: string, pageId: string, page: Page): void {
+    if (this.watchedPages.has(page)) return;
+    this.watchedPages.add(page);
+    page.on('framenavigated', (frame) => {
+      if (frame.parentFrame() === null) this.observeMainFrame(sessionId, pageId, frame.url());
+    });
   }
 
   /**
    * The same rule, applied to where the page actually is: after a redirect,
    * and before anything from the page is handed back. A pure string check for
    * a public address; the outward-effect decision only for a local one not
-   * already allowed on this page.
+   * already allowed on this page under the same main-frame origin. `mainUrl`
+   * is the page's own address when `url` is an embedded frame's.
    */
-  private async requireReadableAddress(sessionId: string, pageId: string, url: string): Promise<void> {
-    await this.requireNavigationAllowed(url, { sessionId, pageId });
+  private async requireReadableAddress(sessionId: string, pageId: string, url: string, mainUrl: string = url): Promise<void> {
+    const mainOrigin = this.observeMainFrame(sessionId, pageId, mainUrl);
+    await this.requireNavigationAllowed(url, { sessionId, pageId, mainOrigin });
   }
 
   /** Whether an embedded frame's content may be returned; a refused frame is left out, not fatal. */
-  private async frameReadable(sessionId: string, pageId: string, url: string): Promise<boolean> {
+  private async frameReadable(sessionId: string, pageId: string, mainUrl: string, url: string): Promise<boolean> {
     try {
-      await this.requireReadableAddress(sessionId, pageId, url);
+      await this.requireReadableAddress(sessionId, pageId, url, mainUrl);
       return true;
     } catch (error) {
       if (error instanceof BrowserSessionError || error instanceof UntrustedEffectError) return false;
@@ -431,7 +466,10 @@ export class BrowserEngine {
       if (page !== selected.page) throw new BrowserSessionError('The original browser page was replaced.', 'Select a live page before retrying.');
       const signal = target.signal ? AbortSignal.any([pageSignal, target.signal]) : pageSignal;
       current(); work?.bindPage(current, signal);
+      this.watchMainFrame(selected.sessionId, selected.pageId, page);
+      this.observeMainFrame(selected.sessionId, selected.pageId, page.url());
       const result = await perform({ ...selected, current, signal });
+      this.observeMainFrame(selected.sessionId, selected.pageId, page.url());
       current(); work?.assertCurrent(); return result;
     });
   }
@@ -466,7 +504,9 @@ export class BrowserEngine {
     const approvedOrigin = await this.requireNavigationAllowed(url);
     const sessionId = await this.ensureSession(target, args.launch ?? {});
     return this.withTarget({ sessionId, pageId: target.pageId, signal: target.signal }, async ({ pageId, page, current, signal }) => {
-      this.rememberLocalReach(sessionId, pageId, approvedOrigin);
+      // A new document starts with only what this navigation was allowed to open.
+      this.localReach.delete(`${sessionId}:${pageId}`);
+      if (approvedOrigin !== null) this.rememberLocalReach(sessionId, pageId, approvedOrigin, approvedOrigin);
       const response = await boundedBrowserCall({
         action: 'navigate', deadlineMs, signal,
         next: 'Call action:"snapshot" to see what has loaded so far, or navigate again.',
@@ -507,7 +547,7 @@ export class BrowserEngine {
       const snapshot = await takeSnapshot(page, sessionId, pageId, {
         ...args,
         work,
-        admitFrame: (frameUrl) => this.frameReadable(sessionId, pageId, frameUrl),
+        admitFrame: (frameUrl) => this.frameReadable(sessionId, pageId, page.url(), frameUrl),
         ...(controls ? { controls } : {}),
         ...(this.cardGuard === null ? {} : { guard: this.cardGuard }),
       });
@@ -1129,7 +1169,7 @@ export class BrowserEngine {
         current();
         // A frame is judged on its own address: a public page may embed a
         // private or metadata address, and that content is not returned.
-        if (!(await this.frameReadable(sessionId, pageId, frame.url()))) { withheld.push(this.untrusted.originOf(frame.url())); current(); continue; }
+        if (!(await this.frameReadable(sessionId, pageId, page.url(), frame.url()))) { withheld.push(this.untrusted.originOf(frame.url())); current(); continue; }
         current();
         const frameText = await read(() => frame.evaluate(() => document.body?.innerText ?? '')).catch(() => { signal.throwIfAborted(); return ''; }); current();
         if (!frameText.trim()) continue;
@@ -1185,8 +1225,9 @@ export class BrowserEngine {
     return this.withTarget(target, async ({ sessionId, pageId, page, current, signal }) => {
       assertCaptureAllowed(this.cardGuard, sessionId, pageId);
       // An image cannot leave a frame out, so every frame's address must be readable.
-      for (const address of new Set([page.url(), ...page.frames().map(frame => frame.url())])) {
-        await this.requireReadableAddress(sessionId, pageId, address); current();
+      const mainUrl = page.url();
+      for (const address of new Set([mainUrl, ...page.frames().map(frame => frame.url())])) {
+        await this.requireReadableAddress(sessionId, pageId, address, mainUrl); current();
       }
       const fileName = `${sessionId}-${pageId}-${String(Date.now())}.png`;
       mkdirSync(this.options.screenshotDirectory, { recursive: true });
@@ -1266,7 +1307,8 @@ export class BrowserEngine {
     return this.sessions.withPage(sessionId, pageId, async (original, current, pageSignal) => {
       if (original !== page) throw new BrowserSessionError('The original new browser tab was replaced.', 'Select a live tab before retrying.');
       current();
-      this.rememberLocalReach(sessionId, pageId, approvedOrigin);
+      this.watchMainFrame(sessionId, pageId, page);
+      if (approvedOrigin !== null) this.rememberLocalReach(sessionId, pageId, approvedOrigin, approvedOrigin);
       if (startUrl) {
         const signal = target.signal ? AbortSignal.any([pageSignal, target.signal]) : pageSignal;
         await boundedBrowserCall({ action: 'new_tab', deadlineMs: DEFAULT_NAVIGATION_TIMEOUT_MS, signal, next: `The tab is open as ${pageId}; call action:"snapshot" on it to see what loaded.` },

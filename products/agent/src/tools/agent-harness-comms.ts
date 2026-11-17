@@ -1,7 +1,7 @@
 import type { CommandContext } from '../input/command-registry.ts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogData, captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
 import { dirname } from 'node:path';
 import { captureHarnessLocalEffect } from './agent-harness-local-effect.ts';
 import { captureAgentExportPath } from './agent-artifact-effect.ts';
@@ -88,26 +88,18 @@ function commsWebhookSecrets(context: CommandContext): ChannelDraftWebhookSecret
 
 function captureCommsEffect(context: CommandContext, args: Record<string, unknown>, options: Parameters<Tool['execute']>[1],
   target: typeof channelDraftFilePath, outward = false) {
-  const assertContext = captureCatalogMethods(context, ['workspace', 'platform']);
-  const workspace = context.workspace, platform = context.platform;
-  const assertWorkspace = captureCatalogMethods(workspace, ['shellPaths']);
-  const assertPlatform = captureCatalogMethods(platform, ['configManager', 'channelDeliveryRouter']);
+  const workspace = context.workspace;
   const paths = workspace.shellPaths;
   if (!paths) throw new ToolInputProjectionError('held');
-  const assertPaths = captureCatalogMethods(paths, ['homeDirectory', 'workingDirectory', 'resolveUserPath', 'resolveProjectPath']);
   const local = captureHarnessLocalEffect(context, args, options, source => [target(source)]);
   const home = paths.homeDirectory, directory = paths.workingDirectory;
   const resolveUserPath = paths.resolveUserPath, resolveProjectPath = paths.resolveProjectPath, destination = target(paths);
   const parent = captureAgentExportPath(home, dirname(destination));
   const ledger = getSessionUntrustedContentLedger();
-  captureCatalogMethods(ledger, ['originsThisTurn', 'exposuresThisTurn', 'taintSourcesThisTurn']);
-  const assertLedger = captureCatalogMethods(ledger, [...Object.getOwnPropertyNames(ledger),
-    ...Object.getOwnPropertyNames(Object.getPrototypeOf(ledger))]);
   const ledgerRevision = ledger.getPublicationRevision();
   const signature = () => JSON.stringify(captureCatalogData([ledger.originsThisTurn(), ledger.exposuresThisTurn(), ledger.taintSourcesThisTurn()]));
   const source = signature();
   const assertSourceCurrent = () => {
-    assertContext(); assertWorkspace(); assertPlatform(); assertPaths(); assertLedger();
     options?.signal?.throwIfAborted();
     if (context.workspace !== workspace || workspace.shellPaths !== paths || paths.homeDirectory !== home || paths.workingDirectory !== directory
       || paths.resolveUserPath !== resolveUserPath || paths.resolveProjectPath !== resolveProjectPath || target(paths) !== destination
@@ -116,7 +108,6 @@ function captureCommsEffect(context: CommandContext, args: Record<string, unknow
     parent.assertCurrent(destination);
   };
   const assertCurrent = () => {
-    assertContext(); assertWorkspace(); assertPlatform(); assertPaths();
     local();
     if (outward && !harnessCatalogInvocationAuthority(args, options, 'send')) throw new ToolInputProjectionError('held');
     assertSourceCurrent();
@@ -476,24 +467,14 @@ export async function channelDraftSendHandoff(
     return 'Channel delivery router is not available. Ensure the Agent is connected to a channel delivery service.';
   }
 
-  const assertRouter = captureCatalogMethods(router, ['deliver', 'listStrategies']);
   const deliver = router.deliver, listStrategies = router.listStrategies;
   const listed = listStrategies.call(router);
-  captureCatalogMethods(listed, ['length', 'map']);
-  const assertListed = captureCatalogMethods(listed, ['length', 'map', ...Object.getOwnPropertyNames(listed)]);
-  const strategies = listed.map(strategy => {
-    const assertMethods = captureCatalogMethods(strategy, ['deliver', 'canHandle']);
-    return { strategy, assertMethods, deliver: strategy.deliver, canHandle: strategy.canHandle };
-  });
+  const strategies = listed.map(strategy => ({ strategy, deliver: strategy.deliver, canHandle: strategy.canHandle }));
   // The draft itself is not re-read here: every store write merges under the store lock.
   const assertSelectedSourceCurrent = () => {
     owner.assertSourceCurrent();
-    assertRouter(); assertListed();
-    for (const strategy of strategies) strategy.assertMethods();
     if (context.platform.channelDeliveryRouter !== router || router.deliver !== deliver || router.listStrategies !== listStrategies) throw new ToolInputProjectionError('stale');
     const current = listStrategies.call(router);
-    captureCatalogMethods(current, ['length']);
-    captureCatalogMethods(current, ['length', ...Object.getOwnPropertyNames(current)]);
     if (current.length !== strategies.length || strategies.some((source, index) => current[index] !== source.strategy
       || source.strategy.deliver !== source.deliver || source.strategy.canHandle !== source.canHandle)) throw new ToolInputProjectionError('stale');
   };

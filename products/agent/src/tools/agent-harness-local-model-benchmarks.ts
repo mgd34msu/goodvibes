@@ -10,7 +10,6 @@ import { hasPurpose, PURPOSE_MODEL_COMPARE_JUDGMENT } from './agent-review-packe
 import { previewHarnessText } from './agent-harness-text.ts';
 import { localStackFor } from './agent-harness-local-model-endpoints.ts';
 import type { LocalModelBenchmarkEvidence, LocalModelBenchmarkPlan, LocalModelBenchmarkRouteLatency, LocalModelBenchmarkWinner, LocalModelRecipe, ArtifactListLike } from './agent-harness-model-routing-types.ts';
-import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { assertModelReadingInputCurrent, captureModelArtifactClockSource, captureModelArtifactClockSources, captureModelReadingInput, captureModelReadingSnapshotGuard, modelReadingServicePath, withModelReadingSource, type ModelReadingOptions } from './agent-harness-model-reading-source.ts';
 import { readRecord, readString } from './agent-harness-model-routing-utils.ts';
 import { personalOpsEntry } from './agent-harness-personal-ops-source.ts';
@@ -369,13 +368,11 @@ export async function readLocalModelBenchmarkSnapshot(context: BenchmarkArtifact
 
 async function readOwnedLocalModelBenchmarkSnapshot(context: BenchmarkArtifactContext, options: ModelReadingOptions): Promise<LocalModelBenchmarkSnapshot> {
   const beganClassic = isClassicOperation();
-  const assertOptions = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent']);
   const signal = options.signal, originalAssert = options.assertCurrent;
-  const assertCaller = () => { assertOptions(); signal?.throwIfAborted(); assertProjectionCurrent(originalAssert); assertOptions(); signal?.throwIfAborted(); };
+  const assertCaller = () => { signal?.throwIfAborted(); assertProjectionCurrent(originalAssert); signal?.throwIfAborted(); };
   assertCaller();
   const nativeStore = modelReadingServicePath(context, ['platform', 'artifactStore']);
   const store = context.platform.artifactStore ?? null;
-  const assertStoreSlots = store ? captureCatalogMethods(store, ['list', 'readContent']) : () => {};
   const list = store?.list, readContent = store?.readContent;
   const originalArtifacts = list?.call(store, ARTIFACT_WINDOW) ?? [];
   const artifactSources = captureModelArtifactClockSources(originalArtifacts);
@@ -385,7 +382,7 @@ async function readOwnedLocalModelBenchmarkSnapshot(context: BenchmarkArtifactCo
   const loaded = new Map<string, CompleteBenchmarkArtifact>();
   const contentGuards: (() => void)[] = [];
   const assertNativeBindings = () => {
-    assertOptions(); signal?.throwIfAborted(); assertStoreSlots();
+    signal?.throwIfAborted();
     if (modelReadingServicePath(context, ['platform', 'artifactStore']) !== nativeStore
       || options.signal !== signal || options.assertCurrent !== originalAssert) throw new ToolInputProjectionError('held');
     assertArtifacts(originalArtifacts);
@@ -405,7 +402,6 @@ async function readOwnedLocalModelBenchmarkSnapshot(context: BenchmarkArtifactCo
     assertCurrent(); const existing = loaded.get(artifact.id); if (existing) return existing;
     if (!readContent) return undefined;
     const result = await readContent.call(store, artifact.id); assertCurrent();
-    const assertResultSlots = captureCatalogMethods(result, ['record', 'buffer']); assertResultSlots();
     const record = captureModelArtifactClockSource(result.record).native, bytes = result.buffer;
     if (!Buffer.isBuffer(bytes) || record.id !== artifact.id
       || record.sizeBytes !== bytes.byteLength) throw new ToolInputProjectionError('held');
@@ -418,7 +414,6 @@ async function readOwnedLocalModelBenchmarkSnapshot(context: BenchmarkArtifactCo
     const assertReadCurrent = result.assertCurrent?.bind(result);
     contentGuards.push(() => {
       try { assertReadCurrent?.(); } catch { throw new ToolInputProjectionError('held'); }
-      assertResultSlots();
       assertModelReadingInputCurrent(result.record, serializedRecord);
       if (!Buffer.prototype.equals.call(bytes, savedBytes)) throw new ToolInputProjectionError('held');
     });

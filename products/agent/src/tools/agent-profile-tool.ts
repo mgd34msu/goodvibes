@@ -46,7 +46,7 @@ import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { PROFILE_FIELDS, PROSE_ONLY_SECTIONS, captureProfileDelegation } from '@goodvibes-jev/engine/platform/platform/owner-profile';
 import { captureProfileGatewayCurrent, captureProfileGatewayLocalState, type ProfileGatewayInvoke } from '../agent/owner-profile-gateway.ts';
-import { captureCatalogMethods, captureCatalogSnapshot } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogSnapshot } from './agent-harness-catalog-ranking.ts';
 import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from './agent-local-state-admission.ts';
 import {
   isProfileAuthority,
@@ -560,7 +560,6 @@ export function createAgentProfileTool(deps: AgentProfileToolDeps): Tool {
       // True once a write has been handed to the daemon: after that a throw cannot say "nothing was recorded".
       let writeSent = false;
       try {
-        const restrictions = options && captureCatalogMethods(options, ['signal', 'assertCurrent', 'inputProjectionContext']);
         const input = captureCatalogSnapshot(rawArgs), args = input.captured;
         assertCurrent();
         const run = async (): Promise<ToolOutcome> => {
@@ -572,12 +571,11 @@ export function createAgentProfileTool(deps: AgentProfileToolDeps): Tool {
           const effects = writing ? agentLocalStateWrite(rawArgs, options) : undefined;
           const delegation = writing ? captureProfileDelegation(rawArgs, options) : undefined;
           const method = ACTION_METHODS[action];
-          const backend = captureCatalogMethods(deps, ['invoke']);
           const gateway = captureProfileGatewayCurrent(deps.invoke, method);
           assertCurrent = () => {
-            restrictions?.(); input.assertCurrent(rawArgs); backend(); gateway();
+            input.assertCurrent(rawArgs); gateway();
             if (effects) effects.assertCurrent(); else assertAgentLocalStateCurrent(rawArgs, options);
-            restrictions?.(); input.assertCurrent(rawArgs); backend(); gateway();
+            input.assertCurrent(rawArgs); gateway();
           };
           assertCurrent();
           const invoke: ProfileGatewayInvoke = async (methodId, body) => {
@@ -662,13 +660,12 @@ export function registerAgentProfileTool(
   }
   registry.register(createAgentProfileTool({ invoke: options.invoke, currentOwnerMessage: options.currentOwnerMessage }), {
     inputProjection: createAgentLocalStateInputProjector(args => {
-      const descriptors = captureCatalogMethods(options, ['invoke']);
       const action = normalizeProfileAction(args.action) ?? normalizeProfileAction(args.mode);
       const method = action ? ACTION_METHODS[action] : undefined;
       const gateway = captureProfileGatewayCurrent(options.invoke, method);
       const local = method && captureProfileGatewayLocalState(options.invoke, method, action !== null && WRITE_ACTIONS.has(action));
       return { targets: local?.targets ?? [], onWriteIntent: local?.onWriteIntent, mutationPath: local?.mutationPath,
-        assertDescriptors() { descriptors(); gateway(); local?.assertCurrent(); } };
+        assertDescriptors() { gateway(); local?.assertCurrent(); } };
     }, args => { const action = normalizeProfileAction(args.action) ?? normalizeProfileAction(args.mode);
       return action !== null && !WRITE_ACTIONS.has(action); }),
   });

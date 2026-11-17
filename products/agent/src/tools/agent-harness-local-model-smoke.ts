@@ -3,7 +3,7 @@ import type { AgentHarnessModelRoutingArgs, LocalModelServerDefaultEndpoint, Loc
 import { previewHarnessText } from './agent-harness-text.ts';
 import { readLimit, readRecord, readString } from './agent-harness-model-routing-utils.ts';
 import { captureLocalModelRegistry, readLocalServerEndpointCandidates, describeLocalServerEndpoint, isPrivateOrLocalUrl, localEndpointSmokeRoute, localModelServerDefaults, parseUrlCandidate } from './agent-harness-local-model-endpoints.ts';
-import { captureCatalogData, captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 
 function localModelSmokeTargetFromEndpoint(endpoint: LocalModelServerEndpoint): LocalModelSmokeTarget {
@@ -294,18 +294,17 @@ async function smokeOneLocalModelTarget(target: LocalModelSmokeTarget, timeoutMs
 }
 
 export async function runLocalModelServerSmoke(context: CommandContext, args: AgentHarnessModelRoutingArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
-  const optionsCurrent = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent']);
   const signal = options.signal, callerCurrent = options.assertCurrent;
   const assertCaller = () => {
-    optionsCurrent(); signal?.throwIfAborted();
+    signal?.throwIfAborted();
     assertProjectionCurrent(callerCurrent);
-    optionsCurrent(); signal?.throwIfAborted();
+    signal?.throwIfAborted();
   };
   assertCaller();
   const source = JSON.stringify(captureCatalogData(args));
   const endpoints = captureLocalModelRegistry(context);
   const assertSourceCurrent = () => {
-    optionsCurrent(); signal?.throwIfAborted();
+    signal?.throwIfAborted();
     if (JSON.stringify(captureCatalogData(args)) !== source) throw new ToolInputProjectionError('stale');
     endpoints.assertCurrent();
   };

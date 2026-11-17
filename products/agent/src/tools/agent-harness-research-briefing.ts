@@ -1,6 +1,6 @@
 import { captureModelArtifactClockSource } from './agent-harness-model-reading-source.ts';
 import { captureCatalogPath, withCapturedResearchCatalog, rankResearchRecords, researchCheckpointRoute, researchRouteString as routeString, researchSourcePriority } from './agent-harness-research-catalog-source.ts';
-import { captureCatalogMethods, captureCatalogSnapshot } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogSnapshot } from './agent-harness-catalog-ranking.ts';
 import { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { observeImportFile, assertImportFileCurrent } from '@goodvibes-jev/engine/platform/platform/config';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -105,8 +105,7 @@ function captureArtifacts(context: CommandContext) {
   const owner = captureCatalogPath(context, ['platform', 'artifactStore']);
   const store = context.platform?.artifactStore;
   const native = store instanceof ArtifactStore ? store : null;
-  const assertMethods = store ? captureCatalogMethods(store, ['list', 'getRecord', 'pruneExpired', 'toDescriptor', 'removeRecordFiles', 'rootDir', 'records']) : () => {};
-  assertMethods(); const list = store?.list, getRecord = native?.getRecord;
+  const list = store?.list, getRecord = native?.getRecord;
   const initial = list ? list.call(store, REPORT_SCAN_LIMIT) : [];
   if (initial.length > 0 && (!native || !getRecord)) throw new ToolInputProjectionError('unavailable');
   const metadata = initial.map(artifact => {
@@ -116,7 +115,7 @@ function captureArtifacts(context: CommandContext) {
     return { id: artifact.id, record, snapshot, path, observation: observeImportFile(path) };
   });
   const assertCurrent = (): void => {
-    owner.assertCurrent(); assertMethods();
+    owner.assertCurrent();
     for (const file of metadata) {
       file.snapshot.assertCurrent(file.record);
       const record = getRecord?.call(native, file.id);

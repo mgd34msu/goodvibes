@@ -4,7 +4,7 @@ import type { Tool, ToolExecuteOptions } from '@goodvibes-jev/engine/platform/pl
 import { BrowserEngine, BrowserSessionError, StaleElementError, UntrustedEffectError } from '@goodvibes-jev/engine/platform/platform/browser';
 import type { BrowserExtractField, BrowserTarget, UntrustedContentPort } from '@goodvibes-jev/engine/platform/platform/browser';
 import { createAgentBrowserEngine } from '../runtime/agent-browser.ts';
-import { captureCatalogMethods, captureCatalogSnapshotGuard } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogSnapshotGuard } from './agent-harness-catalog-ranking.ts';
 import { declareToolCapability } from './agent-tool-capability-declarations.ts';
 
 /**
@@ -266,20 +266,17 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
       concurrency: 'serial',
     },
     execute: async (rawArgs: Record<string, unknown>, executionOptions?: ToolExecuteOptions) => {
-      const optionsCurrent = executionOptions ? captureCatalogMethods(executionOptions, ['signal', 'assertCurrent', 'inputProjectionContext']) : undefined;
       const inputCurrent = executionOptions ? captureCatalogSnapshotGuard(rawArgs) : undefined;
-      optionsCurrent?.();
       const signal = executionOptions?.signal;
       const invocationCurrent = () => {
-        optionsCurrent?.(); inputCurrent?.(rawArgs); existingMethodCurrent?.(); signal?.throwIfAborted();
+        inputCurrent?.(rawArgs); existingMethodCurrent?.(); signal?.throwIfAborted();
         assertCurrentToolInvocation(rawArgs, executionOptions);
-        optionsCurrent?.(); inputCurrent?.(rawArgs); existingMethodCurrent?.(); signal?.throwIfAborted();
+        inputCurrent?.(rawArgs); existingMethodCurrent?.(); signal?.throwIfAborted();
       };
       signal?.throwIfAborted();
       const args = rawArgs as BrowserToolArgs;
       const action = readString(args.action).toLowerCase().replace(/-/g, '_');
       const interactiveAction = action === 'click' || action === 'type' || action === 'select' || action === 'press';
-      const existingMethodCurrent = executionOptions && interactiveAction && engine ? captureCatalogMethods(engine, [action]) : undefined;
       if (executionOptions) invocationCurrent();
       if (!action) {
         return failure(`browser needs an action. Use one of: ${BROWSER_ACTIONS.join(', ')}.`);
@@ -300,8 +297,7 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
       };
       try {
         const browser = resolveEngine();
-        const methodCurrent = existingMethodCurrent ?? (executionOptions && interactiveAction ? captureCatalogMethods(browser, [action]) : undefined);
-        const assertCurrent = () => { methodCurrent?.(); invocationCurrent(); methodCurrent?.(); };
+        const assertCurrent = () => { invocationCurrent(); };
         const ownership = executionOptions && interactiveAction
           ? (typeof browser.retainAdmittedToolAction === 'function' ? browser.retainAdmittedToolAction(rawArgs, executionOptions, assertCurrent) : undefined)
             ?? { signal, assertCurrent } : undefined;

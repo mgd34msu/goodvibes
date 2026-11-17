@@ -1,6 +1,6 @@
 import { types as nodeTypes } from 'node:util';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogMethods, captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureCatalogPath } from './agent-harness-research-catalog-source.ts';
 import { modelReadingServicePath, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
@@ -245,25 +245,20 @@ async function collectFromSource(source: unknown, path: string, kind: SourceCand
   }
   if (source instanceof Map) {
     if (Reflect.ownKeys(source).length !== 0) throw new ToolInputProjectionError('held');
-    const assertMethods = captureCatalogMethods(source, ['entries']); assertMethods();
     const originalEntries = source.entries, entries = [...originalEntries.call(source)];
     if (entries.some(([key]) => typeof key !== 'string' && typeof key !== 'number')) throw new ToolInputProjectionError('held');
     const snapshot = captureCatalogSnapshot(entries); envelopes.push(snapshot.captured);
-    guards.push(() => { if (Reflect.ownKeys(source).length !== 0) throw new ToolInputProjectionError('held'); assertMethods(); snapshot.assertCurrent([...originalEntries.call(source)]); });
+    guards.push(() => { if (Reflect.ownKeys(source).length !== 0) throw new ToolInputProjectionError('held'); snapshot.assertCurrent([...originalEntries.call(source)]); });
     const output: CollectedRecord[] = [];
     for (const [key, value] of entries) output.push(...await collectFromSource(value, `${path}.${String(key)}`, kind, wrapperKeys, methods, guards, envelopes, assertCurrent, visited));
     assertCurrent(); return output;
   }
-  const keys = [...SNAPSHOT_METHODS, ...methods, ...wrapperKeys];
-  const assertMethods = captureCatalogMethods(source, keys); assertMethods(); guards.push(assertMethods);
   const ownKeys = Reflect.ownKeys(source);
   if (ownKeys.some(key => typeof key !== 'string')) throw new ToolInputProjectionError('held');
   const ownerKeys = ownKeys.filter((key): key is string => typeof key === 'string');
-  const assertOwnSlots = captureCatalogMethods(source, ownerKeys);
   const ownData = (): Record<string, unknown> => {
     const currentKeys = Reflect.ownKeys(source);
     if (currentKeys.length !== ownKeys.length || currentKeys.some((key, index) => key !== ownKeys[index])) throw new ToolInputProjectionError('held');
-    assertOwnSlots();
     const data: Record<string, unknown> = Object.create(null);
     for (const key of ownerKeys) {
       const value = modelReadingServicePath(source, [key]);

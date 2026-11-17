@@ -6,7 +6,6 @@ import { readFileSync } from 'node:fs';
 import { getAgentSettingsSchema, readAgentSettingValue, type AgentConfigSetting } from '../config/settings-catalog.ts';
 import type { PendingSubscriptionLogin, ProviderSubscription } from '@goodvibes-jev/engine/platform/platform/config';
 import { bindSettingSchemaDescriptors, setHarnessSetting } from '../agent/harness-control.ts';
-import { captureCatalogMethods } from '../tools/agent-harness-catalog-ranking.ts';
 import { applyThemeModeSettingChange, applyThemeNameSettingChange, THEME_MODE_CONFIG_KEY, THEME_NAME_CONFIG_KEY } from '../renderer/theme-mode-config.ts';
 import { listThemeChoices, normalizeThemeName } from '../renderer/theme.ts';
 import { buildAgentWorkspaceRuntimeSnapshot } from './agent-workspace-snapshot.ts';
@@ -795,18 +794,9 @@ export function captureAgentWorkspaceTuiSettingsImportPreview(context: CommandCo
   readonly sourceViews: readonly unknown[];
   readonly assertCurrent: () => void;
 } {
-  const assertContext = captureCatalogMethods(context, ['workspace', 'platform', 'session']);
-  const workspace = context.workspace, platform = context.platform, session = context.session;
-  const assertWorkspace = captureCatalogMethods(workspace, ['shellPaths']);
-  const assertPlatform = captureCatalogMethods(platform, ['configManager', 'subscriptionManager']);
-  const assertSession = captureCatalogMethods(session, ['runtime']);
-  const runtime = session.runtime;
-  const assertRuntime = captureCatalogMethods(runtime, ['sessionId']);
+  const workspace = context.workspace, platform = context.platform;
   const paths = workspace.shellPaths, config = platform.configManager, subscriptions = platform.subscriptionManager;
   if (!paths || !config) throw new ToolInputProjectionError('unconfigured');
-  const assertPaths = captureCatalogMethods(paths, ['resolveUserPath', 'resolveProjectPath', 'workingDirectory', 'homeDirectory']);
-  const assertConfig = captureCatalogMethods(config, ['getSchema', 'getHostSettingsSchema', 'getConfigurationIncarnation', 'get', 'getStored']);
-  const assertSubscriptions = subscriptions ? captureCatalogMethods(subscriptions, ['list', 'listPending', 'get', 'getPending']) : () => {};
   const builtin = config.getSchema(), host = config.getHostSettingsSchema();
   const assertSchema = bindSettingSchemaDescriptors([builtin, host]);
   const incarnation = config.getConfigurationIncarnation();
@@ -816,8 +806,7 @@ export function captureAgentWorkspaceTuiSettingsImportPreview(context: CommandCo
     paths.resolveProjectPath(GOODVIBES_TUI_SURFACE_ROOT, 'settings.json'), paths.resolveUserPath(GOODVIBES_TUI_SURFACE_ROOT, 'subscriptions.json')];
   const sources = sourcePaths.map(path => ({ path, observation: observeImportFile(path) }));
   const assertCurrent = () => {
-    assertContext(); assertWorkspace(); assertPlatform(); assertSession(); assertRuntime();
-    assertPaths(); assertConfig(); assertSubscriptions(); assertSchema();
+    assertSchema();
     if (config.getConfigurationIncarnation() !== incarnation || config.getSchema() !== builtin || config.getHostSettingsSchema() !== host
       || subscriptionValues() !== originalSubscriptions) throw new ToolInputProjectionError('stale');
     for (const source of sources) {

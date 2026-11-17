@@ -1,4 +1,4 @@
-import { captureCatalogMethods, captureCatalogSnapshot, combineCatalogGuards, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureCatalogReadRequest, selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { captureStatefulCatalogRequest } from './agent-harness-stateful-catalog-source.ts';
 import { captureModelReadingSnapshotGuard, withModelReadingSource } from './agent-harness-model-reading-source.ts';
@@ -89,14 +89,7 @@ function captureWorkspaceCategories(): () => void {
   // Frozen native declarations can reuse a complete descriptor proof. Mutable
   // declarations still receive the full comparison at every publication fence.
   const assertSource = captureModelReadingSnapshotGuard(AGENT_WORKSPACE_CATEGORIES, true);
-  const bindings = [captureCatalogMethods(AGENT_WORKSPACE_CATEGORIES,
-    ['length', ...AGENT_WORKSPACE_CATEGORIES.map((_category, index) => String(index))])];
-  for (const category of AGENT_WORKSPACE_CATEGORIES) {
-    bindings.push(captureCatalogMethods(category, ['actions']));
-    bindings.push(captureCatalogMethods(category.actions, ['length', ...category.actions.map((_action, index) => String(index))]));
-  }
-  const assertBindings = combineCatalogGuards(bindings);
-  return () => { assertBindings(); assertSource(AGENT_WORKSPACE_CATEGORIES); assertBindings(); };
+  return () => { assertSource(AGENT_WORKSPACE_CATEGORIES); };
 }
 
 export function describeWorkspaceCategory(category: AgentWorkspaceCategory): Record<string, unknown> {

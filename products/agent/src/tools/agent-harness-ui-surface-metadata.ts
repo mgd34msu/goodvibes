@@ -1,4 +1,4 @@
-import { captureCatalogMethods, captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { captureStatefulCatalogRequest, rankStatefulCatalog } from './agent-harness-stateful-catalog-source.ts';
@@ -755,13 +755,11 @@ function captureUiRequest(context: CommandContext, args: AgentHarnessUiSurfaceAr
     ...UI_CALLBACK_NAMES.map(name => [name]), ['platform', 'voiceProviderRegistry', 'list'],
     ['platform', 'voiceService', 'listVoices'], ['platform', 'artifactStore', 'list'],
   ], () => {
-    const assertDefinitions = captureCatalogMethods(UI_SURFACES, ['length', ...UI_SURFACES.map((_, index) => String(index))]);
-    const definitions = UI_SURFACES.map(surface => captureCatalogMethods(surface, ['id', 'label', 'kind', 'summary', 'command', 'preferredModelRoute', 'parameters', 'available', 'open']));
     const semanticData = UI_SURFACES.map(surface => ({ id: surface.id, label: surface.label, kind: surface.kind,
       summary: surface.summary, command: surface.command, preferredModelRoute: surface.preferredModelRoute, parameters: surface.parameters }));
     const originalSemanticData = captureCatalogSnapshot(semanticData);
     const guards = [() => {
-      assertDefinitions(); for (const guard of definitions) guard(); originalSemanticData.assertCurrent(semanticData);
+      originalSemanticData.assertCurrent(semanticData);
     }];
     if (context.platform.voiceProviderRegistry) guards.push(captureVoiceProviderReadSource(context.platform.voiceProviderRegistry));
     if (context.platform.voiceService) guards.push(captureVoiceListReadSource(context.platform.voiceService));

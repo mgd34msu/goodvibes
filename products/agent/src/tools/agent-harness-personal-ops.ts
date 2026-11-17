@@ -3,7 +3,7 @@ import { runPersonalOpsStyleDraft, STYLE_DRAFT_RECORD_ID } from './agent-harness
 import { buildAgentWorkspaceRoutineCounters } from '../input/agent-workspace-snapshot.ts';
 import { buildAgentWorkspaceChannels } from '../input/agent-workspace-channels.ts';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { captureCatalogData, captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
@@ -502,12 +502,6 @@ export function runPersonalOpsRead(...args: Parameters<typeof ownedRunPersonalOp
 }
 
 async function ownedRunPersonalOpsRead(context: CommandContext, args: AgentHarnessPersonalOpsArgs, options: CatalogRankingOptions = {}, invocationArgs: Record<string, unknown> = {}, executionOptions?: Parameters<Tool['execute']>[1]): Promise<PersonalOpsReadRunResult> {
-  const assertOptions = captureCatalogMethods(options, ['sourceOwner', 'signal', 'assertCurrent', 'retainCurrent']);
-  const contextGuards = [captureCatalogMethods(context, ['clients', 'extensions', 'session'])];
-  if (context.clients) contextGuards.push(captureCatalogMethods(context.clients, ['mcpApi']));
-  if (context.extensions) contextGuards.push(captureCatalogMethods(context.extensions, ['mcpRegistry', 'toolRegistry']));
-  if (context.session) contextGuards.push(captureCatalogMethods(context.session, ['runtime']));
-  if (context.session?.runtime) contextGuards.push(captureCatalogMethods(context.session.runtime, ['sessionId']));
   options.signal?.throwIfAborted();
   const originalArgs = args;
   args = captureCatalogData(args);
@@ -515,11 +509,8 @@ async function ownedRunPersonalOpsRead(context: CommandContext, args: AgentHarne
   const sourceApi = context.clients?.mcpApi ?? context.extensions?.mcpRegistry;
   const sessionId = context.session?.runtime?.sessionId;
   const registry = context.extensions?.toolRegistry;
-  const assertApiCurrent = sourceApi ? captureCatalogMethods(sourceApi, ['listServerSecurity', 'listAllTools', 'getToolSchema', 'callTool']) : () => {};
-  const assertRegistryCurrent = registry ? captureCatalogMethods(registry, ['executeNested', 'getToolDefinitions']) : () => {};
   const assertCurrent = () => {
-    assertOptions(); for (const guard of contextGuards) guard();
-    options.signal?.throwIfAborted(); options.assertCurrent?.(); assertApiCurrent(); assertRegistryCurrent();
+    options.signal?.throwIfAborted(); options.assertCurrent?.();
     if ((context.clients?.mcpApi ?? context.extensions?.mcpRegistry) !== sourceApi
       || context.extensions?.toolRegistry !== registry || context.session?.runtime?.sessionId !== sessionId
       || JSON.stringify(captureCatalogData(originalArgs)) !== argsJson) throw new ToolInputProjectionError('stale');

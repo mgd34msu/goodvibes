@@ -59,7 +59,7 @@ import { randomBytes } from 'node:crypto';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { captureProfileDelegation } from '@goodvibes-jev/engine/platform/platform/owner-profile';
 import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogData, captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
 import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from './agent-local-state-admission.ts';
 import { captureOccasionsGatewayCurrent, captureOccasionsGatewayLocalState } from '../agent/occasions-gateway.ts';
 import type { OccasionsGatewayInvoke } from '../agent/occasions-gateway.ts';
@@ -670,9 +670,7 @@ export function createAgentOccasionsTool(deps: AgentOccasionsToolDeps): Tool {
       const writing = OCCASIONS_WRITE_ACTIONS.has(action);
       const effects = writing ? agentLocalStateWrite(rawArgs, options) : undefined;
       const delegation = writing ? captureProfileDelegation(rawArgs, options) : undefined;
-      const backend = captureCatalogMethods(deps, ['invoke']);
       const assertCurrent = () => {
-        backend();
         if (effects) effects.assertCurrent(); else assertAgentLocalStateCurrent(rawArgs, options);
         if (action === 'sweep' && !assertCurrentToolEffect(rawArgs, options, 'send')) throw new ToolInputProjectionError('held');
       };
@@ -746,13 +744,12 @@ export function registerAgentOccasionsTool(
 ): void {
   if (!registry.has('occasions')) registry.register(createAgentOccasionsTool({ invoke: options.invoke }), {
     inputProjection: createAgentLocalStateInputProjector(args => {
-      const descriptors = captureCatalogMethods(options, ['invoke']);
       const action = normalizeOccasionsAction(args.action) ?? normalizeOccasionsAction(args.mode);
       const method = action ? ACTION_METHODS[action] : undefined;
       const gateway = captureOccasionsGatewayCurrent(options.invoke, method);
       const local = method && captureOccasionsGatewayLocalState(options.invoke, method, action !== null && OCCASIONS_WRITE_ACTIONS.has(action));
       return { targets: local?.targets ?? [], onWriteIntent: local?.onWriteIntent, mutationPath: local?.mutationPath,
-        assertDescriptors() { descriptors(); gateway(); local?.assertCurrent(); } };
+        assertDescriptors() { gateway(); local?.assertCurrent(); } };
     }, args => { const action = normalizeOccasionsAction(args.action) ?? normalizeOccasionsAction(args.mode); return action !== null && !OCCASIONS_WRITE_ACTIONS.has(action); }),
   });
 }

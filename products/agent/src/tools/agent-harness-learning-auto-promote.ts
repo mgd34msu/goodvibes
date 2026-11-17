@@ -11,7 +11,7 @@ import { AgentSkillRegistry } from '../agent/skill-registry.ts';
 import { runSkillDraftProposer, assertSkillDraftRunResultCurrent, type SkillDraftRunResult } from '../agent/skill-draft-runner.ts';
 import { buildLearningCandidates, assertLearningCandidateCollection } from './agent-harness-learning-curator-proposals.ts';
 import type { LearningCandidate } from './agent-harness-learning-curator-types.ts';
-import { captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureModelReadingSnapshotGuard, modelReadingServicePath } from './agent-harness-model-reading-source.ts';
 import type { LearningCandidateCollection, LearningCuratorNativeContext } from './agent-harness-learning-curator-source.ts';
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
@@ -265,39 +265,26 @@ async function runAutoPromoterOnce(
   context: LearningCuratorNativeContext, skillRegistry: AgentSkillRegistry, memoryApi: MemoryApi,
   options: CatalogRankingOptions, memoryServedByDaemon: boolean,
 ): Promise<AutoPromoteResult> {
-  const assertOptions = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent', 'requirePreservedSource']);
   const signal = options.signal, caller = options.assertCurrent;
-  const assertSignal = signal ? captureCatalogMethods(signal, ['throwIfAborted']) : () => {};
   if (typeof caller !== 'function') throw new ToolInputProjectionError('unavailable');
   const assertCaller = () => {
-    assertOptions(); assertSignal(); signal?.throwIfAborted();
+    signal?.throwIfAborted();
     assertSynchronousJudgmentGuard(caller, () => new ToolInputProjectionError('stale'));
-    assertOptions(); assertSignal(); signal?.throwIfAborted();
+    signal?.throwIfAborted();
   };
   assertCaller();
-  const assertWorkspace = captureCatalogMethods(context, ['workspace']);
   const paths = context.workspace?.shellPaths;
   if (!paths) {
     const workspace = context.workspace;
-    const assertPath = workspace ? captureCatalogMethods(workspace, ['shellPaths']) : () => {};
     const assertEmpty = () => {
-      assertWorkspace(); assertPath(); assertCaller(); assertWorkspace(); assertPath();
+      assertCaller();
       if (context.workspace !== workspace || modelReadingServicePath(context, ['workspace', 'shellPaths']) !== paths)
         throw new ToolInputProjectionError('stale');
     };
     return issueResult({ eligible: 0, promoted: 0, skipped: 0, consolidated: 0,
       domains: {}, log: ['No active workspace; promotion skipped.'] }, context, options, assertEmpty);
   }
-  const assertApi = captureCatalogMethods(memoryApi, ['add', 'getAll']);
-  const factories = [AgentPersonaRegistry, AgentSkillRegistry, AgentRoutineRegistry]
-    .map(factory => captureCatalogMethods(factory, ['prototype', 'fromShellPaths']));
-  const nativeMethods = [
-    captureCatalogMethods(AgentPersonaRegistry.prototype, ['constructor', 'snapshot', 'readStore', 'writeStore', 'nextId', 'validateRequired', 'create', 'update', 'markStale', 'deletePersona']),
-    captureCatalogMethods(AgentSkillRegistry.prototype, ['constructor', 'snapshot', 'readStore', 'writeStore', 'nextId', 'validateRequired', 'create', 'update', 'markStale', 'deleteSkill']),
-    captureCatalogMethods(AgentRoutineRegistry.prototype, ['constructor', 'snapshot', 'readStore', 'writeStore', 'nextId', 'validateRequired', 'create', 'update', 'markStale', 'deleteRoutine']),
-  ];
   const assertOwnership = () => {
-    assertOptions(); assertSignal(); assertWorkspace(); assertApi(); for (const guard of [...factories, ...nativeMethods]) guard();
     signal?.throwIfAborted();
     if (context.workspace?.shellPaths !== paths || context.clients?.agentKnowledgeApi?.memory !== memoryApi)
       throw new ToolInputProjectionError('stale');
@@ -382,15 +369,13 @@ const activePromotions = new Map<string, Promise<AutoPromoteResult>>();
 /** Serialize native writes; each caller keeps its own source/permission lifetime. */
 export async function runAutoPromoter(context: LearningCuratorNativeContext, skills: AgentSkillRegistry,
   memory: MemoryApi, options: CatalogRankingOptions, memoryServedByDaemon = false): Promise<AutoPromoteResult> {
-  const assertContext = captureCatalogMethods(context, ['workspace']);
   const workspace = modelReadingServicePath(context, ['workspace']);
   const paths = modelReadingServicePath(context, ['workspace', 'shellPaths']);
   const root = modelReadingServicePath(context, ['workspace', 'shellPaths', 'userGoodVibesRoot']);
   if (typeof root !== 'string' || !root) return runAutoPromoterOnce(context, skills, memory, options, memoryServedByDaemon);
-  const assertOptions = captureCatalogMethods(options, ['signal', 'assertCurrent']);
   const signal = options.signal;
   const current = () => {
-    assertContext(); assertOptions(); signal?.throwIfAborted();
+    signal?.throwIfAborted();
     if (modelReadingServicePath(context, ['workspace']) !== workspace
       || modelReadingServicePath(context, ['workspace', 'shellPaths']) !== paths
       || modelReadingServicePath(context, ['workspace', 'shellPaths', 'userGoodVibesRoot']) !== root) throw new ToolInputProjectionError('stale');

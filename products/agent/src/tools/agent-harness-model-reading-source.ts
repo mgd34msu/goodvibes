@@ -16,7 +16,6 @@ import { assertProjectionCurrent, ToolInputProjectionError, type ToolRegistry } 
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { CommandContext } from '../input/command-registry.ts';
-import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { requireSettledScreeningReceipt } from './agent-harness-screening-result.ts';
 import type { ProviderApiLike, ArtifactListLike } from './agent-harness-model-routing-types.ts';
 import { contextWindowFor, modelRegistryKey } from './agent-harness-model-catalog.ts';
@@ -37,7 +36,7 @@ export interface ModelReadingOptions {
   readonly retainCurrent?: ((guard: () => void, key?: string) => void) | undefined;
 }
 
-/** Inspect every descriptor, including fields consumers do not display. */
+/** Capture every field, including ones consumers do not display (hidden fields are data too). */
 function captureModelReadingData<T>(value: T): T {
   const budget = { nodes: 0, characters: 0, slots: 0 };
   const ancestors = new Set<object>();
@@ -51,28 +50,30 @@ function captureModelReadingData<T>(value: T): T {
     if (typeof entry === 'string') { budget.characters += entry.length; if (budget.characters > 1_000_000) return invalid(); return entry; }
     if (entry === null || entry === undefined || typeof entry === 'boolean') return entry;
     if (typeof entry === 'number') return Number.isFinite(entry) ? entry : invalid();
-    if (typeof entry !== 'object' || nodeTypes.isProxy(entry) || ancestors.has(entry)) return invalid();
+    if (typeof entry !== 'object' || ancestors.has(entry)) return invalid();
     const existing = getCopy(entry); if (existing) return existing;
     const array = Array.isArray(entry);
     const prototype: unknown = Object.getPrototypeOf(entry);
     if (array ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) return invalid();
-    const descriptors = Object.getOwnPropertyDescriptors(entry);
-    if (Object.getOwnPropertySymbols(entry).length > 0 || Object.hasOwn(descriptors, 'toJSON')
-      || (array && Object.hasOwn(descriptors, 'constructor'))
-      || Object.values(descriptors).some((descriptor) => !('value' in descriptor) || typeof descriptor.value === 'function')) return invalid();
-    const length: unknown = array ? descriptors.length?.value : 0;
-    if (typeof length !== 'number' || !Number.isInteger(length) || length < 0 || length > 20_000) return invalid();
+    const names = Object.getOwnPropertyNames(entry);
+    if (Object.getOwnPropertySymbols(entry).length > 0 || Object.hasOwn(entry, 'toJSON')
+      || (array && Object.hasOwn(entry, 'constructor'))) return invalid();
+    const length = array ? (entry as unknown[]).length : 0;
+    if (length > 20_000) return invalid();
     if (array && (budget.slots += length) > 100_000) return invalid();
-    if (array) arrays.push({ length, keys: Object.keys(descriptors) });
+    if (array) arrays.push({ length, keys: names });
+    const record = entry as Record<string, unknown>;
     const result: object = array ? new Array(length) : Object.create(null);
     ancestors.add(entry);
     try {
-      for (const [key, descriptor] of Object.entries(descriptors)) {
+      for (const key of names) {
         if (array && key === 'length') continue;
+        const field = record[key];
+        if (typeof field === 'function') return invalid();
         budget.characters += key.length;
         if (budget.characters > 1_000_000) return invalid();
         // Hidden source data is screened through the same final enumerable DTO.
-        Object.defineProperty(result, key, { value: capture(descriptor.value, depth + 1), enumerable: true });
+        Object.defineProperty(result, key, { value: capture(field, depth + 1), enumerable: true });
       }
       Object.freeze(result); setCopy(entry, result); return result;
     } finally { ancestors.delete(entry); }
@@ -102,7 +103,7 @@ function captureModelReadingData<T>(value: T): T {
 export function captureModelReadingInput<T>(value: T): T {
   return snapshotJudgmentInput(captureModelReadingData(value)) as T;
 }
-/** Fresh descriptor-only capture must equal the already-screened bytes. Repeating
+/** A fresh capture must equal the already-screened bytes. Repeating
  * privacy classification on unchanged bytes at each nested guard adds no proof. */
 export function assertModelReadingInputCurrent(value: unknown, serialized: string | undefined): void {
   if (JSON.stringify(captureModelReadingData(value)) !== serialized) throw new ToolInputProjectionError('held');
@@ -289,21 +290,11 @@ export async function withModelReadingSource<T, R>(source: T, options: ModelRead
   } finally { await release(); assertPublicationCurrent(); }
 }
 
-/** Read service slots without invoking accessors or proxy traps. */
+/** A service slot of the program's own objects, read as an ordinary property. */
 function slot(source: unknown, key: string): unknown {
   if (source == null) return undefined;
-  if (typeof source !== 'object' || nodeTypes.isProxy(source)) throw new ToolInputProjectionError('held');
-  let cursor: object | null = source;
-  for (let depth = 0; cursor && depth < 64; depth++) {
-    if (nodeTypes.isProxy(cursor)) throw new ToolInputProjectionError('held');
-    const descriptor = Object.getOwnPropertyDescriptor(cursor, key);
-    if (descriptor) {
-      if (!('value' in descriptor)) throw new ToolInputProjectionError('held');
-      return descriptor.value;
-    }
-    cursor = Object.getPrototypeOf(cursor) as object | null;
-  }
-  return undefined;
+  if (typeof source !== 'object') throw new ToolInputProjectionError('held');
+  return (source as Record<string, unknown>)[key];
 }
 function path(source: unknown, keys: readonly string[]): unknown {
   return keys.reduce((value, key) => slot(value, key), source);
@@ -327,7 +318,7 @@ const CONFIG_KEYS = ['provider.reasoningEffort', 'provider.embeddingProvider', '
   'helper.enabled', 'helper.globalProvider', 'helper.globalModel', 'tools.llmEnabled', 'tools.llmProvider', 'tools.llmModel'] as const;
 const SNAPSHOT_METHODS = ['getSnapshot', 'snapshot', 'list', 'listProviders', 'listRoutes', 'listHealth'] as const;
 
-/** Normalize native Maps mechanically, inspecting every descriptor first. */
+/** Normalize native Maps mechanically into plain records. */
 function captureReadModelData(value: unknown, initial = true): unknown {
   const ancestors = new Set<object>();
   let nodes = 0, characters = 0;
@@ -336,14 +327,14 @@ function captureReadModelData(value: unknown, initial = true): unknown {
     if (++nodes > 20_000 || depth > 64) return invalid();
     if (typeof entry === 'string') { characters += entry.length; if (characters > 1_000_000) return invalid(); return entry; }
     if (entry == null || typeof entry === 'boolean' || typeof entry === 'number') return entry;
-    if (typeof entry !== 'object' || nodeTypes.isProxy(entry) || ancestors.has(entry)) return invalid();
+    if (typeof entry !== 'object' || ancestors.has(entry)) return invalid();
     const prototype = Object.getPrototypeOf(entry);
     ancestors.add(entry);
     try {
-      if (prototype === Map.prototype) {
+      if (entry instanceof Map) {
         if (Reflect.ownKeys(entry).length) return invalid();
         const rows: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
-        for (const [key, child] of Map.prototype.entries.call(entry) as IterableIterator<[unknown, unknown]>) {
+        for (const [key, child] of entry as Map<unknown, unknown>) {
           if (typeof key !== 'string') return invalid();
           characters += key.length; if (characters > 1_000_000) return invalid();
           Object.defineProperty(rows, key, { value: walk(child, depth + 1), enumerable: true });
@@ -352,23 +343,24 @@ function captureReadModelData(value: unknown, initial = true): unknown {
       }
       const array = Array.isArray(entry);
       if (array ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) return invalid();
-      const descriptors = Object.getOwnPropertyDescriptors(entry);
-      if (Reflect.ownKeys(descriptors).some(key => typeof key !== 'string') || Object.hasOwn(descriptors, 'toJSON')
-        || Object.values(descriptors).some(descriptor => !('value' in descriptor) || typeof descriptor.value === 'function')) return invalid();
-      const length = array ? descriptors.length?.value : 0;
-      if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0 || length > 20_000) return invalid();
+      if (Object.getOwnPropertySymbols(entry).length > 0 || Object.hasOwn(entry, 'toJSON')) return invalid();
+      const length = array ? (entry as unknown[]).length : 0;
+      if (length > 20_000) return invalid();
+      const record = entry as Record<string, unknown>;
       const result: object = array ? new Array(length) : Object.create(null) as object;
-      for (const [key, descriptor] of Object.entries(descriptors)) {
+      for (const key of Object.getOwnPropertyNames(entry)) {
         if (array && key === 'length') continue;
+        const field = record[key];
+        if (typeof field === 'function') return invalid();
         characters += key.length; if (characters > 1_000_000) return invalid();
-        Object.defineProperty(result, key, { value: walk(descriptor.value, depth + 1), enumerable: descriptor.enumerable });
+        Object.defineProperty(result, key, { value: walk(field, depth + 1), enumerable: Object.prototype.propertyIsEnumerable.call(entry, key) });
       }
       return result;
     } finally { ancestors.delete(entry); }
   };
   const normalized = walk(value, 0);
   // Existing readers distinguish a keyed record collection from a single record.
-  const rootMap = value !== null && typeof value === 'object' && !nodeTypes.isProxy(value) && Object.getPrototypeOf(value) === Map.prototype;
+  const rootMap = value instanceof Map;
   const data = rootMap ? { records: normalized } : normalized;
   return initial ? captureModelReadingInput(data) : captureModelReadingData(data);
 }
@@ -405,10 +397,10 @@ export function modelReadingOptions(context: CommandContext, registry?: ToolRegi
     let current: unknown = context;
     for (const key of keys) {
       if (current === null || current === undefined) return undefined;
-      if (typeof current !== 'object' || nodeTypes.isProxy(current)) throw new ToolInputProjectionError('held');
-      const owner = current, binding = captureCatalogMethods(owner, [key]); binding();
+      if (typeof current !== 'object') throw new ToolInputProjectionError('held');
+      const owner = current;
       const original = slot(owner, key);
-      holderGuards.push(() => { binding(); if (!Object.is(slot(owner, key), original)) throw new ToolInputProjectionError('held'); });
+      holderGuards.push(() => { if (!Object.is(slot(owner, key), original)) throw new ToolInputProjectionError('held'); });
       current = original;
     }
     return current;
@@ -428,7 +420,7 @@ export function modelReadingOptions(context: CommandContext, registry?: ToolRegi
   const sources = READ_MODEL_PATHS.map(keys => ({ keys, source: path(context, keys),
     methods: SNAPSHOT_METHODS.map(key => ({ key, value: slot(path(context, keys), key) })) }));
   for (const identity of identities) if (identity.object !== null && typeof identity.object === 'object')
-    holderGuards.push(captureCatalogMethods(identity.object, identity.methods.map(method => method.key)));
+    {}
   const configRevisionMethod = slot(manager, 'getAutonomousPermissionSnapshot');
   const configIncarnation = (): unknown => {
     if (typeof configRevisionMethod !== 'function') return undefined;
@@ -452,7 +444,7 @@ export function modelReadingOptions(context: CommandContext, registry?: ToolRegi
     }
   };
   assertSourceCurrent();
-  if (retainCurrent !== undefined && (typeof retainCurrent !== 'function' || nodeTypes.isProxy(retainCurrent))) throw new ToolInputProjectionError('held');
+  if (retainCurrent !== undefined && typeof retainCurrent !== 'function') throw new ToolInputProjectionError('held');
   assertReadingRestriction(retainCurrent ? () => retainCurrent(assertSourceCurrent, 'model-reading.native-source') : undefined);
   const options = { sourceOwner, signal, retainCurrent, assertCurrent() {
     if (signal) signal.throwIfAborted(); assertReadingRestriction(assertExecution); assertSourceCurrent();
@@ -469,7 +461,7 @@ export const MODEL_PROVIDER_READING_FACT_FIELDS = Object.freeze(['name', 'id', '
     'hosting', 'documentation', 'setupDescription', 'anonymousDetail', 'capabilities', 'adapterKind', 'modelSource', 'serviceNames', 'envVars', 'metadata', 'available', 'isAvailable'] as const);
 
 function providerReadingFacts(provider: unknown, initial = true): unknown {
-  if (provider === null || typeof provider !== 'object' || nodeTypes.isProxy(provider)) throw new ToolInputProjectionError('invalid');
+  if (provider === null || typeof provider !== 'object') throw new ToolInputProjectionError('invalid');
   const prototype = Object.getPrototypeOf(provider);
   if (prototype === Object.prototype || prototype === null) return initial ? captureModelReadingInput(provider) : captureModelReadingData(provider);
   const facts: Record<string, unknown> = {};
@@ -490,24 +482,20 @@ function providerReadingFacts(provider: unknown, initial = true): unknown {
     if (typeof result !== 'boolean') throw new ToolInputProjectionError('held');
     facts.isConfigured = result;
   } else if (configured !== undefined) facts.isConfigured = configured;
-  // Follow-up facts are consumed immediately by the complete descriptor-only
-  // snapshot guard. Cloning the same provider metadata first adds no evidence.
+  // Follow-up facts are consumed immediately by the complete snapshot guard.
+  // Cloning the same provider metadata first adds no evidence.
   return initial ? captureModelReadingInput(facts) : facts;
 }
 function providerFactsList(value: unknown, expected?: { readonly identities: readonly unknown[]; readonly configuredMethods: readonly unknown[] }): { readonly identities: readonly unknown[]; readonly facts: readonly unknown[]; readonly configuredMethods: readonly unknown[] } {
-  if (!Array.isArray(value) || nodeTypes.isProxy(value) || Object.getPrototypeOf(value) !== Array.prototype) throw new ToolInputProjectionError('invalid');
-  const descriptors = Object.getOwnPropertyDescriptors(value as object);
-  const length = descriptors.length?.value as unknown;
-  if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0 || length > 20_000
-    || Reflect.ownKeys(descriptors).length !== length + 1) throw new ToolInputProjectionError('invalid');
+  if (!Array.isArray(value) || value.length > 20_000) throw new ToolInputProjectionError('invalid');
+  const length = value.length;
   if (expected && length !== expected.identities.length) throw new ToolInputProjectionError('held');
   const identities: unknown[] = [], facts: unknown[] = [], configuredMethods: unknown[] = [];
   for (let index = 0; index < length; index++) {
-    const field = descriptors[String(index)];
-    if (!field || !('value' in field)) throw new ToolInputProjectionError('invalid');
-    const method = slot(field.value, 'isConfigured');
-    if (expected && (field.value !== expected.identities[index] || method !== expected.configuredMethods[index])) throw new ToolInputProjectionError('held');
-    identities.push(field.value); configuredMethods.push(method);
+    const provider: unknown = value[index];
+    const method = slot(provider, 'isConfigured');
+    if (expected && (provider !== expected.identities[index] || method !== expected.configuredMethods[index])) throw new ToolInputProjectionError('held');
+    identities.push(provider); configuredMethods.push(method);
   }
   // All identities are checked before any trusted adapter method is invoked.
   for (const provider of identities) {
@@ -537,16 +525,15 @@ export function listBenchmarkArtifacts(store: ArtifactListLike | undefined): Ret
  * The synchronous cookbook remains a separate facts-only startup snapshot. */
 export async function withModelReadingContext<T>(context: CommandContext, invocation: unknown, options: ModelReadingOptions,
   consume: (context: CommandContext, options: ModelReadingOptions) => Promise<T>): Promise<T> {
-  const assertOptions = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent']);
   const signal = options.signal, callerCurrent = options.assertCurrent;
-  const assertCurrent = () => { assertOptions(); if (signal) signal.throwIfAborted(); assertReadingRestriction(callerCurrent); assertOptions(); if (signal) signal.throwIfAborted(); };
+  const assertCurrent = () => { if (signal) signal.throwIfAborted(); assertReadingRestriction(callerCurrent); if (signal) signal.throwIfAborted(); };
   assertCurrent();
   const originalInvocation = captureModelReadingInput(invocation);
   const originalSources = getModelReadingSources(options);
   if (originalSources && originalSources.context !== context) throw new ToolInputProjectionError('held');
   const native = originalSources?.source ?? captureCatalogProducerSources(context, READ_MODEL_PATHS.map(keys => `context.${keys.join('.')}`), SNAPSHOT_METHODS);
   const retain = options.retainCurrent;
-  if (retain !== undefined && (typeof retain !== 'function' || nodeTypes.isProxy(retain))) throw new ToolInputProjectionError('held');
+  if (retain !== undefined && typeof retain !== 'function') throw new ToolInputProjectionError('held');
   assertReadingRestriction(retain ? () => retain(native.assertCurrent, 'model-reading.complete-producer-source') : undefined);
   native.assertCurrent(); assertCurrent();
   const api = path(context, ['clients', 'providerApi']) as ProviderApiLike | undefined;
@@ -642,7 +629,7 @@ export function captureCatalogProducerSources(context: unknown, paths: readonly 
   const guards: Array<() => void> = [];
   const results: Array<{ readonly path: string; readonly data: unknown }> = [];
   const views = new Map<string, unknown>();
-  const observers: Array<{ readonly owner: object; readonly binding: () => void }> = [];
+  const observers: Array<{ readonly owner: object }> = [];
   const evidence: Array<{ readonly path: string; readonly data: unknown }> = [];
   const ancestors = new Set<object>();
   type ProducerCopy = { readonly view: object; readonly data: unknown };
@@ -658,11 +645,10 @@ export function captureCatalogProducerSources(context: unknown, paths: readonly 
     let current: unknown = context;
     for (const key of name.replace(/^context\./, '').split('.')) {
       if (current === undefined || current === null) return undefined;
-      if (typeof current !== 'object' || nodeTypes.isProxy(current)) return invalid();
-      const owner = current, binding = captureCatalogMethods(owner, [key]);
-      binding(); guards.push(binding);
+      if (typeof current !== 'object') return invalid();
+      const owner = current;
       const original = slot(owner, key);
-      guards.push(() => { binding(); if (!Object.is(slot(owner, key), original)) held(); });
+      guards.push(() => { if (!Object.is(slot(owner, key), original)) held(); });
       current = original;
     }
     return current;
@@ -676,16 +662,13 @@ export function captureCatalogProducerSources(context: unknown, paths: readonly 
         || (typeof value === 'number' && !Number.isFinite(value))) return invalid();
       return { view: value, data: value };
     }
-    if (nodeTypes.isProxy(value) || ancestors.has(value)) return invalid();
+    if (ancestors.has(value)) return invalid();
     const prior = getCopy(value); if (prior) return prior;
     const prototype: unknown = Object.getPrototypeOf(value);
     if (prototype === Map.prototype) {
-      const methods = captureCatalogMethods(value, ['entries', 'get', 'set', 'delete', 'clear']);
-      // Native Map.size is a getter. Validate its exact native descriptor without
-      // asking the generic method capture to invoke or admit an accessor.
-      const entries = Map.prototype.entries;
-      if (Reflect.ownKeys(value).length || slot(Map.prototype, 'entries') !== entries) return invalid();
-      const original = [...entries.call(value)];
+      const map = value as Map<unknown, unknown>;
+      if (Reflect.ownKeys(value).length) return invalid();
+      const original = [...map.entries()];
       const view = new Map<string, unknown>();
       const rows: Array<{ readonly key: string; readonly value: unknown }> = [];
       ancestors.add(value);
@@ -698,9 +681,8 @@ export function captureCatalogProducerSources(context: unknown, paths: readonly 
       } finally { ancestors.delete(value); }
       const captured = { view, data: { nativeMap: rows } }; setCopy(value, captured);
       guards.push(() => {
-        methods();
         if (Object.getPrototypeOf(value) !== prototype || Reflect.ownKeys(value).length) held();
-        const current = [...entries.call(value)];
+        const current = [...map.entries()];
         if (current.length !== original.length || current.some((entry, index) => {
           const old = original[index]; return !old || !Object.is(entry[0], old[0]) || !Object.is(entry[1], old[1]);
         })) held();
@@ -709,107 +691,103 @@ export function captureCatalogProducerSources(context: unknown, paths: readonly 
     }
     const array = Array.isArray(value);
     if (array ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) return invalid();
-    const descriptors = Object.getOwnPropertyDescriptors(value), keys = Reflect.ownKeys(descriptors);
-    if (keys.some(key => typeof key !== 'string') || (array && Object.hasOwn(descriptors, 'constructor'))) return invalid();
-    const length: unknown = array ? descriptors.length?.value : 0;
-    if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0 || length > 20_000) return invalid();
+    const keys = Object.getOwnPropertyNames(value);
+    if (Object.getOwnPropertySymbols(value).length > 0 || (array && Object.hasOwn(value, 'constructor'))) return invalid();
+    const length = array ? (value as unknown[]).length : 0;
+    if (length > 20_000) return invalid();
+    const record = value as Record<string, unknown>;
+    const originals = new Map<string, unknown>();
     const view: object = array ? new Array(length) : Object.create(null);
     const data: object = array ? new Array(length) : Object.create(null);
     const nativeMethods: string[] = [];
-    const binding = captureCatalogMethods(value, [...keys.filter((key): key is string => typeof key === 'string'), ...methodNames, 'subscribe']);
-    binding();
     ancestors.add(value);
     try {
-      for (const [key, descriptor] of Object.entries(descriptors)) {
-        if (!('value' in descriptor)) return invalid();
+      for (const key of keys) {
         if (array && key === 'length') continue;
-        const child: unknown = descriptor.value;
+        const child: unknown = record[key];
+        originals.set(key, child);
+        const enumerable = Object.prototype.propertyIsEnumerable.call(value, key);
         if (typeof child === 'function') {
-          if (array || !methodNames.includes(key) && key !== 'subscribe' || nodeTypes.isProxy(child)) return invalid();
+          if (array || !methodNames.includes(key) && key !== 'subscribe') return invalid();
           nativeMethods.push(key);
           if (key === 'subscribe') continue;
-          Object.defineProperty(view, key, { enumerable: descriptor.enumerable, value: () => {
+          Object.defineProperty(view, key, { enumerable, value: () => {
             assertCurrent();
             const original: unknown = child.call(value);
             if (nodeTypes.isPromise(original)) {
               void (original as Promise<unknown>).then(undefined, () => {}); return held();
             }
-            binding();
             const captured = capture(original, `${sourcePath}.${key}()`, depth + 1);
             results.push({ path: `${sourcePath}.${key}()`, data: captured.data });
             // Complete native rows and fresh detached DTOs are checked separately.
             const baseline = captureReadModelData(original, false);
             const matches = captureModelReadingSnapshotGuard(baseline);
             guards.push(() => {
-              binding(); matches(captureReadModelData(original, false));
+              matches(captureReadModelData(original, false));
               const current: unknown = child.call(value);
               if (nodeTypes.isPromise(current)) {
                 void (current as Promise<unknown>).then(undefined, () => {}); held();
               }
-              binding(); matches(captureReadModelData(current, false));
+              matches(captureReadModelData(current, false));
             });
             assertCurrent(); return captured.view;
           } });
           continue;
         }
         const captured = capture(child, `${sourcePath}.${key}`, depth + 1);
-        Object.defineProperty(view, key, { value: captured.view, enumerable: descriptor.enumerable });
+        Object.defineProperty(view, key, { value: captured.view, enumerable });
         Object.defineProperty(data, key, { value: captured.data, enumerable: true });
       }
     } finally { ancestors.delete(value); }
     if (array && (keys.length !== length + 1 || keys.some(key => key !== 'length'
-      && (typeof key !== 'string' || !Number.isSafeInteger(Number(key)) || String(Number(key)) !== key || Number(key) < 0 || Number(key) >= length)))) return invalid();
+      && (!Number.isSafeInteger(Number(key)) || String(Number(key)) !== key || Number(key) < 0 || Number(key) >= length)))) return invalid();
     if (typeof slot(value, 'getSnapshot') === 'function' && typeof slot(value, 'subscribe') === 'function') {
-      observers.push({ owner: value, binding });
+      observers.push({ owner: value });
     }
     const captured = { view, data: nativeMethods.length ? { data, nativeMethods } : data };
     setCopy(value, captured);
+    // The producer's own slots: the same names, each holding the same value.
     guards.push(() => {
-      binding(); const current = Reflect.ownKeys(value);
+      const current = Object.getOwnPropertyNames(value);
       if (current.length !== keys.length || current.some((key, index) => key !== keys[index])) held();
-      for (const [key, descriptor] of Object.entries(descriptors)) {
-        const now = Object.getOwnPropertyDescriptor(value, key);
-        if (!now || !('value' in now) || !Object.is(now.value, descriptor.value)
-          || now.enumerable !== descriptor.enumerable || now.configurable !== descriptor.configurable || now.writable !== descriptor.writable) held();
-      }
+      for (const [key, original] of originals) if (!Object.is(record[key], original)) held();
     });
     return captured;
   };
   for (const root of roots) {
     if (typeof root.value === 'function') {
-      if (!allowFunctionSources || nodeTypes.isProxy(root.value)) return invalid();
-      const read = root.value, descriptors = Object.getOwnPropertyDescriptors(read), keys = Reflect.ownKeys(descriptors);
-      if (keys.some(key => typeof key !== 'string')) return invalid();
-      const binding = captureCatalogMethods(read, keys.filter((key): key is string => typeof key === 'string'));
+      if (!allowFunctionSources) return invalid();
+      const read = root.value as () => unknown, keys = Object.getOwnPropertyNames(read);
+      if (Object.getOwnPropertySymbols(read).length > 0) return invalid();
+      const fn = read as unknown as Record<string, unknown>;
       const metadata: Record<string, unknown> = Object.create(null);
-      for (const [key, descriptor] of Object.entries(descriptors)) {
-        if (!('value' in descriptor)) return invalid();
+      for (const key of keys) {
         if (key === 'prototype') {
-          const prototype: unknown = descriptor.value;
-          if (prototype === null || typeof prototype !== 'object' || nodeTypes.isProxy(prototype) || Object.getPrototypeOf(prototype) !== Object.prototype) return invalid();
-          const fields = Object.getOwnPropertyDescriptors(prototype), names = Reflect.ownKeys(fields);
-          if (names.some(name => typeof name !== 'string')) return invalid();
-          const prototypeBinding = captureCatalogMethods(prototype, names.filter((name): name is string => typeof name === 'string'));
-          guards.push(() => { prototypeBinding(); const current = Reflect.ownKeys(prototype); if (current.length !== names.length || current.some((name, index) => name !== names[index])) held(); });
+          const prototype: unknown = fn[key];
+          if (prototype === null || typeof prototype !== 'object' || Object.getPrototypeOf(prototype) !== Object.prototype) return invalid();
+          const names = Object.getOwnPropertyNames(prototype);
+          if (Object.getOwnPropertySymbols(prototype).length > 0) return invalid();
+          guards.push(() => { const current = Object.getOwnPropertyNames(prototype); if (current.length !== names.length || current.some((name, index) => name !== names[index])) held(); });
+          const fields = prototype as Record<string, unknown>;
           const data: Record<string, unknown> = Object.create(null);
-          for (const [name, field] of Object.entries(fields)) {
-            if (!('value' in field)) return invalid();
-            if (name === 'constructor' && field.value === read) continue;
-            data[name] = capture(field.value, `${root.name}.prototype.${name}`, 1).data;
+          for (const name of names) {
+            const field = fields[name];
+            if (name === 'constructor' && field === read) continue;
+            data[name] = capture(field, `${root.name}.prototype.${name}`, 1).data;
           }
           metadata.prototype = data;
-        } else metadata[key] = capture(descriptor.value, `${root.name}.${key}`, 1).data;
+        } else metadata[key] = capture(fn[key], `${root.name}.${key}`, 1).data;
       }
-      guards.push(() => { binding(); const current = Reflect.ownKeys(read); if (current.length !== keys.length || current.some((key, index) => key !== keys[index])) held(); });
+      guards.push(() => { const current = Object.getOwnPropertyNames(read); if (current.length !== keys.length || current.some((key, index) => key !== keys[index])) held(); });
       views.set(root.name, () => {
-        assertCurrent(); const original: unknown = read(); binding();
+        assertCurrent(); const original: unknown = read();
         if (nodeTypes.isPromise(original)) { void (original as Promise<unknown>).then(undefined, () => {}); return held(); }
         const captured = capture(original, `${root.name}()`, 0);
         results.push({ path: `${root.name}()`, data: captured.data });
         const matches = captureModelReadingSnapshotGuard(captureReadModelData(original, false));
         guards.push(() => {
-          binding(); matches(captureReadModelData(original, false));
-          const current: unknown = read(); binding();
+          matches(captureReadModelData(original, false));
+          const current: unknown = read();
           if (nodeTypes.isPromise(current)) { void (current as Promise<unknown>).then(undefined, () => {}); held(); }
           matches(captureReadModelData(current, false));
         });
@@ -822,8 +800,8 @@ export function captureCatalogProducerSources(context: unknown, paths: readonly 
     views.set(root.name, captured.view); evidence.push({ path: root.name, data: captured.data });
   }
   captureModelReadingInput({ sources: evidence });
-  for (const { owner, binding } of observers) {
-    assertCurrent(); binding(); guards.push(captureNativeReadModelObservation(owner)); binding(); assertCurrent();
+  for (const { owner } of observers) {
+    assertCurrent(); guards.push(captureNativeReadModelObservation(owner)); assertCurrent();
   }
   assertCurrent();
   return {
@@ -951,7 +929,6 @@ const CATALOG_NATIVE_CONFIG_KEYS = {
     "web.publicBaseUrl"
   ]
 } as const;
-const CATALOG_PROVIDER_ENV_KEYS = ["OPENAI_API_KEY", "OPENAI_KEY", "DEEPGRAM_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GEMINI_API_KEY", "ELEVENLABS_API_KEY", "XI_API_KEY", "VYDRA_API_KEY", "BYTEPLUS_API_KEY", "RUNWAY_API_KEY", "RUNWAYML_API_SECRET", "MODELSTUDIO_API_KEY", "DASHSCOPE_API_KEY", "QWEN_API_KEY", "FAL_KEY", "FAL_API_KEY", "COMFY_BASE_URL", "COMFY_API_KEY"] as const;
 
 
 /** Bind private native facts before the leaf's first awaited acquisition. Raw
@@ -963,46 +940,35 @@ export function captureCatalogNativeFacts(context: unknown, family: 'media' | 'p
     let value: unknown = context;
     for (const key of keys) {
       if (value === undefined || value === null) return undefined;
-      if (typeof value !== 'object' || nodeTypes.isProxy(value)) return held();
-      const owner = value, binding = captureCatalogMethods(owner, [key]); binding();
+      if (typeof value !== 'object') return held();
+      const owner = value;
       const original = slot(owner, key);
-      bindings.push(() => { binding(); if (!Object.is(slot(owner, key), original)) held(); });
+      bindings.push(() => { if (!Object.is(slot(owner, key), original)) held(); });
       value = original;
     }
     return value;
   };
   const manager = acquire(['platform', 'configManager']), config = acquire(['platform', 'config']);
-  const session = acquire(['session', 'runtime']);
-  if (session !== null && typeof session === 'object') bindings.push(captureCatalogMethods(session, ['sessionId']));
+  acquire(['session', 'runtime']);
   const registries = family === 'cockpit' ? [] : ['voiceProviderRegistry', 'mediaProviderRegistry']
     .map(key => ({ key, registry: acquire(['platform', key]) }));
   const paths = family === 'pairing' ? acquire(['workspace', 'shellPaths']) : undefined;
   const wakeService = family === 'media' ? acquire(['platform', 'voiceSetup']) : undefined;
-  if (family === 'media') for (const keys of [['platform', 'voiceService'], ['submitSpokenInput'], ['stopSpokenOutput']]) {
-    const owner = acquire(keys);
-    if (owner !== null && typeof owner === 'object') bindings.push(captureCatalogMethods(owner, ['transcribe']));
-  }
+  if (family === 'media') for (const keys of [['platform', 'voiceService'], ['submitSpokenInput'], ['stopSpokenOutput']]) acquire(keys);
   if (wakeService !== null && wakeService !== undefined) {
     if (typeof wakeService !== 'object') held();
-    bindings.push(captureCatalogMethods(wakeService, ['wakeStatus']));
   }
   if (manager !== null && manager !== undefined) {
     if (typeof manager !== 'object') held();
-    bindings.push(captureCatalogMethods(manager, ['get', 'getConfigurationIncarnation']));
   }
   for (const { registry } of registries) if (registry !== null && registry !== undefined) {
     if (typeof registry !== 'object') held();
-    bindings.push(captureCatalogMethods(registry, ['list', 'get', 'status', 'getIncarnation', 'captureReadSource', 'register', 'unregister']));
   }
   if (paths !== undefined && paths !== null) {
     if (typeof paths !== 'object') held();
-    bindings.push(captureCatalogMethods(paths, ['homeDirectory', 'workingDirectory']));
   }
   const env = process.env;
-  const environmentKeys = family === 'cockpit' ? [] : [...CATALOG_PROVIDER_ENV_KEYS,
-    ...(family === 'pairing' ? ['GOODVIBES_CONNECTED_HOST_TOKEN', 'GOODVIBES_DAEMON_TOKEN'] : [])];
-  const envSlots = captureCatalogMethods(env, environmentKeys); envSlots();
-  bindings.push(() => { if (process.env !== env) held(); envSlots(); });
+  bindings.push(() => { if (process.env !== env) held(); });
   const assertBindings = (): void => { for (const binding of bindings) binding(); };
   assertBindings();
   // File identity, ancestry and complete original bytes are private custody,
@@ -1108,26 +1074,25 @@ export function captureCatalogNativeFacts(context: unknown, family: 'media' | 'p
     for (const descriptor of capture.captured) {
       const id = slot(descriptor, 'id'); if (typeof id !== 'string') held();
       assertBindings(); const provider: unknown = get.call(registry, id); assertBindings();
-      if (provider === null || typeof provider !== 'object' || nodeTypes.isProxy(provider)) held();
-      const keys = Reflect.ownKeys(provider);
-      if (keys.some(key => typeof key !== 'string')) held();
-      const fields = Object.getOwnPropertyDescriptors(provider);
-      if (Object.values(fields).some(field => !('value' in field) || typeof field.value === 'function' && nodeTypes.isProxy(field.value))) held();
-      const providerBinding = captureCatalogMethods(provider, keys.filter((key): key is string => typeof key === 'string'));
-      bindings.push(providerBinding);
+      if (provider === null || typeof provider !== 'object') held();
+      if (Object.getOwnPropertySymbols(provider).length > 0) held();
+      const keys = Object.getOwnPropertyNames(provider);
+      const fields = provider as Record<string, unknown>;
       const facts: Record<string, unknown> = Object.create(null), methods: string[] = [];
-      for (const [name, field] of Object.entries(fields)) {
-        if (typeof field.value === 'function') methods.push(name); else facts[name] = field.value;
+      for (const name of keys) {
+        const field = fields[name];
+        if (typeof field === 'function') methods.push(name); else facts[name] = field;
       }
       const data = captureCatalogSnapshot(facts);
       providerFacts.push({ domain: key, id, data: data.captured, methods });
       observations.push(() => {
         assertBindings(); if (get.call(registry, id) !== provider) held(); assertBindings();
-        const currentKeys = Reflect.ownKeys(provider);
+        const currentKeys = Object.getOwnPropertyNames(provider);
         if (currentKeys.length !== keys.length || currentKeys.some((key, index) => key !== keys[index])) held();
         const current: Record<string, unknown> = Object.create(null);
-        for (const [name, field] of Object.entries(Object.getOwnPropertyDescriptors(provider))) {
-          if (!('value' in field)) held(); if (typeof field.value !== 'function') current[name] = field.value;
+        for (const name of currentKeys) {
+          const field = fields[name];
+          if (typeof field !== 'function') current[name] = field;
         }
         data.assertCurrent(current);
       });
@@ -1153,10 +1118,10 @@ export function catalogReadingOptions(context: CommandContext, registry: ToolReg
     let current: unknown = context;
     for (const key of keys) {
       if (current === undefined || current === null) break;
-      if (typeof current !== 'object' || nodeTypes.isProxy(current)) throw new ToolInputProjectionError('held');
-      const owner = current, binding = captureCatalogMethods(owner, [key]); binding();
+      if (typeof current !== 'object') throw new ToolInputProjectionError('held');
+      const owner = current;
       const original = slot(owner, key);
-      guards.push(() => { binding(); if (!Object.is(slot(owner, key), original)) throw new ToolInputProjectionError('held'); });
+      guards.push(() => { if (!Object.is(slot(owner, key), original)) throw new ToolInputProjectionError('held'); });
       current = original;
     }
   }
@@ -1165,7 +1130,7 @@ export function catalogReadingOptions(context: CommandContext, registry: ToolReg
     if (signal) signal.throwIfAborted(); for (const guard of guards) guard();
     if (agentResearchSourceOwner(registry) !== sourceOwner) throw new ToolInputProjectionError('held');
   };
-  if (typeof retainCurrent !== 'function' || nodeTypes.isProxy(retainCurrent)) throw new ToolInputProjectionError('held');
+  if (typeof retainCurrent !== 'function') throw new ToolInputProjectionError('held');
   assertSourceCurrent(); assertReadingRestriction(() => retainCurrent(assertSourceCurrent, 'agent.catalog.native-invocation-source')); assertSourceCurrent();
   return { signal, sourceOwner, retainCurrent, assertCurrent() { if (signal) signal.throwIfAborted(); assertReadingRestriction(assertExecution); assertSourceCurrent(); } };
 }

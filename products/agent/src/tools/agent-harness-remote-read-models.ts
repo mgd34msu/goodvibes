@@ -3,7 +3,7 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { capturePersonalOpsData, capturePersonalOpsSnapshot, assertPersonalOpsDataCurrent } from './agent-harness-personal-ops-source.ts';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { readRemotePublisherOutcomeKind, readRemotePublisherSchemaStatus } from './agent-harness-remote-publisher-readings.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
@@ -691,8 +691,6 @@ async function settleOwnedRemotePublisherSemantics(token: object, options: Param
   if (!owner || owner.state.kind !== 'captured' || !display || display.binding) throw new ToolInputProjectionError('held');
   owner.state = { kind: 'settling' };
   try {
-    const assertOptions = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'assertSourceCurrent', 'assertSourceMethods', 'retainCurrent']);
-    const assertProjection = captureCatalogMethods(projection, ['projectPath', 'projectText', 'projectRecordText', 'protectFields']);
     const { signal, sourceOwner, assertCurrent: callerCurrent, assertSourceCurrent: backendCurrent, assertSourceMethods: backendMethods, retainCurrent } = options;
     const { projectPath, projectText, projectRecordText, protectFields } = projection;
     // The publisher owns its complete readset until settlement, when the
@@ -701,7 +699,7 @@ async function settleOwnedRemotePublisherSemantics(token: object, options: Param
     const retained = new Set<() => void>();
     const retain = (guard: () => void, _key?: string) => { retained.add(guard); };
     const assertSourceCurrent = () => {
-      assertOptions(); assertProjection(); signal?.throwIfAborted();
+      signal?.throwIfAborted();
       if (options.signal !== signal || options.sourceOwner !== sourceOwner || options.assertCurrent !== callerCurrent || options.assertSourceCurrent !== backendCurrent || options.assertSourceMethods !== backendMethods || options.retainCurrent !== retainCurrent
         || projection.projectPath !== projectPath || projection.projectText !== projectText || projection.projectRecordText !== projectRecordText || projection.protectFields !== protectFields
         || owner.state.kind === 'retired') throw new ToolInputProjectionError('held');
@@ -712,7 +710,7 @@ async function settleOwnedRemotePublisherSemantics(token: object, options: Param
         signal?.throwIfAborted(); assertSynchronousJudgmentGuard(() => backendCurrent.call(options), () => new ToolInputProjectionError('held'));
       }, () => checkBackend(backendMethods ?? backendCurrent));
       for (const guard of retained.values()) guard();
-      signal?.throwIfAborted(); assertOptions(); assertProjection();
+      signal?.throwIfAborted();
       // Arbitrary backend/retained callbacks may write a record. Close that
       // boundary with a complete comparison before this restriction returns.
       owner.assertEntries(owner.entries);

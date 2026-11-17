@@ -1,7 +1,7 @@
 import { relative } from 'node:path';
 import * as nativeOs from 'node:os';
 import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogMethods, captureCatalogSnapshot } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogSnapshot } from './agent-harness-catalog-ranking.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../config/surface.ts';
 import { resolveRuntimeEndpointBinding, type RuntimeEndpointConfigReader } from '../cli/endpoints.ts';
@@ -128,10 +128,8 @@ function readConfigStringArray(context: CommandContext, key: string): readonly s
 /** Bind the original local interface observation before the route's first await.
  * This is an observed address, not a claim about future OS publications. */
 export function capturePairingAdvertisement(config: RuntimeEndpointConfigReader, assertNativeCurrent: () => void) {
-  const nativeMethods = captureCatalogMethods(nativeOs, ['networkInterfaces']);
-  nativeMethods();
   const readInterfaces = nativeOs.networkInterfaces;
-  const assertSource = (): void => { nativeMethods(); assertProjectionCurrent(assertNativeCurrent); nativeMethods(); };
+  const assertSource = (): void => { assertProjectionCurrent(assertNativeCurrent); };
   const get: RuntimeEndpointConfigReader['get'] = key => {
     assertSource(); const value = config.get(key); assertSource(); return value;
   };

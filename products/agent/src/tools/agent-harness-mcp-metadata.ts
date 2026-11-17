@@ -1,5 +1,5 @@
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogMethods, captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureCatalogReadRequest, selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import type { McpApi } from '@goodvibes-jev/engine/platform/platform/mcp';
@@ -146,30 +146,24 @@ function describeServer(
 
 function captureMcpRead(context: McpCatalogContext, args: AgentHarnessMcpArgs, options: CatalogRankingOptions) {
   const request = captureCatalogReadRequest(args, options);
-  const assertContext = captureCatalogMethods(context, ['clients', 'extensions']);
   const clients = context.clients, extensions = context.extensions;
-  const assertClients = clients ? captureCatalogMethods(clients, ['mcpApi']) : () => {};
-  const assertExtensions = extensions ? captureCatalogMethods(extensions, ['mcpRegistry']) : () => {};
   const api = clients?.mcpApi ?? extensions?.mcpRegistry;
-  if (!api) { request.retain(() => { assertContext(); assertClients(); assertExtensions(); }, 'read-catalog.mcp.owner');
+  if (!api) { request.retain(() => {}, 'read-catalog.mcp.owner');
     return { request, source: null }; }
-  const assertMethods = captureCatalogMethods(api, ['listServerSecurity', 'listAllTools', 'captureToolCatalog']);
   const listServers = api.listServerSecurity, listTools = api.listAllTools, captureCatalog = api.captureToolCatalog;
   const assertOwner = () => {
-    assertContext(); assertClients(); assertExtensions(); assertMethods();
     if (context.clients !== clients || context.extensions !== extensions
       || (clients?.mcpApi ?? extensions?.mcpRegistry) !== api) throw new ToolInputProjectionError('held');
   };
   assertOwner();
   if (typeof captureCatalog !== 'function') throw new ToolInputProjectionError('unavailable');
   const catalog = captureCatalog.call(api, options);
-  const assertCatalogMethods = captureCatalogMethods(catalog, ['listAllTools', 'assertCurrent']);
   const ownedListTools = catalog.listAllTools, nativeAssertCurrent = catalog.assertCurrent;
   if (typeof ownedListTools !== 'function' || typeof nativeAssertCurrent !== 'function') throw new ToolInputProjectionError('held');
   const assertCatalog = () => {
-    assertOwner(); assertCatalogMethods();
+    assertOwner();
     const result = nativeAssertCurrent.call(catalog);
-    assertOwner(); assertCatalogMethods();
+    assertOwner();
     return result;
   };
   request.retain(assertCatalog, 'read-catalog.mcp.catalog');

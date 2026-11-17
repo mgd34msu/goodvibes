@@ -1,7 +1,7 @@
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { readPersonalOpsReceiptStatus } from './agent-harness-personal-ops-readings.ts';
 import { captureModelArtifactClockSource } from './agent-harness-model-reading-source.ts';
-import { captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { assertPersonalOpsDataCurrent, capturePersonalOpsData, protectPersonalOpsData } from './agent-harness-personal-ops-source.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { readRecord } from './agent-harness-model-routing-utils.ts';
@@ -381,18 +381,15 @@ interface PersonalOpsArtifactSource { readonly artifact: ArtifactDescriptor; rea
 async function personalOpsArtifacts(context: CommandContext, options: CatalogRankingOptions,
   purposes: ReadonlySet<string>, laneId: PersonalOpsLaneId): Promise<readonly PersonalOpsArtifactSource[]> {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const contextCurrent = captureCatalogMethods(context, ['platform']);
   const platform = context.platform;
-  const platformCurrent = captureCatalogMethods(platform, ['artifactStore']);
   const store = platform.artifactStore;
   if (!store) return [];
-  const methodGuard = captureCatalogMethods(store, ['list']);
   const list = store.list;
   if (!list) return [];
   const originals = list.call(store, PERSONAL_OPS_ARTIFACT_SCAN_LIMIT);
   const originalSnapshot = capturePersonalOpsData(originals);
   const assertSource = () => {
-    options.signal?.throwIfAborted(); contextCurrent(); platformCurrent(); methodGuard();
+    options.signal?.throwIfAborted();
     if (context.platform !== platform || platform.artifactStore !== store) throw new ToolInputProjectionError('held');
     assertPersonalOpsDataCurrent(list.call(store, PERSONAL_OPS_ARTIFACT_SCAN_LIMIT), originalSnapshot);
   };

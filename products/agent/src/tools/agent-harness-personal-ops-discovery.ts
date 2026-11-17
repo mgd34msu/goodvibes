@@ -1,7 +1,7 @@
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { capturePersonalOpsSnapshot } from './agent-harness-personal-ops-source.ts';
 import { captureModelReadingInput, captureModelReadingSnapshotGuard, modelReadingServicePath } from './agent-harness-model-reading-source.ts';
-import { captureCatalogData, captureCatalogMethods, prepareHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData, prepareHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { LANE_DEPENDENCY_METHODS, personalOpsLaneMembers, readPersonalOpsSampleField, readPersonalOpsTool, type DiscoveryLane, type PersonalOpsToolContract } from './agent-harness-personal-ops-readings.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { getOperatorContract, OPERATOR_CONTRACT } from '@goodvibes-jev/engine/platform/contracts';
@@ -134,19 +134,14 @@ function prepareContractMetadata(manifest: ReturnType<typeof getOperatorContract
 }
 
 async function readContractMethodLanes(lanes: readonly DiscoveryLane[], options: CatalogRankingOptions): Promise<readonly ReturnType<typeof partitionInvokableMethods>[]> {
-  const optionsCurrent = captureCatalogMethods(options, ['signal', 'assertCurrent', 'retainCurrent', 'sourceOwner']);
   const signal = options.signal, callerCurrent = options.assertCurrent, retainCurrent = options.retainCurrent;
   const manifest = getOperatorContract();
-  const manifestCurrent = captureCatalogMethods(manifest, ['operator']);
   const operator = manifest.operator;
-  const operatorCurrent = captureCatalogMethods(operator, ['methods']);
   const original = operator.methods;
   if (!Array.isArray(original)) throw new ToolInputProjectionError('invalid');
   const ownKeyCount = Reflect.ownKeys(original).length;
-  const arrayCurrent = captureCatalogMethods(original, Object.getOwnPropertyNames(original));
-  const arrayIdentityCurrent = captureCatalogMethods(original, ['length']);
   const assertRoot = () => {
-    optionsCurrent(); signal?.throwIfAborted(); manifestCurrent(); operatorCurrent(); arrayIdentityCurrent();
+    signal?.throwIfAborted();
     if (getOperatorContract() !== manifest) throw new ToolInputProjectionError('held');
   };
   const found = immutableContractMetadata.get(original);
@@ -164,7 +159,6 @@ async function readContractMethodLanes(lanes: readonly DiscoveryLane[], options:
     // descendant have been captured and proven irreversibly immutable.
     const immutable = immutableContractMetadata.get(original);
     if (manifest === OPERATOR_CONTRACT && immutable?.manifest === manifest && immutable.operator === operator) return;
-    arrayCurrent();
     if (Reflect.ownKeys(original).length !== ownKeyCount) throw new ToolInputProjectionError('held');
     for (const method of captured) method.assertCurrent();
   };
@@ -179,12 +173,10 @@ async function readContractMethodLanes(lanes: readonly DiscoveryLane[], options:
     const dependencies = LANE_DEPENDENCY_METHODS[lane] ?? [];
     for (const { methods, entries } of batches) {
       assertCurrent();
-      const assertIndices = captureCatalogMethods(original, methods.map(method => String(method.index)));
       const assertBatch = () => {
         callerCurrent?.(); assertRoot();
         const immutable = immutableContractMetadata.get(original);
         if (manifest !== OPERATOR_CONTRACT || immutable?.manifest !== manifest || immutable.operator !== operator) {
-          assertIndices();
           for (const method of methods) method.assertCurrent();
         }
         for (const guard of retained.values()) guard();
@@ -249,9 +241,8 @@ export async function mcpToolRecords(context: CommandContext, options: CatalogRa
   if (!api) return [];
   const list = modelReadingServicePath(api, ['listAllTools']);
   if (typeof list !== 'function') return [];
-  const methodGuard = captureCatalogMethods(api, ['listAllTools']);
   const assertSource = () => {
-    options.signal?.throwIfAborted(); methodGuard();
+    options.signal?.throwIfAborted();
     if (mcpApi(context) !== api) throw new ToolInputProjectionError('held');
   };
   const raw: unknown = await list.call(api);
@@ -279,10 +270,9 @@ export function mcpSchemaReader(context: CommandContext, options: CatalogRanking
   if (!api) return null;
   const read = modelReadingServicePath(api, ['getToolSchema']);
   if (typeof read !== 'function') return null;
-  const methodsCurrent = captureCatalogMethods(api, ['getToolSchema']);
   return async qualifiedName => {
     const assertSource = () => {
-      options.signal?.throwIfAborted(); methodsCurrent();
+      options.signal?.throwIfAborted();
       if (mcpApi(context) !== api) throw new ToolInputProjectionError('held');
     };
     const assertCurrent = () => { options.assertCurrent?.(); assertSource(); };
@@ -365,9 +355,8 @@ export async function mcpToolSchemas(
   if (!api || !read) return new Map();
   const source = captureCatalogData(tools);
   const sourceJson = JSON.stringify(source);
-  const methodsCurrent = captureCatalogMethods(api, ['getToolSchema']);
   const assertSource = () => {
-    options.signal?.throwIfAborted(); methodsCurrent();
+    options.signal?.throwIfAborted();
     if (mcpApi(context) !== api
       || JSON.stringify(captureCatalogData(tools)) !== sourceJson) throw new ToolInputProjectionError('held');
   };

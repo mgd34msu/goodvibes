@@ -1,7 +1,7 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolInvocation, assertProjectionExecution, ToolInputProjectionError, type ToolRegistry, type ToolInputProjector } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureOperatorConnection } from '../agent/operator-connection-owner.ts';
-import { captureCatalogMethods, captureCatalogSnapshot } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogSnapshot } from './agent-harness-catalog-ranking.ts';
 import type { ShellPathService } from '@/runtime/index.ts';
 import {
   createAgentPlatform,
@@ -128,13 +128,11 @@ export function createAgentKnowledgeInputProjector(shellPaths: ShellPathService,
   return { async project(request) {
     request.assertCurrent(); request.signal?.throwIfAborted();
     const input = captureCatalogSnapshot(request.args);
-    const pathsCurrent = captureCatalogMethods(shellPaths, ['homeDirectory']);
-    const methodsCurrent = captureCatalogMethods(AGENT_KNOWLEDGE_METHODS, Object.keys(AGENT_KNOWLEDGE_METHODS));
     const methods = captureCatalogSnapshot(AGENT_KNOWLEDGE_METHODS);
     let released = false;
     const assertSelection = () => {
       if (released) throw new ToolInputProjectionError('released');
-      request.assertCurrent(); request.signal?.throwIfAborted(); pathsCurrent(); methodsCurrent();
+      request.assertCurrent(); request.signal?.throwIfAborted();
       input.assertCurrent(request.args); methods.assertCurrent(AGENT_KNOWLEDGE_METHODS);
     };
     const connection = captureOperatorConnection(shellPaths, configManager, assertSelection);
@@ -194,14 +192,12 @@ export function createAgentKnowledgeTool(
       sideEffects: ['network'],
     },
     execute: async (rawArgs, options) => {
-      const optionsCurrent = options && captureCatalogMethods(options, ['signal', 'assertCurrent', 'inputProjectionContext']);
       const input = captureCatalogSnapshot(rawArgs), args = input.captured;
-      const methodsCurrent = captureCatalogMethods(AGENT_KNOWLEDGE_METHODS, Object.keys(AGENT_KNOWLEDGE_METHODS));
       const methods = captureCatalogSnapshot(AGENT_KNOWLEDGE_METHODS);
       const context = options?.inputProjectionContext, captured = context && knowledgeCaptures.get(context);
       const assertInvocation = () => {
-        optionsCurrent?.(); options?.signal?.throwIfAborted(); assertCurrentToolInvocation(rawArgs, options);
-        input.assertCurrent(rawArgs); methodsCurrent(); methods.assertCurrent(AGENT_KNOWLEDGE_METHODS);
+        options?.signal?.throwIfAborted(); assertCurrentToolInvocation(rawArgs, options);
+        input.assertCurrent(rawArgs); methods.assertCurrent(AGENT_KNOWLEDGE_METHODS);
         if (context) {
           if (!captured || captured.shellPaths !== shellPaths || captured.configManager !== configManager) throw new ToolInputProjectionError('held');
           assertProjectionExecution(context, rawArgs); captured.assertCurrent();

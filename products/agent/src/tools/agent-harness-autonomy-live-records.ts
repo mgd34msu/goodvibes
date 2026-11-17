@@ -6,7 +6,7 @@ import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platfor
 import { redactSensitiveData } from '@goodvibes-jev/engine/platform/platform/utils';
 import { AgentResearchRunRegistry, researchRunStorePath, type AgentResearchRunRecord } from '../agent/research-run-registry.ts';
 import { summarizeResearchRunItem } from '../input/agent-workspace-local-library-snapshot.ts';
-import { captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { modelReadingServicePath } from './agent-harness-model-reading-source.ts';
 import { capturePersonalOpsData } from './agent-harness-personal-ops-source.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
@@ -45,13 +45,13 @@ export interface AutonomyLiveNativeFacts {
 }
 
 const liveObservations = new WeakMap<object, { readonly assertCurrent: () => void; readonly captureEpoch: () => () => void }>();
+const observationUnchanged = (): void => {};
 const releaseLiveObservation = new FinalizationRegistry<() => void>(release => release());
 
 /** Native notifications retain ABA evidence and one latest private snapshot. */
 export function captureNativeReadModelObservation(model: object): () => void {
   let observation = liveObservations.get(model);
   if (!observation) {
-    const methods = captureCatalogMethods(model, ['getSnapshot', 'subscribe']);
     const read = modelReadingServicePath(model, ['getSnapshot']), subscribe = modelReadingServicePath(model, ['subscribe']);
     if (typeof read !== 'function' || typeof subscribe !== 'function') throw new ToolInputProjectionError('unavailable');
     const reference = new WeakRef(model), state = { epoch: 0, valid: true };
@@ -66,17 +66,16 @@ export function captureNativeReadModelObservation(model: object): () => void {
         previous = next; state.valid = true;
       } catch { state.epoch++; state.valid = false; }
     };
-    methods();
     const unsubscribe: unknown = subscribe.call(model, changed);
     if (typeof unsubscribe !== 'function') throw new ToolInputProjectionError('unavailable');
-    try { methods(); changed(); if (!state.valid) throw new ToolInputProjectionError('held'); }
+    try { changed(); if (!state.valid) throw new ToolInputProjectionError('held'); }
     catch (error) { try { unsubscribe(); } finally { throw error; } }
     releaseLiveObservation.register(model, () => { unsubscribe(); });
-    observation = { assertCurrent: methods, captureEpoch() {
-      methods(); changed();
+    observation = { assertCurrent: observationUnchanged, captureEpoch() {
+      changed();
       if (!state.valid) throw new ToolInputProjectionError('held');
       const epoch = state.epoch;
-      return () => { methods(); if (!state.valid || state.epoch !== epoch) throw new ToolInputProjectionError('held'); };
+      return () => { if (!state.valid || state.epoch !== epoch) throw new ToolInputProjectionError('held'); };
     } };
     liveObservations.set(model, observation);
   }

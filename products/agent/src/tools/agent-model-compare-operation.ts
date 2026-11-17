@@ -3,11 +3,9 @@ import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform
 import type { ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { AgentModelCompareArtifactStore, AgentModelCompareToolDeps } from './agent-model-compare-types.ts';
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
-import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 
 /** Every asynchronous comparison dependency stays inside its original owner frame. */
 export function createComparisonOperation(source: AgentModelCompareToolDeps, args: Record<string, unknown>, options?: ToolExecuteOptions) {
-  const assertSource = captureCatalogMethods(source, ['artifactStore', 'toolRegistry', 'modelCatalog', 'providerRegistry', 'applyModelRoute']);
   // Only the artifacts this operation read are pinned, by id and size: a listing pins nothing, so the
   // cost of a check does not grow with the store, and an unrelated artifact cannot fail the call.
   const read = new Map<string, number>();
@@ -17,21 +15,17 @@ export function createComparisonOperation(source: AgentModelCompareToolDeps, arg
     read.set(descriptor.id, descriptor.sizeBytes);
   };
   const store = source.artifactStore;
-  const assertStore = store && captureCatalogMethods(store, ['get', 'list', 'readContent', 'create']);
   const storeChecks = new Map<string, () => void>();
   const registry = source.toolRegistry;
   const sourceOwner = agentResearchSourceOwner(registry);
   const get = store?.get; const list = store?.list; const readContent = store?.readContent; const create = store?.create;
   const catalog = source.modelCatalog;
-  const assertCatalog = captureCatalogMethods(catalog, ['listModels', 'getCurrentModel', 'recordModelUsage']);
   const listModels = catalog.listModels; const getCurrentModel = catalog.getCurrentModel; const recordModelUsage = catalog.recordModelUsage;
   const providers = source.providerRegistry;
-  const assertProviders = captureCatalogMethods(providers, ['getForModel']);
   const getForModel = providers.getForModel; const applyModelRoute = source.applyModelRoute;
   const assertCurrent = () => {
     options?.signal?.throwIfAborted();
     assertCurrentToolExecution(args, options);
-    assertSource(); assertStore?.(); assertCatalog(); assertProviders();
     if (source.toolRegistry !== registry || agentResearchSourceOwner(registry) !== sourceOwner || source.artifactStore !== store || store?.get !== get || store?.list !== list || store?.readContent !== readContent || store?.create !== create
       || source.modelCatalog !== catalog || catalog.listModels !== listModels || catalog.getCurrentModel !== getCurrentModel || catalog.recordModelUsage !== recordModelUsage
       || source.providerRegistry !== providers || providers.getForModel !== getForModel || source.applyModelRoute !== applyModelRoute) throw new Error('Comparison dependency owner changed.');

@@ -21,7 +21,6 @@
 import { captureOccasionsGatewayTarget } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { ProfileMutationOptions } from '@goodvibes-jev/engine/platform/platform/owner-profile';
 import { dirname } from 'node:path';
-import { captureCatalogMethods } from '../tools/agent-harness-catalog-ranking.ts';
 import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
 import { PROFILE_METHOD_IDS, type ProfileMethodId } from '../tools/agent-profile-types.ts';
 import {
@@ -94,12 +93,11 @@ export function captureProfileGatewayLocalState(invoke: ProfileGatewayInvoke, me
   const target = catalog && (captureOccasionsGatewayTarget(catalog, method)
     ?? captureOccasionsGatewayTarget(catalog, PROFILE_METHOD_IDS.set));
   if (!target) return undefined;
-  const ownerCurrent = captureCatalogMethods(target, ['profilePath', 'captureProfileRead', 'assertOwnerCurrent']);
   const path = target.profilePath, read = target.captureProfileRead();
   let publishing = false;
   return {
     targets: [{ root: dirname(path), path, access: writing ? 'write' as const : 'read' as const }],
-    assertCurrent() { ownerCurrent(); target.assertOwnerCurrent(); if (!publishing) read.assertCurrent(); },
+    assertCurrent() { target.assertOwnerCurrent(); if (!publishing) read.assertCurrent(); },
     mutationPath() { return path; },
     onWriteIntent() { publishing = true; },
   };

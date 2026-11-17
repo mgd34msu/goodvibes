@@ -3,10 +3,10 @@ import { observeImportFile, assertImportFileCurrent } from '@goodvibes-jev/engin
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { assertJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { SOURCE_SCREENING_LIMITS } from '@goodvibes-jev/engine/platform/platform/security';
-import { AgentResearchRunRegistry, researchRunStorePath } from '../agent/research-run-registry.ts';
-import { AgentResearchSourceRegistry, researchSourceStorePath, type AgentResearchSourceRecord } from '../agent/research-source-registry.ts';
+import { researchRunStorePath } from '../agent/research-run-registry.ts';
+import { researchSourceStorePath, type AgentResearchSourceRecord } from '../agent/research-source-registry.ts';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
-import { captureCatalogMethods, captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { modelReadingServicePath, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 const parseNativeJson = JSON.parse;
 
@@ -49,7 +49,6 @@ export function captureCatalogPath(root: object, keys: readonly string[]): { rea
   for (const key of keys) {
     if (current == null) break;
     if (typeof current !== 'object') throw new ToolInputProjectionError('held');
-    guards.push(captureCatalogMethods(current, [key]));
     current = modelReadingServicePath(current, [key]);
   }
   const value = modelReadingServicePath(root, keys);
@@ -103,11 +102,8 @@ export async function withCapturedResearchCatalog<A, D, R>(context: CommandConte
   caller.retainSourceCurrent();
   const owner = captureCatalogPath(context, ['workspace', 'shellPaths']);
   const shellPaths = context.workspace?.shellPaths;
-  const methodGuard = shellPaths ? captureCatalogMethods(shellPaths, ['resolveProjectPath']) : () => {};
-  const registryGuards = [captureCatalogMethods(AgentResearchRunRegistry, ['fromShellPaths']), captureCatalogMethods(AgentResearchSourceRegistry, ['fromShellPaths']),
-    captureCatalogMethods(AgentResearchRunRegistry.prototype, ['list', 'snapshot', 'readStore']), captureCatalogMethods(AgentResearchSourceRegistry.prototype, ['list', 'snapshot', 'readStore'])];
   const paths = shellPaths ? [researchRunStorePath(shellPaths), researchSourceStorePath(shellPaths)] : [];
-  const assertMethods = (): void => { owner.assertCurrent(); methodGuard(); for (const guard of registryGuards) guard(); };
+  const assertMethods = (): void => { owner.assertCurrent(); };
   const assertNative = (): void => {
     assertMethods();
     if (shellPaths && (researchRunStorePath(shellPaths) !== paths[0] || researchSourceStorePath(shellPaths) !== paths[1])) throw new ToolInputProjectionError('held');

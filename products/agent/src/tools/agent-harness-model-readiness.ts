@@ -1,5 +1,4 @@
 import { decisionOrClassic, isClassicOperation } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { arch, cpus, freemem, platform, totalmem } from 'node:os';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
@@ -48,8 +47,7 @@ export function deferredRecipeFit(): LocalModelRecipeFit {
 }
 
 function classicReadiness(options: ModelReadingOptions): ModelReadinessScore {
-  const current = captureCatalogMethods(options, ['signal', 'assertCurrent', 'sourceOwner', 'retainCurrent']);
-  const nativeCurrent = () => { current(); options.signal?.throwIfAborted(); current(); };
+  const nativeCurrent = () => { options.signal?.throwIfAborted(); };
   nativeCurrent(); assertProjectionCurrent(options.assertCurrent);
   options.retainCurrent?.(nativeCurrent); nativeCurrent();
   return { ...deferredModelReadiness('Classic does not perform semantic model-readiness assessment.'),

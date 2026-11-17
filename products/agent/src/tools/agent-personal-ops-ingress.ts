@@ -2,7 +2,6 @@ import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/g
 import { SOURCE_SCREENING_LIMITS } from '@goodvibes-jev/engine/platform/platform/security';
 import { ToolInputProjectionError, type ToolInputProjector, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
-import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 
 const MODES = new Set(['personal_ops_queue', 'personal_ops_intake', 'personal_ops_lane', 'run_personal_ops_read']);
 export function isPersonalOpsJudgmentMode(args: Record<string, unknown>): boolean {
@@ -26,11 +25,10 @@ export function createPersonalOpsInputProjector(registry: ToolRegistry, fallback
     const args = snapshotJudgmentInput(request.args) as Record<string, unknown>;
     const owner = agentResearchSourceOwner(registry);
     if (!owner) return { status: 'held' };
-    const assertOwnerMethods = captureCatalogMethods(owner, ['capture', 'screen', 'project', 'release']);
     const capture = owner.capture, screen = owner.screen, project = owner.project, releaseHandle = owner.release;
     const serialized = JSON.stringify(args);
     if (serialized.length > SOURCE_SCREENING_LIMITS.characters) return { status: 'held' };
-    request.assertCurrent(); request.signal?.throwIfAborted(); assertOwnerMethods();
+    request.assertCurrent(); request.signal?.throwIfAborted();
     const handle = capture.call(owner, [serialized]);
     let released = false;
     let releasing: Promise<void> | undefined;
@@ -42,7 +40,6 @@ export function createPersonalOpsInputProjector(registry: ToolRegistry, fallback
     const abort = () => { void release().catch(() => {}); };
     const assertCurrent = () => {
       request.assertCurrent(); request.signal?.throwIfAborted();
-      assertOwnerMethods();
       if (released || agentResearchSourceOwner(registry) !== owner) throw new ToolInputProjectionError('held');
     };
     try {

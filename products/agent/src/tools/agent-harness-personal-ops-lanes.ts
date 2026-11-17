@@ -1,6 +1,6 @@
 import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
-import { captureCatalogMethods, captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
@@ -140,26 +140,23 @@ async function ownedBuildLanes(
   exactLane?: 'notes' | 'reminders' | 'inbox',
 ): Promise<readonly PersonalOpsLane[]> {
   if (exactLane !== undefined && exactLane !== 'notes' && exactLane !== 'reminders' && exactLane !== 'inbox') throw new ToolInputProjectionError('invalid');
-  const optionsCurrent = captureCatalogMethods(options, ['signal', 'assertCurrent', 'retainCurrent', 'sourceOwner', 'toolsByServer', 'schemasByQualifiedName']);
   const signal = options.signal, callerCurrent = options.assertCurrent, retainCurrent = options.retainCurrent;
-  const sourceOwner = options.sourceOwner;
-  const ownerCurrent = sourceOwner ? captureCatalogMethods(sourceOwner, ['capture', 'screen', 'project', 'release']) : () => {};
   const staged = new Map<string | (() => void), Set<() => void>>();
   const retainChild = (guard: () => void, key?: string) => {
     const guards = staged.get(key ?? guard) ?? new Set<() => void>();
     guards.add(guard); staged.set(key ?? guard, guards);
   };
   const assertCaller = () => {
-    optionsCurrent(); ownerCurrent(); signal?.throwIfAborted();
+    signal?.throwIfAborted();
     assertSynchronousJudgmentGuard(callerCurrent, () => new ToolInputProjectionError('held'));
-    optionsCurrent(); ownerCurrent(); signal?.throwIfAborted();
+    signal?.throwIfAborted();
   };
-  optionsCurrent(); ownerCurrent(); signal?.throwIfAborted(); assertCaller();
+  signal?.throwIfAborted(); assertCaller();
   const original = buildAgentWorkspaceRuntimeSnapshot(context);
   const workspaceCapture = captureCatalogSnapshot(original);
   const assertSnapshot = workspaceCapture.assertCurrent;
   const assertSource = () => {
-    optionsCurrent(); ownerCurrent(); signal?.throwIfAborted();
+    signal?.throwIfAborted();
     assertSnapshot(buildAgentWorkspaceRuntimeSnapshot(context));
   };
   const assertCurrent = () => { assertSource(); assertCaller(); assertSource(); };

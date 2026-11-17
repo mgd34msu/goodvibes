@@ -4,7 +4,6 @@ import { formatRefusal, readRefusal, type Refusal } from '@goodvibes-jev/engine/
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { CommandContext } from '../input/command-registry.ts';
 import { nativeSettingsCommandMutation } from '../input/commands/operator-runtime.ts';
-import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { resolveHarnessCommandDetail, type CommandDetailLookup } from './agent-harness-command-catalog.ts';
 import type { AgentHarnessToolDeps } from './agent-harness-tool-types.ts';
 import { error, output } from './agent-harness-tool-utils.ts';
@@ -31,11 +30,8 @@ export function runTranslatedWorkspaceCommand(deps: AgentHarnessToolDeps, origin
 
 export async function runCommand(deps: AgentHarnessToolDeps, args: Record<string, unknown>, options: CatalogRankingOptions = {}, executionOptions?: Parameters<Tool['execute']>[1]): Promise<{ readonly success: boolean; readonly output?: string; readonly error?: string }> {
   const registry = deps.commandRegistry;
-  const assertCommandMethods = captureCatalogMethods(registry, ['get', 'execute']);
   const execute = registry.execute, context = deps.commandContext;
-  const assertToolOwner = captureCatalogMethods(deps, ['toolRegistry']);
   const tools = deps.toolRegistry;
-  const assertNestedMethod = captureCatalogMethods(tools, ['executeNested']);
   const executeNested = tools.executeNested;
   const resolved = await resolveHarnessCommandDetail(deps.commandRegistry, args, options);
   options.signal?.throwIfAborted(); options.assertCurrent?.();
@@ -52,7 +48,6 @@ export async function runCommand(deps: AgentHarnessToolDeps, args: Record<string
   });
 
   const assertCommandEffect = (name: string, commandArgs: readonly string[]) => {
-    assertCommandMethods();
     options.signal?.throwIfAborted(); options.assertCurrent?.();
     // A command that declares its verbs (command-verbs.ts) says which admission
     // each needs; a command without a declaration is read from the command policy table.
@@ -62,7 +57,6 @@ export async function runCommand(deps: AgentHarnessToolDeps, args: Record<string
     const effect = verb ? (verb.effect === 'local-write' ? 'write' : 'send')
       : ['local-state', 'ui-navigation', 'session-lifecycle'].includes(policy.effect) ? 'write' : 'send';
     if (!read && !harnessCatalogInvocationAuthority(args, executionOptions, effect)) throw new ToolInputProjectionError('held');
-    assertCommandMethods();
     if (deps.commandRegistry !== registry || registry.execute !== execute || deps.commandContext !== context) throw new ToolInputProjectionError('held');
   };
 
@@ -90,7 +84,6 @@ export async function runCommand(deps: AgentHarnessToolDeps, args: Record<string
     },
   };
   const executeModelCommand = async (name: string, commandArgs: readonly string[]): Promise<boolean> => {
-    assertCommandMethods();
     const command = registry.get(name);
     // An owner-only verb is refused before any admission is asked for it.
     const verb = commandVerbPolicy(command, commandArgs);
@@ -101,8 +94,7 @@ export async function runCommand(deps: AgentHarnessToolDeps, args: Record<string
     assertCommandEffect(name, commandArgs);
     if (!mutation) return execute.call(registry, name, [...commandArgs], toolContext);
     const assertSettingsCurrent = () => {
-      assertToolOwner(); assertNestedMethod(); assertCommandEffect(name, commandArgs);
-      assertToolOwner(); assertNestedMethod();
+      assertCommandEffect(name, commandArgs);
       const current = nativeSettingsCommandMutation(command, commandArgs);
       if (deps.toolRegistry !== tools || registry.get(name) !== command || !current
         || current.action !== mutation.action || current.key !== mutation.key

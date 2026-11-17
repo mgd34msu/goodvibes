@@ -3,7 +3,7 @@ import { types as nodeTypes } from 'node:util';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { memoryExternalProviderLiveCertification, memoryExternalProviderReceiptCertification } from './agent-harness-memory-provider-certification.ts';
 import type { MemoryExternalProviderCertification } from './agent-harness-memory-provider-certification.ts';
-import { captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureModelArtifactClockSource, modelReadingServicePath } from './agent-harness-model-reading-source.ts';
 import { capturePersonalOpsSnapshot, protectPersonalOpsData, protectPersonalOpsResult } from './agent-harness-personal-ops-source.ts';
 import { readPersonalOpsBoolean, readPersonalOpsReceiptStatus } from './agent-harness-personal-ops-readings.ts';
@@ -415,7 +415,6 @@ function acquireSource(context: unknown, path: readonly string[], options: Catal
   for (const key of path) {
     if (current === undefined || current === null) break;
     if (typeof current !== 'object') throw new ToolInputProjectionError('held');
-    guards.push(captureCatalogMethods(current, [key]));
     receiver = current; current = modelReadingServicePath(current, [key]);
   }
   const source = current;
@@ -432,19 +431,14 @@ async function readExternalProviderSnapshot(acquired: ReturnType<typeof acquireS
   acquired.assertCurrent();
   let read: (() => unknown) | undefined;
   if (typeof acquired.source === 'function') {
-    const method = acquired.source, callCurrent = captureCatalogMethods(method, ['call']);
-    options.retainCurrent?.(callCurrent);
-    read = () => { acquired.assertSource(); callCurrent(); const result: unknown = method.call(acquired.receiver); acquired.assertSource(); callCurrent(); return result; };
+    const method = acquired.source;
+    read = () => { acquired.assertSource(); const result: unknown = method.call(acquired.receiver); acquired.assertSource(); return result; };
   } else if (acquired.source !== null && typeof acquired.source === 'object') {
-    const methodsCurrent = captureCatalogMethods(acquired.source, SNAPSHOT_METHODS);
-    options.retainCurrent?.(methodsCurrent);
     for (const name of SNAPSHOT_METHODS) {
-      acquired.assertCurrent(); methodsCurrent();
+      acquired.assertCurrent();
       const method = modelReadingServicePath(acquired.source, [name]);
       if (typeof method !== 'function') continue;
-      const callCurrent = captureCatalogMethods(method, ['call']); options.retainCurrent?.(callCurrent);
-      read = () => { acquired.assertSource(); methodsCurrent(); callCurrent(); const result: unknown = method.call(acquired.source);
-        acquired.assertSource(); methodsCurrent(); callCurrent(); return result; };
+      read = () => { acquired.assertSource(); const result: unknown = method.call(acquired.source); acquired.assertSource(); return result; };
       break;
     }
   }
@@ -750,19 +744,16 @@ async function ownedExternalMemoryReceiptEvidence(context: unknown, originalOpti
   const acquired = acquireSource(context, ['platform', 'artifactStore'], options);
   if (acquired.source === null || acquired.source === undefined) return [];
   if (typeof acquired.source !== 'object') throw new ToolInputProjectionError('held');
-  const storeCurrent = captureCatalogMethods(acquired.source, ['list']);
-  options.retainCurrent?.(storeCurrent, 'agent.memory.artifact-list');
   const method = modelReadingServicePath(acquired.source, ['list']);
   if (method === undefined) return [];
   if (typeof method !== 'function') throw new ToolInputProjectionError('held');
-  const callCurrent = captureCatalogMethods(method, ['call']); options.retainCurrent?.(callCurrent);
-  acquired.assertCurrent(); storeCurrent(); callCurrent();
+  acquired.assertCurrent();
   const value: unknown = method.call(acquired.source, RECEIPT_ARTIFACT_WINDOW);
-  acquired.assertCurrent(); storeCurrent();
+  acquired.assertCurrent();
   const capture = capturePersonalOpsSnapshot(value);
   if (!Array.isArray(capture.captured)) throw new ToolInputProjectionError('held');
-  const assertArtifactRestriction = () => { acquired.assertSource(); storeCurrent(); callCurrent(); capture.assertCurrent(value);
-    const fresh: unknown = method.call(acquired.source, RECEIPT_ARTIFACT_WINDOW); acquired.assertSource(); storeCurrent(); callCurrent(); capture.assertCurrent(fresh); };
+  const assertArtifactRestriction = () => { acquired.assertSource(); capture.assertCurrent(value);
+    const fresh: unknown = method.call(acquired.source, RECEIPT_ARTIFACT_WINDOW); acquired.assertSource(); capture.assertCurrent(fresh); };
   const assertCurrent = () => { assertMemoryCurrent(options); assertArtifactRestriction(); };
   options.retainCurrent?.(assertArtifactRestriction, 'agent.memory.artifacts');
   const reading = { ...options, assertCurrent };

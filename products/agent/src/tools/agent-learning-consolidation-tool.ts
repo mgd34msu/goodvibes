@@ -13,7 +13,7 @@ import { AgentSkillRegistry } from '../agent/skill-registry.ts';
 import { MEMORY_CLASSES, MEMORY_REVIEW_STATES, MEMORY_SCOPES, MODES, cloneRecord, deleteDuplicate, domainForCandidate, failure, getRecord, markDuplicateStale, nextGeneratedId, output, readLimit, readMode, readReceiptFile, readString, receiptId, receiptIdFromReceipt, receiptPath, requireConfirmedWrite, resolveCandidate, updateSurvivor, writeReceipt, type AgentLearningConsolidationDomain, type AgentLearningConsolidationToolArgs, type ConsolidationMemory, type LearningConsolidationReceipt } from './agent-learning-consolidation-core.ts';
 import type { LearningCandidate } from './agent-harness-learning-curator.ts';
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
-import { captureCatalogData, captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
 import { createHarnessCatalogInputProjector, protectHarnessCatalogTool } from './agent-harness-catalog-ingress.ts';
 import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 function arrayField(snapshot: Record<string, unknown>, key: string): string[] {
@@ -778,8 +778,6 @@ export function createAgentLearningConsolidationTool(shellPaths: ShellPathServic
       const originalJson = JSON.stringify(args);
       const signal = options?.signal;
       const sourceOwner = agentResearchSourceOwner(registry);
-      const assertPathMethods = captureCatalogMethods(shellPaths, ['workingDirectory', 'homeDirectory', 'resolveUserPath']);
-      const assertMemoryMethods = captureCatalogMethods(memoryRegistry, ['getStore', 'get', 'update', 'review', 'delete', 'importBundle']);
       const workingDirectory = shellPaths.workingDirectory;
       const homeDirectory = shellPaths.homeDirectory;
       const homeReal = realpathSync(homeDirectory);
@@ -792,7 +790,6 @@ export function createAgentLearningConsolidationTool(shellPaths: ShellPathServic
         shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'routines', 'routines.json'),
         ...(databasePath ? [databasePath] : [])];
       const assertStorageCurrent = () => {
-        assertPathMethods(); assertMemoryMethods();
         if (shellPaths.homeDirectory !== homeDirectory || shellPaths.resolveUserPath !== resolveUserPath
           || realpathSync(homeDirectory) !== homeReal || memoryRegistry.getStore() !== store || store.dbPath !== databasePath) throw new ToolInputProjectionError('stale');
         for (const path of storagePaths) {

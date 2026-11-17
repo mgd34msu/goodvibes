@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { lstatSync } from 'node:fs';
 import { captureAgentExportPath } from './agent-artifact-effect.ts';
 import type { Ranked } from '@goodvibes-jev/judgment';
-import { captureCatalogData, captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
@@ -384,17 +384,13 @@ export async function savePersonalOpsReviewArtifact(options: {
   readonly signal?: AbortSignal | undefined;
   readonly assertCurrent?: (() => void) | undefined;
 }): Promise<Record<string, unknown>> {
-  const assertOptions = captureCatalogMethods(options, ['context', 'lane', 'sourceRecord', 'inputFields', 'reviewRecords', 'output', 'title', 'invocationArgs', 'executionOptions', 'sourceOwner', 'signal', 'assertCurrent']);
   const assertEffectCurrent = () => {
-    assertOptions();
     options.signal?.throwIfAborted(); options.assertCurrent?.();
     if (!harnessCatalogInvocationAuthority(options.invocationArgs, options.executionOptions, 'write')) throw new ToolInputProjectionError('held');
   };
   assertEffectCurrent();
   const source = () => captureCatalogData({ lane: options.lane, sourceRecord: options.sourceRecord, inputFields: options.inputFields, reviewRecords: options.reviewRecords, output: options.output, title: options.title });
   const sourceJson = JSON.stringify(source());
-  const assertContext = captureCatalogMethods(options.context, ['platform']);
-  const assertPlatform = captureCatalogMethods(options.context.platform, ['artifactStore']);
   const store = options.context.platform.artifactStore;
   if (!store?.create) {
     return {
@@ -403,12 +399,11 @@ export async function savePersonalOpsReviewArtifact(options: {
       policy: 'Review-card persistence requires the Agent artifact store; raw connector output was not written.',
     };
   }
-  const assertStoreMethods = captureCatalogMethods(store, ['create']);
   const storagePath = store.storagePath;
   if (typeof storagePath !== 'string' || lstatSync(storagePath).isSymbolicLink()) throw new ToolInputProjectionError('held');
   const physicalRoot = captureAgentExportPath(storagePath, storagePath);
   const assertWriteCurrent = () => {
-    assertEffectCurrent(); assertContext(); assertPlatform(); assertStoreMethods();
+    assertEffectCurrent();
     physicalRoot.assertCurrent();
     if (options.context.platform.artifactStore !== store || store.storagePath !== storagePath
       || lstatSync(storagePath).isSymbolicLink()

@@ -5,17 +5,14 @@ import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/g
 import { routingRegistry, memoryCredentialState, memoryLiveStatus, memoryProviderSelect, memoryReceiptMember, memoryRouteRole, memorySchemaCertified } from '@goodvibes-jev/engine/platform/platform/routing';
 import { maskCredentialCandidates } from '@goodvibes-jev/engine/platform/platform/utils';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { modelReadingServicePath, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { capturePersonalOpsSnapshot, personalOpsEntry, personalOpsJson } from './agent-harness-personal-ops-source.ts';
 
 /** The invocation's native callbacks and source owner remain the same through producer reads and final publication. */
 export function retainMemoryReadingOptions(original: CatalogRankingOptions): CatalogRankingOptions {
-  const fieldsCurrent = captureCatalogMethods(original, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent', 'requirePreservedSource']);
   const signal = original.signal, sourceOwner = original.sourceOwner, caller = original.assertCurrent, retain = original.retainCurrent;
-  const callerCurrent = caller ? captureCatalogMethods(caller, ['call']) : undefined;
-  const retainCurrent = retain ? captureCatalogMethods(retain, ['call']) : undefined;
-  const assertSource = () => { fieldsCurrent(); callerCurrent?.(); retainCurrent?.(); signal?.throwIfAborted(); };
+  const assertSource = () => { signal?.throwIfAborted(); };
   const assertCurrent = () => {
     assertSource(); assertSynchronousJudgmentGuard(() => caller?.call(original), () => new ToolInputProjectionError('held')); assertSource();
   };
@@ -35,12 +32,10 @@ export function assertMemoryCurrent(options: CatalogRankingOptions): void {
 
 function captureMemoryAuthority(decision: object & { readonly name: string }, current: CatalogRankingOptions) {
   const site = decision.name;
-  const registryCurrent = captureCatalogMethods(routingRegistry, ['get']);
-  const decisionCurrent = captureCatalogMethods(decision, ['name', 'version', 'description', 'accuracyFloor', 'model', 'items', 'run', 'select', 'instructions', 'fitInstructions']);
   const semanticFields = () => ({ items: modelReadingServicePath(decision, ['items']), instructions: modelReadingServicePath(decision, ['instructions']), fitInstructions: modelReadingServicePath(decision, ['fitInstructions']) });
   const definition = capturePersonalOpsSnapshot(semanticFields());
   const assertDefinition = () => {
-    registryCurrent(); decisionCurrent(); definition.assertCurrent(semanticFields());
+    definition.assertCurrent(semanticFields());
     if (routingRegistry.get(site) !== decision) throw new ToolInputProjectionError('held');
   };
   assertDefinition(); current.retainCurrent?.(assertDefinition, `agent.memory.definition:${site}`);

@@ -133,17 +133,6 @@ function sameCatalogData(left: unknown, right: unknown, depth: number): boolean 
   return true;
 }
 
-/** Kept for callers that still name the methods they use; a method of the program's own objects is not re-checked. */
-const immutableCatalogSlots = (): void => {};
-export function captureCatalogMethods(_subject: object, _keys: readonly string[]): () => void {
-  return immutableCatalogSlots;
-}
-/** One guard for many retained slots; slots proven unchangeable cost nothing per boundary. */
-export function combineCatalogGuards(guards: readonly (() => void)[]): () => void {
-  const live = guards.filter(guard => guard !== immutableCatalogSlots);
-  if (live.length === 0) return immutableCatalogSlots;
-  return live.length === 1 ? live[0]! : () => { for (const guard of live) guard(); };
-}
 
 type CatalogDescription = { readonly id: string; readonly description: string; readonly evidence?: unknown };
 type CatalogRow = { readonly id: string; readonly description: string };

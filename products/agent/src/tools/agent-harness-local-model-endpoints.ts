@@ -5,7 +5,6 @@ import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/
 import { redactText } from '@goodvibes-jev/engine/terminal-shell';
 import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { captureModelReadModelData, captureModelProviderReadingFacts, captureModelReadingInput, captureModelReadingSnapshotGuard, assertModelReadingInputCurrent, modelReadingServicePath, withModelReadingSource, type ModelReadingOptions } from './agent-harness-model-reading-source.ts';
 import { protectPersonalOpsData } from './agent-harness-personal-ops-source.ts';
 import { readLocalServingBoolean, readLocalServingStatus, readLocalResourcePressure, readLocalServingSchemaStatus } from './agent-harness-local-model-readings.ts';
@@ -254,11 +253,12 @@ function setupServingReadModelSources(context: CommandContext): readonly LocalMo
   }));
 }
 
-function sourceMethods(source: unknown, keys: readonly string[]): () => void {
-  if (source === null || source === undefined) return () => {};
-  if (typeof source !== 'object') throw new Error('Unsupported local model source.');
-  return captureCatalogMethods(source, keys);
+/** A local model source is the program's own service: checked to be an object, its methods not re-checked. */
+function sourceMethods(source: unknown, _keys: readonly string[]): () => void {
+  if (source !== null && source !== undefined && typeof source !== 'object') throw new Error('Unsupported local model source.');
+  return sourceUnchanged;
 }
+const sourceUnchanged = (): void => {};
 
 const SERVING_SNAPSHOT_METHODS = ['getSnapshot', 'snapshot', 'list', 'listDiagnostics', 'listServingDiagnostics', 'listLocalServers', 'listServers', 'readSnapshot'] as const;
 const SERVING_COLLECTION_KEYS = ['localModelServers', 'localServers', 'servingDiagnostics', 'diagnostics', 'servers', 'endpoints', 'records', 'items', 'entries'] as const;
@@ -438,14 +438,13 @@ function providerIdLabel(providerId: string): string {
 }
 
 async function localServingDiagnosticsIndex(context: CommandContext, options: ModelReadingOptions): Promise<LocalModelServingDiagnosticIndex> {
-  const optionsCurrent = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent']);
   const signal = options.signal, callerCurrent = options.assertCurrent;
   const retained: Array<() => void> = [];
   let owner: JudgmentPortCapture | undefined;
   let portCurrent: (() => void) | undefined;
   let activeReading = false;
   const sourceCurrent = () => {
-    optionsCurrent(); signal?.throwIfAborted();
+    signal?.throwIfAborted();
     if (options.signal !== signal || options.assertCurrent !== callerCurrent) throw new Error('Local serving diagnostic owner changed.');
   };
   const assertSource = () => {
@@ -557,9 +556,8 @@ function servingDiagnosticForEndpoint(
 }
 
 function localModelInspectionOptions(context: CommandContext, options: ModelReadingOptions): ModelReadingOptions {
-  const optionsCurrent = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent']);
   const signal = options.signal, callerCurrent = options.assertCurrent;
-  const assertOptions = () => { optionsCurrent(); signal?.throwIfAborted(); };
+  const assertOptions = () => { signal?.throwIfAborted(); };
   const assertCaller = () => {
     assertOptions();
     assertProjectionCurrent(callerCurrent);
@@ -736,9 +734,8 @@ const deleteRegistryReading = localRegistryReadings.delete.bind(localRegistryRea
 
 /** A single protected registry interpretation can feed detection and endpoint views. */
 export async function withLocalModelRegistry<T>(context: CommandContext, options: ModelReadingOptions, consume: (reading: LocalModelRegistryReading) => Promise<T>): Promise<T> {
-  const optionsCurrent = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent']);
   const signal = options.signal, callerCurrent = options.assertCurrent;
-  const assertOptions = () => { optionsCurrent(); signal?.throwIfAborted(); };
+  const assertOptions = () => { signal?.throwIfAborted(); };
   const assertCaller = () => {
     assertOptions();
     assertProjectionCurrent(callerCurrent);

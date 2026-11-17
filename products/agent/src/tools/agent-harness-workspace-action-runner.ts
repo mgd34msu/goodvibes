@@ -13,7 +13,6 @@ import { executeAdmittedAgentSettingsImport, isAgentSettingsImportMutation } fro
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
 import { assertModelReadingInputCurrent, captureModelReadingInput, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { capturedHarnessSettingsImportPreview, harnessCatalogExecutionGuard, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
-import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { getOnboardingCheckMarkerPath, getOnboardingCompletionMarkerPath, writeOnboardingCheckMarker, writeOnboardingCompletionMarker } from '../runtime/onboarding/index.ts';
 import { captureHarnessLocalEffect } from './agent-harness-local-effect.ts';
 
@@ -80,16 +79,14 @@ export async function runWorkspaceAction(
   if (action.kind === 'settings-import') {
     if (!isAgentSettingsImportMutation('agent_harness', args)) {
       try {
-        const assertOptions = options ? captureCatalogMethods(options, ['signal', 'assertCurrent', 'inputProjectionContext']) : () => {};
         const signal = options?.signal;
         const original = JSON.stringify(captureModelReadingInput(args));
-        const assertDeps = captureCatalogMethods(deps, ['commandContext', 'toolRegistry']);
         const assertExecution = harnessCatalogExecutionGuard(args, options);
         signal?.throwIfAborted(); assertExecution();
         const sourceOwner = agentResearchSourceOwner(deps.toolRegistry);
         const capture = capturedHarnessSettingsImportPreview(args, options, deps.commandContext, deps.toolRegistry);
         const assertCurrent = () => {
-          assertOptions(); assertDeps(); signal?.throwIfAborted(); assertExecution();
+          signal?.throwIfAborted(); assertExecution();
           assertModelReadingInputCurrent(args, original); capture.assertCurrent();
           if (agentResearchSourceOwner(deps.toolRegistry) !== sourceOwner) throw new Error('Settings import reader changed.');
         };

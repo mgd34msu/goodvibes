@@ -1,5 +1,5 @@
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogMethods, captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureCatalogReadRequest, selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { captureServiceReadSource, captureSubscriptionReadSource, listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
@@ -47,24 +47,16 @@ async function loadSnapshot(context: ProviderCatalogContext, request?: ReturnTyp
     return buildProviderAccountSnapshot({ providerRegistry: context.provider.providerRegistry, serviceRegistry: services,
       subscriptionManager: subscriptions, secretsManager: context.platform.secretsManager ?? noStoredKeys });
   }
-  const assertContext = captureCatalogMethods(context, ['platform', 'provider']);
   const platform = context.platform, provider = context.provider;
-  const assertPlatform = captureCatalogMethods(platform, ['serviceRegistry', 'subscriptionManager', 'configManager']);
-  const assertProvider = captureCatalogMethods(provider, ['providerRegistry']);
   const models = provider.providerRegistry, services = platform.serviceRegistry, subscriptions = platform.subscriptionManager;
   if (!services || !subscriptions) throw new ToolInputProjectionError('unavailable');
   const manager = platform.configManager;
-  const assertModels = captureCatalogMethods(models, ['listModels', 'captureProviderCatalogIds']);
-  const assertServices = captureCatalogMethods(services, ['getAll', 'inspect']);
-  const assertSubscriptions = captureCatalogMethods(subscriptions, ['list', 'listPending', 'get', 'getPending', 'importGeneration']);
-  const assertManager = captureCatalogMethods(manager, ['getAutonomousPermissionSnapshot']);
   const modelOwner = models.captureProviderCatalogIds();
-  const assertModelOwner = captureCatalogMethods(modelOwner, ['assertCurrent']);
   const serviceCurrent = captureServiceReadSource(services), subscriptionCurrent = captureSubscriptionReadSource(subscriptions);
   const listModels = models.listModels, getAll = services.getAll, inspect = services.inspect;
   const list = subscriptions.list, listPending = subscriptions.listPending, get = subscriptions.get, getPending = subscriptions.getPending;
   const configuration = manager.getAutonomousPermissionSnapshot, incarnation = configuration.call(manager).incarnation;
-  const environment = process.env, assertProcess = captureCatalogMethods(process, ['env']);
+  const environment = process.env;
   const expirationPhase = (expiresAt: number | undefined) => {
     if (expiresAt === undefined) return 'unspecified';
     const observed = Date.now();
@@ -75,7 +67,7 @@ async function loadSnapshot(context: ProviderCatalogContext, request?: ReturnTyp
   const keyNames = new Set<string>();
   const inspectionGuards: (() => void)[] = [];
   const assertOwner = () => {
-    assertContext(); assertPlatform(); assertProvider(); assertModels(); assertModelOwner(); modelOwner.assertCurrent(); assertServices(); assertSubscriptions(); assertManager(); assertProcess();
+    modelOwner.assertCurrent();
     if (context.platform !== platform || context.provider !== provider || provider.providerRegistry !== models
       || platform.serviceRegistry !== services || platform.subscriptionManager !== subscriptions || platform.configManager !== manager
       || configuration.call(manager).incarnation !== incarnation || process.env !== environment) throw new ToolInputProjectionError('held');

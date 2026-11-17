@@ -11,7 +11,7 @@ import { buildAgentWorkspaceMemorySnapshot, type buildAgentWorkspaceRuntimeSnaps
 import { buildAgentWorkspaceSessionMemoryCount } from '../input/agent-workspace-snapshot-builders.ts';
 import { readConfigString } from '../input/agent-workspace-snapshot-config.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
-import { captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { modelReadingServicePath } from './agent-harness-model-reading-source.ts';
 import { capturePersonalOpsSnapshot, protectPersonalOpsData } from './agent-harness-personal-ops-source.ts';
 import { assertMemoryCurrent, retainMemoryReadingOptions, selectMemoryProvider } from './agent-harness-memory-provider-readings.ts';
@@ -77,18 +77,16 @@ function memoryReadingOptions(context: CommandContext, args: unknown, originalOp
     if (receiver === undefined || receiver === null) continue;
     if (typeof receiver !== 'object') throw new ToolInputProjectionError('held');
     const key = path.at(-1); if (key === undefined) throw new ToolInputProjectionError('held');
-    guards.push(captureCatalogMethods(receiver, [key]));
   }
   const api = memoryApi(context);
-  const apiCurrent = api ? captureCatalogMethods(api, ['doctor', 'vectorStats', 'getAll', 'reviewQueue']) : undefined;
   for (const binding of [ { path: ['session', 'sessionMemoryStore'], keys: ['list'] }, { path: ['platform', 'configManager'], keys: ['get'] } ]) {
     const service = modelReadingServicePath(context, binding.path);
-    if (service !== undefined && service !== null) { if (typeof service !== 'object') throw new ToolInputProjectionError('held'); guards.push(captureCatalogMethods(service, binding.keys)); }
+    if (service !== undefined && service !== null) { if (typeof service !== 'object') throw new ToolInputProjectionError('held'); }
   }
   const counts = capturePersonalOpsSnapshot(stableMemoryPostureFacts(memoryPostureSnapshot(context)));
-  const assertSources = () => { options.signal?.throwIfAborted(); for (const guard of guards) guard(); apiCurrent?.();
+  const assertSources = () => { options.signal?.throwIfAborted(); for (const guard of guards) guard();
     input.assertCurrent(args); if (memoryApi(context) !== api) throw new ToolInputProjectionError('held');
-    counts.assertCurrent(stableMemoryPostureFacts(memoryPostureSnapshot(context))); for (const guard of guards) guard(); apiCurrent?.();
+    counts.assertCurrent(stableMemoryPostureFacts(memoryPostureSnapshot(context))); for (const guard of guards) guard();
   };
   options.retainCurrent?.(assertSources, 'agent.memory.posture-native');
   const assertCurrent = () => { assertMemoryCurrent(options); assertSources(); };

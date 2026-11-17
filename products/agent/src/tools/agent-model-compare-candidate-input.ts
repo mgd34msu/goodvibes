@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { SOURCE_SCREENING_LIMITS, type ProtectedSource, type ProtectedSourceOwner, type SourceScreeningHold, type SourceScreeningReceipt } from '@goodvibes-jev/engine/platform/platform/security';
 import { ToolInputProjectionError, type ToolInputProjectionRequest, type ToolInputProjector, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { captureModelReadingInput } from './agent-harness-model-reading-source.ts';
 import { createComparisonOperation } from './agent-model-compare-operation.ts';
 import type { AgentModelCompareToolDeps } from './agent-model-compare-types.ts';
@@ -131,12 +130,11 @@ export function createComparisonCandidateProjector(registry: ToolRegistry, deps:
     if (JSON.stringify(sourceBatches(shared)) !== screening.serialized) throw new ToolInputProjectionError('held');
     const modelId = captured.modelId, providerId = captured.providerId;
     const provider = deps.providerRegistry.getForModel(modelId, providerId);
-    const assertProvider = captureCatalogMethods(provider, ['chat']);
     const serializedArgs = JSON.stringify(captured);
     let released = false;
     const assertCurrent = () => {
       if (released || screening.released) throw new ToolInputProjectionError('held');
-      request.signal?.throwIfAborted(); operation.assertCurrent(); assertProvider();
+      request.signal?.throwIfAborted(); operation.assertCurrent();
       if (deps.providerRegistry.getForModel(modelId, providerId) !== provider) throw new ToolInputProjectionError('held');
     };
     assertCurrent();

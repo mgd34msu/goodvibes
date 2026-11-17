@@ -8,7 +8,7 @@ import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { CommandContext } from '../input/command-registry.ts';
 import { channelDraftFilePath, getDraft, readChannelDrafts } from '../agent/channel-draft.ts';
 import { captureAgentExportPath } from './agent-artifact-effect.ts';
-import { captureCatalogData, captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
 import { captureModelReadingSnapshotGuard } from './agent-harness-model-reading-source.ts';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
 
@@ -43,13 +43,10 @@ export function createChannelDraftReferenceCapture(context?: CommandContext): No
   return request => {
     if (request.name !== 'agent_harness' || request.args.mode !== 'channel_draft_send' || typeof request.args.draftId !== 'string') return undefined;
     if (!context) return undefined;
-    const assertContext = captureCatalogMethods(context, ['workspace', 'platform']);
     const workspace = context.workspace;
     if (!workspace) return undefined;
-    const assertWorkspace = captureCatalogMethods(workspace, ['shellPaths']);
     const paths = workspace?.shellPaths;
     if (!paths) return undefined;
-    const assertPaths = captureCatalogMethods(paths, ['homeDirectory', 'workingDirectory', 'resolveUserPath', 'resolveProjectPath']);
     const home = paths.homeDirectory, directory = paths.workingDirectory;
     const path = channelDraftFilePath(paths);
     const physicalParent = captureAgentExportPath(home, dirname(path));
@@ -77,7 +74,7 @@ export function createChannelDraftReferenceCapture(context?: CommandContext): No
     snapshotJudgmentInput(safeArgs, request.name);
     const token = Object.freeze({});
     const assertOwner = () => {
-      assertContext(); assertWorkspace(); assertPaths(); request.signal?.throwIfAborted();
+      request.signal?.throwIfAborted();
       if (context.workspace !== workspace || workspace.shellPaths !== paths || paths.homeDirectory !== home || paths.workingDirectory !== directory
         || channelDraftFilePath(paths) !== path) throw new ToolInputProjectionError('stale');
       physicalParent.assertCurrent(path);

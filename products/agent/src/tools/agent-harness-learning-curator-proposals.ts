@@ -7,7 +7,7 @@ import { type AgentResearchRunRecord } from '../agent/research-run-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { acquireLearningCuratorSource, type LearningRecord, type LearningCuratorSource, type LearningCandidateCollection, type LearningCuratorNativeContext, type LearningWorkItem as WorkPlanItem } from './agent-harness-learning-curator-source.ts';
 import { readLearningGrade, readLearningProposalTarget, readLearningMemoryClass } from './agent-harness-learning-curator-readings.ts';
-import { captureCatalogData, captureCatalogMethods, captureCatalogSnapshotGuard, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData, captureCatalogSnapshotGuard, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { LearningCandidate, LearningCandidateDraft, LearningProposalTarget, SessionInfoLike, VibeCandidateKind, LocalLearningCandidateDomain } from './agent-harness-learning-curator-types.ts';
 import { candidateBase, isMemoryPromptEligible, isReviewed, MIN_PROMPT_MEMORY_CONFIDENCE, learningPromotionReference, recordedPromotionReferences, localRegistryModelRoute, localRegistryRoute, missingRequirementCount, routeValue } from './agent-harness-learning-curator-common.ts';
@@ -423,15 +423,15 @@ export function candidateSearchText(candidate: LearningCandidate): string {
   ].join('\n').toLowerCase();
 }
 
-const collections = new WeakMap<LearningCandidateCollection, { readonly context: LearningCuratorNativeContext; readonly options: CatalogRankingOptions; readonly assertFields: () => void; readonly assertCandidates: (current: unknown) => void; readonly assertPromptRecords: (current: unknown) => void }>();
+const collections = new WeakMap<LearningCandidateCollection, { readonly context: LearningCuratorNativeContext; readonly options: CatalogRankingOptions; readonly assertCandidates: (current: unknown) => void; readonly assertPromptRecords: (current: unknown) => void }>();
 
 /** Only a collection issued for this exact native caller can authorize its effects. */
 export function assertLearningCandidateCollection(collection: LearningCandidateCollection, context: LearningCuratorNativeContext, options: CatalogRankingOptions): void {
   const issued = collections.get(collection);
   if (!issued || issued.context !== context || issued.options !== options) throw new ToolInputProjectionError('held');
-  issued.assertFields(); issued.assertCandidates(collection.candidates); issued.assertPromptRecords(collection.promptRecords);
+  issued.assertCandidates(collection.candidates); issued.assertPromptRecords(collection.promptRecords);
   collection.assertCurrent();
-  issued.assertFields(); issued.assertCandidates(collection.candidates); issued.assertPromptRecords(collection.promptRecords);
+  issued.assertCandidates(collection.candidates); issued.assertPromptRecords(collection.promptRecords);
 }
 
 export async function buildLearningCandidates(context: LearningCuratorNativeContext, options: CatalogRankingOptions = {}): Promise<LearningCandidateCollection> {
@@ -531,7 +531,6 @@ async function buildOwnedLearningCandidates(context: LearningCuratorNativeContex
       return source.prepareTransition(intent);
     }, options: source.options });
   collections.set(collection, { context, options,
-    assertFields: captureCatalogMethods(collection, ['candidates', 'promptRecords', 'assertCurrent', 'assertCandidateCurrent', 'prepareTransition', 'options']),
     assertCandidates: captureCatalogSnapshotGuard(collection.candidates), assertPromptRecords: captureCatalogSnapshotGuard(collection.promptRecords) });
   return collection;
 }

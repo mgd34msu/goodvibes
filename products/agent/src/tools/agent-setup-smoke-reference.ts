@@ -5,7 +5,6 @@ import { assertCurrentToolEffect, assertCurrentToolExecution, assertProjectionEx
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { containsIssuerCredential } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CommandContext } from '../input/command-registry.ts';
-import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { captureAgentExportPath } from './agent-artifact-effect.ts';
 import { SETUP_SMOKE_EVIDENCE_FIELD_DEFINITIONS, redactSetupSmokeEvidence, redactSetupSmokeEvidenceFull } from './agent-harness-setup-smoke.ts';
 import type { SetupSmokeArtifactStore, SetupSmokeEvidenceField } from './agent-harness-setup-posture-types.ts';
@@ -56,20 +55,14 @@ export function createSetupSmokeReferenceCapture(context?: CommandContext,
     // Inspect the entire source, including content after the artifact display cap
     // and cards appearing after an earlier credential. This creates no grant.
     if (judgmentInputCardProblem(request.args, request.name)) throw new ToolInputProjectionError('held');
-    const assertContext = captureCatalogMethods(context, ['workspace', 'platform']);
     const platform = context.platform;
     const workspace = context.workspace;
-    const assertPlatform = captureCatalogMethods(platform, ['artifactStore', 'configManager']);
     const config = platform.configManager;
-    const assertConfig = captureCatalogMethods(config, ['getConfigurationIncarnation']);
     const incarnation = config.getConfigurationIncarnation();
-    const assertWorkspace = workspace ? captureCatalogMethods(workspace, ['shellPaths']) : () => {};
     const paths = workspace?.shellPaths;
-    const assertPaths = paths ? captureCatalogMethods(paths, ['homeDirectory', 'workingDirectory']) : () => {};
     const physicalHome = paths ? captureAgentExportPath(paths.homeDirectory, paths.homeDirectory) : undefined;
     const physicalWorkspace = paths ? captureAgentExportPath(paths.workingDirectory, paths.workingDirectory) : undefined;
     const store = (platform as { readonly artifactStore?: SetupSmokeArtifactStore }).artifactStore;
-    const assertStore = store ? captureCatalogMethods(store, ['create']) : () => {};
     const create = store?.create;
     // Only the platform's own store has a directory to watch; a custom store keeps its identity alone.
     const nativeStore = store instanceof ArtifactStore ? store : undefined;
@@ -98,7 +91,6 @@ export function createSetupSmokeReferenceCapture(context?: CommandContext,
       rawFields, released: false,
       assertCurrent() {
         signal?.throwIfAborted();
-        assertContext(); assertPlatform(); assertConfig(); assertWorkspace(); assertPaths(); assertStore();
         physicalHome?.assertCurrent(); physicalWorkspace?.assertCurrent();
         physicalStore?.assertCurrent();
         if (nativeStore && (nativeStore.storagePath !== storeRoot

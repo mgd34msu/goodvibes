@@ -1,7 +1,7 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { resolve } from 'node:path';
-import { captureCatalogData, captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
 import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from './agent-local-state-admission.ts';
 import { AgentPersonaRegistry, personaStorePath } from '../agent/persona-registry.ts';
 import {
@@ -296,16 +296,10 @@ export function createAgentVibeTool(commandContext: CommandContext): Tool {
 
 export function registerAgentVibeTool(registry: ToolRegistry, commandContext: CommandContext): void {
   if (!registry.has('vibe')) registry.register(createAgentVibeTool(commandContext), { inputProjection: createAgentLocalStateInputProjector(args => {
-    const workspace = commandContext.workspace;
     const shellPaths = requireShellPaths(commandContext);
-    const contextCurrent = captureCatalogMethods(commandContext, ['workspace']);
-    const workspaceCurrent = captureCatalogMethods(workspace, ['shellPaths']);
-    const pathsCurrent = captureCatalogMethods(shellPaths, ['homeDirectory', 'workingDirectory', 'resolveUserPath', 'expandHomePath', 'resolveWorkspacePath']);
-    const personaCurrent = captureCatalogMethods(AgentPersonaRegistry.prototype, Object.getOwnPropertyNames(AgentPersonaRegistry.prototype));
-    const factoryCurrent = captureCatalogMethods(AgentPersonaRegistry, ['fromShellPaths']);
     const action = readAction(args);
-    const assertDescriptors = () => { contextCurrent(); workspaceCurrent(); pathsCurrent(); personaCurrent(); factoryCurrent(); };
-    assertDescriptors();
+    // The tool's own registries and paths are read directly; nothing about them is re-checked.
+    const assertDescriptors = (): void => {};
     if (action === 'init') {
       const root = readScope(args) === 'global' ? shellPaths.homeDirectory : shellPaths.workingDirectory;
       return { targets: [{ root, path: resolveVibePathReference(shellPaths, readScope(args)), access: 'write' }], assertDescriptors };

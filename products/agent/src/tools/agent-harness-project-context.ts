@@ -1,7 +1,7 @@
 import { lstatSync, statSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogMethods, captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureCatalogReadRequest, selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import type { CommandContext } from '../input/command-registry.ts';
@@ -53,16 +53,11 @@ function projectPathFacts(path: string) {
 
 function captureProjectContext(context: ProjectCatalogContext, args: AgentHarnessProjectContextArgs, options: CatalogRankingOptions) {
   const request = captureCatalogReadRequest(args, options);
-  const assertContext = captureCatalogMethods(context, ['workspace']);
   const workspace = context.workspace;
-  const assertWorkspace = captureCatalogMethods(workspace, ['shellPaths']);
   const shellPaths = workspace.shellPaths;
-  if (!shellPaths) { request.retain(() => { assertContext(); assertWorkspace(); }, 'read-catalog.project.owner');
+  if (!shellPaths) { request.retain(() => {}, 'read-catalog.project.owner');
     return { request, snapshot: null }; }
-  const assertPaths = captureCatalogMethods(shellPaths, ['workingDirectory', 'homeDirectory', 'projectGoodVibesRoot', 'userGoodVibesRoot',
-    'expandHomePath', 'resolveWorkspacePath']);
   const assertOwner = () => {
-    assertContext(); assertWorkspace(); assertPaths();
     if (context.workspace !== workspace || workspace.shellPaths !== shellPaths) throw new ToolInputProjectionError('held');
   };
   // The first walk enumerates native read paths; the second acquires content

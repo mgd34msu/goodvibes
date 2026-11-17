@@ -4,7 +4,6 @@ import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
 import { localServerIdentity, localServingStatus, localResourcePressure, localServingSchemaStatus } from '@goodvibes-jev/engine/platform/platform/routing';
 import { assertProjectionCurrent, booleanValue } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { withModelReadingSource, type ModelReadingOptions } from './agent-harness-model-reading-source.ts';
 import { personalOpsEntry } from './agent-harness-personal-ops-source.ts';
 import type { LocalModelServerServingDiagnostics } from './agent-harness-model-routing-types.ts';
@@ -13,9 +12,8 @@ export type { ClassicModelStack as LocalModelStack } from '@goodvibes-jev/engine
 import type { ClassicModelStack as LocalModelStack } from '@goodvibes-jev/engine/platform/platform/routing';
 
 function localReadingOptions(options: ModelReadingOptions): ModelReadingOptions {
-  const optionsCurrent = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent']);
   const signal = options.signal, callerCurrent = options.assertCurrent;
-  const assertOptions = () => { optionsCurrent(); signal?.throwIfAborted(); };
+  const assertOptions = () => { signal?.throwIfAborted(); };
   const assertCurrent = () => {
     assertOptions();
     assertProjectionCurrent(callerCurrent);

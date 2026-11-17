@@ -3,7 +3,7 @@ import { composeDraftReply, extractStyleProfile, type StyleReplyMessage, type St
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { assertJudgmentInput, retainStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import type { PersonalOpsLiveRecord, PersonalOpsWorkflow } from './agent-harness-personal-ops-types.ts';
 
 export const STYLE_DRAFT_RECORD_ID = 'inbox-style-reply-draft';
@@ -50,7 +50,6 @@ function sentMessage(value: unknown): value is StyleSentMessage {
 /** The registered parent owns admission; this helper never reads a provider or sends mail. */
 export async function runPersonalOpsStyleDraft(fields: unknown, options: CatalogRankingOptions): Promise<Record<string, unknown>> {
   return withConfiguredDecisionModelPolicy(async () => {
-    const optionsCurrent = captureCatalogMethods(options, ['sourceOwner', 'signal', 'assertCurrent', 'retainCurrent']);
     const signal = options.signal, caller = options.assertCurrent, retain = options.retainCurrent, owner = options.sourceOwner;
     const source = retainStrictJudgmentJson(fields, () => new ToolInputProjectionError('invalid'));
     const input = source.snapshot;
@@ -58,9 +57,9 @@ export async function runPersonalOpsStyleDraft(fields: unknown, options: Catalog
       || !message(input.inbound) || !Array.isArray(input.sentMessages) || !input.sentMessages.every(sentMessage)
       || (input.context !== undefined && typeof input.context !== 'string')) throw new ToolInputProjectionError('invalid');
     const current = () => {
-      optionsCurrent(); source.assertCurrent(); signal?.throwIfAborted();
+      source.assertCurrent(); signal?.throwIfAborted();
       assertSynchronousJudgmentGuard(caller, () => new ToolInputProjectionError('held'));
-      optionsCurrent(); source.assertCurrent(); signal?.throwIfAborted();
+      source.assertCurrent(); signal?.throwIfAborted();
     };
     current();
     const reading = { signal, sourceOwner: owner, assertCurrent: current, retainCurrent: retain };
@@ -70,7 +69,7 @@ export async function runPersonalOpsStyleDraft(fields: unknown, options: Catalog
       try { assertJudgmentInput(text); return false; } catch { return true; }
     }, reading);
     current();
-    retain?.(() => { optionsCurrent(); source.assertCurrent(); signal?.throwIfAborted(); });
+    retain?.(() => { source.assertCurrent(); signal?.throwIfAborted(); });
     return {
       status: 'drafted', recordId: STYLE_DRAFT_RECORD_ID, draft,
       ...(draft.provenance === 'classic' ? { provenance: 'classic', styleAssessment: 'not-evaluated' } : {}),

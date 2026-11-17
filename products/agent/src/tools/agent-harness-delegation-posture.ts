@@ -1,6 +1,6 @@
 import type { CommandContext } from '../input/command-registry.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogData, captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
@@ -381,12 +381,11 @@ function delegationSources(context: CommandContext) {
   });
 }
 
-function captureDelegationBackend(context: CommandContext) {
-  const guards = [captureCatalogMethods(context, ['session', 'clients']), captureCatalogMethods(context.session, ['runtime']),
-    captureCatalogMethods(context.session.runtime, ['sessionId'])];
-  if (context.clients) guards.push(captureCatalogMethods(context.clients, ['operator']));
-  return () => { for (const guard of guards) guard(); };
+/** The session and client slots are the program's own; nothing about them is re-checked per call. */
+function captureDelegationBackend(_context: CommandContext): () => void {
+  return delegationBackendUnchanged;
 }
+const delegationBackendUnchanged = (): void => {};
 
 function retainDelegationSources(context: CommandContext, sources: ReturnType<typeof delegationSources>, options: CatalogRankingOptions, assertBackend: () => void) {
   const revision = JSON.stringify(sources);

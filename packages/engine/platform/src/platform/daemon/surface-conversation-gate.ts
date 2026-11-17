@@ -203,11 +203,13 @@ async function gateOwnedSurfaceSpawn(
   if (!delivery.delivered) {
     store.markUndeliverable(proposal.id, delivery.reason);
     await failHeldInput(deps, origin, sessionId, 'The message was not acted on because the work proposal could not be shown. Send it again.', inputId);
+    await failFoldedInputs(deps, proposal, 'The message was not acted on because the work proposal could not be shown. Send it again.');
     return Response.json({ acknowledged: true, queued: false, outcome: 'work-proposal-undelivered' }, { status: 202 });
   }
   const delivered = store.markDelivered(proposal.id);
   if (!delivered || !store.listPending().includes(delivered)) {
     await failHeldInput(deps, origin, sessionId, 'The work proposal expired before it could be answered. Send the message again.', inputId);
+    await failFoldedInputs(deps, proposal, 'The work proposal expired before it could be answered. Send the message again.');
     return Response.json({ acknowledged: true, queued: false, outcome: 'work-proposal-expired' }, { status: 202 });
   }
 
@@ -261,14 +263,25 @@ async function failHeldInput(
   });
 }
 
-/** Close the row of a proposal that will not run (declined, or its agent could not start). */
+/** Close the rows of earlier requests folded into this proposal. */
+async function failFoldedInputs(
+  deps: Pick<ConversationGateDeps, 'sessionBroker'>,
+  proposal: WorkProposalRecord,
+  reason: string,
+): Promise<void> {
+  if (!proposal.sessionId) return;
+  for (const inputId of proposal.foldedInputIds ?? []) await failHeldInput(deps, null, proposal.sessionId, reason, inputId);
+}
+
+/** Close the rows of a proposal that will not run (declined, expired, or its agent could not start), folded requests included. */
 export async function settleUnstartedWork(
   deps: Pick<ConversationGateDeps, 'sessionBroker'>,
   proposal: WorkProposalRecord,
   reason: string,
 ): Promise<void> {
-  if (!proposal.sessionId || !proposal.inputId) return;
-  await failHeldInput(deps, null, proposal.sessionId, reason, proposal.inputId);
+  if (!proposal.sessionId) return;
+  if (proposal.inputId) await failHeldInput(deps, null, proposal.sessionId, reason, proposal.inputId);
+  await failFoldedInputs(deps, proposal, reason);
 }
 
 /** What the sender is told when the message waits for a free agent. */
@@ -413,7 +426,8 @@ export async function startAgreedWork(
     return;
   }
   if (proposal.sessionId) {
-    await deps.sessionBroker.bindAgent(proposal.sessionId, spawned.id, proposal.inputId).catch((error: unknown) => {
+    // Earlier requests folded into this proposal are answered by the same agent and settle with it.
+    await deps.sessionBroker.bindAgent(proposal.sessionId, spawned.id, proposal.inputId, proposal.foldedInputIds).catch((error: unknown) => {
       logger.warn('Agreed work session binding failed', { proposalId: proposal.id, error: summarizeError(error) });
     });
   }

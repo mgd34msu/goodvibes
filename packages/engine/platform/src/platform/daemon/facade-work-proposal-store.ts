@@ -9,9 +9,9 @@ import { summarizeError } from '../utils/error-display.js';
 
 /**
  * Construct the facade's existing proposal store without changing its policy.
- * A proposal nobody answers is dropped by the store; the broker closes the
- * held message behind it so the session does not read as having work waiting
- * forever.
+ * A proposal nobody answers (expired, or the oldest over the pending cap) is
+ * dropped by the store; the broker closes the held messages behind it, with
+ * the reason, so the session does not read as having work waiting forever.
  */
 export function createFacadeWorkProposalStore(
   config: Pick<ConfigManager, 'get' | 'getCategory' | 'getControlPlaneConfigDir'>,
@@ -26,11 +26,16 @@ export function createFacadeWorkProposalStore(
     storePath: join(config.getControlPlaneConfigDir(), 'work-proposals.json'),
     maxPending: () => readConversationGateConfig(config).maxPendingProposals,
     ...(now ? { now } : {}),
-    onUnanswered: (proposal) => {
+    onUnanswered: (proposal, reason) => {
+      // A folded request is not dropped: its held input travels on the newer
+      // proposal for the same conversation and is settled with that answer.
+      if (reason === 'folded') return;
       void settleUnstartedWork(
         { sessionBroker },
         proposal,
-        'The proposed work was not answered in time, so it was not started. Send the message again.',
+        reason === 'over-cap'
+          ? `The proposed work was not started: more proposals were waiting for an answer than conversationGate.maxPendingProposals (${readConversationGateConfig(config).maxPendingProposals}) allows, and this was the oldest. Send the message again.`
+          : 'The proposed work was not answered in time, so it was not started. Send the message again.',
       );
     },
   });

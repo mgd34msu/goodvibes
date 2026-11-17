@@ -778,8 +778,11 @@ export class SharedSessionBroker {
    * Make `agentId` the session's active agent and claim the input it was
    * started for: exactly `inputId` when given, else the oldest queued input. A
    * closed session is returned unchanged, it takes no new agent.
+   * `foldedInputIds` are earlier queued messages the same agent answers
+   * (requests folded into one agreed proposal): each is claimed for the agent
+   * and settles with it, while the reply is announced once, for `inputId`.
    */
-  async bindAgent(sessionId: string, agentId: string, inputId?: string): Promise<SharedSessionRecord | null> {
+  async bindAgent(sessionId: string, agentId: string, inputId?: string, foldedInputIds: readonly string[] = []): Promise<SharedSessionRecord | null> {
     await this.start();
     const session = this.sessions.get(sessionId);
     if (!session) return null;
@@ -791,8 +794,10 @@ export class SharedSessionBroker {
     this.sessions.set(sessionId, updated);
     this.spawnsInFlight.delete(sessionId);
     const claimed = claimNextQueuedSessionInput(this.sessionInputStore(), sessionId, agentId, inputId);
+    const alsoClaimed = foldedInputIds.flatMap((id) => claimNextQueuedSessionInput(this.sessionInputStore(), sessionId, agentId, id) ?? []);
     await this.persist();
     this.publishUpdate('session-agent-bound', updated);
+    for (const folded of alsoClaimed) this.publishInputLifecycleEvent('session-input-spawned', folded, { agentId });
     if (claimed) {
       this.publishInputLifecycleEvent('session-input-spawned', claimed, {
         agentId,

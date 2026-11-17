@@ -62,6 +62,11 @@ export interface WorkProposalRecord {
   readonly sessionId?: string | undefined;
   /** The queued session input holding the owner's message, so agreeing starts the work for that message and no other. */
   readonly inputId?: string | undefined;
+  /**
+   * The queued inputs of earlier requests folded into this proposal: they are
+   * answered, declined or closed together with `inputId`.
+   */
+  readonly foldedInputIds?: readonly string[] | undefined;
   /** The prompt that would be spawned if the owner agrees. */
   readonly task: string;
   /** One short line naming the work, for the proposal message. */
@@ -156,6 +161,9 @@ export function validateWorkProposal(value: unknown): WorkProposalRecord | null 
     ...(optionalString(value.userId) ? { userId: optionalString(value.userId) } : {}),
     ...(optionalString(value.sessionId) ? { sessionId: optionalString(value.sessionId) } : {}),
     ...(optionalString(value.inputId) ? { inputId: optionalString(value.inputId) } : {}),
+    ...(Array.isArray(value.foldedInputIds) && value.foldedInputIds.some((entry) => typeof entry === 'string' && entry.length > 0)
+      ? { foldedInputIds: value.foldedInputIds.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0) }
+      : {}),
     ...(Number.isSafeInteger(value.requestCount) && (value.requestCount as number) > 1 ? { requestCount: value.requestCount as number } : {}),
   };
 }
@@ -323,7 +331,9 @@ export class WorkProposalStore {
    * Create the proposal for a work request. When the same conversation already
    * has a pending proposal, the new request is folded into it: one new proposal
    * whose task lists both, with a fresh expiry and a fresh notice, and the older
-   * record is dropped (reported to `onUnanswered` as `folded`). Two pending
+   * record is dropped (reported to `onUnanswered` as `folded`). The older
+   * record's held inputs travel on the new one (`foldedInputIds`), so they are
+   * settled with its answer instead of being closed as unanswered. Two pending
    * proposals on one source would leave every reply ambiguous.
    */
   create(input: CreateWorkProposalInput): WorkProposalRecord {
@@ -338,6 +348,7 @@ export class WorkProposalStore {
       logger.info('Work proposal folded into a newer request from the same conversation', { proposalId: earlier.id, surface: earlier.surfaceKind });
     }
     const requestCount = (earlier?.requestCount ?? (earlier ? 1 : 0)) + 1;
+    const foldedInputIds = earlier ? [...(earlier.foldedInputIds ?? []), ...(earlier.inputId ? [earlier.inputId] : [])] : [];
     const record: WorkProposalRecord = {
       id: `wp_${randomUUID()}`,
       createdAt,
@@ -357,6 +368,7 @@ export class WorkProposalStore {
       ...(input.userId ? { userId: input.userId } : {}),
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
       ...(input.inputId ? { inputId: input.inputId } : {}),
+      ...(foldedInputIds.length > 0 ? { foldedInputIds } : {}),
     };
     this.proposals.set(record.id, record);
     this.ensureSweep();

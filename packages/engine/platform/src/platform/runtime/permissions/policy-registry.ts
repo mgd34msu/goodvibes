@@ -2,11 +2,12 @@
  * Policy-as-Code registry.
  *
  * Manages versioned policy bundles with promote/rollback semantics.
- * Enforces the rule that no bundle may move to enforcement without
- * prior simulation evidence and a passing divergence gate.
+ * Enforces the rule that no bundle moves to enforcement before the operator
+ * has seen what it changes: the rule diff and the recorded calls it decides
+ * differently (`/policy simulate`), confirmed by promoting.
  *
  * Bundle lifecycle (declared once in `policyBundleLifecycle` below):
- *   loaded → simulating → promoting (gate check) → active (enforced)
+ *   loaded → simulating → promoting (impact shown) → active (enforced)
  *   A failed simulation returns the candidate to `loaded`; a candidate with
  *   evidence can be simulated again. An active bundle becomes `superseded`
  *   when another is promoted (and can be restored by rollback) or
@@ -22,8 +23,8 @@ import type { PolicyRule } from './types.js';
 import type { SignedPolicyBundle } from './policy-signer.js';
 import type { PolicyBundlePayload, BundleProvenance, PolicyLoadResult, PolicyLoaderOptions } from './policy-loader.js';
 import { loadPolicyBundle } from './policy-loader.js';
-import type { DivergenceReport, SimulationMode } from './types.js';
-import type { EnforceGateResult } from './divergence-dashboard.js';
+import type { SimulationMode } from './types.js';
+import type { PolicyImpact } from './policy-impact.js';
 import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 import { revisionSource, type RevisionSource } from '../../utils/revision.js';
 import { createHash } from 'node:crypto';
@@ -78,10 +79,8 @@ export interface PolicyBundleVersion {
   activatedAt?: string | undefined;
   /** ISO 8601 timestamp when this version was rolled back, if applicable. */
   rolledBackAt?: string | undefined;
-  /** Simulation report collected before promotion, if any. */
-  simulationReport?: DivergenceReport | undefined;
-  /** The gate result that was evaluated at promotion time, if any. */
-  gateResult?: EnforceGateResult | undefined;
+  /** What the candidate would decide differently on this installation's recorded calls, from `/policy simulate`. */
+  impact?: PolicyImpact | undefined;
 }
 
 /**
@@ -110,8 +109,8 @@ export interface PolicyDiffResult {
 export interface PromoteResult {
   /** Whether the promotion succeeded. */
   ok: boolean;
-  /** The gate result evaluated at promotion time. */
-  gate?: EnforceGateResult | undefined;
+  /** The impact the operator confirmed. */
+  impact?: PolicyImpact | undefined;
   /** Human-readable explanation when promotion is blocked. */
   error?: string | undefined;
   /** The bundle that was promoted, if successful. */
@@ -168,9 +167,9 @@ export interface PolicyRegistryConfig {
  * PolicyRegistry, Versioned policy bundle manager.
  *
  * Maintains the full bundle lifecycle: loaded → simulating → promoting → active.
- * Enforces that promotion to `active` (enforcement mode) requires:
- *   1. A simulation report to have been attached (evidence of simulation).
- *   2. The divergence gate to be passing (rate below threshold).
+ * Enforces that promotion to `active` (enforcement mode) requires the
+ * candidate's impact on this installation's recorded calls to have been
+ * attached and shown.
  *
  * Usage:
  * ```ts
@@ -179,10 +178,10 @@ export interface PolicyRegistryConfig {
  * // Load a new candidate bundle
  * const loadResult = registry.loadCandidate(signedBundle);
  *
- * // After simulation, attach the report
- * registry.attachSimulationReport(divergenceReport, gateResult);
+ * // After review, attach what it would change
+ * registry.attachImpact(policyImpact({ currentRules, candidateRules, projectRoot, calls }));
  *
- * // Promote when gate passes
+ * // Promote: the operator confirms that list
  * const promoteResult = registry.promote();
  *
  * // Rollback if something goes wrong
@@ -256,7 +255,7 @@ export class PolicyRegistry {
       return false;
     }
     this._publicationRevision++;
-    this._candidate = { ...this._candidate, state: 'simulating', simulationReport: undefined, gateResult: undefined };
+    this._candidate = { ...this._candidate, state: 'simulating', impact: undefined };
     return true;
   }
 
@@ -288,29 +287,15 @@ export class PolicyRegistry {
   }
 
   /**
-   * attachSimulationReport, Attach divergence report and gate result to candidate.
-   *
-   * Advances the candidate to `promoting` state, which is a prerequisite for
-   * calling `promote()`.
-   *
-   * @param report    , The divergence report from the simulation run.
-   * @param gateResult, The gate evaluation at report time.
-   * @returns true if the evidence was attached.
+   * Attach what the candidate would change (the recorded calls it decides
+   * differently) and move it to `promoting`, the state promotion requires.
    */
-  public attachSimulationReport(
-    report: DivergenceReport,
-    gateResult: EnforceGateResult,
-  ): boolean {
+  public attachImpact(impact: PolicyImpact): boolean {
     if (!this._candidate || this._candidate.state !== 'simulating') {
       return false;
     }
     this._publicationRevision++;
-    this._candidate = {
-      ...this._candidate,
-      state: 'promoting',
-      simulationReport: report,
-      gateResult,
-    };
+    this._candidate = { ...this._candidate, state: 'promoting', impact };
     return true;
   }
 
@@ -319,15 +304,14 @@ export class PolicyRegistry {
   /**
    * promote, Promote the candidate bundle to active enforcement.
    *
-   * Blocked unless:
-   *   - A candidate exists in `promoting` state (simulation evidence attached).
-   *   - The attached gate result is `passing`.
+   * Requires a candidate in `promoting` state: `/policy simulate` showed the
+   * operator the rule diff and the recorded calls it decides differently, and
+   * the operator confirms that list by promoting. There is no threshold: a
+   * bundle exists to decide differently.
    *
    * On success, the previous active bundle moves to history.
-   *
-   * @param force, Skip gate check. Use only for testing; not for production use.
    */
-  public promote(force = false): PromoteResult {
+  public promote(): PromoteResult {
     if (!this._candidate) {
       return { ok: false, error: 'No candidate bundle loaded.' };
     }
@@ -336,7 +320,7 @@ export class PolicyRegistry {
       return {
         ok: false,
         error:
-          'Candidate has not been simulated. Run `/policy simulate` first to collect divergence evidence.',
+          'Candidate has not been reviewed. Run `/policy simulate` first to see which recorded calls it would decide differently.',
       };
     }
 
@@ -353,30 +337,7 @@ export class PolicyRegistry {
       return { ok: false, error: `${check.reason}.` };
     }
 
-    const gateResult = this._candidate.gateResult;
-    if (!gateResult) {
-      throw new Error(
-        'Invariant violation: candidate is in "promoting" state but gateResult is missing. ' +
-        'attachSimulationReport() must be called before promote().',
-      );
-    }
-
-    if (!force && gateResult.status === 'blocked') {
-      const rateStr = gateResult.divergenceRate !== undefined
-        ? `${(gateResult.divergenceRate * 100).toFixed(1)}%`
-        : 'unknown';
-      return {
-        ok: false,
-        gate: gateResult,
-        error:
-          `Promotion blocked: divergence gate is "${gateResult.status}" ` +
-          `(rate ${rateStr} exceeds threshold ` +
-          `${(gateResult.threshold * 100).toFixed(1)}%). ` +
-          `Change the candidate's rules and load it again, run \`/policy simulate\` again, ` +
-          `or promote with --force to override the gate.`,
-      };
-    }
-
+    const impact = this._candidate.impact;
     const now = new Date().toISOString();
 
     // Archive the current active bundle; rollback can restore it.
@@ -397,7 +358,7 @@ export class PolicyRegistry {
 
     return {
       ok: true,
-      gate: gateResult,
+      ...(impact ? { impact } : {}),
       bundleId: this._current.bundle.bundleId,
       ...(recorded ? { notice: recorded } : {}),
     };

@@ -99,7 +99,7 @@ export const CATEGORY_INFO: Record<SettingsCategory, string> = {
   notifications:
     'Adaptive notification-burst suppression: the observation window, trip threshold, and cooldown that collapse a rapid run of same-domain notifications to panel-only. Critical/milestone/alert notifications are always exempt.',
   policy:
-    'Policy-as-code bundle loading: where the policy registry loads its initial bundle from at startup, and the file path when loading from disk. A loaded bundle is a candidate subject to the divergence gate before promotion.',
+    'Policy-as-code bundle loading: where the policy registry loads its initial bundle from at startup, and the file path when loading from disk. A loaded bundle is a candidate: /policy simulate shows the recorded calls it would decide differently, and /policy promote --yes enforces it.',
   fetch:
     'Fetch-tool response sanitization: the default sanitize mode, and default trusted/blocked host lists layered under any per-call overrides. The built-in SSRF-risk block applies independently.',
   security:

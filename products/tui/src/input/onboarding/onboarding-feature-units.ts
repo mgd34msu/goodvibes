@@ -150,7 +150,7 @@ export const FEATURE_ONBOARDING_SECTIONS: readonly FeatureSection[] = [
       {
         flagId: 'policy-as-code',
         label: 'Policy-as-code',
-        hint: 'Versioned policy bundle registry with promote/rollback and a divergence gate. Exposes /policy commands.',
+        hint: 'Versioned policy bundle registry with promote/rollback; before promoting, /policy simulate shows the recorded calls a bundle would decide differently. Exposes /policy commands.',
         subOptions: [
           {
             key: 'source',

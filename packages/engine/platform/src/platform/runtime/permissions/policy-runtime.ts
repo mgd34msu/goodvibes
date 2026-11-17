@@ -67,6 +67,11 @@ export class PolicyRuntimeState {
     return () => { own(); registry(); dashboard?.(); };
   }
 
+  /** The calls this installation's permission audit recorded, newest first: the evidence a candidate bundle is reviewed against. */
+  public getRecentPermissionAudit(): readonly PermissionAuditEntry[] {
+    return [...this._recentPermissionAudit];
+  }
+
   public getRegistry(): PolicyRegistry {
     return this._registry;
   }

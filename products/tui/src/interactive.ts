@@ -698,7 +698,6 @@ async function main(prepared: PreparedShellCliRuntime) {
     if (input.prompt.length > 0 || text.length === 0) return;
     input.prompt = text;
     input.cursorPos = text.length;
-    input.syncFeedContextMutableFields();
     render();
   };
   commandContext.jumpToBookmark = jumpToBookmark;

@@ -53,8 +53,8 @@ import type { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runti
  * on every keystroke. Allocated once at InputHandler construction; mutated in place
  * per-feed to avoid per-keystroke GC pressure from ~80-field object allocation.
  *
- * **Mutable per-feed** (synced from handler at the top of every feed() call, and
- * updated inside action closures via syncFeedContextMutableFields):
+ * **Mutable per-feed** (read and written on the handler itself, so an action closure's
+ * edit is seen by every route at once):
  *   - `prompt`, `cursorPos`, current text buffer state
  *   - `commandMode`, `indicatorFocused`, focus-mode flags
  *   - `helpOverlayActive`, `helpScrollOffset`, help overlay visibility and scroll
@@ -179,7 +179,6 @@ export interface InputFeedContext {
 
 export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
   surfaceModalTokens: 'all',
-  guardModalWrites: false,
   pairing: (context, token) => context.handleHostPairingToken?.(token) ?? false,
   modal: (context, token, { history }) => handleModalTokenRoutes(
     {

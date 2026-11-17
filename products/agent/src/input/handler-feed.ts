@@ -52,8 +52,8 @@ import type { FocusTracker } from '@/runtime/index.ts';
  * on every keystroke. Allocated once at InputHandler construction; mutated in place
  * per-feed to avoid per-keystroke GC pressure from ~80-field object allocation.
  *
- * **Mutable per-feed** (synced from handler at the top of every feed() call, and
- * updated inside action closures via syncFeedContextMutableFields):
+ * **Mutable per-feed** (read and written on the handler itself, so an action closure's
+ * edit is seen by every route at once):
  *   - `prompt`, `cursorPos`, current text buffer state
  *   - `commandMode`, `indicatorFocused`, focus-mode flags
  *   - `helpOverlayActive`, `helpScrollOffset`, help overlay visibility and scroll
@@ -193,9 +193,6 @@ export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
   // Every token goes to an open kit modal, mouse included: the modals ignore a mouse
   // token, so a click or wheel over one never reaches the transcript underneath.
   surfaceModalTokens: 'all',
-  // Command handlers set the overlay flags on the handler itself mid-feed; the pipeline
-  // must not restore its older copy over them.
-  guardModalWrites: true,
   pairing: (context, token) => context.handleSetupPairingToken?.(token) ?? false,
   modal: (context, token, { history }) => handleModalTokenRoutes(
     {

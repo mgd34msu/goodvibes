@@ -271,7 +271,6 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     if (hasArgs) input.autocomplete?.reset();
     else input.autocomplete?.update(commandQuery);
     input.ensureInputCursorVisible();
-    input.syncFeedContextMutableFields();
     render();
     return true;
   };
@@ -287,7 +286,6 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     input.filePicker.open(insertPos, injectMode);
     if (query.length > 0) input.filePicker.setQuery(query);
     input.ensureInputCursorVisible();
-    input.syncFeedContextMutableFields();
     render();
     return true;
   };

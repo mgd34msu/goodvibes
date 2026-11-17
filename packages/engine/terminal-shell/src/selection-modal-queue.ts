@@ -31,8 +31,6 @@ export interface SelectionQueueHost {
   readonly selectionModal: Pick<SelectionModal, 'active' | 'open' | 'close'>;
   /** Assigns InputHandler.selectionCallback (the live resolution slot). */
   setSelectionCallback(callback: SelectionModalCallback | null): void;
-  /** Mirrors the callback into the in-flight feed context, when a feed() call is in progress (no-op otherwise). */
-  syncFeedSelectionCallback(callback: SelectionModalCallback | null): void;
   requestRender(): void;
 }
 
@@ -81,7 +79,6 @@ export class SelectionModalQueue {
       if (this.active === request) {
         this.active = undefined;
         this.host.setSelectionCallback(null);
-        this.host.syncFeedSelectionCallback(null);
         this.host.selectionModal.close();
       }
       try { request.callback(null); }
@@ -120,7 +117,6 @@ export class SelectionModalQueue {
     const errors: unknown[] = [];
     for (const cleanup of [
       () => this.host.setSelectionCallback(null),
-      () => this.host.syncFeedSelectionCallback(null),
       () => this.host.selectionModal.close(),
       () => active?.callback(null),
       () => this.clear(),
@@ -147,7 +143,6 @@ export class SelectionModalQueue {
     this.host.selectionModal.open(request.title, request.items, request.opts);
     if (this.active !== request) return;
     this.host.setSelectionCallback(wrapped);
-    this.host.syncFeedSelectionCallback(wrapped);
     this.host.requestRender();
   }
 
@@ -167,7 +162,6 @@ export class SelectionModalQueue {
 export interface SelectionQueueOwner {
   readonly selectionModal: Pick<SelectionModal, 'active' | 'open' | 'close'>;
   selectionCallback: SelectionModalCallback | null;
-  syncFeedSelectionCallback: ((callback: SelectionModalCallback | null) => void) | null;
   requestRender(): void;
   exitApp: () => void;
 }
@@ -183,7 +177,6 @@ export function attachSelectionModalQueue(owner: SelectionQueueOwner): Selection
   const queue = new SelectionModalQueue({
     selectionModal: owner.selectionModal,
     setSelectionCallback: (callback) => { owner.selectionCallback = callback; },
-    syncFeedSelectionCallback: (callback) => { owner.syncFeedSelectionCallback?.(callback); },
     requestRender: () => owner.requestRender(),
   });
   const suppliedExitApp = owner.exitApp;

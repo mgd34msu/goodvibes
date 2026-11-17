@@ -73,8 +73,6 @@ function adopt<Key extends MutableKey>(
 export interface FeedPipelinePorts<Context extends FeedPipelineContext> {
   readonly pairing?: ((context: Context, token: InputToken) => boolean) | undefined;
   readonly surfaceModalTokens: 'all' | 'text-key';
-  /** No longer read: every route follows the one write-back rule. Products still pass it until their feed files drop it. */
-  readonly guardModalWrites?: boolean | undefined;
   readonly modal: (context: Context, token: InputToken, env: FeedEnvironment) => ModalResult;
   readonly workTree: (context: Context, token: InputToken, env: FeedEnvironment) => boolean;
   readonly shortcut: (context: Context, token: KeyToken, env: FeedEnvironment) => PromptResult;

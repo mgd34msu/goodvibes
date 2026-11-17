@@ -183,7 +183,6 @@ export class InputHandler extends TerminalInputHandlerState {
       (this.profilePickerModal.active && this.profilePickerModal.deleteConfirmationTarget !== null)
     );
   }
-  public syncFeedSelectionCallback: ((callback: SelectionModalCallback | null) => void) | null = null;
   /** Time of last [COPIED] block feedback, for brief display. */
 
   /** Pasted images: maps marker IDs to base64 image data. */
@@ -305,9 +304,6 @@ export class InputHandler extends TerminalInputHandlerState {
   public promptEdit(): { readonly prompt: string; readonly cursorPos: number } {
     return { prompt: this.prompt, cursorPos: this.cursorPos };
   }
-
-  /** The feed context reads the composer fields from this handler, so there is nothing to copy; callers that still call this can drop the call. */
-  public syncFeedContextMutableFields(): void {}
 
   /** Wire in the InputHistory instance. Optional; disables history navigation if unset. */
   public setHistory(history: InputHistory): void {

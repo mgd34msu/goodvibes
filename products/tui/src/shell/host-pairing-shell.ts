@@ -27,7 +27,7 @@ export function wireHostPairingShell(options: {
     setPrompt: text => {
       input.prompt = text; input.cursorPos = text.length; input.commandMode = false; input.inputScrollTop = 0;
       input.ensureInputCursorVisible();
-      input.autocomplete?.reset(); input.syncFeedContextMutableFields(); render();
+      input.autocomplete?.reset(); render();
     },
     // No modal open but, at most, command mode: the /pair line that started this is still in it.
     canPresent: () => options.canPresent() && !input.concealedInput

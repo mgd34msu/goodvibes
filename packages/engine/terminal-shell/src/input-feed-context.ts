@@ -117,26 +117,6 @@ export function buildInitialFeedContext<Mutable extends FeedContextMutableInit, 
   for (const key of MUTABLE_KEYS) bindOwnerField(context, owner, key);
   return context as FeedContextMutableInit & typeof context;
 }
-/** Copies the composer fields between two holders. The feed context no longer
- * needs it (its fields are the handler's); kept only for the products'
- * feed-context factories that still re-export it. */
-export function syncFeedContextMutableFields(fields: FeedContextMutableInit, ctx: FeedContextMutableInit): void {
-  ctx.prompt = fields.prompt;
-  ctx.cursorPos = fields.cursorPos;
-  ctx.inputScrollTop = fields.inputScrollTop;
-  ctx.commandMode = fields.commandMode;
-  ctx.indicatorFocused = fields.indicatorFocused;
-  ctx.helpOverlayActive = fields.helpOverlayActive;
-  ctx.helpScrollOffset = fields.helpScrollOffset;
-  ctx.shortcutsOverlayActive = fields.shortcutsOverlayActive;
-  ctx.shortcutsScrollOffset = fields.shortcutsScrollOffset;
-  ctx.selectionCallback = fields.selectionCallback;
-  ctx.nextPasteId = fields.nextPasteId;
-  ctx.nextImageId = fields.nextImageId;
-  ctx.mouseDownRow = fields.mouseDownRow;
-  ctx.mouseDownCol = fields.mouseDownCol;
-  ctx.contentWidth = fields.contentWidth;
-}
 
 const STABLE_HOST_KEYS = [
   'selection',

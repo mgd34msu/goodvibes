@@ -167,7 +167,6 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
       (this.profilePickerModal.active && this.profilePickerModal.deleteConfirmationTarget !== null)
     );
   }
-  public syncFeedSelectionCallback: ((callback: SelectionModalCallback | null) => void) | null = null;
   /** FIFO queue for overlapping openSelection() calls, see selection-modal-queue.ts. */
   private selectionQueue!: SelectionModalQueue;
 
@@ -301,9 +300,6 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
       },
     );
   }
-
-  /** The feed context reads the composer fields from this handler, so there is nothing to copy; callers that still call this can drop the call. */
-  public syncFeedContextMutableFields(): void {}
 
   /** Wire in the InputHistory instance. Optional; disables history navigation if unset. */
   public setHistory(history: InputHistory): void {

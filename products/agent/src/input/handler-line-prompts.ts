@@ -38,7 +38,6 @@ export interface LinePromptHandler {
   concealedInput: ConcealedInputRequest | null;
   plainLineInput: PlainLineInputRequest | null;
   requestRender: () => void;
-  syncFeedContextMutableFields: () => void;
 }
 
 /**
@@ -51,14 +50,12 @@ export interface LinePromptHandler {
 export function beginConcealedInputForHandler(handler: LinePromptHandler, request: ConcealedInputRequest): void {
   cancelPlainLineInputFor(handler);
   beginConcealedInputFor(handler, request);
-  handler.syncFeedContextMutableFields();
 }
 
 /** Begin one line of ORDINARY, echoed entry, cancelling any pending masked prompt first. */
 export function beginPlainInputForHandler(handler: LinePromptHandler, request: PlainLineInputRequest): void {
   cancelConcealedInputFor(handler);
   beginPlainLineInputFor(handler, request);
-  handler.syncFeedContextMutableFields();
 }
 
 /**
@@ -72,15 +69,7 @@ export function beginPlainInputForHandler(handler: LinePromptHandler, request: P
  * that.
  */
 export function submitLinePromptForHandler(handler: LinePromptHandler, value: string): boolean {
-  if (submitConcealedInputFor(handler, value)) {
-    handler.syncFeedContextMutableFields();
-    return true;
-  }
-  if (submitPlainLineInputFor(handler, value)) {
-    handler.syncFeedContextMutableFields();
-    return true;
-  }
-  return false;
+  return submitConcealedInputFor(handler, value) || submitPlainLineInputFor(handler, value);
 }
 
 /**
@@ -92,7 +81,5 @@ export function submitLinePromptForHandler(handler: LinePromptHandler, value: st
  * silently in masked mode with no way out.
  */
 export function cancelLinePromptForHandler(handler: LinePromptHandler): boolean {
-  const cancelled = cancelConcealedInputFor(handler) || cancelPlainLineInputFor(handler);
-  if (cancelled) handler.syncFeedContextMutableFields();
-  return cancelled;
+  return cancelConcealedInputFor(handler) || cancelPlainLineInputFor(handler);
 }

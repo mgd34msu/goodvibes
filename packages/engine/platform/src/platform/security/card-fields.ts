@@ -92,12 +92,6 @@ const NON_CARD_INPUT_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Controls a person types digits into. With no decision model only these keep
- * their value back; every other control reports its value as usual.
- */
-const DIGIT_ENTRY_INPUT_TYPES: ReadonlySet<string> = new Set(['', 'text', 'tel', 'number', 'password', 'month']);
-
-/**
  * What a snapshot does with one control's value:
  * - `reported`: the value is shown.
  * - `card-field`: a payment field; the value is never reported.
@@ -157,7 +151,7 @@ export async function classifyCardFields(controls: readonly FormControlDescripto
   // is a far worse outcome than misclassifying one control.
   const text = (value: unknown): string => (typeof value === 'string' ? value : '');
   const decisions: CardFieldDecision[] = new Array<CardFieldDecision>(controls.length).fill('reported');
-  const pending = new Map<string, { readonly view: CardFieldView; readonly digitEntry: boolean; readonly indexes: number[] }>();
+  const pending = new Map<string, { readonly view: CardFieldView; readonly indexes: number[] }>();
   controls.forEach((control, index) => {
     const tag = text(control?.tag).toLowerCase();
     // Only these elements carry a value a snapshot could report.
@@ -179,7 +173,7 @@ export async function classifyCardFields(controls: readonly FormControlDescripto
     }
     const entry = pending.get(key);
     if (entry) { entry.indexes.push(index); return; }
-    pending.set(key, { view, digitEntry: tag === 'textarea' || (tag === 'input' && DIGIT_ENTRY_INPUT_TYPES.has(type)), indexes: [index] });
+    pending.set(key, { view, indexes: [index] });
   });
   if (pending.size === 0) return decisions;
 
@@ -215,10 +209,12 @@ export async function classifyCardFields(controls: readonly FormControlDescripto
     return decisions;
   }, () => {
     current();
-    // No semantic assessment: only controls a person types digits into keep
-    // their value back, and each says why. Selectors, labels, checked state and
-    // owner-authorized actions remain usable.
-    for (const [, entry] of entries) if (entry.digitEntry) for (const index of entry.indexes) decisions[index] = 'no-decision-model';
+    // No semantic assessment: every control code could not settle keeps its
+    // value back (an unknown or misspelt input type is a text box to a browser,
+    // and a select can be an expiry), and each says why. Only input types that
+    // cannot hold card material report their value. Selectors, labels, checked
+    // state and owner-authorized actions remain usable.
+    for (const [, entry] of entries) for (const index of entry.indexes) decisions[index] = 'no-decision-model';
     return decisions;
   });
 }

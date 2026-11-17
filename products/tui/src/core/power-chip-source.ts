@@ -12,8 +12,9 @@
 // adopted-daemon wire is plain HTTP (no realtime event bridge), so the chip
 // POLLS power.status.get on an unref'd interval and renders the DAEMON's
 // state, a webui-originated toggle on the daemon lights the TUI chip within
-// one poll, and a TUI toggle (forwarded over power.keepAwake.set by
-// power-keepawake-remote.ts) lights the webui's the same way. While the
+// one poll, and a TUI toggle (forwarded over power.keepAwake.set by the
+// engine's one forwarder, platform/power/keep-awake-remote.ts, wired in
+// interactive.ts) lights the webui's the same way. While the
 // daemon's state is unknown (fetch pending/unreachable) the local projection
 // is served rather than a fabricated one.
 // ---------------------------------------------------------------------------

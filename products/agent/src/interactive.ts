@@ -65,7 +65,8 @@ import { getTerminalSize } from './shell/terminal-size.ts';
 import { buildShellSessionContinuityHints } from './shell/session-continuity-hints.ts';
 import { wireShellUiOpeners } from './shell/ui-openers.ts';
 import { deriveComposerState } from './core/composer-state.ts';
-import { describePowerStatus } from './renderer/power-status.ts';
+import { createPowerNoteSource } from './runtime/power-note-source.ts';
+import type { PowerState } from '@goodvibes-jev/engine/platform/platform/power';
 import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { installFocusModeExitGuard, markFocusModeEnabled, wrapRequestPermissionWithApprovalAlert } from './shell/terminal-focus-mode.ts';
 import { createTerminalLifecycle, installTerminalExitGuards, makeFileEditorOpener } from '@goodvibes-jev/engine/terminal-shell';
@@ -365,6 +366,14 @@ async function main(prepared: PreparedShellCliRuntime) {
   unsubs.push(() => commandContext.nativeWorkLedger?.dispose());
   unsubs.push(() => shellPassthrough.cancelRunning());
   unsubs.push(() => input.settingsModal.close());
+  // The footer's power note: the adopted daemon's power.status.get (the daemon owns keep-awake), else this process's manager.
+  const powerNote = createPowerNoteSource({
+    local: () => ctx.services.powerManager.getState(),
+    isAdopted: () => ctx.services.memorySpineClient.active,
+    fetchDaemon: async () => await automationHost.invoke('power.status.get', {}) as unknown as PowerState,
+    render: () => render(),
+  });
+  unsubs.push(() => powerNote.stop());
   // The work tree's live facts: call/turn timings, agent lanes, the call a permission prompt holds, fold persistence (work-tree-wiring.ts).
   const workTreeWiring = wireWorkTree({
     conversation,
@@ -1125,7 +1134,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       // The footer and status report the same effective execution mode.
       dangerMode: readApprovalPostureFromConfig(configManager).automaticApprovals,
       executionMode: readApprovalPostureFromConfig(configManager).mode,
-      powerNote: describePowerStatus(ctx.services.powerManager.getState()) ?? undefined, // see power-status.ts
+      powerNote: powerNote.get() ?? undefined, // the daemon's state while one is adopted (runtime/power-note-source.ts)
       lastInputTokens: orchestrator.lastInputTokens,
       contextUsageAvailable: isConversationContextAvailable(orchestrator),
       commandArgsHint,

@@ -139,7 +139,7 @@ export async function executeInspectMode(
 
       case 'api_sync': {
         const framework: ApiFramework = (input.framework ?? 'auto') as ApiFramework;
-        return createInspectSuccess(await inspectApiSync(projectRoot, framework, current), format, input.mode);
+        return createInspectSuccess(await inspectApiSync(projectRoot, framework, current, signal), format, input.mode);
       }
 
       case 'scaffold': {

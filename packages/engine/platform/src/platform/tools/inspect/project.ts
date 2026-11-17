@@ -518,11 +518,12 @@ async function findFetchCalls(root: string, files: readonly string[], unavailabl
   return calls;
 }
 
-export async function inspectApiSync(root: string, framework: ApiFramework, current?: () => void): Promise<ApiSyncResult> {
+export async function inspectApiSync(root: string, framework: ApiFramework, current?: () => void, signal?: AbortSignal): Promise<ApiSyncResult> {
   const unavailable: string[] = [];
   const notes: string[] = [];
   const files = await walkSourceFiles(root, notes, current);
-  const [routes, fetchCalls] = await Promise.all([inspectApi(root, framework, unavailable, notes, current, files), findFetchCalls(root, files, unavailable, current)]);
+  // The call's signal stops the per-file route readings in flight when the call is cancelled.
+  const [routes, fetchCalls] = await Promise.all([inspectApi(root, framework, unavailable, notes, current, files, signal), findFetchCalls(root, files, unavailable, current)]);
 
   const normalizedRoutes = routes.map((r) => ({
     ...r,

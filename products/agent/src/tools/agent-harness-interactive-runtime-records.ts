@@ -1,498 +1,168 @@
-import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { types as nodeTypes } from 'node:util';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogData, captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { capturePersonalOpsData, assertPersonalOpsDataCurrent } from './agent-harness-personal-ops-source.ts';
-import { captureNativeReadModelObservation } from './agent-harness-autonomy-live-records.ts';
-import { modelReadingServicePath, modelReadingOptions, withModelReadingSource } from './agent-harness-model-reading-source.ts';
-import { readRuntimeBoolean, readRuntimeKind, readRuntimeRoute, readRuntimeSchema, readRuntimeStatus, type InteractiveRuntimeEvidence } from './agent-harness-interactive-runtime-readings.ts';
+import type { BackgroundProcess, ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import { harnessPreviewCuts, redactedHarnessPreview } from './agent-harness-secret-redaction.ts';
-import { readRecord, readString } from './agent-harness-model-routing-utils.ts';
+import { redactedHarnessPreview } from './agent-harness-secret-redaction.ts';
+import { sudoExecutionPosture } from './agent-harness-sudo-posture.ts';
 
-export type AgentHarnessInteractiveRuntimeKind = 'process-output' | 'pty-session' | 'sudo-mediation' | 'browser-desktop-receipt' | 'unassessed';
-export type AgentHarnessInteractiveRuntimeStatus = 'ready' | 'running' | 'completed' | 'blocked' | 'failed' | 'attention' | 'unknown';
-
-export interface AgentHarnessInteractiveRuntimeCertification {
-  readonly schemaStatus: 'certified' | 'legacy' | 'unassessed';
-  readonly operationProvenance?: 'classic';
-  readonly semanticAssessment?: 'not-evaluated' | 'partial';
-  readonly rawSecretReturned?: boolean | null;
-  readonly rawValueReturned?: boolean | null;
-  readonly schemaVersion?: string;
-  readonly publicationGuarantee?: string;
-  readonly publisher?: string;
-  readonly provenance?: readonly string[];
-  readonly receiptId?: string;
-  readonly receiptRoute?: string;
-  readonly missingSignals: readonly string[];
-  readonly policy: string;
-}
+/**
+ * Interactive runtime, read from the owners that exist in this process: the
+ * process manager (tracked processes, their status and output) and the sudo
+ * posture. Kind, status and routes are known by construction, so nothing is
+ * interpreted. No PTY session owner exists; that row says so.
+ */
+export type AgentHarnessInteractiveRuntimeKind = 'process-output' | 'pty-session' | 'sudo-mediation';
+export type AgentHarnessInteractiveRuntimeStatus = 'running' | 'completed' | 'failed';
 
 export interface AgentHarnessInteractiveRuntimeRoute {
-  readonly id: string;
+  readonly id: 'inspect' | 'log' | 'write' | 'kill';
   readonly label: string;
   readonly modelRoute: string;
-  readonly effect: 'read-only' | 'confirmed' | 'confirmed-admin';
+  readonly effect: 'read-only' | 'confirmed';
 }
 
 export interface AgentHarnessInteractiveRuntimeRecord {
   readonly id: string;
   readonly kind: AgentHarnessInteractiveRuntimeKind;
   readonly status: AgentHarnessInteractiveRuntimeStatus;
-  readonly source: string;
+  readonly source: 'process-manager';
   readonly label: string;
   readonly summary: string;
-  readonly processId?: string;
-  readonly sessionId?: string;
-  readonly pid?: number;
-  readonly command?: string;
-  readonly surface?: string;
-  readonly action?: string;
-  readonly receiptId?: string;
-  readonly outputChunks?: readonly Record<string, unknown>[];
-  /** Output chunks the publisher sent beyond the five shown here. */
-  readonly droppedChunks?: number;
+  readonly processId: string;
+  readonly pid: number;
+  readonly command: string;
+  readonly exitCode?: number | null;
+  readonly signal?: string;
+  /** The last few hundred characters of output, masked locally; `process action:"log"` reads more. */
+  readonly outputTail?: string;
   readonly routes: readonly AgentHarnessInteractiveRuntimeRoute[];
-  readonly updatedAt?: string;
-  readonly certification: AgentHarnessInteractiveRuntimeCertification;
+  readonly updatedAt: string;
 }
 
-function redactedPreview(value: unknown, limit = 180): string {
-  return redactedHarnessPreview(readString(value), limit);
-}
-
-function readNumber(value: unknown): number | undefined {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  return typeof parsed === 'number' && Number.isFinite(parsed) ? Math.trunc(parsed) : undefined;
-}
-
-function readTimestamp(value: unknown): string | undefined {
-  const raw = readString(value);
-  const parsed = raw ? Date.parse(raw) : typeof value === 'number' && Number.isFinite(value) ? value : NaN;
-  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : undefined;
-}
-
-function stringArray(value: unknown): readonly string[] {
-  if (Array.isArray(value)) return [...new Set(value.map((entry) => readString(entry)).filter(Boolean))].slice(0, 10);
-  const raw = readString(value);
-  return raw ? raw.split(',').map((entry) => entry.trim()).filter(Boolean).slice(0, 10) : [];
-}
-
-function firstString(records: readonly Readonly<Record<string, unknown>>[], keys: readonly string[]): string {
-  for (const record of records) {
-    for (const key of keys) {
-      const value = readString(record[key]);
-      if (value) return value;
-    }
-  }
-  return '';
-}
-
-function certificationRecords(record: Readonly<Record<string, unknown>>): readonly Readonly<Record<string, unknown>>[] {
-  return [
-    record,
-    readRecord(record.schema),
-    readRecord(record.contract),
-    readRecord(record.publication),
-    readRecord(record.receipt),
-    readRecord(record.certification),
-  ];
-}
-
-
-
-function routeValue(value: unknown): string {
-  const direct = readString(value);
-  if (direct) return direct;
-  const record = readRecord(value);
-  return readString(record.modelRoute) || readString(record.route) || readString(record.command) || readString(record.action) || readString(record.href) || readString(record.url);
-}
-
-
-
-function readId(record: Readonly<Record<string, unknown>>, kind: AgentHarnessInteractiveRuntimeKind): string {
-  return readString(record.id)
-    || readString(record.recordId)
-    || readString(record.processId)
-    || readString(record.sessionId)
-    || readString(record.receiptId)
-    || readString(record.contractId)
-    || `${kind}:${readString(record.sourceId) || readString(record.action) || 'published'}`;
-}
-
-async function routesFor(kind: AgentHarnessInteractiveRuntimeKind, evidence: InteractiveRuntimeEvidence, options: CatalogRankingOptions): Promise<readonly AgentHarnessInteractiveRuntimeRoute[]> {
-  const specs = {
-    inspect: { label: 'Inspect record', effect: 'read-only' }, log: { label: 'Read output', effect: 'read-only' },
-    write: { label: 'Write input', effect: 'confirmed' }, resize: { label: 'Resize session', effect: 'confirmed' },
-    close: { label: 'Close session', effect: 'confirmed' }, credential: { label: 'Mediated credential prompt', effect: 'confirmed-admin' },
-    execute: { label: kind === 'browser-desktop-receipt' ? 'Execute trusted control' : 'Execute route', effect: 'confirmed' },
-    receipt: { label: 'Inspect receipt', effect: 'read-only' },
-  } as const;
-  const routes: AgentHarnessInteractiveRuntimeRoute[] = [];
-  const containers: readonly { readonly path: readonly string[]; readonly value: Readonly<Record<string, unknown>> }[] = [
-    { path: [], value: evidence.record }, ...['routes', 'modelRoutes', 'actions', 'commands', 'links'].map(key => ({ path: [key], value: readRecord(evidence.record[key]) })),
-  ];
-  for (const container of containers) {
-    for (const [key, value] of Object.entries(container.value)) {
-      const role = await readRuntimeRoute({ ...evidence, key, value, routeContainerPath: container.path }, options);
-      options.signal?.throwIfAborted(); options.assertCurrent?.();
-      if (role === 'none') continue;
-      const published = routeValue(value);
-      if (!published) throw new ToolInputProjectionError('held');
-      // A route is published text shown as the thing to call: redact and bound it like every other field.
-      const modelRoute = redactedPreview(published, 240);
-      // Effects are a closed native mapping from the recorded role, never the publisher key.
-      const spec = specs[role];
-      routes.push({ id: role, label: spec.label, modelRoute, effect: spec.effect });
-    }
-  }
-  return routes;
-}
-
-async function outputChunks(evidence: InteractiveRuntimeEvidence, options: CatalogRankingOptions): Promise<{ readonly chunks: readonly Record<string, unknown>[]; readonly dropped: number }> {
-  const record = evidence.record;
-  const output = readRecord(record.output);
-  const rawChunks = Array.isArray(record.outputChunks) ? record.outputChunks
-    : Array.isArray(record.chunks) ? record.chunks
-    : Array.isArray(output.chunks) ? output.chunks
-    : [];
-  const chunks: Record<string, unknown>[] = [];
-  for (const [index, entry] of rawChunks.entries()) {
-    const chunk = readRecord(entry);
-    const rawText = readString(chunk.text ?? chunk.preview ?? chunk.data ?? chunk.content);
-    const text = redactedPreview(rawText, 600);
-    const cutHere = harnessPreviewCuts(rawText, 600);
-    const truncated = await readRuntimeBoolean(evidence, `outputChunks[${index}].truncated`, chunk.truncated, 'Whether this published output chunk omits output because it was truncated.', options);
-    if (text) chunks.push({
-      chunkId: readString(chunk.chunkId) || readString(chunk.id) || `${index + 1}`,
-      stream: readString(chunk.stream) || readString(chunk.channel) || 'stdout',
-      text,
-      chars: readNumber(chunk.chars) ?? text.length,
-      bytes: readNumber(chunk.bytes) ?? Buffer.byteLength(text),
-      // A clipped preview is truncated whatever the publisher claimed.
-      truncated: cutHere ? true : truncated === undefined ? (isClassicOperation() ? null : false) : truncated,
-      createdAt: readTimestamp(chunk.createdAt ?? chunk.timestamp),
-    });
-  }
-  if (chunks.length > 0) return { chunks: chunks.slice(0, 5), dropped: Math.max(0, chunks.length - 5) };
-  const tails = ['stdoutTail', 'stderrTail', 'stdout', 'stderr'].flatMap((key) => {
-    const rawText = readString(record[key] ?? output[key]);
-    const text = redactedPreview(rawText, 600);
-    const cutHere = harnessPreviewCuts(rawText, 600);
-    return text ? [{ chunkId: key, stream: key.includes('stderr') ? 'stderr' : 'stdout', text, chars: text.length, bytes: Buffer.byteLength(text), truncated: cutHere ? true : isClassicOperation() ? null : false }] : [];
-  });
-  return { chunks: tails.slice(0, 5), dropped: Math.max(0, tails.length - 5) };
-}
-
-async function certification(input: {
-  readonly record: Readonly<Record<string, unknown>>;
-  readonly source: string;
-  readonly kind: AgentHarnessInteractiveRuntimeKind;
-  readonly id: string;
-  readonly routes: readonly AgentHarnessInteractiveRuntimeRoute[];
-  readonly chunks: readonly Record<string, unknown>[];
-  readonly evidence: InteractiveRuntimeEvidence;
-  readonly options: CatalogRankingOptions;
-  readonly startedClassic: boolean;
-}): Promise<AgentHarnessInteractiveRuntimeCertification> {
-  const records = certificationRecords(input.record);
-  const status = await readRuntimeSchema(input.evidence, input.options);
-  const publicationGuarantee = firstString(records, ['publicationGuarantee', 'hostPublicationGuarantee', 'runtimePublicationGuarantee']);
-  const publisher = firstString(records, ['publisher', 'publisherId', 'daemonId', 'hostId']);
-  const provenance = [...new Set([
-    ...stringArray(input.record.provenance),
-    input.source ? `source ${input.source}` : '',
-    firstString(records, ['methodId']) ? `method ${firstString(records, ['methodId'])}` : '',
-    firstString(records, ['sourceTool']) ? `sourceTool ${firstString(records, ['sourceTool'])}` : '',
-  ].map((entry) => redactedPreview(entry, 180)).filter(Boolean))].slice(0, 8);
-  const receiptId = firstString(records, ['receiptId', 'operationReceiptId', 'commandReceiptId', 'sessionReceiptId']);
-  const hasRoute = (id: string) => input.routes.some((route) => route.id === id);
-  const rawSecretReturned = await readRuntimeBoolean(input.evidence, 'rawSecretReturned', input.record.rawSecretReturned, 'Whether the publisher returned raw secret material.', input.options);
-  const rawValueReturned = await readRuntimeBoolean(input.evidence, 'rawValueReturned', input.record.rawValueReturned, 'Whether the publisher returned raw credential values.', input.options);
-  const missingSignals = [
-    ...(status === 'unassessed' ? ['Runtime schema certification and route roles were not semantically assessed in Classic operation.']
-      : status === 'certified' ? [] : [`Certified ${input.kind} schema is not published.`]),
-    ...(input.id ? [] : [`Durable ${input.kind} id is not published.`]),
-    ...(publicationGuarantee ? [] : [`${input.kind} publication guarantee is not published.`]),
-    ...(publisher ? [] : [`${input.kind} publisher is not published.`]),
-    ...(provenance.length > 0 ? [] : [`${input.kind} provenance is not published.`]),
-    ...(input.kind === 'process-output' && input.chunks.length === 0 && !hasRoute('log') ? ['Live process output chunks or log route are not published.'] : []),
-    ...(input.kind === 'pty-session' && (!hasRoute('write') || (!hasRoute('log') && input.chunks.length === 0)) ? ['PTY input and output routes are not both published.'] : []),
-    ...(input.kind === 'sudo-mediation' && (!hasRoute('credential') || rawSecretReturned === true || rawValueReturned === true) ? ['Sudo credential mediation route is missing or raw secret exposure was reported.'] : []),
-    ...(input.kind === 'browser-desktop-receipt' && (!receiptId || !hasRoute('execute') || !hasRoute('receipt')) ? ['Browser/desktop command receipt, execute route, or receipt route is not published.'] : []),
-  ];
-  return {
-    schemaStatus: status,
-    rawSecretReturned: rawSecretReturned ?? null, rawValueReturned: rawValueReturned ?? null,
-    ...(isClassicOperation() ? { operationProvenance: 'classic' as const, semanticAssessment: input.startedClassic ? 'not-evaluated' as const : 'partial' as const } : {}),
-    ...(firstString(records, ['schemaVersion', 'receiptSchemaVersion', 'contractVersion']) ? { schemaVersion: redactedPreview(firstString(records, ['schemaVersion', 'receiptSchemaVersion', 'contractVersion']), 80) } : {}),
-    ...(publicationGuarantee ? { publicationGuarantee: redactedPreview(publicationGuarantee, 220) } : {}),
-    ...(publisher ? { publisher: redactedPreview(publisher, 80) } : {}),
-    ...(provenance.length > 0 ? { provenance } : {}),
-    ...(receiptId ? { receiptId: redactedPreview(receiptId, 96) } : {}),
-    ...(hasRoute('receipt') ? { receiptRoute: input.routes.find((route) => route.id === 'receipt')?.modelRoute } : {}),
-    missingSignals,
-    policy: 'Interactive runtime records certify release readiness only when the platform or daemon publishes schema, durable id, publication guarantee, publisher/provenance, bounded output or receipt evidence, exact confirmed control routes, and no raw secret material.',
-  };
-}
-
-async function normalizeRecord(evidence: InteractiveRuntimeEvidence, options: CatalogRankingOptions): Promise<AgentHarnessInteractiveRuntimeRecord | null> {
-  const { record, source } = evidence;
-  const startedClassic = isClassicOperation();
-  if (Object.keys(record).length === 0) return null;
-  const kind = await readRuntimeKind(evidence, options);
-  const id = readId(record, kind);
-  if (!id) return null;
-  const routes = await routesFor(kind, evidence, options);
-  const { chunks, dropped } = await outputChunks(evidence, options);
-  const command = redactedPreview(record.command ?? record.cmd, 180);
-  const receiptId = readString(record.receiptId) || readString(record.operationReceiptId) || readString(record.commandReceiptId);
-  return {
-    id,
-    kind,
-    status: await readRuntimeStatus(evidence, options),
-    source,
-    label: redactedPreview(record.label ?? record.title ?? id, 96),
-    summary: redactedPreview(record.summary ?? record.description ?? record.detail ?? command ?? id, 240),
-    ...(readString(record.processId) ? { processId: readString(record.processId) } : {}),
-    ...(readString(record.sessionId) ? { sessionId: readString(record.sessionId) } : {}),
-    ...(readNumber(record.pid) !== undefined ? { pid: readNumber(record.pid) } : {}),
-    ...(command ? { command } : {}),
-    ...(readString(record.surface) ? { surface: redactedPreview(record.surface, 80) } : {}),
-    ...(readString(record.action) ? { action: redactedPreview(record.action, 80) } : {}),
-    ...(receiptId ? { receiptId: redactedPreview(receiptId, 96) } : {}),
-    ...(chunks.length > 0 ? { outputChunks: chunks } : {}),
-    ...(dropped > 0 ? { droppedChunks: dropped } : {}),
-    routes,
-    ...(readTimestamp(record.updatedAt ?? record.createdAt ?? record.timestamp) ? { updatedAt: readTimestamp(record.updatedAt ?? record.createdAt ?? record.timestamp) } : {}),
-    certification: await certification({ record, source, kind, id, routes, chunks, evidence, options, startedClassic }),
-  };
-}
-
-const RUNTIME_SOURCE_PATHS: readonly (readonly string[])[] = [
-  ['platform', 'readModels', 'execution', 'interactiveRuntime'], ['platform', 'readModels', 'execution', 'processRuntime'],
-  ['platform', 'readModels', 'execution', 'ptySessions'], ['platform', 'readModels', 'execution', 'sudoMediation'],
-  ['platform', 'readModels', 'computer', 'browserDesktopReceipts'], ['platform', 'readModels', 'browser', 'controlReceipts'],
-  ['clients', 'operatorApiClient', 'execution', 'interactiveRuntime'], ['extensions', 'daemonRuntime', 'interactiveRuntime'],
-];
-
-interface RuntimeSourceSnapshot { readonly source: string; readonly snapshot: unknown }
-
-function captureRuntimeSources(context: CommandContext) {
-  const guards: Array<() => void> = [];
-  const sources: RuntimeSourceSnapshot[] = [];
-  const path = (keys: readonly string[]) => {
-    let value: unknown = context;
-    for (const key of keys) {
-      if (value === undefined || value === null) return undefined;
-      if (typeof value !== 'object') throw new ToolInputProjectionError('invalid');
-      guards.push(captureCatalogMethods(value, [key]));
-      value = modelReadingServicePath(value, [key]);
-    }
-    return value;
-  };
-  const synchronous = (read: () => unknown): unknown => {
-    let value: unknown;
-    try { value = read(); } catch { throw new ToolInputProjectionError('unavailable'); }
-    if (nodeTypes.isPromise(value)) {
-      // This native catalog is synchronous. Drain rejection without borrowing a producer's then slot.
-      Promise.prototype.then.call(value, undefined, () => undefined);
-      throw new ToolInputProjectionError('held');
-    }
-    return value;
-  };
-  for (const keys of RUNTIME_SOURCE_PATHS) {
-    const source = path(keys);
-    if (source === undefined || source === null) continue;
-    if ((typeof source === 'object' || typeof source === 'function') && nodeTypes.isProxy(source)) throw new ToolInputProjectionError('held');
-    let acquire: () => unknown = () => source;
-    if (typeof source === 'function') acquire = () => synchronous(() => Reflect.apply(source, undefined, []));
-    else if (typeof source === 'object' && !Array.isArray(source)) {
-      const methods = captureCatalogMethods(source, ['getSnapshot', 'snapshot', 'list', 'records', 'subscribe']); guards.push(methods);
-      for (const name of ['getSnapshot', 'snapshot', 'list', 'records']) {
-        const read = modelReadingServicePath(source, [name]);
-        if (typeof read !== 'function') continue;
-        if (nodeTypes.isProxy(read)) throw new ToolInputProjectionError('held');
-        if (name === 'getSnapshot' && typeof modelReadingServicePath(source, ['subscribe']) === 'function') guards.push(captureNativeReadModelObservation(source));
-        acquire = () => { methods(); const value = synchronous(() => Reflect.apply(read, source, [])); methods(); return value; };
-        break;
-      }
-    }
-    const original = acquire(), snapshot = capturePersonalOpsData(original);
-    guards.push(() => { assertPersonalOpsDataCurrent(original, snapshot); assertPersonalOpsDataCurrent(acquire(), snapshot); });
-    sources.push({ source: `context.${keys.join('.')}`, snapshot });
-  }
-  return { sources, assertCurrent() { for (const guard of guards) guard(); } };
-}
-
-function recordsFromSnapshot(source: RuntimeSourceSnapshot): readonly InteractiveRuntimeEvidence[] {
-  const evidence = (value: unknown, containerPath: readonly string[], mapId?: string): InteractiveRuntimeEvidence => {
-    const record = readRecord(value);
-    return { ...source, containerPath, record: mapId ? { ...record, id: readString(record.id) || mapId } : record };
-  };
-  if (Array.isArray(source.snapshot)) return source.snapshot.map((value, index) => evidence(value, [String(index)]));
-  const record = readRecord(source.snapshot);
-  const values: InteractiveRuntimeEvidence[] = [];
-  // These are native publisher containers. Their paths are evidence, never a kind fallback.
-  for (const key of ['processes', 'liveProcesses', 'outputChunks', 'ptySessions', 'sessions', 'sudoMediation', 'credentials', 'browserDesktopReceipts', 'controlReceipts', 'receipts', 'records', 'items']) {
-    const candidate = record[key];
-    if (Array.isArray(candidate)) values.push(...candidate.map((value, index) => evidence(value, [key, String(index)])));
-    else for (const [id, value] of Object.entries(readRecord(candidate))) values.push(evidence(value, [key, id], id));
-  }
-  return values.length ? values : Object.keys(record).length ? [evidence(record, [])] : [];
+export interface InteractiveRuntimeParity {
+  /** The process manager can write to a running process's stdin. */
+  readonly stdinWriteContract: boolean;
+  /** No PTY session owner exists in this runtime. */
+  readonly ptyContract: false;
+  /** Privilege prompts are mediated only in the foreground (sudo posture). */
+  readonly sudoMediationContract: false;
 }
 
 export interface InteractiveRuntimeSnapshot {
   readonly records: readonly AgentHarnessInteractiveRuntimeRecord[];
   readonly capabilitySummary: Record<string, unknown>;
   readonly parityStatus: InteractiveRuntimeParity;
+  /** Kept for callers of the earlier shape: a snapshot is a plain value, so this only checks cancellation. */
   readonly assertCurrent: () => void;
 }
 
-export function acquireInteractiveRuntimeSnapshot(context: CommandContext, options: CatalogRankingOptions = {}): Promise<InteractiveRuntimeSnapshot> {
-  return withConfiguredDecisionModelPolicy(() => acquireOwnedInteractiveRuntimeSnapshot(context, options));
+const OUTPUT_TAIL_CHARACTERS = 300;
+const LATEST_RECORDS = 6;
+
+function processStatus(entry: BackgroundProcess): AgentHarnessInteractiveRuntimeStatus {
+  if (!entry.done) return 'running';
+  return entry.exitCode === 0 && !entry.signal ? 'completed' : 'failed';
 }
 
-async function acquireOwnedInteractiveRuntimeSnapshot(context: CommandContext, options: CatalogRankingOptions): Promise<InteractiveRuntimeSnapshot> {
-  const optionSlots = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent', 'requirePreservedSource']);
-  optionSlots();
-  const originalAssertCurrent = options.assertCurrent, originalRetainCurrent = options.retainCurrent, signal = options.signal;
-  if ((originalAssertCurrent !== undefined && (typeof originalAssertCurrent !== 'function' || nodeTypes.isProxy(originalAssertCurrent)))
-    || (originalRetainCurrent !== undefined && (typeof originalRetainCurrent !== 'function' || nodeTypes.isProxy(originalRetainCurrent))))
-    throw new ToolInputProjectionError('invalid');
-  const throwIfAborted = AbortSignal.prototype.throwIfAborted;
-  const checkSignal = (): void => { if (signal) Reflect.apply(throwIfAborted, signal, []); };
-  const assertBorrowedCurrent = (): void => {
-    optionSlots(); checkSignal();
-    let result: unknown;
-    try { result = originalAssertCurrent?.(); }
-    finally {
-      if (nodeTypes.isPromise(result)) void Promise.prototype.then.call(result, undefined, () => {});
-      optionSlots(); checkSignal();
-    }
-    if (result !== undefined) throw new ToolInputProjectionError('held');
-  };
-  const dispatchRetainCurrent = (guard: () => void, key?: string): void => {
-    optionSlots(); checkSignal();
-    let result: unknown;
-    try { result = originalRetainCurrent?.(guard, key); }
-    finally {
-      if (nodeTypes.isPromise(result)) void Promise.prototype.then.call(result, undefined, () => {});
-      optionSlots(); checkSignal();
-    }
-    if (result !== undefined) throw new ToolInputProjectionError('held');
-  };
-  assertBorrowedCurrent();
-  const native = captureRuntimeSources(context), retained: Array<() => void> = [];
-  const assertSourceCurrent = () => { optionSlots(); checkSignal(); native.assertCurrent(); };
-  const assertCurrent = () => {
-    assertSourceCurrent(); assertBorrowedCurrent(); assertSourceCurrent();
-    for (const guard of retained) guard();
-    assertSourceCurrent();
-  };
-  const retainCurrent = (guard: () => void): void => {
-    optionSlots(); checkSignal();
-    retained.push(guard);
-  };
-  assertCurrent();
-  let records: AgentHarnessInteractiveRuntimeRecord[] = [];
-  if (native.sources.length) {
-    const readingOptions = options.sourceOwner ? options : modelReadingOptions(context, context.extensions?.toolRegistry, options.signal, options.assertCurrent, retainCurrent);
-    records = await withModelReadingSource({ sources: native.sources }, { ...readingOptions, assertCurrent, retainCurrent }, async (captured, current) => {
-      const normalized: AgentHarnessInteractiveRuntimeRecord[] = [];
-      for (const source of captured.sources) {
-        for (const evidence of recordsFromSnapshot(source)) {
-          const record = await normalizeRecord(evidence, current);
-          current.signal?.throwIfAborted(); current.assertCurrent?.();
-          if (record) normalized.push(record);
-        }
-      }
-      return normalized;
+function processRoutes(processId: string, running: boolean, canWrite: boolean): readonly AgentHarnessInteractiveRuntimeRoute[] {
+  const quoted = JSON.stringify(processId);
+  return [
+    { id: 'inspect', label: 'Inspect process', modelRoute: `process action:"poll" processId:${quoted}`, effect: 'read-only' },
+    { id: 'log', label: 'Read output', modelRoute: `process action:"log" processId:${quoted}`, effect: 'read-only' },
+    ...(running && canWrite ? [{ id: 'write', label: 'Write input', modelRoute: `process action:"write" processId:${quoted} data:"..."`, effect: 'confirmed' } as const] : []),
+    ...(running ? [{ id: 'kill', label: 'Stop process', modelRoute: `process action:"kill" processId:${quoted}`, effect: 'confirmed' } as const] : []),
+  ];
+}
+
+function outputTail(manager: ProcessManager, id: string): string | undefined {
+  const output = manager.getOutput(id);
+  if (!output) return undefined;
+  const text = `${output.stdout}${output.stderr ? `\n${output.stderr}` : ''}`;
+  if (!text.trim()) return undefined;
+  return redactedHarnessPreview(text.slice(-OUTPUT_TAIL_CHARACTERS * 2), OUTPUT_TAIL_CHARACTERS);
+}
+
+function processRecords(manager: ProcessManager): AgentHarnessInteractiveRuntimeRecord[] {
+  const canWrite = typeof manager.writeInput === 'function';
+  const records: AgentHarnessInteractiveRuntimeRecord[] = [];
+  for (const listed of manager.list()) {
+    const entry = manager.getStatus(listed.id);
+    if (!entry) continue;
+    const status = processStatus(entry);
+    const command = redactedHarnessPreview(entry.cmd, 160);
+    records.push({
+      id: entry.id,
+      kind: 'process-output',
+      status,
+      source: 'process-manager',
+      label: command,
+      summary: `${listed.status}${listed.startedBy ? `; started by ${listed.startedBy}` : ''}`,
+      processId: entry.id,
+      pid: entry.pid,
+      command,
+      ...(entry.done ? { exitCode: entry.exitCode } : {}),
+      ...(entry.signal ? { signal: entry.signal } : {}),
+      routes: processRoutes(entry.id, !entry.done, canWrite),
+      updatedAt: new Date(entry.completedAt ?? entry.startTime).toISOString(),
     });
   }
-  assertCurrent();
-  records.sort((left, right) => {
-    const delta = (right.updatedAt ? Date.parse(right.updatedAt) : 0) - (left.updatedAt ? Date.parse(left.updatedAt) : 0);
-    return delta || left.kind.localeCompare(right.kind) || left.id.localeCompare(right.id);
-  });
-  const data = captureCatalogData({ records, capabilitySummary: summarizeInteractiveRuntimeRecords(records), parityStatus: interactiveRuntimeParityForRecords(records) });
-  // Keep nested restrictions local during acquisition. Publish one complete
-  // pure guard so later readers do not recursively replay this whole scope.
-  dispatchRetainCurrent(() => {
-    assertSourceCurrent();
-    for (const guard of retained) guard();
-    assertSourceCurrent();
-  }, 'agent.runtime.sources');
-  assertCurrent();
-  return { ...data, assertCurrent };
+  return records.sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt) || left.id.localeCompare(right.id));
+}
+
+/**
+ * One synchronous read of the process manager. Output is read (and masked)
+ * only for the few newest records the summary shows.
+ */
+export function readInteractiveRuntime(context: CommandContext, options: CatalogRankingOptions = {}): InteractiveRuntimeSnapshot {
+  options.signal?.throwIfAborted();
+  const manager = context.workspace.processManager;
+  const records = manager ? processRecords(manager) : [];
+  const latest = manager
+    ? records.slice(0, LATEST_RECORDS).map((record) => {
+      const tail = outputTail(manager, record.id);
+      return tail ? { ...record, outputTail: tail } : record;
+    })
+    : [];
+  const running = records.filter((record) => record.status === 'running').length;
+  const canWrite = manager !== undefined && typeof manager.writeInput === 'function';
+  const sudo = sudoExecutionPosture(context);
+  const capabilitySummary: Record<string, unknown> = {
+    status: !manager ? 'unavailable' : running > 0 ? 'live' : 'idle',
+    recordCount: records.length,
+    runningCount: running,
+    liveProcessOutput: manager
+      ? { status: running > 0 ? 'live' : 'idle', recordCount: records.length, runningCount: running,
+        route: 'execution action:"processes"', stdinWrite: canWrite ? 'available' : 'unavailable' }
+      : { status: 'unavailable', reason: 'No process manager is wired into this runtime, so nothing tracks background processes.' },
+    ptySessions: {
+      status: 'unavailable',
+      reason: 'No PTY session owner exists in this runtime; interactive programs that need a terminal cannot be driven.',
+      next: 'Run non-interactive commands with exec, or a tracked background process with terminal background:true.',
+    },
+    sudoMediation: { status: sudo.status, route: sudo.foregroundRoute, setupRoute: sudo.setupRoute },
+    latestRecords: latest,
+    policy: 'Read from the process manager and the sudo posture in this process. Routes on a record act through the process tool under its own admission.',
+  };
+  return {
+    records,
+    capabilitySummary,
+    parityStatus: { stdinWriteContract: canWrite, ptyContract: false, sudoMediationContract: false },
+    assertCurrent: () => { options.signal?.throwIfAborted(); },
+  };
+}
+
+/** The earlier asynchronous entry point; the read is synchronous now. */
+export async function acquireInteractiveRuntimeSnapshot(context: CommandContext, options: CatalogRankingOptions = {}): Promise<InteractiveRuntimeSnapshot> {
+  return readInteractiveRuntime(context, options);
 }
 
 export async function interactiveRuntimeRecords(context: CommandContext, options: CatalogRankingOptions = {}): Promise<readonly AgentHarnessInteractiveRuntimeRecord[]> {
-  return (await acquireInteractiveRuntimeSnapshot(context, options)).records;
-}
-
-function complete(record: AgentHarnessInteractiveRuntimeRecord): boolean {
-  return record.certification.schemaStatus === 'certified' && record.certification.missingSignals.length === 0
-    && (record.status === 'ready' || record.status === 'running' || record.status === 'completed');
-}
-
-function kindSummary(records: readonly AgentHarnessInteractiveRuntimeRecord[], kind: AgentHarnessInteractiveRuntimeKind): Record<string, unknown> {
-  const matches = records.filter((record) => record.kind === kind);
-  const certified = matches.filter(complete);
-  return {
-    status: certified.length > 0 ? 'certified' : matches.length > 0 ? 'attention' : 'not-published',
-    recordCount: matches.length,
-    certifiedRecordCount: certified.length,
-    ...(matches[0] ? { latest: matches[0] } : {}),
-  };
-}
-
-export function summarizeInteractiveRuntimeRecords(records: readonly AgentHarnessInteractiveRuntimeRecord[]): Record<string, unknown> {
-  const certified = records.filter(complete);
-  return {
-    status: certified.length > 0 ? 'certified-live-runtime' : records.length > 0 ? 'attention' : 'not-published',
-    recordCount: records.length,
-    certifiedRecordCount: certified.length,
-    unassessedRecordCount: records.filter(record => record.certification.schemaStatus === 'unassessed').length,
-    ...(records.some(record => record.certification.operationProvenance === 'classic') ? { operationProvenance: 'classic', semanticAssessment: records.some(record => record.certification.semanticAssessment === 'partial') ? 'partial' : 'not-evaluated',
-      limitation: 'Published native output and exact metadata remain available. Semantic schema certification and control-route discovery require a decision model; use the native tool routes with their own authorization.' } : {}),
-    liveProcessOutput: kindSummary(records, 'process-output'),
-    ptySessions: kindSummary(records, 'pty-session'),
-    sudoMediation: kindSummary(records, 'sudo-mediation'),
-    browserDesktopControl: kindSummary(records, 'browser-desktop-receipt'),
-    latestRecords: records.slice(0, 6),
-    policy: 'Certified interactive runtime records are read-only evidence until the selected published route is invoked with its own confirmation boundary.',
-  };
-}
-
-export interface InteractiveRuntimeParity {
-  readonly stdinWriteContract: boolean;
-  readonly ptyContract: boolean;
-  readonly sudoMediationContract: boolean;
-  readonly browserDesktopControlContract: boolean;
-  readonly browserDesktopRoute: string | null;
-  readonly browserDesktopRecords: readonly AgentHarnessInteractiveRuntimeRecord[];
-}
-
-export function interactiveRuntimeParityForRecords(records: readonly AgentHarnessInteractiveRuntimeRecord[]): InteractiveRuntimeParity {
-  const certified = records.filter(complete);
-  const hasRoute = (record: AgentHarnessInteractiveRuntimeRecord, id: string) => record.routes.some((route) => route.id === id);
-  const browserDesktopRecords = certified.filter((record) => record.kind === 'browser-desktop-receipt');
-  return {
-    stdinWriteContract: certified.some((record) => (record.kind === 'process-output' || record.kind === 'pty-session') && hasRoute(record, 'write')),
-    ptyContract: certified.some((record) => record.kind === 'pty-session'),
-    sudoMediationContract: certified.some((record) => record.kind === 'sudo-mediation'),
-    browserDesktopControlContract: browserDesktopRecords.length > 0,
-    browserDesktopRoute: browserDesktopRecords[0]?.routes.find((route) => route.id === 'execute')?.modelRoute ?? browserDesktopRecords[0]?.routes.find((route) => route.id === 'inspect')?.modelRoute ?? null,
-    browserDesktopRecords,
-  };
+  return readInteractiveRuntime(context, options).records;
 }
 
 export async function interactiveRuntimeCapabilitySummary(context: CommandContext, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
-  return (await acquireInteractiveRuntimeSnapshot(context, options)).capabilitySummary;
+  return readInteractiveRuntime(context, options).capabilitySummary;
 }
 
 export async function interactiveRuntimeParityStatus(context: CommandContext, options: CatalogRankingOptions = {}): Promise<InteractiveRuntimeParity> {
-  return (await acquireInteractiveRuntimeSnapshot(context, options)).parityStatus;
+  return readInteractiveRuntime(context, options).parityStatus;
 }

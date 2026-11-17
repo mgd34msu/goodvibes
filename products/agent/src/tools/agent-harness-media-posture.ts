@@ -6,7 +6,6 @@ import { captureCatalogNativeFacts, withModelReadingSource } from './agent-harne
 import { buildAgentWorkspaceVoiceMediaReadiness } from '../input/agent-workspace-voice-media.ts';
 import type { AgentWorkspaceVoiceMediaProviderStatus } from '../input/agent-workspace-voice-media.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import { certifiedDeviceLiveRecords, deviceLiveReadModelSnapshot } from './agent-harness-device-live-read-models.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
@@ -120,16 +119,9 @@ async function buildVoiceInteractionWorkflows(
   readiness: ReturnType<typeof buildReadiness>,
   options: CatalogRankingOptions,
 ): Promise<readonly VoiceInteractionWorkflow[]> {
-  const liveDevice = await deviceLiveReadModelSnapshot(context, options);
-  options.assertCurrent?.();
-  const pushToTalkRecords = await certifiedDeviceLiveRecords(liveDevice, 'push-to-talk', ['push to talk', 'speech input', 'microphone'], options);
-  options.assertCurrent?.();
-  const transcriptionRecords = await certifiedDeviceLiveRecords(liveDevice, 'voice-memo-transcription', ['voice memo', 'speech-to-text', 'audio transcription'], options);
-  options.assertCurrent?.();
-  const spokenResponseRecords = await certifiedDeviceLiveRecords(liveDevice, 'spoken-responses', ['tts', 'spoken response', 'speaker'], options);
-  options.assertCurrent?.();
-  const wakeRecords = await certifiedDeviceLiveRecords(liveDevice, 'wake-and-speak', ['wake word', 'always listening'], options);
-  options.assertCurrent?.();
+  // The device capability catalog has no microphone, speaker or wake capability,
+  // so a paired phone adds nothing to these rows; they read this host's voice runtime.
+  options.signal?.throwIfAborted();
   // The one reader for every `voice.wake.*` row (platform settings.ts), so this posture
   // reports the same resolution the capture host itself consults, including which
   // rows refuse to start it, instead of re-deriving it from raw config reads.
@@ -155,11 +147,11 @@ async function buildVoiceInteractionWorkflows(
   const speechInputReady = hasReadyVoiceFeature(readiness, ['stt', 'realtime']);
   const speechInputRegistered = hasRegisteredVoiceFeature(readiness, ['stt', 'realtime']);
   const selectedTtsReady = readiness.selectedTtsProviderStatus === 'ready';
-  const spokenReady = spokenResponseRecords.length > 0 || (spokenTurnRuntime && selectedTtsReady && readiness.ttsVoiceConfigured);
+  const spokenReady = spokenTurnRuntime && selectedTtsReady && readiness.ttsVoiceConfigured;
   const spokenAttention = spokenTurnRuntime && (readiness.selectedTtsProviderStatus === 'ready-agent-env' || (selectedTtsReady && !readiness.ttsVoiceConfigured));
-  const pushToTalkReady = pushToTalkRecords.length > 0 || (voiceEnabled && spokenTurnRuntime && speechInputReady);
+  const pushToTalkReady = voiceEnabled && spokenTurnRuntime && speechInputReady;
   const pushToTalkAttention = voiceEnabled && (spokenTurnRuntime || speechInputRegistered);
-  const transcriptionReady = transcriptionRecords.length > 0 || (transcribeRuntime && speechInputReady);
+  const transcriptionReady = transcribeRuntime && speechInputReady;
   const transcriptionAttention = transcribeRuntime || speechInputRegistered;
 
   return [
@@ -169,7 +161,7 @@ async function buildVoiceInteractionWorkflows(
       status: pushToTalkReady ? 'ready' : pushToTalkAttention ? 'attention' : 'setup-needed',
       userOutcome: 'Speak a short prompt when the local voice surface and speech-input provider are ready.',
       summary: pushToTalkReady
-        ? pushToTalkRecords.length > 0 ? 'The platform/daemon published a certified push-to-talk route with permission-scoped microphone evidence.' : 'Voice surface, spoken-turn runtime, and a ready STT/realtime provider are available.'
+        ? 'Voice surface, spoken-turn runtime, and a ready STT/realtime provider are available.'
         : pushToTalkAttention
           ? 'Some voice input pieces are present, but the full push-to-talk route is not ready.'
           : 'Voice input needs the voice surface plus a ready STT or realtime provider.',
@@ -188,7 +180,6 @@ async function buildVoiceInteractionWorkflows(
         spokenTurnRuntime,
         speechInputReady,
         speechInputRegistered,
-        ...(pushToTalkRecords.length > 0 ? { certifiedLiveRecords: pushToTalkRecords.slice(0, 5) } : {}),
       },
       policy: 'Voice input stays a visible local operator surface; provider setup and transcript submission are separate explicit routes.',
     },
@@ -198,7 +189,7 @@ async function buildVoiceInteractionWorkflows(
       status: transcriptionReady ? 'ready' : transcriptionAttention ? 'attention' : 'setup-needed',
       userOutcome: 'Transcribe an audio note only when a speech-to-text provider and runtime route are both present.',
       summary: transcriptionReady
-        ? transcriptionRecords.length > 0 ? 'The platform/daemon published a certified voice memo transcription route.' : 'Speech-to-text provider and voiceService.transcribe are available.'
+        ? 'Speech-to-text provider and voiceService.transcribe are available.'
         : transcriptionAttention
           ? 'A speech-to-text provider or runtime route is present, but transcription is not fully ready.'
           : 'No ready speech-to-text transcription route is available.',
@@ -215,7 +206,6 @@ async function buildVoiceInteractionWorkflows(
         transcribeRuntime,
         speechInputReady,
         speechInputRegistered,
-        ...(transcriptionRecords.length > 0 ? { certifiedLiveRecords: transcriptionRecords.slice(0, 5) } : {}),
       },
       policy: 'Audio bytes are not printed into chat; transcription must use reviewed media or connected-host voice routes.',
     },
@@ -225,7 +215,7 @@ async function buildVoiceInteractionWorkflows(
       status: spokenReady ? 'ready' : spokenAttention ? 'attention' : 'setup-needed',
       userOutcome: 'Play an assistant answer aloud with a predictable TTS provider and voice.',
       summary: spokenReady
-        ? spokenResponseRecords.length > 0 ? 'The platform/daemon published a certified spoken-response route.' : 'Spoken-turn runtime, selected TTS provider, and voice setting are ready.'
+        ? 'Spoken-turn runtime, selected TTS provider, and voice setting are ready.'
         : spokenAttention
           ? 'Spoken-turn runtime and provider are ready, but the exact voice is not configured.'
           : 'Spoken responses need a ready selected TTS provider and runtime spoken-turn route.',
@@ -244,7 +234,6 @@ async function buildVoiceInteractionWorkflows(
         stopSpokenOutputRuntime,
         selectedTtsProviderStatus: readiness.selectedTtsProviderStatus,
         ttsVoiceConfigured: readiness.ttsVoiceConfigured,
-        ...(spokenResponseRecords.length > 0 ? { certifiedLiveRecords: spokenResponseRecords.slice(0, 5) } : {}),
       },
       policy: 'Spoken turns submit normal assistant prompts and may call model/speech providers; playback stop is local runtime control.',
     },
@@ -260,7 +249,7 @@ async function buildVoiceInteractionWorkflows(
       // its own evidence field rather than being folded into one number.
       status: wake.blockers.length > 0
         ? 'attention'
-        : wake.active || wakeRecords.length > 0 ? 'ready' : 'setup-needed',
+        : wake.active ? 'ready' : 'setup-needed',
       userOutcome: 'Speak a wake phrase on this host and have what follows reach the conversation input; on a paired phone, only after a permission-scoped runtime contract exists.',
       summary: wake.blockers.length > 0
         ? `Wake-word capture is wired on this surface but one row refuses to start it: ${wake.blockers.map((blocker) => blocker.key).join(', ')}.`
@@ -276,9 +265,8 @@ async function buildVoiceInteractionWorkflows(
           ? 'Wake capture is live; confirm the pinned models verify on disk and report the result rather than asking anyone to check.'
           : 'Ask the user whether to turn wake capture on; it keeps the microphone listening. Only on their request set voice.wake.enabled (the surface row moves with it). Turning it on does not fetch models: a host missing them reports not-provisioned and names the command that fetches them.',
       capabilities: ['wake word', 'always listening', 'permission repair'],
-      modelRoute: wakeRecords[0]?.modelRoute ?? 'agent_harness mode:"media_posture" query:"wake word" includeParameters:true',
+      modelRoute: 'agent_harness mode:"media_posture" query:"wake word" includeParameters:true',
       setupRoutes: [
-        ...wakeRecords.slice(0, 3).map((record) => record.modelRoute),
         'settings action:"set" key:"voice.wake.surfaces.agent" value:"true" explicitUserRequest:"<the user request, in their own words>"',
         'agent_harness mode:"media_posture" query:"push to talk" includeParameters:true',
         'agent_harness mode:"pairing_posture" query:"device" includeParameters:true',
@@ -301,10 +289,9 @@ async function buildVoiceInteractionWorkflows(
         speechGateLoaded: vadReady,
         recallIsSyntheticOnly: true,
         // The PHONE half only. False here has never meant "nothing listens".
-        companionWakePublishedByCurrentAgentContract: wakeRecords.length > 0,
-        ...(wakeRecords.length > 0 ? { certifiedLiveRecords: wakeRecords.slice(0, 5) } : {}),
+        companionWakePublishedByCurrentAgentContract: false,
       },
-      policy: 'On this host, always-listening capture runs only while both voice.wake.enabled and voice.wake.surfaces.agent are on, and holds a visible listening row for as long as it does. Agent does not claim always-listening behavior on a paired device without an explicit permission-scoped runtime contract and certified platform/daemon receipt evidence.',
+      policy: 'On this host, always-listening capture runs only while both voice.wake.enabled and voice.wake.surfaces.agent are on, and holds a visible listening row for as long as it does. The paired-device capability catalog has no microphone or wake capability, so always-listening on a paired device is not offered.',
     },
   ];
 }

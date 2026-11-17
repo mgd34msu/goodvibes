@@ -14,5 +14,4 @@ export { DECISION_MODEL_POLICIES, configureDecisionModelPolicy, parseDecisionMod
 
 export type { SystemMessagePresentation, SystemMessageSeverity, SystemMessageActivity, SystemMessageEvent } from './system-message-presentation.js';
 
-export { declaredClassicCapabilityEvidence, declaredClassicRuntimeMetadata } from './classic-capability-facts.js';
 export { classicPersonalOpsResultField, classicPersonalOpsReceiptStatus } from './classic-personal-ops.js';

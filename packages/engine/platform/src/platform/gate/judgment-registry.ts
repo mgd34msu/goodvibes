@@ -120,15 +120,6 @@ registry.register(learningDuplicateAlignment);
 registry.register(learningSurvivorSelection);
 registry.register(learningSurvivorEquivalence);
 
-import { interactiveRuntimeSchemaStatus, interactiveRuntimeKind, interactiveRuntimeStatus, interactiveRuntimeRouteRole } from './batteries/interactive-runtime.js';
-registry.register(interactiveRuntimeSchemaStatus);
-registry.register(interactiveRuntimeKind);
-registry.register(interactiveRuntimeStatus);
-registry.register(interactiveRuntimeRouteRole);
-
-import { browserDeviceEvidence } from './batteries/browser-device-evidence.js';
-registry.register(browserDeviceEvidence);
-
 import { repairFactScoring } from '../knowledge/semantic/repair-fact-scoring/battery.js';
 registry.register(repairFactScoring);
 import { repairProfileRequirement } from '../knowledge/semantic/repair-profile-requirement/battery.js';

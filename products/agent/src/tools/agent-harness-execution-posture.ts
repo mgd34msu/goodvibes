@@ -1,9 +1,6 @@
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogData, captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { capturePersonalOpsData, assertPersonalOpsDataCurrent } from './agent-harness-personal-ops-source.ts';
-import { modelReadingServicePath } from './agent-harness-model-reading-source.ts';
-import { captureNativeReadModelObservation } from './agent-harness-autonomy-live-records.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { captureBrowserControlPosture, type BrowserControlPosture } from './agent-harness-browser-control.ts';
 import { delegationDecisionCards } from './agent-harness-delegation-posture.ts';
@@ -26,7 +23,7 @@ type ExecutionResolution =
   | { readonly status: 'missing_lookup'; readonly usage: string };
 
 type ExecutionLookupSource = 'executionRouteId' | 'target' | 'query';
-type ExecutionEffect = 'read-only' | 'local-effect' | 'external-read' | 'delegated-work' | 'setup-gap';
+type ExecutionEffect = 'read-only' | 'local-effect' | 'external-read' | 'delegated-work' | 'ui-control';
 type ExecutionAvailability = 'ready' | 'setup-needed' | 'fallback-only';
 
 interface ExecutionSupervisionRoute {
@@ -131,7 +128,7 @@ function routeDefinitions(): readonly ExecutionRoute[] {
       label: 'Browser or desktop control',
       detail: 'Use browser, desktop, or computer-control MCP/tooling only when a trusted server or first-class tool is configured.',
       userOutcome: 'The user can automate real UI flows when setup is present, and gets a clear setup gap when it is not.',
-      effect: 'setup-gap',
+      effect: 'ui-control',
       preferredWhen: 'The user asks for browser navigation, UI testing, screenshots, screen recording, or device/desktop actions.',
       useInsteadWhen: 'Use read-only web tools for research that does not require controlling a live browser or desktop.',
       browserMcp: true,
@@ -154,30 +151,35 @@ function routeDefinitions(): readonly ExecutionRoute[] {
   ];
 }
 
-function safeToolDefinitions(toolRegistry: ToolRegistry): readonly ReturnType<ToolRegistry['getToolDefinitions']>[number][] {
+/** The facts every route row is built from, read once per call. */
+interface ExecutionFacts {
+  readonly toolNames: ReadonlySet<string>;
+  readonly browserControl: BrowserControlPosture;
+  /** The delegation posture's own answer: an operator client is attached for a TUI handoff. */
+  readonly delegationReady: boolean;
+}
+
+function readExecutionFacts(context: CommandContext, toolRegistry: ToolRegistry, browserControl: BrowserControlPosture): ExecutionFacts {
+  let names: ReadonlySet<string>;
   try {
-    return toolRegistry.getToolDefinitions();
+    names = new Set(toolRegistry.getToolDefinitions().map((tool) => tool.name));
   } catch {
     throw new ToolInputProjectionError('unavailable');
   }
+  const handoff = delegationDecisionCards(context).find((card) => card.id === 'delegate-decision-tui-handoff');
+  return { toolNames: names, browserControl, delegationReady: handoff?.status === 'ready' };
 }
 
-function registeredToolNames(toolRegistry: ToolRegistry): ReadonlySet<string> {
-  return new Set(safeToolDefinitions(toolRegistry).map((tool) => tool.name));
-}
-
-function routeAvailability(route: ExecutionRoute, context: CommandContext, toolRegistry: ToolRegistry, browserControl: BrowserControlPosture): ExecutionAvailability {
-  if (route.id === 'delegation-isolation-parallel-remote') return 'ready';
-  if (route.browserMcp) return browserControl.configured ? 'ready' : 'setup-needed';
-  const names = registeredToolNames(toolRegistry);
-  if (route.toolNames?.every((name) => names.has(name))) return 'ready';
-  if (route.anyToolNames?.some((name) => names.has(name))) return 'ready';
+function routeAvailability(route: ExecutionRoute, facts: ExecutionFacts): ExecutionAvailability {
+  if (route.id === 'delegation-isolation-parallel-remote') return facts.delegationReady ? 'ready' : 'setup-needed';
+  if (route.browserMcp) return facts.browserControl.configured ? 'ready' : 'setup-needed';
+  if (route.toolNames?.every((name) => facts.toolNames.has(name))) return 'ready';
+  if (route.anyToolNames?.some((name) => facts.toolNames.has(name))) return 'ready';
   return route.effect === 'read-only' ? 'fallback-only' : 'setup-needed';
 }
 
-function availableTools(route: ExecutionRoute, toolRegistry: ToolRegistry): readonly string[] {
-  const names = registeredToolNames(toolRegistry);
-  return [...(route.toolNames ?? []), ...(route.anyToolNames ?? [])].filter((name) => names.has(name));
+function availableTools(route: ExecutionRoute, facts: ExecutionFacts): readonly string[] {
+  return [...(route.toolNames ?? []), ...(route.anyToolNames ?? [])].filter((name) => facts.toolNames.has(name));
 }
 
 function routeSearchText(route: ExecutionRoute): string {
@@ -197,12 +199,12 @@ function routeSearchText(route: ExecutionRoute): string {
   ].join('\n');
 }
 
-function describeCandidate(route: ExecutionRoute, context: CommandContext, toolRegistry: ToolRegistry, browserControl: BrowserControlPosture): Record<string, unknown> {
+function describeCandidate(route: ExecutionRoute, facts: ExecutionFacts): Record<string, unknown> {
   return {
     executionRouteId: route.id,
     label: route.label,
     effect: route.effect,
-    availability: routeAvailability(route, context, toolRegistry, browserControl),
+    availability: routeAvailability(route, facts),
     modelRoute: route.modelRoute,
   };
 }
@@ -244,15 +246,14 @@ function executionSupervisionSummary(context: CommandContext): Record<string, un
 function describeRoute(
   route: ExecutionRoute,
   context: CommandContext,
-  toolRegistry: ToolRegistry,
-  browserPosture: BrowserControlPosture,
+  facts: ExecutionFacts,
   options: { readonly includeParameters?: boolean; readonly lookup?: Record<string, unknown> } = {},
 ): Record<string, unknown> {
-  const availability = routeAvailability(route, context, toolRegistry, browserPosture);
-  const tools = availableTools(route, toolRegistry);
+  const availability = routeAvailability(route, facts);
+  const tools = availableTools(route, facts);
   const supervisionRoutes = executionSupervisionRoutes(context, route);
-  const browserControl = route.browserMcp ? browserPosture : null;
-  const delegationCards = route.id === 'delegation-isolation-parallel-remote' ? delegationDecisionCards(context) : null;
+  const browserControl = route.browserMcp ? facts.browserControl : null;
+  const delegationCards = route.id === 'delegation-isolation-parallel-remote' && options.includeParameters ? delegationDecisionCards(context) : null;
   return {
     executionRouteId: route.id,
     label: route.label,
@@ -288,117 +289,16 @@ function describeRoute(
   };
 }
 
-function executionSources(context: CommandContext, toolRegistry: ToolRegistry, originalSources: readonly unknown[], browserControl: BrowserControlPosture) {
-  return captureCatalogData({
-    originalSources,
-    sessionId: context.session.runtime.sessionId,
-    routes: routeDefinitions().map(route => ({ route,
-      full: describeRoute(route, context, toolRegistry, browserControl, { includeParameters: true }),
-      summary: describeRoute(route, context, toolRegistry, browserControl),
-    })),
-    tools: safeToolDefinitions(toolRegistry),
-    browserControl,
-    delegationCards: delegationDecisionCards(context),
-    sudo: sudoExecutionPosture(context),
-    interactiveRuntime: browserControl.runtime,
-    fileRecovery: fileRecoveryCatalogStatus(context),
-    supervision: executionSupervisionSummary(context),
-  });
-}
-
-function captureExecutionBackend(context: CommandContext, toolRegistry: ToolRegistry) {
-  // Canonical evidence uses complete acquired DTOs; public runtime cards remain bounded.
-  const originalSources: unknown[] = [];
-  const guards = [captureCatalogMethods(context, ['workspace', 'session', 'clients', 'extensions', 'platform', 'openProcessModal', 'openLiveTail']),
-    captureCatalogMethods(toolRegistry, ['getToolDefinitions']), captureCatalogMethods(context.workspace, ['fileUndoManager', 'shellPaths']),
-    captureCatalogMethods(context.session, ['runtime']), captureCatalogMethods(context.session.runtime, ['sessionId']),
-    captureCatalogMethods(context.extensions, ['mcpRegistry', 'daemonRuntime']), captureCatalogMethods(context.platform, ['readModels'])];
-  if (context.clients) guards.push(captureCatalogMethods(context.clients, ['operator', 'operatorApiClient', 'mcpApi']));
-  if (context.workspace.shellPaths) guards.push(captureCatalogMethods(context.workspace.shellPaths, ['workingDirectory', 'homeDirectory']));
-  const retainPublished = (subject: object, key: string, children?: readonly string[]) => {
-    guards.push(captureCatalogMethods(subject, [key]));
-    const source = modelReadingServicePath(subject, [key]);
-    if (children) {
-      if (source !== undefined && source !== null) {
-        if (typeof source !== 'object') throw new ToolInputProjectionError('invalid');
-        for (const child of children) retainPublished(source, child);
-      }
-      return;
-    }
-    if (source && typeof source === 'object' && !Array.isArray(source)) {
-      const names = ['getSnapshot', 'snapshot', 'list', 'records'];
-      const methods = captureCatalogMethods(source, [...names, 'subscribe']); guards.push(methods);
-      let materialized = false;
-      for (const name of names) {
-        const read = modelReadingServicePath(source, [name]);
-        if (typeof read !== 'function') continue;
-        materialized = true;
-        if (name === 'getSnapshot' && typeof modelReadingServicePath(source, ['subscribe']) === 'function') guards.push(captureNativeReadModelObservation(source));
-        const acquire = () => { methods(); let value: unknown;
-          try { value = read.call(source); } catch { throw new ToolInputProjectionError('unavailable'); }
-          methods(); return value;
-        };
-        const original = acquire(), complete = capturePersonalOpsData(original);
-        originalSources.push({ slot: key, method: name, original: complete });
-        guards.push(() => { assertPersonalOpsDataCurrent(original, complete); assertPersonalOpsDataCurrent(acquire(), complete); methods(); });
-      }
-      if (materialized) return;
-    }
-    if (typeof source === 'function') {
-      const acquire = () => { let value: unknown; try { value = source(); } catch { throw new ToolInputProjectionError('unavailable'); } return value; };
-      const original = acquire(), complete = capturePersonalOpsData(original);
-      originalSources.push({ slot: key, original: complete });
-      guards.push(() => { assertPersonalOpsDataCurrent(original, complete); assertPersonalOpsDataCurrent(acquire(), complete); });
-      return;
-    }
-    const complete = capturePersonalOpsData(source);
-    if (source !== undefined && source !== null) originalSources.push({ slot: key, original: complete });
-    guards.push(() => assertPersonalOpsDataCurrent(modelReadingServicePath(subject, [key]), complete));
-  };
-  const readModels: unknown = Reflect.get(context.platform, 'readModels');
-  if (readModels && typeof readModels === 'object') {
-    retainPublished(readModels, 'execution', ['interactiveRuntime', 'processRuntime', 'ptySessions', 'sudoMediation']);
-    retainPublished(readModels, 'computer', ['browserDesktopReceipts']);
-    retainPublished(readModels, 'browser', ['controlReceipts']);
-  }
-  const daemonRuntime: unknown = Reflect.get(context.extensions, 'daemonRuntime');
-  if (daemonRuntime && typeof daemonRuntime === 'object') retainPublished(daemonRuntime, 'interactiveRuntime');
-  const operatorApiClient: unknown = context.clients ? Reflect.get(context.clients, 'operatorApiClient') : undefined;
-  if (operatorApiClient && typeof operatorApiClient === 'object') retainPublished(operatorApiClient, 'execution', ['interactiveRuntime']);
-  if (context.workspace.fileUndoManager) guards.push(captureCatalogMethods(context.workspace.fileUndoManager, ['peekUndo', 'undoDepth', 'redoDepth']));
-  const mcp = context.clients?.mcpApi ?? context.extensions.mcpRegistry;
-  if (mcp) guards.push(captureCatalogMethods(mcp, ['listServerSecurity']));
-  return { originalSources: captureCatalogData(originalSources), assertCurrent: () => { for (const guard of guards) guard(); } };
-}
-
-function retainExecutionSources(context: CommandContext, toolRegistry: ToolRegistry, sources: ReturnType<typeof executionSources>, options: CatalogRankingOptions, assertBackend: () => void) {
-  const revision = JSON.stringify(sources);
-  const assertSourceCurrent = () => {
-    options.signal?.throwIfAborted();
-    assertBackend();
-    if (JSON.stringify(executionSources(context, toolRegistry, sources.originalSources, sources.browserControl)) !== revision) throw new ToolInputProjectionError('stale');
-    assertBackend();
-  };
-  options.retainCurrent?.(assertSourceCurrent, 'agent.harness.execution-posture.sources');
-  const assertCurrent = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); assertSourceCurrent(); };
-  assertCurrent();
-  return assertCurrent;
-}
-
-async function matchingRoutes(sources: ReturnType<typeof executionSources>, input: string, options: CatalogRankingOptions) {
-  options.signal?.throwIfAborted(); options.assertCurrent?.();
-  if (!input) return { matches: sources.routes.map(entry => ({ entry, judgment: undefined })), judgments: [] };
-  return rankHarnessCatalog(sources.routes, input, entry => ({ id: entry.route.id,
-    description: routeSearchText(entry.route), evidence: { ...entry, originalSources: sources.originalSources } }), 'agent.harness.execution-posture',
-    { ...options, requirePreservedSource: true });
+async function matchingRoutes(routes: readonly ExecutionRoute[], input: string, options: CatalogRankingOptions) {
+  if (!input) return { matches: routes.map(entry => ({ entry, judgment: undefined })), judgments: [] };
+  return rankHarnessCatalog(routes, input, route => ({ id: route.id, description: routeSearchText(route) }), 'agent.harness.execution-posture', options);
 }
 
 export async function executionPostureCatalogStatus(context: CommandContext, toolRegistry: ToolRegistry, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
-  const acquired = await captureBrowserControlPosture(context, toolRegistry, options);
-  const browserControl = acquired.posture;
-  acquired.assertCurrent();
+  const { posture } = await captureBrowserControlPosture(context, toolRegistry, options);
+  const facts = readExecutionFacts(context, toolRegistry, posture);
   const routes = routeDefinitions();
-  const statuses = routes.map((route) => routeAvailability(route, context, toolRegistry, browserControl));
+  const statuses = routes.map((route) => routeAvailability(route, facts));
   return {
     modes: ['execution_posture', 'execution_route', 'browser_control_route'],
     routes: routes.length,
@@ -412,16 +312,14 @@ export async function executionPostureSummary(context: CommandContext, toolRegis
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const query = readString(args.query);
   const includeParameters = args.includeParameters === true;
-  const backend = captureExecutionBackend(context, toolRegistry);
-  const acquired = await captureBrowserControlPosture(context, toolRegistry, options);
-  backend.assertCurrent();
-  const sources = executionSources(context, toolRegistry, backend.originalSources, acquired.posture);
-  const assertCurrent = retainExecutionSources(context, toolRegistry, sources, options, () => { backend.assertCurrent(); acquired.assertSourceCurrent(); });
-  const selected = await matchingRoutes(sources, query, { ...options, assertCurrent });
-  assertCurrent();
+  // One look at the tools, the browser posture and the delegation posture; every row is built from it.
+  const { posture: browserControl } = await captureBrowserControlPosture(context, toolRegistry, options);
+  const facts = readExecutionFacts(context, toolRegistry, browserControl);
+  const definitions = routeDefinitions();
+  const selected = await matchingRoutes(definitions, query, options);
+  options.signal?.throwIfAborted();
   const routes = selected.matches.slice(0, readLimit(args.limit, 100));
-  const browserControl = sources.browserControl;
-  const delegationCards = sources.delegationCards;
+  const delegationCards = delegationDecisionCards(context);
   return {
     status: 'available',
     summary: {
@@ -430,32 +328,31 @@ export async function executionPostureSummary(context: CommandContext, toolRegis
       browserControl: browserControl.status,
       browserControlSetup: browserControl,
       delegationDecisionCards: delegationCards,
-      sudoPosture: sources.sudo,
-      interactiveRuntime: sources.interactiveRuntime,
+      sudoPosture: sudoExecutionPosture(context),
+      interactiveRuntime: browserControl.runtime,
       executionHistory: 'execution action:"history"',
       backgroundProcesses: 'execution action:"processes"',
-      fileRecovery: sources.fileRecovery,
-      supervision: sources.supervision,
-      registeredExecutionTools: sources.tools.map(tool => tool.name).filter((name) => ['read', 'find', 'inspect', 'analyze', 'edit', 'write', 'exec', 'fetch', 'web_search'].includes(name)).sort(),
+      fileRecovery: fileRecoveryCatalogStatus(context),
+      supervision: executionSupervisionSummary(context),
+      registeredExecutionTools: ['read', 'find', 'inspect', 'analyze', 'edit', 'write', 'exec', 'fetch', 'web_search'].filter((name) => facts.toolNames.has(name)).sort(),
     },
     decisionRules: [
       'Do not delegate ordinary local implementation, fix, review, or verification work when local tools and permissions are sufficient.',
       'Do delegate when isolation, parallelism, remote execution, a separate worktree, or a requested delegated review improves the user outcome.',
       'Report setup gaps directly for browser/desktop control instead of pretending browser automation exists.',
-      'Treat PTY, sudo, live output, and browser/desktop command execution as ready only when certified platform/daemon runtime records publish exact visible routes and receipts.',
+      'interactiveRuntime says what runs now: tracked processes and their output come from the process manager, sudo is foreground-only, no PTY session owner exists, and browser/desktop control is ready only when a route in browserControlSetup can be invoked.',
       'Use tracked background processes for approved long-running local commands instead of hidden exec background mode.',
     ],
-    routes: routes.map(({ entry, judgment }) => ({ ...(includeParameters ? entry.full : entry.summary), ...(judgment ? { judgment } : {}) })),
+    routes: routes.map(({ entry, judgment }) => ({ ...describeRoute(entry, context, facts, { includeParameters }), ...(judgment ? { judgment } : {}) })),
     judgments: selected.judgments,
     returned: routes.length,
-    total: sources.routes.length,
+    total: definitions.length,
     policy: 'Read-only execution posture. It selects routes and safety boundaries; actual tool calls remain governed by each first-class tool policy.',
   };
 }
 
 export async function describeHarnessExecutionRoute(context: CommandContext, toolRegistry: ToolRegistry, args: AgentHarnessExecutionArgs, options: CatalogRankingOptions = {}): Promise<ExecutionResolution> {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const backend = captureExecutionBackend(context, toolRegistry);
   const lookup = lookupFromArgs(args);
   if (!lookup) {
     return {
@@ -463,30 +360,34 @@ export async function describeHarnessExecutionRoute(context: CommandContext, too
       usage: 'execution action:"route" requires executionRouteId, target, or query. Use execution action:"status" to inspect execution route ids.',
     };
   }
-  const acquired = await captureBrowserControlPosture(context, toolRegistry, options);
-  backend.assertCurrent();
-  const sources = executionSources(context, toolRegistry, backend.originalSources, acquired.posture);
-  const assertCurrent = retainExecutionSources(context, toolRegistry, sources, options, () => { backend.assertCurrent(); acquired.assertSourceCurrent(); });
-  const all = sources.routes;
+  // An exact id is a lookup in the constant table; the facts are read only for the row returned.
+  const all = routeDefinitions();
   const normalized = lookup.input.toLowerCase();
-  const exact = all.find(({ route }) => route.id === lookup.input);
-  if (exact) return { status: 'found', route: { ...exact.full, lookup: { ...lookup, resolvedBy: 'id' } } };
-  const insensitive = all.find(({ route }) => route.id.toLowerCase() === normalized);
-  if (insensitive) return { status: 'found', route: { ...insensitive.full, lookup: { ...lookup, resolvedBy: 'case-insensitive-id' } } };
+  const exact = all.find((route) => route.id === lookup.input);
+  const insensitive = exact ? undefined : all.find((route) => route.id.toLowerCase() === normalized);
+  const found = exact ?? insensitive;
+  const facts = async () => readExecutionFacts(context, toolRegistry, (await captureBrowserControlPosture(context, toolRegistry, options)).posture);
+  if (found) {
+    return { status: 'found', route: describeRoute(found, context, await facts(), { includeParameters: true,
+      lookup: { ...lookup, resolvedBy: exact ? 'id' : 'case-insensitive-id' } }) };
+  }
   const selected = lookup.source === 'executionRouteId' ? { matches: [], judgments: [] }
-    : await matchingRoutes(sources, lookup.input, { ...options, assertCurrent });
-  assertCurrent();
+    : await matchingRoutes(all, lookup.input, options);
+  options.signal?.throwIfAborted();
   const searched = selected.matches;
-  if (searched.length === 1 && searched[0]!.judgment?.reading.verdict === 'yes' && searched[0]!.judgment?.reading.outcome === 'act') return { status: 'found', route: { ...searched[0]!.entry.full, judgment: searched[0]!.judgment, lookup: { ...lookup, resolvedBy: 'search' } } };
-  if (searched.length > 0) {
+  if (searched.length === 0) {
     return {
-      status: 'ambiguous',
-      input: lookup.input,
-      candidates: searched.slice(0, 8).map(({ entry, judgment }) => ({ ...describeCandidate(entry.route, context, toolRegistry, sources.browserControl), judgment })),
+      status: 'missing_lookup',
+      usage: `Unknown execution route ${lookup.input}. Use execution action:"status" to list route ids.`,
     };
   }
+  const read = await facts();
+  if (searched.length === 1 && searched[0]!.judgment?.reading.verdict === 'yes' && searched[0]!.judgment?.reading.outcome === 'act') {
+    return { status: 'found', route: { ...describeRoute(searched[0]!.entry, context, read, { includeParameters: true, lookup: { ...lookup, resolvedBy: 'search' } }), judgment: searched[0]!.judgment } };
+  }
   return {
-    status: 'missing_lookup',
-    usage: `Unknown execution route ${lookup.input}. Use execution action:"status" to list route ids.`,
+    status: 'ambiguous',
+    input: lookup.input,
+    candidates: searched.slice(0, 8).map(({ entry, judgment }) => ({ ...describeCandidate(entry, read), judgment })),
   };
 }

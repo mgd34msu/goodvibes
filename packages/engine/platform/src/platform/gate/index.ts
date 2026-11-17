@@ -23,6 +23,3 @@ export type { AutonomousDecisionInput, AutonomousDecision, AutonomousContinuatio
 export { admitJudgmentJson, captureStrictJudgmentJson, retainStrictJudgmentJson, prepareJudgmentResult, JudgmentResultAdmissionError } from './judgment-result.js';
 export type { JudgmentResultAdmissionFailure, JudgmentResultAdmissionProblem, RetainedStrictJudgmentJson } from './judgment-result.js';
 
-export { interactiveRuntimeSchemaStatus, interactiveRuntimeKind, interactiveRuntimeStatus, interactiveRuntimeRouteRole, INTERACTIVE_RUNTIME_ROUTE_ROLES, type InteractiveRuntimeRouteRole } from './batteries/interactive-runtime.js';
-
-export { browserDeviceEvidence } from './batteries/browser-device-evidence.js';

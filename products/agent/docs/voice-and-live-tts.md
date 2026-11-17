@@ -24,7 +24,7 @@ GoodVibes Agent supports spoken turns as an Agent TUI feature. Text output remai
 
 The model can inspect the same settings through `settings action:"list|get"`, use `device action:"voice|provider"` for voice/media posture and provider inspection, open the visible TTS provider or voice picker through `device action:"open_tts_provider|open_tts_voice"` with confirmation, and change Agent-owned TTS settings with `settings action:"set"` plus explicit confirmation.
 
-Lower-level `mode:"media_posture"` is compact by default; use `includeParameters:true` or `mode:"media_provider"` for full provider readiness, generation route hints, picker routes, and media policy detail. It also returns a voice workflow map for push-to-talk input, voice memo transcription, spoken responses, and wake-word capture, with ready/attention/setup-needed/not-published states, exact setup routes, and certified platform/daemon permission-scoped live records when published.
+Lower-level `mode:"media_posture"` is compact by default; use `includeParameters:true` or `mode:"media_provider"` for full provider readiness, generation route hints, picker routes, and media policy detail. It also returns a voice workflow map for push-to-talk input, voice memo transcription, spoken responses, and wake-word capture, with ready/attention/setup-needed states and exact setup routes, read from this host's voice runtime.
 
 The wake row in that map reports this surface's capture host, covering whether both enablement rows are on, which recorder is configured, and whether a row is refusing to start it. It keeps the paired-phone half in its own evidence field.
 
@@ -126,10 +126,9 @@ The `voice.wake.*` keys this surface reads, with their defaults:
 | `voice.wake.noiseSuppression` | `none` | The denoise stage described above |
 | `voice.wake.vadThreshold` | 0 | The speech gate described above |
 
-Wake capture on a PAIRED PHONE is a different capability and is still reported as
-`not-published` until the runtime exposes a certified permission-scoped contract. When
-the platform/daemon publishes certified wake-word records, Agent shows the permission scope,
-receipt evidence, and exact inspect/control routes.
+Wake capture on a PAIRED PHONE is not offered: the paired-device capability catalog
+(camera, screen, location, clipboard and device commands) has no microphone or wake
+capability, so the posture reports only the capture on this host.
 
 ## Playback requirements
 

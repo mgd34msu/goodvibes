@@ -1,9 +1,8 @@
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
-import { acquireInteractiveRuntimeSnapshot, type InteractiveRuntimeSnapshot } from './agent-harness-interactive-runtime-records.ts';
+import { readInteractiveRuntime, type InteractiveRuntimeSnapshot } from './agent-harness-interactive-runtime-records.ts';
 import { isAgentMcpCallRouteInstalled } from './agent-mcp-call-route.ts';
 import { toolsDeclaringCapability } from './agent-tool-capability-declarations.ts';
-import type { AgentHarnessInteractiveRuntimeRecord } from './agent-harness-interactive-runtime-records.ts';
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 
@@ -59,7 +58,7 @@ interface BrowserControlDecision {
  * spent a session improvising around a route that did not exist.
  */
 export interface BrowserControlInvocationRoute {
-  readonly kind: 'first-class-tool' | 'mcp-tool-call' | 'daemon-certified-route';
+  readonly kind: 'first-class-tool' | 'mcp-tool-call';
   readonly toolName: string;
   readonly modelRoute: string;
   readonly summary: string;
@@ -78,7 +77,6 @@ export interface BrowserControlPosture {
   /** Same list as declaredControlTools, kept for existing readers of this posture. */
   readonly toolMatches: readonly string[];
   readonly mcpServers: readonly BrowserControlMcpServer[];
-  readonly certifiedRuntimeRecords: readonly AgentHarnessInteractiveRuntimeRecord[];
   readonly runtime: Record<string, unknown>;
   readonly workflows: readonly BrowserControlWorkflow[];
   readonly setupChecklist: readonly string[];
@@ -221,7 +219,6 @@ const BROWSER_CONTROL_SAFETY: readonly string[] = [
 function browserInvocationRoutes(
   registry: ToolRegistry | undefined,
   mcpServers: readonly BrowserControlMcpServer[],
-  certifiedExecuteRoute: string | null,
 ): readonly BrowserControlInvocationRoute[] {
   const routes: BrowserControlInvocationRoute[] = [];
   const registeredNames = new Set(safeToolDefinitions(registry).map((tool) => tool.name));
@@ -232,19 +229,6 @@ function browserInvocationRoutes(
       toolName: 'browser',
       modelRoute: 'browser action:"navigate" url:"<page url>"',
       summary: 'Drive a real browser directly: navigate, snapshot, click, type, read the page, screenshot. Provisions its own browser on first use.',
-    });
-  }
-  const certifiedTool = certifiedExecuteRoute?.split(/\s+/)[0] ?? '';
-  if (certifiedExecuteRoute && registeredNames.has(certifiedTool)) {
-    // A certified daemon record counts only when it declares a route that
-    // RUNS something and the tool that route starts with is registered here.
-    // Published route text with no tool behind it describes browser control
-    // without providing it; it stays visible in certifiedRuntimeRecords.
-    routes.push({
-      kind: 'daemon-certified-route',
-      toolName: certifiedTool,
-      modelRoute: certifiedExecuteRoute,
-      summary: 'Run browser or desktop control through the connected host, using the route its certified record declares.',
     });
   }
   if (registeredNames.has('mcp') && isAgentMcpCallRouteInstalled()) {
@@ -273,22 +257,24 @@ function projectBrowserControlPosture(context: CommandContext, toolRegistry: Too
     .sort((left, right) => left.name.localeCompare(right.name));
 
   const needsReview = mcpServers.some((server) => server.readiness === 'attention');
-  const runtime = snapshot.capabilitySummary;
-  const runtimeParity = snapshot.parityStatus;
-  const certifiedExecuteRoute = runtimeParity.browserDesktopRecords[0]?.routes
-    .find((route) => route.id === 'execute')?.modelRoute ?? null;
-  const invocationRoutes = browserInvocationRoutes(registry, mcpServers, certifiedExecuteRoute);
-  // Readiness is invocability. A connected MCP server, a tool whose name looks
-  // browser-shaped, or a certified record that only offers inspection are all
-  // reported below as context; none of them make this capability usable.
+  const invocationRoutes = browserInvocationRoutes(registry, mcpServers);
+  // Readiness is invocability. A connected MCP server or a tool whose name looks
+  // browser-shaped is reported below as context; neither makes this capability usable.
   const configured = invocationRoutes.length > 0;
+  const desktopTools = toolsDeclaringCapability('desktop-control').filter((toolName) => registeredNames.has(toolName));
+  // The interactive runtime rows (processes, PTY, sudo) plus the browser/desktop row this posture owns.
+  const runtime = {
+    ...snapshot.capabilitySummary,
+    browserDesktopControl: {
+      status: configured ? 'ready' : needsReview ? 'attention' : 'setup-needed',
+      routes: invocationRoutes.map((route) => route.modelRoute),
+      desktopControl: desktopTools.length > 0 ? 'ready' : 'unavailable',
+    },
+  };
   const blockers = configured
     ? []
     : [
       'No browser route can be invoked from this session.',
-      ...(certifiedExecuteRoute && !registeredNames.has(certifiedExecuteRoute.split(/\s+/)[0] ?? '')
-        ? ['A certified daemon record publishes an execute route, but no tool in this session starts that route, so it is context only.']
-        : []),
       ...(mcpServers.length > 0 && !isAgentMcpCallRouteInstalled()
         ? ['MCP browser servers are connected but this session has no route that can call them.']
         : []),
@@ -305,10 +291,8 @@ function projectBrowserControlPosture(context: CommandContext, toolRegistry: Too
     declaredControlTools,
     toolMatches: declaredControlTools,
     mcpServers,
-    certifiedRuntimeRecords: runtimeParity.browserDesktopRecords.slice(0, 5),
     runtime,
-    workflows: browserControlWorkflows(configured, needsReview, recommendedRoute, setupRoute,
-      toolsDeclaringCapability('desktop-control').filter((toolName) => registeredNames.has(toolName))),
+    workflows: browserControlWorkflows(configured, needsReview, recommendedRoute, setupRoute, desktopTools),
     setupChecklist: [
       'Inspect browser/desktop MCP servers and first-class tools before attempting live UI control.',
       'Prefer constrained trust, fresh schemas, and explicit allowed hosts/paths.',
@@ -322,7 +306,7 @@ function projectBrowserControlPosture(context: CommandContext, toolRegistry: Too
     executionRoute: 'execution action:"route" id:"browser-or-desktop-control"',
     setupRoute,
     recommendedRoute,
-    policy: 'Browser and desktop control stays explicit: no live UI control is assumed unless a trusted tool, fresh constrained MCP server, or certified daemon browser/desktop command receipt is configured.',
+    policy: 'Browser and desktop control stays explicit: no live UI control is assumed unless a trusted tool or a fresh constrained MCP server is configured.',
   };
 }
 
@@ -334,8 +318,7 @@ export async function captureBrowserControlPosture(context: CommandContext, tool
   const assertCurrent = (): void => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
   assertCurrent();
   const registry = toolRegistry ?? context.extensions?.toolRegistry;
-  const snapshot = await acquireInteractiveRuntimeSnapshot(context, options);
-  assertCurrent();
+  const snapshot = readInteractiveRuntime(context, options);
   return { posture: projectBrowserControlPosture(context, registry, snapshot), assertCurrent, assertSourceCurrent };
 }
 
@@ -383,9 +366,7 @@ function browserControlDecision(
         ? `Call ${route.modelRoute} directly, replacing any <placeholder> with a real value. ${route.summary}`
         : 'Inspect the configured browser tool/server before acting.',
       reason: route
-        ? route.kind === 'daemon-certified-route'
-          ? `A certified daemon record declares this route and ${route.toolName} is registered in this session.`
-          : route.kind === 'mcp-tool-call'
+        ? route.kind === 'mcp-tool-call'
             ? 'The mcp tool is registered and a connected MCP browser server has fresh schemas and a trusted mode.'
             : `${route.toolName} is registered and can be invoked from this session.`
         : 'A browser/desktop control tool or fresh trusted MCP server is configured.',

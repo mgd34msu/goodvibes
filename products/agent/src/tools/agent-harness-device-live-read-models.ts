@@ -1,428 +1,106 @@
-import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
-import { captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { captureCatalogProducerSources, withModelReadingSource } from './agent-harness-model-reading-source.ts';
-import { readBrowserDeviceEvidence } from './agent-harness-browser-device-readings.ts';
+import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import { redactedHarnessPreview } from './agent-harness-secret-redaction.ts';
-import { types as nodeTypes } from 'node:util';
 
-export interface DeviceLiveRecordCertification {
-  readonly schemaStatus: 'certified' | 'legacy';
-  readonly schemaVersion?: string;
-  readonly publicationGuarantee?: string;
-  readonly publisher?: string;
-  readonly provenance?: readonly string[];
-  readonly receiptId?: string;
-  readonly cursor?: string;
-  readonly missingSignals: readonly string[];
-  readonly policy: string;
-}
-
+/**
+ * What the paired devices can do, read from the one owner: the daemon's device
+ * capability runtime (paired nodes with the catalog capabilities each serves,
+ * and the live grants), through `context.platform.devices`. A row is typed by
+ * its capability id, so nothing is interpreted.
+ */
 export interface DeviceLiveCapabilityRecord {
-  readonly provenance?: 'classic';
-  readonly semanticAssessment?: 'not-evaluated';
+  /** `<nodeId>:<capabilityId>`. */
   readonly id: string;
+  /** The device catalog id, e.g. `device.camera.rear.capture`. */
   readonly capabilityId: string;
-  readonly label: string | null;
-  readonly domain: string;
-  readonly status: string;
-  readonly summary: string | null;
-  readonly capabilities: readonly string[];
-  readonly permissionScope: string | null;
-  readonly route: string | null;
+  readonly nodeId: string;
+  readonly nodeLabel: string | null;
+  readonly nodeKind: string | null;
+  readonly platform: string | null;
+  /** `granted`: a live grant covers it; `ask`: the node serves it and a request asks under `permissions.mode`. */
+  readonly status: 'granted' | 'ask';
+  readonly grant: {
+    readonly grantId: string;
+    readonly scope: string | null;
+    readonly expiresAt: string | null;
+    readonly lastUsedAt: string | null;
+    readonly useCount: number;
+  } | null;
   readonly modelRoute: string;
-  readonly controlRoutes: Readonly<Record<string, string>>;
-  readonly sourcePath: string;
-  readonly source: 'daemon-read-model' | 'platform-read-model';
-  readonly certification: DeviceLiveRecordCertification;
 }
 
 export interface DeviceLiveReadModelSnapshot {
-  readonly provenance?: 'classic';
-  readonly semanticAssessment?: 'not-evaluated';
   readonly capabilities: readonly DeviceLiveCapabilityRecord[];
-  readonly sourceCounts: Readonly<Record<string, number>>;
-  /** Producers that threw or answered asynchronously; their records are NOT in this snapshot. */
-  readonly sourceErrors?: readonly string[];
+  readonly pairedNodes: number;
+  /** Why the device runtime could not be read (no daemon client, or the daemon did not answer); absent when it was read. */
+  readonly unavailable?: string;
 }
 
-interface OriginalDeviceLiveRecord {
-  readonly id: string;
-  readonly capabilityId: string;
-  readonly record: Record<string, unknown>;
+/** Device catalog capabilities that a camera, screen, location or device-command row covers. */
+export const SENSOR_DEVICE_CAPABILITY_IDS: readonly string[] = [
+  'device.camera.rear.capture', 'device.camera.front.capture', 'device.screen.capture',
+  'device.location.coarse', 'device.location.precise',
+  'device.command.notify', 'device.command.open_url', 'device.command.vibrate',
+];
+
+function isoTime(value: number | null | undefined): string | null {
+  return typeof value === 'number' && Number.isFinite(value) ? new Date(value).toISOString() : null;
 }
 
-// Complete producer evidence belongs to the exact operation snapshot, not its
-// public DTO. This stores no judgment result and grants no source authority.
-const snapshotSources = new WeakMap<DeviceLiveReadModelSnapshot, {
-  readonly records: readonly OriginalDeviceLiveRecord[];
-  readonly assertSourceCurrent: () => void;
-}>();
-
-interface SourceCandidate {
-  readonly path: string;
-  readonly source: unknown;
-  readonly kind: 'daemon-read-model' | 'platform-read-model';
+function reason(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
-interface CollectedRecord {
-  readonly path: string;
-  readonly kind: 'daemon-read-model' | 'platform-read-model';
-  readonly record: Record<string, unknown>;
-}
-
-const WRAPPER_KEYS = [
-  'records',
-  'items',
-  'capabilities',
-  'deviceCapabilities',
-  'mobileCapabilities',
-  'voiceWorkflows',
-  'workflows',
-  'sensors',
-  'sensorRoutes',
-] as const;
-
-const SNAPSHOT_METHODS = ['getSnapshot', 'snapshot', 'toJSON'] as const;
-const LIST_METHODS = ['listCapabilities', 'listDeviceCapabilities', 'listSensors', 'listVoiceWorkflows', 'list'] as const;
-
-function readObject(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function readMetadata(record: Record<string, unknown>): Record<string, unknown> {
-  return readObject(record.metadata);
-}
-
-function nestedString(record: Record<string, unknown>, key: string): string {
-  return readString(record[key])
-    || readString(readMetadata(record)[key])
-    || readString(readObject(record.capability)[key])
-    || readString(readObject(record.device)[key])
-    || readString(readObject(record.permission)[key])
-    || readString(readObject(record.evidence)[key])
-    || readString(readObject(record.route)[key]);
-}
-
-function certificationRecords(record: Record<string, unknown>): readonly Record<string, unknown>[] {
-  return [
-    record,
-    readMetadata(record),
-    readObject(record.schema),
-    readObject(record.contract),
-    readObject(record.publication),
-    readObject(record.receipt),
-    readObject(record.certification),
-  ];
-}
-
-function firstAcross(records: readonly Record<string, unknown>[], keys: readonly string[]): string {
-  for (const record of records) {
-    for (const key of keys) {
-      const value = readString(record[key]);
-      if (value) return value;
+/**
+ * One read of the paired nodes and one of the grants, side by side. A daemon
+ * that does not answer is reported in `unavailable`; it is not an empty map.
+ */
+export async function deviceLiveReadModelSnapshot(context: CommandContext, options: CatalogRankingOptions = {}): Promise<DeviceLiveReadModelSnapshot> {
+  options.signal?.throwIfAborted();
+  const devices = context.platform.devices;
+  if (!devices) return { capabilities: [], pairedNodes: 0, unavailable: 'This runtime has no connection to the daemon\'s device runtime.' };
+  const [nodes, grants] = await Promise.allSettled([devices.listNodes(), devices.listGrants()]);
+  options.signal?.throwIfAborted();
+  if (nodes.status === 'rejected') return { capabilities: [], pairedNodes: 0, unavailable: `Paired devices could not be read: ${reason(nodes.reason)}` };
+  const grantsByKey = new Map<string, NonNullable<DeviceLiveCapabilityRecord['grant']>>();
+  if (grants.status === 'fulfilled') {
+    for (const grant of grants.value) {
+      if (!grant.nodeId || !grant.capabilityId) continue;
+      grantsByKey.set(`${grant.nodeId}:${grant.capabilityId}`, {
+        grantId: grant.grantId,
+        scope: grant.scope ?? null,
+        expiresAt: isoTime(grant.expiresAt),
+        lastUsedAt: isoTime(grant.lastUsedAt),
+        useCount: grant.useCount ?? 0,
+      });
     }
   }
-  return '';
-}
-
-function stringArray(value: unknown): readonly string[] {
-  if (Array.isArray(value)) return [...new Set(value.map((entry) => readString(entry)).filter(Boolean))].slice(0, 16);
-  const text = readString(value);
-  return text ? text.split(',').map((entry) => entry.trim()).filter(Boolean).slice(0, 16) : [];
-}
-
-function safePreview(value: string, limit: number): string {
-  return redactedHarnessPreview(value, limit);
-}
-
-function safeNullablePreview(value: string, limit: number): string | null {
-  return value ? safePreview(value, limit) : null;
-}
-
-function schemaStatus(records: readonly Record<string, unknown>[]): DeviceLiveRecordCertification['schemaStatus'] {
-  const explicit = firstAcross(records, ['schemaStatus', 'receiptSchemaStatus', 'certificationStatus']).toLowerCase().replace(/[_\s]+/g, '-');
-  if (['certified', 'valid', 'verified', 'schema-certified'].includes(explicit)) return 'certified';
-  return firstAcross(records, ['schemaVersion', 'receiptSchemaVersion', 'contractVersion'])
-    && firstAcross(records, ['publicationGuarantee', 'hostPublicationGuarantee', 'devicePublicationGuarantee'])
-    && firstAcross(records, ['publisher', 'publisherId', 'daemonId', 'hostId'])
-    ? 'certified'
-    : 'legacy';
-}
-
-function routeMap(record: Record<string, unknown>): Readonly<Record<string, string>> {
-  const routes = { ...readObject(record.routes), ...readObject(record.controls) };
-  const output: Record<string, string> = {};
-  for (const key of ['inspect', 'open', 'run', 'capture', 'repairPermission', 'grantPermission', 'revokePermission', 'test']) {
-    const value = readString(routes[key]) || nestedString(record, `${key}Route`);
-    if (value) output[key] = safePreview(value, 180);
+  const capabilities: DeviceLiveCapabilityRecord[] = [];
+  for (const node of nodes.value) {
+    for (const capabilityId of node.supported ?? []) {
+      const id = `${node.nodeId}:${capabilityId}`;
+      const grant = grantsByKey.get(id) ?? null;
+      capabilities.push({
+        id,
+        capabilityId,
+        nodeId: node.nodeId,
+        nodeLabel: node.label ?? null,
+        nodeKind: node.nodeKind ?? null,
+        platform: node.platform ?? null,
+        status: grant ? 'granted' : 'ask',
+        grant,
+        modelRoute: `phone action:"run" nodeId:${JSON.stringify(node.nodeId)} capabilityId:${JSON.stringify(capabilityId)}`,
+      });
+    }
   }
-  return output;
-}
-
-function certification(input: {
-  readonly record: Record<string, unknown>;
-  readonly sourcePath: string;
-  /** Ids as the record published them, before any position-based fallback. */
-  readonly id: string;
-  readonly capabilityId: string;
-  readonly status: string;
-  readonly permissionScope: string;
-  readonly modelRoute: string;
-  readonly hasRoutes: boolean;
-}): DeviceLiveRecordCertification {
-  const records = certificationRecords(input.record);
-  const currentSchemaStatus = schemaStatus(records);
-  const schemaVersion = firstAcross(records, ['schemaVersion', 'receiptSchemaVersion', 'contractVersion']);
-  const publicationGuarantee = firstAcross(records, ['publicationGuarantee', 'hostPublicationGuarantee', 'devicePublicationGuarantee']);
-  const publisher = firstAcross(records, ['publisher', 'publisherId', 'daemonId', 'hostId']);
-  const receiptId = firstAcross(records, ['receiptId', 'capabilityReceiptId', 'permissionReceiptId', 'routeReceiptId']);
-  const cursor = firstAcross(records, ['cursor', 'freshnessCursor', 'sequence', 'checkpoint']);
-  const provenance = [...new Set([
-    ...stringArray(input.record.provenance),
-    input.sourcePath ? `source ${input.sourcePath}` : '',
-    firstAcross(records, ['methodId']) ? `method ${firstAcross(records, ['methodId'])}` : '',
-    firstAcross(records, ['sourceTool']) ? `sourceTool ${firstAcross(records, ['sourceTool'])}` : '',
-  ].map((entry) => safePreview(entry, 180)).filter(Boolean))].slice(0, 8);
-  const missingSignals = [
-    ...(currentSchemaStatus === 'certified' ? [] : ['Certified device capability schema is not published.']),
-    ...(input.id ? [] : ['Durable device capability record id is not published.']),
-    ...(input.capabilityId ? [] : ['Device capability id is not published.']),
-    ...(input.status ? [] : ['Device capability status is not published.']),
-    ...(publicationGuarantee ? [] : ['Device capability publication guarantee is not published.']),
-    ...(publisher ? [] : ['Device capability publisher is not published.']),
-    ...(provenance.length > 0 ? [] : ['Device capability provenance is not published.']),
-    ...(cursor ? [] : ['Device capability freshness cursor is not published.']),
-    ...(input.permissionScope ? [] : ['Permission scope is not published.']),
-    ...(input.modelRoute && input.hasRoutes ? [] : ['Exact inspect/control route is not published.']),
-  ];
   return {
-    schemaStatus: currentSchemaStatus,
-    ...(schemaVersion ? { schemaVersion: safePreview(schemaVersion, 80) } : {}),
-    ...(publicationGuarantee ? { publicationGuarantee: safePreview(publicationGuarantee, 220) } : {}),
-    ...(publisher ? { publisher: safePreview(publisher, 80) } : {}),
-    ...(provenance.length > 0 ? { provenance } : {}),
-    ...(receiptId ? { receiptId: safePreview(receiptId, 96) } : {}),
-    ...(cursor ? { cursor: safePreview(cursor, 96) } : {}),
-    missingSignals,
-    policy: 'Device capability read models certify release readiness only when the platform or daemon publishes schema, durable capability ids, permission scope, publication guarantee, publisher/provenance, freshness cursor, exact inspect/control routes, and redacted receipt evidence.',
+    capabilities,
+    pairedNodes: nodes.value.length,
+    ...(grants.status === 'rejected' ? { unavailable: `Grants could not be read (every row shows "ask"): ${reason(grants.reason)}` } : {}),
   };
 }
 
-function callMethod(source: Record<string, unknown>, method: string, path: string, problems: string[]): unknown {
-  const fn = source[method];
-  if (typeof fn !== 'function') return undefined;
-  try {
-    const value = (fn as () => unknown).call(source);
-    if (nodeTypes.isPromise(value) || (value !== null && typeof value === 'object' && typeof (value as { then?: unknown }).then === 'function')) {
-      // Swallow a later rejection; the producer is reported, not awaited.
-      void Promise.resolve(value).catch(() => {});
-      problems.push(`${path}.${method}() answered asynchronously, so its records were not read`);
-      return undefined;
-    }
-    return value;
-  } catch (error) {
-    problems.push(error instanceof ToolInputProjectionError
-      ? `${path}.${method}() was refused by the source guard (an asynchronous or non-plain answer is not read), so its records are missing`
-      : `${path}.${method}() threw: ${safePreview(error instanceof Error ? error.message : String(error), 120)}`);
-    return undefined;
-  }
-}
-
-function collectFromSource(
-  source: unknown,
-  path: string,
-  kind: 'daemon-read-model' | 'platform-read-model',
-  problems: string[],
-  visited = new WeakSet<object>(),
-): readonly CollectedRecord[] {
-  if (!source) return [];
-  if (Array.isArray(source)) return source.flatMap((entry, index) => collectFromSource(entry, `${path}[${index}]`, kind, problems, visited));
-  if (source instanceof Map) return Array.from(source.entries()).flatMap(([key, value]) => collectFromSource(value, `${path}.${String(key)}`, kind, problems, visited));
-  if (typeof source !== 'object') return [];
-  if (visited.has(source)) return [];
-  visited.add(source);
-  const record = source as Record<string, unknown>;
-  const problemsBefore = problems.length;
-  const fromSnapshots = SNAPSHOT_METHODS.flatMap((method) => {
-    const snapshot = callMethod(record, method, path, problems);
-    return snapshot === undefined ? [] : collectFromSource(snapshot, `${path}.${method}()`, kind, problems, visited);
-  });
-  const fromMethods = LIST_METHODS.flatMap((method) => {
-    const snapshot = callMethod(record, method, path, problems);
-    return snapshot === undefined ? [] : collectFromSource(snapshot, `${path}.${method}()`, kind, problems, visited);
-  });
-  const fromWrappers = WRAPPER_KEYS.flatMap((key) => {
-    if (!(key in record)) return [];
-    return collectFromSource(record[key], `${path}.${key}`, kind, problems, visited);
-  });
-  if (fromSnapshots.length > 0 || fromMethods.length > 0 || fromWrappers.length > 0) {
-    return [...fromSnapshots, ...fromMethods, ...fromWrappers];
-  }
-  // A producer that failed or answered asynchronously is reported, not read as a record
-  // describing itself (its methods would make the whole snapshot invalid).
-  if (problems.length > problemsBefore) return [];
-  return [{ path, kind, record }];
-}
-
-function modelRoute(record: Record<string, unknown>, capabilityId: string): string {
-  const routes = readObject(record.routes);
-  return nestedString(record, 'modelRoute')
-    || nestedString(record, 'inspectRoute')
-    || nestedString(record, 'route')
-    || readString(routes.inspect)
-    || readString(routes.open)
-    || readString(routes.run)
-    || `device action:"capability" capabilityId:"${capabilityId}" includeParameters:true`;
-}
-
-function publishedCapabilityIdOf(record: Record<string, unknown>): string {
-  return nestedString(record, 'capabilityId')
-    || nestedString(record, 'id')
-    || nestedString(record, 'kind');
-}
-
-function normalizeCapability(entry: CollectedRecord, index: number): DeviceLiveCapabilityRecord | null {
-  const publishedCapabilityId = publishedCapabilityIdOf(entry.record);
-  const capId = safePreview(publishedCapabilityId || `device-capability-${index}`, 96);
-  if (!capId) return null;
-  const publishedId = nestedString(entry.record, 'id') || nestedString(entry.record, 'receiptId');
-  const id = safePreview(publishedId || `device-live:${capId}:${index}`, 120);
-  const routes = routeMap(entry.record);
-  const route = nestedString(entry.record, 'route') || nestedString(entry.record, 'openRoute') || routes.open || routes.run || routes.inspect || null;
-  const routeForModel = safePreview(modelRoute(entry.record, capId), 240);
-  const permissionScope = nestedString(entry.record, 'permissionScope') || nestedString(entry.record, 'scope') || nestedString(entry.record, 'permission');
-  const status = safePreview(nestedString(entry.record, 'status') || nestedString(entry.record, 'state') || 'unknown', 80);
-  return {
-    ...(isClassicOperation() ? { provenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
-    id,
-    capabilityId: capId,
-    label: safeNullablePreview(nestedString(entry.record, 'label') || nestedString(entry.record, 'title'), 120),
-    domain: safePreview(nestedString(entry.record, 'domain') || nestedString(entry.record, 'surface') || 'device', 80),
-    status,
-    summary: safeNullablePreview(nestedString(entry.record, 'summary') || nestedString(entry.record, 'detail'), 220),
-    capabilities: [...new Set([
-      ...stringArray(entry.record.capabilities),
-      ...stringArray(entry.record.features),
-      ...stringArray(readObject(entry.record.capability).capabilities),
-      capId,
-    ].map((value) => safePreview(value, 80)).filter(Boolean))].slice(0, 16),
-    permissionScope: safeNullablePreview(permissionScope, 120),
-    route: route ? safePreview(route, 180) : null,
-    modelRoute: routeForModel,
-    controlRoutes: routes,
-    sourcePath: entry.path,
-    source: entry.kind,
-    certification: certification({
-      record: entry.record,
-      sourcePath: entry.path,
-      id: publishedId,
-      capabilityId: publishedCapabilityId,
-      status,
-      permissionScope,
-      modelRoute: routeForModel,
-      hasRoutes: Boolean(route || Object.keys(routes).length > 0),
-    }),
-  };
-}
-
-function sourceCounts(entries: readonly CollectedRecord[]): Readonly<Record<string, number>> {
-  const counts: Record<string, number> = {};
-  for (const entry of entries) counts[entry.path] = (counts[entry.path] ?? 0) + 1;
-  return counts;
-}
-
-function sources(native: ReturnType<typeof captureCatalogProducerSources>): readonly SourceCandidate[] {
-  return [
-    { path: 'context.platform.readModels.device.capabilities', source: native.source('context.platform.readModels.device.capabilities'), kind: 'daemon-read-model' },
-    { path: 'context.platform.readModels.device.sensors', source: native.source('context.platform.readModels.device.sensors'), kind: 'daemon-read-model' },
-    { path: 'context.platform.readModels.companion.capabilities', source: native.source('context.platform.readModels.companion.capabilities'), kind: 'daemon-read-model' },
-    { path: 'context.platform.readModels.voice.workflows', source: native.source('context.platform.readModels.voice.workflows'), kind: 'daemon-read-model' },
-    { path: 'context.platform.readModels.deviceCapabilities', source: native.source('context.platform.readModels.deviceCapabilities'), kind: 'daemon-read-model' },
-    { path: 'context.platform.readModels.companionCapabilities', source: native.source('context.platform.readModels.companionCapabilities'), kind: 'daemon-read-model' },
-    { path: 'context.ops.device.capabilities', source: native.source('context.ops.device.capabilities'), kind: 'platform-read-model' },
-    { path: 'context.clients.operator.device.capabilities', source: native.source('context.clients.operator.device.capabilities'), kind: 'platform-read-model' },
-    { path: 'context.clients.operatorApiClient.device.capabilities', source: native.source('context.clients.operatorApiClient.device.capabilities'), kind: 'platform-read-model' },
-  ];
-}
-
-export function isCertifiedDeviceLiveRecord(record: DeviceLiveCapabilityRecord): boolean {
-  return record.certification.schemaStatus === 'certified' && record.certification.missingSignals.length === 0;
-}
-
-export async function certifiedDeviceLiveRecords(
-  snapshot: DeviceLiveReadModelSnapshot,
-  capabilityId: string,
-  terms: readonly string[] = [],
-  options: CatalogRankingOptions = {},
-): Promise<readonly DeviceLiveCapabilityRecord[]> {
-  return withConfiguredDecisionModelPolicy(() => ownedCertifiedDeviceLiveRecords(snapshot, capabilityId, terms, options));
-}
-
-async function ownedCertifiedDeviceLiveRecords(snapshot: DeviceLiveReadModelSnapshot, capabilityId: string, terms: readonly string[], options: CatalogRankingOptions): Promise<readonly DeviceLiveCapabilityRecord[]> {
-  const original = snapshotSources.get(snapshot);
-  if (!original) throw new ToolInputProjectionError('invalid');
-  original.assertSourceCurrent();
-  const caller = captureAsyncHarnessInput({ snapshot, originalRecords: original.records, capabilityId, terms }, options, true);
-  caller.options.retainCurrent(original.assertSourceCurrent, 'agent.device.snapshot-source');
-  const published = await withModelReadingSource(caller.args, caller.options, async (captured, current) => {
-    original.assertSourceCurrent();
-    const matched: DeviceLiveCapabilityRecord[] = [];
-    for (const record of captured.snapshot.capabilities) {
-      if (!isCertifiedDeviceLiveRecord(record)) continue;
-      const evidence = captured.originalRecords.find(entry => entry.id === record.id && entry.capabilityId === record.capabilityId);
-      if (!evidence) throw new ToolInputProjectionError('invalid');
-      original.assertSourceCurrent();
-      const supported = await readBrowserDeviceEvidence({ kind: 'device-capability', record: evidence.record,
-        requestedCapability: captured.capabilityId, requestedTerms: captured.terms }, current);
-      current.assertCurrent?.(); original.assertSourceCurrent();
-      if (supported) matched.push(record);
-    }
-    current.assertCurrent?.(); original.assertSourceCurrent();
-    return matched;
-  });
-  caller.retainSourceCurrent('agent.device.sources');
-  return published;
-}
-
-export async function deviceLiveReadModelSnapshot(context: CommandContext,
-  options: CatalogRankingOptions = {}): Promise<DeviceLiveReadModelSnapshot> {
-  return withConfiguredDecisionModelPolicy(() => ownedDeviceLiveReadModelSnapshot(context, options));
-}
-
-async function ownedDeviceLiveReadModelSnapshot(context: CommandContext, options: CatalogRankingOptions): Promise<DeviceLiveReadModelSnapshot> {
-  options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const native = captureCatalogProducerSources(context, ["context.platform.readModels.device.capabilities", "context.platform.readModels.device.sensors", "context.platform.readModels.companion.capabilities", "context.platform.readModels.voice.workflows", "context.platform.readModels.deviceCapabilities", "context.platform.readModels.companionCapabilities", "context.ops.device.capabilities", "context.clients.operator.device.capabilities", "context.clients.operatorApiClient.device.capabilities"], ["getSnapshot", "snapshot", "toJSON", "listCapabilities", "listDeviceCapabilities", "listSensors", "listVoiceWorkflows", "list"]);
-  const problems: string[] = [];
-  const entries = sources(native).flatMap((candidate) => collectFromSource(candidate.source, candidate.path, candidate.kind, problems));
-  const caller = captureAsyncHarnessInput({ entries, problems, producerSource: native.evidence() }, options, true);
-  caller.options.retainCurrent(native.assertCurrent, 'agent.device.native-source');
-  const published = await withModelReadingSource(caller.args, caller.options, async (captured, current) => {
-    const seen = new Set<string>();
-    const capabilities: DeviceLiveCapabilityRecord[] = [];
-    const originalRecords: OriginalDeviceLiveRecord[] = [];
-    for (const [index, entry] of captured.entries.entries()) {
-      const record = normalizeCapability(entry, index);
-      if (!record) continue;
-      const key = `${record.capabilityId}:${record.id}`;
-      if (seen.has(key)) continue;
-      seen.add(key); capabilities.push(record);
-      originalRecords.push({ id: record.id, capabilityId: record.capabilityId, record: entry.record });
-    }
-    const result = captureCatalogSnapshot({ capabilities, sourceCounts: sourceCounts(captured.entries),
-      ...(captured.problems.length > 0 ? { sourceErrors: captured.problems } : {}),
-      ...(isClassicOperation() ? { provenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
-    }).captured;
-    snapshotSources.set(result, { records: originalRecords, assertSourceCurrent: caller.assertSourceCurrent });
-    current.assertCurrent?.();
-    return result;
-  });
-  caller.retainSourceCurrent('agent.device.sources');
-  return published;
+/** The rows for the given device catalog ids. */
+export function deviceLiveRecordsFor(snapshot: DeviceLiveReadModelSnapshot, capabilityIds: readonly string[]): readonly DeviceLiveCapabilityRecord[] {
+  const wanted = new Set(capabilityIds);
+  return snapshot.capabilities.filter((record) => wanted.has(record.capabilityId));
 }

@@ -11,7 +11,6 @@ export function browserControlSignals(posture: BrowserControlPosture): readonly 
       `mcp:${server.name} ${server.connected ? 'connected' : 'disconnected'} ${server.readiness} role=${server.role} trust=${server.trustMode} schema=${server.schemaFreshness}`
     )));
   }
-  if (posture.certifiedRuntimeRecords.length > 0) signals.push(`certified runtime receipts: ${posture.certifiedRuntimeRecords.length}`);
   if (signals.length === 0) signals.push('No browser, desktop, computer-use, screenshot, or screen-recording tool is configured.');
   return signals;
 }

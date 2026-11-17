@@ -1,5 +1,4 @@
 import { relative } from 'node:path';
-import { isClassicOperation } from '@goodvibes-jev/engine/platform/platform/runtime';
 import * as nativeOs from 'node:os';
 import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogMethods, captureCatalogSnapshot } from './agent-harness-catalog-ranking.ts';
@@ -15,7 +14,7 @@ import { browserDeviceCatalogMatches } from './agent-harness-browser-device-read
 import { captureCatalogNativeFacts, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
-import { certifiedDeviceLiveRecords, deviceLiveReadModelSnapshot } from './agent-harness-device-live-read-models.ts';
+import { deviceLiveReadModelSnapshot, deviceLiveRecordsFor, SENSOR_DEVICE_CAPABILITY_IDS, type DeviceLiveCapabilityRecord } from './agent-harness-device-live-read-models.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
@@ -385,8 +384,8 @@ async function queryRequestsWholeDeviceMap(query: string, deviceMap: DeviceCapab
   return matched.length === 1;
 }
 
-function liveDeviceEvidence(records: Awaited<ReturnType<typeof certifiedDeviceLiveRecords>>): Record<string, unknown> | undefined {
-  return records.length > 0 ? { certifiedLiveRecords: records.slice(0, 5) } : undefined;
+function liveDeviceEvidence(records: readonly DeviceLiveCapabilityRecord[]): Record<string, unknown> | undefined {
+  return records.length > 0 ? { liveRecords: records.slice(0, 5) } : undefined;
 }
 
 async function buildDeviceCapabilityMap(context: CommandContext, browserPosture: BrowserControlPosture, options: CatalogRankingOptions, networkAddress: string): Promise<DeviceCapabilityMap> {
@@ -409,9 +408,7 @@ async function buildDeviceCapabilityMap(context: CommandContext, browserPosture:
   const enabledChannels = channels.filter((channel) => channel.enabled);
   const notificationWebhookCount = readConfigStringArray(context, 'notifications.webhookUrls').length;
   const liveDevice = await deviceLiveReadModelSnapshot(context, options);
-  options.assertCurrent?.();
-  const sensorRecords = await certifiedDeviceLiveRecords(liveDevice, 'camera-location-sensors', ['camera', 'location', 'screen', 'device command', 'sensor'], options);
-  options.assertCurrent?.();
+  const sensorRecords = deviceLiveRecordsFor(liveDevice, SENSOR_DEVICE_CAPABILITY_IDS);
   const sensorReady = sensorRecords.length > 0;
   const ttsStatus: DeviceCapabilityStatus = voiceReadiness.selectedTtsProviderStatus === 'ready' && voiceReadiness.ttsVoiceConfigured
     ? 'ready'
@@ -605,36 +602,40 @@ async function buildDeviceCapabilityMap(context: CommandContext, browserPosture:
       id: 'camera-location-sensors',
       label: 'Camera, screen, and location sensors',
       domain: 'device',
-      status: sensorReady ? 'ready' : isClassicOperation() && liveDevice.capabilities.length > 0 ? 'attention' : 'not-published',
-      userOutcome: 'Use phone camera, screen, location, or local device commands only after the daemon/companion publishes permission-scoped records.',
+      status: sensorReady ? 'ready' : liveDevice.unavailable ? 'attention' : 'setup-needed',
+      userOutcome: 'Use the paired phone\'s camera, screen, location or device commands; each request is granted or asked under permissions.mode by the daemon.',
       summary: sensorReady
-        ? 'The platform/daemon published certified permission-scoped camera, screen, location, or device-command capability records.'
-        : isClassicOperation() && liveDevice.capabilities.length > 0
-          ? 'Device records are published, but Classic operation did not interpret their descriptions. No exact ready sensor capability declaration matched; inspect the actual records.'
-          : 'Camera, screen, location, and device-command adapters are not published by the current Agent-visible platform/daemon contract.',
+        ? `${new Set(sensorRecords.map((record) => record.nodeId)).size} paired device(s) serve ${new Set(sensorRecords.map((record) => record.capabilityId)).size} camera, screen, location or command capabilities (${sensorRecords.filter((record) => record.status === 'granted').length} with a live grant).`
+        : liveDevice.unavailable
+          ? `The device runtime could not be read: ${liveDevice.unavailable}`
+          : liveDevice.pairedNodes > 0
+            ? 'Paired devices are present but none serves a camera, screen, location or command capability right now.'
+            : 'No device is paired.',
       nextStep: sensorReady
-        ? 'Inspect the certified device record and use only its returned confirmed permission/control routes.'
-        : 'Inspect operator methods for newly published camera/location/screen contracts before claiming device access.',
+        ? 'Run a capability with phone action:"run" (or photo, screenshot, location, notify); the daemon asks the owner when no grant covers it.'
+        : liveDevice.unavailable
+          ? 'Check the connected host (host action:"status"), then read this posture again.'
+          : 'Ask the owner to pair a phone (/pair in the Agent terminal).',
       capabilities: [
         'camera permission posture',
         'screen capture permission posture',
         'location permission posture',
         'local device command routes',
-        ...sensorRecords.flatMap((record) => record.capabilities),
+        ...new Set(sensorRecords.map((record) => record.capabilityId)),
       ],
-      modelRoute: sensorRecords[0]?.modelRoute ?? 'host action:"methods" query:"camera location device"',
+      modelRoute: sensorRecords[0]?.modelRoute ?? 'phone action:"capabilities"',
       setupRoutes: [
         ...sensorRecords.slice(0, 3).map((record) => record.modelRoute),
-        'host action:"methods" query:"camera location device"',
-        'host action:"capabilities" includeParameters:true',
+        'phone action:"nodes"',
+        'phone action:"grants"',
       ],
       evidence: {
-        publishedByCurrentAgentContract: sensorReady ? true : isClassicOperation() && liveDevice.capabilities.length > 0 ? null : false,
-        ...(isClassicOperation() ? { provenance: 'classic', semanticAssessment: 'not-evaluated' } : {}),
+        pairedNodes: liveDevice.pairedNodes,
         liveDeviceRecords: liveDevice.capabilities.length,
+        ...(liveDevice.unavailable ? { unavailable: liveDevice.unavailable } : {}),
         ...liveDeviceEvidence(sensorRecords),
       },
-      policy: 'Agent reports unpublished device sensor APIs honestly and counts device access only when certified platform/daemon permission-scoped records publish exact routes without raw payloads.',
+      policy: 'Read from the daemon\'s device runtime (paired nodes and live grants). Every capability request is admitted by that runtime: a live grant, or the owner asked under permissions.mode.',
     },
   ];
   capabilities.sort((left, right) => deviceStatusRank(left.status) - deviceStatusRank(right.status) || left.label.localeCompare(right.label));

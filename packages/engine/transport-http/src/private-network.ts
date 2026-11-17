@@ -8,10 +8,19 @@
  *
  * Private: loopback and `.localhost`; the wildcard bind addresses (as a dial
  * target they reach this machine); mDNS `.local`; RFC 1918 (10/8, 172.16/12,
- * 192.168/16); IPv4 link-local 169.254/16; the Tailscale range 100.64/10 and
- * MagicDNS `*.ts.net` names (a plain-http `ts.net` origin is reachable only
- * inside the tailnet, where WireGuard encrypts it; Funnel serves https only);
- * IPv6 unique-local fc00::/7 and link-local fe80::/10.
+ * 192.168/16); IPv4 link-local 169.254/16; Tailscale MagicDNS `*.ts.net` names
+ * (a plain-http `ts.net` origin is reachable only inside the tailnet, where
+ * WireGuard encrypts it; Funnel serves https only); IPv6 unique-local fc00::/7
+ * and link-local fe80::/10.
+ *
+ * A 100.64/10 address is private only when it is stated to be a Tailscale
+ * address. That range is RFC 6598 shared address space: Tailscale uses it, and
+ * so does carrier-grade NAT, where a plain-http origin crosses the ISP's
+ * network unencrypted. It is stated by Tailscale itself (the processes that
+ * probe `tailscale status` record this machine's and its peers' addresses with
+ * {@link stateTailnetAddresses}) or by the owner, in
+ * `GOODVIBES_TAILNET_ADDRESSES` (comma-separated addresses, or `100.64.0.0/10`
+ * for the whole range when no carrier-grade NAT is in the path).
  *
  * Accepts the hostname as URL.hostname yields it (IPv6 still in brackets).
  */
@@ -46,8 +55,50 @@ function isPrivateIpv4(host: string): boolean {
   if (a === 172 && b >= 16 && b <= 31) return true; // 172.16/12
   if (a === 192 && b === 168) return true; // 192.168/16
   if (a === 169 && b === 254) return true; // link-local
-  if (a === 100 && b >= 64 && b <= 127) return true; // Tailscale (CGNAT 100.64/10)
   return false;
+}
+
+/** 100.64/10, the shared address space Tailscale and carrier-grade NAT both use. */
+function isSharedAddressSpace(host: string): boolean {
+  const octets = ipv4Octets(host);
+  return octets !== null && octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127;
+}
+
+const WHOLE_SHARED_RANGE = '100.64.0.0/10';
+/** 100.64/10 addresses stated to be Tailscale addresses by this process. */
+const statedTailnetAddresses = new Set<string>();
+let settingText: string | undefined;
+let settingAddresses: ReadonlySet<string> = new Set();
+
+/** The owner's `GOODVIBES_TAILNET_ADDRESSES`, parsed again only when its text changes. */
+function settingTailnetAddresses(): ReadonlySet<string> {
+  const runtimeProcess = (globalThis as { readonly process?: { readonly env?: Record<string, string | undefined> } }).process;
+  const text = runtimeProcess?.env?.GOODVIBES_TAILNET_ADDRESSES ?? '';
+  if (text !== settingText) {
+    settingText = text;
+    settingAddresses = new Set(text.split(/[\s,]+/).map((entry) => bareHost(entry)).filter((entry) => entry.length > 0));
+  }
+  return settingAddresses;
+}
+
+/**
+ * Record addresses this process knows are Tailscale addresses (from Tailscale
+ * itself). Only 100.64/10 literals are kept; anything else is already decided
+ * by the rules above.
+ */
+export function stateTailnetAddresses(addresses: Iterable<string>): void {
+  for (const address of addresses) {
+    const host = bareHost(address);
+    if (isSharedAddressSpace(host)) statedTailnetAddresses.add(host);
+  }
+}
+
+function isStatedTailnetAddress(host: string): boolean {
+  const ipv4 = mappedIpv4(host.replace(/%.*$/, '')) ?? host;
+  if (!isSharedAddressSpace(ipv4)) return false;
+  if (statedTailnetAddresses.has(ipv4)) return true;
+  const setting = settingTailnetAddresses();
+  return setting.has(ipv4) || setting.has(WHOLE_SHARED_RANGE);
 }
 
 function isPrivateIpv6(host: string): boolean {
@@ -64,12 +115,11 @@ function isPrivateIpv6(host: string): boolean {
   return false;
 }
 
-/** A Tailscale MagicDNS name or a Tailscale address (100.64/10). */
+/** A Tailscale MagicDNS name, or a 100.64/10 address stated to be a Tailscale address. */
 export function isTailnetHost(hostname: string): boolean {
   const host = bareHost(hostname);
   if (host.endsWith('.ts.net')) return true;
-  const octets = ipv4Octets(host);
-  return octets !== null && octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127;
+  return isStatedTailnetAddress(host);
 }
 
 /** Whether a URL hostname addresses a private network (see the file header for the list). */
@@ -79,5 +129,5 @@ export function isPrivateNetworkHost(hostname: string): boolean {
   if (host === '0.0.0.0') return true;
   if (host.endsWith('.local')) return true;
   if (host.endsWith('.ts.net')) return true;
-  return isPrivateIpv4(host) || isPrivateIpv6(host);
+  return isPrivateIpv4(host) || isPrivateIpv6(host) || isStatedTailnetAddress(host);
 }

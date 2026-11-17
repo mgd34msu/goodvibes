@@ -10,12 +10,13 @@
  * renders the honest HTTPS message instead of importing the app at all.
  *
  * Plain http on a private network (loopback, a private LAN or link-local address, a
- * `.local` name, a Tailscale name or address) is a supported posture and never trips
+ * `.local` name, a Tailscale `*.ts.net` name) is a supported posture and never trips
  * this wall; its browser-gated capabilities render as labelled degradation from
  * `pairing.posture.get` instead. The public/private boundary is the transport's own
  * `isPrivateNetworkHost`, imported from the transport's paths module (which loads
  * no app code and does not throw on import), so the guard and the transport cannot
- * disagree.
+ * disagree. A 100.64/10 address is shared with carrier-grade NAT, so a browser (which
+ * has no Tailscale probe and no environment) is pointed at the Tailscale name instead.
  */
 import { isPrivateNetworkHost } from '@goodvibes-jev/engine/transport-http/paths';
 
@@ -25,8 +26,9 @@ export const INSECURE_ORIGIN_BODY =
   'GoodVibes needs a secure (HTTPS) connection over the public internet; open it over '
   + 'HTTPS instead of plain http. The daemon refuses to talk to an insecure public '
   + 'origin, so the app cannot start here. Plain http is supported on your own network '
-  + '(localhost, a private network address, a .local name, or a Tailscale name or '
-  + 'address), this page would work there.';
+  + '(localhost, a private network address, a .local name, or a Tailscale name), this '
+  + 'page would work there. A 100.64-127.x address is also used by carrier-grade NAT, so '
+  + 'open a Tailscale machine by its Tailscale name (<machine>.<tailnet>.ts.net) instead.';
 
 /**
  * The baseUrl the platform transport would be handed, identical source to

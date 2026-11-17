@@ -20,10 +20,14 @@ computes, so it is stated where you pair a device and never repeated as a nag.
 - **Plain `http` on your LAN works, and is a supported posture.** A phone or
   laptop on the same private network (a `10.x` / `172.16-31.x` / `192.168.x`
   or link-local address, an IPv6 unique-local or link-local address, a `.local`
-  mDNS name, a Tailscale name or `100.64-127.x` address, or localhost) uses the
+  mDNS name, a Tailscale `*.ts.net` name, or localhost) uses the
   full cockpit over `http://<server>:3423` for browsing sessions, watching
   agents, and steering them. The transport does not refuse private-network
-  origins. Over a Tailscale name or address the connection is already
+  origins. A `100.64-127.x` address is accepted over http only as a Tailscale
+  address (carrier-grade NAT uses the same range): the daemon and `goodvibes
+  pair` record the addresses Tailscale reports; elsewhere list them in
+  `GOODVIBES_TAILNET_ADDRESSES`, or use the Tailscale name, which a browser
+  needs. Over a Tailscale name or address the connection is already
   encrypted by Tailscale, and the pairing surfaces say so instead of the LAN
   line below. The address in a pairing link or QR is chosen in this order: the
   Tailscale name when Tailscale is up, the `<host>.local` name only when it

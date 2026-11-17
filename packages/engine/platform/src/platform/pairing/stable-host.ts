@@ -16,7 +16,10 @@
  * `alternateHost`, so a surface can print a working fallback under the QR.
  *
  * Every rung yields a host the transport and the web UI accept for plain http
- * (`isPrivateNetworkHost` admits tailnet names and addresses).
+ * (`isPrivateNetworkHost` admits tailnet names, and a 100.64/10 address only
+ * when it is stated to be a Tailscale address: the Tailscale probe below states
+ * the addresses Tailscale reports, or the owner lists them in
+ * `GOODVIBES_TAILNET_ADDRESSES`).
  *
  * Probing: interfaces, the hostname and (on Linux) the default-route interface
  * from /proc/net/route are cheap synchronous reads taken on every call. The two
@@ -32,6 +35,7 @@ import { execFile } from 'node:child_process';
 import { lookup } from 'node:dns/promises';
 import { readFileSync } from 'node:fs';
 import { hostname as osHostname, networkInterfaces } from 'node:os';
+import { stateTailnetAddresses } from '@goodvibes-jev/engine/transport-http/paths';
 
 export type StableHostKind =
   | 'tailscale-magicdns'
@@ -134,6 +138,12 @@ export function interfaceIpv4(nets: ReturnType<typeof networkInterfaces>, name: 
   return (nets[name] ?? []).find((netInfo) => netInfo.family === 'IPv4' && !netInfo.internal)?.address;
 }
 
+/** The string entries of a `TailscaleIPs` field. */
+function tailscaleIps(node: unknown): string[] {
+  const ips = node !== null && typeof node === 'object' ? (node as { TailscaleIPs?: unknown }).TailscaleIPs : undefined;
+  return Array.isArray(ips) ? ips.filter((ip): ip is string => typeof ip === 'string') : [];
+}
+
 /** Parse `Self.DNSName` + running state out of `tailscale status --json` output. */
 export function parseTailscaleStatus(json: string): TailscaleState | undefined {
   try {
@@ -143,6 +153,18 @@ export function parseTailscaleStatus(json: string): TailscaleState | undefined {
     return { up, ...(dnsName ? { magicDnsName: dnsName } : {}) };
   } catch {
     return undefined;
+  }
+}
+
+/** This machine's and its peers' addresses (`TailscaleIPs`) from a running Tailscale's `status --json` output. */
+function runningTailnetAddresses(json: string): string[] {
+  try {
+    const parsed = JSON.parse(json) as { BackendState?: unknown; Self?: unknown; Peer?: unknown };
+    if (parsed.BackendState !== 'Running') return [];
+    const peers = parsed.Peer !== null && typeof parsed.Peer === 'object' ? Object.values(parsed.Peer as Record<string, unknown>) : [];
+    return [...tailscaleIps(parsed.Self), ...peers.flatMap(tailscaleIps)];
+  } catch {
+    return [];
   }
 }
 
@@ -206,7 +228,14 @@ function probeTailscaleState(): Promise<TailscaleState | undefined> {
   return new Promise((resolve) => {
     try {
       const child = execFile('tailscale', ['status', '--json'], { encoding: 'utf8', timeout: PROBE_TIMEOUT_MS, windowsHide: true }, (error, stdout) => {
-        resolve(error ? undefined : parseTailscaleStatus(stdout));
+        if (error) {
+          resolve(undefined);
+          return;
+        }
+        // Tailscale's own list is the fact that a 100.64/10 address is a tailnet address
+        // (not carrier-grade NAT): the transport accepts plain http to exactly these.
+        stateTailnetAddresses(runningTailnetAddresses(stdout));
+        resolve(parseTailscaleStatus(stdout));
       });
       // A probe never holds a finishing process open.
       child.unref();

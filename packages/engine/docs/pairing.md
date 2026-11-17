@@ -250,6 +250,16 @@ devices are unpaired to fit under it again.
   `pairing.tokens.list` returns each device's `scopes`, and the web app's device list shows
   them. Local sign-in users take the same list through `local_auth.users.create({ scopes })`
   and `local_auth.users.scopes.set({ username, scopes })` (`null` returns the role's set).
+  A user without the admin role reads status (counts, states, names, configuration) but none
+  of the owner's content: mail, profile, purchases, dates, memory, transcripts, paired devices
+  and peers, calendar, approvals and the questions waiting on the owner, named people,
+  workspace file contents, and the records of the browser, knowledge, channels, automations,
+  fleet and skills. Those reads need `read:email`, `read:profile`, `read:profile-document`,
+  `read:payments`, `read:occasions`, `read:memory`, `read:transcripts`, `read:pairing`,
+  `read:remote`, `read:calendar`, `read:approvals`, `read:principals`, `read:checkpoints`,
+  `read:browser-content`, `read:knowledge-content`, `read:channel-content`,
+  `read:automation-content`, `read:fleet-content` or `read:skill-content`, and a limited device
+  holds one only when its list names it.
 
 ## Legacy: the shared token
 
@@ -442,11 +452,21 @@ pairing contract, never as a recurring nag):
 **Plain http on your LAN works, and is a supported posture.** A phone on the
 same private network (a `10.x`/`172.16-31.x`/`192.168.x` or link-local address,
 an IPv6 unique-local or link-local address, a `.local` mDNS name, a Tailscale
-name or `100.64-127.x` address, or localhost) uses the full cockpit over http.
+`*.ts.net` name, or localhost) uses the full cockpit over http.
 The transport does not refuse private-network origins; the one rule is
 `isPrivateNetworkHost` in `transport-http`, which the web UI's start-up guard
 imports. Over a Tailscale name or address the connection is already encrypted
 by Tailscale, and the posture notice says so instead of the LAN line.
+
+A `100.64-127.x` address is accepted over http only as a stated Tailscale
+address, because carrier-grade NAT uses the same range and an http request to
+it would cross the ISP's network unencrypted with the bearer token. A process
+that probes Tailscale (the daemon, `goodvibes pair`) records the addresses
+`tailscale status` reports for this machine and its peers; anywhere else, list
+them in `GOODVIBES_TAILNET_ADDRESSES` (comma-separated, or `100.64.0.0/10` for
+the whole range when no carrier-grade NAT is in the path) or use the
+Tailscale name. A browser cannot be told, so the web UI is opened by the
+Tailscale name.
 
 The host in a pairing link, a QR or `web.publicBaseUrl` for a wildcard bind
 comes from one rule (`stableUrlHostForBindHost`): the Tailscale MagicDNS name

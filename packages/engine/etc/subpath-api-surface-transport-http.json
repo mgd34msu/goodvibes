@@ -1132,6 +1132,11 @@
       "name": "normalizeBaseUrl",
       "kind": "function",
       "text": "export declare function normalizeBaseUrl(baseUrl: string): string;"
+    },
+    {
+      "name": "stateTailnetAddresses",
+      "kind": "function",
+      "text": "export declare function stateTailnetAddresses(addresses: Iterable<string>): void; ;; via Iterable = interface Iterable<T, TReturn = any, TNext = any> { [Symbol.iterator](): Iterator<T, TReturn, TNext>; }"
     }
   ],
   "./reconnect": [

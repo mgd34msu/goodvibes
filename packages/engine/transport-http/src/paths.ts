@@ -39,7 +39,7 @@ export interface TransportPaths {
 // the daemon never mints certificates, so the transport works over http there,
 // in a browser bundle too, where no process.env escape hatch exists.
 // Genuinely public http origins keep the insecure-transport wall.
-export { isPrivateNetworkHost, isTailnetHost } from './private-network.js';
+export { isPrivateNetworkHost, isTailnetHost, stateTailnetAddresses } from './private-network.js';
 
 export function normalizeBaseUrl(baseUrl: string): string {
   const normalized = baseUrl.trim();
@@ -62,7 +62,7 @@ export function normalizeBaseUrl(baseUrl: string): string {
     throw new ConfigurationError(`Unsupported transport baseUrl protocol: ${protocol}`, {
       code: 'ENGINE_TRANSPORT_BASE_URL_PROTOCOL_UNSUPPORTED',
       source: 'transport',
-      hint: 'Use https:// or wss://. http:// and ws:// are supported on private-network origins (localhost, private LAN and link-local addresses, .local names, Tailscale names and addresses) and for explicit public-http deployments.',
+      hint: 'Use https:// or wss://. http:// and ws:// are supported on private-network origins (localhost, private LAN and link-local addresses, .local names, Tailscale names and stated Tailscale addresses) and for explicit public-http deployments.',
     });
   }
   // Only a genuinely public http origin keeps the wall; the server-side env
@@ -76,7 +76,7 @@ export function normalizeBaseUrl(baseUrl: string): string {
     throw new ConfigurationError('Refusing insecure PUBLIC GoodVibes transport baseUrl.', {
       code: 'ENGINE_TRANSPORT_INSECURE_BASE_URL',
       source: 'transport',
-      hint: 'Use https:// or wss:// for public origins. Plain http is supported on private-network origins (localhost; 10/8, 172.16/12, 192.168/16 and link-local addresses; .local names; Tailscale names and 100.64/10 addresses). For an intentional public-http deployment set GOODVIBES_ALLOW_INSECURE_TRANSPORT=true (server-side only).',
+      hint: 'Use https:// or wss:// for public origins. Plain http is supported on private-network origins (localhost; 10/8, 172.16/12, 192.168/16 and link-local addresses; .local names; Tailscale *.ts.net names). A 100.64/10 address is also used by carrier-grade NAT, so it is accepted over http only as a Tailscale address: use the machine\'s Tailscale name (<machine>.<tailnet>.ts.net), or list the address in GOODVIBES_TAILNET_ADDRESSES (or set it to 100.64.0.0/10 when no carrier-grade NAT is in the path). For an intentional public-http deployment set GOODVIBES_ALLOW_INSECURE_TRANSPORT=true (server-side only).',
     });
   }
   return normalized.replace(/\/+$/, '');

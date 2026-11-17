@@ -12,12 +12,12 @@ import { createProviderStack } from '@goodvibes-jev/engine/platform/platform/run
 import { composeJudgment } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import { createFeatureFlagManager, deriveFeatureStates } from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags';
-import { ServiceRegistry, SubscriptionManager, sharedSubscriptionsPath } from '@goodvibes-jev/engine/platform/platform/config';
+import { ServiceRegistry, SubscriptionManager, createRuntimeSecretsManager, resolveGoodVibesDaemonHome, sharedSubscriptionsPath } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ProviderCatalogOptions, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { RuntimeEventBus, configureRuntimeEventBusDefaults, runtimeEventBusOptionsFrom, createShellPathService } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../runtime/store/index.ts';
-import { SecretsManager } from '../config/secrets.ts';
+import type { SecretsManager } from '../config/secrets.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { CliCommandRuntime } from './management.ts';
 
@@ -50,10 +50,12 @@ export async function withProviderServices<T>(
   configureRuntimeEventBusDefaults(runtimeEventBusOptionsFrom((key) => configManager.get(key)));
   const featureFlags = createFeatureFlagManager();
   featureFlags.loadFromConfig({ flags: deriveFeatureStates(configManager) });
-  const secretsManager = new SecretsManager({
+  const secretsManager = createRuntimeSecretsManager({
     projectRoot: runtime.workingDirectory,
     globalHome: runtime.homeDirectory,
+    surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
     configManager,
+    daemonHome: resolveGoodVibesDaemonHome(runtime.homeDirectory),
   });
   const subscriptionManager = new SubscriptionManager(sharedSubscriptionsPath(shellPaths));
   const serviceRegistry = new ServiceRegistry({ user: shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'services.json'), project: shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'services.json') }, {

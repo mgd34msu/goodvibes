@@ -73,6 +73,7 @@ import { ServiceRegistry } from '../config/service-registry.js';
 import { SubscriptionManager, sharedSubscriptionsPath } from '../config/subscriptions.js';
 import type { ToolLLM } from '../config/tool-llm.js';
 import { createRuntimeSecretsManager } from './secrets-composition.js';
+import { resolveGoodVibesDaemonHome } from '../config/goodvibes-home.js';
 import { composeJudgment, type JudgmentServices } from './judgment-services.js';
 import { ArtifactStore } from '../artifacts/index.js';
 import { SessionLiveTurnControlsHolder } from '../control-plane/index.js';
@@ -480,7 +481,7 @@ function composeClientRuntimeServices(
     globalHome: homeDirectory,
     surfaceRoot,
     configManager,
-    ...(options.daemonHome === undefined ? {} : { daemonHome: options.daemonHome }),
+    daemonHome: options.daemonHome ?? resolveGoodVibesDaemonHome(homeDirectory),
   });
   // Provider subscriptions (OAuth sessions like the 'openai-subscriber' login)
   // live in the platform's SHARED tier, not this surface's own root: the

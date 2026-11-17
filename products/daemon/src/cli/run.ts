@@ -3,8 +3,7 @@ import { homedir } from 'node:os';
 import { writeSync } from 'node:fs';
 import { runClusterCommand } from '@goodvibes-jev/engine/terminal-shell';
 import { readOperatorTokenFile } from '@goodvibes-jev/engine/platform/platform/workspace';
-import { isDeclaredSecretBearingConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
-import { SecretsManager } from '../config/secrets.js';
+import { createRuntimeSecretsManager, isDeclaredSecretBearingConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { runConfigCommand } from '../daemon/config-command.js';
 import { runPairCommand } from '../daemon/pair-command.js';
 import { createDaemonCommandRemote } from '../daemon/remote-transport.js';
@@ -153,8 +152,8 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
     const remote = createDaemonCommandRemote({ configManager: config, daemonHomeDir: daemonHomeDirectory, controlPlaneConfigDir: config.getControlPlaneConfigDir() });
     switch (cli.command) {
       case 'config': return result(await runConfigCommand(cli.commandArgs, { configManager: config, json: cli.flags.json,
-        openSecretStore: () => new SecretsManager({ projectRoot: workingDirectory, globalHome: homeDirectory,
-          daemonHome: daemonHomeDirectory, configManager: config, diagnosticMode: 'structural' }) }));
+        openSecretStore: () => createRuntimeSecretsManager({ projectRoot: workingDirectory, globalHome: homeDirectory,
+          surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT, daemonHome: daemonHomeDirectory, configManager: config, diagnosticMode: 'structural' }) }));
       case 'status': return result(await runStatusCommand({ ...remote, flags: remoteFlags }));
       case 'update': return result(await runUpdateCommand({ ...remote, flags: { ...remoteFlags, check: cli.flags.check } }));
       case 'sessions': return result(await runSessionsCommand({ ...remote, flags: { ...remoteFlags, all: cli.flags.all }, args: cli.commandArgs }));

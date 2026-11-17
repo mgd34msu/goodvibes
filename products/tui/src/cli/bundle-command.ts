@@ -3,7 +3,8 @@ import type { RuntimeServices } from '../runtime/services.ts';
 import { readAuthPaths, withRuntimeServices } from './management-utils.ts';
 import { getOnboardingCheckMarkerPath } from '../runtime/onboarding/index.ts';
 import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
-import { SecretsManager } from '../config/secrets.ts';
+import { createRuntimeSecretsManager, resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import type { CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
 
 import { getPackageVersion } from './help.ts';
@@ -17,12 +18,13 @@ export const handleBundleCommand = createSupportBundleCommand<
 >(
   {
     schema: CONFIG_SCHEMA,
-    createSecrets: (runtime) =>
-      new SecretsManager({
-        projectRoot: runtime.workingDirectory,
-        globalHome: runtime.homeDirectory,
-        configManager: runtime.configManager,
-      }),
+    createSecrets: (runtime) => createRuntimeSecretsManager({
+      projectRoot: runtime.workingDirectory,
+      globalHome: runtime.homeDirectory,
+      surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT,
+      configManager: runtime.configManager,
+      daemonHome: resolveGoodVibesDaemonHome(runtime.homeDirectory),
+    }),
     withServices: withRuntimeServices,
     providerRegistry: (services) => services.providerRegistry,
     classifyProvider: classifyProviderSetup,

@@ -7,7 +7,8 @@ import { withProviderServices, type OneShotProviderServices } from './one-shot-s
 import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
 import { getOnboardingCheckMarkerPath } from '../runtime/onboarding/index.ts';
 import { CONFIG_SCHEMA } from '../config/index.ts';
-import { SecretsManager } from '../config/secrets.ts';
+import { createRuntimeSecretsManager, resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
+import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { CliCommandRuntime } from './management.ts';
 
 import { getPackageVersion } from './help.ts';
@@ -40,12 +41,13 @@ export const handleBundleCommand = createSupportBundleCommand<
 >(
   {
     schema: CONFIG_SCHEMA,
-    createSecrets: (runtime) =>
-      new SecretsManager({
-        projectRoot: runtime.workingDirectory,
-        globalHome: runtime.homeDirectory,
-        configManager: runtime.configManager,
-      }),
+    createSecrets: (runtime) => createRuntimeSecretsManager({
+      projectRoot: runtime.workingDirectory,
+      globalHome: runtime.homeDirectory,
+      surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
+      configManager: runtime.configManager,
+      daemonHome: resolveGoodVibesDaemonHome(runtime.homeDirectory),
+    }),
     withServices: withProviderServices,
     providerRegistry: (services) => services.providerRegistry,
     classifyProvider: classifyProviderSetup,

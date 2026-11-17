@@ -357,6 +357,9 @@ export type {
   SecretWriteEffectOwner,
   SecretsManagerOptions,
 } from './secrets.js';
+// The one way a product builds its credential store (the daemon home is required).
+export { createRuntimeSecretsManager } from '../runtime/secrets-composition.js';
+export type { DaemonSecretsCompositionInput } from '../runtime/secrets-composition.js';
 export { ServiceRegistry, captureServiceReadSource } from './service-registry.js';
 export type * from './service-registry.js';
 export { SubscriptionManager, captureSubscriptionReadSource, sharedSubscriptionsPath, subscriptionState, SUBSCRIPTION_EXPIRING_SOON_MS } from './subscriptions.js';

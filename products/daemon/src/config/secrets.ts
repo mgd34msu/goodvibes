@@ -9,19 +9,5 @@ export type {
   SecretWriteOptions,
 } from '@goodvibes-jev/engine/platform/platform/config';
 
-import {
-  SecretsManager as PlatformSecretsManager,
-  type SecretsManagerOptions as PlatformSecretsManagerOptions,
-} from '@goodvibes-jev/engine/platform/platform/config';
-import { GOODVIBES_DAEMON_SURFACE_ROOT } from './surface.ts';
-
-export type SecretsManagerOptions = Omit<PlatformSecretsManagerOptions, 'surfaceRoot'>;
-
-export class SecretsManager extends PlatformSecretsManager {
-  constructor(options: SecretsManagerOptions) {
-    super({
-      ...options,
-      surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT,
-    });
-  }
-}
+// The store is built only through createRuntimeSecretsManager (engine config), which requires the daemon home.
+export { SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';

@@ -4,7 +4,8 @@ import { createCliSubscriptionView } from '@goodvibes-jev/engine/terminal-shell/
 import '@goodvibes-jev/engine/platform/platform/sessions';
 import 'node:fs';
 import { join } from 'node:path';
-import { SecretsManager } from '../config/secrets.ts';
+import { createRuntimeSecretsManager, resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import '@goodvibes-jev/engine/platform/platform/config';
 import '@goodvibes-jev/engine/platform/platform/config';
 import '@goodvibes-jev/engine/platform/platform/config';
@@ -260,8 +261,10 @@ export const { renderSubscriptions } = createCliSubscriptionView<CliCommandRunti
 });
 
 export const { runSecrets } = createCliSecretsCommand<CliCommandRuntime>({
-  createSecrets: (runtime) =>
-    new SecretsManager({ projectRoot: runtime.workingDirectory, globalHome: runtime.homeDirectory, configManager: runtime.configManager }),
+  createSecrets: (runtime) => createRuntimeSecretsManager({
+    projectRoot: runtime.workingDirectory, globalHome: runtime.homeDirectory, surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT,
+    configManager: runtime.configManager, daemonHome: resolveGoodVibesDaemonHome(runtime.homeDirectory),
+  }),
   binary: () => 'goodvibes',
   inline: true,
   writeScope: (_key, requested) => requested,

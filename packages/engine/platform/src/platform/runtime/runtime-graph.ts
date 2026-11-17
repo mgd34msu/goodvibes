@@ -118,6 +118,7 @@ import { createAgentExecutionGraph } from './agent-graph-composition.js';
 import { bindPermissionModeChangeEvent } from '../permissions/mode-change-emitter.js';
 import { requireSurfaceRoot } from './surface-root.js';
 import { createRuntimeSecretsManager } from './secrets-composition.js';
+import { resolveGoodVibesDaemonHome } from '../config/goodvibes-home.js';
 import { createNoopKeybindingsManager, createNoopPanelManager } from './host-ui.js';
 import { createWorkflowServices } from '../tools/workflow/index.js';
 import { createProcessRegistry, withFleetArchive, attachFleetEmitBridge } from './fleet/index.js';
@@ -207,7 +208,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     globalHome: homeDirectory,
     surfaceRoot,
     configManager,
-    ...(roots.daemonHome === undefined ? {} : { daemonHome: roots.daemonHome }),
+    daemonHome: roots.daemonHome ?? resolveGoodVibesDaemonHome(homeDirectory),
   });
   const judgment = composeJudgment({ config: configManager, secrets: secretsManager, env: process.env, stateRoot: shellPaths.resolveProjectPath(surfaceRoot), disposal: scope.registry });
   // Provider subscriptions live in the SHARED tier so a login completed on one

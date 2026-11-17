@@ -17,8 +17,6 @@
  * It is NOT the user home, and deliberately does not relocate the user and
  * project config tiers: those are addressed by `homeDir` and `workingDir`, and
  * runtime/secrets-composition.ts explains why conflating them would be wrong.
- * `describeSecretIsolation` reports which tiers an override actually moved
- * rather than implying it moved all of them.
  *
  * What WAS broken is that the resolved value reached only the identity files.
  * The ConfigManager derived its daemon tier from `homedir()` regardless, so a

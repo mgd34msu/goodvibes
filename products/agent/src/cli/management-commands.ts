@@ -5,7 +5,8 @@ import { withProviderServices, withSessionServices, type OneShotProviderServices
 import '@goodvibes-jev/engine/platform/platform/sessions';
 import 'node:fs';
 import 'node:path';
-import { SecretsManager } from '../config/secrets.ts';
+import { createRuntimeSecretsManager, resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
+import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { credentialWriteScopeWasRelocated, resolveCredentialDeleteScope, resolveCredentialWriteScope } from '../config/credential-scope.ts';
 import '@goodvibes-jev/engine/platform/platform/config';
 import '@goodvibes-jev/engine/platform/platform/config';
@@ -66,8 +67,10 @@ export const { renderSubscriptions } = createCliSubscriptionView<CliCommandRunti
 });
 
 export const { handleSecrets } = createCliSecretsCommand<CliCommandRuntime>({
-  createSecrets: (runtime) =>
-    new SecretsManager({ projectRoot: runtime.workingDirectory, globalHome: runtime.homeDirectory, configManager: runtime.configManager }),
+  createSecrets: (runtime) => createRuntimeSecretsManager({
+    projectRoot: runtime.workingDirectory, globalHome: runtime.homeDirectory, surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
+    configManager: runtime.configManager, daemonHome: resolveGoodVibesDaemonHome(runtime.homeDirectory),
+  }),
   binary: (runtime) => runtime.cli.binary,
   inline: false,
   writeScope: resolveCredentialWriteScope,

@@ -78,7 +78,7 @@ export function buildLoadingStep(controller: OnboardingWizardControllerLike): On
       title: failed ? 'Current settings unavailable' : 'Loading current settings',
       shortLabel: 'Loading',
       description: failed
-        ? 'The wizard is locked because current runtime settings could not be collected. Close and reopen onboarding after fixing the reported issue.'
+        ? 'The wizard is locked because current runtime settings could not be collected. Fix the reported issue, then press Enter to load them again (Esc closes setup).'
         : 'Collecting the current daemon, listener, provider, subscription, auth, and surface settings before the wizard becomes editable.',
       summaryTitle: failed ? 'Preload failed' : 'Preload required',
       summaryLines: [
@@ -95,9 +95,9 @@ export function buildLoadingStep(controller: OnboardingWizardControllerLike): On
           id: 'loading.runtime-snapshot',
           label: failed ? 'Runtime settings snapshot failed' : 'Runtime settings snapshot',
           hint: failed
-            ? controller.hydrationError ?? 'The runtime snapshot did not complete.'
+            ? `${controller.hydrationError ?? 'The runtime snapshot did not complete.'} Press Enter to retry.`
             : 'Waiting for the current GoodVibes configuration and account state.',
-          defaultValue: failed ? 'Locked' : 'Loading',
+          defaultValue: failed ? 'Enter: retry' : 'Loading',
         },
       ],
     };
@@ -671,6 +671,15 @@ export function buildAccountsStep(controller: OnboardingWizardControllerLike): O
         placeholder: needsAuthBootstrap ? 'password required' : 'leave blank to keep unchanged',
         defaultValue: '',
         required: needsAuthBootstrap,
+      },
+      {
+        kind: 'masked',
+        id: 'accounts.admin-password-confirm',
+        label: 'Confirm local auth admin password',
+        hint: 'Type the same password again. Nothing is created or rotated until both entries match, so one mistyped character cannot lock you out (a rotation signs the account out everywhere).',
+        placeholder: 'type the password again',
+        defaultValue: '',
+        required: false,
       },
     );
 

@@ -92,6 +92,15 @@ export function getFieldValidationError(
       return `${step.shortLabel}: ${field.label} must be at least 8 characters.`;
     }
 
+    if (field.id === 'accounts.admin-password-confirm') {
+      // Compared exactly as the password is sent, before any auth call runs.
+      const password = controller.getStringFieldValue('accounts.admin-password', '');
+      if (password.length > 0 && controller.getStringFieldValue(field.id, '') !== password) {
+        return `${step.shortLabel}: ${field.label} does not match the password; type it again.`;
+      }
+      return null;
+    }
+
     if (field.kind === 'masked' && isMalformedGoodVibesSecretReferenceValue(value)) {
       return `${step.shortLabel}: ${field.label} must be a secret value or a goodvibes://secrets/... reference.`;
     }

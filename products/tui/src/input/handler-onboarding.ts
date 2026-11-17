@@ -228,6 +228,15 @@ export function handleModelPickerCommitForHandler(handler: InputHandler): boolea
   }
 
 export async function handleOnboardingActionForHandler(handler: InputHandler, action: OnboardingWizardAction): Promise<void> {
+    if (action === 'retry-hydration') {
+      if (handler.onboardingWizard.hydrationError === null) return;
+      // The same collection opening setup runs; a newer serial drops any older answer.
+      const hydrationSerial = ++handler.onboardingHydrationSerial;
+      handler.onboardingWizard.beginRuntimeHydration();
+      handler.requestRender();
+      await handler.hydrateOnboardingWizardFromRuntime(hydrationSerial);
+      return;
+    }
     if (action === 'connect-existing-daemon') {
       await handleConnectExistingDaemonForHandler(handler);
       return;

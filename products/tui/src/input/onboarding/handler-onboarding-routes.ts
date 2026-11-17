@@ -49,6 +49,10 @@ export function handleOnboardingWizardToken(state: OnboardingRouteState, token: 
 
   if (state.onboardingWizard.hydrationPending || state.onboardingWizard.hydrationError !== null) {
     if (token.type === 'key' && token.logicalName === 'escape') state.handleEscape();
+    // A failed load is retried in place with Enter; nothing is editable until it succeeds.
+    else if (state.onboardingWizard.hydrationError !== null && !state.onboardingWizard.hydrationPending && isEnterKey(token)) {
+      state.onAction?.('retry-hydration');
+    }
     state.requestRender();
     return true;
   }

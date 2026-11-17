@@ -62,7 +62,8 @@ export type OnboardingWizardAction =
   | 'start-openai-subscription'
   | 'finish-openai-subscription'
   | 'connect-existing-daemon'
-  | 'migrate-legacy-daemon-service';
+  | 'migrate-legacy-daemon-service'
+  | 'retry-hydration';
 
 export type OnboardingWizardApplyFeedbackSeverity = 'info' | 'warning' | 'error';
 

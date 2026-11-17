@@ -1085,7 +1085,8 @@ export class DaemonLifecycleRuntime {
 
   /** The service-manager actions shared by the update swap and boot promotion. */
   private buildServiceActions(signal?: AbortSignal, assertCurrent?: () => void): AutoUpdateServiceActions {
-    const requestedName = String(this.options.configManager.get('service.serviceName') ?? 'goodvibes').trim() || 'goodvibes';
+    // The manager's own reading: the owner's setting, else the install's default unit name.
+    const requestedName = this.options.platformServiceManager.serviceName();
     let serviceName = requestedName;
     let selectedService: { name: string; path: string; pid: number | undefined; contents: string | undefined } | undefined;
     const platform = this.options.servicePlatform ?? process.platform;

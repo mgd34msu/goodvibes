@@ -806,6 +806,15 @@ export class PlatformServiceManager {
     return status.platform === 'launchd' ? status.pid === process.pid : status.platform === 'systemd';
   }
 
+  /**
+   * The unit name this manager installs and controls: the owner's
+   * `service.serviceName`, else the default this manager was built with. No
+   * service-manager query; the one answer for every caller that needs the name.
+   */
+  serviceName(): string {
+    return this.definitionOverride?.name ?? resolveServiceName(this.configManager, this.defaultServiceName);
+  }
+
   private resolveDefinition(): ManagedServiceDefinition {
     return this.definitionOverride ?? buildDefaultDefinition(this.configManager, this.workingDirectory, {
       binaryBaseName: this.binaryBaseName,

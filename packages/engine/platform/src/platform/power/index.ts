@@ -20,11 +20,14 @@ export {
   postPowerKeepAwakeSet,
   forwardKeepAwakeToAdoptedDaemon,
   readServedKeepAwakeState,
+  readServedKeepAwakeEnabled,
+  readPowerKeepAwakeEnabled,
   describeKeepAwakeOutcome,
   forwardKeepAwakeWithNotice,
   createKeepAwakeForwardQueue,
   createKeepAwakeForwarder,
   POWER_KEEP_AWAKE_SET_PATH,
+  POWER_STATUS_PATH,
   POWER_KEEP_AWAKE_SET_TIMEOUT_MS,
 } from './keep-awake-remote.js';
 export type {

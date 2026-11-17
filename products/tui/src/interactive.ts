@@ -388,13 +388,14 @@ async function main(prepared: PreparedShellCliRuntime) {
   const memoryProvenanceUi = createMemoryProvenanceUi({ render: () => render(), memorySpine: ctx.services.memorySpine });
   // Topology-aware keep-awake: in adopted-external mode the daemon owns keep-awake, the chip renders its
   // state (power-chip-source.ts), every toggle from /power, Alt+A or the settings modal (all land on the
-  // power.keepAwake key) is forwarded to it, and the current value, on or off, is sent again each time it
-  // becomes reachable, through the engine's one forwarder.
+  // power.keepAwake key) is forwarded to it, and each time it becomes reachable a toggle it has not taken is
+  // sent again, on or off; otherwise this terminal takes the daemon's value. One forwarder in the engine.
   const isExternalDaemon = () => uiServices.platform.externalServices?.inspect()?.daemonStatus?.mode === 'external';
   const daemonRpc = () => resolveOperatorRpc({ configManager, homeDirectory });
   const keepAwakeForwarder = createKeepAwakeForwarder({
     where: 'this terminal',
     readKeepAwake: () => configManager.get('power.keepAwake') === true,
+    adoptKeepAwake: (enabled) => configManager.set('power.keepAwake', enabled),
     notify: (line) => { systemMessageRouter.high(line); render(); },
     send: async (enabled) => {
       const rpc = daemonRpc();
@@ -417,7 +418,7 @@ async function main(prepared: PreparedShellCliRuntime) {
         state = null;
       }
     }
-    keepAwakeForwarder.reachable(state !== null);
+    keepAwakeForwarder.reachable(state !== null, typeof state?.keepAwake?.enabled === 'boolean' ? state.keepAwake.enabled : undefined);
     return state;
   };
   const powerChipSource = createPowerChipSource({

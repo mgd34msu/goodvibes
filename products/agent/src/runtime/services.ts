@@ -943,14 +943,15 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
         const memorySpineTransport = createMemorySpineRestTransport({ resolveConnection: spineResolveConnection });
 
         // The keep-awake hold survives this process only on the daemon, so a toggle
-        // is forwarded while a daemon is adopted, one after another, and the
-        // current value is sent again once per attach. What the daemon did not take
-        // is told to the owner.
+        // is forwarded while a daemon is adopted, one after another. On each attach
+        // a toggle the daemon has not taken is sent again; otherwise this process
+        // takes the daemon's value. What the daemon did not take is told to the owner.
         let keepAwakeNoticeCount = 0;
         const keepAwakeForwarder = createAgentKeepAwakeForwarder({
           readKeepAwake: () => configManager.get('power.keepAwake') === true,
           isAdopted: () => base.memorySpine.active,
           resolveConnection: spineResolveConnection,
+          adoptKeepAwake: (enabled) => configManager.set('power.keepAwake', enabled),
           notify: (text) => { daemonReceiptFeed.push([{ id: `keep-awake:${++keepAwakeNoticeCount}`, text, at: Date.now() }]); },
         });
         forwardKeepAwakeOnAttach = () => keepAwakeForwarder.attached();

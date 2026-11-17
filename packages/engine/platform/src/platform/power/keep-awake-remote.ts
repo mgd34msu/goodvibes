@@ -6,9 +6,11 @@
  * hold outlives a surface closing, and `power.keepAwake` is a surface-local
  * config key that does not reach the daemon's own config. Each surface still
  * holds a local inhibitor of its own, so keep-awake works with no daemon at
- * all; every change made in the surface is forwarded to the daemon, and the
- * CURRENT value, on or off, is sent again each time the daemon becomes
- * reachable, so a change made while it was away (a restart, a blip) reaches it.
+ * all; every change made in the surface is forwarded to the daemon. When the
+ * daemon becomes reachable, a change it has not taken yet (made while it was
+ * away, or refused) is sent again, on or off; with nothing undelivered the
+ * surface takes the daemon's value instead, so a toggle made in another surface
+ * is never overwritten by this surface's older copy.
  *
  * This file is the one forwarder both products use: the raw-REST request
  * (`postPowerKeepAwakeSet`, version tolerant, with the shared failure
@@ -31,6 +33,8 @@ export interface PowerKeepAwakeRemoteConnection {
 }
 
 export const POWER_KEEP_AWAKE_SET_PATH = '/api/power/keep-awake';
+/** The daemon's served power state (`power.status.get`). */
+export const POWER_STATUS_PATH = '/api/power/status';
 /** Best-effort background forward; short so it never blocks a settings-modal apply. */
 export const POWER_KEEP_AWAKE_SET_TIMEOUT_MS = 1500;
 
@@ -76,6 +80,39 @@ async function readResponseBody(response: Response): Promise<unknown> {
 export function readServedKeepAwakeState(body: unknown): string | undefined {
   const served = isRecord(body) && isRecord(body.keepAwake) ? body.keepAwake.state : undefined;
   return typeof served === 'string' ? served : undefined;
+}
+
+/** Whether a served power state says the owner's keep-awake toggle is on; undefined when it does not say. */
+export function readServedKeepAwakeEnabled(body: unknown): boolean | undefined {
+  const enabled = isRecord(body) && isRecord(body.keepAwake) ? body.keepAwake.enabled : undefined;
+  return typeof enabled === 'boolean' ? enabled : undefined;
+}
+
+/**
+ * Read the daemon's keep-awake toggle over `GET /api/power/status`. Never
+ * throws: undefined when there is no token, the daemon cannot be reached, the
+ * route is missing, or the answer does not carry the value.
+ */
+export async function readPowerKeepAwakeEnabled(
+  connection: PowerKeepAwakeRemoteConnection,
+  options: { readonly timeoutMs?: number | undefined } = {},
+): Promise<boolean | undefined> {
+  if (!connection.token) return undefined;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? POWER_KEEP_AWAKE_SET_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${connection.baseUrl}${POWER_STATUS_PATH}`, {
+      method: 'GET',
+      headers: { authorization: `Bearer ${connection.token}` },
+      signal: controller.signal,
+    });
+    const body = await readResponseBody(response);
+    return response.ok ? readServedKeepAwakeEnabled(body) : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Identical failure classification to the platform's other raw-REST wire mirrors. */
@@ -205,17 +242,23 @@ export interface KeepAwakeNoticeDeps {
   readonly where?: string | undefined;
 }
 
-/** Send one keep-awake value to the daemon and tell the owner when it did not hold. Never throws. */
-export async function forwardKeepAwakeWithNotice(enabled: boolean, deps: KeepAwakeNoticeDeps): Promise<void> {
+/**
+ * Send one keep-awake value to the daemon and tell the owner when it did not
+ * hold. Never throws. Resolves true when the daemon took the value.
+ */
+export async function forwardKeepAwakeWithNotice(enabled: boolean, deps: KeepAwakeNoticeDeps): Promise<boolean> {
   try {
     const outcome = await deps.send(enabled);
-    if (!outcome.attempted && deps.tellWhenUnreachable === false) return;
+    const delivered = outcome.attempted && outcome.result.ok;
+    if (!outcome.attempted && deps.tellWhenUnreachable === false) return delivered;
     const line = describeKeepAwakeOutcome(enabled, outcome, deps.where);
-    if (line === null) return;
+    if (line === null) return delivered;
     logger.warn('[power] keep-awake daemon forward did not hold', { enabled, attempted: outcome.attempted });
     deps.notify?.(line);
+    return delivered;
   } catch (error) {
     logger.warn('[power] keep-awake daemon forward failed', { error: summarizeError(error) });
+    return false;
   }
 }
 
@@ -238,31 +281,90 @@ export function createKeepAwakeForwardQueue(): { run<T>(step: () => Promise<T>):
 export interface KeepAwakeForwarderDeps extends Omit<KeepAwakeNoticeDeps, 'tellWhenUnreachable'> {
   /** The surface's current keep-awake value, read when a re-send's turn comes. */
   readonly readKeepAwake: () => boolean;
+  /**
+   * The daemon's keep-awake toggle, read on attach when the attach did not
+   * carry it; undefined when it cannot be read. Never throws.
+   */
+  readonly readDaemonKeepAwake?: (() => Promise<boolean | undefined>) | undefined;
+  /**
+   * Take the daemon's value into this surface (write the surface's
+   * power.keepAwake). The write is not forwarded back to the daemon.
+   */
+  readonly adoptKeepAwake?: ((enabled: boolean) => void) | undefined;
 }
 
 export interface KeepAwakeForwarder {
   /** Forward a change the owner made in this surface. */
   set(enabled: boolean): Promise<void>;
-  /** The daemon became reachable: send the current value, on or off. */
-  attached(): Promise<void>;
-  /** Report each daemon reachability reading; a change to reachable sends the current value. */
-  reachable(isReachable: boolean): void;
+  /**
+   * The daemon became reachable. A change it has not taken is sent again, on
+   * or off; otherwise the surface takes the daemon's value (`daemonKeepAwake`
+   * when the caller already read it, else `readDaemonKeepAwake`).
+   */
+  attached(daemonKeepAwake?: boolean): Promise<void>;
+  /** Report each daemon reachability reading, with the daemon's toggle when the reading carried it; a change to reachable attaches. */
+  reachable(isReachable: boolean, daemonKeepAwake?: boolean): void;
 }
 
 /**
  * The forwarder a surface wires once: changes and re-sends go through one
  * ordered queue, and a re-send reads the value at its own turn, so an "off" set
- * meanwhile is never followed by a late "on".
+ * meanwhile is never followed by a late "on". The daemon is the owner of the
+ * value: only a change this surface made and the daemon did not take is pushed
+ * on attach; otherwise the daemon's value is adopted.
  */
 export function createKeepAwakeForwarder(deps: KeepAwakeForwarderDeps): KeepAwakeForwarder {
   const queue = createKeepAwakeForwardQueue();
   let wasReachable = false;
-  const attached = (): Promise<void> => queue.run(() => forwardKeepAwakeWithNotice(deps.readKeepAwake(), { ...deps, tellWhenUnreachable: false }));
+  // A change made in this surface that the daemon has not taken (not reachable, or refused).
+  let undelivered = false;
+  let changes = 0;
+  // The value being adopted from the daemon: its config echo is not forwarded back.
+  let adopting: boolean | undefined;
+  const adopt = (enabled: boolean): void => {
+    if (!deps.adoptKeepAwake || enabled === deps.readKeepAwake()) return;
+    adopting = enabled;
+    try {
+      deps.adoptKeepAwake(enabled);
+      logger.info('[power] keep-awake taken from the daemon', { enabled });
+    } catch (error) {
+      logger.warn('[power] keep-awake could not take the daemon value', { enabled, error: summarizeError(error) });
+    } finally {
+      adopting = undefined;
+    }
+  };
+  const attached = (daemonKeepAwake?: boolean): Promise<void> => queue.run(async () => {
+    if (undelivered) {
+      const change = changes;
+      const delivered = await forwardKeepAwakeWithNotice(deps.readKeepAwake(), { ...deps, tellWhenUnreachable: false });
+      if (delivered && change === changes) undelivered = false;
+      return;
+    }
+    let served = daemonKeepAwake;
+    if (served === undefined && deps.readDaemonKeepAwake) {
+      try {
+        served = await deps.readDaemonKeepAwake();
+      } catch {
+        served = undefined;
+      }
+    }
+    // A change made while this read was in flight is newer than the daemon's answer.
+    if (served !== undefined && !undelivered) adopt(served);
+  });
   return {
-    set: (enabled) => queue.run(() => forwardKeepAwakeWithNotice(enabled, deps)),
+    set: (enabled) => {
+      if (adopting === enabled) return Promise.resolve();
+      undelivered = true;
+      const change = ++changes;
+      return queue.run(async () => {
+        const delivered = await forwardKeepAwakeWithNotice(enabled, deps);
+        // Only the newest change settles it; an older one is followed by its own step.
+        if (change === changes) undelivered = !delivered;
+      });
+    },
     attached,
-    reachable(isReachable) {
-      if (isReachable && !wasReachable) void attached();
+    reachable(isReachable, daemonKeepAwake) {
+      if (isReachable && !wasReachable) void attached(daemonKeepAwake);
       wasReachable = isReachable;
     },
   };

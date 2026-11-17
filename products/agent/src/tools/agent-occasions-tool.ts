@@ -453,6 +453,7 @@ async function handleRemove(
     // §4.11: one confirmation. Not unquestioned, and not an argument, people
     // divorce and people die.
     return fail([
+      `Not removed: ${occasionId} and everything recorded against it (answers, gift history, calendar mirrors) cannot be restored, so he confirms once.`,
       `Ask him once to confirm removing ${occasionId}, then call this again with confirmed:true.`,
       'One question, not a negotiation. Do not ask why, and do not ask twice.',
     ]);

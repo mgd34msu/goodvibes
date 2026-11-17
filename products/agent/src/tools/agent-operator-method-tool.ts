@@ -602,8 +602,9 @@ export function createAgentOperatorMethodTool(
       }
 
       if (methodSnapshot.id === 'occasions.remove' && route.payload.confirmed !== true) {
-        // The same ask-once rule the occasions tool enforces: removal also drops the machine's records for it.
-        return { success: false, error: `Ask the owner once to confirm removing ${String(route.payload.occasionId ?? 'this occasion')}, then call occasions.remove again with input.confirmed:true. One question, not a negotiation.` };
+        // Removal drops the date with its answers and gift history, which nothing restores: the owner says yes once.
+        // Refused here so an unconfirmed call costs no effect admission and no request.
+        return { success: false, error: `Not removed: ${String(route.payload.occasionId ?? 'this occasion')} and everything recorded against it cannot be restored, so the owner confirms once. Ask him once, then call occasions.remove again with input.confirmed:true. One question, not a negotiation.` };
       }
       const preview = summarizePreview(route);
       if (readBoolean(args.dryRun)) {
@@ -639,8 +640,7 @@ export function createAgentOperatorMethodTool(
         const retainedPayload = operatorExecutionWireInput(route.payload, rawArgs, options, shellPaths, configManager, 'method');
         const wirePayload = AUTONOMOUS_PROFILE_METHOD_IDS.has(methodSnapshot.id)
           ? { ...retainedPayload, authority: 'autonomous',
-            ...(PROFILE_QUOTE_METHOD_IDS.has(methodSnapshot.id) ? { said: '' } : {}),
-            ...(methodSnapshot.id === 'occasions.remove' ? { confirmed: true } : {}) }
+            ...(PROFILE_QUOTE_METHOD_IDS.has(methodSnapshot.id) ? { said: '' } : {}) }
           : methodSnapshot.id === 'payments.purchase.cancel' ? { ...retainedPayload, confirm: true } : retainedPayload;
         const actsForOwner = AUTONOMOUS_PROFILE_METHOD_IDS.has(methodSnapshot.id) || AUTONOMOUS_NATIVE_STATE_METHOD_IDS.has(methodSnapshot.id)
           || isOperatorAutomationTargetMethod(methodSnapshot.id);

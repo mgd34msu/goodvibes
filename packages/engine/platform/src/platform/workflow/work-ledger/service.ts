@@ -405,11 +405,15 @@ export function createWorkLedger(options: {
   // validated afresh.
   let validated: { readonly revision: number; readonly state: WorkLedgerState } | undefined;
   function readValidatedState(raw: unknown): WorkLedgerState {
+    return structuredClone(readValidatedShared(raw));
+  }
+  /** The validated state itself, not a copy: for readers that only read and copy what they return. */
+  function readValidatedShared(raw: unknown): Readonly<WorkLedgerState> {
     const revision = raw !== null && typeof raw === 'object' ? (raw as { revision?: unknown }).revision : undefined;
-    if (validated !== undefined && revision === validated.revision && isDeepStrictEqual(validated.state, raw)) return structuredClone(validated.state);
+    if (validated !== undefined && revision === validated.revision && isDeepStrictEqual(validated.state, raw)) return validated.state;
     const state = readWorkLedgerState(raw, projectId);
     validated = { revision: state.revision, state: structuredClone(state) };
-    return state;
+    return validated.state;
   }
   const identities = new WeakMap<WorkLedgerActor, WorkLedgerHostIdentity>();
   const pending = new Set<Promise<unknown>>();
@@ -463,6 +467,12 @@ export function createWorkLedger(options: {
     try { raw = await storage.read(); } catch { throw new WorkLedgerAccessError('storage_error', 'Cannot read authoritative ledger storage.'); }
     try { return readValidatedState(raw); } catch { throw new WorkLedgerAccessError('invalid_state', 'Authoritative ledger state is invalid; it was not reset.'); }
   }
+  /** The authoritative state without copying it; a page copies only the events it returns. */
+  async function readAuthoritativeShared(): Promise<Readonly<WorkLedgerState>> {
+    let raw: unknown;
+    try { raw = await storage.read(); } catch { throw new WorkLedgerAccessError('storage_error', 'Cannot read authoritative ledger storage.'); }
+    try { return readValidatedShared(raw); } catch { throw new WorkLedgerAccessError('invalid_state', 'Authoritative ledger state is invalid; it was not reset.'); }
+  }
 
   const service: WorkLedgerService & WorkLedgerHistoryPager = {
     readSnapshot(actor) {
@@ -491,15 +501,20 @@ export function createWorkLedger(options: {
       requireIdentity(actor);
       if (!Number.isSafeInteger(afterSequence) || afterSequence < 0) throw new WorkLedgerAccessError('invalid_cursor', 'Invalid history cursor');
       if (!Number.isSafeInteger(limit) || limit < 1) throw new WorkLedgerAccessError('invalid_cursor', 'Invalid history page size');
-      const state = await readAuthoritativeState();
+      const state = await readAuthoritativeShared();
       if (closed) throw new WorkLedgerAccessError('closed', 'Work ledger is closed');
       requireIdentity(actor);
-      const events: WorkLedgerEvent[] = [];
-      for (const event of state.history) {
-        if (event.sequence <= afterSequence) continue;
-        events.push(event);
-        if (events.length === limit) break;
+      // History is ordered by sequence: the page starts at the first event after the cursor, found by
+      // binary search, and only the page's events are copied. The storage read and its comparison with
+      // the validated copy still cost one pass over the stored ledger per page.
+      const history = state.history;
+      let low = 0, high = history.length;
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        if (history[middle]!.sequence <= afterSequence) low = middle + 1;
+        else high = middle;
       }
+      const events: WorkLedgerEvent[] = structuredClone(history.slice(low, low + limit));
       return { cursor: state.revision, events };
       });
     },

@@ -245,8 +245,8 @@ The daemon's surface root is `tui`, so these sit under `~/.goodvibes/tui/`.
 
 **The daemon has no timezone concept today.** Searched: no global timezone or
 locale config key exists; the only IANA timezone strings in the platform are
-per-schedule fields in `platform/scheduler/scheduler.ts` and
-`platform/automation/schedules.ts`, and `device.location.*` is a paired-phone
+per-schedule fields in `platform/automation/schedules.ts` (read by
+`platform/automation/cron.ts`), and `device.location.*` is a paired-phone
 GPS permission, unrelated. This capability adds the first one.
 
 ### 4.1 The setting

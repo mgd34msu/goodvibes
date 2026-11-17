@@ -124,21 +124,17 @@ export async function retainVerifiedDaemonCiArtifact(root: string, source: Daemo
   return Object.freeze({ artifact: immutableArtifact(artifact), retained });
 }
 
-export async function verifyDaemonCiArtifact(root: string, source: DaemonArtifactSource): Promise<void> {
-  await readVerifiedDaemonCiArtifact(root, source);
-}
-
 if (import.meta.main) {
   const root = resolve(import.meta.dir, '..');
   const [action, sourceCommit, headCommit] = process.argv.slice(2);
-  if (!sourceCommit || !headCommit || (action !== 'record' && action !== 'verify')) {
-    throw new Error('Usage: ci-artifact.ts <record|verify> <checkout SHA> <PR head SHA>');
+  // Consumers verify the artifact where they read it (package-native.ts, install-native.ts).
+  if (!sourceCommit || !headCommit || action !== 'record') {
+    throw new Error('Usage: ci-artifact.ts record <checkout SHA> <PR head SHA>');
   }
   const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
   if (git('rev-parse', 'HEAD') !== sourceCommit) throw new Error('Daemon CI artifact checkout SHA mismatch');
   // Generated source changes must not be mislabeled as the checked-out commit.
   git('diff', '--exit-code', 'HEAD');
   const source = { sourceCommit, sourceTree: git('rev-parse', 'HEAD^{tree}'), headCommit, target: daemonNativeHost() };
-  if (action === 'record') await recordDaemonCiArtifact(root, source);
-  else await verifyDaemonCiArtifact(root, source);
+  await recordDaemonCiArtifact(root, source);
 }

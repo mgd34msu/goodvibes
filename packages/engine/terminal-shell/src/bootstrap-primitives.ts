@@ -97,10 +97,12 @@ export function seedTerminalSession(dispatch: Pick<DomainDispatch, 'syncSessionS
  * delivery queues into the integrations domain. The notifier is attached even
  * with no channel yet: it resolves its channels at send time, so a token saved
  * during the session delivers the next notification. The rows are written now
- * and again whenever the notifier's channels change.
+ * and again whenever the notifier's channels change or a notification fails. A
+ * chat service connected with a bot token but no notification target gets a
+ * degraded row that names what to add, as the daemon shows it.
  */
 export function syncTerminalNotifierQueues(
-  notifier: Pick<Notifier, 'getQueueStatus' | 'onChannelsChanged'>,
+  notifier: Pick<Notifier, 'getQueueStatus' | 'onChannelsChanged' | 'channelGaps' | 'onDeadLetter'>,
   dispatch: Pick<DomainDispatch, 'syncIntegration'>,
   attach: () => () => void,
 ): () => void {
@@ -108,7 +110,8 @@ export function syncTerminalNotifierQueues(
   let shown = new Set<string>();
   const syncRows = (): void => {
     const queues = notifier.getQueueStatus();
-    const now = new Set(queues.map((queue) => queue.channel));
+    const gaps = notifier.channelGaps();
+    const now = new Set([...queues.map((queue) => queue.channel), ...gaps.map((gap) => gap.channel)]);
     for (const gone of shown) {
       if (now.has(gone)) continue;
       dispatch.syncIntegration(
@@ -117,6 +120,17 @@ export function syncTerminalNotifierQueues(
       );
     }
     shown = now;
+    for (const gap of gaps) {
+      dispatch.syncIntegration(
+        {
+          id: gap.channel, displayName: gap.channel[0]!.toUpperCase() + gap.channel.slice(1),
+          category: 'communication', status: 'degraded', enabled: true, successCount: 0, errorCount: 0,
+          lastError: `${gap.reason}. ${gap.next}.`,
+          meta: { notifications: 'no-target', next: gap.next },
+        },
+        'bootstrap.notifier',
+      );
+    }
     for (const queue of queues) {
       dispatch.syncIntegration(
         {
@@ -143,7 +157,8 @@ export function syncTerminalNotifierQueues(
   };
   syncRows();
   const stopRows = notifier.onChannelsChanged(syncRows);
-  return () => { stopRows(); unsubscribe(); };
+  const stopFailures = notifier.onDeadLetter(syncRows);
+  return () => { stopRows(); stopFailures(); unsubscribe(); };
 }
 
 export function initialTerminalRuntimeFields(

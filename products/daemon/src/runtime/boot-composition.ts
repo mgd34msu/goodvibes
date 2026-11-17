@@ -108,9 +108,36 @@ export function createDaemonBootOperations(runtime: RuntimeServices): DaemonBoot
     async createNotifier() {
       const notifier = await withServiceReadDrain(runtime.serviceRegistry, (registry) =>
         Notifier.fromConfig(registry, { featureFlags: runtime.featureFlags, metadataOnly, configManager: runtime.configManager, secretsManager: runtime.secretsManager }));
-      let stopRows: (() => void) | undefined;
+      const unsubscribers: (() => void)[] = [];
+      let shown = new Set<string>();
+      let attached = false;
+      // One row per channel, rebuilt when the channels or their gaps change
+      // (a webhook URL or default channel saved later) and when a notification
+      // fails: a gap row says what to add, a queue row follows deliveries.
       const syncRows = (): void => {
-        for (const queue of notifier.getQueueStatus()) {
+        const queues = notifier.getQueueStatus();
+        const gaps = notifier.channelGaps();
+        const now = new Set<string>([...gaps.map((gap) => gap.channel), ...queues.map((queue) => queue.channel)]);
+        for (const gone of shown) {
+          if (now.has(gone)) continue;
+          notificationRows.delete(gone);
+          runtime.runtimeDispatch.syncIntegration({
+            id: gone, displayName: gone[0]!.toUpperCase() + gone.slice(1),
+            category: 'communication', status: 'unconfigured', enabled: false, successCount: 0, errorCount: 0, meta: {},
+          }, 'boot.notifier');
+        }
+        shown = now;
+        // A bot token alone connects chat, not notifications: the row says what to add.
+        for (const gap of gaps) {
+          notificationRows.add(gap.channel);
+          runtime.runtimeDispatch.syncIntegration({
+            id: gap.channel, displayName: gap.channel[0]!.toUpperCase() + gap.channel.slice(1),
+            category: 'communication', status: 'degraded', enabled: true, successCount: 0, errorCount: 0,
+            lastError: `${gap.reason}. ${gap.next}.`,
+            meta: { notifications: 'no-target', next: gap.next },
+          }, 'boot.notifier');
+        }
+        for (const queue of queues) {
           notificationRows.add(queue.channel);
           runtime.runtimeDispatch.syncIntegration({
             id: queue.channel, displayName: queue.channel[0]!.toUpperCase() + queue.channel.slice(1),
@@ -122,28 +149,24 @@ export function createDaemonBootOperations(runtime: RuntimeServices): DaemonBoot
               deadLetters: queue.metrics.deadLettered, dlqSize: queue.metrics.dlqSize, sloEnforced: queue.sloEnforced },
           }, 'boot.notifier');
         }
+        // Announcing runtime events only while a channel exists keeps a
+        // channel-less notifier off every agent and workstream event.
+        if (notifier.channels.length > 0 && !attached) {
+          notifier.attachToRuntimeBus(runtime.runtimeBus, runtimeNotifications);
+          attached = true;
+        } else if (notifier.channels.length === 0 && attached) {
+          notifier.detach();
+          attached = false;
+        }
       };
       return {
         attach() {
           chatNotifier = notifier;
           keepDeadLetters(notifier, 'notification-dead-letters-chat.json');
-          // A bot token alone connects chat, not notifications: the row says what to add.
-          for (const gap of notifier.channelGaps()) {
-            notificationRows.add(gap.channel);
-            runtime.runtimeDispatch.syncIntegration({
-              id: gap.channel, displayName: gap.channel[0]!.toUpperCase() + gap.channel.slice(1),
-              category: 'communication', status: 'degraded', enabled: true, successCount: 0, errorCount: 0,
-              lastError: `${gap.reason}. ${gap.next}.`,
-              meta: { notifications: 'no-target', next: gap.next },
-            }, 'boot.notifier');
-          }
-          if (notifier.channels.length === 0) return;
-          notifier.attachToRuntimeBus(runtime.runtimeBus, runtimeNotifications);
           syncRows();
-          // The row follows the queue: a failed notification turns it degraded when it happens.
-          stopRows = notifier.onDeadLetter(syncRows);
+          unsubscribers.push(notifier.onChannelsChanged(syncRows), notifier.onDeadLetter(syncRows));
         },
-        close: () => { stopRows?.(); return notifier.close(); },
+        close: () => { for (const unsubscribe of unsubscribers.splice(0)) unsubscribe(); return notifier.close(); },
       };
     },
     synchronizeServices: () => withServiceReadDrain(runtime.serviceRegistry, (registry) =>

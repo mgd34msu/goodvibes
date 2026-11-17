@@ -227,6 +227,6 @@ export function emptyProbeContext(): ProbeContext {
     mcpServers: [],
     mcpToolNames: new Set(),
     servedOperatorMethodIds: new Set(),
-    configValuePresent: () => false,
+    configValuePresent: () => ({ state: 'absent' }),
   };
 }

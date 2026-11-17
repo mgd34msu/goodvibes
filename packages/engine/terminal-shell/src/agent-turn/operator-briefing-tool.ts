@@ -4,9 +4,7 @@ import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/platfo
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { requestDeadline, type ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
-import { readConnectedHostOperatorToken } from './connected-host-auth.js';
-import { connectedHostBaseUrl } from './connected-host-dial.js';
+import { requestDeadline, resolveConnectedHost, type ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
 import type { AgentInProcessHost } from './in-process-host.js';
 import { requireOperatorHttpBinding } from './operator-contract-routes.js';
 
@@ -130,18 +128,20 @@ interface BriefingConnection {
   readonly baseUrl: string;
   readonly token: string | null;
   readonly fetch: typeof fetch;
-  /** Why there is no credential, when the host said. */
+  /** Why there is no credential, and what to do about it. */
   readonly unavailable?: string | undefined;
+  readonly next?: readonly string[] | undefined;
 }
 
 function briefingConnection(configManager: AgentConnectedHostConfigReader, homeDirectory: string,
   inProcess: AgentInProcessHost | undefined): BriefingConnection {
-  if (inProcess) {
-    const connection = inProcess.connection();
-    return { baseUrl: connection.baseUrl, token: connection.token, fetch: connection.fetch ?? fetch, unavailable: connection.unavailable?.reason };
-  }
-  const baseUrl = connectedHostBaseUrl(configManager.get('controlPlane.host'), configManager.get('controlPlane.port'));
-  return { baseUrl, token: readConnectedHostOperatorToken(homeDirectory, baseUrl).token, fetch };
+  // The Agent's one resolution: the dial setting, the host build check, the
+  // cached credential and the reason with its next step when there is none.
+  const resolved = resolveConnectedHost({ configManager, homeDirectory, inProcess });
+  return {
+    baseUrl: resolved.baseUrl, token: resolved.token, fetch: resolved.fetch ?? fetch,
+    unavailable: resolved.unavailable?.reason, next: resolved.unavailable?.next,
+  };
 }
 
 async function fetchOperatorRoute(
@@ -293,7 +293,10 @@ export function createAgentOperatorBriefingTool(
       // The connection is resolved once; every read of this briefing uses it.
       const connection = briefingConnection(configManager, shellPaths.homeDirectory, inProcess);
       const token = connection.token;
-      if (!token) return { success: false, error: `auth_required: ${connection.unavailable ?? 'no connected-host operator token'}` };
+      if (!token) {
+        const next = connection.next?.length ? `; next: ${connection.next.join('; ')}` : '';
+        return { success: false, error: `auth_required: ${connection.unavailable ?? 'no connected-host operator token'}${next}` };
+      }
       const { signal } = requestDeadline(deadlineMs, options?.signal);
       // No streams, subscriptions, retries, history, or lifecycle calls. The
       // snapshot reader is disposed when the briefing ends, which aborts its request.

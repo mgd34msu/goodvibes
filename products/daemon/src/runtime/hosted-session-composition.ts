@@ -146,6 +146,8 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
 
   return {
     nativeConversation: nativeHostedConversationOwner(services.gatewayMethods),
+    // A hosted session in the daemon's own project keeps this plan with `work_plan`.
+    workPlan: services.workPlan,
     floorFactory: async ({ workspaceRoot, liveConversationMessages }): Promise<HostedWorkspaceFloor> => {
       const taskGraphPath = createShellPathService({ workingDirectory: workspaceRoot, homeDirectory: services.homeDirectory })
         .resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'sessions', 'task-graph.json');

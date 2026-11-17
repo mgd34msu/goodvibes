@@ -124,8 +124,11 @@ declare module 'simple-git' {
     allowEnvironment?: readonly string[];
     baseDir?: string;
     config?: string[];
-    binary?: string;
+    /** The git command, alone or with one argument placed before every subcommand. */
+    binary?: string | [string] | [string, string];
     maxConcurrentProcesses?: number;
+    /** Ends a git process that produces no output for `block` milliseconds. */
+    timeout?: { block: number; stdErr?: boolean; stdOut?: boolean };
     trimmed?: boolean;
   }
   export interface FileStatusResult {

@@ -44,11 +44,6 @@ import type { ClusterClock, ClusterLogger } from './types.js';
 /** Refusals one member will send in a window; past it, further ones are dropped. */
 const MAX_REFUSALS_PER_WINDOW = 16;
 const REFUSAL_WINDOW_MS = 10_000;
-/**
- * How long a join keeps waiting after a reply it cannot verify (the sign of a
- * wrong join key) for a grant that would prove otherwise, before saying so.
- */
-const MISMATCH_SETTLE_MS = 2_000;
 const JOIN_KEY_MISMATCH = 'a machine in that group answered and the join key did not match';
 
 /**
@@ -564,12 +559,14 @@ export class GroupAdmissionService {
     if (checked.envelope.body['forNodeId'] !== this.host.nodeId) return;
     if (!checked.joinKeyProved) {
       // A refusal of this exact request that this machine cannot verify: a
-      // member heard it and the key it was signed with is not the group's.
-      // Not obeyed (anything on the network can send one), but it is reported
-      // after a short wait for a grant instead of the full timeout's silence.
+      // member heard it and the key it was signed with is not the group's, or
+      // something on the network echoed the request's signature (it travels in
+      // the clear). Neither obeyed nor allowed to shorten the wait, which would
+      // let a forger end a join before a slow grant arrives; it is counted, so
+      // a join that times out says the join key did not match instead of
+      // that nobody answered.
       if (type === GROUP_MESSAGE_TYPES.joinRefuse && pending.requestSig && checked.envelope.body['forRequest'] === pending.requestSig) {
         pending.unauthenticatedReplies += 1;
-        this.settleSoon(pending, MISMATCH_SETTLE_MS);
       }
       return;
     }
@@ -740,14 +737,6 @@ export class GroupAdmissionService {
           + ' either this machine was away across a removal and no longer recognises any current member,'
           + ' or something on this network is answering that is not in the group',
     };
-  }
-
-  /** Bring a pending request's deadline forward to `delayMs` from now. */
-  private settleSoon(pending: PendingAdmission, delayMs: number): void {
-    if (this.pending !== pending || pending.deadline <= this.host.clock.now() + delayMs) return;
-    pending.deadline = this.host.clock.now() + delayMs;
-    pending.cancelDeadline?.();
-    pending.cancelDeadline = this.host.clock.setTimer(() => this.settle(this.timeoutOutcome(pending), pending), delayMs);
   }
 
   private settle(result: AdmissionOutcome, only?: PendingAdmission): void {

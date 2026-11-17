@@ -52,7 +52,7 @@ const SUBCOMMAND_FLAGS: Readonly<Record<string, DeclaredFlags & { readonly compo
     components: true,
   },
   verify: { values: ['worker-url', 'worker-token', 'worker-token-ref'], booleans: ['yes'], components: false },
-  disable: { values: [...AUTH_FLAGS, 'worker-name'], booleans: ['keep-cron', 'keep-worker-subdomain', 'yes'], components: false },
+  disable: { values: [...AUTH_FLAGS, 'worker-name', 'bootstrap-token', 'bootstrap-env'], booleans: ['keep-cron', 'keep-worker-subdomain', 'yes'], components: false },
 };
 const CLOUDFLARE_USAGE = 'Usage: /cloudflare [status|setup|requirements|create-token|discover|validate|provision|verify|disable] [flags]';
 
@@ -102,7 +102,7 @@ export function registerCloudflareRuntimeCommands(registry: CommandRegistry): vo
     subcommands: {
       status: '', setup: '', requirements: '[component...] [--all]', 'create-token': '--bootstrap-token <token> | --bootstrap-env <name> [--account <id>]',
       discover: '[--token-ref <ref>] [--fast]', validate: '[--token <token> | --token-env <name> | --token-ref <ref>]',
-      provision: '[component...] [--account <id>] [--no-verify]', verify: '[--worker-url <url>]', disable: '[--keep-cron] [--keep-worker-subdomain]',
+      provision: '[component...] [--account <id>] [--no-verify]', verify: '[--worker-url <url>]', disable: '[--keep-cron] [--keep-worker-subdomain] [--bootstrap-token <token> | --bootstrap-env <name>]',
     },
     async handler(args, ctx) {
       const subcommand = (args[0] ?? 'status').toLowerCase();
@@ -310,6 +310,8 @@ export function registerCloudflareRuntimeCommands(registry: CommandRegistry): vo
           const result = await client.disable({
             ...cloudflareAuthInput(parsed),
             ...optionalString('workerName', getFlag(parsed, 'worker-name')),
+            // A token allowed to edit API tokens also revokes the operational token this daemon made.
+            ...optionalString('bootstrapToken', getFlag(parsed, 'bootstrap-token') || readTokenEnv(parsed, 'bootstrap-env')),
             disableWorkerSubdomain: !hasFlag(parsed, 'keep-worker-subdomain'),
             disableCron: !hasFlag(parsed, 'keep-cron'),
             persistConfig: true,

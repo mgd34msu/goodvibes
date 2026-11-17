@@ -28,7 +28,7 @@ Select `Use Cloudflare for batch or remote daemon work` on the first onboarding 
 The wizard supports these paths:
 
 - Save settings only: persist configuration and provision later.
-- Paste temporary bootstrap token: the platform creates a narrower operational token, stores it in GoodVibes secrets, and does not persist the bootstrap token. The daemon keeps a record of the operational token it made (its id, never its value) and returns that token again for the same account, zone and components, across retries, the final apply and restarts; a new token, for a changed selection, revokes the one it replaces, and the result says whether that worked. Disable revokes it too when a bootstrap token is set in the wizard; otherwise it says the token is still live.
+- Paste temporary bootstrap token: the platform creates a narrower operational token, stores it in GoodVibes secrets, and does not persist the bootstrap token. The daemon keeps a record of the operational token it made (its id, never its value) and returns that token again for the same account, zone and components, across retries, the final apply and restarts; a new token, for a changed selection, revokes the one it replaces, and the result says whether that worked. Disable revokes it too when a bootstrap token is given (set in the wizard, or `/cloudflare disable --bootstrap-token <token>` / `--bootstrap-env <ENV_NAME>`); otherwise it says the token is still live. A token Cloudflare no longer has counts as revoked, and its record is cleared.
 - Read bootstrap token from environment: same as pasted bootstrap token, but the TUI reads the value from an environment variable in the current process.
 - Paste final operational token: the TUI stores it as `goodvibes://secrets/goodvibes/CLOUDFLARE_API_TOKEN`.
 - Use final token from environment: the TUI writes a `goodvibes://secrets/env/<ENV_NAME>` reference, usually `CLOUDFLARE_API_TOKEN`.
@@ -48,7 +48,7 @@ Use `/cloudflare` for runtime inspection and daemon actions:
 /cloudflare validate --token-env CLOUDFLARE_API_TOKEN
 /cloudflare provision --account <account-id> --batch-mode explicit --tunnel-token-ref goodvibes://secrets/goodvibes/GOODVIBES_CLOUDFLARE_TUNNEL_TOKEN
 /cloudflare verify [--worker-url <url>] [--worker-token <token> | --worker-token-ref <ref>]
-/cloudflare disable [--keep-cron] [--keep-worker-subdomain]
+/cloudflare disable [--keep-cron] [--keep-worker-subdomain] [--bootstrap-token <token> | --bootstrap-env <ENV_NAME>]
 ```
 
 `/cloudflare setup` opens onboarding in edit mode. All other subcommands call platform-owned daemon routes under local daemon admin/auth.

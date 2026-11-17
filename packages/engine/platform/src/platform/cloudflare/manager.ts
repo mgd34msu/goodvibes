@@ -1048,7 +1048,7 @@ export class CloudflareControlPlaneManager {
       const bootstrapToken = clean(input.bootstrapToken);
       const label = `operational token ${madeToken.tokenName} (${madeToken.tokenId})`;
       if (!bootstrapToken) {
-        steps.push({ name: 'revoke-operational-token', status: 'skipped', message: `The ${label} is still live in Cloudflare. Disable again with a bootstrap token to revoke it, or delete it in the Cloudflare dashboard (My Profile > API Tokens).`, resourceId: madeToken.tokenId });
+        steps.push({ name: 'revoke-operational-token', status: 'skipped', message: `The ${label} is still live in Cloudflare. Disable again with a bootstrap token to revoke it (/cloudflare disable --bootstrap-token <token> or --bootstrap-env <name>), or delete it in the Cloudflare dashboard (My Profile > API Tokens).`, resourceId: madeToken.tokenId });
       } else {
         let outcome: { readonly revoked: boolean; readonly reason?: string | undefined };
         try {
@@ -1058,7 +1058,14 @@ export class CloudflareControlPlaneManager {
         }
         if (outcome.revoked) {
           tokenRecord.clear();
-          steps.push({ name: 'revoke-operational-token', status: 'ok', message: `Revoked the ${label}; it no longer works anywhere.`, resourceId: madeToken.tokenId });
+          steps.push({
+            name: 'revoke-operational-token',
+            status: 'ok',
+            message: outcome.reason
+              ? `The ${label} was already gone at Cloudflare (${outcome.reason}); its record here is cleared.`
+              : `Revoked the ${label}; it no longer works anywhere.`,
+            resourceId: madeToken.tokenId,
+          });
         } else {
           steps.push({ name: 'revoke-operational-token', status: 'warning', message: `Could not revoke the ${label}: ${outcome.reason ?? 'unknown reason'}. Delete it in the Cloudflare dashboard (My Profile > API Tokens).`, resourceId: madeToken.tokenId });
         }
@@ -1160,6 +1167,9 @@ export class CloudflareControlPlaneManager {
       await tokenApi.delete(tokenId);
       return { tokenId, revoked: true };
     } catch (error: unknown) {
+      // A token Cloudflare no longer has is as revoked as it gets; a record kept for it would warn on every disable.
+      const status = error && typeof error === 'object' ? Object.getOwnPropertyDescriptor(error, 'status')?.value : undefined;
+      if (status === 404) return { tokenId, revoked: true, reason: 'Cloudflare has no token with that id' };
       return { tokenId, revoked: false, reason: summarizeError(error) };
     }
   }

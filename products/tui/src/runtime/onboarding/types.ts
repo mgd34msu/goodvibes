@@ -208,7 +208,7 @@ export interface OnboardingSnapshotDependencies {
 export interface OnboardingApplyDependencies {
   readonly clock?: () => number;
   readonly config: Pick<ConfigManager, 'describeConfigKeySource' | 'get' | 'getRaw' | 'load' | 'reset' | 'setDynamic' | 'watchDaemonWrites'>;
-  readonly secrets?: Pick<SecretsManager, 'delete' | 'deleteWriteScopeEntry' | 'get' | 'getWriteScopeEntry' | 'inspect' | 'set'>;
+  readonly secrets?: Pick<SecretsManager, 'delete' | 'deleteWriteScopeEntry' | 'get' | 'getFromScope' | 'getWriteScopeEntry' | 'inspect' | 'set'>;
   readonly auth?: Pick<
     UserAuthManager,
     'addUser' | 'clearBootstrapCredentialFile' | 'createSession' | 'deleteUser' | 'getUser' | 'inspect' | 'restoreState' | 'revokeSession' | 'rotatePassword' | 'snapshotState'
@@ -220,7 +220,7 @@ export interface OnboardingApplyDependencies {
 export interface OnboardingVerificationDependencies {
   readonly clock?: () => number;
   readonly config: Pick<ConfigManager, 'get'>;
-  readonly secrets?: Pick<SecretsManager, 'get'>;
+  readonly secrets?: Pick<SecretsManager, 'get' | 'getFromScope'>;
   readonly auth?: Pick<UserAuthManager, 'inspect'>;
   readonly shellPaths: OnboardingShellPaths;
   readonly acknowledgementScope?: OnboardingStateScope;

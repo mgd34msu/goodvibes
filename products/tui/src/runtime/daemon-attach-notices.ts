@@ -62,8 +62,8 @@ const RECEIPT_ACK_BATCH = 100;
  * the three things attaching to it decides on: its undelivered receipts, the
  * client build floor it publishes, and its own build.
  *
- * The default deployment adopts such a daemon with no in-process handle
- * (daemonServer is null), so the embedded in-process fold sees nothing; this
+ * The default deployment adopts such a daemon with no in-process handle,
+ * so the embedded in-process fold sees nothing; this
  * hits the daemon's own endpoint instead, GET <baseUrl>/status with the shared
  * bearer, plus `?receipts=peek` when the caller is going to render them, then
  * `?receipts=ack` for the ids it parsed. The daemon marks only acknowledged

@@ -29,12 +29,9 @@ export type CommonOnboardingVerificationOperation<Key extends string> =
 export interface OnboardingVerificationDependencies<Key extends string> {
   readonly clock?: (() => number) | undefined;
   readonly config: { get(key: Key): unknown };
-  /**
-   * `getFromScope` reads the scope the write went to; the live secrets manager
-   * always has it (optional only so a narrower host type still passes).
-   */
+  /** `getFromScope` reads the scope the write went to. */
   readonly secrets?:
-    | { get(key: string): Promise<string | null>; getFromScope?(key: string, scope: SecretScope): Promise<string | null> }
+    | { get(key: string): Promise<string | null>; getFromScope(key: string, scope: SecretScope): Promise<string | null> }
     | undefined;
   readonly auth?: Pick<UserAuthManager, 'inspect'> | undefined;
   readonly shellPaths: OnboardingShellPaths;
@@ -137,9 +134,6 @@ export function createOnboardingVerifier<
           : `${operation.key} was stored as a GoodVibes secret reference, but the reference resolves to nothing.`,
         target: operation.key,
       };
-    }
-    if (!deps.secrets.getFromScope) {
-      return { id, status: 'fail', message: 'Secret manager cannot read one scope, so the stored key cannot be checked.', target: operation.key };
     }
     // The write targeted one scope; the check reads that scope, not whichever
     // copy (an exported variable, another store) wins when the key is used.

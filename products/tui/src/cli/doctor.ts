@@ -2,7 +2,8 @@ import { describeConfiguredPermissions, describePermissionMode } from '../permis
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { PermissionManager, createPermissionConfigReader } from '@goodvibes-jev/engine/platform/platform/permissions';
 import type { PermissionCheckResult } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { PolicyRuntimeState, createFeatureFlagManager, deriveFeatureStates } from '@/runtime/index.ts';
+import { createFeatureFlagManager, deriveFeatureStates } from '@/runtime/index.ts';
+import { createPolicyRuntimeState } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers';
 import { describeConfiguredEffort } from '../providers/reasoning-effort-surface.ts';
 import type { CliCommandOutput } from '@goodvibes-jev/engine/terminal-shell';
@@ -154,7 +155,8 @@ async function explain(options: DoctorSubcommandOptions): Promise<CliCommandOutp
   const featureFlags = createFeatureFlagManager();
   featureFlags.loadFromConfig({ flags: deriveFeatureStates(config) });
   const policyEngineOn = featureFlags.isEnabled('permissions-policy-engine');
-  const policyRuntimeState = new PolicyRuntimeState();
+  // The same policy state the running app composes, with the configured bundle loaded.
+  const policyRuntimeState = createPolicyRuntimeState(config, featureFlags);
   const manager = new PermissionManager(
     async () => ({ approved: false, remember: false }),
     createPermissionConfigReader(config),

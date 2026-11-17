@@ -19,7 +19,7 @@ export interface ThemePickerContext {
 }
 export interface ThemePickerPresentation { readonly clearScreen: boolean; readonly primaryVerbLabel: boolean }
 const DEFAULT_PRESENTATION: ThemePickerPresentation = { clearScreen: false, primaryVerbLabel: true };
-const THEME_NAME_CONFIG_KEY = 'display.theme';
+import { THEME_NAME_CONFIG_KEY } from './renderer/theme-mode-config.js';
 import type { SelectionItem } from './selection-modal.js';
 import {
   getActiveThemeName,

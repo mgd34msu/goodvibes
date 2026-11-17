@@ -472,6 +472,9 @@ export function composeInboundMail(
       // never arrived expired without anybody being told. See
       // `InboundExpectationRegistry.hasOpen`.
       expectationOpen: () => expectations.hasOpen(),
+      // An opening wakes the idle wait at once, so the wait is one timer
+      // rather than a wake-up every pollExpectingMs for the whole interval.
+      expectationOpened: (wake) => expectations.onOpened(wake),
       // The owner's own cadence, read from their two Gmail poll settings by
       // `source-factory.ts` at CREATE time and handed in here. Not re-read:
       // one key, one reader. A second read in this file would be a second

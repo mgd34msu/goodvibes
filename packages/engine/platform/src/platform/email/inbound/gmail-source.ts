@@ -180,10 +180,10 @@ export interface GmailMailSourceDeps {
   readonly expectationOpen: ExpectationPresence;
   /**
    * Subscribe to "an expectation was just opened"; returns the unsubscribe.
-   * With it, an idle wait is one timer that this wakes early; without it the
-   * wait is sliced at `pollExpectingMs` so an opening is still noticed in time.
+   * An idle wait is one timer that this wakes early, so an opening is noticed
+   * at once without waking every `pollExpectingMs` meanwhile.
    */
-  readonly expectationOpened?: ((wake: () => void) => () => void) | undefined;
+  readonly expectationOpened: (wake: () => void) => () => void;
   /** `surfaces.email.inbound.gmailPollSecondsExpecting`, in milliseconds. */
   readonly pollExpectingMs: number;
   /** `surfaces.email.inbound.gmailPollSecondsIdle`, in milliseconds. */
@@ -366,11 +366,10 @@ export class GmailMailSource implements InboundMailSource {
    *
    * A single fixed sleep of the idle interval (up to an hour by configuration)
    * would not poll for an expectation opened during it until it ended, past the
-   * expectation's own window. With `expectationOpened` wired the wait is one
-   * timer that the opening wakes; without it the wait is sliced at
-   * `pollExpectingMs` and the interval re-read each slice. Either way Google is
-   * only asked when the whole interval in force has elapsed. A refused grant is
-   * not sliced, nothing about it changes when an expectation opens.
+   * expectation's own window. The wait is one timer that the opening wakes,
+   * and the interval is re-read when it does; Google is only asked when the
+   * whole interval in force has elapsed. A refused grant's wait is not woken,
+   * nothing about it changes when an expectation opens.
    */
   private async sleepUntilDue(signal: AbortSignal): Promise<void> {
     const startedAt = this.deps.clock.now();
@@ -383,10 +382,6 @@ export class GmailMailSource implements InboundMailSource {
       if (remaining <= 0) return;
       if (this.tracker.state === 'insufficient') {
         await this.deps.clock.sleep(remaining, signal);
-        continue;
-      }
-      if (subscribe === undefined) {
-        await this.deps.clock.sleep(Math.min(remaining, this.pollExpectingMs), signal);
         continue;
       }
       const opened = new AbortController();

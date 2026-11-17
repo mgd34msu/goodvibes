@@ -37,11 +37,6 @@ export interface MemoryConfig {
    */
   hardLimitPct: number;
 }
-declare module './schema-types.js' {
-  interface GoodVibesConfig {
-    memory: MemoryConfig;
-  }
-}
 
 export const memoryConfigDefaults: { memory: MemoryConfig } = {
   memory: {

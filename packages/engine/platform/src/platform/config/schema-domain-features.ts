@@ -6,12 +6,9 @@
  * hardcoded before promotion, so a fresh config reproduces prior behaviour;
  * constructor/per-call params still override.
  *
- * These five sections are top-level config domains, so, like the worktree
- * domain in schema-domain-runtime.ts, they augment GoodVibesConfig via
- * `declare module` here (co-located with their defaults) instead of editing
- * schema-types.ts. Registering the domain is what keeps get('fetch.*') etc. from
- * throwing "section 'fetch' does not exist"; the scalar keys additionally appear
- * in the ConfigKey union / ConfigValue map in schema-types.ts so config.get is typed.
+ * These five sections are top-level config domains: GoodVibesConfig
+ * (schema-types.ts) imports their interfaces, and their keys and value types
+ * are read off those interfaces.
  */
 import type { ConfigSetting } from './schema-types.js';
 import { intRange, numRange } from './schema-shared.js';
@@ -87,15 +84,6 @@ export interface AgentsConfig {
   maxTurnsCap: number;
 }
 
-declare module './schema-types.js' {
-  interface GoodVibesConfig {
-    fetch: FetchConfig;
-    security: SecurityConfig;
-    integrations: IntegrationsConfig;
-    policy: PolicyConfig;
-    agents: AgentsConfig;
-  }
-}
 
 export const featureConfigDefaults: {
   fetch: FetchConfig;

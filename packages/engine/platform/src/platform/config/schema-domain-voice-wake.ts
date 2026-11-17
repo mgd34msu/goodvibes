@@ -37,11 +37,9 @@ export interface VoiceWakeConfig {
 }
 
 /*
- * No `declare module './schema-types.js'` block here on purpose. TypeScript's
- * interface merging requires every declaration of a property to give it the
- * SAME type, and schema-domain-voice-local.ts already declares `voice`. That
- * file owns the `voice` key and widens it to `VoiceLocalConfig & VoiceWakeConfig`;
- * this module contributes the type, the defaults, and the rows.
+ * GoodVibesConfig (schema-types.ts) declares `voice` as
+ * `VoiceLocalConfig & VoiceWakeConfig`; this module contributes the wake type,
+ * the defaults, and the rows.
  */
 
 /** The wake model id shipped and pinned by the platform. */

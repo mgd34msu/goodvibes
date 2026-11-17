@@ -17,11 +17,6 @@ export interface ConversationGateSettings {
   gatedSurfaces: string[];
 }
 
-declare module './schema-types.js' {
-  interface GoodVibesConfig {
-    conversationGate: ConversationGateSettings;
-  }
-}
 
 export const conversationGateConfigDefaults = {
   conversationGate: {

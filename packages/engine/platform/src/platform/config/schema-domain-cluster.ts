@@ -40,11 +40,6 @@ export interface ClusterConfig {
   rosterGossipSeconds: number;
 }
 
-declare module './schema-types.js' {
-  interface GoodVibesConfig {
-    cluster: ClusterConfig;
-  }
-}
 
 export const clusterConfigDefaults: { cluster: ClusterConfig } = {
   cluster: {

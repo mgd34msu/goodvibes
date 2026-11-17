@@ -21,15 +21,14 @@
  * for TTS.
  */
 import type { ConfigSettingDefinition } from './schema-shared.js';
-import type { VoiceWakeConfig } from './schema-domain-voice-wake.js';
 
 /** Local voice engine configuration (`voice.local.*`). */
 export interface VoiceLocalConfig {
   local: {
-    sttEngine: string;
+    sttEngine: '' | 'whisper-cpp' | 'faster-whisper';
     sttBinary: string;
     sttModelPath: string;
-    ttsEngine: string;
+    ttsEngine: '' | 'piper' | 'kokoro';
     ttsBinary: string;
     ttsModelPath: string;
   };
@@ -40,11 +39,6 @@ export interface VoiceLocalConfig {
  * schema-domain-voice-wake.ts, and TypeScript's interface merging requires a
  * single declaration site, so the widened type is assembled here.
  */
-declare module './schema-types.js' {
-  interface GoodVibesConfig {
-    voice: VoiceLocalConfig & VoiceWakeConfig;
-  }
-}
 
 export const voiceLocalConfigDefaults: { voice: VoiceLocalConfig } = {
   voice: {

@@ -29,11 +29,6 @@ import type { OccasionsConfig } from './schema-types-occasions.js';
 
 export type { OccasionsConfig } from './schema-types-occasions.js';
 
-declare module './schema-types.js' {
-  interface GoodVibesConfig {
-    occasions: OccasionsConfig;
-  }
-}
 
 export const occasionsConfigSettings: ConfigSettingDefinition[] = [
   {

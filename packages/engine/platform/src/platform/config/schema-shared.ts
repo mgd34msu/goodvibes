@@ -1,9 +1,17 @@
 import { isAcceptableReasoningEffortSetting } from './reasoning-effort-setting.js';
+import type { ConfigKey } from './schema-types.js';
+import type { ConfigValue } from './schema-types-values.js';
 
-export interface ConfigSettingDefinition {
-  key: string;
+/**
+ * One settings row: its key is a ConfigKey (a leaf of GoodVibesConfig) and its
+ * default has that key's value type, so a row for a key that does not exist,
+ * or with a default of the wrong type, is a compile error.
+ */
+export type ConfigSettingDefinition = { [K in ConfigKey]: ConfigSettingFields & { key: K; default: ConfigValue<K> } }[ConfigKey];
+
+/** What a settings row says besides its key and default. */
+export interface ConfigSettingFields {
   type: 'boolean' | 'number' | 'string' | 'enum';
-  default: unknown;
   description: string;
   /** Retained for saved-config compatibility, excluded from current settings controls. */
   deprecated?: boolean;
@@ -73,7 +81,7 @@ export interface ConfigKeyFacts {
  * preference remains valid when a serving model temporarily offers fewer levels;
  * the model's request adapter resolves the effective level separately.
  */
-export function reasoningEffortSetting(): Pick<ConfigSettingDefinition, 'validate' | 'validationHint'> {
+export function reasoningEffortSetting(): Pick<ConfigSettingFields, 'validate' | 'validationHint'> {
   return {
     validate: isAcceptableReasoningEffortSetting,
     validationHint: 'a known reasoning effort level, run /effort for the current model choices',
@@ -84,7 +92,7 @@ export function reasoningEffortSetting(): Pick<ConfigSettingDefinition, 'validat
 export function intRange(
   min: number,
   max: number,
-): Pick<ConfigSettingDefinition, 'validate' | 'validationHint'> {
+): Pick<ConfigSettingFields, 'validate' | 'validationHint'> {
   return {
     validate: (v) => typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max,
     validationHint: `integer in [${min}, ${max}]`,
@@ -95,7 +103,7 @@ export function intRange(
 export function numRange(
   min: number,
   max: number,
-): Pick<ConfigSettingDefinition, 'validate' | 'validationHint'> {
+): Pick<ConfigSettingFields, 'validate' | 'validationHint'> {
   return {
     validate: (v) => typeof v === 'number' && v >= min && v <= max,
     validationHint: `number in [${min}, ${max}]`,
@@ -103,7 +111,7 @@ export function numRange(
 }
 
 /** An optional owner-configured work limit; zero disables it. */
-export function optionalWorkLimit(): Pick<ConfigSettingDefinition, 'validate' | 'validationHint'> {
+export function optionalWorkLimit(): Pick<ConfigSettingFields, 'validate' | 'validationHint'> {
   return {
     validate: (value) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0,
     validationHint: 'non-negative safe integer; 0 means unlimited',
@@ -114,11 +122,11 @@ const PORT_VALIDATION_HINT = 'integer port in [1, 65535]';
 const isPortNumber = (v: unknown): boolean => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 65535;
 
 /** A TCP port this machine listens on (integer in [1, 65535]); never replicated to cluster peers. */
-export function port(): Pick<ConfigSettingDefinition, 'validate' | 'validationHint' | 'role'> {
+export function port(): Pick<ConfigSettingFields, 'validate' | 'validationHint' | 'role'> {
   return { validate: isPortNumber, validationHint: PORT_VALIDATION_HINT, role: 'listen-port' };
 }
 
 /** A TCP port of a remote server this machine connects to (integer in [1, 65535]). */
-export function remotePort(): Pick<ConfigSettingDefinition, 'validate' | 'validationHint' | 'role'> {
+export function remotePort(): Pick<ConfigSettingFields, 'validate' | 'validationHint' | 'role'> {
   return { validate: isPortNumber, validationHint: PORT_VALIDATION_HINT, role: 'remote-port' };
 }

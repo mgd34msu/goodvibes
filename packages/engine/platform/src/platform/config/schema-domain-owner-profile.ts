@@ -20,11 +20,6 @@ import type { OwnerProfileConfig } from './schema-types-owner-profile.js';
 
 export type { OwnerProfileConfig } from './schema-types-owner-profile.js';
 
-declare module './schema-types.js' {
-  interface GoodVibesConfig {
-    profile: OwnerProfileConfig;
-  }
-}
 
 export const ownerProfileConfigDefaults: { profile: OwnerProfileConfig } = {
   profile: {

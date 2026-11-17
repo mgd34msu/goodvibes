@@ -60,11 +60,6 @@ export interface TriggersConfig {
   outputTailBytes: number;
 }
 
-declare module './schema-types.js' {
-  interface WatchersConfig {
-    triggers: TriggersConfig;
-  }
-}
 
 export const triggersConfigDefaults: { triggers: TriggersConfig } = {
   triggers: {

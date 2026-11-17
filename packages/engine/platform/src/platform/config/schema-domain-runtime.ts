@@ -2,22 +2,17 @@ import { type ConfigSettingDefinition, intRange, numRange, port } from './schema
 
 /**
  * Per-project worktree cold-start setup (resolveWorktreeSetupConfig). Both fields
- * are arrays, so, like notifications.webhookUrls / contract.gates, they are NOT
- * scalar ConfigKeys; read them via getCategory('worktree').setup. The domain is
- * augmented onto GoodVibesConfig here (co-located with its default below) so
- * schema-types.ts stays under its grandfathered line ceiling; registering it is
- * what keeps get('worktree.setup.*') from throwing "section 'worktree' does not
- * exist", the daemon reads those keys via a cast.
+ * are lists, read whole (`get('worktree.setup.commands')` or
+ * getCategory('worktree').setup). GoodVibesConfig (schema-types.ts) imports
+ * this interface as `worktree`.
  */
 export interface WorktreeConfig {
   setup: { commands: string[]; carryOverGlobs: string[] };
 }
 
 /**
- * The proactive check-in section. Its keys and defaults already shipped; no
- * `declare module` block ever put the SECTION on `GoodVibesConfig`, so reading
- * it off the config object was a compile error. Pinned in
- * test/types/config-domains-complete.ts.
+ * The proactive check-in section, imported into GoodVibesConfig
+ * (schema-types.ts) as `checkin`.
  */
 export interface CheckinConfig {
   enabled: boolean;
@@ -26,12 +21,6 @@ export interface CheckinConfig {
   quietHours: string;
 }
 
-declare module './schema-types.js' {
-  interface GoodVibesConfig {
-    worktree: WorktreeConfig;
-    checkin: CheckinConfig;
-  }
-}
 export const runtimeConfigDefaults = {
   runtime: {
     companionChatLimiter: {

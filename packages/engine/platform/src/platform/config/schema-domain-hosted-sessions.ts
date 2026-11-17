@@ -48,11 +48,6 @@ export interface HostedSessionsSettings {
   routeConversationTurns: boolean;
 }
 
-declare module './schema-types.js' {
-  interface GoodVibesConfig {
-    hostedSessions: HostedSessionsSettings;
-  }
-}
 
 export const hostedSessionsConfigDefaults = {
   hostedSessions: {

@@ -15,11 +15,6 @@ import { numRange, type ConfigSettingDefinition } from './schema-shared.js';
 export interface FleetConfig {
   maxSize: number;
 }
-declare module './schema-types.js' {
-  interface GoodVibesConfig {
-    fleet: FleetConfig;
-  }
-}
 
 export const fleetConfigDefaults: { fleet: FleetConfig } = {
   fleet: { maxSize: 8 },

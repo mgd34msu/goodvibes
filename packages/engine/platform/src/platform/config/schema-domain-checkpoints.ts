@@ -17,11 +17,6 @@ export interface CheckpointsConfig {
   autoRetention: boolean;
 }
 
-declare module './schema-types.js' {
-  interface GoodVibesConfig {
-    checkpoints: CheckpointsConfig;
-  }
-}
 
 export const checkpointsConfigDefaults = {
   checkpoints: {

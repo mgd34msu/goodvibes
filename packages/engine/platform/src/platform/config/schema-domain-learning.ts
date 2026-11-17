@@ -15,11 +15,9 @@
  * own DEFAULT_MEMORY_CONSOLIDATION_CONFIG fallback (a test guards that they
  * never drift), so its output is unchanged.
  *
- * The scalar keys ARE ordinary ConfigKeys, registered through the string-keyed
- * ConfigSettingDefinition[] the composition spreads into CONFIG_SCHEMA (as the
- * runtime domain does), so they need no edit to the grandfathered schema-types.ts
- * ConfigKey union; the LearningConfig type is augmented onto GoodVibesConfig here,
- * co-located with its default below.
+ * The scalar keys are ordinary ConfigKeys, read off LearningConfig, which
+ * GoodVibesConfig (schema-types.ts) imports as `learning`; the rows are spread
+ * into CONFIG_SCHEMA like every other domain's.
  */
 import { type ConfigSettingDefinition, intRange } from './schema-shared.js';
 
@@ -36,11 +34,6 @@ export interface LearningConfig {
     decayConfidenceStep: number;
     archiveConfidenceFloor: number;
   };
-}
-declare module './schema-types.js' {
-  interface GoodVibesConfig {
-    learning: LearningConfig;
-  }
 }
 
 /**

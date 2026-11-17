@@ -1,6 +1,6 @@
 /**
- * The judgment port's config types: the `judgment` category shape, the
- * `judgment.*` key union and the value of each key. Defaults and setting
+ * The judgment port's config types: the `judgment` category shape, from which
+ * the `judgment.*` keys and their values are read. Defaults and setting
  * definitions live in schema-domain-judgment.ts; the port is built from them in
  * runtime/judgment-services.ts.
  */
@@ -43,30 +43,4 @@ export interface JudgmentSettings {
   decisionDeadlineMs?: number;
   /** Ordered compatible endpoints. An explicit empty list disables inherited fallbacks. */
   fallbacks: readonly JudgmentFallbackSettings[];
-}
-
-export type JudgmentConfigKey =
-  | 'judgment.volumeMonitor'
-  | 'judgment.policy'
-  | 'judgment.endpoint'
-  | 'judgment.keySource'
-  | 'judgment.keyName'
-  | 'judgment.model'
-  | 'judgment.backend'
-  | 'judgment.timeoutMs'
-  | 'judgment.decisionDeadlineMs'
-  | 'judgment.fallbacks';
-
-/** The value of every `judgment.*` key, folded into ConfigValue with one arm. */
-export interface JudgmentConfigValueMap {
-  'judgment.volumeMonitor': Partial<JudgmentVolumeMonitorControl>;
-  'judgment.policy': DecisionModelPolicy;
-  'judgment.endpoint': string;
-  'judgment.keySource': JudgmentKeySource;
-  'judgment.keyName': string;
-  'judgment.model': string;
-  'judgment.backend': JudgmentBackendSettings;
-  'judgment.timeoutMs': number;
-  'judgment.decisionDeadlineMs': number;
-  'judgment.fallbacks': readonly JudgmentFallbackSettings[];
 }

@@ -29,12 +29,6 @@ export type {
   GoogleConnectorConfig,
 } from './schema-types-connectors.js';
 
-declare module './schema-types.js' {
-  interface GoodVibesConfig {
-    calendar: CalendarConnectorConfig;
-    google: GoogleConnectorConfig;
-  }
-}
 
 /** Defaults for the connector's `calendar` section: one entry per OAuth calendar provider. */
 const CALENDAR_CONNECTOR_DEFAULTS: CalendarConnectorConfig = {

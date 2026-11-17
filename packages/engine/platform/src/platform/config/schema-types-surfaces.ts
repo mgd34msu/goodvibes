@@ -137,6 +137,7 @@ export interface MSTeamsSurfaceConfig {
   botId: string;
   defaultConversationId: string;
   defaultChannelId: string;
+  webhookSecret: string;
   setupVersion: number;
 }
 
@@ -155,6 +156,7 @@ export interface MattermostSurfaceConfig {
   botToken: string;
   teamId: string;
   defaultChannelId: string;
+  webhookSecret: string;
   setupVersion: number;
 }
 
@@ -164,6 +166,7 @@ export interface MatrixSurfaceConfig {
   accessToken: string;
   userId: string;
   defaultRoomId: string;
+  webhookSecret: string;
   setupVersion: number;
 }
 

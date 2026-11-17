@@ -12,10 +12,8 @@
  * historical default feeds migrate. Release availability is independent of
  * source readiness.
  *
- * Like the worktree domain in schema-domain-runtime.ts, `update` is a
- * top-level config section registered via `declare module` here (co-located
- * with its defaults); the scalar keys additionally appear in the ConfigKey
- * union / ConfigValue map in schema-types.ts so config.get is typed.
+ * `update` is a top-level config section: GoodVibesConfig (schema-types.ts)
+ * imports UpdateConfig, and its keys and value types are read off it.
  */
 import { type ConfigSettingDefinition, intRange } from './schema-shared.js';
 export const DAEMON_RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes/releases/latest';
@@ -43,11 +41,6 @@ export interface UpdateConfig {
   alertAfterFailedChecks: number;
 }
 
-declare module './schema-types.js' {
-  interface GoodVibesConfig {
-    update: UpdateConfig;
-  }
-}
 
 export const updateConfigDefaults = {
   update: {

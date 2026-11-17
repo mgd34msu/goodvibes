@@ -31,11 +31,6 @@ export interface PushConfig {
   };
 }
 
-declare module './schema-types.js' {
-  interface GoodVibesConfig {
-    push: PushConfig;
-  }
-}
 
 export const pushConfigDefaults: { push: PushConfig } = {
   push: {

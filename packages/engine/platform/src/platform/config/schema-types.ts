@@ -2,9 +2,27 @@ import type { DecisionRouterSettings } from './decision-router-settings.js';
 /**
  * Shared config schema types for goodvibes-platform.
  */
-import type { ProfileConfigKey, ProfileConfigValue } from './schema-types-owner-profile.js';
-import type { OccasionsConfigKey } from './schema-types-occasions.js';
-import type { ConnectorsConfigKey } from './schema-types-connectors.js';
+// The categories declared beside their defaults and rows. Imported here, never
+// merged in by `declare module`, so GoodVibesConfig is one declaration that
+// every consumer, published types included, sees whole.
+import type { CheckpointsConfig } from './schema-domain-checkpoints.js';
+import type { ClusterConfig } from './schema-domain-cluster.js';
+import type { CalendarConnectorConfig, GoogleConnectorConfig } from './schema-types-connectors.js';
+import type { ConversationGateSettings } from './schema-domain-conversation-gate.js';
+import type { DeviceConfig } from './schema-domain-device.js';
+import type { AgentsConfig, FetchConfig, IntegrationsConfig, PolicyConfig, SecurityConfig } from './schema-domain-features.js';
+import type { FleetConfig } from './schema-domain-fleet.js';
+import type { HostedSessionsSettings } from './schema-domain-hosted-sessions.js';
+import type { LearningConfig } from './schema-domain-learning.js';
+import type { MemoryConfig } from './schema-domain-memory.js';
+import type { OccasionsConfig } from './schema-types-occasions.js';
+import type { OwnerProfileConfig } from './schema-types-owner-profile.js';
+import type { PowerConfig } from './schema-domain-power.js';
+import type { PushConfig } from './schema-domain-push.js';
+import type { CheckinConfig, WorktreeConfig } from './schema-domain-runtime.js';
+import type { UpdateConfig } from './schema-domain-update.js';
+import type { VoiceLocalConfig } from './schema-domain-voice-local.js';
+import type { VoiceWakeConfig } from './schema-domain-voice-wake.js';
 
 
 export * from "./schema-types-surfaces.js";
@@ -33,9 +51,9 @@ import type {
 export * from "./schema-types-permissions.js";
 import type { BackgroundAgentsMode, LineNumberMode, PermissionAction, PermissionMode, PermissionsToolConfig } from "./schema-types-permissions.js";
 export * from "./schema-types-payments.js";
-import type { PaymentsConfig, PaymentsConfigKey, PaymentsConfigValueMap } from "./schema-types-payments.js";
-import type { ContractConfigKey, ContractSettings } from "./schema-types-contract.js";
-import type { JudgmentConfigKey, JudgmentSettings } from "./schema-types-judgment.js";
+import type { PaymentsConfig } from "./schema-types-payments.js";
+import type { ContractSettings } from "./schema-types-contract.js";
+import type { JudgmentSettings } from "./schema-types-judgment.js";
 
 export * from "./schema-types-daemon.js";
 import type {
@@ -46,8 +64,6 @@ import type {
   TtsConfig,
   WatchersConfig,
   DaemonProcessConfig,
-  DaemonProcessConfigKey,
-  DaemonProcessConfigValueMap,
 } from "./schema-types-daemon.js";
 
 
@@ -202,6 +218,29 @@ export interface GoodVibesConfig {
   batch: BatchConfig;
   cloudflare: CloudflareConfig;
   pricing: PricingConfig;
+  checkpoints: CheckpointsConfig;
+  cluster: ClusterConfig;
+  calendar: CalendarConnectorConfig;
+  google: GoogleConnectorConfig;
+  conversationGate: ConversationGateSettings;
+  device: DeviceConfig;
+  fetch: FetchConfig;
+  security: SecurityConfig;
+  integrations: IntegrationsConfig;
+  policy: PolicyConfig;
+  agents: AgentsConfig;
+  fleet: FleetConfig;
+  hostedSessions: HostedSessionsSettings;
+  learning: LearningConfig;
+  memory: MemoryConfig;
+  occasions: OccasionsConfig;
+  profile: OwnerProfileConfig;
+  power: PowerConfig;
+  push: PushConfig;
+  worktree: WorktreeConfig;
+  checkin: CheckinConfig;
+  update: UpdateConfig;
+  voice: VoiceLocalConfig & VoiceWakeConfig;
 }
 
 /** One user-set manual model price, USD per 1M tokens. */
@@ -243,566 +282,34 @@ export interface ConfigSetting {
   role?: 'listen-port' | 'remote-port' | undefined;
 }
 
-/** Dot-path config keys for all settings. */
-export type ConfigKey =
-  | 'display.stream'
-  | 'display.lineNumbers'
-  | 'display.collapseThreshold'
-  | 'display.theme'
-  | 'display.themeMode'
-  | 'display.treeGlyphs'
-  | 'display.showThinking'
-  | 'display.showReasoningSummary'
-  | 'display.showTokenSpeed'
-  | 'display.showToolPreview'
-  | 'provider.reasoningEffort'
-  | 'provider.decisionRouter'
-  | 'provider.model'
-  | 'provider.embeddingProvider'
-  | 'provider.systemPromptFile'
-  | 'provider.optimizerMode'
-  | 'provider.optimizerPinnedModel'
-  | 'provider.localContextIngestion'
-  | 'behavior.autoApprove'
-  | 'behavior.autoCompactThreshold'
-  | 'behavior.compactionStrategy'
-  | 'behavior.staleContextWarnings'
-  | 'behavior.saveHistory'
-  | 'behavior.notifyOnComplete'
-  | 'behavior.suggestAlternativeOnProviderFail'
-  | 'behavior.hitlMode'
-  | 'behavior.toolResultReconciliation'
-  | 'behavior.returnContextMode'
-  | 'behavior.guidanceMode'
-  | 'storage.secretPolicy'
-  | 'storage.artifacts.maxBytes'
-  | 'storage.secretProviders.onePasswordCli'
-  | 'storage.secretProviders.bitwardenCli'
-  | 'storage.secretProviders.bitwardenAppDataDir'
-  | 'storage.secretProviders.bitwardenSessionEnv'
-  | 'storage.secretProviders.bwsCli'
-  | 'storage.secretProviders.bwsAccessTokenEnv'
-  | 'storage.secretProviders.bwsConfigFile'
-  | 'storage.secretProviders.bwsServerUrl'
-  | 'permissions.mode'
-  | 'permissions.backgroundAgents'
-  | 'permissions.engine'
-  | 'permissions.simulation'
-  | 'permissions.divergenceDashboard'
-  | 'permissions.commandParser'
-  | 'permissions.divergenceThreshold'
-  | 'permissions.maxDivergenceRecords'
-  | 'permissions.tools.read'
-  | 'permissions.tools.write'
-  | 'permissions.tools.edit'
-  | 'permissions.tools.exec'
-  | 'permissions.tools.find'
-  | 'permissions.tools.fetch'
-  | 'permissions.tools.analyze'
-  | 'permissions.tools.inspect'
-  | 'permissions.tools.agent'
-  | 'permissions.tools.state'
-  | 'permissions.tools.workflow'
-  | 'permissions.tools.registry'
-  | 'permissions.tools.delegate'
-  | 'permissions.tools.mcp'
-  | 'diagnostics.postEdit'
-  | 'orchestration.recursionEnabled'
-  | 'orchestration.maxDepth'
-  | 'planner.decomposition'
-  | 'planner.maxTurns'
-  | 'planner.tokenCeiling'
-  | 'planner.wallTimeoutMs'
-  | 'planner.adaptive'
-  | 'sandbox.enabled'
-  | 'sandbox.judgment'
-  | 'sandbox.replIsolation'
-  | 'sandbox.mcpIsolation'
-  | 'sandbox.windowsMode'
-  | 'sandbox.vmBackend'
-  | 'ui.voiceEnabled'
-  | 'ui.systemMessages'
-  | 'ui.operationalMessages'
-  | 'ui.contractMessages'
-  | 'tts.provider'
-  | 'tts.voice'
-  | 'tts.llmProvider'
-  | 'tts.llmModel'
-  | 'tts.speed'
-  | PaymentsConfigKey
-  | DaemonProcessConfigKey
-  | 'danger.httpListener'
-  | 'tools.llmEnabled'
-  | 'tools.llmProvider'
-  | 'tools.llmModel'
-  | 'tools.autoHeal'
-  | 'tools.defaultTokenBudget'
-  | 'tools.hooksFile'
-  | 'tools.overflowSpillBackend'
-  | 'tools.contractVerification'
-  | 'tools.outputSchemaFingerprints'
-  | ContractConfigKey
-  | JudgmentConfigKey
-  | 'cache.enabled'
-  | 'cache.stableTtl'
-  | 'cache.monitorHitRate'
-  | 'cache.hitRateWarningThreshold'
-  | 'helper.enabled'
-  | 'helper.globalProvider'
-  | 'helper.globalModel'
-  | 'automation.enabled'
-  | 'automation.maxConcurrentRuns'
-  | 'automation.runHistoryLimit'
-  | 'automation.defaultTimeoutMs'
-  | 'automation.catchUpWindowMinutes'
-  | 'automation.failureCooldownMs'
-  | 'automation.deleteAfterRun'
-  | 'controlPlane.enabled'
-  | 'controlPlane.gateway'
-  | 'controlPlane.hostMode'
-  | 'controlPlane.host'
-  | 'controlPlane.port'
-  | 'controlPlane.publicBaseUrl' | 'conversationGate.mode' | 'conversationGate.proposalTtlMs' | 'conversationGate.maxPendingProposals'
-  | 'hostedSessions.detachPolicy' | 'hostedSessions.maxSessions' | 'hostedSessions.maxMessagesPerSession' | 'hostedSessions.terminatedRetentionMs'
-  | 'hostedSessions.attachmentTtlMs'
-  | 'hostedSessions.promoteInboundConversations'
-  | 'hostedSessions.routeConversationTurns'
-  | 'controlPlane.streamMode'
-  | 'controlPlane.trustProxy'
-  | 'controlPlane.openaiCompatible.enabled'
-  | 'controlPlane.openaiCompatible.pathPrefix'
-  | 'controlPlane.webui.serve'
-  | 'controlPlane.webui.bundleDir'
-  | 'controlPlane.cors.enabled'
-  | 'controlPlane.cors.allowedOrigins'
-  | 'controlPlane.tls.mode'
-  | 'controlPlane.tls.certFile'
-  | 'controlPlane.tls.keyFile'
-  | 'httpListener.hostMode'
-  | 'httpListener.host'
-  | 'httpListener.port'
-  | 'httpListener.trustProxy'
-  | 'httpListener.trustCloudflare'
-  | 'httpListener.tls.mode'
-  | 'httpListener.tls.certFile'
-  | 'httpListener.tls.keyFile'
-  | 'web.enabled'
-  | 'web.hostMode'
-  | 'web.host'
-  | 'web.port'
-  | 'web.publicBaseUrl'
-  | 'web.staticAssetsDir'
-  | 'surfaces.hostedInboxScreening'
-  | 'surfaces.slack.setupVersion'
-  | 'surfaces.discord.setupVersion'
-  | 'surfaces.ntfy.setupVersion'
-  | 'surfaces.webhook.setupVersion'
-  | 'surfaces.homeassistant.setupVersion'
-  | 'surfaces.telegram.setupVersion'
-  | 'surfaces.googleChat.setupVersion'
-  | 'surfaces.signal.setupVersion'
-  | 'surfaces.whatsapp.setupVersion'
-  | 'surfaces.telephony.setupVersion'
-  | 'surfaces.imessage.setupVersion'
-  | 'surfaces.msteams.setupVersion'
-  | 'surfaces.bluebubbles.setupVersion'
-  | 'surfaces.mattermost.setupVersion'
-  | 'surfaces.matrix.setupVersion'
-  | 'surfaces.slack.enabled'
-  | 'surfaces.slack.signingSecret'
-  | 'surfaces.slack.botToken'
-  | 'surfaces.slack.appToken'
-  | 'surfaces.slack.defaultChannel'
-  | 'surfaces.slack.workspaceId'
-  | 'surfaces.slack.inboxUserId'
-  | 'surfaces.discord.enabled'
-  | 'surfaces.discord.publicKey'
-  | 'surfaces.discord.botToken'
-  | 'surfaces.discord.applicationId'
-  | 'surfaces.discord.inboxBotUserId'
-  | 'surfaces.discord.inboxChannelIds'
-  | 'surfaces.discord.defaultChannelId'
-  | 'surfaces.discord.guildId'
-  | 'surfaces.ntfy.enabled'
-  | 'surfaces.ntfy.baseUrl'
-  | 'surfaces.ntfy.topic'
-  | 'surfaces.ntfy.chatTopic'
-  | 'surfaces.ntfy.agentTopic'
-  | 'surfaces.ntfy.remoteTopic'
-  | 'surfaces.ntfy.token'
-  | 'surfaces.ntfy.defaultPriority'
-  | 'surfaces.webhook.enabled'
-  | 'surfaces.webhook.defaultTarget'
-  | 'surfaces.webhook.timeoutMs'
-  | 'surfaces.webhook.secret'
-  | 'surfaces.homeassistant.enabled'
-  | 'surfaces.homeassistant.instanceUrl'
-  | 'surfaces.homeassistant.accessToken'
-  | 'surfaces.homeassistant.webhookSecret'
-  | 'surfaces.homeassistant.defaultConversationId'
-  | 'surfaces.homeassistant.deviceId'
-  | 'surfaces.homeassistant.deviceName'
-  | 'surfaces.homeassistant.eventType'
-  | 'surfaces.homeassistant.remoteSessionTtlMs'
-  | 'surfaces.telegram.enabled'
-  | 'surfaces.telegram.botToken'
-  | 'surfaces.telegram.webhookSecret'
-  | 'surfaces.telegram.defaultChatId'
-  | 'surfaces.telegram.botUsername'
-  | 'surfaces.telegram.discoveredBotTokenId'
-  | 'surfaces.telegram.mode'
-  | 'surfaces.googleChat.enabled'
-  | 'surfaces.googleChat.webhookUrl'
-  | 'surfaces.googleChat.verificationToken'
-  | 'surfaces.googleChat.appId'
-  | 'surfaces.googleChat.spaceId'
-  | 'surfaces.signal.enabled'
-  | 'surfaces.signal.bridgeUrl'
-  | 'surfaces.signal.account'
-  | 'surfaces.signal.token'
-  | 'surfaces.signal.defaultRecipient'
-  | 'surfaces.whatsapp.enabled'
-  | 'surfaces.whatsapp.provider'
-  | 'surfaces.whatsapp.bridgeUrl'
-  | 'surfaces.whatsapp.accessToken'
-  | 'surfaces.whatsapp.verifyToken'
-  | 'surfaces.whatsapp.signingSecret'
-  | 'surfaces.whatsapp.phoneNumberId'
-  | 'surfaces.whatsapp.businessAccountId'
-  | 'surfaces.whatsapp.defaultRecipient'
-  | 'surfaces.telephony.enabled'
-  | 'surfaces.telephony.provider'
-  | 'surfaces.telephony.mode'
-  | 'surfaces.telephony.bridgeUrl'
-  | 'surfaces.telephony.token'
-  | 'surfaces.telephony.accountSid'
-  | 'surfaces.telephony.authToken'
-  | 'surfaces.telephony.fromNumber'
-  | 'surfaces.telephony.defaultRecipient'
-  | 'surfaces.telephony.webhookSecret'
-  | 'surfaces.telephony.voiceLanguage'
-  | 'surfaces.imessage.enabled'
-  | 'surfaces.imessage.bridgeUrl'
-  | 'surfaces.imessage.account'
-  | 'surfaces.imessage.token'
-  | 'surfaces.imessage.defaultChatId'
-  | 'surfaces.msteams.enabled'
-  | 'surfaces.msteams.appId'
-  | 'surfaces.msteams.appPassword'
-  | 'surfaces.msteams.webhookSecret'
-  | 'surfaces.msteams.tenantId'
-  | 'surfaces.msteams.serviceUrl'
-  | 'surfaces.msteams.botId'
-  | 'surfaces.msteams.defaultConversationId'
-  | 'surfaces.msteams.defaultChannelId'
-  | 'surfaces.bluebubbles.enabled'
-  | 'surfaces.bluebubbles.serverUrl'
-  | 'surfaces.bluebubbles.password'
-  | 'surfaces.bluebubbles.account'
-  | 'surfaces.bluebubbles.defaultChatGuid'
-  | 'surfaces.mattermost.enabled'
-  | 'surfaces.mattermost.baseUrl'
-  | 'surfaces.mattermost.botToken'
-  | 'surfaces.mattermost.webhookSecret'
-  | 'surfaces.mattermost.teamId'
-  | 'surfaces.mattermost.defaultChannelId'
-  | 'surfaces.matrix.enabled'
-  | 'surfaces.matrix.homeserverUrl'
-  | 'surfaces.matrix.accessToken'
-  | 'surfaces.matrix.webhookSecret'
-  | 'surfaces.matrix.userId'
-  | 'surfaces.matrix.defaultRoomId'
-  // The daemon's own mailbox and calendar (schema-domain-daemon-mailbox.ts).
-  | 'surfaces.email.host'
-  | 'surfaces.email.user'
-  | 'surfaces.email.from'
-  | 'surfaces.email.password'
-  | 'surfaces.email.imap.host'
-  | 'surfaces.email.imap.port'
-  | 'surfaces.email.imap.user'
-  | 'surfaces.email.imap.password'
-  | 'surfaces.email.imap.secure'
-  | 'surfaces.email.imap.mailbox'
-  | 'surfaces.email.imap.draftsMailbox'
-  | 'surfaces.email.smtp.host'
-  | 'surfaces.email.smtp.port'
-  | 'surfaces.email.smtp.password'
-  | 'surfaces.email.smtp.secure'
-  // The inbound-mail watcher (schema-domain-daemon-mailbox.ts, docs/decisions/2026-07-27-inbound-email-design.md §8)
-  | 'surfaces.email.inbound.enabled'
-  | 'surfaces.email.inbound.accounts'
-  | 'surfaces.email.inbound.source'
-  | 'surfaces.email.inbound.gmailPollSecondsExpecting'
-  | 'surfaces.email.inbound.gmailPollSecondsIdle'
-  | 'surfaces.email.inbound.mode'
-  | 'surfaces.email.inbound.pollIntervalSeconds'
-  | 'surfaces.email.inbound.idleReissueMinutes'
-  | 'surfaces.email.inbound.reconnect.maxBackoffSeconds'
-  | 'surfaces.email.inbound.notice.route'
-  | 'surfaces.email.inbound.notice.mode'
-  | 'surfaces.email.inbound.expectationWindowMinutes'
-  | 'surfaces.email.inbound.dedupTtlMinutes'
-  | 'surfaces.email.inbound.retentionDays'
-  | 'surfaces.email.inbound.maxRecords'
-  | 'surfaces.email.inbound.capabilityRecheckMinutes'
-  | 'surfaces.email.inbound.onInsufficientCapability'
-  | 'surfaces.calendar.caldavUrl'
-  | 'surfaces.calendar.caldavUser'
-  | 'surfaces.calendar.caldavPassword'
-  | 'surfaces.calendar.defaultCalendarId'
-  | 'surfaces.calendar.calendars'
-  | 'watchers.enabled'
-  | 'watchers.pollIntervalMs'
-  | 'watchers.heartbeatIntervalMs'
-  | 'watchers.recoveryWindowMinutes'
-  | 'watchers.ciPollIntervalMs'
-  // Trigger family, shapes and descriptions live in schema-domain-triggers.ts
-  | 'watchers.triggers.enabled'
-  | 'watchers.triggers.backoffLadderMs'
-  | 'watchers.triggers.breakerStrikes'
-  | 'watchers.triggers.defaultCheckIntervalMs'
-  | 'watchers.triggers.probeTimeoutMs'
-  | 'watchers.triggers.maxConcurrentChecks'
-  | 'watchers.triggers.observationRingSize'
-  | 'watchers.triggers.runHistoryLimit'
-  | 'watchers.triggers.runHistoryTtlHours'
-  | 'watchers.triggers.eventLogLimit'
-  | 'watchers.triggers.eventLogTtlHours'
-  | 'watchers.triggers.sweepIntervalMs'
-  | 'watchers.triggers.supervisionTickMs'
-  | 'watchers.triggers.streamQueueLimit'
-  | 'watchers.triggers.streamBatchLines'
-  | 'watchers.triggers.streamBatchIntervalMs'
-  | 'watchers.triggers.onExitMaxDurationMs'
-  | 'watchers.triggers.onExitStdin'
-  | 'watchers.triggers.outputTailBytes'
-  | 'service.enabled'
-  | 'service.autostart'
-  | 'service.restartOnFailure'
-  | 'service.platform'
-  | 'service.serviceName'
-  | 'service.logPath'
-  | 'update.auto'
-  | 'update.autoUpdateAtLaunch'
-  | 'update.launchCheckTimeoutMs'
-  | 'update.intervalMinutes'
-  | 'update.firstCheckSeconds'
-  | 'update.releasesUrl'
-  | 'update.rollbackAfterFailedStarts'
-  | 'update.alertAfterFailedChecks'
-  | 'checkpoints.preferGitRoot'
-  | 'checkpoints.allowBroadRoot'
-  | 'checkpoints.allowLargeFirstSnapshot'
-  | 'checkpoints.maxFirstSnapshotFiles'
-  | 'checkpoints.autoRetention'
-  | 'network.outboundTls.mode'
-  | 'network.outboundTls.customCaFile'
-  | 'network.outboundTls.customCaDir'
-  | 'network.outboundTls.allowInsecureLocalhost'
-  | 'network.remoteFetch.allowPrivateHosts'
-  | 'relay.enabled'
-  | 'relay.url'
-  | 'relay.rendezvousId'
-  | 'relay.label'
-  | 'relay.requireStepUpForMutations'
-  | 'runtime.companionChatLimiter.perSessionLimit'
-  | 'runtime.eventBus.maxListeners'
-  | 'runtime.maxParallelToolCalls'
-  | 'runtime.unifiedTasks'
-  | 'runtime.pluginLifecycle'
-  | 'runtime.mcpLifecycle'
-  | 'runtime.toolBudget.enforced'
-  | 'runtime.toolBudget.maxMs'
-  | 'runtime.toolBudget.maxTokens'
-  | 'runtime.toolBudget.maxCostUsd'
-  | 'telemetry.includeRawPrompts'
-  | 'telemetry.decisionOtlpEnabled'
-  | 'telemetry.decisionOtlpEndpoint'
-  | 'telemetry.decisionOtlpSignal'
-  | 'telemetry.otelMode'
-  | 'atRest.redactionEnabled'
-  | 'atRest.retentionMaxAgeDays'
-  | 'atRest.retentionMaxTotalMb'
-  | 'batch.mode'
-  | 'batch.fallback'
-  | 'batch.queueBackend'
-  | 'batch.tickIntervalMs'
-  | 'batch.maxDelayMs'
-  | 'batch.maxJobsPerProviderBatch'
-  | 'batch.maxQueuePayloadBytes'
-  | 'batch.maxQueueMessagesPerDay'
-  | 'cloudflare.enabled'
-  | 'cloudflare.freeTierMode'
-  | 'cloudflare.accountId'
-  | 'cloudflare.apiTokenRef'
-  | 'cloudflare.zoneId'
-  | 'cloudflare.zoneName'
-  | 'cloudflare.workerName'
-  | 'cloudflare.workerSubdomain'
-  | 'cloudflare.workerHostname'
-  | 'cloudflare.workerBaseUrl'
-  | 'cloudflare.daemonBaseUrl'
-  | 'cloudflare.daemonHostname'
-  | 'cloudflare.workerTokenRef'
-  | 'cloudflare.workerClientTokenRef'
-  | 'cloudflare.workerCron'
-  | 'cloudflare.queueName'
-  | 'cloudflare.deadLetterQueueName'
-  | 'cloudflare.tunnelName'
-  | 'cloudflare.tunnelId'
-  | 'cloudflare.tunnelTokenRef'
-  | 'cloudflare.accessAppId'
-  | 'cloudflare.accessServiceTokenId'
-  | 'cloudflare.accessServiceTokenRef'
-  | 'cloudflare.kvNamespaceName'
-  | 'cloudflare.kvNamespaceId'
-  | 'cloudflare.durableObjectNamespaceName'
-  | 'cloudflare.durableObjectNamespaceId'
-  | 'cloudflare.r2BucketName'
-  | 'cloudflare.secretsStoreName'
-  | 'cloudflare.secretsStoreId'
-  | 'cloudflare.maxQueueOpsPerDay'
-  | 'notifications.adaptiveSuppression'
-  | 'notifications.burstWindowMs'
-  | 'notifications.burstThreshold'
-  | 'notifications.burstCooldownMs'
-  | 'notifications.pushApproval'
-  | 'notifications.pushNeedsInput'
-  | 'notifications.pushCompletion'
-  | 'notifications.blockedEscalationGraceMs'
-  | 'notifications.blockedEscalationFollowUpMs'
-  | 'notifications.blockedEscalationMaxFollowUps'
-  | 'fetch.sanitizeMode'
-  | 'fetch.trustedHosts'
-  | 'fetch.blockedHosts'
-  | 'fetch.allowLocalhost'
-  | 'security.tokenAudit.enabled'
-  | 'security.tokenAudit.rotationCadenceDays'
-  | 'security.tokenAudit.rotationWarningDays'
-  | 'security.tokenAudit.managed'
-  | 'integrations.routeBinding'
-  | 'integrations.deliveryTracking'
-  | 'integrations.delivery.maxRetries'
-  | 'integrations.delivery.initialDelayMs'
-  | 'integrations.delivery.maxDelayMs'
-  | 'integrations.delivery.maxDlqSize'
-  | 'integrations.delivery.sloEnforced'
-  | 'policy.registryEnabled'
-  | 'policy.requireSignedBundles'
-  | 'policy.bundleSource'
-  | 'policy.bundlePath'
-  | 'agents.passiveInjection.knowledge'
-  | 'agents.passiveInjection.code'
-  | 'agents.passiveInjection.budgetTokens'
-  | 'agents.passiveInjection.relevanceFloor'
-  | 'agents.passiveInjection.codeLimit'
-  | 'agents.contextWindowGuard'
-  | 'agents.contextCompactThreshold'
-  | 'agents.maxTurns'
-  | 'agents.maxTurnsCap'
-  | 'pricing.modelPrices'
-  // Proactive check-in (schema-domain-runtime.ts).
-  | 'checkin.enabled'
-  | 'checkin.cadence'
-  | 'checkin.deliveryChannel'
-  | 'checkin.quietHours'
-  // Memory consolidation (schema-domain-learning.ts).
-  | 'learning.consolidation.enabled'
-  | 'learning.consolidation.intervalMs'
-  | 'learning.consolidation.minIdleMs'
-  | 'learning.consolidation.maxMergesPerRun'
-  | 'learning.consolidation.maxDecaysPerRun'
-  | 'learning.consolidation.maxProposalsPerRun'
-  | 'learning.consolidation.decayAgeDays'
-  | 'learning.consolidation.decayConfidenceStep'
-  | 'learning.consolidation.archiveConfidenceFloor'
-  // Sleep ownership (schema-domain-power.ts).
-  | 'power.keepAwake'
-  | 'power.inhibitWhileWorking'
-  | 'power.workInhibitMaxMinutes'
-  // MemoryGovernor (schema-domain-memory.ts).
-  | 'memory.budgetMb'
-  | 'memory.tier.elevatedPct'
-  | 'memory.tier.highPct'
-  | 'memory.tier.criticalPct'
-  | 'memory.tripwire.rateMbPerSec'
-  | 'memory.tripwire.sustainSec'
-  | 'memory.hardLimitPct'
-  // Local voice engines (schema-domain-voice-local.ts).
-  | 'voice.local.sttEngine'
-  | 'voice.local.sttBinary'
-  | 'voice.local.sttModelPath'
-  | 'voice.local.ttsEngine'
-  | 'voice.local.ttsBinary'
-  | 'voice.local.ttsModelPath'
-  // Wake-word detection. Interface, defaults and row metadata live in
-  // schema-domain-voice-wake.ts, so only the union entries land here.
-  | 'voice.wake.enabled'
-  | 'voice.wake.models'
-  | 'voice.wake.threshold'
-  | 'voice.wake.patienceFrames'
-  | 'voice.wake.cooldownMs'
-  | 'voice.wake.vadThreshold'
-  | 'voice.wake.noiseSuppression'
-  | 'voice.wake.inputDevice'
-  | 'voice.wake.captureCommand'
-  | 'voice.wake.surfaces.tui'
-  | 'voice.wake.surfaces.agent'
-  | 'voice.wake.surfaces.webui'
-  | 'voice.wake.surfaces.app'
-  | 'voice.wake.activationSound'
-  | 'voice.wake.activationSoundPath'
-  | 'voice.wake.indicator'
-  | 'voice.wake.preRollMs'
-  | 'voice.wake.captureMaxSeconds'
-  | 'voice.wake.silenceStopMs'
-  | 'voice.wake.silenceFloorRms'
-  | 'voice.wake.speechRetriggerMs'
-  | 'voice.wake.autoSubmit'
-  | 'voice.wake.retainAudio'
-  | 'voice.wake.customModelDir'
-  | 'voice.wake.maxRestarts'
-  | 'voice.wake.restartBackoffMs'
-  | 'voice.wake.crashWindowSeconds'
-  | 'voice.wake.browserBackend'
-  | 'device.capabilities.mode'
-  | 'device.capabilities.allowAlwaysOffer'
-  | 'device.capabilities.requestTimeoutSeconds'
-  | 'device.location.precision'
-  | 'device.clipboard.readMode'
-  | 'device.capture.retentionHours'
-  | 'device.capture.maxArtifacts'
-  | 'device.capture.sweepIntervalMinutes'
-  | 'device.grants.expiryDays'
-  | 'device.grants.maxPerNode'
-  | 'device.grants.auditRetentionDays'
-  | 'device.nodes.maxPaired'
-  // Browser-push subscription custody (schema-domain-push.ts).
-  | 'push.vapidSubject'
-  | 'push.subscriptions.warnAbovePerPrincipal'
-  | 'push.subscriptions.failureThreshold'
-  | 'push.subscriptions.sweepIntervalMinutes'
-  // The one fleet ceiling (schema-domain-fleet.ts).
-  | 'fleet.maxSize'
-  // Which node on this network consumes inbound channels (schema-domain-cluster.ts).
-  // The peers list is an array and therefore not a scalar ConfigKey, so it is
-  // read through the cluster category, like conversationGate.gatedSurfaces.
-  | 'cluster.enabled'
-  | 'cluster.heartbeatSeconds'
-  | 'cluster.masterTimeoutSeconds'
-  | 'cluster.bootProbeSeconds'
-  | 'cluster.port'
-  | 'cluster.multicastGroup'
-  | 'cluster.secret'
-  | 'cluster.keyRotationHours'
-  | 'cluster.keyRotationGraceMinutes'
-  | 'cluster.beaconSeconds'
-  | 'cluster.rosterGossipSeconds'
-  // The owner profile's policy (schema-types-owner-profile.ts / schema-domain-owner-profile.ts).
-  | ProfileConfigKey
-  // Proactive occasions and plans (schema-types-occasions.ts / schema-domain-occasions.ts).
-  | OccasionsConfigKey
-  // The mail and calendar connector (schema-types-connectors.ts / schema-domain-connectors.ts).
-  | ConnectorsConfigKey;
+/**
+ * Settings whose value is one object, read and written whole, rather than a
+ * section of further keys. Every other object in GoodVibesConfig is a section.
+ */
+type ObjectValuedConfigKey = 'provider.decisionRouter' | 'judgment.volumeMonitor' | 'judgment.backend';
+
+/**
+ * The dot paths of every leaf of `T`: a scalar, a list, a map keyed by any
+ * string, or an object-valued setting. Optional fields are keys like the rest.
+ */
+type ConfigLeafPaths<T, Prefix extends string> = {
+  [Name in keyof T & string]-?: `${Prefix}${Name}` extends ObjectValuedConfigKey
+    ? `${Prefix}${Name}`
+    : Exclude<T[Name], undefined> extends readonly unknown[]
+      ? `${Prefix}${Name}`
+      : Exclude<T[Name], undefined> extends object
+        ? string extends keyof Exclude<T[Name], undefined>
+          ? `${Prefix}${Name}`
+          : ConfigLeafPaths<Exclude<T[Name], undefined>, `${Prefix}${Name}.`>
+        : `${Prefix}${Name}`;
+}[keyof T & string];
+
+/**
+ * Dot-path config keys for all settings, derived from GoodVibesConfig: the
+ * interfaces are the one declaration of which settings exist and what each
+ * holds, so adding a field there adds its key, and a key that names no field
+ * is a compile error wherever it is used.
+ */
+export type ConfigKey = Extract<ConfigLeafPaths<GoodVibesConfig, ''>, string>;
 
 export * from "./schema-types-values.js";

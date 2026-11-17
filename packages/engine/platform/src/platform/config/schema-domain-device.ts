@@ -20,15 +20,15 @@ import { intRange } from './schema-shared.js';
 /** Paired-device capability configuration (`device.*`). */
 export interface DeviceConfig {
   capabilities: {
-    mode: string;
-    allowAlwaysOffer: string;
+    mode: 'off' | 'ask-every-time' | 'honor-grants';
+    allowAlwaysOffer: 'every-capability' | 'standard-only' | 'never';
     requestTimeoutSeconds: number;
   };
   location: {
-    precision: string;
+    precision: 'coarse-only' | 'ask-precise' | 'precise-grantable';
   };
   clipboard: {
-    readMode: string;
+    readMode: 'off' | 'ask-only' | 'grantable';
   };
   capture: {
     retentionHours: number;
@@ -45,11 +45,6 @@ export interface DeviceConfig {
   };
 }
 
-declare module './schema-types.js' {
-  interface GoodVibesConfig {
-    device: DeviceConfig;
-  }
-}
 
 export const deviceConfigDefaults: { device: DeviceConfig } = {
   device: {

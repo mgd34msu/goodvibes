@@ -1,3 +1,4 @@
+import type { TriggersConfig } from './schema-domain-triggers.js';
 /**
  * Daemon-side service config interfaces: notification fan-out, speech output,
  * the automation scheduler, watchers, the OS service integration, and runtime
@@ -58,6 +59,8 @@ export interface WatchersConfig {
   recoveryWindowMinutes: number;
   /** Cadence (ms) for the daemon's recurring CI-watch poll (floor 15s at the poller). */
   ciPollIntervalMs: number;
+  /** Trigger supervision (schema-domain-triggers.ts). */
+  triggers: TriggersConfig;
 }
 
 export interface ServiceConfig {
@@ -123,17 +126,4 @@ export interface DaemonProcessConfig {
    * how a local daemon listens.
    */
   connectedHost: { enabled: boolean; url: string };  // default: enabled true, url ''
-}
-
-export type DaemonProcessConfigKey =
-  | 'daemon.enabled'
-  | 'daemon.connectedHost.enabled'
-  | 'daemon.connectedHost.url'
-  | 'daemon.timezone';
-
-export interface DaemonProcessConfigValueMap {
-  'daemon.enabled': boolean;
-  'daemon.connectedHost.enabled': boolean;
-  'daemon.connectedHost.url': string;
-  'daemon.timezone': string;
 }

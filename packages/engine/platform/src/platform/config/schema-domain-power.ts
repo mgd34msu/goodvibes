@@ -20,11 +20,6 @@ export interface PowerConfig {
   inhibitWhileWorking: boolean;
   workInhibitMaxMinutes: number;
 }
-declare module './schema-types.js' {
-  interface GoodVibesConfig {
-    power: PowerConfig;
-  }
-}
 
 export const powerConfigDefaults: { power: PowerConfig } = {
   power: {

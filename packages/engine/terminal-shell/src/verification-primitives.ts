@@ -14,21 +14,26 @@ export interface CommandResult {
   stdout: string;
   stderr: string;
   timedOut: boolean;
+  /** stdout passed the capture limit, so only its start is in `stdout`. */
+  truncated?: boolean | undefined;
 }
-/** Bytes kept per stream; a verification probe never needs more than a compact excerpt. */
+/** Bytes kept per stream: bounds memory for a probe that floods its output; parsed JSON fits well under it. */
 const MAX_CAPTURED_STREAM_BYTES = 8 * 1024 * 1024;
 
-function capturingSink(): { readonly push: (chunk: Buffer) => void; readonly text: () => string } {
+function capturingSink(): { readonly push: (chunk: Buffer) => void; readonly text: () => string; readonly truncated: () => boolean } {
   const chunks: Buffer[] = [];
   let size = 0;
+  let dropped = false;
   return {
     push(chunk) {
+      if (size + chunk.length > MAX_CAPTURED_STREAM_BYTES) dropped = true;
       if (size >= MAX_CAPTURED_STREAM_BYTES) return;
       const kept = chunk.length > MAX_CAPTURED_STREAM_BYTES - size ? chunk.subarray(0, MAX_CAPTURED_STREAM_BYTES - size) : chunk;
       chunks.push(kept);
       size += kept.length;
     },
     text: () => Buffer.concat(chunks).toString('utf8'),
+    truncated: () => dropped,
   };
 }
 
@@ -77,6 +82,7 @@ export function createVerificationPrimitives(policy: {
           stdout: stdout.text(),
           stderr: stderr.text(),
           timedOut,
+          truncated: stdout.truncated(),
         });
       };
       timeout = setTimeout(() => {
@@ -126,6 +132,7 @@ export function createVerificationPrimitives(policy: {
       | undefined,
   ): LiveVerificationCheck {
     const parseJsonOutput = (): string | null => {
+      if (result.truncated) return `Output passed the ${MAX_CAPTURED_STREAM_BYTES / (1024 * 1024)} MiB capture limit, so only its start was kept and it cannot be read as JSON.`;
       try {
         JSON.parse(result.stdout);
         return null;

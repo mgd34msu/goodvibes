@@ -239,7 +239,7 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
           fields: {
             type: 'array',
             items: { type: 'string', enum: ['text', 'html', 'value', 'attributes'] },
-            description: 'What to read for action:"extract": any of text, html, value, attributes. Defaults to text; an unknown name is refused.',
+            description: 'What to read for action:"extract": any of text, html, value, attributes. Defaults to text; an unknown name is skipped and listed in ignoredFields.',
           },
           all: { type: 'boolean', description: 'For action:"extract": read every match rather than the first.' },
           sessionId: { type: 'string', description: 'Browser session to act on. Defaults to the open session, except action:"release" and action:"close", which require it.' },
@@ -425,16 +425,21 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
           case 'forward':
             return output(await browser.goForward(target));
           case 'extract': {
-            if (readStringArray(args.fields).length > 0 && readExtractFields(args.fields).length === 0) {
-              throw new BrowserSessionError('browser action:"extract" got no field it knows.', 'Use fields from: text, html, value, attributes.');
-            }
-            return output(await browser.extract(target, {
+            // A read: an unknown field name is dropped and named in the result rather
+            // than costing a refusal and a second call; with none known, text is read.
+            const requested = readStringArray(args.fields);
+            const fields = readExtractFields(requested);
+            const ignoredFields = requested.filter((field) => !(fields as readonly string[]).includes(field));
+            const extracted = await browser.extract(target, {
               ...(readString(args.ref) ? { ref: readString(args.ref) } : {}),
               ...(readString(args.selector) ? { selector: readString(args.selector) } : {}),
-              ...(readStringArray(args.fields).length > 0 ? { fields: readExtractFields(args.fields) } : {}),
+              ...(fields.length > 0 ? { fields } : {}),
               ...(args.all === true ? { all: true } : {}),
               ...(readNumber(args.limit) === undefined ? {} : { limit: readNumber(args.limit) }),
-            }));
+            });
+            return output(ignoredFields.length > 0
+              ? { ...extracted, ignoredFields, note: 'Known fields are text, html, value and attributes.' }
+              : extracted);
           }
           default:
             return failure(`Unknown browser action: ${action}. Use one of: ${BROWSER_ACTIONS.join(', ')}.`);

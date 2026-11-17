@@ -65,7 +65,7 @@ export class ProjectPlanningRoutes {
         throw new RefusalError(refusal({
           code: 'PLANNING_STATE_READ_ONLY',
           state: 'saved planning state and project language are read-only history',
-          reason: 'The planning interview is retired; nothing reads a planning state or its readiness to start work',
+          reason: 'The planning interview is retired. It was the only writer of planning state, readiness and project language, and nothing reads any of them to start or shape work; saved records stay readable as history',
           next: ['Add or change tasks in the work plan: POST /api/projects/planning/work-plan/tasks'],
           status: 410,
         }));

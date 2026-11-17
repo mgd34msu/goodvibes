@@ -22,9 +22,14 @@ import { SESSION_UPDATE_WIRE_EVENT } from '../lib/sessions-union';
 /** The approval broker's wire event; the daemon tags it with the `gate` domain. */
 const APPROVAL_UPDATE_WIRE_EVENT = 'approval-update';
 
-/** Every domain this tab needs app-wide; wire events ride the domain the daemon tags them with. */
+/**
+ * Every domain this tab needs app-wide; wire events ride the domain the daemon tags them with.
+ * `planner` is handled by the Work plan panel's own subscription; it is listed so the app lane's
+ * domain set stays the same when that panel opens or closes, which would otherwise reopen the
+ * one app-wide stream and refetch every active query.
+ */
 const APP_DOMAINS: readonly RuntimeEventDomain[] = [
-  'tasks', 'contracts', 'gate', 'providers', 'knowledge', 'control-plane', 'fleet', 'ops', 'session',
+  'tasks', 'contracts', 'gate', 'providers', 'knowledge', 'control-plane', 'fleet', 'ops', 'session', 'planner',
 ];
 
 /**

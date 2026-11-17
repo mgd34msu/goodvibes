@@ -46,7 +46,7 @@ export function buildReviewPacketTimeline(
       kind: 'document',
       at: isoToEpoch(document.updatedAt),
       label: `Document ${document.status}: ${document.title}`,
-      detail: `${document.versions.length} version(s), ${openComments} open comment(s), ${proposedSuggestions} proposed suggestion(s), ${document.attachments.length} attachment(s), last artifact ${document.lastArtifactId ?? 'none'}`,
+      detail: `${document.versionCount} version(s), ${openComments} open comment(s), ${proposedSuggestions} proposed suggestion(s), ${document.attachments.length} attachment(s), last artifact ${document.lastArtifactId ?? 'none'}`,
       status: openComments + proposedSuggestions > 0 ? 'attention' : document.status === 'reviewed' ? 'ready' : 'info',
       route: `agent_documents show documentId:"${document.id}" includeVersions:true`,
       sourceId: document.id,

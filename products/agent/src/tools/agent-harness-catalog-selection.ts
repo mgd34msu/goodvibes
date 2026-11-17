@@ -36,7 +36,7 @@ const MAX_CONTEXT_CHARACTERS = 2_000;
  * The one record selector. Code decides first, for free: an exact id
  * (ignoring case), a sole id prefix, then the only row carrying every query
  * word. Nothing matching in code is "unknown" (the caller lists the valid
- * ids); several partial matches are settled by ONE selection request over the
+ * ids); partial matches, even a single one, are settled by ONE selection request over the
  * best few, each candidate carrying only its id and description, with any
  * shared context sent once. A failed or unsettled reading selects nothing.
  */
@@ -57,7 +57,8 @@ export async function selectHarnessCatalog<T>(entries: readonly T[], query: stri
   if (prefix.length === 1) return entries[prefix[0]!.index] ?? null;
   const literal = rankClassicCatalog(rows, text, row => row);
   if (literal.length === 0) return null;
-  if (literal.length === 1) return entries[literal[0]!.entry.index] ?? null;
+  // A sole row that shares only some query words is not decided in code: it
+  // goes to the complete-match rule, then to the one reading (or none in Classic).
   const complete = literal.filter(match => match.score === 1);
   if (complete.length === 1) return entries[complete[0]!.entry.index] ?? null;
   if (isClassicOperation()) return null;
@@ -81,7 +82,7 @@ export async function selectHarnessCatalog<T>(entries: readonly T[], query: stri
     } finally { authority.consumeObservation(); }
   } catch (error) {
     if (options.signal?.aborted) throw error;
-    // No reading could be taken (no decision model, an outage): several partial matches stay unresolved.
+    // No reading could be taken (no decision model, an outage): partial matches stay unresolved.
     return null;
   }
 }

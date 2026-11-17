@@ -1533,7 +1533,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     // letters always go to the composer or the open view.
     if (handleShellActionChord(data, actionOffers, {
       retry: () => {
-        if (!resubmitLastTurn()) systemMessageRouter.high('[Retry] Nothing to send again: the failed prompt has already been sent again.');
+        if (!resubmitLastTurn()) systemMessageRouter.high('[Retry] Nothing to send again: the failed prompt was already sent again, or a prompt sent after it has completed.');
       },
       openSession: (sessionId) => { void commandContext.executeCommand?.('session', ['resume', sessionId]); },
       render,

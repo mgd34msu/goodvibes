@@ -276,7 +276,13 @@ export class Orchestrator {
   private turnStartMessageCount = 0;
   /** Counts user turns started, so a failed turn knows whether a later one has run since. */
   private userTurnSeq = 0;
-  private lastFailedUserTurn: (Omit<FailedTurnInput, 'superseded'> & { readonly seq: number }) | null = null;
+  /**
+   * The most recent failed user turn. `clearsAfterSeq` is the last user turn
+   * already queued behind it when it failed: a later turn than that one
+   * completing means the person moved on, and the failed turn is no longer
+   * offered to be sent again.
+   */
+  private lastFailedUserTurn: (Omit<FailedTurnInput, 'superseded'> & { readonly seq: number; readonly clearsAfterSeq: number }) | null = null;
   /** Whether a streaming block is currently active (for cleanup on abort). */
   private get isStreaming(): boolean { return phaseIsStreaming(this.phase); }
   /** Last token warning bracket (multiples of 10%) to avoid repeat warnings at same level. */
@@ -792,7 +798,7 @@ export class Orchestrator {
   public failedTurnInput(): FailedTurnInput | null {
     const failed = this.lastFailedUserTurn;
     if (!failed) return null;
-    const { seq, ...input } = failed;
+    const { seq, clearsAfterSeq: _clearsAfterSeq, ...input } = failed;
     return { ...input, superseded: seq !== this.userTurnSeq };
   }
 
@@ -1033,7 +1039,7 @@ export class Orchestrator {
       // Recorded before TURN_ERROR is published, so a retry offered on that event
       // sends this turn's own input, never a prompt queued behind it.
       if (userTurnSeq !== undefined) {
-        this.lastFailedUserTurn = Object.freeze({ turnId, text, rollbackCount, seq: userTurnSeq,
+        this.lastFailedUserTurn = Object.freeze({ turnId, text, rollbackCount, seq: userTurnSeq, clearsAfterSeq: userTurnSeq + this.messageQueue.length,
           ...(content ? { content } : {}), ...(options ? { options } : {}) });
       }
       await hookOwner.closeAndDrain();
@@ -1042,6 +1048,9 @@ export class Orchestrator {
       await this.handleTurnError(err, turnId, configManager, providerRegistry);
     } finally {
       this.turnHookOwner = null;
+      // A user turn sent after the failure completed: the failed prompt is no longer offered again.
+      const failed = this.lastFailedUserTurn;
+      if (failed && userTurnSeq !== undefined && !this._turnFailed && userTurnSeq > failed.clearsAfterSeq) this.lastFailedUserTurn = null;
       this.finalizeTurn(turnStartTime, submissionKey, turnId, configManager);
     }
   }

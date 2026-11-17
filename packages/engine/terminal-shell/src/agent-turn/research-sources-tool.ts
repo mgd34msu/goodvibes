@@ -12,6 +12,7 @@ import {
 } from './research-source-registry.js';
 import { clampReadLimit } from './read-helpers.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
+import { toolErrorText } from './tool-error-text.js';
 
 export interface AgentResearchSourcesToolArgs {
   readonly mode?: unknown | undefined;
@@ -438,7 +439,7 @@ function createAgentResearchSourcesTool(shellPaths?: Pick<ShellPathService, 'res
         assertWrite();
         return output(formatMutationResult('Deleted Agent research source', registry.delete(requireId(args))));
       } catch (error) {
-        return failure(error instanceof Error ? error.message : String(error));
+        return failure(toolErrorText(error));
       }
     },
   };

@@ -14,6 +14,7 @@ import {
 } from './channel-delivery.js';
 import { agentChannelDeliveryReceiptPath, recordAgentChannelDeliveryReceipt } from './channel-delivery-receipts.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
+import { toolErrorText } from './tool-error-text.js';
 
 export interface AgentChannelSendToolArgs {
   readonly message?: unknown | undefined;
@@ -124,7 +125,7 @@ export function createAgentChannelSendTool(
       try {
         preview = buildAgentChannelDeliveryPreview(input);
       } catch (error) {
-        return failure(error instanceof Error ? error.message : String(error));
+        return failure(toolErrorText(error));
       }
       if (readBoolean(args.preview)) {
         return output(formatAgentChannelDeliveryPreview(preview, channelDeliveryRouter.listStrategies().length));
@@ -151,7 +152,7 @@ export function createAgentChannelSendTool(
           || current.length !== strategies.length || strategies.some((source, index) => current[index] !== source.strategy
             || source.strategy.canHandle !== source.canHandle || source.strategy.deliver !== source.deliver)) throw new ToolInputProjectionError('held');
       };
-      try { assertCurrent(); } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+      try { assertCurrent(); } catch (error) { return failure(toolErrorText(error)); }
       // Delivering a channel message is an outward effect and had no
       // untrusted-content gate at all, the ledger was never consulted here, so
       // a page or a mailbox the agent had just read could dictate the text of a

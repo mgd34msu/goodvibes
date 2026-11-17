@@ -5,6 +5,7 @@ import { BrowserSessionError, StaleElementError, UntrustedEffectError } from '@g
 import type { BrowserActionLifetime, BrowserExtractField, BrowserTarget } from '@goodvibes-jev/engine/platform/platform/browser';
 import type { DaemonBrowserGatewayService } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { captureCatalogSnapshotGuard } from './catalog-data.js';
+import { toolErrorText } from './tool-error-text.js';
 
 /**
  * The `browser` tool: real browser control through Playwright.
@@ -399,7 +400,7 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions): Tool {
         if (error instanceof BrowserSessionError || error instanceof StaleElementError || error instanceof UntrustedEffectError) {
           return failure(error.message, error.fix);
         }
-        return failure(error instanceof Error ? error.message : String(error));
+        return failure(toolErrorText(error));
       }
     },
   };

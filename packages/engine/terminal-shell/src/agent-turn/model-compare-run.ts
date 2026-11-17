@@ -5,6 +5,7 @@ import type { AgentModelCompareArtifactStore, AgentModelCompareCatalogModel, Age
 import { BLIND_LABELS, COMPARISON_STORE_LIMIT, DEFAULT_CANDIDATE_COUNT, DEFAULT_CANDIDATE_OUTPUT_CHARS, DEFAULT_MAX_TOKENS, DEFAULT_SIDE_BY_SIDE_PREVIEW_BYTES, MAX_SIDE_BY_SIDE_PREVIEW_BYTES, MIN_CANDIDATES, MODE_ANALYTICS, MODE_APPLY, MODE_EXPORT, MODE_HANDOFF, MODE_HANDOFF_ARCHIVE, MODE_HANDOFF_DIFF, MODE_JUDGE, MODE_REVEAL, MODE_REVIEW, MODE_ROUTE_DECISION, MODE_RUN, MODE_SIDE_BY_SIDE, MODE_SYNTHESIS } from './model-compare-types.js';
 import { clamp, isTextLike, listAllArtifacts, shuffled, readBenchmarkKind, readComparisonTag, readModelRefs, readNumber, readRecord, readString, readStringList, previewText } from './model-compare-utils.js';
 import { readFlag } from './tool-args.js';
+import { toolErrorText } from './tool-error-text.js';
 
 export function normalizeCatalogModel(model: AgentModelCompareCatalogModel): ResolvedCompareModel | null {
   const modelId = readString(model.modelId ?? model.id);
@@ -184,7 +185,7 @@ export async function runCandidate(
       status: 'failed',
       content: '',
       latencyMs: Date.now() - startedAt,
-      error: error instanceof Error ? error.message : String(error),
+      error: toolErrorText(error),
     };
   }
 }

@@ -5,6 +5,7 @@ import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools
 import { agentArtifactEffectGuard, captureAgentArtifactSource } from './artifact-effect.js';
 import { DEFAULT_LIST_LIMIT, MAX_FRESHNESS_ARTIFACT_SCAN, MAX_LIST_LIMIT, REVIEW_PACKET_PRESET_SCHEMA, auditPresetFreshness, buildPresetRecord, clamp, compactText, defaultPacketSummary, freshnessReferences, isPresetArtifact, packetFromMetadata, parseMode, parsePresetBody, presetCreateInput, readMetadataString, readNumber, readString, sourceArtifactId, type AgentReviewPacketPresetArtifactStore, type AgentReviewPacketPresetsToolArgs, type LoadedReviewPacketPreset, type ReviewPacketFreshnessAudit, type ReviewPacketPresetPacket, type ReviewPacketPresetRecord } from './review-packet-presets-core.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
+import { toolErrorText } from './tool-error-text.js';
 function formatPacketLines(packet: ReviewPacketPresetPacket): readonly string[] {
   return [
     `  summary ${packet.summary}`,
@@ -470,7 +471,7 @@ export function createAgentReviewPacketPresetsTool(
         }
         return output(formatSaveResult(descriptor, record, audit));
       } catch (error) {
-        return failure(error instanceof Error ? error.message : String(error));
+        return failure(toolErrorText(error));
       }
     },
   };

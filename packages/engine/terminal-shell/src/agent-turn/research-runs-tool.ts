@@ -12,6 +12,7 @@ import {
   type AgentResearchRunStatus,
 } from './research-run-registry.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
+import { toolErrorText } from './tool-error-text.js';
 
 export interface AgentResearchRunsToolArgs {
   readonly mode?: unknown | undefined;
@@ -431,7 +432,7 @@ function createAgentResearchRunsTool(shellPaths?: Pick<ShellPathService, 'resolv
         assertWrite();
         return output(formatMutationResult('Deleted Agent research run', registry.delete(requireId(args))));
       } catch (error) {
-        return failure(error instanceof Error ? error.message : String(error));
+        return failure(toolErrorText(error));
       }
     },
   };

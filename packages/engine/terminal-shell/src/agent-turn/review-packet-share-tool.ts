@@ -12,6 +12,7 @@ import {
   type AgentChannelDeliveryInput,
 } from './channel-delivery.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
+import { toolErrorText } from './tool-error-text.js';
 
 export interface AgentReviewPacketShareToolArgs {
   readonly archiveArtifactId?: unknown | undefined;
@@ -234,13 +235,13 @@ export function createAgentReviewPacketShareTool(
     execute: async (rawArgs: Record<string, unknown>, executionOptions) => {
       const args = rawArgs;
       const effect = agentArtifactEffectGuard(rawArgs, executionOptions, 'send');
-      try { effect(); } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+      try { effect(); } catch (error) { return failure(toolErrorText(error)); }
       const artifactId = readString(args.archiveArtifactId);
       if (!artifactId) return failure('archiveArtifactId is required.');
       // Checked before the outward-effect decision, which would otherwise rule on an empty target and mask this cause.
       try {
         requireOneDeliveryTarget({ channel: readString(args.channel), route: readString(args.route), webhook: readString(args.webhook), link: readString(args.link) });
-      } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
+      } catch (error) { return failure(toolErrorText(error)); }
       let summary: ReviewPacketArchiveSummary;
       let assertSource: () => void;
       try {
@@ -250,7 +251,7 @@ export function createAgentReviewPacketShareTool(
         assertSource();
         summary = summarizeArchiveArtifact(archive);
       } catch (error) {
-        return failure(error instanceof Error ? error.message : String(error));
+        return failure(toolErrorText(error));
       }
       const title = readString(args.title) ?? 'GoodVibes Agent review packet';
       // The target alone, to ask which strategy takes it; the message is filled in below.

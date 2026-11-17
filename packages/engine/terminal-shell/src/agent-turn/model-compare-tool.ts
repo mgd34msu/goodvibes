@@ -18,6 +18,7 @@ import { buildComparisonHandoffArchivePayload, findRouteDecisionArtifactIdsForHa
 import { clamp, failure, output, previewText, readBenchmarkKind, readComparisonTag, readModelRefs, readNumber, readString, readStringList } from './model-compare-utils.js';
 import { readFlag } from './tool-args.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
+import { toolErrorText } from './tool-error-text.js';
 export type { AgentModelCompareCatalogModel, AgentModelCompareModelCatalog, AgentModelCompareProviderRegistry, AgentModelCompareRouteUpdateResult, AgentModelCompareToolArgs, AgentModelCompareToolDeps } from './model-compare-types.js';
 
 /**
@@ -719,7 +720,7 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
           ? output(rendered)
           : failure(rendered);
       } catch (error) {
-        return failure(error instanceof Error ? error.message : String(error));
+        return failure(toolErrorText(error));
       }
     },
   };

@@ -11,6 +11,7 @@ import {
   generateAgentMedia,
 } from './media-generation.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
+import { toolErrorText } from './tool-error-text.js';
 
 export interface AgentMediaGenerateToolArgs {
   readonly prompt?: unknown | undefined;
@@ -139,7 +140,7 @@ export function createAgentMediaGenerateTool(
             { signal: executionOptions?.signal, assertCurrent });
           return output(formatAgentMediaGenerationResult(result));
         } catch (error) {
-          return failure(error instanceof Error ? error.message : String(error));
+          return failure(toolErrorText(error));
         }
       }
       if (!prompt) return failure('prompt is required (or taskId to collect a pending job).');
@@ -167,7 +168,7 @@ export function createAgentMediaGenerateTool(
         }, { signal: executionOptions?.signal, assertCurrent });
         return output(formatAgentMediaGenerationResult(result));
       } catch (error) {
-        return failure(error instanceof Error ? error.message : String(error));
+        return failure(toolErrorText(error));
       }
     },
   };

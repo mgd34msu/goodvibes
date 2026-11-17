@@ -58,14 +58,7 @@ export function buildAgentWorkspaceProfileEditorSubmission(
     };
   }
   if (editor.kind === 'profile-template-import') {
-    if (!isAffirmative(readField('confirm'))) {
-      return {
-        kind: 'editor',
-        editor: { ...editor, message: 'Starter template import not confirmed. Type yes, then press Enter.' },
-        status: 'Agent starter template import not confirmed.',
-      };
-    }
-    const command = `/agent-profile template import ${quoteSlashCommandArg(readField('path'))} --yes`;
+    const command = `/agent-profile template import ${quoteSlashCommandArg(readField('path'))}`;
     return {
       kind: 'dispatch',
       command,
@@ -73,7 +66,7 @@ export function buildAgentWorkspaceProfileEditorSubmission(
       actionResult: {
         kind: 'dispatched',
         title: 'Opening Agent starter template import',
-        detail: 'The workspace handed a confirmed starter template import command to the shell-owned command router.',
+        detail: 'The workspace handed a starter template import command to the shell-owned command router.',
         command,
         safety: 'safe',
       },

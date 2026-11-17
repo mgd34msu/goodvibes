@@ -46,10 +46,9 @@ export function createAgentWorkspaceProfileEditor(kind: AgentWorkspaceProfileEdi
       mode: 'create',
       title: 'Import Agent Starter Template',
       selectedFieldIndex: 0,
-      message: 'Import a reviewed starter template JSON file into this Agent home. Type yes on the final field to confirm.',
+      message: 'Import a reviewed starter template JSON file into this Agent home. It is imported when you submit; an existing template is never replaced.',
       fields: [
         { id: 'path', label: 'Template path', value: '', required: true, multiline: false, hint: 'Workspace-relative JSON path to import.' },
-        { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /agent-profile template import with --yes.' },
       ],
     };
   }

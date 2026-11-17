@@ -103,10 +103,9 @@ const MEMORY_COMMAND_EDITOR_SPECS: Readonly<Record<AgentWorkspaceMemoryCommandEd
     mode: 'update',
     title: 'Import Agent Memory Bundle',
     selectedFieldIndex: 0,
-    message: 'Import a reviewed Agent memory bundle into the Agent-local memory registry. Type yes on the final field to confirm.',
+    message: 'Import a reviewed Agent memory bundle into the Agent-local memory registry. It is imported when you submit.',
     fields: [
       { id: 'path', label: 'Bundle path', value: 'agent-memory-bundle.json', required: true, multiline: false, hint: 'Workspace-relative JSON bundle path.' },
-      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /memory import with --yes.' },
     ],
   },
   'memory-handoff-export': {
@@ -133,10 +132,9 @@ const MEMORY_COMMAND_EDITOR_SPECS: Readonly<Record<AgentWorkspaceMemoryCommandEd
     mode: 'update',
     title: 'Import Memory Handoff',
     selectedFieldIndex: 0,
-    message: 'Import a reviewed memory handoff bundle into Agent-local memory. Type yes on the final field to confirm.',
+    message: 'Import a reviewed memory handoff bundle into Agent-local memory. It is imported when you submit.',
     fields: [
       { id: 'path', label: 'Bundle path', value: 'agent-memory-handoff.json', required: true, multiline: false, hint: 'Workspace-relative JSON handoff bundle path.' },
-      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /memory handoff-import with --yes.' },
     ],
   },
   'memory-vector-rebuild': {

@@ -58,12 +58,11 @@ export function createLocalEditor(kind: AgentWorkspaceLocalEditorKind | 'knowled
       mode: 'create',
       title: 'Ingest Agent Knowledge URL',
       selectedFieldIndex: 0,
-      message: 'Add a source-backed URL to the isolated Agent Knowledge segment. Type yes on the final field to confirm.',
+      message: 'Add a source-backed URL to the isolated Agent Knowledge segment. It is ingested when you submit.',
       fields: [
         { id: 'url', label: 'URL', value: '', required: true, multiline: false, hint: 'HTTP or HTTPS URL to ingest into Agent Knowledge only.' },
         { id: 'tags', label: 'Tags', value: '', required: false, multiline: false, hint: 'Comma-separated optional tags. Spaces are not needed.' },
         { id: 'folder', label: 'Folder', value: '', required: false, multiline: false, hint: 'Optional Agent Knowledge folder path.' },
-        { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /knowledge ingest-url with --yes.' },
       ],
     };
   }
@@ -264,13 +263,12 @@ export function createKnowledgeUrlEditorFromNote(note: AgentNoteRecord): AgentWo
     kind: 'knowledge-url',
     mode: 'create',
     title: 'Ingest Note Source Into Agent Knowledge',
-    selectedFieldIndex: 3,
-    message: `Review the source URL from ${note.title}, then type yes to ingest it into isolated Agent Knowledge. The scratchpad note remains unchanged.`,
+    selectedFieldIndex: 0,
+    message: `Review the source URL from ${note.title}, then submit to ingest it into isolated Agent Knowledge. The scratchpad note remains unchanged.`,
     fields: [
       { id: 'url', label: 'URL', value: note.sourceUrl ?? '', required: true, multiline: false, hint: 'HTTP or HTTPS URL to ingest into Agent Knowledge only.' },
       { id: 'tags', label: 'Tags', value: noteTags(note, 'from-note'), required: false, multiline: false, hint: 'Comma-separated optional tags. Spaces are not needed.' },
       { id: 'folder', label: 'Folder', value: 'notes', required: false, multiline: false, hint: 'Optional Agent Knowledge folder path.' },
-      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /knowledge ingest-url with --yes.' },
     ],
   };
 }

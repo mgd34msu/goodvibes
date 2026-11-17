@@ -93,13 +93,11 @@ const MEMORY_COMMAND_SUBMISSION_HANDLERS: Readonly<Record<AgentWorkspaceMemoryCo
       'safe',
     );
   },
-  'memory-import': (editor, readField) => {
-    const confirmation = requireConfirmation(editor, readField, 'Memory bundle import');
-    if (confirmation) return confirmation;
+  'memory-import': (_editor, readField) => {
     return dispatchCommandEditorSubmission(
-      `/memory import ${quoteSlashCommandArg(readField('path'))} --yes`,
+      `/memory import ${quoteSlashCommandArg(readField('path'))}`,
       'Opening Agent memory bundle import',
-      'The workspace handed a confirmed Agent-local memory import command to the shell-owned command router.',
+      'The workspace handed an Agent-local memory import command to the shell-owned command router.',
       'safe',
     );
   },
@@ -122,13 +120,11 @@ const MEMORY_COMMAND_SUBMISSION_HANDLERS: Readonly<Record<AgentWorkspaceMemoryCo
     'The workspace handed an Agent-local memory handoff inspection command to the shell-owned command router.',
     'read-only',
   ),
-  'memory-handoff-import': (editor, readField) => {
-    const confirmation = requireConfirmation(editor, readField, 'Memory handoff import');
-    if (confirmation) return confirmation;
+  'memory-handoff-import': (_editor, readField) => {
     return dispatchCommandEditorSubmission(
-      `/memory handoff-import ${quoteSlashCommandArg(readField('path'))} --yes`,
+      `/memory handoff-import ${quoteSlashCommandArg(readField('path'))}`,
       'Opening Agent memory handoff import',
-      'The workspace handed a confirmed Agent-local memory handoff import command to the shell-owned command router.',
+      'The workspace handed an Agent-local memory handoff import command to the shell-owned command router.',
       'safe',
     );
   },

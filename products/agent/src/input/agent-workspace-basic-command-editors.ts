@@ -139,61 +139,56 @@ const BASIC_OWN_COMMAND_EDITOR_SPECS: Readonly<Record<AgentWorkspaceBasicOwnComm
     mode: 'create',
     title: 'Import Bookmarks into Agent Knowledge',
     selectedFieldIndex: 0,
-    message: 'Import a browser bookmark export into the isolated Agent Knowledge segment. Type yes on the final field to confirm.',
+    message: 'Import a browser bookmark export into the isolated Agent Knowledge segment. It is imported when you submit; imported sources can be removed again.',
     fields: [
       { id: 'path', label: 'Bookmark export path', value: '', required: true, multiline: false, hint: 'Path to an HTML or JSON browser bookmark export.' },
-      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /knowledge import-bookmarks with --yes.' },
     ],
   },
   'knowledge-file': {
     mode: 'create',
     title: 'Ingest File into Agent Knowledge',
     selectedFieldIndex: 0,
-    message: 'Import a local source-backed file into the isolated Agent Knowledge segment. Type yes on the final field to confirm.',
+    message: 'Import a local source-backed file into the isolated Agent Knowledge segment. It is ingested when you submit.',
     fields: [
       { id: 'path', label: 'File path', value: '', required: true, multiline: false, hint: 'Path to a local document or text file to ingest.' },
       { id: 'title', label: 'Title', value: '', required: false, multiline: false, hint: 'Optional source title.' },
       { id: 'tags', label: 'Tags', value: '', required: false, multiline: false, hint: 'Comma-separated optional tags.' },
       { id: 'folder', label: 'Folder', value: '', required: false, multiline: false, hint: 'Optional Agent Knowledge folder path.' },
-      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /knowledge ingest-file with --yes.' },
     ],
   },
   'knowledge-urls': {
     mode: 'create',
     title: 'Import URL List into Agent Knowledge',
     selectedFieldIndex: 0,
-    message: 'Import a local newline-delimited URL list into the isolated Agent Knowledge segment. Type yes on the final field to confirm.',
+    message: 'Import a local newline-delimited URL list into the isolated Agent Knowledge segment. It is imported when you submit.',
     fields: [
       { id: 'path', label: 'URL list path', value: '', required: true, multiline: false, hint: 'Path to a local file containing one URL per line.' },
       { id: 'allowPrivateHosts', label: 'Allow private hosts', value: '', required: false, multiline: false, hint: 'yes/no. Blank defaults to no.' },
-      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /knowledge import-urls with --yes.' },
     ],
   },
   'knowledge-browser-history': {
     mode: 'create',
     title: 'Import Browser History into Agent Knowledge',
     selectedFieldIndex: 0,
-    message: 'Import local browser history/bookmarks into the isolated Agent Knowledge segment. Type yes on the final field to confirm.',
+    message: 'Import local browser history/bookmarks into the isolated Agent Knowledge segment. It is imported when you submit.',
     fields: [
       { id: 'browsers', label: 'Browsers', value: '', required: false, multiline: false, hint: 'Optional comma list: chrome, brave, edge, firefox, safari, etc.' },
       { id: 'sources', label: 'Sources', value: 'history,bookmark', required: false, multiline: false, hint: 'history, bookmark, or both.' },
       { id: 'limit', label: 'Limit', value: '250', required: false, multiline: false, hint: 'Maximum browser entries to import.' },
       { id: 'sinceDays', label: 'Since days', value: '', required: false, multiline: false, hint: 'Optional age window, such as 30.' },
-      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /knowledge import-browser-history with --yes.' },
     ],
   },
   'knowledge-connector-ingest': {
     mode: 'create',
     title: 'Ingest Connector Input',
     selectedFieldIndex: 0,
-    message: 'Send explicit connector input into the isolated Agent Knowledge segment. Type yes on the final field to confirm.',
+    message: 'Send explicit connector input into the isolated Agent Knowledge segment. It runs when you submit; allowing private hosts asks you once first.',
     fields: [
       { id: 'connectorId', label: 'Connector id', value: '', required: true, multiline: false, hint: 'Connector id from /knowledge connectors.' },
       { id: 'input', label: 'Input', value: '', required: false, multiline: true, hint: 'Optional JSON or text input. Ctrl-J inserts a new line.' },
       { id: 'path', label: 'Path', value: '', required: false, multiline: false, hint: 'Optional local path for connectors that read files.' },
       { id: 'content', label: 'Content', value: '', required: false, multiline: true, hint: 'Optional raw content for connectors that accept text.' },
       { id: 'allowPrivateHosts', label: 'Allow private hosts', value: 'no', required: false, multiline: false, hint: 'yes/no. Defaults to no.' },
-      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /knowledge ingest-connector with --yes.' },
     ],
   },
   'knowledge-reindex': {
@@ -461,33 +456,30 @@ const BASIC_OWN_COMMAND_EDITOR_SPECS: Readonly<Record<AgentWorkspaceBasicOwnComm
     mode: 'create',
     title: 'Import Discovered Skill',
     selectedFieldIndex: 0,
-    message: 'Import one discovered SKILL.md or .md skill file into the Agent-local skill registry. Type yes on the final field to confirm.',
+    message: 'Import one discovered SKILL.md or .md skill file into the Agent-local skill registry. It is imported when you submit.',
     fields: [
       { id: 'name', label: 'Discovered skill', value: '', required: true, multiline: false, hint: 'Name shown by /skills discover.' },
       { id: 'enabled', label: 'Enable now', value: 'yes', required: false, multiline: false, hint: 'yes/no.' },
-      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /skills import-discovered with --yes.' },
     ],
   },
   'persona-discovery-import': {
     mode: 'create',
     title: 'Import Discovered Persona',
     selectedFieldIndex: 0,
-    message: 'Import one discovered persona markdown file into the Agent-local persona registry. Type yes on the final field to confirm.',
+    message: 'Import one discovered persona markdown file into the Agent-local persona registry. It is imported when you submit.',
     fields: [
       { id: 'name', label: 'Discovered persona', value: '', required: true, multiline: false, hint: 'Name shown by /personas discover.' },
       { id: 'use', label: 'Use now', value: 'yes', required: false, multiline: false, hint: 'yes/no.' },
-      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /personas import-discovered with --yes.' },
     ],
   },
   'routine-discovery-import': {
     mode: 'create',
     title: 'Import Discovered Routine',
     selectedFieldIndex: 0,
-    message: 'Import one discovered routine markdown file into the Agent-local routine registry. Type yes on the final field to confirm.',
+    message: 'Import one discovered routine markdown file into the Agent-local routine registry. It is imported when you submit.',
     fields: [
       { id: 'name', label: 'Discovered routine', value: '', required: true, multiline: false, hint: 'Name shown by /routines discover.' },
       { id: 'enabled', label: 'Enable now', value: 'yes', required: false, multiline: false, hint: 'yes/no.' },
-      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /routines import-discovered with --yes.' },
     ],
   },
   'skill-standard-import': {
@@ -497,7 +489,6 @@ const BASIC_OWN_COMMAND_EDITOR_SPECS: Readonly<Record<AgentWorkspaceBasicOwnComm
     message: 'Import one SKILL.md file in the open skill format into the Agent-local skill library. The skill will wait for your review before it can be enabled.',
     fields: [
       { id: 'path', label: 'Path to SKILL.md', value: '', required: true, multiline: false, hint: 'Full path to a SKILL.md file.' },
-      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to import with --yes.' },
     ],
   },
   'skill-standard-export': {
@@ -508,7 +499,6 @@ const BASIC_OWN_COMMAND_EDITOR_SPECS: Readonly<Record<AgentWorkspaceBasicOwnComm
     fields: [
       { id: 'id', label: 'Skill id or name', value: '', required: true, multiline: false, hint: 'Local skill id or name.' },
       { id: 'dest', label: 'Destination folder', value: '', required: true, multiline: false, hint: 'Directory to write <slug>/SKILL.md into.' },
-      { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to export with --yes.' },
     ],
   },
   'skill-bundle': {

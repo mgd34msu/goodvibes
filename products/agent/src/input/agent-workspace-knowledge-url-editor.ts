@@ -1,5 +1,5 @@
 import type { AgentWorkspaceActionResult, AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
-import { isAffirmative, splitList } from './agent-workspace-editors.ts';
+import { splitList } from './agent-workspace-editors.ts';
 import { quoteSlashCommandArg } from './slash-command-parser.ts';
 
 type AgentWorkspaceFieldReader = (fieldId: string) => string;
@@ -24,14 +24,6 @@ export function buildAgentKnowledgeUrlEditorSubmission(
   commandDispatchAvailable: boolean,
 ): AgentKnowledgeUrlEditorSubmission {
   const url = readField('url');
-  const confirm = readField('confirm');
-  if (!isAffirmative(confirm)) {
-    return {
-      kind: 'editor',
-      editor: { ...editor, message: 'Type yes to confirm Agent Knowledge URL ingest.' },
-      status: 'Agent Knowledge ingest not confirmed.',
-    };
-  }
 
   try {
     const parsed = new URL(url);
@@ -70,7 +62,6 @@ export function buildAgentKnowledgeUrlEditorSubmission(
   const parts = ['/knowledge', 'ingest-url', quoteSlashCommandArg(url)];
   if (tags.length > 0) parts.push('--tags', quoteSlashCommandArg(tags.join(',')));
   if (folder.length > 0) parts.push('--folder', quoteSlashCommandArg(folder));
-  parts.push('--yes');
   const command = parts.join(' ');
 
   return {
@@ -80,7 +71,7 @@ export function buildAgentKnowledgeUrlEditorSubmission(
     actionResult: {
       kind: 'dispatched',
       title: 'Opening Agent Knowledge URL ingest',
-      detail: 'The workspace handed a confirmed Agent Knowledge URL ingest command to the shell-owned command router.',
+      detail: 'The workspace handed an Agent Knowledge URL ingest command to the shell-owned command router.',
       command,
       safety: 'safe',
     },

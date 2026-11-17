@@ -27,6 +27,7 @@ import type { SecretsManager } from '../config/secrets.js';
 import { captureJudgmentFallbackSettings } from '../config/judgment-fallback-settings.js';
 import { openStateDecisionLogWithNotice, scheduleDecisionLogRetention } from '../state/decision-log.js';
 import { logger } from '../utils/logger.js';
+import { maskJudgmentStateCredentials } from '../gate/judgment-input.js';
 import { withWebuiAnswerBoundary, type WebuiAnswerBoundaryOptions } from '../judgment-browser/batteries/webui-answers.js';
 import type { DisposalRegistry } from './disposal.js';
 
@@ -335,7 +336,10 @@ export function composeJudgment(input: JudgmentServicesInput): JudgmentServices 
         try {
           const callerSignal = request.signal;
           const signal = callerSignal === undefined ? lifetime.signal : AbortSignal.any([lifetime.signal, callerSignal]);
-          void recorded.ask({ ...request, signal }).then(resolve, reject);
+          // A short credential the input screen passed reaches neither the model nor the log; a state
+          // bound for a later proof match is sent as it is (its own screen still refuses key-shaped values).
+          const state = request.inputBinding === undefined ? maskJudgmentStateCredentials(request.state) : request.state;
+          void recorded.ask({ ...request, state, signal }).then(resolve, reject);
         } catch (error) { reject(error); }
         return work;
       },

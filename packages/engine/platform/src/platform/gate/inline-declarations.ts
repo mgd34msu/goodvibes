@@ -121,35 +121,46 @@ export interface DeclaredValueRule {
   readonly authHeader?: boolean;
 }
 
-function unquoted(text: string, start: number, end: number): string {
-  if (VALUE_QUOTE.test(text.charAt(start))) start++;
-  if (end > start && VALUE_QUOTE.test(text.charAt(end - 1))) end--;
-  return start >= end ? '' : text.slice(start, end);
-}
-
 /**
- * Whether a declaration's value is literal material of its kind. A secret
- * reference, an empty value, an expansion, a member expression or a
- * placeholder is not. A safe reference chain must not repeatedly scan every
- * remaining path suffix.
+ * Where a declaration's literal value sits: its span in `text` (quotes left
+ * out; for an authentication header, the token after the scheme word) and the
+ * value. Null for a secret reference, an empty value, an expansion, a member
+ * expression or a placeholder. A safe reference chain must not repeatedly scan
+ * every remaining path suffix.
  */
-export function literalDeclarationValue(text: string, declaration: InlineDeclaration, rule: DeclaredValueRule): boolean {
+export function declaredValueSpan(
+  text: string,
+  declaration: InlineDeclaration,
+  rule: DeclaredValueRule,
+): { readonly start: number; readonly end: number; readonly value: string } | null {
   let start = declaration.valueStart, end = declaration.valueEnd;
   if (VALUE_QUOTE.test(text.charAt(start))) start++;
   if (end > start && VALUE_QUOTE.test(text.charAt(end - 1))) end--;
   if (end > start + SECRET_REFERENCE_PREFIX.length && text.startsWith(SECRET_REFERENCE_PREFIX, start)
-    && declaration.lastReferenceSeparator < start) return false;
-  let value = unquoted(text, declaration.valueStart, declaration.valueEnd);
-  if (value.length === 0) return false;
-  if (rule.kind === 'credential' && rule.evidence && EVIDENCE_CREDENTIAL_MARKERS.some(marker => marker === value)) return false;
+    && declaration.lastReferenceSeparator < start) return null;
+  if (start >= end) return null;
+  let value = text.slice(start, end);
+  if (rule.kind === 'credential' && rule.evidence && EVIDENCE_CREDENTIAL_MARKERS.some(marker => marker === value)) return null;
   if (rule.authHeader && AUTH_SCHEME.test(value)) {
     let next = declaration.valueEnd;
     while (SPACE.test(text.charAt(next))) next++;
     let tokenEnd = next;
     while (tokenEnd < text.length && !TOKEN_END.test(text.charAt(tokenEnd))) tokenEnd++;
-    value = unquoted(text, next, tokenEnd);
-    if (value.length === 0) return false;
+    start = next; end = tokenEnd;
+    if (VALUE_QUOTE.test(text.charAt(start))) start++;
+    if (end > start && VALUE_QUOTE.test(text.charAt(end - 1))) end--;
+    if (start >= end) return null;
+    value = text.slice(start, end);
   }
-  if (credentialReferenceText(value)) return false;
-  return rule.kind === 'card' || secretLiteral(value);
+  if (credentialReferenceText(value)) return null;
+  return { start, end, value };
+}
+
+/**
+ * Whether a declaration's value is literal material of its kind: any literal
+ * for a card value, a key- or token-shaped literal for a credential.
+ */
+export function literalDeclarationValue(text: string, declaration: InlineDeclaration, rule: DeclaredValueRule): boolean {
+  const span = declaredValueSpan(text, declaration, rule);
+  return span !== null && (rule.kind === 'card' || secretLiteral(span.value));
 }

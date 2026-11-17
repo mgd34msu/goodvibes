@@ -4,11 +4,15 @@
  *
  * This does not decide what a command means or try to discover every secret.
  * It refuses declared credential/card fields of structured arguments, known
- * wire operations, card numbers, private key blocks and, in free text (file
- * content, commands), a credential declaration or URL whose value is a
- * key- or token-shaped literal. Text that only names a credential (an
- * environment variable, a member expression, a placeholder) is ordinary code;
- * whether free text is sensitive in meaning is the gate's `secrets` reading.
+ * wire operations, card numbers, private key blocks, a URL carrying a literal
+ * password (a URL password has no innocent reading) and, in free text (file
+ * content, commands), a credential declaration whose value is a key- or
+ * token-shaped literal. A shorter literal in a credential declaration is not
+ * refused but masked in what the decision model is sent and what the decision
+ * log keeps (`maskJudgmentStateCredentials`). Text that only names a
+ * credential (an environment variable, a member expression, a placeholder) is
+ * ordinary code; whether free text is sensitive in meaning is the gate's
+ * `secrets` reading.
  *
  * Inspect the complete JSON tree and complete strings BEFORE any reading size
  * cap. A refusal names the field and the kind of material seen, never the
@@ -19,7 +23,7 @@ import { isSecretBearingConfigKey, isSecretReferenceValue } from '../config/secr
 import { CARD_FIELD_NAMES } from '../payments/card-material.js';
 import { findCardNumbersInContext } from '../security/card-shapes.js';
 import type { EntryType, JsonValue } from '@goodvibes-jev/judgment';
-import { credentialReferenceText, evidenceCredentialMarker, inlineDeclarations, literalDeclarationValue, secretLiteral } from './inline-declarations.js';
+import { credentialReferenceText, declaredValueSpan, evidenceCredentialMarker, inlineDeclarations, literalDeclarationValue, secretLiteral } from './inline-declarations.js';
 
 export type JudgmentInputProblem = 'credential-material' | 'card-material' | 'unsupported-input';
 
@@ -340,9 +344,9 @@ function inspectInlineProblem(text: string, cardOnly = false, evidence = false, 
   for (const match of text.matchAll(/(?<![A-Za-z0-9+.-])[0-9+.-]*([A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s"'<>]+)/g)) {
     try {
       const url = new URL(match[1]!);
-      const password = decodeURIComponent(url.password);
-      if (!cardOnly && password.length > 0 && !credentialReferenceText(password) && secretLiteral(password)) {
-        return found('credential-material', 'URL password', TOKEN_SEEN);
+      const password = decodedUrlPart(url.password);
+      if (!cardOnly && password.length > 0 && !credentialReferenceText(password)) {
+        return found('credential-material', 'URL password', LITERAL_SEEN['credential-material']);
       }
       for (const [key, value] of url.searchParams) {
         const problem = protectedKey(key);
@@ -352,6 +356,65 @@ function inspectInlineProblem(text: string, cardOnly = false, evidence = false, 
     } catch { /* Not a URL; its meaning remains Jev's question. */ }
   }
   return undefined;
+}
+
+/** A URL part decoded, or as written when its `%` is not an escape. */
+function decodedUrlPart(part: string): string {
+  try { return decodeURIComponent(part); } catch { return part; }
+}
+
+const MASKED_CREDENTIAL = '[credential]';
+
+/** Free text with the literal value of each credential declaration masked; the same string when there is none. */
+function maskCredentialText(text: string): string {
+  const spans: { start: number; end: number }[] = [];
+  for (const flags of [true, false]) {
+    for (const declaration of inlineDeclarations(text, flags)) {
+      if (protectedKey(declaration.key) !== 'credential-material') continue;
+      const span = declaredValueSpan(text, declaration, {
+        kind: 'credential', evidence: false, authHeader: AUTH_HEADERS.has(declaration.key.toLowerCase()),
+      });
+      if (span !== null) spans.push({ start: span.start, end: span.end });
+    }
+  }
+  if (spans.length === 0) return text;
+  spans.sort((a, b) => a.start - b.start);
+  let out = '', cursor = 0;
+  for (const span of spans) {
+    if (span.end <= cursor) continue;
+    out += text.slice(cursor, Math.max(cursor, span.start)) + MASKED_CREDENTIAL;
+    cursor = span.end;
+  }
+  return out + text.slice(cursor);
+}
+
+/**
+ * A judgment state with the literal value of every credential declaration in
+ * its text masked. The screen above refuses key- or token-shaped values and
+ * passes shorter ones (a real but short password in a command); the decision
+ * model needs to know a credential is there, never its value, so the copy it
+ * is sent, and the one the decision log keeps, carries a marker instead. One
+ * scan of the state's strings per request; unchanged parts are returned as
+ * they are.
+ */
+export function maskJudgmentStateCredentials(state: EntryType): EntryType {
+  const mask = (value: unknown): unknown => {
+    if (typeof value === 'string') return maskCredentialText(value);
+    if (value === null || typeof value !== 'object') return value;
+    if (Array.isArray(value)) {
+      const next = value.map(mask);
+      return next.every((entry, index) => entry === value[index]) ? value : next;
+    }
+    let changed = false;
+    const next: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      const masked = mask(entry);
+      if (masked !== entry) changed = true;
+      next[key] = masked;
+    }
+    return changed ? next : value;
+  };
+  return mask(state) as EntryType;
 }
 
 /**

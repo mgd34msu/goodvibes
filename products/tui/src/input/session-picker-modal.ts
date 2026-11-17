@@ -173,7 +173,7 @@ export class SessionPickerModal extends SavedSessionPickerState {
     }
     if (this.deleteConfirmationTarget !== session.name) {
       this.deleteConfirmationTarget = session.name;
-      this.statusMessage = `Press d again to delete ${session.name}.`;
+      this.statusMessage = `Press Ctrl+D again to delete ${session.name}.`;
       return false;
     }
 

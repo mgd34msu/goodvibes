@@ -71,7 +71,7 @@ export function createSessionPickerRenderer<Modal extends SessionPickerRenderSta
       const title = sess.title && sess.title !== sess.name ? sess.title : '';
       const row: KitRow = armed
         ? {
-            label: `Press d again to delete "${sess.name}"`,
+            label: `Press Ctrl+D again to delete "${sess.name}"`,
             right: `${sess.messageCount} msgs · ${shortWhen(sess.timestamp, now)}`,
             danger: true,
             mark: '✕',
@@ -98,7 +98,7 @@ export function createSessionPickerRenderer<Modal extends SessionPickerRenderSta
         ? [
             ['↑↓', 'move'],
             ['⏎', policy.openLabel],
-            ['d', armed ? 'confirm delete' : policy.deleteLabel],
+            ['ctrl+d', armed ? 'confirm delete' : policy.deleteLabel],
           ]
         : [
             ['↑↓', 'move'],
@@ -114,7 +114,7 @@ export function createSessionPickerRenderer<Modal extends SessionPickerRenderSta
     // Status and the armed-delete note sit at the bottom of the body, wrapped in full.
     const footLines: Array<{ text: string; fg: string }> = [];
     const width = f.r - f.l + 1;
-    // While armed, the row itself carries the "press d again" prompt.
+    // While armed, the row itself carries the "press Ctrl+D again" prompt.
     if (modal.statusMessage && !armed) {
       for (const line of wrapLines(modal.statusMessage, width)) footLines.push({ text: line, fg: armed ? t.warning : t.accent });
     }

@@ -43,7 +43,7 @@ export function createProfilePickerRenderer(presentation: ProfilePickerPresentat
       }),
     );
     const notes: TextLine[] = [];
-    if (armed) notes.push({ text: `Press d again to permanently delete ${armed}.`, style: { fg: t.warning, bold: true } });
+    if (armed) notes.push({ text: `Press Ctrl+D again to permanently delete ${armed}.`, style: { fg: t.warning, bold: true } });
     else if (modal.statusMessage) notes.push({ text: modal.statusMessage, style: { fg: t.accent } });
     if (presentation.note) notes.push({ text: presentation.note, style: { fg: t.textFaint } });
     const width = modalTextWidth(screenWidth, screenHeight);

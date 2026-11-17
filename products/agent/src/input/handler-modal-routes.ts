@@ -1,6 +1,6 @@
 import { openDecisionRouterSettings } from '@goodvibes-jev/engine/terminal-shell/decision-router-settings-actions';
 import { openSettingsChoice, type SettingsChoiceAction } from '@goodvibes-jev/engine/terminal-shell/settings-choice-actions';
-import { sessionPickerDeleteNamedKey, sessionPickerDeleteTextAction } from '@goodvibes-jev/engine/terminal-shell/searchable-modal-route';
+import { sessionPickerDeleteNamedKey } from '@goodvibes-jev/engine/terminal-shell/searchable-modal-route';
 import {
   createSearchableModalTokenRoute,
   createProfilePickerTokenRoute,
@@ -69,7 +69,6 @@ export const handleSessionPickerToken = createSearchableModalTokenRoute<SessionP
   },
 
   namedKey: sessionPickerDeleteNamedKey,
-  textAction: sessionPickerDeleteTextAction,
 });
 
 export const handleProfilePickerToken = createProfilePickerTokenRoute<CommandContext['platform']['configManager']>(false);

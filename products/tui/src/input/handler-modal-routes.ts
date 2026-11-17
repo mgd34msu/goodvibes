@@ -1,6 +1,6 @@
 import { openDecisionRouterSettings } from '@goodvibes-jev/engine/terminal-shell/decision-router-settings-actions';
 import { openSettingsChoice, type SettingsChoiceAction } from '@goodvibes-jev/engine/terminal-shell/settings-choice-actions';
-import { sessionPickerDeleteNamedKey, sessionPickerDeleteTextAction } from '@goodvibes-jev/engine/terminal-shell/searchable-modal-route';
+import { sessionPickerDeleteNamedKey } from '@goodvibes-jev/engine/terminal-shell/searchable-modal-route';
 import {
   createSearchableModalTokenRoute,
   createProfilePickerTokenRoute,
@@ -62,9 +62,8 @@ type SessionPickerRouteState = {
 };
 
 /**
- * The session picker's search row is always live: printable keys go to the
- * query. `d` arms (then confirms) delete only while the query is empty, so a
- * search can still contain the letter d.
+ * The session picker's search row is always live: every printable key goes to
+ * the query. Ctrl+D arms (then confirms) deleting the selected session.
  */
 export const handleSessionPickerToken = createSearchableModalTokenRoute<SessionPickerRouteState>({
   modal: (state) => state.sessionPickerModal,
@@ -74,14 +73,13 @@ export const handleSessionPickerToken = createSearchableModalTokenRoute<SessionP
   },
 
   namedKey: sessionPickerDeleteNamedKey,
-  textAction: sessionPickerDeleteTextAction,
 });
 
 /**
- * Profiles: the search row is always live. `d` (arm, then delete) and `s`
- * (save the current settings) fire while the query is empty; otherwise every
- * printable key is typed into the query. Esc drops an armed delete first,
- * otherwise it closes.
+ * Profiles: the search row is always live and every printable key is typed
+ * into the query. Ctrl+D arms (then confirms) a delete and Ctrl+S saves the
+ * current settings as a profile. Esc drops an armed delete first, otherwise it
+ * closes.
  */
 export const handleProfilePickerToken = createProfilePickerTokenRoute<CommandContext['platform']['configManager']>(true);
 

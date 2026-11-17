@@ -11,13 +11,17 @@ interface ModalRouteState {
   requestRender(): void;
   handleEscape(): void;
 }
-/** Search and navigation are shared; resume/save/delete admission stays with the owning product. */
+/**
+ * Search and navigation are shared; resume/save/delete admission stays with the
+ * owning product. Every printable character is typed into the query: actions
+ * come only from named keys and Ctrl chords (`namedKey`), so a search that
+ * starts with any letter never fires one.
+ */
 export function createSearchableModalTokenRoute<State extends ModalRouteState>(policy: {
   readonly modal: (state: State) => SearchableModal;
   readonly enter: (state: State) => void;
   readonly cancelConfirmation?: ((state: State) => boolean) | undefined;
   readonly namedKey: (state: State, key: string, ctrl: boolean) => void;
-  readonly textAction: (state: State, value: string) => boolean;
   readonly editEmptyQuery?: boolean | undefined;
 }) {
   return function handleSearchableModalToken(state: State, token: InputToken): boolean {
@@ -36,7 +40,7 @@ export function createSearchableModalTokenRoute<State extends ModalRouteState>(p
         if (policy.editEmptyQuery !== false || modal.query.length > 0) modal.setQuery(modal.query.slice(0, -1));
       } else if (token.logicalName) policy.namedKey(state, token.logicalName, token.ctrl === true);
     } else if (token.type === 'text') {
-      if (!policy.textAction(state, token.value)) modal.setQuery(modal.query + token.value);
+      modal.setQuery(modal.query + token.value);
     }
     state.requestRender();
     return true;
@@ -54,10 +58,10 @@ export interface ProfilePickerRouteState<Config> extends ModalRouteState {
 }
 export function createProfilePickerTokenRoute<Config>(cancelDeleteConfirmation: boolean) {
   type State = ProfilePickerRouteState<Config>;
-  // Letter shortcuts act only on a bare key with an empty query, like the
-  // session picker: Ctrl+D / Ctrl+S must not delete or save a profile.
-  const act = (state: State, key: string, ctrl = false): void => {
-    if (ctrl || state.profilePickerModal.query.length) return;
+  // Ctrl+D arms (then confirms) deleting the selected profile and Ctrl+S saves
+  // the current settings; the bare letters are search text.
+  const act = (state: State, key: string, ctrl: boolean): void => {
+    if (!ctrl) return;
     if (key === 'd') state.profilePickerModal.deleteSelected();
     else if (key === 's') {
       const config = state.commandContext?.platform.configManager;
@@ -73,22 +77,13 @@ export function createProfilePickerTokenRoute<Config>(cancelDeleteConfirmation: 
     },
     cancelConfirmation: (state) => cancelDeleteConfirmation && (state.profilePickerModal.cancelDeleteConfirmation?.() ?? false),
     namedKey: act,
-    textAction(state, value) {
-      if (state.profilePickerModal.query.length || (value !== 'd' && value !== 's')) return false;
-      act(state, value);
-      return true;
-    },
   });
 }
 
 interface SessionPickerDeleteState {
-  readonly sessionPickerModal: { readonly query: string; deleteSelected(): void };
+  readonly sessionPickerModal: { deleteSelected(): void };
 }
+/** Ctrl+D arms (then confirms) deleting the selected session; a bare d is search text. */
 export function sessionPickerDeleteNamedKey(state: SessionPickerDeleteState, key: string, ctrl: boolean): void {
-  if (key === 'd' && !ctrl && !state.sessionPickerModal.query.length) state.sessionPickerModal.deleteSelected();
-}
-export function sessionPickerDeleteTextAction(state: SessionPickerDeleteState, value: string): boolean {
-  if (value !== 'd' || state.sessionPickerModal.query.length) return false;
-  state.sessionPickerModal.deleteSelected();
-  return true;
+  if (key === 'd' && ctrl) state.sessionPickerModal.deleteSelected();
 }

@@ -4,7 +4,7 @@ import { createSessionPickerRenderer } from '@goodvibes-jev/engine/terminal-shel
  *
  * Saved sessions grouped by recency (today, yesterday, this week, earlier)
  * with message count and age right-aligned and muted, and an always-live
- * search row. Deleting is an explicit slash command in the agent, so `d`
+ * search row. Deleting is an explicit slash command in the agent, so Ctrl+D
  * only shows that command as a status line under the list.
  */
 

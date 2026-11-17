@@ -90,6 +90,8 @@ export interface SpawnAutomationTaskInput {
   readonly reasoningEffort?: AutomationExecutionPolicy['reasoningEffort'] | undefined;
   readonly toolAllowlist?: readonly string[] | undefined;
   readonly context?: string | undefined;
+  /** The shared session the run answers in, when it has one: the agent is that session's. */
+  readonly sessionId?: string | undefined;
 }
 
 export function sortJobs(jobs: Iterable<AutomationJob>): AutomationJob[] {

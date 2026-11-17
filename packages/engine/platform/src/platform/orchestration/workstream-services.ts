@@ -528,6 +528,7 @@ export function createWorkstreamServices(deps: WorkstreamServicesDeps): Workstre
     configManager: deps.configManager,
     runtimeBus: deps.runtimeBus,
     projectRoot: deps.projectRoot,
+    sessionId: deps.sessionId,
     priceUsage: (model, usage) => {
       const modelId = model ?? 'unknown';
       if (!isModelPriced(modelId)) return null;

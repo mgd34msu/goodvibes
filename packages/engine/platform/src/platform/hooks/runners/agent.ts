@@ -50,6 +50,8 @@ export async function run(
       task,
       template: 'general',
       model: hook.model,
+      // The session whose event fired the hook owns its agent.
+      sessionId: event.sessionId,
     });
   } catch (err) {
     const message = summarizeError(err);
@@ -122,6 +124,7 @@ async function runOwned(
       task: hook.prompt.replaceAll('$ARGUMENTS', JSON.stringify(event)),
       template: 'general',
       model: hook.model,
+      sessionId: event.sessionId,
     }, { signal: execution.signal });
     const current = await retainHookWork(owned.settled);
     const agentId = current.id;

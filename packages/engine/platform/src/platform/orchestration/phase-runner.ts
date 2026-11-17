@@ -560,6 +560,8 @@ async function runPhaseWithSignal(
       task: `${unitSpawn ? item.task : buildPhaseTask(item, phase, priorReports)}${item.worktreeSetupNote ? `\n\n${item.worktreeSetupNote}` : ''}`,
       template: templateForPhase(phase),
       outsideContract: true,
+      // The agent belongs to the session the work runs for: its agent tool lists, reads and cancels it.
+      sessionId: deps.sessionId,
       ...unitSpawn?.input,
       // An isolated item's tools run inside its own worktree.
       ...(deps.itemWorktree ? { workingDirectory: deps.itemWorktree.path } : {}),

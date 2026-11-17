@@ -50,6 +50,8 @@ export interface ContractEngineInput {
   readonly stateRoot: string;
   /** The contract id: its snapshots get their own directory, since every contract names its groups g1, g2... */
   readonly stateNamespace: string;
+  /** The session the contract belongs to: every agent its plan starts is that session's. */
+  readonly sessionId: string;
   readonly initializeWorktree?: import('../orchestration/worktree-isolation.js').WorktreeIsolationManagerDeps['initializeWorktree'];
   readonly prepareInputAuthority?: ((worktree: { readonly path: string; readonly branch: string }, signal: AbortSignal) => Promise<ContractInputAuthority>) | undefined;
   readonly contractUnitSettlement: ContractUnitSettlement;
@@ -150,6 +152,7 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
       projectRoot: contract.worktreePath ?? contract.projectRoot,
       stateRoot: contract.projectRoot,
       stateNamespace: contract.id,
+      sessionId: contract.sessionId,
       ...(contract.inputSnapshot === undefined ? {} : { prepareInputAuthority: async (worktree: { readonly path: string; readonly branch: string }, signal: AbortSignal) => {
         signal.throwIfAborted();
         const authority = await createContractInputAuthority(contract, worktree.path, { signal: AbortSignal.any([run.abort.signal, signal]), mutable: true, branch: worktree.branch });

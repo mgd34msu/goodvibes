@@ -401,6 +401,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
     // Another session's agent is not this session's to read, steer or cancel: it is unknown here.
     if (typeof input.agentId === 'string' && input.agentId.trim() !== '') {
       const named = manager.getStatus(input.agentId);
+      if (named && named.sessionId === undefined) return { success: false, error: `Agent '${input.agentId}' belongs to no session (it was started outside any conversation), so this session cannot read, steer or cancel it.` };
       if (named && named.sessionId !== session) return { success: false, error: `Unknown agent: '${input.agentId}'` };
     }
     const delegationKey = delegationPlanKey(delegationSession, input.authoritativeTask ?? '');

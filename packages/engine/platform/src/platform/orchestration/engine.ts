@@ -83,7 +83,8 @@ export interface OrchestrationEngineDeps {
   readonly stateRoot?: string | undefined;
   /** A subdirectory of the snapshot directory for this engine alone (the contract runner passes the contract id). */
   readonly stateNamespace?: string | undefined;
-  readonly sessionId?: string | undefined;
+  /** The session this engine's agents belong to: a fixed id, or read when each phase starts. */
+  readonly sessionId?: string | (() => string) | undefined;
   readonly createWorktree?: (() => WorktreeOps) | undefined;
   readonly priceUsage?: ((model: string | undefined, usage: WorkItemUsage, provider?: string | undefined) => number | null) | undefined;
   /** Provenance for the same resolution priceUsage prices with, stamped onto committed usage records at pricing time. */
@@ -215,7 +216,8 @@ function assertDistinctIds(entries: readonly { readonly id: string }[], kind: st
 
 export function createOrchestrationEngine(deps: OrchestrationEngineDeps): OrchestrationEngine {
   const now = deps.now ?? ((): number => Date.now());
-  const sessionId = deps.sessionId ?? crypto.randomUUID();
+  const fixedSessionId = typeof deps.sessionId === 'string' ? deps.sessionId : crypto.randomUUID();
+  const sessionFor = (): string => typeof deps.sessionId === 'function' ? deps.sessionId() : fixedSessionId;
   const stateRoot = deps.stateRoot ?? deps.projectRoot;
   const snapshotRoot: SnapshotRoot = deps.stateNamespace === undefined ? stateRoot : { root: stateRoot, namespace: deps.stateNamespace };
   const maxItemRetries = deps.maxItemRetries ?? 0;
@@ -567,7 +569,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
       configManager: deps.configManager,
       runtimeBus: deps.runtimeBus,
       projectRoot: deps.projectRoot,
-      sessionId,
+      sessionId: sessionFor(),
       createWorktree: deps.createWorktree,
       cancellation: cancellationFor(workstream),
       cancellationSignal: signal,

@@ -25,6 +25,7 @@ export function createAutomationSpawnTask(agentManager: Pick<AgentManager, 'spaw
       ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
       ...(input.toolAllowlist?.length ? { tools: [...input.toolAllowlist], restrictTools: true } : {}),
       ...(input.context ? { context: input.context } : {}),
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     }, automationActionBinding(input));
     return record.id;
   };

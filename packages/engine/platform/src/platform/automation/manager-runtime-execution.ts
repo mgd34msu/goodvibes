@@ -265,6 +265,7 @@ export async function executeAutomationJob(
       reasoningEffort: effectiveJob.execution.reasoningEffort,
       toolAllowlist: effectiveJob.execution.toolAllowlist,
       ...(executionContext ? { context: executionContext } : {}),
+      ...(resolved.session?.id ? { sessionId: resolved.session.id } : {}),
     }, operation));
     spawnedAgentId = agentId;
     const runningRun: AutomationRun = {

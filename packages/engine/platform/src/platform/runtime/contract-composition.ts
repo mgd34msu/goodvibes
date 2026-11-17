@@ -317,6 +317,7 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
       prepareInputAuthority: input.prepareInputAuthority,
       stateRoot: input.stateRoot,
       stateNamespace: input.stateNamespace,
+      sessionId: input.sessionId,
       contractUnitSettlement: input.contractUnitSettlement,
       fleetCapacity: input.fleetCapacity,
       judgeAttempts: input.judgeAttempts,

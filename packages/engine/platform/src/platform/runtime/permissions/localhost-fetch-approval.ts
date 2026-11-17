@@ -1,8 +1,8 @@
 /**
- * Localhost fetch admission: autonomous operations require one exact-hop,
- * recorded capability; ordinary interactive callers retain the one-tap
- * "allow for this project" ask. Autonomous operations never consume or write
- * that persistent grant.
+ * Localhost fetch admission: ordinary interactive callers get the one-tap
+ * "allow localhost fetches" ask, and so does a model's run when a person is at
+ * the surface to answer it. An unattended model's run requires one
+ * exact-hop, recorded capability instead, and never writes the persistent grant.
  *
  * STANDING RULE (same as sandbox escalations and MCP elicitations): the ask
  * rides the ONE approval broker so every surface's existing approval UI
@@ -26,6 +26,12 @@ import type { PermissionPromptDecision, PermissionPromptRequest } from '../../pe
 
 export interface LocalhostFetchApprovalDeps {
   readonly autonomousHost?: AutonomousToolPromptHost | undefined;
+  /**
+   * Whether a person can answer on this surface now. Read when a model's run
+   * fetches localhost: attended, the person gets the one-tap ask (no decision
+   * model request); absent or false, the hop is admitted on its own.
+   */
+  readonly attended?: (() => boolean) | undefined;
   readonly requestApproval: (input: {
     readonly request: PermissionPromptRequest;
     readonly metadata?: Record<string, unknown> | undefined;
@@ -58,8 +64,8 @@ export function buildLocalhostFetchApproval(deps: LocalhostFetchApprovalDeps): L
   let inFlight: Promise<boolean> | null = null;
 
   return async (input, context) => {
-    // An autonomous hop never consumes a human grant or persists a new one.
-    if (currentExternalOperationSource()) {
+    // An unattended autonomous hop never consumes a human grant or persists a new one.
+    if (currentExternalOperationSource() && deps.attended?.() !== true) {
       return deps.autonomousHost ? admitLocalhostFetch(deps.autonomousHost, input, context) : false;
     }
     // Already approved for this project (possibly by a concurrent ask).

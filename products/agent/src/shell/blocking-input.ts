@@ -4,7 +4,10 @@ import { describeCrashRecovery, type CrashRecoveryReport } from '@goodvibes-jev/
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 
 export type PendingPermissionState = PermissionRequest & {
-  resolve: (approved: boolean, remember?: boolean) => void;
+  /** `modifiedArgs.answer` carries the text typed into a command's terminal prompt (an `exec:prompt` ask). */
+  resolve: (approved: boolean, remember?: boolean, modifiedArgs?: Record<string, unknown>) => void;
+  /** The answer being typed into a command's terminal prompt; shown masked on the card. */
+  replyBuffer?: string | undefined;
   /** When the card was put on screen; keys typed within the settle time or as one burst go to the composer. */
   openedAt?: number;
   /** The last key that was passed to the composer as typing. */
@@ -14,6 +17,11 @@ export type PendingPermissionState = PermissionRequest & {
   /** `a` was pressed: Enter now allows for the session, any other key goes back. */
   rememberArmed?: boolean | undefined;
 };
+
+/** An ask to type the answer a running command is waiting for on its terminal. */
+export function isExecPromptAsk(request: PermissionRequest): boolean {
+  return request.attribution?.kind === 'exec-prompt';
+}
 
 export type BlockingInputHandlerOptions = {
   data: string;
@@ -75,6 +83,42 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
       };
     }
     const req: PendingPermissionState = routed.card.addressed ? { ...pendingPermission, addressed: true } : pendingPermission;
+    // A command waiting on its terminal: every printable key types the answer (a prompt
+    // that wants a literal 'y' must not have it taken as a card key). Enter sends it,
+    // Esc clears the draft and then declines, Ctrl+C declines and stops the turn.
+    if (isExecPromptAsk(req)) {
+      const buffer = req.replyBuffer ?? '';
+      if (data === '\x03') {
+        req.resolve(false, false);
+        abortTurn();
+        render();
+        return { handled: true, pendingPermission: null, recoveryPending };
+      }
+      if (data === '\r' || data === '\n') {
+        req.resolve(true, false, { answer: buffer });
+        render();
+        return { handled: true, pendingPermission: null, recoveryPending };
+      }
+      if (data === '\x1b') {
+        if (buffer.length > 0) {
+          render();
+          return { handled: true, pendingPermission: { ...req, replyBuffer: '' }, recoveryPending };
+        }
+        req.resolve(false, false);
+        render();
+        return { handled: true, pendingPermission: null, recoveryPending };
+      }
+      if (data === '\x7f' || data === '\b') {
+        render();
+        return { handled: true, pendingPermission: { ...req, replyBuffer: [...buffer].slice(0, -1).join('') }, recoveryPending };
+      }
+      if (data.length >= 1 && !data.startsWith('\x1b') && data >= ' ') {
+        render();
+        return { handled: true, pendingPermission: { ...req, replyBuffer: buffer + data }, recoveryPending };
+      }
+      render();
+      return { handled: true, pendingPermission: req, recoveryPending };
+    }
     // "For session" is not offered for an ask the owner is asked again.
     const canRemember = req.rememberEffect !== 'owner-asked-again';
     if (req.rememberArmed) {

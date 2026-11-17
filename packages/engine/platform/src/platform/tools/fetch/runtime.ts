@@ -401,14 +401,17 @@ async function fetchWithValidatedRedirects(input: {
       };
       const approved = await input.deps.approveLocalhostFetch?.({ url: currentUrl, host: host!, request,
         originalRequest: input.originalRequest, credentialHeaders: [...input.credentialHeaders] }, { signal: input.signal, assertCurrent });
-      if (!approved || typeof approved === 'boolean') {
+      if (!approved) {
         throw new Error(`Request blocked: the fetch to the localhost host "${host}" was not admitted for this run, and localhost fetches are not allowed (fetch.allowLocalhost is off). `
           + 'Ask the owner to set fetch.allowLocalhost to true, or fetch a URL that is not on this machine.');
       }
-      permit = approved;
-      input.permits.push(permit);
-      assertCurrent();
-      permit.assertCurrent();
+      // `true` is the person's own answer to the one-tap ask (saved as fetch.allowLocalhost); a permit is one admitted hop.
+      if (approved !== true) {
+        permit = approved;
+        input.permits.push(permit);
+        assertCurrent();
+        permit.assertCurrent();
+      }
       localhostApproved = true;
     }
     // Final claim follows checked DNS. The live guard also protects every address retry.

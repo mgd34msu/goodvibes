@@ -26,7 +26,7 @@
  * broker-originated write or edit shows its change as a diff too. It is
  * deliberately narrower than the TUI's broker-approval-card.ts: this product's
  * PendingPermissionState (shell/blocking-input.ts) has no hunk-selection, no
- * typed-reply modes, and no CI fix-session concept (the agent does not own
+ * deny-with-reason mode (it does take a command's typed terminal answer), and no CI fix-session concept (the agent does not own
  * build/fix/review worktrees, see DisabledAgentWorktreeRegistry in
  * runtime/services.ts), so none of that TUI-only machinery is ported here.
  */
@@ -42,6 +42,7 @@ export interface BrokerApprovalBroker {
     input: {
       readonly approved: boolean;
       readonly remember?: boolean;
+      readonly modifiedArgs?: Record<string, unknown>;
       readonly actor: string;
       readonly actorSurface?: string;
     },
@@ -93,10 +94,11 @@ export function handleBrokerApprovalChange(params: BrokerApprovalChangeParams): 
     const card: PendingPermissionState = {
       ...current.request,
       openedAt: Date.now(),
-      resolve: (approved: boolean, remember = false) => {
+      resolve: (approved: boolean, remember = false, modifiedArgs?: Record<string, unknown>) => {
         void broker.resolveApproval(approval.id, {
           approved,
           remember,
+          ...(approved && modifiedArgs ? { modifiedArgs } : {}),
           actor: 'agent',
           actorSurface: 'agent',
         }).catch((error: unknown) => {

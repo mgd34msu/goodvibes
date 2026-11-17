@@ -1,5 +1,5 @@
 import { currentExternalOperationSource } from '../../permissions/external-operation-scope.js';
-import { answerExecPrompt, type AutonomousToolPromptHost } from './autonomous-tool-prompts.js';
+import { answerExecPrompt, personExecPromptAnswer, type AutonomousToolPromptHost } from './autonomous-tool-prompts.js';
 /**
  * One rule for a command stopped on its terminal. A fixed control prompt
  * ([y/N], yes/no) in a model's run is answered by the autonomous host through a
@@ -49,7 +49,7 @@ export function buildExecPromptAnswerHandler(deps: ExecPromptWiringDeps): ExecPr
         const controlled = await answerExecPrompt(deps.autonomousHost, ask, execution);
         if (controlled.answered) return controlled;
       }
-      if (deps.attended?.() !== true) return { answered: false };
+      if (deps.attended?.() !== true) return { answered: false, declined: 'unattended' };
     }
     const request: PermissionPromptRequest = {
       callId: `exec-prompt-${randomUUID().slice(0, 8)}`,
@@ -78,11 +78,11 @@ export function buildExecPromptAnswerHandler(deps: ExecPromptWiringDeps): ExecPr
       request,
       metadata: { source: 'exec-prompt', command: ask.command },
     });
-    if (!decision.approved) return { answered: false };
+    if (!decision.approved) return { answered: false, declined: 'refused' };
     const answer = decision.modifiedArgs?.['answer'];
     // Never fabricate a reply the human did not type: an approval that carries
     // no text is a decline in practice, reported honestly.
-    if (typeof answer !== 'string') return { answered: false };
-    return { answered: true, text: answer };
+    if (typeof answer !== 'string') return { answered: false, declined: 'refused' };
+    return personExecPromptAnswer(answer);
   };
 }

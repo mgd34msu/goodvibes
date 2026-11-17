@@ -605,12 +605,16 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     ...(workspaceTrustFor ? { workspaceTrustFor } : {}),
   };
   const announcementStore = new FeatureAnnouncementStore(featureAnnouncementsPath(configManager));
+  // A person at this surface answers a command's terminal prompt (and, in ask-me, the localhost ask) in a model's run.
+  const personAttended = product.permissionHost.personElicitation === true;
   const { sandboxEscalationHandler, execPromptAnswerHandler, localhostFetchApproval, onSandboxedRun } = createApprovalDerivedHandlers({
     autonomousHost: externalPermissionHost,
     requestApproval,
     configManager,
     featureFlags,
     announcementStore,
+    attended: () => personAttended,
+    permissionMode: () => permissionManager.getMode(),
   });
   localhostFetchApprovalForSearch = localhostFetchApproval;
   // ACP/MCP protocol decisions use the same recorded autonomous owner as native tools.

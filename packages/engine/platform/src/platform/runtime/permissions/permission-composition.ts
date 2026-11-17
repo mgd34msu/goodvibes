@@ -12,6 +12,7 @@ import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import type { ConfigManager } from '../../config/manager.js';
 import type { PermissionPromptDecision } from '../../permissions/prompt.js';
+import type { GatePresetName } from '../../gate/presets.js';
 import { PermissionManager, createPermissionConfigReader } from '../../permissions/manager.js';
 import { UserPermissionRuleStore } from '../../permissions/user-rule-store.js';
 import type { HookDispatcher } from '../../hooks/index.js';
@@ -141,6 +142,14 @@ export interface ApprovalDerivedHandlerOptions {
   readonly featureFlags: FeatureFlagManager;
   /** Announce-once store backing the containment receipt. */
   readonly announcementStore: Pick<FeatureAnnouncementStore, 'recordOnce'>;
+  /**
+   * Whether a person can answer on this surface now: a terminal app, or a
+   * hosted session with a client attached. Read when a model's run meets
+   * something only a person can answer. Absent: no one is attached.
+   */
+  readonly attended?: (() => boolean) | undefined;
+  /** The permission mode the current call runs under; absent reads as ask-me. */
+  readonly permissionMode?: (() => GatePresetName) | undefined;
 }
 
 /** The handlers that must ride the same ask seam as a tool permission. */
@@ -152,6 +161,15 @@ export interface ApprovalDerivedHandlers {
 }
 
 export function createApprovalDerivedHandlers(options: ApprovalDerivedHandlerOptions): ApprovalDerivedHandlers {
+  // One rule for what a model's run may put to the person at the surface. A
+  // terminal prompt (a passphrase, a package name) is something only the person
+  // knows, so it is asked in every mode but just-vibes, which never interrupts.
+  // The localhost one-tap ask saves a standing grant, so it replaces Jev's
+  // per-hop admission only in ask-me; the other modes keep the per-hop admission.
+  const attended = options.attended;
+  const mode = (): GatePresetName => options.permissionMode?.() ?? 'ask-me';
+  const promptAttended = attended ? (): boolean => attended() && mode() !== 'just-vibes' : undefined;
+  const localhostAttended = attended ? (): boolean => attended() && mode() === 'ask-me' : undefined;
   // The same recorded owner admits exact sandbox plans; final spawn consumes
   // the permit without widening argv, network, or filesystem containment.
   const sandboxEscalationHandler = buildSandboxEscalationHandler({
@@ -166,12 +184,14 @@ export function createApprovalDerivedHandlers(options: ApprovalDerivedHandlerOpt
   // continuing run.
   const execPromptAnswerHandler = buildExecPromptAnswerHandler({
     autonomousHost: options.autonomousHost,
+    attended: promptAttended,
     requestApproval: options.requestApproval,
   });
   // Localhost dev-server fetches ride the same seam: ask once; approving
   // saves fetch.allowLocalhost in the user's own settings.
   const localhostFetchApproval = buildLocalhostFetchApproval({
     autonomousHost: options.autonomousHost,
+    attended: localhostAttended,
     requestApproval: options.requestApproval,
     configManager: options.configManager,
   });

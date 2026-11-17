@@ -342,6 +342,12 @@ export interface ClientRuntimeServicesOptions {
    * own broker's `requestApproval`.
    */
   readonly requestApproval: ApprovalRaiser;
+  /**
+   * Whether a person can answer on this surface now, read when a model's run
+   * meets a command's terminal prompt or a localhost fetch. Absent: no one is
+   * attached, so the prompt is declined and the hop is admitted on its own.
+   */
+  readonly attended?: (() => boolean) | undefined;
   /** Inbound dispatch for sessions this surface hosts. Default: a held dispatch (nothing inbound yet). */
   readonly sessionDispatch?: SessionContinuationDispatch | undefined;
   /** Session-identity mirror to the adopted daemon. Absent ⇒ this surface mirrors nowhere. */
@@ -578,6 +584,8 @@ function composeClientRuntimeServices(
     configManager,
     featureFlags,
     announcementStore,
+    attended: options.attended,
+    permissionMode: () => permissionManager.getMode(),
   });
 
   const artifactStore = new ArtifactStore({ configManager });

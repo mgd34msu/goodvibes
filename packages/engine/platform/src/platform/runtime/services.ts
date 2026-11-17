@@ -173,7 +173,8 @@ export interface PermissionHostSeam {
    */
   readonly raiseApproval?: ((broker: ApprovalBroker, graph: { readonly configManager: ConfigManager; readonly featureFlags: FeatureFlagManager }) => ApprovalRaiser) | undefined;
   /**
-   * Whether a person sits at this surface to answer an MCP server's question the call's own facts cannot.
+   * Whether a person sits at this surface to answer what a model's run cannot: an MCP server's question the
+   * call's own facts cannot answer, and a command stopped on a terminal prompt (a passphrase, a package name).
    * Absent or false: such a question is declined and handed back to the agent in the tool result.
    */
   readonly personElicitation?: boolean | undefined;

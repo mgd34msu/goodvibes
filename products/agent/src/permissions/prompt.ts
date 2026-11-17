@@ -94,9 +94,10 @@ export class PermissionPromptUI extends PermissionPromptFacts {
    * screen keeps its start and end around a "not shown" marker), for a `write` or
    * `edit` the change itself as a diff under the facts, and the three choices.
    * Drawn above every other modal; the keys (y / a / n, Esc denies) live in
-   * shell/blocking-input.ts.
+   * shell/blocking-input.ts. A command waiting on its terminal shows the answer
+   * being typed, masked, in place of the choices.
    */
-  static createPromptLayer(screenWidth: number, screenHeight: number, request: PermissionRequest): SurfaceLayer {
+  static createPromptLayer(screenWidth: number, screenHeight: number, request: PermissionRequest & { readonly replyBuffer?: string | undefined }): SurfaceLayer {
     const tokens = activeTokens();
     const analysis = fallbackAnalysis(request);
     const brief = buildPermissionApprovalBrief(request);
@@ -106,12 +107,16 @@ export class PermissionPromptUI extends PermissionPromptFacts {
     const labelW = 11;
     const valueW = Math.max(8, width - labelW - 1);
     const facts = this.promptFacts(request);
+    if (isExecPrompt(request)) {
+      const typed = [...(request.replyBuffer ?? '')].length;
+      facts.push({ label: 'Answer', value: typed > 0 ? '•'.repeat(typed) : '(type the answer; Enter sends it)', fg: tokens.text });
+    }
     const factRows = facts.reduce((n, fact) => n + wrapLines(fact.value, valueW).length, 0);
     // No change can show more source lines than the screen has rows, so none past that are drawn.
     const diff = approvalDiffText(request, Math.max(1, screenHeight));
     const diffLines = diff ? renderDiffView(diff.text, width) : [];
     const body = factRows + diffLines.length + (diff && diff.hiddenLines > 0 ? 1 : 0) + 2;
-    const hints = promptHints(request);
+    const hints = promptHints(request, (request.replyBuffer ?? '').length > 0);
     const height = modalHeightFor(screenWidth, screenHeight, { hints }, body);
     const f = beginModal(screenWidth, screenHeight, {
       title: brief.title,
@@ -235,9 +240,19 @@ const PROMPT_CHOICES: ReadonlyArray<readonly [key: string, text: string, tone: B
 function remembersAllow(request: PermissionRequest): boolean {
   return request.rememberEffect !== 'owner-asked-again';
 }
-function promptHints(request: PermissionRequest): readonly KitHint[] {
+/** An ask to type the answer a running command is waiting for on its terminal. */
+function isExecPrompt(request: PermissionRequest): boolean {
+  return request.attribution?.kind === 'exec-prompt';
+}
+function promptHints(request: PermissionRequest, typed = false): readonly KitHint[] {
+  if (isExecPrompt(request)) return [['⏎', 'send answer'], ['esc', typed ? 'clear' : 'decline'], ['ctrl+c', 'stop turn']];
   return remembersAllow(request) ? PROMPT_HINTS : PROMPT_HINTS.filter(([key]) => key !== 'a');
 }
+const EXEC_PROMPT_CHOICES: typeof PROMPT_CHOICES = [
+  ['⏎', 'Send answer', 'primary'],
+  ['esc', 'Decline', 'danger'],
+];
 function promptChoices(request: PermissionRequest): typeof PROMPT_CHOICES {
+  if (isExecPrompt(request)) return EXEC_PROMPT_CHOICES;
   return remembersAllow(request) ? PROMPT_CHOICES : PROMPT_CHOICES.filter(([key]) => key !== 'a');
 }

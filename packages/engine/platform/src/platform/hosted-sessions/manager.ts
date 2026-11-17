@@ -553,6 +553,7 @@ export class HostedSessionManager {
         permissionModeChanged: mode => this.savePermissionMode(sessionId, mode),
         ...(this.options.cloudflareAuthToken ? { cloudflareAuthToken: this.options.cloudflareAuthToken } : {}),
         ...(this.options.ownerQuestions ? { ownerQuestions: this.options.ownerQuestions } : {}),
+        attended: () => this.hasAttachedClient(sessionId),
       });
       const record: HostedSessionRecord = {
         id: sessionId,
@@ -645,6 +646,11 @@ export class HostedSessionManager {
         `This daemon already hosts ${liveCount} sessions, the configured maximum (hostedSessions.maxSessions). Kill one, or raise the setting.`,
       );
     }
+  }
+
+  /** Whether a client holds an attachment to the session now, so a person there can be asked. */
+  private hasAttachedClient(sessionId: string): boolean {
+    return (this.sessions.get(sessionId)?.attached.size ?? 0) > 0;
   }
 
   /**
@@ -1081,6 +1087,7 @@ export class HostedSessionManager {
         permissionModeChanged: mode => this.savePermissionMode(live.record.id, mode),
         ...(this.options.cloudflareAuthToken ? { cloudflareAuthToken: this.options.cloudflareAuthToken } : {}),
         ...(this.options.ownerQuestions ? { ownerQuestions: this.options.ownerQuestions } : {}),
+        attended: () => this.hasAttachedClient(live.record.id),
       });
       live.runtime = runtime;
       live.lease = lease;

@@ -21,7 +21,11 @@ import type { PendingPermissionState } from './blocking-input.ts';
 export interface PermissionAnswer {
   readonly approved: boolean;
   readonly remember: boolean;
+  /** The typed answer to a command's terminal prompt, as `{ answer }`; absent for every other ask. */
+  readonly modifiedArgs?: Record<string, unknown>;
 }
+
+type Settle = (approved: boolean, remember: boolean, modifiedArgs?: Record<string, unknown>) => void;
 
 export interface CommandContextUiOptions {
   readonly compositor: { resetDiff(): void };
@@ -52,8 +56,8 @@ export function createCommandContextUi(options: CommandContextUiOptions): Comman
   // One card is on screen at a time. The shell keeps a single pending slot, so a
   // second ask written into it would drop the first ask's resolver and leave the
   // tool call behind it waiting forever. A later ask waits its turn instead.
-  let active: { readonly callId: string; readonly settle: Array<(approved: boolean, remember: boolean) => void> } | null = null;
-  const waiting: Array<{ readonly request: Omit<PendingPermissionState, 'resolve'>; readonly settle: (approved: boolean, remember: boolean) => void }> = [];
+  let active: { readonly callId: string; readonly settle: Settle[] } | null = null;
+  const waiting: Array<{ readonly request: Omit<PendingPermissionState, 'resolve'>; readonly settle: Settle }> = [];
 
   const showNext = (): void => {
     if (active !== null) return;
@@ -66,7 +70,7 @@ export function createCommandContextUi(options: CommandContextUiOptions): Comman
 
   const show = (
     request: Omit<PendingPermissionState, 'resolve'>,
-    settle: Array<(approved: boolean, remember: boolean) => void>,
+    settle: Settle[],
   ): void => {
     const entry = { callId: request.callId, settle };
     active = entry;
@@ -74,10 +78,10 @@ export function createCommandContextUi(options: CommandContextUiOptions): Comman
       ...request,
       // A queued card replacing the one just answered starts its own settle time, so a held or repeated key cannot answer it.
       openedAt: Date.now(),
-      resolve: (approved: boolean, remember = false) => {
+      resolve: (approved: boolean, remember = false, modifiedArgs?: Record<string, unknown>) => {
         if (active !== entry) return;
         active = null;
-        for (const settleOne of entry.settle) settleOne(approved, remember);
+        for (const settleOne of entry.settle) settleOne(approved, remember, modifiedArgs);
         // The shell clears its pending slot right after this call returns, so the
         // next card is placed after that, not into the slot about to be emptied.
         queueMicrotask(showNext);
@@ -92,7 +96,7 @@ export function createCommandContextUi(options: CommandContextUiOptions): Comman
       options.render();
     },
     requestPermission: (request, permissionOptions) => new Promise<PermissionAnswer>((resolve) => {
-      const settle = (approved: boolean, remember: boolean): void => resolve({ approved, remember });
+      const settle: Settle = (approved, remember, modifiedArgs) => resolve({ approved, remember, ...(approved && modifiedArgs ? { modifiedArgs } : {}) });
       const signal = permissionOptions?.signal;
       if (signal?.aborted) {
         settle(false, false);

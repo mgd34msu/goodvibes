@@ -25,6 +25,16 @@ export function commitExecPromptAnswer(answer: ExecPromptAnswer, assertCurrent: 
   assertCurrent(); owner?.claim(); assertCurrent();
 }
 export function discardExecPromptAnswer(answer: ExecPromptAnswer): void { answers.get(answer)?.close(); }
+/**
+ * An answer the person typed into the `exec:prompt` ask. The person's own answer
+ * is its authority, so it is owned with nothing further to claim, and is accepted
+ * inside a model's run as well as outside one.
+ */
+export function personExecPromptAnswer(text: string): ExecPromptAnswer {
+  const answer = Object.freeze({ answered: true, text });
+  answers.set(answer, { claim() {}, close() {} });
+  return answer;
+}
 
 export async function answerExecPrompt(host: AutonomousToolPromptHost, ask: ExecPromptAsk,
   execution?: ExecPromptExecution): Promise<ExecPromptAnswer> {

@@ -213,6 +213,8 @@ export interface ExecPromptAnswer {
   readonly answered: boolean;
   /** The text to feed the waiting child (a trailing newline is appended). */
   readonly text?: string | undefined;
+  /** Why a declined prompt was not answered: no person could be asked, or the person declined. */
+  readonly declined?: 'unattended' | 'refused' | undefined;
 }
 
 /**
@@ -311,6 +313,7 @@ export async function runInteractiveCommand(input: InteractiveRunInput): Promise
   let cancelled = false;
   let promptsAnswered = 0;
   let promptDeclined = false;
+  let declinedPrompt: { readonly prompt: string; readonly unattended: boolean } | undefined;
   let promptsDropped = 0;
   let pendingPrompt: string | undefined;
   // The transcript length when the prompt was read: output past it means the child went on, so the prompt no longer blocks it.
@@ -409,6 +412,7 @@ export async function runInteractiveCommand(input: InteractiveRunInput): Promise
         // Declined: the honest move is to stop the run now, not burn the
         // remaining timeout on a child that will never get its answer.
         promptDeclined = true;
+        declinedPrompt = { prompt, unattended: answer.declined === 'unattended' };
         void kill();
       }
     } catch (err: unknown) {
@@ -490,7 +494,11 @@ export async function runInteractiveCommand(input: InteractiveRunInput): Promise
     stdout: transcript,
     stderr: stoppedForUnansweredPrompt
       ? `Stopped: no timeout_ms was set and the prompt ${JSON.stringify(pendingPrompt)} stayed unanswered (${Math.round((interaction.unansweredPromptLimitMs ?? DEFAULT_UNANSWERED_PROMPT_LIMIT_MS) / 1000)}s with no new output). Answer it by passing input the command can read, or run it again with a timeout_ms.`
-      : '',
+      : declinedPrompt
+        ? declinedPrompt.unattended
+          ? `Stopped: the command asked ${JSON.stringify(declinedPrompt.prompt)} and no one is attached to answer it. Run it again with the value supplied non-interactively (a flag, an environment variable or piped input).`
+          : `Stopped: the command asked ${JSON.stringify(declinedPrompt.prompt)} and the answer was declined, so nothing was typed.`
+        : '',
     success: !timedOut && !cancelled && !promptDeclined && exitCode === 0,
     duration_ms: duration,
     cwd,

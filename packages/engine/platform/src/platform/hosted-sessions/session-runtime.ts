@@ -142,6 +142,12 @@ export interface HostedSessionRuntimeOptions {
   readonly surfaceTurn?: HostedSurfaceTurn | undefined;
   /** The daemon's own request path, handed to the surface turn's tools. */
   readonly daemonRequests?: HostedDaemonRequestPath | undefined;
+  /**
+   * Whether a client is attached to this session now, read when a turn's
+   * command stops on a terminal prompt or fetches localhost: attached, the
+   * person there is asked. Omitted ⇒ no one is attached.
+   */
+  readonly attended?: (() => boolean) | undefined;
 }
 
 /** The engine's side of a session's contracts. */
@@ -231,6 +237,8 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     configManager: services.configManager,
     featureFlags: services.featureFlags,
     announcementStore,
+    attended: options.attended,
+    permissionMode: () => permissionMode,
   });
 
   const inbox = options.ownerQuestions;

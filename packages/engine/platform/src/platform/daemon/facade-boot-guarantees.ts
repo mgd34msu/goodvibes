@@ -10,8 +10,6 @@ import { join } from 'node:path';
 import type { SweepableSecrets } from '../config/plaintext-credential-sweep.js';
 import { describePlaintextSweep, sweepPlaintextCredentials } from '../config/plaintext-credential-sweep.js';
 import { raiseReaderFloorInFile } from '../config/shared-config-tier.js';
-import { PAYMENTS_SYNTHETIC_CONFIG_KEYS } from '../config/payment-config-keys.js';
-import { daemonSecretKeyFor } from '../config/daemon-secret-keys.js';
 import type { ConfigManager } from '../config/manager.js';
 import { ensureActivityLoggerConfigured, logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -77,7 +75,6 @@ export async function runDaemonBootGuarantees(
 ): Promise<void> {
   ensureDaemonActivityLog(services.shellPaths.workingDirectory, configManager);
   await sweepPlaintextCredentialsOnBoot(configManager, services);
-  await clearRetiredCardSettings(services);
   // The live watch was armed during graph acquisition, before the sweep's
   // owned writes. Consume their disk generations before readiness. This uses
   // the ordinary reload/invalidation path and also observes external edits
@@ -124,45 +121,13 @@ async function sweepPlaintextCredentialsOnBoot(
 }
 
 /**
- * Delete the card an older build's Settings screen stored under the four
- * retired card settings (number, expiry, security code, cardholder name). No
- * purchase ever read them and no screen can show or clear them any more, so a
- * card number and security code would otherwise stay on disk unused. Cards
- * added with `/payments card` live in the card store and are not touched.
- * Cost per start: four lookups in the already-open secret stores; a deletion
- * only when one is found.
- */
-async function clearRetiredCardSettings(services: DaemonBootServices): Promise<void> {
-  let cleared = 0;
-  for (const key of PAYMENTS_SYNTHETIC_CONFIG_KEYS) {
-    try {
-      cleared += (await services.secretsManager.deleteWithReceipt(daemonSecretKeyFor(key))).length > 0 ? 1 : 0;
-    } catch (error) {
-      logger.warn('DaemonServer: a retired card setting could not be cleared from the secret store', {
-        setting: key,
-        error: summarizeError(error),
-        detail: 'it holds card material no purchase reads; delete it with /secrets delete ' + daemonSecretKeyFor(key),
-      });
-    }
-  }
-  if (cleared > 0) {
-    logger.info('DaemonServer: card details stored under retired settings were deleted', {
-      count: cleared,
-      detail: 'cards are added with /payments card, which this does not affect',
-    });
-  }
-}
-
-/**
  * What the guarantees need from the runtime, structurally.
  *
  * Structural rather than a `RuntimeServices` import so this module keeps the
- * narrow surface it has: it takes a secret store it can list, read, write and
- * delete through, and two directory paths. Nothing else.
+ * narrow surface it has: it takes a secret store it can read and write
+ * through, and two directory paths. Nothing else.
  */
 export interface DaemonBootServices {
-  readonly secretsManager: SweepableSecrets & {
-    deleteWithReceipt(key: string): Promise<readonly unknown[]>;
-  };
+  readonly secretsManager: SweepableSecrets;
   readonly shellPaths: { readonly workingDirectory: string; readonly homeDirectory: string };
 }

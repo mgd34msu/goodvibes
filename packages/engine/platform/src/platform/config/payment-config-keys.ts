@@ -70,9 +70,7 @@ export function paymentsAddressConfigKeys(kind: PaymentsAddressKind): readonly C
  * Retired settings that once held a card's number, expiry, security code and
  * cardholder name. No purchase ever read them: cards are added with
  * `/payments card` (or the web UI) into the daemon card store. The names stay
- * declared as card material so any write to them is refused, and the daemon
- * deletes what an older build stored under them when it starts
- * (daemon/facade-boot-guarantees.ts).
+ * declared as card material so any write to them is refused.
  */
 export const PAYMENTS_SYNTHETIC_CONFIG_KEYS: readonly ConfigKey[] = [
   'payments.cardNumber' as ConfigKey,

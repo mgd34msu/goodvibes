@@ -146,6 +146,13 @@ interface ConfigCliOverrides {
   workingDir?: string | undefined;
   surfaceRoot?: string | undefined;
   /**
+   * The surface whose `settings.json` files (global and project) hold this
+   * manager's client-scoped keys. Omitted: `surfaceRoot`. The daemon keeps its
+   * own, so a preference set in one terminal app (such as `permissions.mode`)
+   * does not become the daemon's, while its state stays under `surfaceRoot`.
+   */
+  settingsSurfaceRoot?: string | undefined;
+  /**
    * True only in the daemon composition, which OWNS the daemon tier file. A
    * client only READS it; the default is that non-writing answer.
    */
@@ -408,12 +415,16 @@ export class ConfigManager {
       throw new Error('ConfigManager surfaceRoot is required when deriving config paths from homeDir/workingDir.');
     }
     const base = configDir ?? resolveSurfaceDirectory(homeDirectory!, surfaceRoot!);
+    const settingsSurfaceRoot = overrides.settingsSurfaceRoot
+      ? requireSurfaceRoot(overrides.settingsSurfaceRoot, 'ConfigManager settingsSurfaceRoot') : surfaceRoot;
     this.configDir = base;
-    this.configPath = join(base, 'settings.json');
+    this.configPath = !configDir && settingsSurfaceRoot && settingsSurfaceRoot !== surfaceRoot
+      ? resolveSurfaceDirectory(homeDirectory!, settingsSurfaceRoot, 'settings.json')
+      : join(base, 'settings.json');
     this.workingDirectory = workingDirectory;
     this.homeDirectory = homeDirectory;
     this.projectConfigPath = this.workingDirectory
-      ? resolveSurfaceDirectory(this.workingDirectory, surfaceRoot!, 'settings.json')
+      ? resolveSurfaceDirectory(this.workingDirectory, settingsSurfaceRoot!, 'settings.json')
       : null;
     this.#workspaceOwner = Object.freeze({ workingDirectory, configDir: base,
       projectConfigPath: this.projectConfigPath, homeDirectory });

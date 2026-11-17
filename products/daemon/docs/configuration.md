@@ -26,15 +26,18 @@ See [CLI ownership](../src/cli/configuration.ts) and
 
 ## Settings files and precedence
 
-The daemon still uses the `tui` surface directory for its surface settings and
-workspace state. Changing that directory name would require a state migration.
-Its daemon-owned settings have a separate store.
+The daemon keeps its own surface settings in the `daemon-host` directory, so a
+preference chosen in the terminal app (such as `permissions.mode`) does not
+change what the daemon's own sessions may do. Its first start with that file
+begins from a copy of the terminal app's file, which it read before; after
+that the two are separate. Its workspace state stays in the `tui` directory,
+and its daemon-owned settings have a separate store.
 See the [surface declaration](../src/config/surface.ts).
 
 | Settings tier | File | Role |
 | --- | --- | --- |
-| Global surface | `<tree-root>/.goodvibes/tui/settings.json` | Local surface preferences |
-| Project surface | `<workspace>/.goodvibes/tui/settings.json` | Workspace overrides of surface preferences |
+| Global surface | `<tree-root>/.goodvibes/daemon-host/settings.json` | Local surface preferences |
+| Project surface | `<workspace>/.goodvibes/daemon-host/settings.json` | Workspace overrides of surface preferences |
 | Shared | `<tree-root>/.goodvibes/shared/settings.json` | The shared speech settings listed below |
 | Daemon | `<daemon-identity-directory>/settings.json` | Settings owned by the daemon |
 

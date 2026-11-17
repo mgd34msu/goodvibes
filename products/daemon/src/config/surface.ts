@@ -7,7 +7,7 @@
  * bare string literal at each call site, which is how a writer and a reader
  * ended up disagreeing about where the last-session pointer lives.
  *
- * ── Why the daemon's surface root is still `tui` ────────────────────────────
+ * ── Why the daemon's state root is still `tui` ──────────────────────────────
  *
  * Because that is where the running daemon's state already is. Every store
  * this daemon has written on every installed machine, sessions, approvals,
@@ -19,6 +19,19 @@
  * The rename is a migration, not a constant edit: it needs a copy-forward pass
  * with a receipt, the same shape the platform already performs for the unscoped →
  * scoped move, plus the live-install rehearsal that goes with it. Until then
- * this constant carries the reason so nobody "tidies" it.
+ * this constant carries the reason so nobody "tidies" it. The daemon's
+ * settings do not live here: see GOODVIBES_DAEMON_SETTINGS_ROOT below.
  */
 export const GOODVIBES_DAEMON_SURFACE_ROOT = 'tui';
+
+/**
+ * Where the daemon keeps its own value of every client-scoped setting
+ * (`~/.goodvibes/daemon-host/settings.json` and the project's
+ * `.goodvibes/daemon-host/settings.json`). The terminal app's settings file is
+ * the terminal app's: a preference chosen there, such as `permissions.mode`,
+ * does not become the posture of the daemon's own sessions (channels, the web
+ * UI, hosted Agent turns). Daemon-owned settings live in the daemon tier
+ * either way (config-ownership.ts). Only the settings move; the state above
+ * stays where it is.
+ */
+export const GOODVIBES_DAEMON_SETTINGS_ROOT = 'daemon-host';

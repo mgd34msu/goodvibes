@@ -228,6 +228,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     currentModelId: getCurrentModelForPickerTarget,
     currentProviderId: getCurrentProviderForPickerTarget,
     configuredProviderIds: () => new Set(getConfiguredProviderIds()),
+    unreachableProviders: () => providerRegistry.unreachableAtStartup(),
     buildConfiguredVia: (ids, configured, secretIds) =>
       buildConfiguredViaMap([...ids], new Set(configured), subscriptionManager, secretIds),
     buildTargets: buildModelPickerTargets,

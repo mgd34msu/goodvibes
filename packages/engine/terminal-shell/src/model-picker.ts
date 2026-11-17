@@ -135,6 +135,8 @@ export class ModelPickerModal {
   public configuredProviders: Set<string> = new Set();
   /** How each provider is configured, drives badge display in provider mode. */
   public configuredViaMap: Map<string, 'env' | 'secrets' | 'subscription' | 'anonymous'> = new Map();
+  /** Providers the registry could not reach, with the reason; set when the picker opens. */
+  public unreachableProviders: ReadonlyMap<string, string> = new Map();
   /** IDs of pinned/favorite models, shown at top of list. */
   public pinnedIds: Set<string> = new Set();
   /** Counts local pin flips, so a slow load of the stored pins can tell it is out of date. */

@@ -222,6 +222,8 @@ function detailLines(picker: ModelPickerModal): string[] {
     const provider = picker.getFilteredProviders()[picker.selectedIndex] ?? '';
     lines.push(providerSelectionDetail(targetLabel));
     if (provider) lines.push(`Selected provider: ${provider}`);
+    const unreachable = provider ? picker.unreachableProviders.get(provider) : undefined;
+    if (unreachable !== undefined) lines.push(`Health: unreachable: ${unreachable}`);
   } else if (picker.mode === 'model') {
     lines.push(modelSelectionDetail(targetLabel));
     if (selected) {
@@ -245,6 +247,8 @@ function detailLines(picker: ModelPickerModal): string[] {
       }
       const fitLine = modelHardwareFitLine(selected);
       if (fitLine) lines.push(fitLine);
+      const unreachable = picker.unreachableProviders.get(selected.provider);
+      if (unreachable !== undefined) lines.push(`Health: ${selected.provider} is unreachable: ${unreachable}`);
     }
   } else if (picker.mode === 'effort') {
     lines.push(MODEL_WORKSPACE_REASONING_EFFORT_DETAIL);

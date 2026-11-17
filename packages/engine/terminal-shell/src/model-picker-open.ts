@@ -5,6 +5,7 @@ export interface ModelPickerOpenDeps<Info> {
   readonly picker: {
     configuredProviders: Set<string>;
     configuredViaMap: ConfiguredVia;
+    unreachableProviders?: ReadonlyMap<string, string> | undefined;
     readonly embeddingProviders?: EmbeddingProviderPickerEntry[] | undefined;
     setTargetInfos(infos: Info[]): void;
     openProviders(providers: string[], id: string): void;
@@ -21,6 +22,8 @@ export interface ModelPickerOpenDeps<Info> {
   readonly currentModelId: () => string;
   readonly currentProviderId: () => string;
   readonly configuredProviderIds: () => ReadonlySet<string>;
+  /** Providers the registry could not reach, with the reason (the registry's own record; no probe). */
+  readonly unreachableProviders?: (() => ReadonlyMap<string, string>) | undefined;
   /** Which credential source configured each provider, given the providers the credential store holds keys for. */
   readonly buildConfiguredVia: (
     providerIds: readonly string[],
@@ -50,6 +53,7 @@ export function openModelPickerNow<Info>(deps: ModelPickerOpenDeps<Info>, mode: 
   const models = deps.listModels();
   const providers = mode === 'providers' ? deps.listProviders() : [...new Set(models.map((m) => m.provider))];
   picker.configuredProviders = configured;
+  picker.unreachableProviders = new Map(deps.unreachableProviders?.() ?? []);
   picker.configuredViaMap = deps.buildConfiguredVia(providers, configured, new Set());
   picker.setTargetInfos(deps.buildTargets(picker.embeddingProviders ?? []));
   if (mode === 'providers') picker.openProviders(providers, deps.currentProviderId());

@@ -148,6 +148,8 @@ Paid and subscription models do not auto-switch to a different model, because th
 
 Synthetic models are split into **Top Models** (S-tier or A-tier by benchmark) and **All Synthetic**. Each entry shows how many providers are available for failover, and quality tier badges (S/A/B/C) are shown next to model names based on composite benchmark score.
 
+A provider whose endpoint did not return its model list during the startup model discovery sweep (nothing listening, credentials refused, an unreadable answer) shows `Health: unreachable: <the failure>` in the detail area when the provider, or one of its models, is selected, in both the TUI and the Agent picker. The picker reads this from the provider registry when it opens; it sends no request of its own.
+
 ### Failover notices and cost delta
 
 Besides the backend rotation inside a single synthetic model described above, the TUI has a second, broader failover path. When a turn ends in a provider failure (`TURN_ERROR` with a `provider_error` or `provider_exhausted` stop reason) before any tool has started, and an optimizer-driven fallback chain has a viable next provider that has not already been tried this turn, the TUI switches to it and resubmits the turn, whether or not the original model was synthetic. A turn that failed for another reason (a hook denied the call, for example), or in which a tool had already started, is not resubmitted: the error is shown instead, because a second run would repeat the tool's side effects. A synthetic model is itself a fallback ladder over real backends, so this broader path never fails over *into* a synthetic model after a real one failed, only between real providers.

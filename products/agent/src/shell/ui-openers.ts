@@ -136,6 +136,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     },
     currentProviderId: getCurrentProviderForPickerTarget,
     configuredProviderIds: () => new Set(getConfiguredProviderIds()),
+    unreachableProviders: () => providerRegistry.unreachableAtStartup(),
     buildConfiguredVia: (ids, configured, secretIds) =>
       buildConfiguredViaMap(
         ids.filter((p) => p !== LOCAL_REC_PROVIDER),

@@ -50,10 +50,6 @@ export type {
   SettingsSnapshot,
   WorktreeSnapshot,
 } from './integration/helpers.js';
-export {
-  enrichModelEntries,
-  groupEntriesByProvider,
-} from './ui/model-picker/health-enrichment.js';
 export { NotificationRouter, createNotificationRouter } from './notifications/index.js';
 export type {
   Notification,

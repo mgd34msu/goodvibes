@@ -208,6 +208,8 @@ function drawModelDetail(f: ModalFrame, picker: ModelPickerModal, p: KitInset): 
     const target = picker.getSelectedTargetInfo();
     if (target && !isTargetModel(target, model)) y = kv(c, p, y, 'Now', `${targetLabelFor(target.target)}: ${targetSummary(target)}`);
     y = kv(c, p, y, 'Status', configured ? 'configured' : 'not configured', configured ? t.success : t.warning);
+    const unreachable = picker.unreachableProviders.get(model.provider);
+    if (unreachable !== undefined) y = kv(c, p, y, 'Health', `unreachable: ${unreachable}`, t.warning);
     if (picker.isPinned(model)) y = kv(c, p, y, 'Pinned', 'yes');
     y++;
     // Meters only where the data exists.
@@ -284,6 +286,8 @@ function drawStepDetail(f: ModalFrame, picker: ModelPickerModal, p: KitInset): v
         picker.configuredProviders.has(provider) ? `configured${via ? ` via ${via}` : ''}` : 'not configured',
         picker.configuredProviders.has(provider) ? t.success : t.warning,
       );
+      const unreachable = picker.unreachableProviders.get(provider);
+      if (unreachable !== undefined) y = kv(c, p, y, 'Health', `unreachable: ${unreachable}`, t.warning);
       y = kv(c, p, y, 'Models', String(picker.models.filter((m) => m.provider === provider).length));
     }
   } else if (picker.mode === 'embeddingProvider') {

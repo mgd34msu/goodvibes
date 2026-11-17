@@ -138,13 +138,14 @@ SSE is simpler (standard HTTP, firewall-friendly, works in all browser environme
 
 ### SSE and WebSocket reconnect
 
-Reconnect is **off by default** for both transports and is opted into via
-`realtime.sseReconnect` / `realtime.webSocketReconnect`. The underlying HTTP
-retry policy is also off by default (`maxAttempts: 1`). When reconnect is
-enabled, both stream/SSE and WebSocket reconnect default to a finite
-`maxAttempts` of `10` (`DEFAULT_STREAM_MAX_ATTEMPTS` / `DEFAULT_WS_MAX_ATTEMPTS`),
-using exponential backoff with the same `baseDelayMs * backoffFactor^(attempt-1)`
-formula as HTTP retry. On SSE reconnect the platform sends `Last-Event-ID` so the server can replay
+The runtime-event feeds (SSE and WebSocket) reconnect unless
+`realtime.sseReconnect` / `realtime.webSocketReconnect` sets `enabled: false`;
+a raw stream opened directly reconnects only when asked. The underlying HTTP
+retry policy is off by default (`maxAttempts: 1`). Reconnect attempts are
+unlimited unless you set `maxAttempts` (`DEFAULT_STREAM_MAX_ATTEMPTS` /
+`DEFAULT_WS_MAX_ATTEMPTS` are unlimited), using exponential backoff with the same
+`baseDelayMs * backoffFactor^(attempt-1)` formula as HTTP retry, the delay capped
+at 30 s. A refused or revoked credential ends the stream at once. On SSE reconnect the platform sends `Last-Event-ID` so the server can replay
 missed events when supported.
 
 For the configuration shapes, per-surface examples, and the full default table,

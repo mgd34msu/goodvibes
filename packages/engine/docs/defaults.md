@@ -23,15 +23,17 @@ increase `maxAttempts` for batch/background operations.
 
 | Path | Default | Notes |
 |------|---------|-------|
-| `DEFAULT_STREAM_RECONNECT_POLICY.enabled` | `false` | Reconnect is opt-in |
-| `DEFAULT_STREAM_RECONNECT_POLICY.maxAttempts` | 10 | Finite cap prevents infinite reconnect loops |
+| `DEFAULT_STREAM_RECONNECT_POLICY.enabled` | `false` | Off for a raw stream opened directly; the runtime-event connectors turn it on unless told not to |
+| `DEFAULT_STREAM_RECONNECT_POLICY.maxAttempts` | unlimited | `DEFAULT_STREAM_MAX_ATTEMPTS`; set `maxAttempts` for a limit |
 | `DEFAULT_STREAM_RECONNECT_POLICY.baseDelayMs` | 500 | Initial reconnect delay |
 | `DEFAULT_STREAM_RECONNECT_POLICY.maxDelayMs` | 30 000 | Hard backoff cap (30 s) |
 | `DEFAULT_STREAM_RECONNECT_POLICY.backoffFactor` | 2 | Exponential multiplier |
 
-**Rationale:** a finite retry cap prevents unbounded reconnect loops during
-persistent auth failure or server outage. `maxDelayMs: 30 000` caps worst-case
-wait between attempts to 30 seconds.
+**Rationale:** the daemon is a long-lived local service that comes back after a
+restart or a sleep, so a stream keeps trying; `maxDelayMs: 30 000` caps the wait
+between attempts to 30 seconds. A refused or revoked credential (401, 403) ends
+the stream at once, so a persistent auth failure never loops; closing the stream
+is how a caller gives up.
 
 ## Daemon batch processing
 
@@ -134,7 +136,7 @@ See [Voice and streaming TTS](./voice.md) for the provider-agnostic streaming ro
 
 | Path | Default | Notes |
 |------|---------|-------|
-| `DEFAULT_WS_MAX_ATTEMPTS` | 10 | Shared constant in `@goodvibes-jev/engine/platform/transport-realtime`; passed to `normalizeStreamReconnectPolicy` |
+| `DEFAULT_WS_MAX_ATTEMPTS` | unlimited | Shared constant in `@goodvibes-jev/engine/platform/transport-realtime`; passed to `normalizeStreamReconnectPolicy`. A refused or revoked credential ends the connection at once |
 | `reconnect.baseDelayMs` | 500 (inherited from SSE policy) | |
 | `reconnect.maxDelayMs` | 30 000 (inherited from SSE policy) | |
 | `reconnect.backoffFactor` | 2 | |

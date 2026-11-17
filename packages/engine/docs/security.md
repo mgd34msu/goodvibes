@@ -523,25 +523,37 @@ The gate's judgment request is an outward transmission in its own right. Before
 permission analysis, hooks, request recording, or any judgment-port request,
 `gate/judgment-input.ts` checks the complete argument tree and complete strings.
 It refuses protected input locally with the `judgment-input` boundary check and
-`boundary_judgment_input` reason. This refusal cannot be cleared by auto-approve,
-a preset, a remembered grant, an owner prompt, or the background-agent exemption.
-Direct gate readers, MCP capability readings and execution-ledger observers share
-the check. A refused ledger event keeps its lifecycle identifiers/status and a
-value-free reason, with argument and command previews withheld.
+`boundary_judgment_input` reason. The refusal names the field and the kind of
+material seen (never the value) and says what to do instead. It cannot be
+cleared by auto-approve, a preset, a remembered grant, an owner prompt, or the
+background-agent exemption. Direct gate readers, MCP capability readings and
+execution-ledger observers share the check. A refused ledger event keeps its
+lifecycle identifiers/status and a value-free reason, with argument and command
+previews withheld.
 
 The deterministic classes are deliberately bounded:
 
 - Credential config/store names declared by the platform registry, including
-  nested config paths, registered environment names and prefix families
-- Literal values in `credentials.set` envelopes; standard credential wire fields
-  (password/API key/OAuth token/private key) and HTTP authentication headers
+  nested config paths, registered environment names and prefix families, and
+  standard credential wire fields (password/API key/OAuth token/private key) in
+  structured arguments: any literal value there is refused
+- Literal values in `credentials.set` envelopes
 - `payments.cards.create` envelopes, declared card fields, CardMaterial fields,
   field/value pairs, and explicit HTML payment/password descriptors or CSS
   attribute-equality selectors paired with a value/text
-- Existing local PAN shapes (13–19 digits passing Luhn, with the existing space
-  and hyphen/group-window rules), including numeric JSON values; private-key PEM
-  headers; URL password userinfo and declared credential query fields; declared credential assignments/headers in
-  shell strings and JSON-encoded bodies
+- Card numbers written as text (13–19 digits passing Luhn that are grouped like
+  a card or have a card word nearby); a JSON number is a count, an id or a
+  clock and is never read as a card unless a card field holds it
+- Private-key PEM headers
+- In free text (file content, shell commands, JSON-encoded bodies): a credential
+  assignment, flag or HTTP authentication header, URL password userinfo or
+  credential query field whose value is a key- or token-shaped literal (a JWT,
+  or 16+ visible characters mixing letters and digits). A value that only names
+  a credential is ordinary code and passes: an environment variable or other
+  expansion (`$TOKEN`, `${DB_PASSWORD}`), a member expression or call
+  (`process.env.API_KEY`, `form.password.value`), a template placeholder or a
+  placeholder word (`changeme`, `<your key>`). Whether other free text is
+  sensitive in meaning is the gate's own `secrets` reading.
 
 These checks do not ask a remote model to discover a secret. They do not read the
 secret store, process environment, user files or live card material. The browser's

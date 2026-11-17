@@ -3,11 +3,10 @@ import { prepareJudgmentResult, snapshotJudgmentInput } from '@goodvibes-jev/eng
 import { processOutputError } from './batteries/process-output.js';
 import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runtime/decision-policy';
 
-export const PROCESS_OUTPUT_READING_LIMITS = { questions: 64, concurrency: 4, endpointCandidates: 256 } as const;
+export const PROCESS_OUTPUT_READING_LIMITS = { questions: 64, concurrency: 4 } as const;
 /** Lines before a page's first target sent with that page as context. */
 const PROCESS_OUTPUT_PAGE_CONTEXT_LINES = 16;
 export interface ProcessOutputEvidenceLine { readonly id: string; readonly text: string; readonly raw: string; readonly stream: 'stdout' | 'stderr'; }
-export interface ProcessEndpointCandidate { readonly id: string; readonly lineId: string; readonly start: number; readonly end: number; readonly port: number; }
 export interface ProcessOutputEvidence {
   readonly lines: readonly ProcessOutputEvidenceLine[];
   readonly partials: { readonly stdout: string; readonly stderr: string };
@@ -16,7 +15,6 @@ export interface ProcessOutputEvidence {
 export interface ProcessOutputReading {
   readonly provenance?: 'classic';
   readonly errors: ReadonlyMap<string, boolean | undefined>;
-  readonly port: number | undefined;
   readonly assertCurrent: () => void;
   /** Completed line observations remain valid only under this original authority. */
   readonly assertAuthorityCurrent: () => void;
@@ -41,21 +39,6 @@ function captureEvidence(evidence: ProcessOutputEvidence, lineIds: readonly stri
   return { evidence: { lines, partials: { stdout: source.partials.stdout, stderr: source.partials.stderr }, done: source.done }, lineIds: targets };
 }
 
-/**
- * Literal integer spans in output. The log finds a listening port with one
- * anchored pattern (`listeningPortOf`), so nothing asks a model about these.
- */
-export function processEndpointCandidates(lines: readonly ProcessOutputEvidenceLine[]): readonly ProcessEndpointCandidate[] | undefined {
-  const candidates: ProcessEndpointCandidate[] = [];
-  for (const line of lines) for (const match of line.text.matchAll(/(?<![\w.+-])\d{1,5}(?![\w.])/g)) {
-    const port = Number(match[0]);
-    if (port < 1 || port > 65535) continue;
-    if (candidates.length >= PROCESS_OUTPUT_READING_LIMITS.endpointCandidates) return undefined;
-    candidates.push({ id: `endpoint-${candidates.length}`, lineId: line.id, start: match.index, end: match.index + match[0].length, port });
-  }
-  return candidates;
-}
-
 export async function readProcessOutput(evidence: ProcessOutputEvidence, lineIds: readonly string[], options: Pick<JudgmentReadingOptions, 'signal' | 'assertCurrent'> & { readonly authoritySignal: AbortSignal }): Promise<ProcessOutputReading> {
   return decisionOrClassic(() => readDecisionProcessOutput(evidence, lineIds, options), () => {
     const captured = captureEvidence(evidence, lineIds);
@@ -63,7 +46,7 @@ export async function readProcessOutput(evidence: ProcessOutputEvidence, lineIds
     const current = () => { authorityCurrent(); options.signal?.throwIfAborted(); options.assertCurrent?.(); };
     current();
     // Raw output stays visible. No unknown line is called an error without that evidence.
-    return { provenance: 'classic' as const, errors: new Map(captured.lineIds.map(id => [id, undefined])), port: undefined,
+    return { provenance: 'classic' as const, errors: new Map(captured.lineIds.map(id => [id, undefined])),
       assertCurrent: current, assertAuthorityCurrent: authorityCurrent, recordPublication: current };
   });
 }
@@ -102,7 +85,7 @@ async function readDecisionProcessOutput(evidence: ProcessOutputEvidence, lineId
   try { await Promise.all(workers); }
   catch (error) { batchLifetime.abort(); await Promise.allSettled(workers); throw error; }
   owner.assertCurrent();
-  return { errors, port: undefined, assertCurrent: owner.assertCurrent, assertAuthorityCurrent: authorityCurrent,
+  return { errors, assertCurrent: owner.assertCurrent, assertAuthorityCurrent: authorityCurrent,
     recordPublication() { for (const publish of publications) publish(); },
   };
 }

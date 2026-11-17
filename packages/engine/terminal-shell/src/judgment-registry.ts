@@ -1,6 +1,6 @@
 import { BatteryRegistry } from '@goodvibes-jev/judgment';
 import { clusterJoinGroup } from './batteries/cluster-join-group.js';
-import { processOutputError, processOutputEndpoint } from './batteries/process-output.js';
+import { processOutputError } from './batteries/process-output.js';
 
 /**
  * Every named decision the terminal shell makes, for calibration:
@@ -11,4 +11,3 @@ export const registry = new BatteryRegistry();
 
 registry.register(clusterJoinGroup);
 registry.register(processOutputError);
-registry.register(processOutputEndpoint);

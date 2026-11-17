@@ -41,8 +41,8 @@
  */
 export { createHerdrSessionReporter, type HerdrSessionReporter, type HerdrSessionReporterOptions,
   type HerdrSessionUpdate, type HerdrReporterEnvironment, type HerdrTransportContext } from './herdr-session-reporter.js';
-export { readProcessOutput, processEndpointCandidates, PROCESS_OUTPUT_READING_LIMITS, type ProcessOutputEvidence, type ProcessOutputEvidenceLine, type ProcessOutputReading } from './process-output-reading.js';
-export { processOutputError, processOutputEndpoint } from './batteries/process-output.js';
+export { readProcessOutput, PROCESS_OUTPUT_READING_LIMITS, type ProcessOutputEvidence, type ProcessOutputEvidenceLine, type ProcessOutputReading } from './process-output-reading.js';
+export { processOutputError } from './batteries/process-output.js';
 
 export {
   attachWsOnlyGatewayVerbHandlers,

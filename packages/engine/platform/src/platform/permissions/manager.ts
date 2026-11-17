@@ -1,7 +1,7 @@
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { isDeepStrictEqual } from 'node:util';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { DecisionModelsDisabledError, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { decisionOrClassic, rememberDecisionRefusal, wasDecisionRefused, type RefusedDecisionAction } from '../runtime/decision-policy.js';
 import { readExternalRequestEvidence, type ExternalRequestEvidence } from './external-request-evidence.js';
 import { JudgmentError, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
@@ -1282,9 +1282,9 @@ export class PermissionManager {
         askKind: toolCategoryOf({ name: input.toolName }) === undefined, askObfuscated: shellCommandsIn(input.args).length > 0,
         signal: input.signal, port });
       input.assertCurrent();
-      // The operation moved to no decision model while this call was in flight: this phase ends and the
-      // gate's own no-model path (owner configuration, then the owner) decides, as for a call that started there.
-      if (reading.unassessed) throw new DecisionModelsDisabledError('semantic tool-call risk assessment');
+      // The operation moved to no decision model while this call was in flight: the gate's own
+      // no-model path (owner configuration, then the owner) decides, as for a call that started there.
+      if (reading.unassessed) return this.assessClassicExecutionSafety(input);
       analysis = withReading(analysis, reading, input.category);
       boundary = await runBoundary({ toolName: input.toolName, args: input.args, reading,
         declaredMutation: input.category === 'write', surfaceId: this.gate.surfaceOf?.(),

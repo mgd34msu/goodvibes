@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { currentExecutionMode, withInvocationExecutionMode } from '../gate/execution-context.js';
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import { randomUUID } from 'node:crypto';
-import { judgmentPort, DecisionModelsDisabledError, createSharedRegexTester, type SharedRegexTester } from '@goodvibes-jev/engine/errors';
+import { judgmentPort, createSharedRegexTester, type SharedRegexTester } from '@goodvibes-jev/engine/errors';
 import { endDecisionPhaseWithoutModel, isClassicOperation } from '../runtime/decision-policy.js';
 import {
   ToolInputProjectionError, assertProjectionCurrent, assertProjectionSignal, captureProjectionArgs, captureProjectionStructure,
@@ -816,14 +816,11 @@ export class ToolRegistry {
 
   private repairPort(record: CapturedProjection, ids: string[], inner?: JudgmentPort): JudgmentPort {
     // Native repairs do not borrow a supplied transport's metadata or recorder.
-    // A handle created without a decision model cannot become a semantic capability after its scope ends.
-    if (isClassicOperation()) {
-      const disabled = (): never => { throw new DecisionModelsDisabledError('semantic tool argument repair; supply exact schema parameters'); };
-      return { get model() { return disabled(); }, ask: disabled };
-    }
+    // With no decision model in use repair's no-model path never asks this port, so nothing is looked up;
+    // an ask made after the operation moved to no decision model ends the phase before any request.
     // Preserve the installed recorder without requiring a port for calls needing no repair.
     let captured = inner;
-    if (!captured) { try { captured = judgmentPort('tools.input-projection.repair'); } catch { /* Lazily fail if a reading is needed. */ } }
+    if (!captured && !isClassicOperation()) { try { captured = judgmentPort('tools.input-projection.repair'); } catch { /* Lazily fail if a reading is needed. */ } }
     const port = () => captured ??= judgmentPort('tools.input-projection.repair');
     return {
       get model() { return port().model; },

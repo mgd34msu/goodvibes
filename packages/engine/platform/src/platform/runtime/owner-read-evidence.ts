@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync, type BigIntStats } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { sourceReadsFromTurns, type ContractTurnRecord, type SourceReadEvidence } from '../contract/evidence.js';
+import { sourceReadsFromFolded, type SourceReadEvidence } from '../contract/evidence.js';
 import { readBodyWithHostEvidence, returnedReadRows } from '../tools/read/observation.js';
 import type { ToolResult } from '../types/tools.js';
 import type { OwnerEvidenceReader } from '../contract/owner-evidence.js';
@@ -19,6 +19,17 @@ function none(reason: string, sessionId?: string): undefined {
 const sameFile = (before: BigIntStats, after: BigIntStats): boolean => after.dev === before.dev && after.ino === before.ino && after.mode === before.mode
   && after.nlink === 1n && after.size === before.size && after.mtimeNs === before.mtimeNs && after.ctimeNs === before.ctimeNs;
 
+/**
+ * A journal's identity without reading it. Both journals are replaced by
+ * rename on every content change (a new inode), and the recovery writer only
+ * moves the snapshot's file time when nothing changed, so device, inode and
+ * size name one content.
+ */
+const fileIdentity = (info: BigIntStats): string => `${info.dev}:${info.ino}:${info.size}`;
+
+/** One read result qualified against an input tree: the file lines it returned that match the tree. */
+type QualifiedRead = readonly { readonly path: string; readonly rows: readonly (readonly [number, string])[] }[];
+
 /** Where the owner's read results come from. */
 export interface OwnerReadSource {
   /**
@@ -32,21 +43,31 @@ export interface OwnerReadSource {
 }
 
 /** Reuses actual owner read results only after each numbered line matches
- * the contract's immutable input. Session text cannot certify source or work. */
+ * the contract's immutable input. Session text cannot certify source or work.
+ *
+ * A read's qualification is a function of its call id, its returned text and
+ * the input tree, none of which changes, so each read is qualified once per
+ * tree and kept. A journal on disk is re-read only when its identity changed;
+ * a live conversation is re-scanned only when its length or last message did. */
 export function createOwnerReadEvidenceReader(from: string | OwnerReadSource): OwnerEvidenceReader {
   const source: OwnerReadSource = typeof from === 'string' ? { surfaceDirectory: from } : from;
-  // Retain only recent exact originals; private journal bytes never become keys
-  // or evidence fields. Oversized entries are still read, simply not cached.
-  const cacheByteLimit = 16 * 1024 * 1024;
+  // Derived results only; journal bytes are never kept. Eight sessions, eight trees.
   const cache = new Map<string, { scope: SourceReadEvidence[]; calls: string[];
     rows: Map<string, [number, string][]>; citations: RegExp;
-    originals: readonly { path: string; buffer: Buffer }[]; byteLength: number;
-    liveStamp?: { readonly count: number; readonly last: unknown } | undefined }>();
+    sources: readonly { path: string; bytes: number }[];
+    stamp: string | { readonly count: number; readonly last: unknown } }>();
+  const qualifiedByTree = new Map<string, Map<string, QualifiedRead>>();
+  const remember = <K, V>(map: Map<K, V>, key: K, value: V): void => {
+    map.delete(key);
+    map.set(key, value);
+    while (map.size > 8) map.delete(map.keys().next().value as K);
+  };
   return (contract, citationText) => {
     if (!contract.sessionId) return none('contract has no owner session');
     if (!contract.inputSnapshot || !/^[a-f0-9]{40,64}$/.test(contract.inputSnapshot.inputTree)) return none('contract has no input tree', contract.sessionId);
     const sessionId = contract.sessionId;
-    const sources: { path: string; buffer: Buffer; bytes: number; contents: string }[] = [];
+    const inputTree = contract.inputSnapshot.inputTree;
+    const journals: { path: string; info: BigIntStats }[] = [];
     let messages: Record<string, unknown>[] | undefined;
     const live = source.liveMessages?.(contract.sessionId);
     if (live) {
@@ -62,42 +83,47 @@ export function createOwnerReadEvidenceReader(from: string | OwnerReadSource): O
         if (existsSync(directory) && (!lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink())) return none('surface directory path is not a plain directory', sessionId);
       }
       // The names the session store and the recovery writer give these files.
-      const sessionFiles = [join(surfaceDirectory, 'sessions', `${sanitizeSessionName(contract.sessionId)}.jsonl`)];
-      try { sessionFiles.push(recoveryFilePath(join(surfaceDirectory, 'recovery'), contract.sessionId)); } catch { /* no recovery name for this id */ }
-      for (const path of sessionFiles) {
+      const sessionFile = join(surfaceDirectory, 'sessions', `${sanitizeSessionName(contract.sessionId)}.jsonl`);
+      let recoveryFile: string | undefined;
+      try { recoveryFile = recoveryFilePath(join(surfaceDirectory, 'recovery'), contract.sessionId); } catch { /* no recovery name for this id */ }
+      for (const path of [sessionFile, ...(recoveryFile ? [recoveryFile] : [])]) {
         if (!existsSync(path)) continue;
-        let bytes: Buffer | undefined;
-        // A session save can land between the two stats; one more read then sees the saved file.
-        for (let attempt = 0; attempt < 2 && bytes === undefined; attempt++) {
-          const info = lstatSync(path, { bigint: true });
-          if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1n || lstatSync(join(path, '..')).isSymbolicLink()) return none('session journal is not a single-link regular file', sessionId);
-          const read = readFileSync(path);
-          if (sameFile(info, lstatSync(path, { bigint: true }))) bytes = read;
-        }
-        if (bytes === undefined) return none('session journal changed while it was read, twice', sessionId);
-        sources.push({ path, buffer: bytes, bytes: bytes.length, contents: bytes.toString('utf8') });
+        const info = lstatSync(path, { bigint: true });
+        if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1n || lstatSync(join(path, '..')).isSymbolicLink()) return none('session journal is not a single-link regular file', sessionId);
+        journals.push({ path, info });
       }
-      if (!sources.length) return none('no session journal on disk', sessionId);
+      // The recovery file is a copy of the same conversation written between
+      // saves; once the session file is newer, the copy adds nothing.
+      const [session, recovery] = journals.length === 2 ? journals : [undefined, undefined];
+      if (session && recovery && session.info.mtimeNs >= recovery.info.mtimeNs) journals.pop();
+      if (!journals.length) return none('no session journal on disk', sessionId);
     }
-    // A live conversation is keyed by its length and last message; files by their bytes.
-    const liveStamp = messages ? { count: messages.length, last: messages[messages.length - 1] } : undefined;
-    const key = JSON.stringify([contract.projectRoot, contract.inputSnapshot.inputTree,
-      messages ? `conversation:${contract.sessionId}` : sources.map(item => item.path)]);
+    // A live conversation is keyed by its length and last message; files by their identity.
+    const stamp = messages ? { count: messages.length, last: messages[messages.length - 1] } : journals.map(({ info }) => fileIdentity(info)).join('|');
+    const key = JSON.stringify([contract.projectRoot, inputTree,
+      messages ? `conversation:${contract.sessionId}` : journals.map(item => item.path)]);
     let saved = cache.get(key);
-    const previous = saved;
-    if (previous && (liveStamp
-      ? previous.liveStamp?.count !== liveStamp.count || previous.liveStamp?.last !== liveStamp.last
-      : !sources.every((item, index) => previous.originals[index]?.buffer.equals(item.buffer)))) {
+    if (saved && (typeof stamp === 'string'
+      ? saved.stamp !== stamp
+      : typeof saved.stamp === 'string' || saved.stamp.count !== stamp.count || saved.stamp.last !== stamp.last)) {
       cache.delete(key); saved = undefined;
     }
     if (!saved) {
-      const turns: ContractTurnRecord[] = [], calls: string[] = [];
-      const originals = new Map<string, string[] | null>();
-      const seen = new Set<string>();
+      const sources: { path: string; bytes: number }[] = [];
       if (!messages) {
         messages = [];
-        for (const item of sources) {
-          for (const line of item.contents.split('\n').filter(Boolean)) {
+        for (const { path, info } of journals) {
+          let bytes: Buffer | undefined;
+          // A session save can land between the two stats; one more read then sees the saved file.
+          for (let attempt = 0; attempt < 2 && bytes === undefined; attempt++) {
+            const before = attempt === 0 ? info : lstatSync(path, { bigint: true });
+            const read = readFileSync(path);
+            if (sameFile(before, lstatSync(path, { bigint: true }))) bytes = read;
+          }
+          if (bytes === undefined) return none('session journal changed while it was read, twice', sessionId);
+          sources.push({ path, bytes: bytes.length });
+          for (const line of bytes.toString('utf8').split('\n')) {
+            if (!line) continue;
             try { const parsed: unknown = JSON.parse(line); if (object(parsed)) messages.push(parsed); } catch { return none('a session journal line is not JSON', sessionId); }
           }
         }
@@ -106,35 +132,44 @@ export function createOwnerReadEvidenceReader(from: string | OwnerReadSource): O
       for (const message of messages) if (message['role'] === 'assistant' && Array.isArray(message['toolCalls'])) {
         for (const call of message['toolCalls']) if (object(call) && call['name'] === 'read' && typeof call['id'] === 'string') requests.set(call['id'], call);
       }
-      const pending: { callId: string; arguments: Record<string, unknown>; files: { path: string; content: string; readObservation?: unknown }[] }[] = [];
+      const qualified = qualifiedByTree.get(inputTree) ?? new Map<string, QualifiedRead>();
+      remember(qualifiedByTree, inputTree, qualified);
+      const records: { callId: string; identity: string }[] = [];
+      const pending: { callId: string; identity: string; files: { path: string; content: string; readObservation?: unknown }[] }[] = [];
+      const seen = new Set<string>();
       for (const message of messages) {
         if (message['role'] !== 'tool' || typeof message['callId'] !== 'string' || typeof message['content'] !== 'string') continue;
-        const call = requests.get(message['callId']);
-        if (!call) continue;
-        const identity = JSON.stringify([message['callId'], message['content']]);
+        if (!requests.has(message['callId'])) continue;
+        // A call id's returned text never changes; its length tells a re-stored copy from a different result.
+        const identity = `${message['callId']}\0${message['content'].length}`;
         if (seen.has(identity)) continue;
         seen.add(identity);
+        records.push({ callId: message['callId'], identity });
+        if (qualified.has(identity)) continue;
         // The read's observations travel beside its text on the stored message; a result stored before that carries them in the text.
         const result = readBodyWithHostEvidence({ output: message['content'], hostEvidence: message['hostEvidence'] as ToolResult['hostEvidence'] });
-        if (result === undefined) continue;
-        if (result['success'] !== true || !Array.isArray(result['files'])) continue;
         const files: { path: string; content: string; readObservation?: unknown }[] = [];
-        for (const file of result['files']) {
-          if (!object(file) || typeof file['path'] !== 'string' || typeof file['content'] !== 'string' || file['error'] || file['binary']
-            || (file['extract'] !== 'content' && file['extract'] !== 'lines')) continue;
-          // One spelling per file: `./src/a.ts`, `src/a.ts` and the absolute path are the same entry.
-          const path = relative(contract.projectRoot, resolve(contract.projectRoot, file.path));
-          if (isAbsolute(path) || /[\r\n\0]/.test(path) || path.split('/').includes('..') || path.startsWith('.goodvibes/') || path.startsWith('.git/')) continue;
-          if (typeof file.resolvedPath === 'string' && file.resolvedPath !== join(contract.projectRoot, path)) continue;
-          files.push({ path, content: file.content, readObservation: file['readObservation'] });
+        if (result !== undefined && result['success'] === true && Array.isArray(result['files'])) {
+          for (const file of result['files']) {
+            if (!object(file) || typeof file['path'] !== 'string' || typeof file['content'] !== 'string' || file['error'] || file['binary']
+              || (file['extract'] !== 'content' && file['extract'] !== 'lines')) continue;
+            // One spelling per file: `./src/a.ts`, `src/a.ts` and the absolute path are the same entry.
+            const path = relative(contract.projectRoot, resolve(contract.projectRoot, file.path));
+            if (isAbsolute(path) || /[\r\n\0]/.test(path) || path.split('/').includes('..') || path.startsWith('.goodvibes/') || path.startsWith('.git/')) continue;
+            if (typeof file.resolvedPath === 'string' && file.resolvedPath !== join(contract.projectRoot, path)) continue;
+            files.push({ path, content: file.content, readObservation: file['readObservation'] });
+          }
         }
-        if (files.length) pending.push({ callId: message['callId'], arguments: object(call['arguments']) ? call['arguments'] : {}, files });
+        if (files.length) pending.push({ callId: message['callId'], identity, files });
+        else qualified.set(identity, []);
       }
+      // The input tree is read only for files a not-yet-qualified read returned.
+      const originals = new Map<string, string[] | null>();
       const sourcePaths = [...new Set(pending.flatMap(record => record.files.map(file => file.path)))];
       for (let offset = 0; offset < sourcePaths.length; offset += 64) {
         const batch = sourcePaths.slice(offset, offset + 64);
         const blobs = spawnSync('git', ['-C', contract.projectRoot, 'cat-file', '--batch'], {
-          input: batch.map(path => `${contract.inputSnapshot!.inputTree}:${path}\n`).join(''), maxBuffer: 32 * 1024 * 1024,
+          input: batch.map(path => `${inputTree}:${path}\n`).join(''), maxBuffer: 32 * 1024 * 1024,
         });
         if (blobs.status !== 0) return none('git cat-file failed on the input tree', sessionId);
         let position = 0;
@@ -153,44 +188,39 @@ export function createOwnerReadEvidenceReader(from: string | OwnerReadSource): O
           position = end + 1 + size + 1;
         }
       }
-      const returned = new Map<string, Map<number, string>>();
       for (const record of pending) {
-        const files: { path: string; extract: 'lines'; content: string }[] = [];
+        const reads: { path: string; rows: [number, string][] }[] = [];
         for (const file of record.files) {
-          const path = file.path;
-          const original = originals.get(path);
+          const original = originals.get(file.path);
           if (!original) continue;
-          const rows = returnedReadRows(file).filter((row: string) => {
+          const rows: [number, string][] = [];
+          for (const row of returnedReadRows(file)) {
             const match = /^[ \t]*(\d+) \| ?(.*)$/.exec(row);
-            return match !== null && Number.isSafeInteger(Number(match[1])) && Number(match[1]) > 0 && original[Number(match[1]) - 1] === match[2];
-          });
-          if (rows.length) {
-            files.push({ path, extract: 'lines', content: rows.join('\n') });
-            const numbered = returned.get(path) ?? new Map<number, string>();
-            for (const row of rows) numbered.set(Number(/^[ \t]*(\d+) \|/.exec(row)![1]), row);
-            returned.set(path, numbered);
+            const line = Number(match?.[1]);
+            if (match && Number.isSafeInteger(line) && line > 0 && original[line - 1] === match[2]) rows.push([line, row]);
           }
+          if (rows.length) reads.push({ path: file.path, rows });
         }
-        if (!files.length) continue;
-        calls.push(record.callId);
-        turns.push({ turn: turns.length + 1, assistantText: '', toolCalls: [{ name: 'read', arguments: record.arguments }],
-          results: [{ callId: record.callId, success: true, output: JSON.stringify({ success: true, files }) }] });
+        qualified.set(record.identity, reads);
       }
-      const scope = sourceReadsFromTurns(turns);
+      const returned = new Map<string, Map<number, string>>();
+      const calls: string[] = [];
+      for (const record of records) {
+        const reads = qualified.get(record.identity);
+        if (!reads?.length) continue;
+        calls.push(record.callId);
+        for (const read of reads) {
+          const numbered = returned.get(read.path) ?? new Map<number, string>();
+          for (const [line, row] of read.rows) numbered.set(line, row);
+          returned.set(read.path, numbered);
+        }
+      }
+      const scope = sourceReadsFromFolded(returned);
       const names = scope.map(read => read.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).sort((a, b) => b.length - a.length);
       saved = { scope, calls, rows: new Map([...returned].map(([path, rows]) => [path, [...rows].sort(([a], [b]) => a - b)])),
         citations: new RegExp('(?<![\\w./-])(' + (names.join('|') || '(?!)') + ')(?::|#L)(\\d+)(?:[-–]L?(\\d+))?', 'g'),
-        originals: sources.map(({ path, buffer }) => ({ path, buffer })), byteLength: sources.reduce((total, item) => total + item.bytes, 0),
-        ...(liveStamp ? { liveStamp } : {}) };
-      if (saved.byteLength <= cacheByteLimit) {
-        let retainedBytes = [...cache.values()].reduce((total, entry) => total + entry.byteLength, 0);
-        while (cache.size >= 8 || retainedBytes + saved.byteLength > cacheByteLimit) {
-          const oldest = cache.entries().next().value;
-          if (!oldest) break;
-          retainedBytes -= oldest[1].byteLength; cache.delete(oldest[0]);
-        }
-        cache.set(key, saved);
-      }
+        sources, stamp };
+      remember(cache, key, saved);
     }
     saved.citations.lastIndex = 0;
     const cited = new Map<string, [number, number][]>();
@@ -211,9 +241,9 @@ export function createOwnerReadEvidenceReader(from: string | OwnerReadSource): O
         ownerSessionId: contract.sessionId, inputTree: contract.inputSnapshot.inputTree,
         qualifiedFiles: reads.length, returnedLines: reads.reduce((total, read) => total + read.returnedLines, 0),
         meaning: 'Actual original-owner tool returns matched the immutable source line by line. This establishes returned scope and cited text, not semantic review quality, tests or native acceptance.' },
-      sources: messages && !sources.length
+      sources: !saved.sources.length
         ? [{ operation: 'read-owner-session', success: true, path: `conversation:${contract.sessionId}`, bytes: 0 }]
-        : sources.map(({ path, bytes }) => ({ operation: 'read-owner-session', success: true, path, bytes })),
+        : saved.sources.map(({ path, bytes }) => ({ operation: 'read-owner-session', success: true, path, bytes })),
       sourceReads: reads.map(read => ({ ...read, returnedRanges: [...read.returnedRanges] })),
       meaning: 'Actual recorded original-owner successful read results, qualified line by line against this immutable contract input. Only complete returned source lines with matching host offsets and original text count; requests, declared totals, searches and previews do not. Line labels may be normalized from host-bound plain returns. Quoted contents are limited to cited source ranges. These are earlier owner observations, not worker actions, executed tests, semantic review approval or acceptance of this answer.',
     };

@@ -147,7 +147,9 @@ export function createConversationRenderer(presentation: ConversationPresentatio
             lineNumberMode: config?.get('display.lineNumbers') ?? 'off',
             collapseThreshold: config?.get('display.collapseThreshold') ?? 30,
             collapseState: context.collapseState,
-            isNavigableSystem: (index, content) => navigable(context, index, content),
+            // Notices are drawn after the turn with their own level; the only system row
+            // inside a turn is the model-switch line, which is information.
+            isNavigableSystem: (index) => navigable(context, index, 'info'),
             frame: context.frame ?? 0,
         }, presentation.rows);
     }

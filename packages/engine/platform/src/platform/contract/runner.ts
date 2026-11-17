@@ -433,7 +433,12 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     const worktrees = deps.worktrees ?? new WorktreeRegistry(contract.projectRoot);
     const targets = [{ path: contract.worktreePath!, baseBranch: contract.baseBranch },
       ...(contract.inputSnapshot === undefined ? [] : [{ path: contractInputPath(contract.inputSnapshot), baseBranch: contract.baseBranch }])];
-    void worktrees.releaseEnded(targets).catch((error: unknown) => {
+    void worktrees.releaseEnded(targets).then((report) => {
+      // What the release did is recorded; a tree kept with work in it is listed again with its next steps at the next start.
+      for (const entry of report.removed) logger.info('contract worktree released', { contractId: contract.id, path: entry.path, note: entry.note });
+      for (const entry of report.kept) logger.info('contract worktree kept', { contractId: contract.id, path: entry.path, why: entry.reason.why, detail: entry.reason.detail });
+      for (const entry of report.failed) logger.warn('contract worktree could not be removed', { contractId: contract.id, path: entry.path, error: entry.error });
+    }).catch((error: unknown) => {
       logger.warn('contract worktree could not be released', { contractId: contract.id, error: summarizeError(error) });
     });
   }

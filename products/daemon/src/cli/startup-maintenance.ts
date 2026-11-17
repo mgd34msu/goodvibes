@@ -1,6 +1,6 @@
 /** Original startup maintenance, scoped to the admitted CLI owner. */
 import { controlPlaneScheme, ensurePublicBaseUrl, pruneStaleOperatorTokens } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { WorktreeRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { formatWorktreeStartupReport, WorktreeRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { workspaceOperatorTokenCandidates } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
@@ -36,12 +36,15 @@ export function persistDaemonStartupPublicUrl(
 
 /**
  * Apply the worktree retention policy to leftovers from earlier runs, then
- * return the one line to print when kept worktrees hold a lot of disk (null
- * otherwise). Never throws: a failure here must not stop the daemon starting.
+ * return what to print: each worktree removed, each kept for the owner's
+ * decision with the next steps, each removal that did not complete, and the
+ * disk-use line (null when there is nothing to say). Never throws: a failure
+ * here must not stop the daemon starting.
  */
 export async function sweepDaemonWorktrees(configuration: DaemonCliConfiguration): Promise<string | null> {
   try {
-    return await new WorktreeRegistry(configuration.workingDirectory).startupSweep();
+    const report = await new WorktreeRegistry(configuration.workingDirectory).startupSweep();
+    return report ? formatWorktreeStartupReport(report, configuration.workingDirectory) : null;
   } catch {
     return null;
   }

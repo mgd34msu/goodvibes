@@ -31,6 +31,21 @@ export function formatSetupDetail(setup: ManagedWorktreeMeta['setup']): string[]
 
 type KeptWorktreeInfo = Awaited<ReturnType<WorktreeRegistry['describeKept']>>[number];
 
+/** The next steps of a worktree kept for the owner's decision, one per line under its row; empty for any other. */
+function formatNextSteps(steps: readonly string[] | undefined): string {
+  return steps && steps.length > 0 ? steps.map((step) => `\n        ${step}`).join('') : '';
+}
+
+/** What this process's start-up pass removed, so the review shows it as well as the start notice did. */
+function formatStartupRemovals(runtime: WorktreeRegistry): string[] {
+  const report = runtime.lastStartupReport();
+  if (!report || report.removed.length === 0) return [];
+  return [
+    `  removed at start (${new Date(report.finishedAt).toLocaleTimeString()}):`,
+    ...report.removed.map((entry) => `    ${entry.path}: ${entry.note}`),
+  ];
+}
+
 /** Retention view of the product's own worktrees (age, size, why kept), or why it could not be read. */
 async function describeKeptWorktrees(
   runtime: WorktreeRegistry,
@@ -92,7 +107,7 @@ export function registerWorktreeRuntimeCommands(registry: CommandRegistry): void
           `  updated: ${new Date(record.updatedAt).toLocaleString()}`,
           ...formatSetupDetail(record.setup),
           ...(nextSteps.length > 0 ? ['  next:', ...nextSteps.map((step) => `    ${step}`)] : ['  next: /worktree review']),
-          ...kept.infos.map((info) => `  kept: ${info.summary}`),
+          ...kept.infos.map((info) => `  kept: ${info.summary}${formatNextSteps(info.nextSteps)}`),
           ...(kept.failure ? [kept.failure] : []),
         ].join('\n'));
         return;
@@ -235,12 +250,13 @@ export function registerWorktreeRuntimeCommands(registry: CommandRegistry): void
             `  session attached: ${summary.sessionAttached}  task attached: ${summary.taskAttached}`,
             `  agent owned: ${summary.agentOwned}  orchestrator owned: ${summary.orchestratorOwned}  manual: ${summary.manualOwned}`,
             ...rows.map((row) => (
-              `  ${row.kind.padEnd(12)} ${row.state.padEnd(15)} ${row.branch.padEnd(22)} session=${(row.sessionId ?? '-').padEnd(12)} task=${(row.taskId ?? '-').padEnd(12)} ${row.path}${formatSetupTag(row.setup)}${keptInfo.has(row.path) ? `\n      ${keptInfo.get(row.path)!.summary}` : ''}`
+              `  ${row.kind.padEnd(12)} ${row.state.padEnd(15)} ${row.branch.padEnd(22)} session=${(row.sessionId ?? '-').padEnd(12)} task=${(row.taskId ?? '-').padEnd(12)} ${row.path}${formatSetupTag(row.setup)}${keptInfo.has(row.path) ? `\n      ${keptInfo.get(row.path)!.summary}` : ''}${formatNextSteps(keptInfo.get(row.path)?.nextSteps)}`
             )),
             ...(keptInfo.size > 0 ? ['  Discard one you no longer need with /worktree discard <path>; the branch and any uncommitted state are preserved on it.'] : []),
+            ...formatStartupRemovals(runtime),
             ...(kept.failure ? [kept.failure] : []),
           ].join('\n')
-        : 'Worktree Review\n  No worktrees discovered.');
+        : ['Worktree Review', '  No worktrees discovered.', ...formatStartupRemovals(runtime)].join('\n'));
     },
   });
 }

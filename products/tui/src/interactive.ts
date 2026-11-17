@@ -59,6 +59,7 @@ import { formatStatusReport } from './shell/status-report.ts';
 import { voiceCaptureDescription } from './renderer/voice-capture-chip.ts';
 import { voiceCaptureRowVisible } from './core/voice-capture-status.ts';
 import { resolveWebSurfaceUrl } from '@goodvibes-jev/engine/platform/platform/runtime/feature-announcements';
+import { worktreeStatusLines } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { emitAgentAwaitingMessage, emitAgentAwaitingTool } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
 import { createFailoverTurnState, resolveActiveModelDisplay } from './core/active-model-identity.ts';
 import { computePromptContentWidth } from './renderer/prompt-content-width.ts';
@@ -1281,6 +1282,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       microphone: voice && voiceCaptureRowVisible(voice) ? voiceCaptureDescription(voice) : null,
       runningAgents: agentManager.list().filter((a) => a.status === 'running' || a.status === 'pending').length,
       runningProcesses: processManager.runningCount(),
+      worktrees: worktreeStatusLines(ctx.services.worktreeRegistry.lastStartupReport(), workingDir),
     });
   };
   wireShellUiOpeners({

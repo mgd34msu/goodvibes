@@ -56,6 +56,7 @@ import { ensureBootModelResolvable } from './provider-boot.ts';
 import { bindSessionContextAccounting } from '@goodvibes-jev/engine/platform/platform/tools';
 import { createBootstrapShell } from './bootstrap-shell.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { formatWorktreeStartupReport } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import '@goodvibes-jev/engine/terminal-shell';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { registerAgentTools } from './bootstrap-agent-tools.ts';
@@ -473,8 +474,14 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     logger.info(announcement.text, { announcement: announcement.id });
     systemMessageRouter.low(`[Startup] ${announcement.text}`);
   }
-  // Retention for worktrees earlier runs left (the daemon runs the same pass at its start).
-  void services.worktreeRegistry.startupSweep().then((notice) => { if (notice) systemMessageRouter.low(`[Worktrees] ${notice}`); });
+  // Retention for worktrees earlier runs left (the daemon runs the same pass at its start). Everything it removed
+  // and every worktree it kept for the owner's decision is shown; only the disk-use line alone stays in the activity feed.
+  void services.worktreeRegistry.startupSweep().then((report) => {
+    const text = report ? formatWorktreeStartupReport(report, workingDir) : null;
+    if (!text || !report) return;
+    if (report.removed.length > 0 || report.attention.length > 0 || report.failed.length > 0) systemMessageRouter.high(`[Worktrees] ${text}`, report.attention.length > 0 || report.failed.length > 0 ? 'warning' : 'info');
+    else systemMessageRouter.low(`[Worktrees] ${text}`);
+  });
   const commandRegistry = shell.commandRegistry;
   const commandContext = shell.commandContext;
   const inputHistory = shell.inputHistory;

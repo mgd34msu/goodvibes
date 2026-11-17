@@ -55,6 +55,7 @@ import { bindWriteLastSessionPointerToSurface, ProcessTaskAdapter } from '@goodv
 import { deriveSpineFooterStatus, type SessionSpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import { transportRetryHooks } from '@goodvibes-jev/engine/platform/platform/runtime/emitters';
 import { bindControlCommands } from './control-surfaces.ts';
+import { formatWorktreeStartupReport } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { createSpineAdoptionSync } from './client/spine-adoption.ts';
 import { pruneStaleOperatorTokens } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { resolveDaemonCompanionToken, workspaceOperatorTokenCandidates } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
@@ -378,8 +379,14 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     // Best-effort, never let the resume notice block or crash boot.
   });
   announceInstallHealth(systemMessageRouter);
-  // Retention for worktrees earlier runs left (the daemon runs the same pass at its start).
-  void services.worktreeRegistry.startupSweep().then((notice) => { if (notice) systemMessageRouter.low(`[Worktrees] ${notice}`); });
+  // Retention for worktrees earlier runs left (the daemon runs the same pass at its start). Everything it removed
+  // and every worktree it kept for the owner's decision is shown; only the disk-use line alone stays in the activity feed.
+  void services.worktreeRegistry.startupSweep().then((report) => {
+    const text = report ? formatWorktreeStartupReport(report, workingDir) : null;
+    if (!text || !report) return;
+    if (report.removed.length > 0 || report.attention.length > 0 || report.failed.length > 0) systemMessageRouter.high(`[Worktrees] ${text}`, report.attention.length > 0 || report.failed.length > 0 ? 'warning' : 'info');
+    else systemMessageRouter.low(`[Worktrees] ${text}`);
+  });
   const { gitStatusProvider, inputHistory, lastGitInfoRef } = shell;
   // FIX 2: dispose the header's live-repo-state poll (git-status.ts
   // startPolling) on shutdown, same pattern as acpTaskSyncInterval above.

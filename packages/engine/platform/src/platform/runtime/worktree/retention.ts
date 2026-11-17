@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
-import { unsettledWorktreeReason } from '../../git/product-worktree-marker.js';
+import { unsettledWorktreeReason, WORKTREE_CREATION_GRACE_MS } from '../../git/product-worktree-marker.js';
 
 /**
  * Retention policy for product-created worktrees under `.goodvibes/.worktrees`.
@@ -15,11 +15,17 @@ import { unsettledWorktreeReason } from '../../git/product-worktree-marker.js';
  *   ended, listed with its size, then removed. Files that are copies of the main
  *   checkout's (a carried-over `.env` that still matches) and the dependency
  *   folders setup installs (`node_modules`, `.venv`) are not local state at all.
- * - Uncommitted changes, or git state that cannot be read: never removed here.
- * - No created-by record (made by a version before the record existed): removed
- *   once no running owner holds it and its creation has settled (git no longer
- *   holds it locked and it is older than the creation grace period), whatever it
- *   holds; its branch is kept unless every commit on it is already in its base.
+ * - Uncommitted changes (tracked or untracked), or git state that cannot be
+ *   read: never removed automatically; listed at start with the next steps.
+ * - Commits on a detached HEAD that no branch holds: saved to the branch
+ *   `goodvibes/saved-<first 12 hex of HEAD>` before the directory may go.
+ * - No created-by record (made by a version before the record existed): the
+ *   same protections; it is removed only once no running owner holds it, git
+ *   does not hold it locked, nothing touched it for the creation grace period,
+ *   it has no uncommitted or untracked change and every commit on it is held by
+ *   a branch or its base. Ignored files of its own delay that by the retention
+ *   period after its last use. Removal is never forced; its branch is deleted
+ *   only when merged.
  */
 export const DEFAULT_WORKTREE_RETENTION_DAYS = 14;
 export const DEFAULT_WORKTREE_RETENTION_MS = DEFAULT_WORKTREE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
@@ -40,8 +46,9 @@ export interface WorktreeOwnerInfo {
 /** What git says is in a worktree. */
 export type WorktreeAssessment =
   /** `ignored`: ignored files or folders that are this worktree's own (not copies, not installed dependencies). */
-  | { readonly kind: 'nothing-unique'; readonly branch: string | null; readonly ignored?: number | undefined }
-  | { readonly kind: 'unmerged'; readonly branch: string | null; readonly commits: number; readonly base: string; readonly ignored?: number | undefined }
+  | { readonly kind: 'nothing-unique'; readonly branch: string | null; readonly head: string; readonly ignored?: number | undefined }
+  /** `heldBy`: on a detached HEAD, a branch that already contains HEAD, so its commits stay reachable without this worktree. */
+  | { readonly kind: 'unmerged'; readonly branch: string | null; readonly head: string; readonly commits: number; readonly base: string; readonly heldBy?: string | undefined; readonly ignored?: number | undefined }
   | { readonly kind: 'uncommitted'; readonly changes: number; readonly ignored: number }
   | { readonly kind: 'unreadable'; readonly reason: string };
 
@@ -49,6 +56,8 @@ export type WorktreeAssessment =
 export type WorktreeKeepReason =
   | { readonly why: 'running'; readonly detail: string }
   | { readonly why: 'uncommitted'; readonly detail: string }
+  /** Commits on a detached HEAD that no branch holds, and a branch to hold them could not be made. */
+  | { readonly why: 'detached'; readonly detail: string }
   | { readonly why: 'unmerged'; readonly detail: string; readonly pruneInDays: number | null }
   /** Only ignored files of its own: kept for the retention period, then removed. */
   | { readonly why: 'ignored'; readonly detail: string; readonly pruneInDays: number | null }
@@ -122,8 +131,69 @@ export async function assessWorktree(path: string, rootDir: string, baseBranch?:
   const branch = branchResult.ok && branchResult.out.length > 0 ? branchResult.out : null;
   const baseLabel = baseBranch ?? 'the current branch';
   const own = ignored > 0 ? { ignored } : {};
-  if (commits === 0) return { kind: 'nothing-unique', branch, ...own };
-  return { kind: 'unmerged', branch, commits, base: baseLabel, ...own };
+  if (commits === 0) return { kind: 'nothing-unique', branch, head: head.out, ...own };
+  if (branch === null) {
+    // A detached HEAD: its commits outlive the directory only if some branch already contains them.
+    const holders = await runGit(rootDir, ['for-each-ref', '--count=1', '--contains', head.out, '--format=%(refname:short)', 'refs/heads']);
+    if (!holders.ok) return { kind: 'unreadable', reason: 'git could not tell whether a branch holds its detached HEAD' };
+    if (holders.out.length > 0) return { kind: 'unmerged', branch, head: head.out, commits, base: baseLabel, heldBy: holders.out, ...own };
+  }
+  return { kind: 'unmerged', branch, head: head.out, commits, base: baseLabel, ...own };
+}
+
+/** The branch the sweep saves a detached HEAD's commits to before the directory may go. */
+export function savedBranchName(head: string): string {
+  return `goodvibes/saved-${head.slice(0, 12)}`;
+}
+
+/** A path as one shell word, quoted only when it needs to be. */
+function shellWord(value: string): string {
+  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * The exact next steps for a worktree kept because it needs its owner's
+ * decision: save what it holds, keep it as it is (which also ends the notice),
+ * or discard it. Each is a git command, so it works from any shell and any of
+ * the programs; discarding is the owner's own act.
+ */
+export function worktreeNextSteps(input: {
+  readonly path: string;
+  readonly why: WorktreeKeepReason['why'];
+  /** The branch checked out there, or null on a detached HEAD. */
+  readonly branch: string | null;
+  /** HEAD, when it could be read: names the branch a detached HEAD is saved to. */
+  readonly head?: string | undefined;
+}): string[] {
+  const at = shellWord(input.path);
+  const name = input.path.split(/[\\/]/).filter(Boolean).pop() ?? 'worktree';
+  const newBranch = input.head ? savedBranchName(input.head) : `goodvibes/saved-${name}`;
+  const keep = `keep as is: git worktree lock ${at}   (never removed automatically, and no longer listed)`;
+  if (input.why === 'uncommitted') {
+    const onBranch = input.branch === null ? `git -C ${at} switch -c ${newBranch} && ` : '';
+    return [
+      `save it:    ${onBranch}git -C ${at} add -A && git -C ${at} commit -m ${shellWord(`Work kept from ${name}`)}   (branch ${input.branch ?? newBranch} then holds the work, and the directory is cleaned up by the usual rules)`,
+      keep,
+      `discard it: git worktree remove --force ${at}   (deletes the uncommitted changes)`,
+    ];
+  }
+  if (input.why === 'detached') {
+    return [
+      `save it:    git -C ${at} switch -c ${newBranch}`,
+      keep,
+      `discard it: git worktree remove --force ${at}   (its commits are then on no branch)`,
+    ];
+  }
+  return [
+    `look at it: git -C ${at} status`,
+    keep,
+    `discard it: git worktree remove --force ${at}   (or git worktree prune when the directory is already gone)`,
+  ];
+}
+
+/** Keep reasons that need the owner's decision, so they are listed at every start until it is made. */
+export function needsOwnerDecision(reason: WorktreeKeepReason): boolean {
+  return reason.why === 'uncommitted' || reason.why === 'detached' || reason.why === 'unreadable';
 }
 
 /** Folders the derived setup commands install (bun/npm/pnpm/yarn, uv): rebuilt by running setup again. */
@@ -148,7 +218,7 @@ function regenerable(entry: string, worktree: string, rootDir: string): boolean 
 /** The local state a worktree holds that no commit does, in words: "2 uncommitted change(s) and 1 ignored file(s)". */
 export function describeLocalState(changes: number, ignored: number): string {
   const parts: string[] = [];
-  if (changes > 0) parts.push(`${changes} uncommitted change(s)`);
+  if (changes > 0) parts.push(`${changes} uncommitted or untracked change(s)`);
   if (ignored > 0) parts.push(`${ignored} ignored file(s) or folder(s) (not in git, deleted with the directory)`);
   return parts.join(' and ');
 }
@@ -197,15 +267,23 @@ export function formatAge(ms: number): string {
 /** What the policy does with one worktree. */
 export interface WorktreeEvaluation {
   /**
-   * `remove-all`: directory and branch. `prune-directory`: directory only, the branch stays.
-   * `remove-unmarked`: a worktree from before the created-by record, removed with whatever it holds.
+   * `remove-all`: directory and branch (the branch only when merged). `prune-directory`: directory only, the branch stays.
+   * `remove-unmarked`: a worktree from before the created-by record that holds nothing found nowhere else; its branch is deleted only when merged.
    * `keep`: nothing is touched.
+   * Removal is never forced: git's own refusal of a tree with changes is the last check.
    */
   readonly action: 'remove-all' | 'prune-directory' | 'remove-unmarked' | 'keep';
   readonly reason: WorktreeKeepReason;
   readonly assessment: WorktreeAssessment;
   /** The moment retention counts from: when the owner ended, else the last sign of life. */
   readonly sinceMs: number;
+  /** A detached HEAD no branch holds: the branch its commits are saved to before the directory goes. */
+  readonly saveAs?: string | undefined;
+}
+
+/** The branch that holds a worktree's commits once its directory is gone, in words. */
+function holderOf(assessment: Extract<WorktreeAssessment, { kind: 'unmerged' }>, saveAs: string | undefined): string {
+  return assessment.branch ?? assessment.heldBy ?? saveAs ?? '(none)';
 }
 
 /**
@@ -222,7 +300,7 @@ export async function evaluateWorktree(input: {
 }): Promise<WorktreeEvaluation> {
   const { path, rootDir, owner, now, retentionMs } = input;
   if (owner.state === 'running') {
-    return { action: 'keep', reason: { why: 'running', detail: 'its contract or agent is still running' }, assessment: { kind: 'unreadable', reason: 'not read while running' }, sinceMs: now };
+    return { action: 'keep', reason: { why: 'running', detail: 'its contract, workstream or agent is still running' }, assessment: { kind: 'unreadable', reason: 'not read while running' }, sinceMs: now };
   }
   const assessment = await assessWorktree(path, rootDir, owner.baseBranch);
   const ended = owner.state === 'ended' && owner.endedAt !== undefined;
@@ -233,9 +311,6 @@ export async function evaluateWorktree(input: {
   }
   if (assessment.kind === 'unreadable') {
     return keep({ why: 'unreadable', detail: `kept because ${assessment.reason}` });
-  }
-  if (assessment.kind === 'unmerged' && assessment.branch === null) {
-    return keep({ why: 'unreadable', detail: `${assessment.commits} commit(s) exist only in this detached worktree; create a branch to keep them` });
   }
   const due = now - sinceMs >= retentionMs;
   if (!ended && !due) {
@@ -249,17 +324,24 @@ export async function evaluateWorktree(input: {
     if (!ended || !due) return keep({ why: 'ignored', detail: `${describeLocalState(0, local)}; removed in ${pruneInDays} day(s)`, pruneInDays });
     return { action: 'remove-all', reason: { why: 'removable', detail: `every commit is in its base; past retention, removed with ${describeLocalState(0, local)}` }, assessment, sinceMs };
   }
+  const saveAs = assessment.branch === null && assessment.heldBy === undefined ? savedBranchName(assessment.head) : undefined;
   if (!due) {
-    return keep({ why: 'unmerged', detail: `${assessment.commits} commit(s) not in ${assessment.base}; the directory is pruned in ${pruneInDays} day(s), the branch is kept`, pruneInDays });
+    const held = saveAs ? `are on a detached HEAD and are saved to branch ${saveAs} before the directory is pruned in ${pruneInDays} day(s)`
+      : `stay on branch ${holderOf(assessment, undefined)}; the directory is pruned in ${pruneInDays} day(s), the branch is kept`;
+    return keep({ why: 'unmerged', detail: `${assessment.commits} commit(s) not in ${assessment.base} ${held}`, pruneInDays });
   }
-  return { action: 'prune-directory', reason: { why: 'unmerged', detail: `${assessment.commits} commit(s) not in ${assessment.base}; past retention, directory pruned and branch ${assessment.branch ?? ''} kept`, pruneInDays: 0 }, assessment, sinceMs };
+  return { action: 'prune-directory', reason: { why: 'unmerged', detail: `${assessment.commits} commit(s) not in ${assessment.base}; past retention, directory pruned and branch ${holderOf(assessment, saveAs)} kept`, pruneInDays: 0 }, assessment, sinceMs, ...(saveAs ? { saveAs } : {}) };
 }
 
 /**
  * Decide on a worktree under `.goodvibes/.worktrees` that carries no created-by
- * record: one made by a version of the product before that record existed. The
- * owner's rule is that these go, uncommitted changes included; only a running
- * owner keeps one. What it held is read so the removal can say what was lost.
+ * record: one made by a version of the product before that record existed.
+ * It goes only when it is provably disposable: no running owner, not locked,
+ * not in use in the last grace period, no uncommitted or untracked change, and
+ * every commit on it held by a branch or its base (a detached HEAD no branch
+ * holds is saved to a new branch first). Anything else is kept and listed at
+ * start for its owner to decide. Ignored files of its own delay removal by the
+ * retention period after its last use.
  */
 export async function evaluateUnmarkedWorktree(input: {
   readonly path: string;
@@ -267,22 +349,39 @@ export async function evaluateUnmarkedWorktree(input: {
   readonly registeredAt: number;
   readonly owner: WorktreeOwnerInfo;
   readonly now: number;
+  readonly retentionMs?: number | undefined;
 }): Promise<WorktreeEvaluation> {
   const { path, rootDir, owner, now } = input;
+  const retentionMs = input.retentionMs ?? DEFAULT_WORKTREE_RETENTION_MS;
   if (owner.state === 'running') {
-    return { action: 'keep', reason: { why: 'running', detail: 'its contract or agent is still running' }, assessment: { kind: 'unreadable', reason: 'not read while running' }, sinceMs: now };
+    return { action: 'keep', reason: { why: 'running', detail: 'its contract, workstream or agent is still running' }, assessment: { kind: 'unreadable', reason: 'not read while running' }, sinceMs: now };
   }
-  // Git lists a worktree from the moment its add begins, before the record is written.
+  // Git lists a worktree from the moment its add begins, before the record is written; a lock or a young link keeps it.
   const unsettled = unsettledWorktreeReason(path, now);
   if (unsettled) {
     return { action: 'keep', reason: { why: 'running', detail: `kept because ${unsettled}` }, assessment: { kind: 'unreadable', reason: 'not read while in creation' }, sinceMs: now };
   }
+  const lastUse = await lastWorktreeActivity(path, 0);
+  // With no owner on record, a program of any version still working there is seen by its HEAD or index moving.
+  if (owner.state !== 'ended' && now - lastUse < WORKTREE_CREATION_GRACE_MS) {
+    return { action: 'keep', reason: { why: 'running', detail: `kept because git used it ${Math.max(0, Math.round((now - lastUse) / 1000))} s ago, so a program may still be working in it` }, assessment: { kind: 'unreadable', reason: 'not read while in use' }, sinceMs: now };
+  }
   const assessment = await assessWorktree(path, rootDir, owner.baseBranch);
-  const sinceMs = owner.state === 'ended' && owner.endedAt !== undefined ? owner.endedAt : input.registeredAt;
-  // Git cannot remove a tree it does not recognise as its worktree; say why it stays rather than fail the removal.
-  if (assessment.kind === 'unreadable') return { action: 'keep', reason: { why: 'unreadable', detail: `kept because ${assessment.reason}` }, assessment, sinceMs };
-  const held = assessment.kind === 'uncommitted' ? `; ${describeLocalState(assessment.changes, assessment.ignored)} removed with it`
-    : assessment.kind === 'unmerged' ? `; ${assessment.commits} commit(s) not in ${assessment.base} stay on branch ${assessment.branch ?? '(detached)'}`
-      : '';
-  return { action: 'remove-unmarked', reason: { why: 'removable', detail: `created before this release (no created-by record), so it is removed${held}` }, assessment, sinceMs };
+  const sinceMs = owner.state === 'ended' && owner.endedAt !== undefined ? owner.endedAt : lastUse > 0 ? lastUse : input.registeredAt;
+  const keep = (reason: WorktreeKeepReason): WorktreeEvaluation => ({ action: 'keep', reason, assessment, sinceMs });
+  if (assessment.kind === 'unreadable') return keep({ why: 'unreadable', detail: `kept because ${assessment.reason}` });
+  if (assessment.kind === 'uncommitted') {
+    return keep({ why: 'uncommitted', detail: `created before this release, kept because it holds ${describeLocalState(assessment.changes, assessment.ignored)}; never removed automatically` });
+  }
+  const local = assessment.ignored ?? 0;
+  const pruneInDays = daysUntilPrune(sinceMs, now, retentionMs);
+  if (local > 0 && now - sinceMs < retentionMs) {
+    return keep({ why: 'ignored', detail: `created before this release; ${describeLocalState(0, local)}; removed in ${pruneInDays} day(s) unless used again`, pruneInDays });
+  }
+  const saveAs = assessment.kind === 'unmerged' && assessment.branch === null && assessment.heldBy === undefined ? savedBranchName(assessment.head) : undefined;
+  const held = assessment.kind !== 'unmerged' ? ''
+    : saveAs ? `; its ${assessment.commits} commit(s) on a detached HEAD are saved to new branch ${saveAs} first`
+      : `; its ${assessment.commits} commit(s) not in ${assessment.base} stay on branch ${holderOf(assessment, undefined)}`;
+  const lost = local > 0 ? `; ${describeLocalState(0, local)} go with the directory` : '';
+  return { action: 'remove-unmarked', reason: { why: 'removable', detail: `created before this release; everything in it is also on a branch or in its base, so its directory is removed${held}${lost}` }, assessment, sinceMs, ...(saveAs ? { saveAs } : {}) };
 }

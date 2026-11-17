@@ -234,7 +234,8 @@ export function runConfiguredDaemonCli(
       published = publishDaemonRuntimeRecord(daemonHomeDirectory, { ...actual, command: 'goodvibes-daemon serve' });
       // Background: the sweep reads git for every leftover worktree and must not delay the endpoint line.
       // close() waits for it, so the process never exits halfway through removing a worktree.
-      worktreeSweep = sweepWorktrees(selected).then((notice) => { if (notice && !closed) stderr(`[goodvibes-daemon] ${notice}`); });
+      // One journal line per item, each tagged, so a service manager's log shows every worktree removed or kept.
+      worktreeSweep = sweepWorktrees(selected).then((notice) => { if (notice && !closed) for (const line of notice.split('\n')) stderr(`[goodvibes-daemon] worktrees: ${line}`); });
       const clientBinding = readControlPlaneBinding((key) => isKnownConfigKey(key, config.getSchema()) ? config.get(key) : undefined);
       if (describeDerivedBindMismatch(actual, clientBinding) !== null) {
         // The canonical helper decides drift; its raw host/URL prose is private.

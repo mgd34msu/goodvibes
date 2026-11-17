@@ -5,10 +5,11 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
  * The durable fact that this product created a worktree: a small file in the
  * worktree's own git administrative directory, written when it is added. Git
  * deletes that directory with the worktree, so the fact cannot outlive it or
- * be inherited by a different worktree at the same path. The retention sweep
- * removes a worktree in the product's own location that lacks it (one made by
- * an earlier version) once no running owner holds it and its creation has
- * settled; worktrees elsewhere are never removed automatically.
+ * be inherited by a different worktree at the same path. A worktree in the
+ * product's own location that lacks it (one made by an earlier version) is
+ * removed by the retention sweep only when it holds nothing that exists nowhere
+ * else (see `evaluateUnmarkedWorktree`); worktrees elsewhere are never removed
+ * automatically.
  */
 const MARKER_FILE = 'goodvibes-created';
 
@@ -56,6 +57,16 @@ export function unsettledWorktreeReason(worktreePath: string, now: number, grace
     const age = now - lstatSync(join(worktreePath, '.git')).mtimeMs;
     return age < graceMs ? `it was created ${Math.max(0, Math.round(age / 1000))} s ago and may still be in creation` : null;
   } catch { return 'its git link could not be read'; }
+}
+
+/**
+ * True when git holds the worktree locked: during `git worktree add`, or by a
+ * person's `git worktree lock`. Git itself refuses to remove a locked worktree,
+ * and the retention sweep never tries.
+ */
+export function isWorktreeLockedByGit(worktreePath: string): boolean {
+  const directory = administrativeDirectory(worktreePath);
+  return directory !== null && existsSync(join(directory, 'locked'));
 }
 
 export function isMarkedProductWorktree(worktreePath: string): boolean {

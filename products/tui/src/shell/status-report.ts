@@ -45,6 +45,8 @@ export interface StatusReportSource {
   readonly microphone: string | null;
   readonly runningAgents: number;
   readonly runningProcesses: number;
+  /** What the start-up worktree pass removed and kept for a decision, with next steps (worktreeStatusLines). */
+  readonly worktrees?: readonly string[];
 }
 
 function n(value: number): string {
@@ -99,5 +101,9 @@ export function formatStatusReport(s: StatusReportSource): string {
   lines.push('Background');
   row('agents', String(s.runningAgents));
   row('processes', String(s.runningProcesses));
+  if (s.worktrees && s.worktrees.length > 0) {
+    lines.push('Worktrees');
+    for (const line of s.worktrees) lines.push(`  ${line}`);
+  }
   return lines.join('\n');
 }

@@ -1,8 +1,8 @@
 import { withProcessLockSync } from '../../utils/process-lock.js';
 import { existsSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { GitService } from '../../git/service.js';
-import { isMarkedProductWorktree } from '../../git/product-worktree-marker.js';
+import { isMarkedProductWorktree, isWorktreeLockedByGit } from '../../git/product-worktree-marker.js';
 import { logger } from '../../utils/logger.js';
 import { writeJsonFileAtomic } from '../../utils/atomic-json-store.js';
 import { summarizeError } from '../../utils/error-display.js';
@@ -18,8 +18,11 @@ import {
   formatAge,
   formatBytes,
   isProductWorktreePath,
+  needsOwnerDecision,
   runGit,
+  worktreeNextSteps,
   worktreeSizeBytes,
+  type WorktreeEvaluation,
   type WorktreeKeepReason,
   type WorktreeOwnerInfo,
 } from './retention.js';
@@ -616,15 +619,17 @@ export class WorktreeRegistry {
    * worktrees under `.goodvibes/.worktrees`: clean worktrees with nothing
    * unique go at once, clean ones with unmerged commits lose their directory
    * after the retention period with the branch kept, and anything with
-   * uncommitted changes, a running owner or unreadable git state is left
-   * alone. Ignored files of its own (not installed dependencies, not unchanged
-   * copies of the main checkout) keep a worktree for the retention period after
-   * its owner ended, then it is removed with them. A
-   * worktree in one of the product's own shapes that carries no created-by
-   * marker was made before the marker existed and is removed, whatever it
-   * holds, once no running owner holds it. Nothing marked kept, paused or
-   * attached to a session or task is swept, and a directory that merely sits
-   * under `.goodvibes` is never touched. Each removal is decided first (git and
+   * uncommitted or untracked changes, a running owner or unreadable git state
+   * is left alone. Ignored files of its own (not installed dependencies, not
+   * unchanged copies of the main checkout) keep a worktree for the retention
+   * period after its owner ended, then it is removed with them. A worktree in
+   * one of the product's own shapes that carries no created-by marker was made
+   * before the marker existed; it goes only when it holds nothing found nowhere
+   * else. A detached HEAD that no branch holds is saved to a new branch before
+   * its directory goes. Nothing marked kept, paused, attached to a session or
+   * task, locked with `git worktree lock`, or holding another worktree inside it
+   * is swept, and a directory that merely sits under `.goodvibes` is never
+   * touched. Removal is never forced. Each removal is decided first (git and
    * owner reads, outside any lock), then checked against the register under its
    * lock, synchronously: a row whose state, session, task or update time moved
    * since the decision is kept for the next sweep. The lock is never held across
@@ -647,14 +652,14 @@ export class WorktreeRegistry {
       return report;
     }
     const storePath = getStorePath(this.workingDirectory);
+    const allPaths = rows.map((row) => row.path);
     for (const row of rows) {
       if (row.kind === 'manual' || !isProductWorktreePath(row.path, this.workingDirectory)) continue;
       if (onlyPaths && !onlyPaths.has(row.path)) continue;
-      const decide = () => this.evaluateRow(row, owner(row.path), now, retentionMs);
-      const keepReason = (reason: WorktreeKeepReason) => report.kept.push({ path: row.path, branch: row.branch, reason });
-      const guarded = sweepProtection(row);
+      const keepReason = (reason: WorktreeKeepReason) => report.kept.push({ path: row.path, branch: row.branch, head: row.head, reason });
+      const guarded = sweepProtection(row) ?? gitHeldProtection(row.path, allPaths);
       if (guarded) { keepReason(guarded); continue; }
-      const evaluation = await decide();
+      const evaluation = await this.evaluateRow(row, owner(row.path), now, retentionMs);
       if (evaluation.action === 'keep') { keepReason(evaluation.reason); continue; }
       // The register as it is now, read under its lock with no await in between: another process or another
       // contract here may have attached, paused, kept or set up this worktree since the listing the decision used.
@@ -678,19 +683,14 @@ export class WorktreeRegistry {
         continue;
       }
       if (changed) { keepReason(changed); continue; }
+      const kept = await this.prepareRemoval(row.path, evaluation);
+      if (kept) { keepReason(kept); continue; }
       try {
-        if (evaluation.action === 'remove-unmarked') {
-          // The owner's rule for worktrees from before the marker: removed with what they hold, so git's dirty-tree refusal is overridden.
-          if (!(await runGit(this.workingDirectory, ['worktree', 'remove', '--force', row.path])).ok) throw new Error('git worktree remove --force failed');
-        } else {
-          await this.git.worktreeRemove(row.path);
-        }
+        // Never forced: git refuses a tree with modified or untracked files, whatever was read before.
+        await this.git.worktreeRemove(row.path);
         const branch = evaluation.assessment.kind === 'nothing-unique' || evaluation.assessment.kind === 'unmerged' ? evaluation.assessment.branch : null;
         let branchDeleted = false;
-        if (evaluation.action === 'remove-unmarked') {
-          // `-d` keeps a branch with commits its base lacks, so only the uncommitted state is lost, as the rule says.
-          if (branch) branchDeleted = (await runGit(this.workingDirectory, ['branch', '-d', branch])).ok;
-        } else if (evaluation.action === 'remove-all' && branch) {
+        if ((evaluation.action === 'remove-unmarked' || evaluation.action === 'remove-all') && branch) {
           // `-d` refuses a branch that is not merged, so a commit the base lacks can never be dropped here.
           branchDeleted = (await runGit(this.workingDirectory, ['branch', '-d', branch])).ok;
         } else if (branch?.startsWith('contract-input/')) {
@@ -698,12 +698,13 @@ export class WorktreeRegistry {
           branchDeleted = (await runGit(this.workingDirectory, ['branch', '-D', branch])).ok;
         }
         this.forgetRemoved(storePath, row.path);
+        const saved = evaluation.saveAs ? `; its detached HEAD was saved to new branch ${evaluation.saveAs}` : '';
         const note = evaluation.action === 'remove-unmarked'
           ? `${evaluation.reason.detail}${branchDeleted ? '; its branch was merged and is deleted' : ''}`
           : evaluation.action === 'prune-directory' && !branchDeleted
-            ? `directory pruned after retention; branch ${branch ?? '(none)'} kept so its commits stay reachable`
+            ? `directory pruned after retention; branch ${branch ?? evaluation.saveAs ?? (evaluation.assessment.kind === 'unmerged' ? evaluation.assessment.heldBy : undefined) ?? '(none)'} kept so its commits stay reachable${saved}`
             : branchDeleted ? 'removed with its branch' : `removed; branch ${branch ?? '(none)'} kept`;
-        report.removed.push({ path: row.path, branch, branchDeleted, pruned: evaluation.action === 'prune-directory', note });
+        report.removed.push({ path: row.path, branch, branchDeleted, pruned: evaluation.action === 'prune-directory', note, ...(evaluation.saveAs ? { savedBranch: evaluation.saveAs } : {}) });
         logger.info('worktree retention: removed a worktree', { path: row.path, branch, note });
       } catch (error) {
         // Another process sweeping at the same moment may have removed it first; that is not a failure here.
@@ -716,10 +717,30 @@ export class WorktreeRegistry {
     return report;
   }
 
+  /**
+   * The last checks before a decided removal, after the register check: HEAD
+   * has not moved since it was read, and a detached HEAD no branch holds is
+   * saved to its new branch. Returns why the worktree stays, or null to remove.
+   */
+  private async prepareRemoval(path: string, evaluation: WorktreeEvaluation): Promise<WorktreeKeepReason | null> {
+    const assessment = evaluation.assessment;
+    if (assessment.kind !== 'nothing-unique' && assessment.kind !== 'unmerged') return null;
+    const head = await runGit(path, ['rev-parse', '--verify', '-q', 'HEAD']);
+    if (!head.ok || head.out !== assessment.head) {
+      return { why: 'protected', detail: 'a commit was made in it while it was being assessed; the next sweep decides again' };
+    }
+    if (!evaluation.saveAs) return null;
+    if ((await runGit(this.workingDirectory, ['branch', evaluation.saveAs, assessment.head])).ok) return null;
+    // An earlier sweep may have made the branch already; it is good only if it names this very commit.
+    const existing = await runGit(this.workingDirectory, ['rev-parse', '--verify', '-q', `refs/heads/${evaluation.saveAs}^{commit}`]);
+    if (existing.ok && existing.out === assessment.head) return null;
+    return { why: 'detached', detail: `${assessment.kind === 'unmerged' ? assessment.commits : 0} commit(s) on its detached HEAD are on no branch, and branch ${evaluation.saveAs} to hold them could not be made` };
+  }
+
   /** The retention decision for one product worktree: the marker says which rule applies. */
-  private evaluateRow(row: WorktreeStatusRecord, owner: WorktreeOwnerInfo, now: number, retentionMs: number) {
-    const input = { path: row.path, rootDir: this.workingDirectory, registeredAt: row.updatedAt, owner, now };
-    return isMarkedProductWorktree(row.path) ? evaluateWorktree({ ...input, retentionMs }) : evaluateUnmarkedWorktree(input);
+  private evaluateRow(row: WorktreeStatusRecord, owner: WorktreeOwnerInfo, now: number, retentionMs: number): Promise<WorktreeEvaluation> {
+    const input = { path: row.path, rootDir: this.workingDirectory, registeredAt: row.updatedAt, owner, now, retentionMs };
+    return isMarkedProductWorktree(row.path) ? evaluateWorktree(input) : evaluateUnmarkedWorktree(input);
   }
 
   /** Drop the register entry of a worktree whose directory is gone. Best effort: the next list() reaps it otherwise. */
@@ -754,24 +775,26 @@ export class WorktreeRegistry {
     });
   }
 
-  private defaultOwnerCache: ((path: string) => WorktreeOwnerInfo) | undefined;
-
+  /**
+   * The owner lookup for every worktree shape (see owners.ts), made fresh for
+   * each pass: it reads contracts and saved workstreams once per pass, so a
+   * later pass sees owners that have ended or started since.
+   */
   private async defaultOwnerResolver(): Promise<(path: string) => WorktreeOwnerInfo> {
-    if (this.defaultOwnerCache) return this.defaultOwnerCache;
     const [{ ContractStore }, { createContractOwnerResolver }] = await Promise.all([
       import('../../contract/store.js'),
       import('./owners.js'),
     ]);
-    this.defaultOwnerCache = createContractOwnerResolver(this.workingDirectory, new ContractStore({ projectRoot: this.workingDirectory }));
-    return this.defaultOwnerCache;
+    return createContractOwnerResolver(this.workingDirectory, new ContractStore({ projectRoot: this.workingDirectory }));
   }
 
   /**
    * The product's worktrees with why each is still on disk: age, size, and
    * the reason (running, uncommitted changes, unmerged commits with the days
-   * left before pruning). Read-only. Pass the `rows` a caller already listed
-   * to skip a second listing, and `only` to describe one path; worktrees are
-   * evaluated and measured side by side, a few at a time.
+   * left before pruning), with the next steps for one that needs its owner's
+   * decision. Read-only. Pass the `rows` a caller already listed to skip a
+   * second listing, and `only` to describe one path; worktrees are evaluated
+   * and measured side by side, a few at a time.
    */
   public async describeKept(options: Pick<WorktreeRetentionOptions, 'now' | 'retentionMs' | 'owner'> & {
     readonly rows?: readonly WorktreeStatusRecord[] | undefined;
@@ -781,22 +804,26 @@ export class WorktreeRegistry {
     const retentionMs = options.retentionMs ?? DEFAULT_WORKTREE_RETENTION_MS;
     const owner = options.owner ?? await this.defaultOwnerResolver();
     const only = options.only !== undefined ? normalizePath(options.only, this.workingDirectory) : undefined;
-    const rows = (options.rows ?? await this.list()).filter((row) =>
+    const listed = options.rows ?? await this.list();
+    const allPaths = listed.map((row) => row.path);
+    const rows = listed.filter((row) =>
       row.kind !== 'manual' && isProductWorktreePath(row.path, this.workingDirectory) && (only === undefined || row.path === only));
     const describe = async (row: WorktreeStatusRecord): Promise<KeptWorktreeInfo> => {
       const [evaluation, sizeBytes] = await Promise.all([
         this.evaluateRow(row, owner(row.path), now, retentionMs),
         worktreeSizeBytes(row.path),
       ]);
-      const guarded = sweepProtection(row);
+      const guarded = sweepProtection(row) ?? gitHeldProtection(row.path, allPaths);
+      const reason = guarded ?? evaluation.reason;
       return {
         path: row.path,
         branch: row.branch,
         ageMs: Math.max(0, now - evaluation.sinceMs),
         ...(sizeBytes !== undefined ? { sizeBytes } : {}),
-        reason: guarded ?? evaluation.reason,
+        reason,
         willBeRemoved: guarded === null && evaluation.action !== 'keep',
-        summary: `age ${formatAge(Math.max(0, now - evaluation.sinceMs))}, ${sizeBytes !== undefined ? formatBytes(sizeBytes) : 'size unknown (it could not be measured)'}: ${(guarded ?? evaluation.reason).detail}`,
+        summary: `age ${formatAge(Math.max(0, now - evaluation.sinceMs))}, ${sizeBytes !== undefined ? formatBytes(sizeBytes) : 'size unknown (it could not be measured)'}: ${reason.detail}`,
+        ...(needsOwnerDecision(reason) ? { nextSteps: worktreeNextSteps({ path: row.path, why: reason.why, branch: listedBranch(row.branch), head: row.head || undefined }) } : {}),
       };
     };
     const infos: KeptWorktreeInfo[] = [];
@@ -806,33 +833,62 @@ export class WorktreeRegistry {
     return infos;
   }
 
-  /**
-   * One line for startup when kept worktrees hold more than `thresholdBytes` in
-   * total, else null. It names the largest few with their size and why each is
-   * kept (for one holding only ignored files, when it is removed).
-   */
-  public async keptWorktreeNotice(options: { readonly thresholdBytes?: number; readonly owner?: WorktreeRetentionOptions['owner'] } = {}): Promise<string | null> {
-    const infos = await this.describeKept(options.owner ? { owner: options.owner } : {});
-    const total = infos.reduce((sum, info) => sum + (info.sizeBytes ?? 0), 0);
-    if (total <= (options.thresholdBytes ?? DEFAULT_KEPT_WORKTREE_NOTICE_BYTES) || infos.length === 0) return null;
-    const largest = [...infos].sort((a, b) => (b.sizeBytes ?? 0) - (a.sizeBytes ?? 0)).slice(0, 3)
-      .map((info) => `${relative(this.workingDirectory, info.path)} ${info.sizeBytes !== undefined ? formatBytes(info.sizeBytes) : 'size unknown'} (${info.reason.detail})`);
-    return `${infos.length} kept worktree(s) under .goodvibes use ${formatBytes(total)}; largest: ${largest.join('; ')}. Review with /worktree review, discard one with /worktree discard <path>.`;
+  /** What the start-up pass of this process found, or null until it has finished. */
+  private startupReport: WorktreeStartupReport | null = null;
+
+  /** The report of this process's start-up pass (removed, kept for a decision, failed), or null while it runs or when it did not complete. */
+  public lastStartupReport(): WorktreeStartupReport | null {
+    return this.startupReport;
   }
 
   /**
    * The start-up pass every program runs (the daemon and both terminal apps):
-   * apply retention to leftovers from earlier runs, then return the kept-worktree
-   * notice, or null. Never throws: start-up must not fail on it.
+   * apply retention to leftovers from earlier runs and report all of it: what
+   * was removed, each worktree kept because it needs its owner's decision with
+   * the next steps, each removal that did not complete, and a disk-use line
+   * when kept worktrees hold a lot. Null only when the pass could not run.
+   * Never throws: start-up must not fail on it.
    */
-  public async startupSweep(): Promise<string | null> {
+  public async startupSweep(options: { readonly thresholdBytes?: number | undefined } = {}): Promise<WorktreeStartupReport | null> {
     try {
-      await this.sweepRetention();
-      return await this.keptWorktreeNotice();
+      const sweep = await this.sweepRetention();
+      const attention = sweep.kept.filter((entry) => needsOwnerDecision(entry.reason)).map((entry) => ({
+        path: entry.path,
+        branch: entry.branch,
+        reason: entry.reason,
+        nextSteps: worktreeNextSteps({ path: entry.path, why: entry.reason.why, branch: listedBranch(entry.branch), head: entry.head || undefined }),
+      }));
+      const report: WorktreeStartupReport = {
+        finishedAt: Date.now(),
+        removed: sweep.removed,
+        attention,
+        failed: sweep.failed,
+        diskNotice: await this.diskNotice(sweep.kept, options.thresholdBytes ?? DEFAULT_KEPT_WORKTREE_NOTICE_BYTES),
+      };
+      this.startupReport = report;
+      return report;
     } catch (error) {
       logger.warn('worktree retention: the start-up pass did not complete', { error: summarizeError(error) });
       return null;
     }
+  }
+
+  /**
+   * One line when the worktrees the sweep kept hold more than `thresholdBytes`
+   * in total, else null. It names the largest few with their size and why each
+   * is kept. Measured from the sweep's own decisions, so nothing is assessed twice.
+   */
+  private async diskNotice(kept: readonly KeptWorktree[], thresholdBytes: number): Promise<string | null> {
+    if (kept.length === 0) return null;
+    const sizes: Array<{ readonly entry: KeptWorktree; readonly sizeBytes: number | undefined }> = [];
+    for (let start = 0; start < kept.length; start += DESCRIBE_CONCURRENCY) {
+      sizes.push(...await Promise.all(kept.slice(start, start + DESCRIBE_CONCURRENCY).map(async (entry) => ({ entry, sizeBytes: await worktreeSizeBytes(entry.path) }))));
+    }
+    const total = sizes.reduce((sum, item) => sum + (item.sizeBytes ?? 0), 0);
+    if (total <= thresholdBytes) return null;
+    const largest = [...sizes].sort((a, b) => (b.sizeBytes ?? 0) - (a.sizeBytes ?? 0)).slice(0, 3)
+      .map((item) => `${relative(this.workingDirectory, item.entry.path)} ${item.sizeBytes !== undefined ? formatBytes(item.sizeBytes) : 'size unknown'} (${item.entry.reason.detail})`);
+    return `${kept.length} kept worktree(s) under .goodvibes use ${formatBytes(total)}; largest: ${largest.join('; ')}. Review them with /worktree review in goodvibes; remove one you no longer need with /worktree discard <path> (its changes are committed to its branch first).`;
   }
 
   public attach(path: string, target: { sessionId?: string; taskId?: string }): void {
@@ -1086,7 +1142,7 @@ export class WorktreeRegistry {
     const assessment = await assessWorktree(path, this.workingDirectory, owner.baseBranch);
     switch (assessment.kind) {
       case 'uncommitted': return `At stake: ${describeLocalState(assessment.changes, assessment.ignored)}. Discard commits the uncommitted changes onto the branch first; ignored files cannot be preserved and are deleted with the directory.`;
-      case 'unmerged': return `At stake: ${assessment.commits} commit(s) not in ${assessment.base}; they stay on branch ${assessment.branch ?? '(detached HEAD, no branch holds them)'}.`;
+      case 'unmerged': return `At stake: ${assessment.commits} commit(s) not in ${assessment.base}; they stay on branch ${assessment.branch ?? assessment.heldBy ?? '(detached HEAD, no branch holds them)'}.`;
       case 'nothing-unique': return 'At stake: nothing unique (clean, all commits already in its base).';
       case 'unreadable': return `What is at stake could not be read (${assessment.reason}).`;
     }
@@ -1114,6 +1170,67 @@ function sweepProtection(row: Pick<WorktreeStatusRecord, 'path' | 'state' | 'ses
   return null;
 }
 
+/**
+ * Why git's own state keeps a worktree from the sweep, or null: git holds it
+ * locked (`git worktree lock`, or an add in progress; git refuses to remove it
+ * too), or another worktree lives inside its directory (removing it would
+ * delete that one's files), which is decided first.
+ */
+function gitHeldProtection(path: string, allPaths: readonly string[]): WorktreeKeepReason | null {
+  if (isWorktreeLockedByGit(path)) return { why: 'protected', detail: `locked with git worktree lock (or still being created); git worktree unlock ${path} lets the sweep decide again` };
+  const inside = allPaths.find((other) => other !== path && other.startsWith(`${path}${sep}`));
+  return inside ? { why: 'protected', detail: `another worktree lives inside it (${inside}); that one is decided first` } : null;
+}
+
+/** The branch `git worktree list` names, or null for a detached HEAD. */
+function listedBranch(branch: string): string | null {
+  return branch === '(detached)' || branch.length === 0 ? null : branch;
+}
+
+/**
+ * The start-up report as text, one item per line, or null when there is
+ * nothing to say: what was removed, each worktree kept for its owner's
+ * decision with why and the exact next steps, each removal that did not
+ * complete, and the disk-use line. Paths are shown relative to `workingDirectory`
+ * in the headings and absolute in the commands.
+ */
+export function formatWorktreeStartupReport(report: WorktreeStartupReport, workingDirectory: string): string | null {
+  const show = (path: string): string => {
+    const rel = relative(workingDirectory, path);
+    return rel && !rel.startsWith('..') && !isAbsolute(rel) ? rel : path;
+  };
+  const lines: string[] = [];
+  if (report.removed.length > 0) {
+    lines.push(`Removed ${report.removed.length} worktree(s) whose work is all on a branch or in the base:`);
+    for (const entry of report.removed) lines.push(`  - ${show(entry.path)}: ${entry.note}`);
+  }
+  if (report.attention.length > 0) {
+    lines.push(`Kept ${report.attention.length} worktree(s) that need your decision; nothing in them is removed automatically:`);
+    for (const entry of report.attention) {
+      const branch = listedBranch(entry.branch);
+      lines.push(`  - ${show(entry.path)} (${branch ? `branch ${branch}` : 'detached HEAD'}): ${entry.reason.detail}`);
+      for (const step of entry.nextSteps) lines.push(`      ${step}`);
+    }
+  }
+  if (report.failed.length > 0) {
+    lines.push(`Could not remove ${report.failed.length} worktree(s); each is still on disk as it was:`);
+    for (const entry of report.failed) lines.push(`  - ${show(entry.path)}: ${entry.error}`);
+  }
+  if (report.diskNotice) lines.push(report.diskNotice);
+  return lines.length > 0 ? lines.join('\n') : null;
+}
+
+/**
+ * The worktree lines /status shows: the same report the start notice gave,
+ * stamped with when the pass finished, or why there is none yet.
+ */
+export function worktreeStatusLines(report: WorktreeStartupReport | null, workingDirectory: string): string[] {
+  if (!report) return ['no start-up report yet: the start-up pass is still running, or it did not complete (see the log)'];
+  const text = formatWorktreeStartupReport(report, workingDirectory);
+  const at = new Date(report.finishedAt).toLocaleTimeString();
+  return text ? [`at start (${at}):`, ...text.split('\n')] : [`at start (${at}): nothing removed, and none needs your decision`];
+}
+
 export interface WorktreeRetentionOptions {
   /** Injected clock; defaults to the wall clock. */
   readonly now?: (() => number) | undefined;
@@ -1131,13 +1248,37 @@ export interface SweptWorktree {
   readonly branchDeleted: boolean;
   /** True when the directory was removed after the retention period with its branch kept. */
   readonly pruned: boolean;
+  /** The branch made to hold the commits of a detached HEAD no branch held, when one was made. */
+  readonly savedBranch?: string | undefined;
   readonly note: string;
 }
 
 export interface KeptWorktree {
   readonly path: string;
+  /** As `git worktree list` names it; `(detached)` for a detached HEAD. */
+  readonly branch: string;
+  /** HEAD as `git worktree list` read it. */
+  readonly head?: string | undefined;
+  readonly reason: WorktreeKeepReason;
+}
+
+/** A worktree the sweep kept because it needs its owner's decision. */
+export interface WorktreeAttention {
+  readonly path: string;
   readonly branch: string;
   readonly reason: WorktreeKeepReason;
+  /** Save it, keep it as it is, or discard it: exact commands. */
+  readonly nextSteps: readonly string[];
+}
+
+/** Everything the start-up pass did and found; never discarded. */
+export interface WorktreeStartupReport {
+  readonly finishedAt: number;
+  readonly removed: readonly SweptWorktree[];
+  readonly attention: readonly WorktreeAttention[];
+  readonly failed: ReadonlyArray<{ readonly path: string; readonly error: string }>;
+  /** The disk-use line when kept worktrees hold more than the threshold, else null. */
+  readonly diskNotice: string | null;
 }
 
 export interface WorktreeSweepReport {
@@ -1154,6 +1295,8 @@ export interface KeptWorktreeInfo {
   readonly reason: WorktreeKeepReason;
   /** True when the next sweep would remove it. */
   readonly willBeRemoved: boolean;
+  /** For a worktree kept for its owner's decision: save it, keep it as it is, or discard it. */
+  readonly nextSteps?: readonly string[] | undefined;
   /** Age, size and the reason it is kept, as one human-readable string. */
   readonly summary: string;
 }

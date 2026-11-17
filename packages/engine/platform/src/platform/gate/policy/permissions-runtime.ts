@@ -7,7 +7,7 @@
  *
  * With no arguments it prints every permission-relevant setting in effect and
  * where each value came from (provenance; read-only). `rules` lists the
- * durable remembered approvals with a press-Enter revoke; `revoke <id>`
+ * durable remembered approvals with a Delete-key revoke; `revoke <id>`
  * removes one by id. Revokes hit the same in-process rule store the evaluator
  * reads, so they take effect live.
  */
@@ -85,7 +85,7 @@ function showRememberedRules(ctx: PermissionsCommandContext): void {
     const revoke = new Map<string, 'delete'>([['d', 'delete']]);
     const items: PermissionRuleSelectionItem[] = records.map((record) => {
       const { label, detail } = describeRuleRow(record);
-      return { id: record.rule.id, label, detail, actions: '[d] revoke' };
+      return { id: record.rule.id, label, detail, actions: '[Del] revoke' };
     });
     ctx.openSelection('Remembered permission rules', items, { allowSearch: true, customActions: revoke }, (result) => {
       if (!result || result.action !== 'delete') return;

@@ -829,6 +829,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
       ...(!merchantVerdict.isMajor ? ['merchant-recourse' as const] : []),
       ...(notChecked.length > 0 ? ['not-checked' as const] : []),
     ] satisfies readonly PurchaseApprovalReason[],
+    ...(decision.kind === 'needs-approval' ? { limitReason: decision.reason } : {}),
     ...(notChecked.length > 0 ? { notChecked } : {}),
   };
 

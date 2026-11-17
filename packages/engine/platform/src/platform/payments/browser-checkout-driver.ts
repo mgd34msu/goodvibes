@@ -680,7 +680,9 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
  * matters. Anything else, most of all a failure from the click itself, is
  * genuine ambiguity: the merchant may have received it.
  */
-const PRE_CLICK_ERROR_NAMES = new Set(['BrowserSessionError', 'StaleElementError', 'UntrustedEffectError', 'JudgmentAuthorityRetiredError', 'CheckoutSubmitRefused']);
+// JudgmentInputError: a reading's input was refused before it was built (the
+// pre-click outward and credential checks); the click is never reached.
+const PRE_CLICK_ERROR_NAMES = new Set(['BrowserSessionError', 'StaleElementError', 'UntrustedEffectError', 'JudgmentAuthorityRetiredError', 'JudgmentInputError', 'CheckoutSubmitRefused']);
 
 /**
  * What checkout-flow.ts is told about a pre-click failure of each kind,
@@ -704,6 +706,8 @@ function describePreClickFailure(name: string): string {
       return 'the submit control on this page could not be activated';
     case 'StaleElementError':
       return 'the page changed before the submit control could be found';
+    case 'JudgmentInputError':
+      return 'the order form could not be checked without sending card details to a reader, so the submit was withheld and no order was placed';
     case 'UntrustedEffectError':
       return 'content this daemon read since the purchase began (a mail or another browser page, not necessarily this order) could not be cleared against the order form, so the submit was withheld and no order was placed; approve the purchase again and begin it once nothing else is being read';
     default:

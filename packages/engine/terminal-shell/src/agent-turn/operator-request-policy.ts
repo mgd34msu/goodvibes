@@ -9,6 +9,9 @@ import { screenOutboundForCardMaterial } from './payments-channel-guard.js';
 import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runtime/decision-policy';
 import type { JudgmentPort } from '@goodvibes-jev/judgment/decisions';
 
+/** Operator effects whose host judges this turn's untrusted content against the effect itself. */
+const HOST_JUDGED_METHODS: ReadonlySet<string> = new Set(['payments.checkout.begin', 'payments.purchase.cancel']);
+
 /** Retain the local source record; this does not mint execution or human authority. */
 export function captureOperatorRequestPolicy() {
   const ledger = getProcessUntrustedContentLedger();
@@ -32,6 +35,12 @@ export function captureOperatorRequestPolicy() {
       { signal: options.signal, assertCurrent: check });
     check();
     if (card) throw new ToolInputProjectionError('held');
+    // A purchase is judged where it is made: checkout admission keeps this turn's taint
+    // evidence and the checkout reads it against the purchase itself (evaluatePaymentTaint
+    // in payments/checkout-flow.ts), with the owner's limits and windows. A second, coarser
+    // reading here refused every purchase begun from the page the Agent had just read,
+    // and refused it outright when no decision model is set.
+    if (HOST_JUDGED_METHODS.has(request.methodId)) return;
     const evaluate = (port?: JudgmentPort) => evaluateOutwardEffect({ request: { toolName: request.toolName, action: request.methodId,
       description: 'invoking the selected connected-host operator effect' }, ledger, content,
       taintOptions: { signal: options.signal, exactMatchFields: ['endpoint'], ...(port ? { port: {

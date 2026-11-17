@@ -380,7 +380,9 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
     // a plain refusal, the store has to stop until someone inspects the file.
     try {
       current(check); this.keyBytes(false, check); this.records.set(id, { operationId, physical: fileObservationIdentity(path) });
-      if (!isDeepStrictEqual(this.readOwned(id, operationId, check), next)) throw new ProtectedPaymentRequestError();
+      // The file holds JSON: a field the record carries as undefined is not in it, so the
+      // record read back is compared with the record as JSON keeps it.
+      if (!isDeepStrictEqual(this.readOwned(id, operationId, check), JSON.parse(JSON.stringify(next)) as unknown)) throw new ProtectedPaymentRequestError();
     } catch (error) { this.failed = true; throw error instanceof RefusedRequestError ? new ProtectedPaymentRequestError() : error; }
   }
 

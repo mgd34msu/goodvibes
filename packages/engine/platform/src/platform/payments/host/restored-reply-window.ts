@@ -133,8 +133,17 @@ export function prepareRestoredPaymentReplyWindow(input: RestoreReplyWindowInput
         if (late !== undefined) settleFromInbox(late); else historicalAnswer = null;
         return inboxDeliveries;
       }
-      reception = { deliveries: Promise.resolve(inboxDeliveries), cancel: withdrawInbox,
-        awaitAnswer(deadlineMs) { current(); return inboxWait(deadlineMs).finally(withdrawInbox); } };
+      // The window is open again where the owner answers it: the inbox item, and
+      // the purchase status the terminal apps and web UI read and answer by window id.
+      const operator = replies.prepareAnswer({ purchaseId, kind, channels: [], notice, signal });
+      reception = { deliveries: Promise.resolve(inboxDeliveries), cancel: () => { operator.cancel(); withdrawInbox(); },
+        awaitAnswer(deadlineMs) {
+          current();
+          const fromOperator = operator.waitForAnswer({ deadlineMs, channels: [], deliveries: inboxDeliveries });
+          // The first answer from either; silence in the inbox leaves the operator window to decide.
+          return Promise.race([fromOperator, inboxWait(deadlineMs).then(answer => answer ?? fromOperator)])
+            .finally(() => { operator.cancel(); withdrawInbox(); });
+        } };
       return inboxDeliveries;
     }
     const accounts = await Promise.allSettled(recipients.map(({ receipt }) => replies.retainTelegramReceipt(receipt, { signal, assertCurrent: current })));

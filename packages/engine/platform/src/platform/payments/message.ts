@@ -79,6 +79,8 @@ export interface PurchaseFacts {
   readonly poolsAfter: PoolSnapshot;
   readonly requestedMaximumMinorUnits?: MinorUnits | undefined;
   readonly approvalReasons?: readonly PurchaseApprovalReason[] | undefined;
+  /** Over a limit: which limit and by how much, with the amounts (the budget decision's own words). */
+  readonly limitReason?: string | undefined;
   /**
    * What no decision model checked, one already-neutralised line each (the
    * cart lines as the merchant labelled them, whether the charge repeats,
@@ -133,6 +135,7 @@ export function renderApprovalMessage(facts: PurchaseFacts, expiresInMinutes: nu
   const notChecked = facts.notChecked ?? [];
   const lines = [
     why.length ? `Approval needed: ${why.join('; ')}.` : 'Approval needed before this purchase.',
+    ...(facts.limitReason ? [facts.limitReason] : []),
     ``,
     `  ${renderItem(facts.item)}`,
     `  from ${renderMerchant(facts.merchantDomain)}`,

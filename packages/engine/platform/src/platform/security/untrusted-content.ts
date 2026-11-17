@@ -745,6 +745,8 @@ async function assessEvidence(
   if (evidence.sources.length === 0) return { kind: 'clean', findings: [] };
   if (content === undefined) return { kind: 'incomplete', findings: [], reason: 'missing-content' };
   const fields = Object.freeze({ ...content });
+  // The caller established what leaves, and nothing does: nothing can repeat what was read.
+  if (Object.values(fields).every((value) => value === undefined || value.trim().length === 0)) return { kind: 'clean', findings: [] };
   if (judgmentInputProblem(fields) || evidence.sources.some(sourceWithheldFromJudgment)) {
     return { kind: 'incomplete', findings: [], reason: 'protected-input' };
   }

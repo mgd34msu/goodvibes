@@ -284,6 +284,21 @@ export class BrowserEngine {
   }
 
   /**
+   * The form's fields without the card material in it: the card the payment
+   * flow typed from the owner's stored card (known to the card guard) and any
+   * issuer credential. Like a password, card material is not something a page
+   * could have planted, so it adds nothing to the derivation check, and it is
+   * never sent to a reader.
+   */
+  private withoutCardMaterial(sessionId: string, pageId: string,
+    fields: Readonly<Record<string, string | undefined>> | undefined): Readonly<Record<string, string | undefined>> | undefined {
+    if (fields === undefined) return undefined;
+    // Every field known and none left is a known answer (nothing else leaves), not an unknown one.
+    return Object.fromEntries(Object.entries(fields).filter(([, value]) => value === undefined
+      || (!containsIssuerCredential(value) && this.scrub(sessionId, pageId, value) === value)));
+  }
+
+  /**
    * The label of the control that Enter in this element's form would activate:
    * the form's default (first) submit control. Undefined outside a form, with
    * no submit control, or when the page will not answer.
@@ -908,7 +923,7 @@ export class BrowserEngine {
         // the fields the derivation check should see. Read live; undefined when
         // the element is outside a form or the page will not answer, which drops
         // this call to the coarse rule rather than to a false clean bill.
-        const formFields = await work.wait(() => BrowserEngine.enclosingFormFields(locator));
+        const formFields = this.withoutCardMaterial(sessionId, pageId, await work.wait(() => BrowserEngine.enclosingFormFields(locator)));
         await revalidate(); scope.current();
         await work.wait(() => this.requireOutwardEffectAllowed(
           'browser.submit',
@@ -998,7 +1013,7 @@ export class BrowserEngine {
         // guard runs BEFORE anything is entered, so a body lifted from a page
         // cannot be typed into a field and then submitted while the check looks
         // at the pre-fill state.
-        const formFields = await work.wait(() => BrowserEngine.enclosingFormFields(locator));
+        const formFields = this.withoutCardMaterial(sessionId, pageId, await work.wait(() => BrowserEngine.enclosingFormFields(locator)));
         await revalidate(); scope.current();
         await work.wait(() => this.requireOutwardEffectAllowed(
           'browser.submit',
@@ -1124,7 +1139,7 @@ export class BrowserEngine {
           await BrowserEngine.refuseOrderSubmitByKey(locator, work, `Pressing ${args.key}`);
           await revalidate(); scope.current();
         }
-        const formFields = await work.wait(() => BrowserEngine.enclosingFormFields(locator));
+        const formFields = this.withoutCardMaterial(sessionId, pageId, await work.wait(() => BrowserEngine.enclosingFormFields(locator)));
         await revalidate(); scope.current();
         await work.wait(() => this.requireOutwardEffectAllowed(
           'browser.submit',

@@ -17,6 +17,11 @@ import { JudgmentHeldError } from '../types/judgment-held.js';
  *
  * No rule names a vendor or a model: every judgment is about the work and
  * the model's published facts.
+ *
+ * With no decision model in use nothing is read: the work goes to the
+ * session's selected model when it meets the work's hard requirements, else to
+ * the first eligible model in the tier's published-facts order, and the
+ * route's reason says no decision model chose it.
  */
 import { NONE, type Candidate, type JsonValue, type Selection } from '@goodvibes-jev/judgment';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
@@ -26,7 +31,8 @@ import type { ProviderStatus } from '../providers/provider-health.js';
 import { modelChoice } from './batteries/model.js';
 import { modelFactsState, type ModelFacts, type ModelTierStore } from './model-tiers.js';
 import { CHOICE_SHORTLIST, FALLBACK_ROUTES, TIER_READ_ROUNDS, TIER_READ_SHORTLIST } from './policy.js';
-import { readRequest, type RequestReading, type RoutingRequest } from './request-reading.js';
+import { readRequest, unassessedRequestReading, type RequestReading, type RoutingRequest } from './request-reading.js';
+import { isClassicOperation } from '../runtime/decision-policy.js';
 import { tierSearchOrder, type RouteTier } from './tiers.js';
 import { withinSelectedFamily } from './route-scope.js';
 import { sameProviderCatalog } from '../providers/provider-aliases.js';
@@ -83,7 +89,8 @@ export interface PlannedRoute {
   /** The tier and the choice, in words, for the unit's route reason. */
   readonly reason: string;
   readonly request: RequestReading;
-  readonly pick: Selection;
+  /** The model-choice selection; absent when no decision model chose the route. */
+  readonly pick?: Selection | undefined;
 }
 
 export class NoRouteError extends Error {
@@ -168,9 +175,11 @@ function choiceContext(request: RoutePlanRequest, reading: RequestReading): { [k
     work: request.brief,
     purpose: request.purpose,
     tier: reading.tier,
-    intent: reading.readings.intent.choice,
-    domain: reading.readings.domain.choice,
-    language: reading.readings.language.choice,
+    ...(reading.readings === undefined ? {} : {
+      intent: reading.readings.intent.choice,
+      domain: reading.readings.domain.choice,
+      language: reading.readings.language.choice,
+    }),
     ...(request.originalSource === undefined ? {} : { originalSource: { goal: request.originalSource.goal, criteria: [...request.originalSource.criteria] } }),
   };
 }
@@ -202,17 +211,57 @@ function describe(reading: RequestReading, pool: TierPool, pick: Selection, chos
   const r = reading.readings;
   const parts = [
     `tier ${reading.tier} (${reading.tierBecause})`,
-    `intent ${r.intent.choice}, domain ${r.domain.choice}, language ${r.language.choice}, difficulty ${r.difficulty.score.toFixed(1)}/3, risk ${r.risk.score.toFixed(1)}/3`,
+    ...(r === undefined ? [] : [`intent ${r.intent.choice}, domain ${r.domain.choice}, language ${r.language.choice}, difficulty ${r.difficulty.score.toFixed(1)}/3, risk ${r.risk.score.toFixed(1)}/3`]),
   ];
   if (pool.tier !== reading.tier) parts.push(`no fitting ${reading.tier} model is configured, so the ${pool.tier} tier was used`);
   parts.push(`chose ${chosen} from ${pool.members.length} ${pool.tier} candidates of ${eligible} eligible models (pick ${pick.pick.confidence.toFixed(2)}, ${pick.outcome})`);
   return parts.join('; ');
 }
 
+/**
+ * The route without a decision model: the session's selected model when the
+ * catalog lists it as eligible for this work (tool calling, context, image
+ * input, a healthy configured provider), else, with no selection, the first
+ * eligible model in the tier's published-facts order with the next ones as
+ * failover. No request is made; the reason says no decision model chose it.
+ */
+async function routeWithoutDecisionModel(deps: RoutePlannerDeps, request: RoutePlanRequest): Promise<PlannedRoute> {
+  const reading = unassessedRequestReading(request);
+  const available = eligibleModels(deps, request.requires, request.selectedModel?.provider);
+  const selected = request.selectedModel;
+  if (selected) {
+    const model = available.find((candidate) => candidate.registryKey === selected.registryKey)
+      ?? available.find((candidate) => sameProviderCatalog(candidate.provider, selected.provider) && candidate.id === selected.id);
+    if (!model) {
+      throw new NoRouteError(`The session's model ${selected.displayName} is not available for this work (a configured, healthy provider with tool calling, the context window and image input it needs), and no decision model is in use to choose another in its family.`);
+    }
+    return {
+      model: model.registryKey, provider: selected.provider, modelId: model.id, fallbackModels: [],
+      tier: reading.tier, chosenTier: reading.tier, request: reading,
+      reason: `No decision model is in use: the work was not read and goes to the session's model ${model.registryKey}.`,
+    };
+  }
+  if (available.length === 0) {
+    throw new NoRouteError('No configured, healthy provider serves a model that meets this work\'s requirements (tool calling, context window, image input).');
+  }
+  await deps.prepareBenchmarks?.(available, request.signal);
+  request.signal?.throwIfAborted();
+  const ordered = available.map((model) => ({ model, facts: factsFor(deps, model) }))
+    .sort((a, b) => shortlistOrder(reading.tier)(a.facts, b.facts));
+  const [first, ...rest] = ordered;
+  return {
+    model: first!.model.registryKey, provider: first!.model.provider, modelId: first!.model.id,
+    fallbackModels: rest.slice(0, FALLBACK_ROUTES).map(({ model }) => model.registryKey),
+    tier: reading.tier, chosenTier: reading.tier, request: reading,
+    reason: `No decision model is in use: the work was not read; ${first!.model.registryKey} is the first of ${available.length} eligible models in the ${reading.tier} order of published facts (benchmark and price), unranked by fit.`,
+  };
+}
+
 export function createRoutePlanner(deps: RoutePlannerDeps): RoutePlanner {
   return {
     async planRoute(request) {
       request.signal?.throwIfAborted();
+      if (isClassicOperation()) return routeWithoutDecisionModel(deps, request);
       const signalOption = { ...(request.signal ? { signal: request.signal } : {}), ...(request.beforeAttempt ? { beforeAttempt: request.beforeAttempt } : {}), ...(request.onRetry ? { onRetry: request.onRetry } : {}) };
       const reading = await readRequest(request, { site: 'routing.route-planner.request', ...signalOption });
       const available = eligibleModels(deps, request.requires, request.selectedModel?.provider);

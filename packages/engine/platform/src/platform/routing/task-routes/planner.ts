@@ -1,4 +1,5 @@
-import { requireDecisionFeature } from '../../runtime/decision-policy.js';
+import { isClassicOperation } from '../../runtime/decision-policy.js';
+import { rankClassicCatalog } from '../../runtime/classic-catalog.js';
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 /**
  * The task route planner: the agent's planAgentTaskRoute, with the keyword
@@ -14,6 +15,11 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
  * prefers one. Confident none means main conversation; uncertainty never
  * implies none. All original readings and decision ids remain available under
  * judgment, independent of display limits.
+ *
+ * With no decision model in use nothing is read and nothing is sent: the plan
+ * is held, listing the routes whose descriptions share words with the request
+ * (then the main conversation) at low confidence, every effect keeping its
+ * confirmation boundary, for the calling model or the user to choose.
  */
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { isDeepStrictEqual } from 'node:util';
@@ -141,6 +147,34 @@ function selectionEvidence(selection: Selection): Omit<Selection, 'recordAction'
   return evidence;
 }
 
+/** The slots of a request no decision model read: every effect keeps its confirmation boundary, no variant is on, no target is named. */
+const UNREAD_SLOTS: TaskRouteSlots = Object.freeze({
+  changes: true, starts: true, opensUi: true, controls: true, freshRead: true,
+  existing: false, reminder: false, delegated: false, device: false, evidence: false, instructionFiles: false,
+  lane: null, channelTask: 'status', policyTarget: null, modelProvider: null, memoryProvider: null, channelTarget: null,
+});
+
+const READ_ONLY_POLICY = 'This held read-only plan authorizes no dispatch or effects.';
+
+/** The held plan without a decision model: literal word overlap with each route's description, then the main conversation. */
+function planWithoutDecisionModel(request: string, args: TaskRouteArgs): UncertainPlan {
+  const includeParameters = args.includeParameters === true;
+  const limit = readLimit(args.limit, includeParameters ? 8 : 5);
+  const matches = rankClassicCatalog(TASK_ROUTES, request, (entry) => ({ id: entry.id, description: entry.description }));
+  const ranked: RankedRoute[] = [
+    ...matches.map((match) => ({ draft: match.entry.build(request, UNREAD_SLOTS), outcome: 'escalate' as const, score: match.score })),
+    { draft: mainConversationRoute(request), outcome: 'escalate', score: 0 },
+  ];
+  const leading = ranked[0]!;
+  return {
+    status: 'uncertain', request: previewText(request, includeParameters ? 220 : 120), judgment: null,
+    unsure: { reading: 'no decision model', outcome: 'escalate', leading: leading.draft.id, probability: leading.score },
+    candidates: ranked.slice(0, limit).map((route) => ({ ...describeRoute(route, includeParameters), confidence: 'low' as const })),
+    nextAction: 'No decision model is in use, so no route was read for fit: these routes share words with the request, best overlap first. Choose the one that matches what the user asked for, or ask the user which outcome they want; each candidate keeps its own confirmation boundary.',
+    policy: READ_ONLY_POLICY,
+  };
+}
+
 const MISSING_REQUEST: MissingRequestPlan = {
   status: 'missing_request',
   usage: 'Use route action:"plan" query:"<user task>" to get the preferred GoodVibes Agent route, alternatives, missing fields, and confirmation boundary.',
@@ -163,11 +197,11 @@ export async function planTaskRoute(
   deps: TaskRouteDeps = {},
   options: TaskRouteReadOptions = {},
 ): Promise<TaskRoutePlan> {
-  requireDecisionFeature('semantic task route planning; use explicit native targets or ordinary chat');
   const originalArgs = captureStrictJudgmentJson(args);
   const request = typeof originalArgs.query === 'string' && originalArgs.query.trim() ? originalArgs.query
     : typeof originalArgs.target === 'string' && originalArgs.target.trim() ? originalArgs.target : '';
   if (!request) return MISSING_REQUEST;
+  if (isClassicOperation()) { options.signal?.throwIfAborted(); return planWithoutDecisionModel(request, originalArgs); }
   assertJudgmentInput(originalArgs);
 
   // The request and the listings are read once into frozen values and passed
@@ -251,7 +285,7 @@ export async function planTaskRoute(
         unsure: { reading: 'route selection', outcome: selection.outcome, leading: leading.draft.id, probability: leading.score },
         candidates: ranked.slice(0, limit).map((route) => ({ ...describeRoute(route, includeParameters), confidence: 'low' as const })),
         nextAction: 'The route selection was unsure, so no route is preferred. Choose the candidate that matches what the user asked for, or ask the user which outcome they want; each candidate keeps its own confirmation boundary.',
-        policy: 'This held read-only plan authorizes no dispatch or effects.',
+        policy: READ_ONLY_POLICY,
       };
       return held;
     }

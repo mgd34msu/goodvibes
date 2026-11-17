@@ -152,12 +152,17 @@ export interface ReadyPlan {
   readonly policy: string;
 }
 
-/** A held plan: which reading was unsure, and the fitting routes at low confidence for the caller to choose from. */
+/**
+ * A held plan: which reading was unsure, and the fitting routes at low
+ * confidence for the caller to choose from. With no decision model in use
+ * nothing was read (`reading: 'no decision model'`, `judgment: null`): the
+ * candidates are the routes whose descriptions share words with the request.
+ */
 export interface UncertainPlan {
   readonly status: 'uncertain';
   readonly request: string;
-  readonly judgment: TaskRouteJudgment;
-  readonly unsure: { readonly reading: 'route selection'; readonly outcome: Outcome; readonly leading: string; readonly probability: number };
+  readonly judgment: TaskRouteJudgment | null;
+  readonly unsure: { readonly reading: 'route selection' | 'no decision model'; readonly outcome: Outcome; readonly leading: string; readonly probability: number };
   readonly candidates: readonly TaskRouteCandidate[];
   readonly nextAction: string;
   readonly policy: string;

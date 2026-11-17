@@ -11,7 +11,7 @@ import type { YesNoReading } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, JudgmentAuthorityRetiredError, judgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { captureNormalizationSource } from '../utils/error-display.js';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
-import { decisionOrClassic, isClassicOperation, requireDecisionFeature } from '../runtime/decision-policy.js';
+import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 import {
   alternateApi,
   contentPartKind,
@@ -192,11 +192,14 @@ export function knownContentPartIsReasoning(label: string): boolean | undefined 
   if (isClassicOperation()) return undefined;
   try { return configured('routing.content-part-kind.peek').cache.partKinds.get(label); } catch { return undefined; }
 }
+/**
+ * Whether an undocumented content-part label carries reasoning. With no
+ * decision model in use the label is answer text, as the stream treats every
+ * label outside its documented wire table (providers/openai-stream-delta.ts):
+ * nothing is hidden from the user on a guess.
+ */
 export async function readContentPartIsReasoning(label: string, site: string): Promise<boolean> {
-  return decisionOrClassic(() => readDecisionContentPartIsReasoning(label, site), () => {
-    requireDecisionFeature('interpret an undocumented provider content type');
-    throw new Error('Decision content-type interpretation is unavailable');
-  });
+  return decisionOrClassic(() => readDecisionContentPartIsReasoning(label, site), () => false);
 }
 async function readDecisionContentPartIsReasoning(label: string, site: string): Promise<boolean> {
   assertJudgmentInput({ type: label });

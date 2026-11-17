@@ -1,8 +1,10 @@
-import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { isClassicOperation } from '../runtime/decision-policy.js';
 /**
  * Reads a piece of work before any model token is spent on it: the six
  * request batteries asked in one request (speculative fan-out), then the tier
- * composed in code from the readings and the policy floors.
+ * composed in code from the readings and the policy floors. With no decision
+ * model in use the work is not read: the tier is the purpose's floor (standard
+ * when the purpose has none) and the reading says it is unassessed.
  */
 import { fanOut, type ChoiceReading, type ScoreReading } from '@goodvibes-jev/judgment';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
@@ -28,15 +30,18 @@ export interface RequestReading {
   readonly tier: RouteTier;
   /** How the tier was composed, one clause per step, for the route's reason string. */
   readonly tierBecause: string;
-  readonly readings: {
+  /** The battery readings; absent when no decision model read the work (`unassessed`). */
+  readonly readings?: {
     readonly tier: ChoiceReading<RouteTier>;
     readonly intent: ChoiceReading<RequestIntent>;
     readonly difficulty: ScoreReading;
     readonly risk: ScoreReading;
     readonly domain: ChoiceReading<RequestDomain>;
     readonly language: ChoiceReading<RequestLanguage>;
-  };
+  } | undefined;
   readonly decisionId: string | undefined;
+  /** No decision model read the work; the tier comes from the purpose alone. */
+  readonly unassessed?: true | undefined;
   recordAction(action: string): void;
 }
 
@@ -56,7 +61,7 @@ const pct = (value: number): string => value.toFixed(2);
  * the reading; it is not permission to execute the user's request.
  */
 export function composeTier(
-  readings: RequestReading['readings'],
+  readings: NonNullable<RequestReading['readings']>,
   purpose: string,
 ): { readonly tier: RouteTier; readonly because: string } {
   const clauses: string[] = [];
@@ -73,12 +78,29 @@ export function composeTier(
   return { tier, because: clauses.join('; ') };
 }
 
-/** Reads the work with every request battery in one request and composes its tier. */
+/** The tier code gives work no decision model read: the purpose's floor, else standard. */
+export function unassessedRequestReading(request: Pick<RoutingRequest, 'purpose'>): RequestReading {
+  const floor = TIER_FLOOR_FOR_PURPOSE[request.purpose];
+  return {
+    tier: floor ?? 'standard',
+    tierBecause: floor === undefined
+      ? 'not read (no decision model is in use): standard by default'
+      : `not read (no decision model is in use): the floor for purpose ${request.purpose}`,
+    decisionId: undefined,
+    unassessed: true,
+    recordAction() { /* nothing was read */ },
+  };
+}
+
+/**
+ * Reads the work with every request battery in one request and composes its
+ * tier; with no decision model in use, returns the unassessed reading without a request.
+ */
 export async function readRequest(
   request: RoutingRequest,
   options: import('@goodvibes-jev/judgment').CallOptions = {},
 ): Promise<RequestReading> {
-  requireDecisionFeature('semantic request classification; routing without a decision model uses the configured General target');
+  if (isClassicOperation()) { options.signal?.throwIfAborted(); return unassessedRequestReading(request); }
   const site = options.site ?? 'routing.request';
   const state = requestState(request);
   const run = await fanOut(judgmentPort(site), state, REQUEST_BATTERIES, {

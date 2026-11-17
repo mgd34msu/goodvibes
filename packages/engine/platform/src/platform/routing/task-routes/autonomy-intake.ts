@@ -1,4 +1,4 @@
-import { requireDecisionFeature } from '../../runtime/decision-policy.js';
+import { isClassicOperation } from '../../runtime/decision-policy.js';
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { defineBattery, oneOf, STAKES_BANDS, yesNo, type BatteryRun, type EntryType, type JudgmentPort, type Questions, type JudgmentResult } from '@goodvibes-jev/judgment';
@@ -80,7 +80,7 @@ export interface AutonomyIntakeEvidence {
 }
 export type AutonomyIntakeReading =
   | { readonly status: 'ready'; readonly cadence: AutonomyCadence; readonly intents: AutonomyIntents; readonly schedule: AutonomyIntakeSchedule; readonly judgment: AutonomyIntakeEvidence }
-  | { readonly status: 'held'; readonly reason: 'source-unavailable' | 'protected-source' | 'unsettled' | 'schedule-unsettled'; readonly unsettled: readonly string[]; readonly judgment: AutonomyIntakeEvidence | null };
+  | { readonly status: 'held'; readonly reason: 'source-unavailable' | 'protected-source' | 'unsettled' | 'schedule-unsettled' | 'no-decision-model'; readonly unsettled: readonly string[]; readonly judgment: AutonomyIntakeEvidence | null };
 export interface AutonomyIntakeOptions extends JudgmentReadingOptions {
   readonly sourceOwner?: ProtectedSourceOwner | undefined;
   readonly retainCurrent?: ((guard: () => void, key?: string) => void) | undefined;
@@ -101,9 +101,21 @@ async function readIntakeSchedule(request: string, cadence: AutonomyCadence, por
   return { status: 'ready', reading, schedule: { kind: schedule.kind, value: schedule.kind === 'at' ? new Date(schedule.at).toISOString() : schedule.kind === 'every' ? formatEveryInterval(schedule.intervalMs) : schedule.expression, missing: [], notes: ['Read the exact cadence through the canonical schedule owner.'] } };
 }
 
-/** Screen the original in full before port lookup, then retain every reading and response field. */
+/** Every reading the intake makes; with no decision model in use, all of them stay unread. */
+const INTAKE_READINGS = Object.keys(autonomyIntake.items);
+
+/**
+ * Screen the original in full before port lookup, then retain every reading
+ * and response field. With no decision model in use the request is not read
+ * and nothing is sent: the intake is held with reason `no-decision-model` and
+ * every reading listed as unsettled, so the caller takes the explicit command
+ * (schedule, reminder, delegation) the user names instead of an inferred one.
+ */
 export async function readAutonomyIntake(request: string, options: AutonomyIntakeOptions = {}): Promise<AutonomyIntakeReading> {
-  requireDecisionFeature('semantic autonomy and schedule intake; use explicit native commands without a decision model');
+  if (isClassicOperation()) {
+    options.signal?.throwIfAborted();
+    return { status: 'held', reason: 'no-decision-model', unsettled: INTAKE_READINGS, judgment: null };
+  }
   const signal = options.signal, owner = options.sourceOwner, originalCurrent = options.assertCurrent, retainCurrent = options.retainCurrent;
   const capture = owner?.capture, screen = owner?.screen, project = owner?.project, release = owner?.release, close = owner?.close;
   const clock = Object.freeze({ now: Date.now(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone });

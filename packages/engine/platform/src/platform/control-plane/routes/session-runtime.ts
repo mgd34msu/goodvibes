@@ -57,7 +57,7 @@ export function toOperatorPermissionMode(mode: PermissionMode): OperatorPermissi
 export function toConfigPermissionMode(mode: string): PermissionMode {
   if (isSettableGatePresetName(mode)) return GATE_PRESETS[mode].mode;
   throw new GatewayVerbError(
-    `Invalid permission mode: ${String(mode)} (expected safe-owner, safe-jev, yolo, or plan)`,
+    `Invalid permission mode: ${String(mode)} (expected ask-me, jev-decides, just-vibes, yolo, or plan)`,
     'INVALID_ARGUMENT',
     400,
     'mode',

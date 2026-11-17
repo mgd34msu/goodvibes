@@ -163,17 +163,26 @@ Override the working directory used for session storage and project-scoped confi
 
 ## Runtime
 
-### `--no-worries-just-vibes`
+### `--just-vibes`
 
-Enable tool auto-approve for this launch. This is shorthand for
-`--config behavior.autoApprove=true` and does not save a settings change.
-Read, search and repository-map tools also honor it for access outside the
-project, including resolved symlink targets. Authentication, capability scopes,
-revocation, input ownership and operating-system access still apply.
+Run this launch in the `just-vibes` execution mode: the agent does as much as
+it can without interrupting you, Jev decides judgment calls when a decision
+model works, and anything that needs you is held and listed at the end of the
+run. Shorthand for `--config permissions.mode=just-vibes`; no settings change
+is saved.
+
+### `--yolo`
+
+Run this launch in the `yolo` execution mode: no general safety denial or
+prompt. Shorthand for `--config permissions.mode=yolo`; no settings change is
+saved. Read, search and repository-map tools also honor it for access outside
+the project, including resolved symlink targets. Authentication, capability
+scopes, revocation, input ownership, operating-system access, host containment,
+secret storage and payment limits still apply.
 
 ```sh
-goodvibes --no-worries-just-vibes
-goodvibes --no-worries-just-vibes --prompt 'Inspect the sibling project directory.'
+goodvibes --yolo
+goodvibes --just-vibes --prompt 'Tidy the test fixtures and tell me what you could not do.'
 ```
 
 ### `--config <key=value>`, `-c <key=value>`

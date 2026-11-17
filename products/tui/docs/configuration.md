@@ -67,7 +67,7 @@ for reference.
 | `behavior.notifyOnComplete` | `true` | Emit terminal bell and desktop notification when a long turn completes or fails (not when you cancel it) |
 | `behavior.guidanceMode` | `minimal` | Operational guidance mode: `off`, `minimal`, `guided` |
 | `storage.secretPolicy` | `preferred_secure` | Secret storage policy: prefer secure backing store, fall back when allowed |
-| `permissions.mode` | `safe-owner` | Execution mode: `safe-owner`, `safe-jev`, `yolo`, or `plan` |
+| `permissions.mode` | `jev-decides` | Execution mode: `ask-me`, `jev-decides`, `just-vibes`, `yolo`, or `plan` |
 | `ui.systemMessages` | `panel` | Routing target for general system messages (`panel`, `conversation`, or `both`); every value shows them inline in the transcript |
 | `ui.operationalMessages` | `panel` | Routing target for operational runtime notices (`panel`, `conversation`, or `both`); every value shows them inline in the transcript |
 | `ui.contractMessages` | `both` | Routing target for contract lifecycle updates: status, checks, corrections, owner questions and the outcome (`panel`, `conversation`, or `both`); every value shows them inline in the transcript |
@@ -95,29 +95,31 @@ for reference.
 
 ## Permission modes
 
-`permissions.mode` takes four values:
+`permissions.mode` takes five values:
 
 | Value | Behavior |
 | --- | --- |
-| `safe-owner` (default) | Ordinary work (reads, writes, edits, ordinary commands) runs without asking; dangerous actions wait for the owner's reply, bound to the exact action |
-| `safe-jev` | Jev stands in for the owner: it permits ordinary work and justified risk and refuses genuinely harmful actions |
+| `ask-me` | Ordinary work (reads, writes, edits, ordinary commands) runs without asking; dangerous actions and owner-only decisions wait for your reply, bound to the exact action |
+| `jev-decides` (default) | Jev, the decision model, decides judgment calls: it permits ordinary work and justified risk and refuses genuinely harmful actions; owner-only decisions (spending over a limit, unrecoverable deletion, a new recipient, granting access, loosening security, changing a contract) still ask you. With no working decision model (`judgment.endpoint` and `judgment.model` set, decision models not off, the key present) it behaves as `ask-me` |
+| `just-vibes` | Does as much as it can without interrupting you: Jev decides judgment calls when a decision model works; an owner-only decision, or a judgment with no decision model, is not run and is held, and the agent lists what was held at the end of the run for you to approve |
 | `yolo` | Runs authorized actions without general safety decisions or prompts; host containment, secret storage and payment rules still apply |
 | `plan` | Allows read-only tools and refuses every mutating or exec tool with a structured plan-mode denial |
 
-Older settings files keep working: `prompt`, `normal`, `accept-edits` and
-`custom` load as `safe-owner`, `auto` loads as `safe-jev`, and `allow-all`
-loads as `yolo`. `behavior.autoApprove` is a deprecated alias for `yolo`;
+Older settings files keep working: `safe-owner`, `prompt`, `normal`,
+`accept-edits` and `custom` are rewritten to `ask-me`, `safe-jev` and `auto`
+to `jev-decides`, and `allow-all` to `yolo`, with a one-line notice.
+`--just-vibes` and `--yolo` select those modes for one launch. `behavior.autoApprove` is a deprecated alias for `yolo`;
 selecting an execution mode clears it. Per-tool overrides are the separate
 `permissions.tools.<name>` keys, each `allow`, `prompt` or `deny`; an explicit
 `deny` blocks that tool in the safe modes.
 
 `Shift+Tab` cycles the execution modes of the current session in this order:
-`safe-owner` → `safe-jev` → `yolo` → `safe-owner`. The change lasts for the session and
+`ask-me` → `jev-decides` → `just-vibes` → `yolo` → `ask-me`. The change lasts for the session and
 asks before entering `yolo`; the saved `permissions.mode` changes only through
 `/permissions` or Settings. The key is `cycle-permission-mode` in the keybindings file. `/plan` toggles plan mode directly and `/plan off`
 returns to the mode you were in when you ran `/plan on` (it does nothing when plan
 mode is not on); `plan` is outside the cycle, and cycling from it, or leaving a plan mode that
-`/plan` did not enter, starts again at `safe-owner`.
+`/plan` did not enter, starts again at `ask-me`.
 
 Background and subagent tool calls follow the mode of the session that
 started them, and their asks reach the owner through the same approval prompt

@@ -45,6 +45,8 @@ export interface CliCommandOutput {
 }
 
 export interface GoodVibesCliFlags {
+  /** `--just-vibes` or `--yolo`: the execution mode for this launch. */
+  readonly permissionMode?: 'just-vibes' | 'yolo' | undefined;
   readonly provider: string | undefined;
   readonly model: string | undefined;
   readonly agentProfile: string | undefined;

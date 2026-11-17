@@ -425,7 +425,7 @@ In a searchable modal, `/` focuses the filter, and any keystroke that no row hot
 |-----|--------|
 | `Ctrl+C` | Clear input / cancel generation / exit (double-press to quit) |
 | `Ctrl+K` | Open the command palette (search and run any command) |
-| `Shift+Tab` | Cycle this session's execution mode: safe-owner → safe-jev → yolo, asking before yolo; the saved default changes only in `/permissions` or Settings (plan is outside the cycle; `/plan` toggles it). While the session chips show (an agent or background process is running) and the composer is empty, it switches to the previous session instead, and `Tab` to the next |
+| `Shift+Tab` | Cycle this session's execution mode: ask-me → jev-decides → just-vibes → yolo, asking before yolo; the saved default changes only in `/permissions` or Settings (plan is outside the cycle; `/plan` toggles it). While the session chips show (an agent or background process is running) and the composer is empty, it switches to the previous session instead, and `Tab` to the next |
 | `Ctrl+X` | Inside an agent or process view: stop what it shows (the first press asks, the second stops) |
 | `Alt+C` | Cancel the running tool call (the turn continues) |
 | `Alt+A` | Toggle keep-awake (the "sleep disabled" chip) |

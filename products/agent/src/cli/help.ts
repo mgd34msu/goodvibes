@@ -109,6 +109,8 @@ export function renderGoodVibesHelp(binary = 'goodvibes-agent'): string {
     '      --output-format <format>   Alias for --output',
     '      --json                     Alias for --output-format json',
     '      --no-alt-screen            Keep output in normal terminal scrollback',
+    '      --just-vibes               Work without interrupting you; anything that needs you is held for the end',
+    '      --yolo                     Run every action without safety denials for this launch',
     '  -r, --resume [id|latest]       Resume saved session when supported',
     '  -s, --session <id>             run: attach to a specific session',
     '      --continue                 run: continue the latest session',
@@ -424,7 +426,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     usage: [
       'channel-profiles list',
       'channel-profiles get <surfaceKind> [--channel-id <id>]',
-      'channel-profiles set <surfaceKind> [--channel-id <id>] [--model <model>] [--provider <provider>] [--permission-mode <safe-owner|safe-jev|yolo|plan>] --yes',
+      'channel-profiles set <surfaceKind> [--channel-id <id>] [--model <model>] [--provider <provider>] [--permission-mode <ask-me|jev-decides|just-vibes|yolo|plan>] --yes',
       'channel-profiles delete <surfaceKind> [--channel-id <id>] --yes',
     ],
     summary: 'Manage per-channel default model, provider, and permission-mode bindings applied to sessions that channel originates.',

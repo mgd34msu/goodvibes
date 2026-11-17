@@ -379,16 +379,17 @@ The stakes become the analysis `riskLevel`; the family, the facts, the side effe
 
 ### 4. Presets over the stakes table
 
-`permissions.mode` takes four values, each selecting a preset (`platform/gate/presets.ts`). Older settings files still load: `prompt`, `normal`, `accept-edits` and `custom` become `safe-owner`, `auto` becomes `safe-jev`, and `allow-all` becomes `yolo`; `behavior.autoApprove` is a deprecated alias for `yolo`.
+`permissions.mode` takes five values, each selecting a preset (`platform/gate/presets.ts`). Older settings files are rewritten at load: `safe-owner`, `prompt`, `normal`, `accept-edits` and `custom` become `ask-me`, `safe-jev` and `auto` become `jev-decides`, and `allow-all` becomes `yolo`; `behavior.autoApprove` is a deprecated alias for `yolo`. `jev-decides` is the default and behaves as `ask-me` while no decision model is set up (`decisionModelReady`: decision models not off, an endpoint and a model set, an environment key present).
 
 | Setting value | low | medium | high | critical | Notes |
 |---|---|---|---|---|---|
-| `safe-owner` (default) | allow | allow | allow | ask | dangerous actions wait for the owner |
-| `safe-jev` | allow | allow | allow | ask | Jev stands in for the owner |
+| `ask-me` | allow | allow | allow | ask | dangerous actions and owner-only items wait for the owner |
+| `jev-decides` (default) | allow | allow | allow | ask | Jev decides judgment calls; owner-only items ask the owner |
+| `just-vibes` | allow | allow | allow | ask | Jev decides judgment calls when a decision model works; owner-only items, and judgments with no decision model, are held (`queued-for-owner`, `mode_queued_for_owner`) and listed at the end of the run |
 | `yolo` | allow | allow | allow | allow | no general safety denial or prompt; host containment, secret storage and payment rules still apply |
 | `plan` | allow | allow | allow | ask | any call Jev reads as a change or outward is refused (`plan_mode`) |
 
-The mode cycle (Shift+Tab in the TUI) is `safe-owner`, `safe-jev`, `yolo`; `plan` is outside it. The cycle changes the mode of that session only and asks before entering `yolo`; the saved `permissions.mode` changes only through `/permissions` or Settings. Per-tool `permissions.tools.*` settings are separate from the mode: an explicit `deny` blocks that tool in the safe modes.
+The mode cycle (Shift+Tab in the TUI) is `ask-me`, `jev-decides`, `just-vibes`, `yolo`; `plan` is outside it. The cycle changes the mode of that session only and asks before entering `yolo`; the saved `permissions.mode` changes only through `/permissions` or Settings. Per-tool `permissions.tools.*` settings are separate from the mode: an explicit `deny` blocks that tool in the safe modes.
 
 An allow reports `stakes_preset` / `preset_allow`, a plan refusal `runtime_mode` / `plan_mode`, and an ask goes to the owner's approval prompt (`user_prompt`), where the answer can be remembered at the tier the owner picks. `PRESET_CHANGED` on the `gate` domain announces a preset change.
 
@@ -396,7 +397,7 @@ Background agents follow the same gate, under the mode of the session that start
 
 ### Sandbox escalations
 
-What host access a sandboxed command needs (the network, host privileges) is Jev's reading, `engine.gate.sandbox-needs`, replacing the shell classifier's fixed binary and subcommand sets and the package-install table. The exec tool opens the network inside the sandbox only for a command that Jev reads as needing it and whose every command the owner's egress allowlist names; a listed command that needs no network, or a `*` allowlist, does not get it, and when Jev's reading is unavailable the network stays closed. Approving an ask never opens the network for an unlisted command: the ask names the unlisted commands, and the owner adds them to `sandbox.egressAllowlist`. A sandboxed command that needs host access asks the owner through the same approval broker, once, inside the call that runs it; the terminal app's approval card leaves that question to the exec tool, so the owner is not asked it twice and no answer carries over to another call. Host privilege is never granted inside the boundary: approving a command that wants it only lets it run without root. With `sandbox.judgment` set to annotate or auto-approve, the `engine.gate.sandbox-advisory` battery reads whether the command shows a risk the owner should see; the reading annotates the ask, and only in the opt-in auto-approve mode does a confident looks-safe reading approve it. It never denies and never touches the catastrophic list.
+What host access a sandboxed command needs (the network, host privileges) is Jev's reading, `engine.gate.sandbox-needs`, replacing the shell classifier's fixed binary and subcommand sets and the package-install table. The exec tool opens the network inside the sandbox only for a command that Jev reads as needing it and whose every command the owner's egress allowlist names; a listed command that needs no network, or a `*` allowlist, does not get it, and when Jev's reading is unavailable the network stays closed. Approving an ask never opens the network for an unlisted command: the ask names the unlisted commands, and the owner adds them to `sandbox.egressAllowlist`. Who decides a sandboxed command's host access follows `permissions.mode`: in `ask-me` (or `jev-decides` with no working decision model) the owner is asked through the same approval broker, once, inside the call that runs it, and in the other modes the call's own admission decides; the terminal app's approval card leaves that question to the exec tool, so the owner is not asked it twice and no answer carries over to another call. Host privilege is never granted inside the boundary: approving a command that wants it only lets it run without root. With `sandbox.judgment` set to annotate or auto-approve, the `engine.gate.sandbox-advisory` battery reads whether the command shows a risk the owner should see; the reading annotates the ask, and only in the opt-in auto-approve mode does a confident looks-safe reading approve it. It never denies and never touches the catastrophic list.
 
 ### MCP tool calls
 
@@ -404,11 +405,11 @@ When a server's profile lists allowed capabilities, `McpPermissionManager` reads
 
 `checkDetailed()` returns a `PermissionCheckResult` with `approved`, `persisted`, `sourceLayer`, `reasonCode`, the `analysis`, and when present the `boundary` checks, the `reading`, the `preset` decision and a `detail` explaining a refusal.
 
-For headless automation, `permissions.mode: safe-jev` lets Jev decide in the owner's place and still refuses genuinely harmful actions. `permissions.mode: yolo` (and its deprecated alias `behavior.autoApprove: true`) removes the general safety denials and prompts, so use it only where the surroundings contain the work. To forbid a tool outright:
+For headless automation, `permissions.mode: jev-decides` lets Jev decide in the owner's place and still refuses genuinely harmful actions. `permissions.mode: yolo` (and its deprecated alias `behavior.autoApprove: true`) removes the general safety denials and prompts, so use it only where the surroundings contain the work. To forbid a tool outright:
 
 ```yaml
 permissions:
-  mode: safe-owner
+  mode: ask-me
   tools:
     exec: deny
     write: deny

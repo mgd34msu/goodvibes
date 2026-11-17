@@ -103,9 +103,9 @@ export const SAFETY_GATE_CONFIG_PREFIXES: readonly string[] = [
   // value an operator can store is `deny`. Falling back therefore opens a gate
   // they closed, which is the whole hazard.
   'permissions.tools.',
-  // The execution mode. Default `safe-owner`; `plan` is the read-only posture
-  // and is stricter than the default, so falling back would open a stored
-  // `plan`; a stored `safe-jev` or `yolo` is looser and is the operator's choice.
+  // The execution mode. Default `jev-decides`; `plan` and `ask-me` are
+  // stricter than the default, so falling back would open a stored one; a
+  // stored `just-vibes` or `yolo` is the operator's choice.
   'permissions.mode',
   // Which permission engine decides. Default `baseline`; `policy-engine` is the
   // one that actually enforces a policy bundle.

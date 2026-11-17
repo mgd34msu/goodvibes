@@ -22,7 +22,7 @@ import { createHash } from 'node:crypto';
 import { assertPermissionActive, awaitPermission } from './cancellation.js';
 import { analyzePermissionRequest, withReading } from './analysis.js';
 
-import { effectivePermissionMode, presetForMode, type GatePreset, type GatePresetName } from '../gate/presets.js';
+import { decisionModelReady, effectivePermissionMode, presetForMode, type GatePreset, type GatePresetName } from '../gate/presets.js';
 import { judgmentInputBoundary, runBoundary } from '../gate/boundary.js';
 import { readToolCall, shellCommandsIn } from '../gate/reading.js';
 import { currentExecutionMode, currentExecutionModeForReadDecision, currentExecutionModeOwner, isInvocationAdmitted, withExecutionMode } from '../gate/execution-context.js';
@@ -235,6 +235,8 @@ export interface PermissionConfigReader {
   /** Coherent owner-held frame. Must read owned state without invoking observers or host callbacks. */
   getAutonomousSnapshot?(): Readonly<{ permissions: PermissionConfigSnapshot['permissions']; autoApprove: boolean; directory: string | null; incarnation?: number }>;
   isAutoApproveEnabled(): boolean;
+  /** Whether a decision model is set up to answer (gate/presets.ts `decisionModelReady`); absent counts as ready. */
+  isDecisionModelReady?(): boolean;
   getSnapshot(): PermissionConfigSnapshot;
   getWorkingDirectory(): string | null;
   /**
@@ -293,6 +295,10 @@ export function createPermissionConfigReader(
     ...(flushPendingChanges ? { flushPendingChanges } : {}),
     ...(permissionSnapshot ? { getAutonomousSnapshot: permissionSnapshot } : {}),
     isAutoApproveEnabled: () => isAutoApproveEnabled(configManager),
+    isDecisionModelReady: () => decisionModelReady({
+      policy: configManager.get('judgment.policy'), endpoint: configManager.get('judgment.endpoint'), model: configManager.get('judgment.model'),
+      keySource: configManager.get('judgment.keySource'), keyName: configManager.get('judgment.keyName'),
+    }),
     getSnapshot: permissionSnapshot
       ? () => ({ permissions: permissionSnapshot().permissions })
       : () => getConfigSnapshot(configManager),
@@ -610,7 +616,7 @@ export class PermissionManager {
     if (!scope) throw new Error('Autonomous execution requires a coherent permission owner snapshot');
     assertAutonomousData(scope);
     const executionOwner = currentExecutionModeOwner();
-    const mode = executionOwner?.getMode() ?? effectivePermissionMode(scope.permissions.mode, scope.autoApprove);
+    const mode = executionOwner?.getMode() ?? effectivePermissionMode(scope.permissions.mode, scope.autoApprove, this.decisionModelWorks());
     const frame = { ...scope, permissions: { ...scope.permissions, mode }, autoApprove: false,
       executionOwnerRevision: executionOwner?.getRevision(), source, surface, rules, rulePublication, policyRules, policyPublication, policyEnabled,
       exposure,
@@ -846,7 +852,7 @@ export class PermissionManager {
     const analysis = analyzePermissionRequest(toolName, args, category);
     this.policyRuntimeState.recordPermissionRequest({ callId: sourceId, tool: toolName, category, analysis });
     const permissions = capturedAuthority.permissions;
-    const mode = effectivePermissionMode(permissions?.mode, capturedAuthority.autoApprove === true);
+    const mode = effectivePermissionMode(permissions?.mode, capturedAuthority.autoApprove === true, this.decisionModelWorks());
     const preset = presetForMode(mode);
     const effectReadOnly = preset.readOnly;
     const effectSurface = capturedAuthority.surface;
@@ -1078,7 +1084,8 @@ export class PermissionManager {
 
   /**
    * The decision after the classifier: a fact is final; an owner-only item is
-   * put to the owner; only a judgment reads the call and, in safe-jev, asks Jev.
+   * put to the owner (held for the end in just-vibes); only a judgment reads
+   * the call and, in jev-decides and just-vibes, asks Jev.
    */
   private async assessDecisionExecutionSafety(input: SafetyInput): Promise<SafetyOutcome> {
     input.assertCurrent();
@@ -1089,6 +1096,7 @@ export class PermissionManager {
         { detail: 'The owner approved these exact revised arguments.' }) };
     }
     if (decided.kind === 'owner-only') {
+      if (input.mode === 'just-vibes') return this.queuedForOwner(input.policyResult.analysis, `held for you: ${ownerOnlyReason(decided.item)}`);
       return this.askOwner(input, input.policyResult.analysis, {
         reasons: [`Only you decide this: ${ownerOnlyReason(decided.item)}.`], ownerOnly: decided.item,
         revisedDetail: 'Prepare the exact action revised and approved by the owner.',
@@ -1096,6 +1104,10 @@ export class PermissionManager {
     }
     // Plan mode reached here only for a read the defaults did not settle (outside the directories).
     if (input.mode === 'plan') return { result: input.policyResult };
+    // just-vibes with no working decision model: nobody can decide now without interrupting the owner.
+    if (input.mode === 'just-vibes' && !this.decisionModelWorks()) {
+      return this.queuedForOwner(input.policyResult.analysis, 'held for you: this needs a decision and no decision model is set up');
+    }
     const privacy = judgmentInputBoundary(input.toolName, input.args, input.workingDirectory);
     let analysis = input.policyResult.analysis;
     let reading: Awaited<ReturnType<typeof readToolCall>> | undefined;
@@ -1116,7 +1128,7 @@ export class PermissionManager {
             if (prior) assertSynchronousJudgmentGuard(() => prior()); else input.assertCurrent();
           } }), input.signal);
           input.assertCurrent();
-          if (input.mode === 'safe-jev' && !result.decisionId) throw new JudgmentError('unrecorded', 'execution safety requires recorded provenance');
+          if ((input.mode === 'jev-decides' || input.mode === 'just-vibes') && !result.decisionId) throw new JudgmentError('unrecorded', 'execution safety requires recorded provenance');
           if (result.decisionId) supportingIds.push(result.decisionId);
           return result;
         },
@@ -1139,14 +1151,14 @@ export class PermissionManager {
       passed: boundary.passed, checks: boundary.checks,
       ...(!boundary.passed ? { refusedBy: boundary.refusedBy } : {}),
     };
-    if (input.mode === 'safe-owner') {
+    if (input.mode === 'ask-me') {
       if (boundary.passed && reading?.stakes !== 'critical' && reading?.irreversible !== true && reading?.weakensSecurity !== true) {
         return { result: this.result(true, false, 'stakes_preset', 'preset_allow', analysis,
-          { boundary: boundaryResult, preset: { preset: 'safe-owner', action: 'allow' } }) };
+          { boundary: boundaryResult, preset: { preset: 'ask-me', action: 'allow' } }) };
       }
       return this.askOwner(input, analysis, {
         reasons: !boundary.passed ? [boundary.reason] : [], boundary: boundaryResult,
-        preset: { preset: 'safe-owner', action: 'ask' }, revisedDetail: 'Prepare the exact action revised and approved by the owner.',
+        preset: { preset: 'ask-me', action: 'ask' }, revisedDetail: 'Prepare the exact action revised and approved by the owner.',
       });
     }
     if (!privacy.passed) {
@@ -1178,7 +1190,7 @@ export class PermissionManager {
     return {
       result: this.result(receipt.outcome === 'act', false, 'jev_decision', `jev_${receipt.outcome}`, analysis,
         { boundary: boundaryResult, autonomousDecision: receipt, detail: receipt.summary,
-          preset: { preset: 'safe-jev', action: receipt.outcome === 'act' ? 'allow' : 'deny' } }),
+          preset: { preset: input.mode, action: receipt.outcome === 'act' ? 'allow' : 'deny' } }),
       recordClaim: () => decision.recordClaim(),
     };
   }
@@ -1555,7 +1567,7 @@ export class PermissionManager {
   /**
    * getMode, Returns the active session permission mode from config.
    * Surfaces (mode pill) and the orchestrator's standing plan-mode instruction
-   * read this to reflect the current mode. Defaults to safe-owner.
+   * read this to reflect the current mode. Defaults to jev-decides (ask-me with no working decision model).
    */
   getMode(): GatePresetName {
     const scoped = currentExecutionModeOwner();
@@ -1563,11 +1575,11 @@ export class PermissionManager {
     const native = nativePermissionConfigs.get(this.configReader);
     if (native && Object.getOwnPropertyDescriptor(this.configReader, 'getAutonomousSnapshot')?.value === native.snapshot) {
       const frame = native.owner.readMode();
-      return effectivePermissionMode(frame.mode, frame.autoApprove);
+      return effectivePermissionMode(frame.mode, frame.autoApprove, this.decisionModelWorks());
     }
     const frame = this.configReader.getAutonomousSnapshot?.();
-    return frame ? effectivePermissionMode(frame.permissions.mode, frame.autoApprove)
-      : effectivePermissionMode(this.configReader.getSnapshot().permissions?.mode, this.configReader.isAutoApproveEnabled());
+    return frame ? effectivePermissionMode(frame.permissions.mode, frame.autoApprove, this.decisionModelWorks())
+      : effectivePermissionMode(this.configReader.getSnapshot().permissions?.mode, this.configReader.isAutoApproveEnabled(), this.decisionModelWorks());
   }
 
   /** Capture the live host mode and its generation before entering an invocation scope. */
@@ -1580,7 +1592,7 @@ export class PermissionManager {
     };
     const frame = snapshot();
     const assertConfiguration = capturePermissionConfiguration(this.configReader, snapshot, frame);
-    const mode = owner?.getMode() ?? effectivePermissionMode(frame.permissions.mode, frame.autoApprove);
+    const mode = owner?.getMode() ?? effectivePermissionMode(frame.permissions.mode, frame.autoApprove, this.decisionModelWorks());
     return Object.freeze({ mode, assertCurrent: () => {
       assertConfiguration();
       if (currentExecutionModeOwner() !== owner || owner?.getRevision() !== ownerRevision
@@ -1631,6 +1643,24 @@ export class PermissionManager {
     // across sessions, so an answer in one must not decide a call in another.
     const key = sessionApprovalKey(toolName, args);
     return sessionId === undefined ? key : `session:${sessionId}|${key}`;
+  }
+
+  /** Whether Jev can decide now: the decision-model settings, read when a decision is made. */
+  private decisionModelWorks(): boolean {
+    return this.configReader.isDecisionModelReady?.() ?? true;
+  }
+
+  /**
+   * A call held for the owner in just-vibes: not run, the work carries on, and
+   * the agent lists it for the owner at the end of the run.
+   */
+  private queuedForOwner(analysis: PermissionRequestAnalysis, reason: string): SafetyOutcome {
+    return { result: this.result(false, false, 'runtime_mode', 'mode_queued_for_owner', analysis, {
+      detail: reason,
+      decision: { state: 'queued-for-owner', decidedBy: 'mode', reason,
+        next: ['carry on with the work that does not need this call',
+          'at the end of the run, list the calls held for the owner and ask them to approve or change them'] },
+    }) };
   }
 
   private result(

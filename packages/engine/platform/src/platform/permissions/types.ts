@@ -59,6 +59,8 @@ export const PERMISSION_DECISION_REASON_CODES = [
   'managed_policy_deny',
   'safety_guardrail',
   'mode_allow_all',
+  // just-vibes held an owner-only call (or one needing a decision with no decision model) for the end of the run
+  'mode_queued_for_owner',
   'invocation_already_admitted',
   'mode_denied',
   // Mode, plan mode refused a mutating/exec tool (structured plan-mode denial)

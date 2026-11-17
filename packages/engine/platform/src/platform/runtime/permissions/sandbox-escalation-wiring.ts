@@ -1,6 +1,11 @@
-/** Canonical sandbox sub-operations retain the recorded autonomous owner and
- * exact final-spawn permit. Broker/advisory behavior remains only for direct
- * compatibility constructors outside an autonomous operation. */
+/**
+ * Who decides a sandboxed command's host access follows `permissions.mode`,
+ * the one rule for every ask: with the owner deciding (ask-me, or jev-decides
+ * with no working decision model) the owner is asked on the approval card,
+ * annotated by the advisory reading per `sandbox.judgment`; otherwise the
+ * call's own recorded admission decides. Either way the exec gets one live
+ * permit for the final spawn.
+ */
 import { logger } from '../../utils/logger.js';
 import type { ConfigManager } from '../../config/manager.js';
 import type { FeatureFlagManager } from '../feature-flags/index.js';
@@ -11,6 +16,8 @@ import {
 } from './sandbox-escalation.js';
 
 import { currentExternalOperationSource } from '../../permissions/external-operation-scope.js';
+import { decisionModelReady, effectivePermissionMode } from '../../gate/presets.js';
+import type { SandboxEscalationExecution, SandboxEscalationPermit } from '../../tools/exec/sandbox.js';
 import { admitSandboxEscalation } from './autonomous-sandbox-escalation.js';
 import type { AutonomousToolPromptHost } from './autonomous-tool-prompts.js';
 export type ExecSandboxEscalationHandler = import('../../tools/exec/sandbox.js').SandboxEscalationHandler;
@@ -39,10 +46,31 @@ export function buildSandboxEscalationHandler(deps: EscalationWiringDeps): ExecS
       }
     : undefined;
 
-  return async (input, execution) => {
-    if (deps.autonomousHost) return admitSandboxEscalation(deps.autonomousHost, input, execution);
-    if (currentExternalOperationSource()) return false;
-    const seam = createSandboxEscalationApprovalHandler(deps.requestApproval, judgmentNow());
-    return (await seam({ sandbox: 'exec-sandbox', ...input })).approved;
+  const ownerDecides = (): boolean => {
+    const config = deps.configManager;
+    return effectivePermissionMode(config.get('permissions.mode'), config.get('behavior.autoApprove') === true, decisionModelReady({
+      policy: config.get('judgment.policy'), endpoint: config.get('judgment.endpoint'), model: config.get('judgment.model'),
+      keySource: config.get('judgment.keySource'), keyName: config.get('judgment.keyName'),
+    })) === 'ask-me';
   };
+
+  return async (input, execution) => {
+    if (deps.autonomousHost && !ownerDecides()) return admitSandboxEscalation(deps.autonomousHost, input, execution);
+    const seam = createSandboxEscalationApprovalHandler(deps.requestApproval, judgmentNow());
+    const approved = (await seam({ sandbox: 'exec-sandbox', ...input })).approved;
+    if (!approved) return false;
+    // Inside a model turn the exec spawns only on a live permit; the owner's yes is that permit.
+    return currentExternalOperationSource() ? ownerPermit(execution) : true;
+  };
+}
+
+/** The owner's approval as the permit the exec claims immediately before it spawns. */
+function ownerPermit(execution?: SandboxEscalationExecution): SandboxEscalationPermit {
+  const signal = execution?.signal ?? new AbortController().signal;
+  let closed = false;
+  const assertCurrent = (): void => {
+    if (closed) throw new Error('Sandbox escalation approval closed');
+    signal.throwIfAborted(); execution?.assertCurrent();
+  };
+  return Object.freeze({ signal, assertCurrent, claim: assertCurrent, close() { closed = true; } });
 }

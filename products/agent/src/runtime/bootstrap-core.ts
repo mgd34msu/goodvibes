@@ -423,7 +423,7 @@ export async function initializeBootstrapCore(
         project: workingDir,
         title: 'GoodVibes Agent session',
         // Declares the session permission mode at creation time in the shared
-        // metadata bag (safe-owner, safe-jev, yolo, or the read-only plan posture).
+        // metadata bag (ask-me, jev-decides, just-vibes, yolo, or the read-only plan posture).
         // Read-only declaration, the execution owner
         // itself always reads permissions.mode live off configManager, so this
         // does not change enforcement; it lets cross-session tooling see which

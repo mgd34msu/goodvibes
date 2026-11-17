@@ -31,8 +31,9 @@ const POLICY_DETAILS: Readonly<Record<string, string>> = {
   'Default - On': 'Use the configured decision models; halt and report availability problems if the whole chain fails.',
   Preferred: 'Try the configured decision chain, then continue in Classic only when all targets are unavailable.',
   'Classic - Off': 'Make no decision-model requests. Ordinary chat and tools remain available with the chosen execution permissions.',
-  'safe-owner': 'Ordinary work runs automatically; dangerous actions require your approval.',
-  'safe-jev': 'Use a decision model for approval judgments. Classic uses owner approval instead.',
+  'ask-me': 'Ordinary work runs automatically; dangerous actions and owner-only decisions ask you.',
+  'jev-decides': 'A decision model decides judgment calls; owner-only decisions ask you. With no working decision model you are asked instead.',
+  'just-vibes': 'Does as much as it can without interrupting you; anything that needs you is held and listed at the end.',
   yolo: 'Run without general execution approval prompts. Authentication, workspace boundaries and spending rules still apply.',
   plan: 'Inspect and plan without executing changes.',
 };

@@ -186,7 +186,7 @@ warning-level violations are handled.
 
 Tool permissions are configured under `permissions.tools.*` and enforced by the
 runtime permission layer. `permissions.mode` selects the execution mode
-(`safe-owner` default, `safe-jev`, `yolo`, or `plan`), and each tool category has its own
+(`ask-me`, `jev-decides` default, `just-vibes`, `yolo`, or `plan`), and each tool category has its own
 key with a built-in default:
 
 | Config key | Default | Covers |

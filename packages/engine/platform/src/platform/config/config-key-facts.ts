@@ -62,7 +62,7 @@ function isProjectSettable(key: string): boolean {
   return PROJECT_SETTABLE.some(entry => entry.endsWith('.') ? key.startsWith(entry) : key === entry);
 }
 
-const MODE_RANK: ReadonlyMap<string, number> = new Map([['plan', 0], ['safe-owner', 1], ['safe-jev', 2], ['yolo', 3]]);
+const MODE_RANK: ReadonlyMap<string, number> = new Map([['plan', 0], ['ask-me', 1], ['jev-decides', 2], ['just-vibes', 2], ['yolo', 3]]);
 const TOOL_RANK: ReadonlyMap<string, number> = new Map([['deny', 0], ['prompt', 1], ['allow', 2]]);
 
 function modeRank(value: unknown): number | undefined {

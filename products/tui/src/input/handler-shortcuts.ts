@@ -116,7 +116,7 @@ async function cycleSessionPermissionMode(state: GlobalShortcutRouteState): Prom
       tone: 'danger',
     }) ?? false;
     if (!confirmed) {
-      context.print(`[Permissions] Mode stays ${permissionModeLabel(current ?? 'safe-owner')} for this session.`);
+      context.print(`[Permissions] Mode stays ${permissionModeLabel(current ?? 'ask-me')} for this session.`);
       state.requestRender();
       return;
     }
@@ -125,7 +125,7 @@ async function cycleSessionPermissionMode(state: GlobalShortcutRouteState): Prom
   try {
     configManager.setRuntimeOverride('permissions.mode', next);
   } catch (error) {
-    context.print(`[Permissions] Mode stays ${permissionModeLabel(current ?? 'safe-owner')}: ${error instanceof Error ? error.message : String(error)}`);
+    context.print(`[Permissions] Mode stays ${permissionModeLabel(current ?? 'ask-me')}: ${error instanceof Error ? error.message : String(error)}`);
     state.requestRender();
     return;
   }

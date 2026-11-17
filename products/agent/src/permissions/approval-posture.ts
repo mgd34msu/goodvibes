@@ -29,7 +29,7 @@ export function computeApprovalPosture(input: ApprovalPostureInput): ApprovalPos
     mode: preset.name,
     autoApprove: input.autoApprove,
     automaticApprovals: preset.name === 'yolo',
-    bypassesPrompts: preset.name === 'yolo' || preset.name === 'safe-jev',
+    bypassesPrompts: preset.name === 'yolo' || preset.name === 'jev-decides' || preset.name === 'just-vibes',
     label: preset.label,
     detail: preset.summary,
   };

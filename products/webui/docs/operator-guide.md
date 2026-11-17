@@ -257,7 +257,7 @@ rather than implying completeness. In a session's detail you can:
 - read and set the session's gate preset through the permission-mode picker.
   Labels and choices come from the engine. The preset is session-scoped, and
   a session the daemon cannot answer for shows an honest unavailable state; the
-  picker offers exactly the four modes `safe-owner`, `safe-jev`, `yolo` and `plan`
+  picker offers exactly the five modes `ask-me`, `jev-decides`, `just-vibes`, `yolo` and `plan`
 - read the context-usage figure, an estimate marked with `~`, and the
   per-session cost for the last 24 hours; a session with no recorded cost says
   so instead of showing a fabricated zero

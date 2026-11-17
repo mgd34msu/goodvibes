@@ -99,7 +99,10 @@ export const GLOBAL_FLAGS: readonly CompletionFlag[] = [
     description: 'Alias for --output-format json',
   },
   {
-    name: '--no-worries-just-vibes', takesValue: false, description: 'Auto-approve tools and access outside the project for this launch',
+    name: '--just-vibes', takesValue: false, description: 'Work without interrupting you; anything that needs you is held for the end',
+  },
+  {
+    name: '--yolo', takesValue: false, description: 'Run every action without safety denials for this launch',
   },
   {
     name: '--no-alt-screen',

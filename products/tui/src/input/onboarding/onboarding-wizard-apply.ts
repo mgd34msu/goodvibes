@@ -153,7 +153,7 @@ export function buildOnboardingApplyRequest(controller: OnboardingWizardControll
     // and adding one here would clobber a non-default choice with the stock
     // mode when the batch flushes.
     setConfig('behavior.guidanceMode', controller.getStringFieldValue('experience.guidance', controller.runtimeSnapshot?.runtimeDefaults.behavior.guidanceMode ?? 'minimal'));
-    setConfig('permissions.mode', normalizePermissionMode(controller.getStringFieldValue('experience.permissions', controller.runtimeSnapshot?.runtimeDefaults.permissionsMode ?? 'safe-owner')));
+    setConfig('permissions.mode', normalizePermissionMode(controller.getStringFieldValue('experience.permissions', controller.runtimeSnapshot?.runtimeDefaults.permissionsMode ?? 'jev-decides')));
     setConfig('storage.secretPolicy', controller.getStringFieldValue('external-services.secret-policy', controller.runtimeSnapshot?.runtimeDefaults.secretStoragePolicy ?? 'preferred_secure'));
 
     // Provider-agnostic key capture: store each entered key under the provider's

@@ -131,11 +131,12 @@ plane, optional HTTP listener and WebUI are hosted by the daemon.
 
 ## Tool access and completion
 
-`goodvibes --no-worries-just-vibes` enables `behavior.autoApprove=true` for one
-launch, including access outside the project for read/search/map tools. The
-same override is available as `--config behavior.autoApprove=true`. Neither
-form persists it. Authentication, scopes and other deterministic checks remain
-in force. See [CLI flags](cli-flags.md#--no-worries-just-vibes).
+`goodvibes --yolo` runs one launch in the `yolo` execution mode, including
+access outside the project for read/search/map tools, and `goodvibes
+--just-vibes` runs one launch without interrupting you, holding anything that
+needs you for the end. Both are shorthand for `--config permissions.mode=...`
+and neither persists. Authentication, scopes and other deterministic checks
+remain in force. See [CLI flags](cli-flags.md#--yolo).
 
 Composer input and `--prompt` reach the conversation model directly. Actionable
 work then uses [completion verification](../../../packages/engine/docs/runtime-orchestration.md#completion-verification)

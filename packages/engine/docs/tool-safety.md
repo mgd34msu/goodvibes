@@ -16,12 +16,12 @@ autonomous decision contract
 supersedes legacy semantic approval/escalation flows, including the historical
 approval UI described later in this guide.
 
-In the TUI, `goodvibes --no-worries-just-vibes` sets
-`behavior.autoApprove=true` for that launch without saving the setting. The
-equivalent general override is `--config behavior.autoApprove=true`. Read,
+In the TUI, `goodvibes --yolo` selects the `yolo` execution mode for that
+launch without saving the setting. The equivalent general override is
+`--config permissions.mode=yolo`. Read,
 find and repository-map tools honor that setting for access outside the project,
 including resolved symlink targets. This setting does not grant operating-system
-access or bypass the other authority checks above. See [CLI flags](../../../products/tui/docs/cli-flags.md#--no-worries-just-vibes).
+access or bypass the other authority checks above. See [CLI flags](../../../products/tui/docs/cli-flags.md#--yolo).
 
 Built-in reads report an operation failure when every requested file fails,
 retaining per-file diagnostics. Mixed results retain successful reads and

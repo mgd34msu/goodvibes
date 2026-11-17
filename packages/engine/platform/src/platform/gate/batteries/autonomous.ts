@@ -122,7 +122,7 @@ const criteriaFor = (act: string | undefined, continuations: readonly FixtureCon
 /** A tool call as the tool site states it (permissions/manager.ts assessDecisionExecutionSafety). */
 const toolCall = (tool: string, args: EntryType, goal: string) => ({ tool, arguments: args,
   source: { goal, criteria: [] }, workingDirectory: '/home/dev/projects/shop-api',
-  evidence: { boundary: { passed: true, checks: [] } }, constraints: { mode: 'safe-jev', ownerPolicyAllowed: true }, provenance: { surface: 'owner-direct' } });
+  evidence: { boundary: { passed: true, checks: [] } }, constraints: { mode: 'jev-decides', ownerPolicyAllowed: true }, provenance: { surface: 'owner-direct' } });
 
 const DISPOSITION_FIXTURES: readonly DispositionFixture[] = [
   {

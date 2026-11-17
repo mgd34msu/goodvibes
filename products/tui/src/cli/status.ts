@@ -560,7 +560,7 @@ export function buildCliStatusSnapshot(options: CliStatusOptions): CliStatusSnap
       permissionLabel: describeConfiguredPermissions(config).label,
       autoApprove: config.get('behavior.autoApprove') === true,
       automaticApprovals: approvalPreset.name === 'yolo',
-      bypassesPrompts: approvalPreset.name === 'yolo' || approvalPreset.name === 'safe-jev',
+      bypassesPrompts: approvalPreset.name === 'yolo' || approvalPreset.name === 'jev-decides' || approvalPreset.name === 'just-vibes',
       permissionDetail: describeConfiguredPermissions(config).detail,
       localUsers: options.auth ?? null,
     },

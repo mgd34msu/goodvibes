@@ -1,5 +1,5 @@
 /** Execution modes and explicit owner tool restrictions. */
-export type PermissionMode = 'safe-owner' | 'safe-jev' | 'yolo' | 'plan'
+export type PermissionMode = 'ask-me' | 'jev-decides' | 'just-vibes' | 'yolo' | 'plan'
   // Read-compatible saved settings; active mutations use the canonical modes.
   | 'prompt' | 'allow-all' | 'custom' | 'accept-edits';
 export type PermissionAction = 'allow' | 'prompt' | 'deny';

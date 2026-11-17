@@ -13,7 +13,7 @@ const CHANNEL_PROFILE_ROUTE = '/api/channels/profiles/{surfaceKind}';
 
 const CHANNEL_PROFILES_GET_USAGE = 'Usage: goodvibes-agent channel-profiles get <surfaceKind> [--channel-id <id>]';
 const CHANNEL_PROFILES_SET_USAGE =
-  'Usage: goodvibes-agent channel-profiles set <surfaceKind> [--channel-id <id>] [--model <model>] [--provider <provider>] [--permission-mode <safe-owner|safe-jev|yolo|plan>] --yes';
+  'Usage: goodvibes-agent channel-profiles set <surfaceKind> [--channel-id <id>] [--model <model>] [--provider <provider>] [--permission-mode <ask-me|jev-decides|just-vibes|yolo|plan>] --yes';
 const CHANNEL_PROFILES_DELETE_USAGE = 'Usage: goodvibes-agent channel-profiles delete <surfaceKind> [--channel-id <id>] --yes';
 const CHANNEL_PROFILES_USAGE =
   'Usage: goodvibes-agent channel-profiles [list|get <surfaceKind> [--channel-id <id>]|set <surfaceKind> [--channel-id <id>] [--model <model>] [--provider <provider>] [--permission-mode <mode>] --yes|delete <surfaceKind> [--channel-id <id>] --yes]';

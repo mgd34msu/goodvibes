@@ -154,7 +154,7 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
   // reads and Shift+Tab cycles, so plan mode is one concept across surfaces.
   // The mode the session was in when /plan turned plan mode on, so leaving
   // plan mode puts the user's chosen permission posture back. Plan mode entered
-  // elsewhere (Shift+Tab) has no remembered mode and exits to safe-owner.
+  // elsewhere (Shift+Tab) has no remembered mode and exits to ask-me.
   let modeBeforePlan: PermissionModeValue | undefined;
   let stopWatchingMode: (() => void) | undefined;
   const forgetModeBeforePlan = (): void => {
@@ -190,7 +190,7 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
         return;
       }
       if (!inPlan) {
-        ctx.print(`[Permissions] Plan mode is not on; mode stays ${permissionModeLabel(current ?? 'safe-owner')}. Use /plan on to enter it.`);
+        ctx.print(`[Permissions] Plan mode is not on; mode stays ${permissionModeLabel(current ?? 'ask-me')}. Use /plan on to enter it.`);
         return;
       }
       const restored = modeBeforePlan !== undefined && !isPlanMode(modeBeforePlan) ? modeBeforePlan : togglePlanMode(current);

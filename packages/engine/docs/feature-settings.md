@@ -112,11 +112,11 @@ Hardened browsing / adversarial web content:
 ```json
 {
   "fetch": { "sanitizeMode": "strict" },
-  "permissions": { "mode": "safe-owner" }
+  "permissions": { "mode": "ask-me" }
 }
 ```
 
-`safe-owner` asks only for dangerous actions. To forbid a tool outright, set `permissions.tools.<tool>` to `deny`.
+`ask-me` asks only for dangerous actions and owner-only decisions. To forbid a tool outright, set `permissions.tools.<tool>` to `deny`.
 
 Minimal local-only host (no serving, no automation):
 
@@ -136,7 +136,7 @@ Headless automation with hard budgets:
 {
   "runtime": { "toolBudget": { "enforced": true, "maxMs": 600000, "maxCostUsd": 5 } },
   "tools": { "outputSchemaFingerprints": true },
-  "permissions": { "mode": "safe-jev" }
+  "permissions": { "mode": "jev-decides" }
 }
 ```
 

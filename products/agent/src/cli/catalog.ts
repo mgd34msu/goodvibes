@@ -276,6 +276,9 @@ const GLOBAL_FLAGS: readonly CommandFlagSpec<FlagField>[] = [
     summary: 'Agent session',
   },
   // run limits: consumed by extractHeadlessRunFlags before this parser runs; declared so help and completions list them.
+  { field: 'permissionMode', tokens: ['--just-vibes'], kind: 'const', constValue: 'just-vibes', summary: 'Work without interrupting you for this launch: anything that needs you is held and listed at the end (permissions.mode just-vibes)' },
+  // --no-worries-just-vibes is kept as an unlisted spelling of --yolo.
+  { field: 'permissionMode', tokens: ['--yolo', '--no-worries-just-vibes'], kind: 'const', constValue: 'yolo', summary: 'Run every action without safety denials for this launch (permissions.mode yolo)' },
   { field: 'timeout', tokens: ['--timeout'], kind: 'string', summary: 'run: stop after this long (90, 90s, 5m, 1h); exits 124' },
   { field: 'maxTurns', tokens: ['--max-turns'], kind: 'string', summary: 'run: stop once the model has answered this many times and still asks for tools; exits 1' },
   { field: 'omitAccumulated', tokens: ['--omit-accumulated'], kind: 'boolean', summary: 'run: with stream-json, leave accumulated out of STREAM_DELTA frames' },
@@ -320,6 +323,9 @@ export const AGENT_CLI_CATALOG: CliCatalog<GoodVibesCliCommand, FlagField, GoodV
   createDefaultFlags,
   unknownOptionError: (name) => 'Unknown option: ' + name,
   postFlag(flags, spec) {
+    if (spec.field === 'permissionMode' && flags.permissionMode) {
+      return { ...flags, configOverrides: [...flags.configOverrides, `permissions.mode=${flags.permissionMode}`] };
+    }
     return spec.field === 'model' && flags.model !== undefined
       ? { ...flags, provider: inferProviderForFlag(flags.model, flags.provider) }
       : flags;

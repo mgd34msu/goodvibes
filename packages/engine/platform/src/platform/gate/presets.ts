@@ -7,7 +7,7 @@ import type { GateRiskFamily } from './batteries/risk-family.js';
 export type GateAction = 'allow' | 'ask' | 'deny';
 
 /** The preset names, as the mode pill shows them. */
-export type GatePresetName = 'safe-owner' | 'safe-jev' | 'yolo' | 'plan';
+export type GatePresetName = 'ask-me' | 'jev-decides' | 'just-vibes' | 'yolo' | 'plan';
 
 export type { Stakes as GateStakes } from '@goodvibes-jev/judgment';
 
@@ -35,17 +35,23 @@ export interface GatePresetDefinition extends GatePreset {
   readonly label: string;
 }
 
-/** Safe modes permit ordinary work; only consequential risk needs a decision. */
+/** Every mode permits ordinary work; they differ in who decides the rest. */
 export const GATE_PRESETS: Readonly<Record<GatePresetName, GatePresetDefinition>> = {
-  'safe-owner': {
-    name: 'safe-owner', label: 'Safe — owner', mode: 'safe-owner',
-    summary: 'Ordinary actions run automatically; dangerous actions ask the owner.',
+  'ask-me': {
+    name: 'ask-me', label: 'Ask me', mode: 'ask-me',
+    summary: 'Ordinary actions run automatically; dangerous actions and owner-only decisions ask you.',
     stakes: { low: 'allow', medium: 'allow', high: 'allow', critical: 'ask' },
     readOnly: false,
   },
-  'safe-jev': {
-    name: 'safe-jev', label: 'Safe — Jev', mode: 'safe-jev',
-    summary: 'Jev stands in for the owner, allowing justified actions and refusing genuinely harmful ones.',
+  'jev-decides': {
+    name: 'jev-decides', label: 'Jev decides', mode: 'jev-decides',
+    summary: 'Jev stands in for you on judgment calls, allowing justified actions and refusing harmful ones; owner-only decisions still ask you. Without a working decision model you are asked instead.',
+    stakes: { low: 'allow', medium: 'allow', high: 'allow', critical: 'ask' },
+    readOnly: false,
+  },
+  'just-vibes': {
+    name: 'just-vibes', label: 'Just vibes', mode: 'just-vibes',
+    summary: 'Does as much as it can without interrupting you: Jev decides judgment calls when a decision model works, and anything that needs you is held and listed at the end of the run.',
     stakes: { low: 'allow', medium: 'allow', high: 'allow', critical: 'ask' },
     readOnly: false,
   },
@@ -64,7 +70,7 @@ export const GATE_PRESETS: Readonly<Record<GatePresetName, GatePresetDefinition>
 };
 
 /** Plan is a separate non-executing posture, outside the execution-mode cycle. */
-export const SESSION_GATE_PRESET_NAMES = ['safe-owner', 'safe-jev', 'yolo', 'plan'] as const satisfies readonly GatePresetName[];
+export const SESSION_GATE_PRESET_NAMES = ['ask-me', 'jev-decides', 'just-vibes', 'yolo', 'plan'] as const satisfies readonly GatePresetName[];
 export type SettableGatePresetName = (typeof SESSION_GATE_PRESET_NAMES)[number];
 
 /** Exact canonical mode membership; unknown wire values remain invalid. */
@@ -85,10 +91,12 @@ export function gatePresetLabel(name: string): string {
 /** Decode saved legacy settings into the single current mode vocabulary. */
 export function parsePermissionMode(mode: unknown): GatePresetName | undefined {
   switch (mode) {
-    case 'safe-owner': case 'safe-jev': case 'yolo': case 'plan': return mode;
-    case 'auto': return 'safe-jev';
+    case 'ask-me': case 'jev-decides': case 'just-vibes': case 'yolo': case 'plan': return mode;
+    case 'safe-owner': return 'ask-me';
+    case 'safe-jev': case 'auto': return 'jev-decides';
+    case 'just-work': return 'just-vibes';
     case 'allow-all': return 'yolo';
-    case 'prompt': case 'normal': case 'accept-edits': case 'custom': return 'safe-owner';
+    case 'prompt': case 'normal': case 'accept-edits': case 'custom': return 'ask-me';
     default: return undefined;
   }
 }
@@ -97,23 +105,52 @@ export function parsePermissionMode(mode: unknown): GatePresetName | undefined {
  * What changed for an owner whose saved `permissions.mode` is a retired value.
  *
  * None of the retired values asks before ordinary work any more: they all run as
- * safe-owner, where only critical actions ask. A saved `prompt` that used to ask on
+ * ask-me, where only critical actions ask. A saved `prompt` that used to ask on
  * every change is loosened by that, so a surface that reads the saved mode says so
  * instead of changing the posture silently. Undefined for a current or unknown value.
  */
 export function retiredPermissionModeNotice(mode: unknown): string | undefined {
   if (mode !== 'prompt' && mode !== 'normal' && mode !== 'accept-edits' && mode !== 'custom') return undefined;
-  return `permissions.mode "${mode}" is retired and now runs as safe-owner: ordinary actions run without asking and only critical actions ask. `
-    + 'To be asked less or more, choose safe-jev or yolo; for read-only planning choose plan; to block one tool, set permissions.tools.<tool> to deny.';
+  return `permissions.mode "${mode}" is retired and now runs as ask-me: ordinary actions run without asking and only critical actions ask. `
+    + 'To be asked less, choose jev-decides, just-vibes or yolo; for read-only planning choose plan; to block one tool, set permissions.tools.<tool> to deny.';
 }
 
 export function normalizePermissionMode(mode: unknown): GatePresetName {
-  return parsePermissionMode(mode) ?? 'safe-owner';
+  return parsePermissionMode(mode) ?? 'ask-me';
 }
 
-/** The old auto-approve switch is a saved alias for YOLO. */
-export function effectivePermissionMode(mode: unknown, autoApprove = false): GatePresetName {
-  return autoApprove ? 'yolo' : normalizePermissionMode(mode);
+/** The judgment settings that say whether a decision model can answer. */
+export interface DecisionModelSettings {
+  readonly policy?: unknown;
+  readonly endpoint?: unknown;
+  readonly model?: unknown;
+  readonly keySource?: unknown;
+  readonly keyName?: unknown;
+}
+
+/**
+ * Whether a decision model is set up to answer, from facts the program holds:
+ * decision models are not switched off, an endpoint and a model are set, and
+ * an environment key it names is present. A key in the secret store is
+ * trusted to be there; a failed request then takes the judgment's fallback.
+ */
+export function decisionModelReady(settings: DecisionModelSettings, env: Readonly<Record<string, string | undefined>> = process.env): boolean {
+  if (settings.policy === 'Classic - Off') return false;
+  const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+  if (!text(settings.endpoint) || !text(settings.model)) return false;
+  if (settings.keySource === 'env') return Boolean(env[text(settings.keyName) || 'TYPESAFE_API_KEY']);
+  return true;
+}
+
+/**
+ * The mode in force. The old auto-approve switch is a saved alias for YOLO;
+ * Jev cannot decide without a working decision model, so jev-decides asks the
+ * owner instead (just-vibes keeps going and holds those items for the end).
+ */
+export function effectivePermissionMode(mode: unknown, autoApprove = false, decisionModelWorks = true): GatePresetName {
+  if (autoApprove) return 'yolo';
+  const parsed = normalizePermissionMode(mode);
+  return parsed === 'jev-decides' && !decisionModelWorks ? 'ask-me' : parsed;
 }
 
 export function presetForMode(mode: unknown): GatePresetDefinition {
@@ -155,8 +192,8 @@ export function decideByPreset(preset: GatePreset, input: PresetInput): PresetDe
 /** The config `permissions.mode` values, exactly as the schema defines them. */
 export type PermissionModeValue = PermissionMode;
 
-/** The three execution modes, shared by keyboard and graphical controls. */
-export const PERMISSION_MODE_CYCLE = ['safe-owner', 'safe-jev', 'yolo'] as const satisfies readonly PermissionModeValue[];
+/** The execution modes, in the order keyboard and graphical controls cycle them. */
+export const PERMISSION_MODE_CYCLE = ['ask-me', 'jev-decides', 'just-vibes', 'yolo'] as const satisfies readonly PermissionModeValue[];
 
 /** User-facing label for a mode value: the preset name the pill shows. */
 export function permissionModeLabel(mode: PermissionModeValue | string | undefined): GatePresetName {
@@ -169,12 +206,12 @@ export type PermissionModeTone = 'neutral' | 'info' | 'caution';
 export function permissionModeTone(mode: PermissionModeValue | string | undefined): PermissionModeTone {
   switch (normalizePermissionMode(mode)) {
     case 'plan': return 'info';
-    case 'safe-jev': case 'yolo': return 'caution';
+    case 'jev-decides': case 'just-vibes': case 'yolo': return 'caution';
     default: return 'neutral';
   }
 }
 
-/** Cycle execution modes; unknown values and the planning posture enter safe-owner. */
+/** Cycle execution modes; unknown values and the planning posture enter ask-me. */
 export function nextPermissionMode(current: PermissionModeValue | string | undefined): PermissionModeValue {
   const idx = PERMISSION_MODE_CYCLE.findIndex(mode => mode === parsePermissionMode(current));
   if (idx < 0) return PERMISSION_MODE_CYCLE[0]!;
@@ -186,7 +223,7 @@ export function isPlanMode(mode: PermissionModeValue | string | undefined): bool
   return mode === 'plan';
 }
 
-/** Enter the planning posture, or return to safe-owner from planning. */
+/** Enter the planning posture, or return to ask-me from planning. */
 export function togglePlanMode(current: PermissionModeValue | string | undefined): PermissionModeValue {
-  return isPlanMode(current) ? 'safe-owner' : 'plan';
+  return isPlanMode(current) ? 'ask-me' : 'plan';
 }

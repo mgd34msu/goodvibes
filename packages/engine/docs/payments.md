@@ -15,7 +15,7 @@ Choices made under zero-deferrals where no owner ruling existed are listed in
 deliberately rather than discovered.
 
 Payment authorization is a separate domain contract and applies in every general
-execution mode, including `safe-owner`, `safe-jev` and `yolo`. Those modes do not
+execution mode, including `ask-me`, `jev-decides`, `just-vibes` and `yolo`. Those modes do not
 bypass payment enablement, direct-owner origin, budgets, merchant checks, or the
 payment-specific approval and veto windows described below.
 

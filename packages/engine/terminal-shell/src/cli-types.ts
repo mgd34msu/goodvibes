@@ -57,7 +57,8 @@ export interface GoodVibesCliFlags {
   readonly enableFeatures: readonly string[];
   readonly disableFeatures: readonly string[];
   readonly noAltScreen: boolean;
-  readonly autoApprove?: boolean;
+  /** `--just-vibes` or `--yolo`: the execution mode for this launch. */
+  readonly permissionMode?: 'just-vibes' | 'yolo' | undefined;
   readonly port: number | undefined;
   readonly hostname: string | undefined;
   readonly open: boolean;

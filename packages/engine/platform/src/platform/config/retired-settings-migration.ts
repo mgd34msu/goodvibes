@@ -108,9 +108,27 @@ export const RETIRED_SETTING_KEYS: readonly string[] = [
   ...RETIRED_SPELLINGS.map((spelling) => spelling.from),
 ];
 
+/** Values a setting no longer takes, each with the value that replaced it. */
+export const RETIRED_VALUES: readonly { readonly key: string; readonly values: Readonly<Record<string, string>> }[] = [
+  {
+    key: 'permissions.mode',
+    values: {
+      'safe-owner': 'ask-me', 'safe-jev': 'jev-decides', 'just-work': 'just-vibes',
+      auto: 'jev-decides', 'allow-all': 'yolo', prompt: 'ask-me', normal: 'ask-me', 'accept-edits': 'ask-me', custom: 'ask-me',
+    },
+  },
+];
+
+function retiredValueOf(config: Record<string, unknown>, key: string, values: Readonly<Record<string, string>>): string | undefined {
+  const found = readDotPath(config, key);
+  return found.present && typeof found.value === 'string' && Object.hasOwn(values, found.value) ? found.value : undefined;
+}
+
 export interface RetiredSettingsMigrationResult {
   readonly config: Record<string, unknown>;
   readonly migrated: boolean;
+  /** Settings whose stored value was a retired one, rewritten to its replacement. */
+  readonly renamedValues?: readonly { readonly key: string; readonly from: string; readonly to: string }[] | undefined;
   /** Removed settings that were present, in {@link RETIRED_SETTINGS} order. */
   readonly removed: readonly string[];
   /** Retired spellings that were present: moved, or dropped because they were never in force. */
@@ -123,10 +141,18 @@ function isSet(config: Record<string, unknown>, key: string): boolean {
 }
 
 export function migrateRetiredSettings(parsed: Record<string, unknown>): RetiredSettingsMigrationResult {
-  if (!RETIRED_SETTING_KEYS.some((key) => readDotPath(parsed, key).present)) {
+  if (!RETIRED_SETTING_KEYS.some((key) => readDotPath(parsed, key).present)
+    && !RETIRED_VALUES.some(({ key, values }) => retiredValueOf(parsed, key, values) !== undefined)) {
     return { config: parsed, migrated: false, removed: [], moves: [] };
   }
   const config = structuredClone(parsed);
+  const renamedValues: { key: string; from: string; to: string }[] = [];
+  for (const { key, values } of RETIRED_VALUES) {
+    const from = retiredValueOf(config, key, values);
+    if (from === undefined) continue;
+    writeRawDotPath(config, key, values[from]!);
+    renamedValues.push({ key, from, to: values[from]! });
+  }
   const removed: string[] = [];
   for (const { key } of RETIRED_SETTINGS) {
     if (deleteRawDotPath(config, key)) removed.push(key);
@@ -141,12 +167,15 @@ export function migrateRetiredSettings(parsed: Record<string, unknown>): Retired
     if (moved) writeRawDotPath(config, to, convert ? convert(found.value, parsed) : found.value);
     moves.push({ from, to, moved });
   }
-  return { config, migrated: true, removed, moves };
+  return { config, migrated: true, removed, moves, ...(renamedValues.length > 0 ? { renamedValues } : {}) };
 }
 
 /** The one-line receipt for a migrated file. */
 export function describeRetiredSettingsMigration(result: RetiredSettingsMigrationResult, sourcePath: string): string {
   const parts: string[] = [];
+  for (const { key, from, to } of result.renamedValues ?? []) {
+    parts.push(`${key} "${from}" in ${sourcePath} is now "${to}": the execution modes are ask-me, jev-decides, just-vibes and yolo (plus plan), and this is the one that does what yours did.`);
+  }
   for (const key of result.removed) {
     const setting = RETIRED_SETTINGS.find((entry) => entry.key === key);
     parts.push(`${key} is gone from ${sourcePath}. ${setting?.instead ?? ''}`.trim());

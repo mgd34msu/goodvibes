@@ -238,6 +238,7 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         webhookNotifier: services.webhookNotifier,
         mediaProviders: services.mediaProviders,
         channelDeliveryRouter: services.channelDeliveryRouter,
+        workPlan: services.workPlan,
       }),
     },
     // Called for every session the engine binds to a workspace (create and

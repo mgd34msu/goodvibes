@@ -42,6 +42,8 @@ import { registerAgentReviewPacketPresetsTool } from './review-packet-presets-to
 import { registerAgentNotifyTool } from './notify-tool.js';
 import { registerAgentMediaGenerateTool } from './media-generate-tool.js';
 import { registerAgentReviewPacketShareTool } from './review-packet-share-tool.js';
+import { registerAgentWorkPlanTool, type AgentWorkPlanStore } from './work-plan-tool.js';
+import { resolve } from 'node:path';
 import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 
@@ -65,6 +67,8 @@ export interface AgentTurnToolDeps {
   readonly mediaProviders: Parameters<typeof registerAgentMediaGenerateTool>[1];
   /** The process's one channel delivery router; the daemon's in a hosted turn. */
   readonly channelDeliveryRouter: Parameters<typeof registerAgentReviewPacketShareTool>[2];
+  /** The project work plan of this turn's workspace; absent where none is kept for it. */
+  readonly workPlan?: AgentWorkPlanStore | undefined;
 }
 
 /**
@@ -90,38 +94,57 @@ export function registerAgentTurnTools(registry: ToolRegistry, deps: AgentTurnTo
   registerAgentReviewPacketShareTool(registry, deps.artifactStore, deps.channelDeliveryRouter);
   registerAgentMediaGenerateTool(registry, deps.mediaProviders, deps.artifactStore);
   registerAgentNotifyTool(registry, deps.notificationConfig, deps.webhookNotifier);
+  if (deps.workPlan) registerAgentWorkPlanTool(registry, deps.workPlan);
 }
 
 /**
- * The Agent's tools that run only in the Agent's own process: views over its
- * command registry and terminal, and the tools whose stores and connections
- * that process owns. A turn the daemon hosts names them and refuses a call to
- * one; a tool that moves into `registerAgentTurnTools` leaves this list.
+ * Agent tools that work through the Agent process's own slash-command registry
+ * and `CommandContext` (its live session, conversation, workspace views,
+ * panels, keybindings and command handlers, built only by that process), and
+ * the two that drive its own terminal and process table. A daemon-hosted turn
+ * has none of that state, so these are refused there, with the platform tool
+ * that covers the same facts named as the next step.
  */
-export const AGENT_PROCESS_TOOL_NAMES: readonly string[] = Object.freeze([
-  // Views over the Agent's command registry and terminal.
+export const AGENT_SHELL_TOOL_NAMES: readonly string[] = Object.freeze([
   'agent_harness', 'audit', 'autonomy', 'capability_status', 'channels', 'computer', 'context', 'delegation', 'device',
   'execution', 'host', 'import_goodvibes_settings', 'memory', 'models', 'personal_ops', 'process', 'research', 'route',
   'security', 'sessions', 'settings', 'setup', 'support', 'terminal', 'vibe', 'workspace',
-  // Tools over the Agent process's own stores and connections.
-  'accounts', 'agent_autonomy_schedule', 'agent_channel_send', 'agent_knowledge', 'agent_knowledge_ingest',
-  'agent_learning_consolidation', 'agent_local_registry', 'agent_model_compare',
-  'agent_operator_action', 'agent_operator_briefing', 'agent_operator_method', 'agent_reminder_schedule',
-  'agent_research_report', 'agent_schedule_edit', 'agent_work_plan', 'browser', 'google',
-  'schedule',
 ]);
 
-const HOSTED_REFUSAL = {
-  reason: 'This GoodVibes Agent turn is hosted by the daemon, and this tool runs only in the GoodVibes Agent\'s own process.',
-  next: 'Tell the owner which tool the request needs and that it runs when he continues in the GoodVibes Agent itself (with the setting hostedSessions.routeConversationTurns off, the Agent answers in its own process).',
+/**
+ * Agent tools that need no terminal but are not composed in a hosted turn yet:
+ * they reach the daemon through the Agent's own connected-host client, or need
+ * a daemon-side owner passed in. Each leaves this list when it joins
+ * `registerAgentTurnTools`.
+ */
+export const AGENT_NOT_YET_HOSTED_TOOL_NAMES: readonly string[] = Object.freeze([
+  'accounts', 'agent_autonomy_schedule', 'agent_channel_send', 'agent_knowledge', 'agent_knowledge_ingest',
+  'agent_learning_consolidation', 'agent_local_registry', 'agent_model_compare', 'agent_operator_action',
+  'agent_operator_briefing', 'agent_operator_method', 'agent_reminder_schedule', 'agent_research_report',
+  'agent_schedule_edit', 'browser', 'google', 'schedule',
+]);
+
+/** Every Agent tool a hosted turn refuses. */
+export const AGENT_PROCESS_TOOL_NAMES: readonly string[] = Object.freeze([...AGENT_SHELL_TOOL_NAMES, ...AGENT_NOT_YET_HOSTED_TOOL_NAMES]);
+
+const SHELL_REFUSAL = {
+  reason: 'This tool works through the GoodVibes Agent\'s own slash-command registry and session (its CommandContext), which exist only in the Agent\'s own process; this turn is hosted by the daemon.',
+  next: 'Use the platform tool here that covers the same facts (goodvibes_settings for settings, state mode=memory for memory, exec for commands and processes, web_search and fetch for research, query to ask the owner), or tell the owner the tool runs when he continues in the GoodVibes Agent itself.',
+};
+
+const NOT_YET_HOSTED_REFUSAL = {
+  reason: 'This Agent tool reaches the daemon through the GoodVibes Agent\'s own connected-host client and is not composed in a daemon-hosted turn.',
+  next: 'Tell the owner which tool the request needs and that it runs when he continues in the GoodVibes Agent itself (with hostedSessions.routeConversationTurns off the Agent answers in its own process).',
 };
 
 /** The one section a hosted Agent turn's prompt adds: what it is and what it cannot do here. */
 function hostedAgentSection(): string {
+  const names = (list: readonly string[]): string => list.map((name) => `\`${name}\``).join(', ');
   return [
     '## This Agent turn is hosted by the daemon',
-    'You are the GoodVibes Agent, answering in a session the daemon hosts rather than in the Agent\'s own process. Your policy, persona, skills, routines and memory below are the Agent\'s, and `profile`, `occasions`, `agent_artifacts`, `agent_documents`, `agent_research_runs`, `agent_research_sources` and `agent_review_packet_presets` are here, so recording what you learn works as the policy says.',
-    `These Agent tools run only in the Agent's own process and are not here: ${AGENT_PROCESS_TOOL_NAMES.map((name) => `\`${name}\``).join(', ')}. Where the policy names one of them, say which tool the request needs, that this hosted turn cannot run it, and that it runs when the owner continues in the GoodVibes Agent itself. A call to one is refused.`,
+    'You are the GoodVibes Agent, answering in a session the daemon hosts rather than in the Agent\'s own process. Your policy, persona, skills, routines and memory below are the Agent\'s, and the Agent tools `profile`, `occasions`, `agent_artifacts`, `agent_documents`, `agent_research_runs`, `agent_research_sources`, `agent_review_packet_presets`, `agent_review_packet_share`, `agent_media_generate`, `agent_notify` and, in the daemon's own project, `agent_work_plan` are here, so recording what you learn works as the policy says.',
+    `These work through the Agent's own command registry and session and are not here: ${names(AGENT_SHELL_TOOL_NAMES)}. Use the platform tool that covers the same facts, or say the request runs when the owner continues in the GoodVibes Agent itself.`,
+    `These are not in this hosted turn yet: ${names(AGENT_NOT_YET_HOSTED_TOOL_NAMES)}. Where the request needs one, say which and that it runs in the GoodVibes Agent itself. A call to any listed tool is refused.`,
   ].join('\n');
 }
 
@@ -141,6 +164,8 @@ export interface AgentHostedTurnDeps {
   readonly webhookNotifier: AgentTurnToolDeps['webhookNotifier'];
   readonly mediaProviders: AgentTurnToolDeps['mediaProviders'];
   readonly channelDeliveryRouter: AgentTurnToolDeps['channelDeliveryRouter'];
+  /** The daemon's project work plan, kept for its own project only. */
+  readonly workPlan: AgentWorkPlanStore;
 }
 
 export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceTurn {
@@ -151,7 +176,17 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
   const section = hostedAgentSection();
   return {
     registerTools({ registry, workspaceRoot }) {
+      // The daemon keeps one project work plan, for its own project; a session in
+      // another workspace has no plan of its own here and is told so on a call.
+      const ownProject = resolve(deps.workPlan.projectRoot) === resolve(workspaceRoot);
+      if (!ownProject) {
+        registry.declareElsewhere(['agent_work_plan'], {
+          reason: `The work plan the daemon keeps is for its own project (${deps.workPlan.projectRoot}), not this session's workspace (${workspaceRoot}).`,
+          next: 'Use agent_work_plan from the GoodVibes Agent opened in that workspace, or start the hosted session in the daemon\'s project.',
+        });
+      }
       registerAgentTurnTools(registry, {
+        ...(ownProject ? { workPlan: deps.workPlan } : {}),
         gatewayMethods: deps.gatewayMethods,
         shellPaths: createShellPathService({ workingDirectory: workspaceRoot, homeDirectory: deps.homeDirectory }),
         artifactStore: deps.artifactStore,
@@ -160,7 +195,8 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
         mediaProviders: deps.mediaProviders,
         channelDeliveryRouter: deps.channelDeliveryRouter,
       });
-      registry.declareElsewhere(AGENT_PROCESS_TOOL_NAMES, HOSTED_REFUSAL);
+      registry.declareElsewhere(AGENT_SHELL_TOOL_NAMES, SHELL_REFUSAL);
+      registry.declareElsewhere(AGENT_NOT_YET_HOSTED_TOOL_NAMES, NOT_YET_HOSTED_REFUSAL);
       return undefined;
     },
     async systemPrompt(input) {

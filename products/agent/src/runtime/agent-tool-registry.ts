@@ -25,7 +25,6 @@ import { registerAgentTurnTools } from '@goodvibes-jev/engine/terminal-shell/age
 import { connectedHostFamilyRemote } from '../agent/operator-gateway-call.ts';
 import { registerAgentScheduleEditTool } from '../tools/agent-schedule-edit-tool.ts';
 import { registerAgentScheduleTool } from '../tools/agent-schedule-tool.ts';
-import { registerAgentWorkPlanTool } from '../tools/agent-work-plan-tool.ts';
 import { compactRegisteredToolDefinitions } from '../tools/tool-definition-compaction.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -164,6 +163,7 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     webhookNotifier: services.webhookNotifier,
     mediaProviders: services.mediaProviders,
     channelDeliveryRouter: services.channelDeliveryRouter,
+    workPlan: services.workPlan,
   });
   registerAgentBrowserTool(toolRegistry, {
     screenshotDirectory: agentBrowserScreenshotRoot(services.shellPaths.homeDirectory),
@@ -231,7 +231,6 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
   registerAgentReminderScheduleTool(toolRegistry, services.shellPaths, configManager, services.artifactStore);
   registerAgentScheduleEditTool(toolRegistry, services.shellPaths, configManager);
   registerAgentScheduleTool(toolRegistry, services.shellPaths, configManager);
-  registerAgentWorkPlanTool(toolRegistry, services.workPlan);
   installAgentToolPolicyGuard(toolRegistry);
   compactRegisteredToolDefinitions(toolRegistry);
   return { toolRegistry, fileCache, projectIndex, dispose };

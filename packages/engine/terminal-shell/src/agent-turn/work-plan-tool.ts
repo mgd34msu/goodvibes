@@ -1,7 +1,7 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
-import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { captureCatalogData } from './catalog-data.js';
+import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from './local-state-admission.js';
 import {
   WORK_PLAN_TASK_STATUSES as WORK_PLAN_STATUSES,
   summarizeWorkPlanEdit,
@@ -11,7 +11,7 @@ import {
   type ProjectWorkPlanTaskStatus as WorkPlanItemStatus,
   type WorkPlanTaskPatch,
 } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { confirmParameter, requestParameter } from './effect-admission.js';
 
 /** The slice of the project work plan this tool uses. */
 export type AgentWorkPlanStore = Pick<ProjectWorkPlan, 'projectRoot' | 'snapshot' | 'get' | 'add' | 'update' | 'setStatus' | 'remove' | 'clearCompleted'>;

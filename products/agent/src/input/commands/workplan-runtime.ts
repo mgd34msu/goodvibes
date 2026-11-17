@@ -1,5 +1,5 @@
 import { summarizeWorkPlanEdit, type ProjectWorkPlanTaskStatus as WorkPlanItemStatus } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import { createAgentWorkPlanTool } from '../../tools/agent-work-plan-tool.ts';
+import { createAgentWorkPlanTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { isDirectOwnerCommandContext, type CommandRegistry } from '../command-registry.ts';
 
 const LOCAL_STATUS: Readonly<Record<string, WorkPlanItemStatus>> = {

@@ -17,6 +17,7 @@
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
 import {
   BOOLEAN_SCHEMA,
+  JSON_VALUE_SCHEMA,
   NUMBER_SCHEMA,
   STRING_SCHEMA,
   entityOutputSchema,
@@ -39,7 +40,28 @@ export const CHANNEL_PROFILE_BINDING_SCHEMA = objectSchema({
   permissionMode: CHANNEL_PERMISSION_MODE_SCHEMA,
   updatedAt: NUMBER_SCHEMA,
   metadata: METADATA_SCHEMA,
+  // Present when the stored row holds a value this build cannot use: that
+  // field is left out of every resolution until the binding is set again or deleted.
+  invalid: objectSchema({
+    field: { type: 'string', enum: ['permissionMode'] },
+    value: JSON_VALUE_SCHEMA,
+    reason: STRING_SCHEMA,
+  }, ['field', 'value', 'reason']),
 }, ['id', 'surfaceKind', 'updatedAt']);
+
+/** What a channel's sessions get: each field merged from the channel binding and the surface-wide one, and the binding id that supplied it. */
+const CHANNEL_PROFILE_EFFECTIVE_SCHEMA = objectSchema({
+  profile: objectSchema({
+    model: STRING_SCHEMA,
+    provider: STRING_SCHEMA,
+    permissionMode: CHANNEL_PERMISSION_MODE_SCHEMA,
+  }, []),
+  sources: objectSchema({
+    model: STRING_SCHEMA,
+    provider: STRING_SCHEMA,
+    permissionMode: STRING_SCHEMA,
+  }, []),
+}, ['profile', 'sources']);
 
 export const CHANNEL_PROFILES_LIST_INPUT_SCHEMA = objectSchema({}, []);
 export const CHANNEL_PROFILES_LIST_OUTPUT_SCHEMA = listOutputSchema('bindings', CHANNEL_PROFILE_BINDING_SCHEMA);
@@ -48,7 +70,10 @@ export const CHANNEL_PROFILES_GET_INPUT_SCHEMA = objectSchema({
   surfaceKind: STRING_SCHEMA,
   channelId: STRING_SCHEMA,
 }, ['surfaceKind']);
-export const CHANNEL_PROFILES_GET_OUTPUT_SCHEMA = entityOutputSchema('binding', CHANNEL_PROFILE_BINDING_SCHEMA);
+export const CHANNEL_PROFILES_GET_OUTPUT_SCHEMA = objectSchema({
+  binding: CHANNEL_PROFILE_BINDING_SCHEMA,
+  effective: CHANNEL_PROFILE_EFFECTIVE_SCHEMA,
+}, ['binding', 'effective']);
 
 export const CHANNEL_PROFILES_SET_INPUT_SCHEMA = objectSchema({
   surfaceKind: STRING_SCHEMA,
@@ -84,7 +109,7 @@ export const builtinGatewayChannelProfilesMethodDescriptors: readonly GatewayMet
   methodDescriptor({
     id: 'channels.profiles.get',
     title: 'Get Channel Profile Binding',
-    description: 'Return the profile binding for a channel (surfaceKind plus optional channelId). Returns 404 when no binding for that exact key exists.',
+    description: 'Return the profile binding for a channel (surfaceKind plus optional channelId) and `effective`: what a session that channel originates gets, each field merged from this binding and the surface-wide one, with `sources` naming the binding id that supplied each field. Returns 404 when no binding for that exact key exists. A listed or returned binding with `invalid` holds a value this build cannot use; that field is left out until the binding is set again or deleted.',
     category: 'channels',
     scopes: ['read:channels'],
     http: { method: 'GET', path: '/api/channels/profiles/{surfaceKind}' },

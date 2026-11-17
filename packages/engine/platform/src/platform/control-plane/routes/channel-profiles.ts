@@ -19,7 +19,7 @@ import {
 
 export type ChannelProfilesGatewayService = Pick<
   ChannelProfileRegistry,
-  'list' | 'get' | 'set' | 'delete'
+  'list' | 'get' | 'set' | 'delete' | 'explain'
 >;
 
 const ERROR_STATUS: Readonly<Record<string, number>> = {
@@ -54,8 +54,12 @@ function createGetHandler(service: ChannelProfilesGatewayService): GatewayMethod
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const surfaceKind = requireStringValue(params.surfaceKind, 'surfaceKind');
+    const channelId = optionalString(params.channelId);
     try {
-      return { binding: await service.get(surfaceKind, optionalString(params.channelId)) };
+      const binding = await service.get(surfaceKind, channelId);
+      // The binding exists, so a resolution exists; the fallback only guards a delete racing this read.
+      const effective = await service.explain(surfaceKind, channelId) ?? { profile: {}, sources: {} };
+      return { binding, effective };
     } catch (error) {
       rethrowAsVerbError(error);
     }

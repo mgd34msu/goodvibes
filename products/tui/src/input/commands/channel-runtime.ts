@@ -136,6 +136,19 @@ function renderProfileBinding(binding: ChannelProfileBinding): string {
   const lines = [`  ${scope}`];
   if (binding.model) lines.push(`    model: ${binding.model}${binding.provider ? ` (${binding.provider})` : ''}`);
   if (binding.permissionMode) lines.push(`    permission mode: ${binding.permissionMode}`);
+  if (binding.invalid) lines.push(`    needs attention: ${binding.invalid.reason}`);
+  return lines.join('\n');
+}
+
+/** What a channel's sessions get, and which binding supplied each field. */
+function renderEffectiveProfile(effective: OperatorMethodOutput<'channels.profiles.get'>['effective']): string {
+  const fields = [
+    ['model', effective.profile.model, effective.sources.model],
+    ['provider', effective.profile.provider, effective.sources.provider],
+    ['permission mode', effective.profile.permissionMode, effective.sources.permissionMode],
+  ] as const;
+  const lines = ['  sessions from this channel get:'];
+  for (const [label, value, source] of fields) lines.push(`    ${label}: ${value ?? '(host default)'}${value !== undefined && source ? ` (from ${source})` : ''}`);
   return lines.join('\n');
 }
 
@@ -187,8 +200,8 @@ async function handleChannelProfilesSubcommand(args: string[], ctx: CommandConte
       return;
     }
     try {
-      const { binding } = await rpc.platformClient.operator.invoke('channels.profiles.get', { surfaceKind, ...(channelId ? { channelId } : {}) });
-      ctx.print(renderProfileBinding(binding));
+      const { binding, effective } = await rpc.platformClient.operator.invoke('channels.profiles.get', { surfaceKind, ...(channelId ? { channelId } : {}) });
+      ctx.print(`${renderProfileBinding(binding)}\n${renderEffectiveProfile(effective)}`);
     } catch (error) {
       ctx.print(`[channel profiles get] ${describeOperatorRpcError(error)}`);
     }

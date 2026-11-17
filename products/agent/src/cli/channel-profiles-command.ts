@@ -52,12 +52,25 @@ function renderChannelProfile(binding: ChannelProfile): string {
     `  provider ${binding.provider ?? '(default)'}`,
     `  permission mode ${binding.permissionMode ?? '(default)'}`,
     `  updated ${appendTemporalLabel(new Date(binding.updatedAt).toISOString(), binding.updatedAt)}`,
+    ...(binding.invalid ? [`  needs attention: ${binding.invalid.reason}`] : []),
+  ].join('\n');
+}
+
+/** What a channel's sessions get, and which binding supplied each field. */
+function renderEffectiveProfile(effective: OperatorMethodOutput<'channels.profiles.get'>['effective']): string {
+  const line = (label: string, value: string | undefined, source: string | undefined): string =>
+    `  ${label} ${value ?? '(host default)'}${value !== undefined && source ? ` (from ${source})` : ''}`;
+  return [
+    'Sessions from this channel get',
+    line('model', effective.profile.model, effective.sources.model),
+    line('provider', effective.profile.provider, effective.sources.provider),
+    line('permission mode', effective.profile.permissionMode, effective.sources.permissionMode),
   ].join('\n');
 }
 
 function renderChannelProfileLine(binding: ChannelProfile): string {
   const surface = binding.channelId ? `${binding.surfaceKind}:${binding.channelId}` : binding.surfaceKind;
-  return `  ${surface.padEnd(24)} model ${(binding.model ?? '(default)').padEnd(20)} provider ${(binding.provider ?? '(default)').padEnd(14)} permission ${binding.permissionMode ?? '(default)'}`;
+  return `  ${surface.padEnd(24)} model ${(binding.model ?? '(default)').padEnd(20)} provider ${(binding.provider ?? '(default)').padEnd(14)} permission ${binding.permissionMode ?? '(default)'}${binding.invalid ? '  needs attention' : ''}`;
 }
 
 function renderChannelProfileList(bindings: readonly ChannelProfile[]): string {
@@ -93,7 +106,7 @@ async function handleChannelProfilesGet(runtime: CliCommandRuntime, args: readon
   if (!result.ok) {
     return { output: jsonOrText(runtime, result, formatOperatorGatewayFailure(result)), exitCode: 1 };
   }
-  return { output: jsonOrText(runtime, result, renderChannelProfile(result.data.binding)), exitCode: 0 };
+  return { output: jsonOrText(runtime, result, `${renderChannelProfile(result.data.binding)}\n${renderEffectiveProfile(result.data.effective)}`), exitCode: 0 };
 }
 
 async function handleChannelProfilesSet(runtime: CliCommandRuntime, args: readonly string[]): Promise<CliCommandOutput> {

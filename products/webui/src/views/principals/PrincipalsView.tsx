@@ -451,6 +451,7 @@ function ChannelProfilesSection() {
                   binding.model && `model: ${binding.model}`,
                   binding.provider && `provider: ${binding.provider}`,
                   binding.permissionMode,
+                  binding.invalid && `needs attention: ${binding.invalid.reason}`,
                 ].filter(Boolean).join(' · ') || 'Uses the defaults'}
                 trailing={(
                   <>

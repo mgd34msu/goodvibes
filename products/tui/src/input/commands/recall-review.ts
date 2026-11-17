@@ -6,13 +6,9 @@ export const { handleRecallQueue, handleRecallReview, handleRecallExplain, handl
   createRecallReviewCommands<CommandContext>(getMemorySpine, getMemoryApi, {
     tag: '[recall]',
     command: 'recall',
-    validValuesLabel: 'Valid:',
-    validValuesSuffix: '',
     scopedQueue: true,
     temporal: true,
-    staleSeparator: ': ',
     confirmPromote: false,
-    reviewState: (state) => state,
   });
 export function handleRecallInjections(args: string[], context: CommandContext): void {
   const agentId = args[0];

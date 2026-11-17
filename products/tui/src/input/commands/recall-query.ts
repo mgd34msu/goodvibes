@@ -41,8 +41,6 @@ export const { handleRecallSearch, handleRecallVector, handleRecallGet, handleRe
   createRecallQueryCommands<CommandContext>(getMemorySpine, getMemoryApi, {
     tag: '[recall]',
     command: 'recall',
-    validValuesLabel: 'Valid:',
-    validValuesSuffix: '',
     listSuffix: ':',
     temporal: true,
     originLabel: 'via:',
@@ -59,7 +57,6 @@ export const { handleRecallSearch, handleRecallVector, handleRecallGet, handleRe
         origin: 'Provenance:',
         links: 'Links:',
       })[label],
-    missingSeparator: ': ',
     confirmMutations: false,
     linkFailure: '[recall] Link failed: check that both IDs exist.',
     printLinked(context, fromId, toId, relation) {

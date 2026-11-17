@@ -1,7 +1,6 @@
 import { createRecallReviewCommands } from '@goodvibes-jev/engine/terminal-shell/recall-review';
 import type { CommandContext } from '../command-registry.ts';
 import { getMemoryApi, getMemorySpine } from './recall-query.ts';
-import { formatAgentRecordReviewState } from '../../agent/record-labels.ts';
 import { formatConsolidationProposalForReview } from '../../agent/memory-consolidation-proposals.ts';
 export const { handleRecallQueue, handleRecallReview, handleRecallExplain, handleRecallPromote } =
   createRecallReviewCommands<CommandContext>(
@@ -22,13 +21,9 @@ export const { handleRecallQueue, handleRecallReview, handleRecallExplain, handl
     {
       tag: '[memory]',
       command: 'memory',
-      validValuesLabel: 'Valid values',
-      validValuesSuffix: '.',
       scopedQueue: false,
       temporal: false,
-      staleSeparator: ', ',
       confirmPromote: true,
-      reviewState: formatAgentRecordReviewState,
       queueExtras(context) {
         const proposals = context.clients?.memoryConsolidation?.listPendingProposals() ?? [];
         return proposals.length

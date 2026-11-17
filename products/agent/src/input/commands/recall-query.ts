@@ -44,8 +44,6 @@ export const { handleRecallSearch, handleRecallVector, handleRecallGet, handleRe
     {
       tag: '[memory]',
       command: 'memory',
-      validValuesLabel: 'Valid values',
-      validValuesSuffix: '.',
       listSuffix: '',
       temporal: false,
       originLabel: 'origin',
@@ -62,7 +60,6 @@ export const { handleRecallSearch, handleRecallVector, handleRecallGet, handleRe
           origin: 'origin',
           links: 'links',
         })[label],
-      missingSeparator: ' ',
       confirmMutations: true,
       linkFailure: '[memory] Link failed, check that both IDs exist.',
       printLinked(context, fromId, toId, relation) {

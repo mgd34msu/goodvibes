@@ -31,13 +31,7 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
   presentation: {
     readonly tag: string;
     readonly command: string;
-    readonly validValuesLabel: string;
-    readonly validValuesSuffix: string;
     readonly confirmMutations: boolean;
-    readonly errorSeparator: string;
-    readonly fieldSeparator: string;
-    readonly recordsLabel: string;
-    readonly linksLabel: string;
   },
 ) {
   /** The resolved bundle path, or undefined after printing why a model-run command may not use it. */
@@ -88,7 +82,7 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
     if (scope !== undefined) {
       if (!isValidScope(scope)) {
         context.print(
-          `${presentation.tag} Unknown scope "${scope}". ${presentation.validValuesLabel} ${VALID_SCOPES.join(', ')}${presentation.validValuesSuffix}`,
+          `${presentation.tag} Unknown scope "${scope}". Valid: ${VALID_SCOPES.join(', ')}.`,
         );
         return;
       }
@@ -98,7 +92,7 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
     if (cls !== undefined) {
       if (!isValidClass(cls)) {
         context.print(
-          `${presentation.tag} Unknown class "${cls}". ${presentation.validValuesLabel} ${VALID_CLASSES.join(', ')}${presentation.validValuesSuffix}`,
+          `${presentation.tag} Unknown class "${cls}". Valid: ${VALID_CLASSES.join(', ')}.`,
         );
         return;
       }
@@ -135,21 +129,21 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
     try {
       bundle = readBundle(targetPath);
     } catch (error) {
-      context.print(`${presentation.tag} Nothing was imported: could not read the memory bundle at ${targetPath}${presentation.errorSeparator}${summarizeError(error)}`);
+      context.print(`${presentation.tag} Nothing was imported: could not read the memory bundle at ${targetPath}: ${summarizeError(error)}`);
       return;
     }
     const result = await memory.importBundle(bundle);
     context.print(`${presentation.tag} Imported bundle from ${targetPath}`);
-    context.print(`  ${presentation.recordsLabel}imported=${result.importedRecords} skipped=${result.skippedRecords}`);
-    context.print(`  ${presentation.linksLabel}imported=${result.importedLinks}`);
+    context.print(`  Records: imported=${result.importedRecords} skipped=${result.skippedRecords}`);
+    context.print(`  Links: imported=${result.importedLinks}`);
   }
   function inspectBundle(bundle: MemoryBundle): string {
     return [
       'Memory Handoff Review',
-      `  scope${presentation.fieldSeparator}${bundle.scope}`,
-      `  records${presentation.fieldSeparator}${bundle.recordCount}`,
-      `  links${presentation.fieldSeparator}${bundle.linkCount}`,
-      `  exportedAt${presentation.fieldSeparator}${new Date(bundle.exportedAt).toISOString()}`,
+      `  scope: ${bundle.scope}`,
+      `  records: ${bundle.recordCount}`,
+      `  links: ${bundle.linkCount}`,
+      `  exportedAt: ${new Date(bundle.exportedAt).toISOString()}`,
     ].join('\n');
   }
   function handleRecallHandoffExport(args: string[], context: Context): void | Promise<void> {
@@ -179,7 +173,7 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
     const scopeRaw = flags.values.get('--scope') ?? 'team';
     if (!isValidScope(scopeRaw)) {
       context.print(
-        `${presentation.tag} Unknown scope "${scopeRaw}". ${presentation.validValuesLabel} ${VALID_SCOPES.join(', ')}${presentation.validValuesSuffix}`,
+        `${presentation.tag} Unknown scope "${scopeRaw}". Valid: ${VALID_SCOPES.join(', ')}.`,
       );
       return;
     }
@@ -201,7 +195,7 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
     try {
       context.print(inspectBundle(readBundle(targetPath)));
     } catch (error) {
-      context.print(`${presentation.tag} Failed to inspect handoff bundle${presentation.errorSeparator}${summarizeError(error)}`);
+      context.print(`${presentation.tag} Failed to inspect handoff bundle: ${summarizeError(error)}`);
     }
   }
   async function handleRecallHandoffImport(args: string[], context: Context): Promise<void> {

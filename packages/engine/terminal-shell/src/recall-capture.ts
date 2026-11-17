@@ -72,9 +72,6 @@ export function createRecallCaptureCommands<Context extends RecallCaptureContext
   presentation: {
     readonly tag: string;
     readonly command: string;
-    readonly validValuesLabel: string;
-    readonly validValuesSuffix: string;
-    readonly missingItemSeparator: string;
     readonly printAdded: (
       context: Context,
       record: Awaited<ReturnType<MemoryApi['add']>>,
@@ -90,7 +87,7 @@ export function createRecallCaptureCommands<Context extends RecallCaptureContext
     const cls = args[0];
     if (!cls || !isValidClass(cls)) {
       context.print(
-        `${presentation.tag} Invalid class "${cls ?? ''}". ${presentation.validValuesLabel} ${VALID_CLASSES.join(', ')}${presentation.validValuesSuffix}`,
+        `${presentation.tag} Invalid class "${cls ?? ''}". Valid: ${VALID_CLASSES.join(', ')}.`,
       );
       return;
     }
@@ -108,7 +105,7 @@ export function createRecallCaptureCommands<Context extends RecallCaptureContext
     const scopeRaw = flags.values.get('--scope');
     if (scopeRaw !== undefined && !isValidScope(scopeRaw)) {
       context.print(
-        `${presentation.tag} Invalid scope "${scopeRaw}". ${presentation.validValuesLabel} ${VALID_SCOPES.join(', ')}${presentation.validValuesSuffix}`,
+        `${presentation.tag} Invalid scope "${scopeRaw}". Valid: ${VALID_SCOPES.join(', ')}.`,
       );
       return;
     }
@@ -150,12 +147,12 @@ export function createRecallCaptureCommands<Context extends RecallCaptureContext
           ? forensicsRegistry.latest()
           : forensicsRegistry.getById(requestedId);
       if (!report) {
-        context.print(`${presentation.tag} Incident not found${presentation.missingItemSeparator}${requestedId ?? 'latest'}`);
+        context.print(`${presentation.tag} Incident not found: ${requestedId ?? 'latest'}`);
         return;
       }
       const bundle = forensicsRegistry.buildBundle(report.id);
       if (!bundle) {
-        context.print(`${presentation.tag} Failed to build incident bundle${presentation.missingItemSeparator}${report.id}`);
+        context.print(`${presentation.tag} Failed to build incident bundle: ${report.id}`);
         return;
       }
       const record = await memory.add(buildIncidentMemoryAddOptions(bundle));
@@ -180,7 +177,7 @@ export function createRecallCaptureCommands<Context extends RecallCaptureContext
       }
       const server = context.extensions.mcpRegistry.listServerSecurity().find((entry) => entry.name === serverName);
       if (!server) {
-        context.print(`${presentation.tag} MCP server not found${presentation.missingItemSeparator}${serverName}`);
+        context.print(`${presentation.tag} MCP server not found: ${serverName}`);
         return;
       }
       const record = await memory.add(buildMcpSecurityMemoryAddOptions(server));
@@ -199,7 +196,7 @@ export function createRecallCaptureCommands<Context extends RecallCaptureContext
       }
       const plugin = pluginManager.list().find((entry) => entry.name === pluginName);
       if (!plugin) {
-        context.print(`${presentation.tag} Plugin not found${presentation.missingItemSeparator}${pluginName}`);
+        context.print(`${presentation.tag} Plugin not found: ${pluginName}`);
         return;
       }
       const quarantineReason = pluginManager.getQuarantineRecord(plugin.name)?.reason;

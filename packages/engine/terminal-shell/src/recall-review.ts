@@ -29,13 +29,9 @@ export function createRecallReviewCommands<Context extends RecallQueryContext>(
   presentation: {
     readonly tag: string;
     readonly command: string;
-    readonly validValuesLabel: string;
-    readonly validValuesSuffix: string;
     readonly scopedQueue: boolean;
     readonly temporal: boolean;
-    readonly staleSeparator: string;
     readonly confirmPromote: boolean;
-    readonly reviewState: (state: MemoryRecord['reviewState']) => string;
     readonly queueExtras?: ((context: Context) => readonly string[] | undefined) | undefined;
   },
 ) {
@@ -119,7 +115,7 @@ export function createRecallReviewCommands<Context extends RecallQueryContext>(
     if (scope !== undefined) {
       if (!isValidScope(scope)) {
         context.print(
-          `${presentation.tag} Unknown scope "${scope}". ${presentation.validValuesLabel} ${VALID_SCOPES.join(', ')}${presentation.validValuesSuffix}`,
+          `${presentation.tag} Unknown scope "${scope}". Valid: ${VALID_SCOPES.join(', ')}.`,
         );
         return;
       }
@@ -139,9 +135,9 @@ export function createRecallReviewCommands<Context extends RecallQueryContext>(
     } else {
       context.print(`${presentation.tag} Review queue (${queue.length}):`);
       for (const record of queue) {
-        const reason = record.staleReason ? presentation.staleSeparator + record.staleReason : '';
+        const reason = record.staleReason ? ': ' + record.staleReason : '';
         context.print(
-          `  ${record.id} [${record.scope}/${record.cls}] ${presentation.reviewState(record.reviewState)} ${record.confidence}%  ${record.summary}${reason}${presentation.temporal ? temporalStatusLabel(record) : ''}`,
+          `  ${record.id} [${record.scope}/${record.cls}] ${record.reviewState} ${record.confidence}%  ${record.summary}${reason}${presentation.temporal ? temporalStatusLabel(record) : ''}`,
         );
       }
     }

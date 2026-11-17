@@ -35,15 +35,12 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
   presentation: {
     readonly tag: string;
     readonly command: string;
-    readonly validValuesLabel: string;
-    readonly validValuesSuffix: string;
     readonly listSuffix: string;
     readonly temporal: boolean;
     readonly originLabel: string;
     readonly provenance: (refs: MemoryRecord['provenance']) => string;
     readonly provenanceEntry: (ref: MemoryRecord['provenance'][number]) => string;
     readonly label: (label: 'scope' | 'class' | 'summary' | 'detail' | 'tags' | 'created' | 'origin' | 'links') => string;
-    readonly missingSeparator: string;
     readonly confirmMutations: boolean;
     readonly printLinked: (context: Context, fromId: string, toId: string, relation: string) => void;
     readonly printDeleted: (context: Context, id: string) => void;
@@ -68,7 +65,7 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
       if (isValidClass(cls)) filter.cls = cls;
       else {
         context.print(
-          `${presentation.tag} Unknown class "${cls}". ${presentation.validValuesLabel} ${VALID_CLASSES.join(', ')}${presentation.validValuesSuffix}`,
+          `${presentation.tag} Unknown class "${cls}". Valid: ${VALID_CLASSES.join(', ')}.`,
         );
         return;
       }
@@ -78,7 +75,7 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
       if (isValidScope(scope)) filter.scope = scope;
       else {
         context.print(
-          `${presentation.tag} Unknown scope "${scope}". ${presentation.validValuesLabel} ${VALID_SCOPES.join(', ')}${presentation.validValuesSuffix}`,
+          `${presentation.tag} Unknown scope "${scope}". Valid: ${VALID_SCOPES.join(', ')}.`,
         );
         return;
       }
@@ -163,7 +160,7 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
     if (cls) {
       if (!isValidClass(cls)) {
         context.print(
-          `${presentation.tag} Unknown class "${cls}". ${presentation.validValuesLabel} ${VALID_CLASSES.join(', ')}${presentation.validValuesSuffix}`,
+          `${presentation.tag} Unknown class "${cls}". Valid: ${VALID_CLASSES.join(', ')}.`,
         );
         return;
       }
@@ -173,7 +170,7 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
     if (scope !== undefined) {
       if (!isValidScope(scope)) {
         context.print(
-          `${presentation.tag} Unknown scope "${scope}". ${presentation.validValuesLabel} ${VALID_SCOPES.join(', ')}${presentation.validValuesSuffix}`,
+          `${presentation.tag} Unknown scope "${scope}". Valid: ${VALID_SCOPES.join(', ')}.`,
         );
         return;
       }
@@ -213,7 +210,7 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
     }
     return afterMemory(memory.get(id), (record) => {
       if (!record) {
-        context.print(`${presentation.tag} Record not found${presentation.missingSeparator}${id}`);
+        context.print(`${presentation.tag} Record not found: ${id}`);
         return;
       }
       const ts = new Date(record.createdAt).toISOString().slice(0, 19).replace('T', ' ');
@@ -285,7 +282,7 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
     }
     return afterMemory(memory.delete(id), (removed) => {
       if (!removed) {
-        context.print(`${presentation.tag} Record not found${presentation.missingSeparator}${id}`);
+        context.print(`${presentation.tag} Record not found: ${id}`);
         return;
       }
       presentation.printDeleted(context, id);

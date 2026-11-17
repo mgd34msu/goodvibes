@@ -8,9 +8,6 @@ const getMemoryWriter = (context: CommandContext) => getMemorySpine(context) ?? 
 export const { handleRecallAdd, handleRecallCapture } = createRecallCaptureCommands<CommandContext>(getMemoryWriter, {
   tag: '[memory]',
   command: 'memory',
-  validValuesLabel: 'Valid values',
-  validValuesSuffix: '.',
-  missingItemSeparator: ' ',
   printAdded(context, record, cls) {
     context.print(`[memory] Added ${cls}`);
     context.print(`  id ${record.id}`);

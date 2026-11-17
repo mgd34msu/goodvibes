@@ -83,7 +83,10 @@ export function captureScheduleEffect(rawArgs: Record<string, unknown>, options:
       if (!receipt.result.success && methodId === 'automation.jobs.update' && /AUTOMATION_JOB_STALE|"status": 409\b/.test(receipt.result.error ?? '')) {
         return { success: false, error: `The schedule changed since it was read, so the host refused the edit and nothing was changed. Read it again with schedule action:"list" scheduleId:"${String(input.jobId)}" and repeat the edit if it still applies.` };
       }
-      if (receipt.kind === 'held' && receipt.result.success) return { success: false, error: 'The native operator effect receipt is unavailable.' };
+      // The host answered 2xx, so the change happened; only its answer could not be handed over.
+      if (receipt.kind === 'held' && receipt.result.success) {
+        return { success: true, output: [`${methodId} was applied on the connected host, but its answer could not be read, so the schedule id is not known here. List the schedules to see it; do not repeat the call.`, receipt.result.output ?? ''].filter(Boolean).join('\n') };
+      }
       if (receipt.kind === 'received') {
         const body = receipt.body;
         if (!body || typeof body !== 'object' || Array.isArray(body) || !('id' in body) || typeof body.id !== 'string'

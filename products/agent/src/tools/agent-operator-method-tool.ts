@@ -1,7 +1,7 @@
 import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { redactStructuredDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
+import { logger, redactStructuredDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import { isDeepStrictEqual } from 'node:util';
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
@@ -670,31 +670,60 @@ export function createAgentOperatorMethodTool(
           ...(READ_ONLY_HTTP_METHODS.has(route.httpMethod) ? {} : { body: JSON.stringify(wirePayload) }),
         });
         stage = 'answered'; httpStatus = response.status;
-        assertCurrent();
-        const body = await readResponseBody(response);
-        assertCurrent();
-        const outcome = operatorOutcome(route.method.id, response.ok, body);
-        const output = {
+        // From here the host's answer is the outcome. A check after it cannot undo an
+        // applied effect, so nothing below re-checks currentness, and for an effect a body
+        // that cannot be read or protected is withheld instead of turning the answer into
+        // a failure. A read without its body has nothing to report, so it fails and can be retried.
+        const facts = {
           methodId: route.method.id,
           status: response.status,
           ok: response.ok,
           route: `${route.httpMethod} ${requestPath}`,
           effect: preview.effect,
-          body,
-          ...(outcome ? { outcome } : {}),
         };
-        const formatted = await stringifyOutput(output, { signal: options?.signal, assertCurrent, secretValues: [connection.token],
-          declaredFields: operatorResultFields(methodSnapshot) });
-        assertCurrent();
+        let body: unknown;
+        try {
+          body = await readResponseBody(response);
+        } catch (error) {
+          if (!requiresEffect) throw error;
+          return withheldOperatorAnswer({ ...facts, route: `${route.httpMethod} ${route.path}` }, `the answer body could not be read (${summarizeError(error)})`);
+        }
+        if (response.ok) {
+          try {
+            publishOperatorMethodReceipt(route.method.id, rawArgs, body);
+          } catch (error) {
+            logger.warn('agent_operator_method: the receipt of an applied method was not handed to its caller', {
+              methodId: route.method.id, error: summarizeError(error),
+            });
+          }
+        }
+        const outcome = operatorOutcome(route.method.id, response.ok, body);
+        let formatted: string;
+        try {
+          formatted = await stringifyOutput({ ...facts, body, ...(outcome ? { outcome } : {}) }, {
+            signal: options?.signal, secretValues: [connection.token], declaredFields: operatorResultFields(methodSnapshot) });
+        } catch (error) {
+          if (!requiresEffect) throw error;
+          return withheldOperatorAnswer({ ...facts, route: `${route.httpMethod} ${route.path}` }, `the answer body could not be checked for private data (${summarizeError(error)})`);
+        }
         if (!response.ok) return { success: false, error: formatted };
-        publishOperatorMethodReceipt(route.method.id, rawArgs, options, body);
-        assertCurrent();
         return { success: true, output: formatted };
       } catch (error) {
         return { success: false, error: operatorMethodFailure(stage, readOnlyHttp, httpStatus, route.method.id, error) };
       }
     },
   };
+}
+
+/**
+ * The host answered an effect, but its body is withheld: the status decides the
+ * result, and the reason says why the body is missing.
+ */
+function withheldOperatorAnswer(facts: { readonly methodId: string; readonly status: number; readonly ok: boolean; readonly route: string; readonly effect: unknown },
+  reason: string): { success: boolean; output?: string; error?: string } {
+  const text = JSON.stringify({ ...facts, body: 'withheld', bodyWithheldBecause: reason }, null, 2);
+  if (facts.ok) return { success: true, output: `${facts.methodId} was applied: the host answered HTTP ${facts.status}. Its answer is withheld because ${reason}. Do not repeat the call; read the current state if the details are needed.\n${text}` };
+  return { success: false, error: `${facts.methodId} did not succeed: the host answered HTTP ${facts.status}. Its answer is withheld because ${reason}.\n${text}` };
 }
 
 function operatorMethodFailure(stage: 'before-send' | 'sending' | 'answered', readOnlyHttp: boolean,

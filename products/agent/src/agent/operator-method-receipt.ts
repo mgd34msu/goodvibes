@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { isDeepStrictEqual } from 'node:util';
 import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
-import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 
 interface ReceiptScope {
@@ -31,17 +31,21 @@ export async function executeOperatorMethodWithReceipt(registry: ToolRegistry, c
     if (receipt !== undefined) throw new Error('Private operator receipt was already published.');
     receipt = { body: captureStrictJudgmentJson(body) };
   } }, () => registry.executeNested(callId, 'agent_operator_method', { methodId, input: captured }, parentOptions, { signal, assertCurrent }));
-  assertCurrent();
+  // No currentness check after the call: once the host answered, its answer is the outcome.
   if (!result.success || receipt === undefined) return { kind: 'held', result };
   return { kind: 'received', result, body: receipt.body };
 }
 
-/** Internal transport publication. ToolResult contains the protected display only. */
-export function publishOperatorMethodReceipt(methodId: string, args: Record<string, unknown>,
-  options: Parameters<Tool['execute']>[1], body: unknown): void {
+/**
+ * Internal transport publication. ToolResult contains the protected display only.
+ * It runs after the host applied the method, so it checks only that this is the
+ * call the parent made; a currentness check here could not undo the effect.
+ */
+export function publishOperatorMethodReceipt(methodId: string, args: Record<string, unknown>, body: unknown): void {
   const scope = scopes.getStore();
   if (!scope) return;
-  if (methodId !== scope.methodId || !isDeepStrictEqual(captureStrictJudgmentJson(args.input ?? {}), scope.input)
-    || !assertCurrentToolInvocation(args, options)) throw new Error('Private operator receipt source changed.');
+  if (methodId !== scope.methodId || !isDeepStrictEqual(captureStrictJudgmentJson(args.input ?? {}), scope.input)) {
+    throw new Error('Private operator receipt source changed.');
+  }
   scope.receive(body);
 }

@@ -163,17 +163,23 @@ export function createAgentAutonomyScheduleTool(
       sideEffects: ['network', 'state'],
     },
     execute: async (rawArgs, options) => {
+      let effect: ReturnType<typeof captureScheduleEffect> | undefined;
       try {
-        const effect = captureScheduleEffect(rawArgs, options, shellPaths, configManager, registry);
+        effect = captureScheduleEffect(rawArgs, options, shellPaths, configManager, registry);
         const parsed = parseAutonomyScheduleArgs(buildAutonomyScheduleArgs(rawArgs), { requireExplicitUserRequest: false });
         if (parsed.errors.length > 0) return { success: false, error: parsed.errors.join('\n') };
         const preview = buildAutonomySchedulePreview(parsed);
         effect.assertCurrent();
+        // Once the host has answered, its answer is the outcome: no check runs after it.
         const result = await effect.invoke('automation.schedules.create', preview.payload);
-        effect.assertCurrent();
         return formatScheduleOperatorResult(result, 'Created GoodVibes schedule for autonomous Agent work');
       } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) };
+        const message = error instanceof Error ? error.message : String(error);
+        // Only a request already handed to the transport can have been applied.
+        if (effect?.sent) {
+          return { success: false, error: `outcome_unknown: the schedule request was sent to the connected host and then failed (${message}). It may have been applied; read the schedule list before repeating it.` };
+        }
+        return { success: false, error: effect ? `${message} Nothing was sent to the connected host.` : message };
       }
     },
   };

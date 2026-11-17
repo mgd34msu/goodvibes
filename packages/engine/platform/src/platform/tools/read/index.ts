@@ -1,4 +1,3 @@
-import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DEFAULT_CEILING_TOKENS } from '../../runtime/tools/output-policy.js';
 import type { ReadAccessFilter } from '../shared/read-access.js';
@@ -92,15 +91,9 @@ export class ReadTool implements Tool {
   }
 
   /** A link inside the project is judged by where it leads as well as by its own name. */
+  /** The access filter already judges where a link lands (PermissionManager.readAccess), so one call decides. */
   private async readAllowed(access: ReadAccessFilter, lexicalPath: string): Promise<boolean> {
-    if (!await access(lexicalPath)) return false;
-    let real: string;
-    try {
-      real = realpathSync(lexicalPath);
-    } catch {
-      return true; // Not an existing path: the read itself reports that.
-    }
-    return real === lexicalPath || access(real);
+    return access(lexicalPath);
   }
 
   private async _execute(input: ReadInput, assertCurrent: () => void, allowOutsideProject: boolean): Promise<{ success: boolean; output: string; error?: string; hostEvidence?: ToolHostEvidence }> {

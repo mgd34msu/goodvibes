@@ -23,7 +23,10 @@
  * withheld, the same "names shown, values withheld" idiom as withheld_env.
  */
 
-/** Resolves true when a read of `absolutePath` is currently allowed (content may be shown). */
+/**
+ * Resolves true when a read of `absolutePath` is currently allowed (content may be shown).
+ * A filter judges where a link at that path really lands as well, so callers ask once.
+ */
 export type ReadAccessFilter = (absolutePath: string) => Promise<boolean>;
 
 /** A filter that allows everything, the default when no permission seam is wired. */

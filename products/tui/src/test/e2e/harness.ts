@@ -110,10 +110,11 @@ export interface ModelRequest {
   readonly tools: readonly unknown[];
 }
 
-/** One scripted answer: plain text, or tool calls the TUI should run. */
+/** One scripted answer: plain text, tool calls the TUI should run, or an HTTP error the provider answers. */
 export type ModelReply =
   | { readonly text: string }
-  | { readonly toolCalls: ReadonlyArray<{ readonly name: string; readonly arguments: Record<string, unknown> }> };
+  | { readonly toolCalls: ReadonlyArray<{ readonly name: string; readonly arguments: Record<string, unknown> }> }
+  | { readonly status: number; readonly error: string };
 
 export interface StubModel {
   readonly baseURL: string;
@@ -181,6 +182,7 @@ export function startStubModel(answer: (request: ModelRequest, index: number) =>
       const index = requests.length;
       requests.push(request);
       const reply = answer(request, index);
+      if ('status' in reply) return Response.json({ error: { message: reply.error, type: 'invalid_request_error' } }, { status: reply.status });
       const created = Math.floor(Date.now() / 1000);
       const toolCalls = 'toolCalls' in reply
         ? reply.toolCalls.map((call, i) => ({

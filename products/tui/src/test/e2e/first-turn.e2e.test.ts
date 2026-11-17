@@ -1,5 +1,7 @@
 // Proves: The shipped goodvibes binary starts, completes an interactive first turn, and its headless entry point exits 0 with the reply as JSON and reaches no outside network.
 // Red when: The daemon cannot start or pair, the compiled terminal does not reach its input area or writes to stderr, a first turn is not answered or creates work, or the headless run does not exit 0 with JSON, asks a decision model under No Decision Model, or tries the network.
+// Proves: A headless run whose turn failed at the provider exits with a code other than the documented failure code 1, so a script or CI job takes the failure for done or for an outcome it must not retry.
+// Red when: The headless entry point does not set exit code 1 when the turn ends in an error (it exits 0, or 3 for an unknown outcome), or writes more than the one JSON result to stdout.
 /**
  * The built `goodvibes` binary on a fresh home, against a real daemon and a
  * scripted model at the HTTP wire: it starts in a real terminal with nothing on
@@ -21,8 +23,12 @@ import { closeE2EFixture, inputAreaVisible, isolatedEnv, lastUserText, launchTui
 const PROMPT = 'give this project a code review';
 const REPLY = 'I will review the project code.';
 
+const FAILING = 'this request is refused by the provider';
+
 const model = startStubModel((request) => (
-  lastUserText(request).includes(PROMPT) ? { text: REPLY } : { text: 'E2E side request' }
+  lastUserText(request).includes(PROMPT) ? { text: REPLY }
+    : lastUserText(request).includes(FAILING) ? { status: 400, error: 'The request was refused.' }
+      : { text: 'E2E side request' }
 ));
 let tui: TuiSession | null = null;
 let host: Awaited<ReturnType<typeof startE2ENativeHost>> | null = null;
@@ -74,6 +80,21 @@ describe('first turn', () => {
       // The interactive session's check ran inside stop(); the headless child writes to the same log.
       const violations = join(home.root, 'network-violations.log');
       expect(existsSync(violations) ? readFileSync(violations, 'utf8') : '').toBe('');
+    } finally { if (child.exitCode === null) child.kill('SIGKILL'); await child.exited; }
+  });
+
+  test('a headless run whose turn fails at the provider exits 1 with one JSON result that says so', async () => {
+    const home = ownedHome!;
+    const child = Bun.spawn([resolveBinary(), '--prompt', FAILING, '--output-format', 'json'], {
+      cwd: home.workspace, env: isolatedEnv(home, host!.env), stdout: 'pipe', stderr: 'pipe',
+    });
+    try {
+      const [stdout, exitCode] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+      expect(exitCode).toBe(1);
+      // stdout is the one JSON object a script parses, and nothing else.
+      const result = JSON.parse(stdout) as { ok?: unknown; stopReason?: unknown };
+      expect(result.ok).toBe(false);
+      expect(typeof result.stopReason).toBe('string');
     } finally { if (child.exitCode === null) child.kill('SIGKILL'); await child.exited; }
   });
 });

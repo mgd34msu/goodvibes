@@ -25,8 +25,6 @@ export * from './ui-read-models-observability-security.js';
 export * from './ui-read-models-observability-system.js';
 export * from './ui-read-models-operations.js';
 export * from './ui-service-queries.js';
-export { createUiRuntimeServices } from './ui-services.js';
-export type { UiRuntimeServices } from './ui-services.js';
 export {
   dismissGuidance,
   evaluateContextualGuidance,

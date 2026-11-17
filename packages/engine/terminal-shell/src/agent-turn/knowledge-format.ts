@@ -66,12 +66,16 @@ function sourceLine(value: unknown): string {
 
 function resultLine(value: unknown): string {
   const record = isRecord(value) ? value : {};
-  const title = cleanInline(record.title) || cleanInline(record.id) || 'untitled';
+  // A search hit carries the record it found under `source` or `node`; its title, address and summary are there.
+  const found = isRecord(record.source) ? record.source : isRecord(record.node) ? record.node : {};
+  const title = cleanInline(record.title) || cleanInline(found.title) || cleanInline(record.id) || 'untitled';
   const id = cleanInline(record.id);
   const type = cleanInline(record.type) || cleanInline(record.kind) || cleanInline(record.sourceType) || 'result';
   const score = readNumber(record, 'score');
-  const url = cleanInline(record.url) || cleanInline(record.canonicalUri) || cleanInline(record.sourceUri);
-  const snippet = cleanInline(record.snippet) || cleanInline(record.summary) || cleanInline(record.text);
+  const url = cleanInline(record.url) || cleanInline(record.canonicalUri) || cleanInline(record.sourceUri)
+    || cleanInline(found.canonicalUri) || cleanInline(found.sourceUri);
+  const snippet = cleanInline(record.snippet) || cleanInline(record.summary) || cleanInline(record.text)
+    || cleanInline(found.summary) || cleanInline(found.description);
   const parts = [
     `[${type}] ${title}`,
     id && id !== title ? `id ${id}` : '',

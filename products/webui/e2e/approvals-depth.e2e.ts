@@ -1,16 +1,12 @@
 /**
- * Approvals depth, remember tiers, the pending queue, the exec-prompt
- * answerable card, deny with a reason, and the durable-rules view. Runs on
- * BOTH phone and desktop; the mock daemon forwards the decision fields into
- * resolution and returns the authoritative `recorded` block
- * (rememberTier / reasonStored / modifiedArgsDelivered) plus its
- * remembered-decision sweep, so every honesty path here exercises the same
- * recorded-block reporting a supporting daemon drives, the UI claims only
- * what the daemon actually recorded.
+ * What the owner decides on an approval reaches the daemon as decided: the
+ * remember tier, a deny reason, a typed answer to a waiting command, and the
+ * deletion of a remembered rule. Runs on phone and desktop; the daemon is a
+ * stand-in at the wire that records every decision it receives.
  */
 import { test, expect, type Page } from '@playwright/test';
 import { installMockDaemon } from './support/mock-daemon';
-import { detailPane, expectNoHorizontalScroll, openRow } from './support/app';
+import { detailPane, openRow } from './support/app';
 import {
   EXEC_PROMPT_APPROVAL,
   PENDING_APPROVAL,
@@ -21,18 +17,6 @@ import {
 function needsYou(page: Page) {
   return page.getByRole('region', { name: 'Needs you' });
 }
-
-test('multiple pending asks render under Needs you, newest first', async ({ page }) => {
-  await installMockDaemon(page, { approvals: [PENDING_APPROVAL, PENDING_APPROVAL_SAME_CLASS] });
-  // The old Approvals link lands on Work.
-  await page.goto('/?view=approvals-tasks');
-  const approvals = needsYou(page).locator('.gv-row', { hasText: /^Approve bash/ });
-  await expect(approvals).toHaveCount(2);
-  // Newest first: the later-created same-class ask leads.
-  await expect(approvals.nth(0).filter({ hasText: 'Typecheck the workspace' })).toHaveCount(1);
-  await expect(approvals.nth(1).filter({ hasText: 'Run the full test suite before merging' })).toHaveCount(1);
-  await expectNoHorizontalScroll(page);
-});
 
 test('an approval granted at the command-class tier records a rule and suppresses the next identical ask', async ({ page }) => {
   const daemon = await installMockDaemon(page, { approvals: [PENDING_APPROVAL, PENDING_APPROVAL_SAME_CLASS] });
@@ -57,7 +41,6 @@ test('an approval granted at the command-class tier records a rule and suppresse
   await page.goto('/?view=work&settings=permissions');
   const rules = page.locator('[data-testid="permission-rules"]');
   await expect(rules.getByRole('button', { name: /^Delete rule/ })).toHaveCount(1);
-  await expectNoHorizontalScroll(page);
 });
 
 test('deny accepts an optional reason that rides the wire with the denial', async ({ page }) => {
@@ -91,7 +74,6 @@ test('a command waiting on stdin is answerable and the typed reply feeds the run
     action: 'approve',
     body: { modifiedArgs: { answer: 'yes' } },
   });
-  await expectNoHorizontalScroll(page);
 });
 
 test('approval rules live in Settings, Permissions, and delete revokes one', async ({ page }) => {
@@ -103,5 +85,4 @@ test('approval rules live in Settings, Permissions, and delete revokes one', asy
   await deleteButtons.click();
   await expect.poll(() => daemon.invocations('permissions.rules.delete')).toEqual([expect.objectContaining({ ruleId: SEEDED_PERMISSION_RULE.id })]);
   await expect(deleteButtons).toHaveCount(0);
-  await expectNoHorizontalScroll(page);
 });

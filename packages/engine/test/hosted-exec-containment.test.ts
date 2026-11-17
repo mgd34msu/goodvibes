@@ -1,5 +1,5 @@
 // Proves: A daemon-hosted conversational turn runs a command directly on the host when the sandbox is required but unavailable, switched off or not wired.
-// Red when: The containment decision allows a command when the boundary is required and the plan is unavailable, switched off or absent, or the exec tool (in the foreground or the background) runs without consulting it.
+// Red when: The containment decision allows a command when the boundary is required and the plan is unavailable, switched off or absent, a hosted session that states no posture (or whose decider throws or answers anything but workstream) is not held to the boundary, or the exec tool (in the foreground or the background) runs without consulting it.
 /**
  * hosted-exec-containment.test.ts, a hosted conversational turn does not get
  * the host.
@@ -23,6 +23,7 @@ import {
   type ExecContainmentRequirement,
 } from '../platform/src/platform/tools/exec/containment.ts';
 import type { ExecSandboxPlan } from '../platform/src/platform/tools/exec/sandbox.ts';
+import { containmentFor, resolveHostedExecPosture, type HostedExecPostureDecider } from '../platform/src/platform/hosted-sessions/exec-posture.ts';
 import { createExecTool } from '../platform/src/platform/tools/exec/index.ts';
 import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.ts';
 import { OverflowHandler } from '../platform/src/platform/tools/shared/overflow.ts';
@@ -73,6 +74,16 @@ describe('decideExecContainment', () => {
     expect(decideExecContainment(REQUIRED, contained).allowed).toBe(true);
     // The host cannot provide one, the sandbox is switched off, or none is wired: each refuses.
     for (const plan of [unavailable, switchedOff, null]) expect(decideExecContainment(REQUIRED, plan).allowed).toBe(false);
+    // A hosted session's requirement comes from the posture its composition states; only an explicit workstream gets the host.
+    const deciders: Record<string, HostedExecPostureDecider | undefined> = {
+      'no decider': undefined,
+      'a decider that throws': () => { throw new Error('composition cannot say'); },
+      'an answer that is not a posture': () => 'host' as never,
+      workstream: () => 'workstream',
+    };
+    const onTheHost = Object.fromEntries(Object.entries(deciders).map(([row, decide]) => [row,
+      decideExecContainment(containmentFor(resolveHostedExecPosture(decide, { sessionId: 's1', workspaceRoot: '/w' })), unavailable).allowed]));
+    expect(onTheHost).toEqual({ 'no decider': false, 'a decider that throws': false, 'an answer that is not a posture': false, workstream: true });
   });
 });
 

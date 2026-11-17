@@ -111,7 +111,7 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
           },
           artifactId: {
             type: 'string',
-            description: `Run source artifact (a text artifact inlined into the prompt; the prompt, document and request together may hold at most ${COMPARISON_TEXT_LIMIT.toLocaleString('en-US')} characters), or the saved comparison or judgment artifact id for apply, routeDecision, export, handoff, handoffArchive, sideBySide and review.',
+            description: `Run source artifact (a text artifact inlined into the prompt; the prompt, document and request together may hold at most ${COMPARISON_TEXT_LIMIT.toLocaleString('en-US')} characters), or the saved comparison or judgment artifact id for apply, routeDecision, export, handoff, handoffArchive, sideBySide and review.`,
           },
           leftArtifactId: {
             type: 'string',

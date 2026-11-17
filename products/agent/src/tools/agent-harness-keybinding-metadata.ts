@@ -585,7 +585,7 @@ export async function listHarnessKeybindings(context: KeybindingContext, args: H
     returned: entries.length,
     total: sources.entries.length,
     policy: manager
-      ? 'Reads the live resolved keybindings; workspace action:"keybinding" actionId:"<action>" (or includeParameters:true) shows a binding's defaults and routes. run_keybinding executes only supported shell-safe actions. set_keybinding/reset_keybinding write the same keybindings.json file the user can edit and reload the runtime manager.'
+      ? 'Reads the live resolved keybindings; workspace action:"keybinding" actionId:"<action>" (or includeParameters:true) shows a binding\'s defaults and routes. run_keybinding executes only supported shell-safe actions. set_keybinding/reset_keybinding write the same keybindings.json file the user can edit and reload the runtime manager.'
       : 'Live keybinding manager is unavailable; default keybindings are shown for discovery only. run_keybinding, set_keybinding, and reset_keybinding require a live manager.',
   };
 }

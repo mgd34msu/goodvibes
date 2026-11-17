@@ -139,8 +139,8 @@ export async function registerOwnedMailInbox(factory: DaemonInboxFactory, contex
         return owned;
       } } satisfies Pick<DaemonInboxControls, 'acquireHostedScreening'> : {}),
       ...(onAccountInvalidation ? { onAccountInvalidation } : {}),
-      ...(subscribeFacts ? { onProviderInvalidation: (provider: InboxProvider, listener: () => void) => subscribeFacts(inboxProviderFacts(provider), listener) }
-        satisfies Pick<DaemonInboxControls, 'onProviderInvalidation'> : {}),
+      ...(subscribeFacts ? { onProviderInvalidation: (provider: InboxProvider, listener: () => void) => subscribeFacts(inboxProviderFacts(provider), listener) } satisfies
+        Pick<DaemonInboxControls, 'onProviderInvalidation'> : {}),
       ...(subscribeConfig ? { onConfigurationChange: (key, listener) => {
         assertCurrent(); return subscribeConfig(key, listener);
       } } satisfies Pick<DaemonInboxControls, 'onConfigurationChange'> : {}),

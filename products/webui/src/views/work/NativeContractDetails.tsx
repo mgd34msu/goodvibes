@@ -190,7 +190,7 @@ function InputSnapshot({ snapshot, onShowFiles }: { snapshot: Snapshot; onShowFi
           ]} />}
         </li>)}
       </ul>}
-    </Disclosure>
+    </Disclosure>}
   </Disclosure>;
 }
 

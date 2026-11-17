@@ -406,8 +406,10 @@ export async function processTelegramUpdate(
     }
     return Response.json({ ...body, ...noticeFields(notice, notified) }, { status: response.status });
   };
-  // The gate showed a work proposal itself; any other gate answer is a message the sender never sees otherwise.
-  if (outcome.kind === 'answered' && outcome.outcome !== 'work-proposed') {
+  // The gate showed a work proposal itself, and told the sender once that a
+  // message waits for a free agent; any other gate answer is a message the
+  // sender never sees otherwise.
+  if (outcome.kind === 'answered' && outcome.outcome !== 'work-proposed' && outcome.outcome !== 'waiting-for-capacity') {
     return withSenderNotice(outcome.response, gateAnswerText(outcome.outcome));
   }
   // A failure redelivery can fix (capacity, a busy session) is retried, and the poller tells the

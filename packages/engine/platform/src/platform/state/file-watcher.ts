@@ -133,15 +133,6 @@ export class FileWatcher {
     logger.debug('FileWatcher: started', { watched: this.watchedPaths.size });
   }
 
-  /** Follow a workspace swap: stop watching the old tree and watch the new one. */
-  async reroot(newProjectRoot: string): Promise<void> {
-    const wasWatching = this.watching;
-    this.stop();
-    this.projectRoot = resolve(newProjectRoot);
-    this.capReported = false;
-    if (wasWatching) await this.start();
-  }
-
   /**
    * A file created in the root after start() is picked up here: the root
    * directory is watched without recursion, only to register new regular files

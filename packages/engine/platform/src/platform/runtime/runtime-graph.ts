@@ -558,7 +558,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   let codeIndexOpened: CodeIndexServices | undefined;
   const openCodeIndex = (): CodeIndexServices => codeIndexOpened ??= createCodeIndexServices({
     workingDirectory,
-    // A workspace swap moves the project index; relative reindex paths follow it.
+    // Relative reindex paths resolve against the project index's root, this graph's working directory.
     getWorkingDirectory: () => projectIndex.baseDir,
     surfaceRoot,
     configManager,

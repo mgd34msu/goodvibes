@@ -144,7 +144,8 @@ export interface SurfaceRoots {
 /**
  * Where the memory store lives.
  * - `home`: the one cross-surface store under the user's home, what every shipped product opens.
- * - `project`: a per-project file under `<workingDir>/.goodvibes/<surface root>/`; it follows a workspace swap.
+ * - `project`: a per-project file under `<workingDir>/.goodvibes/<surface root>/`; a daemon that moves to another
+ *   working directory builds its services again there, so it opens that directory's file.
  * - `{ path }`: an explicit file.
  */
 export type MemoryStoreChoice = 'home' | 'project' | { readonly path: string };

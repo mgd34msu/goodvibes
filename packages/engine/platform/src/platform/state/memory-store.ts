@@ -1212,33 +1212,6 @@ export class MemoryStore {
     this.ready = false;
   }
 
-  /**
-   * Re-root the store to a new SQLite database path.
-   *
-   * Closes the existing SQLite handle and vector index, then re-opens both at
-   * the new path. The caller is responsible for ensuring no writes are in-flight
-   * when this is called (WorkspaceSwapManager enforces this via the busy-session
-   * guard).
-   *
-   * @throws if the new SQLite store or vector index cannot be opened.
-   */
-  async reroot(newDbPath: string): Promise<void> {
-    this.backendEpoch++;
-    this.sqlite.close();
-    this.vectorIndex?.close();
-    this.ready = false;
-    this.rebuildVectorIndexPromise = null;
-    this.rebuildVectorIndexAgain = null;
-    this.sqlite = this.openBackend(newDbPath);
-    this.vectorIndex = new SqliteVecMemoryIndex(
-      resolveMemoryVectorDbPath(newDbPath),
-      undefined,
-      this.embeddingRegistry,
-      id => this.rowRevision(id),
-    );
-    await this.init();
-  }
-
   // ── Private helpers ──────────────────────────────────────────────────────────
 
   private openBackend(dbPath: string | undefined): SQLiteStore {

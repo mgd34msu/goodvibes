@@ -32,7 +32,7 @@ export interface CodeIndexBuildStats {
   readonly startedAt: number;
   readonly completedAt: number;
   readonly durationMs: number;
-  /** Present exactly when the build was aborted (reroot()/close() during the walk), partial results were discarded, not recorded as lastBuild. */
+  /** Present exactly when the build was aborted (close() during the walk), partial results were discarded, not recorded as lastBuild. */
   readonly abortReason?: string | undefined;
   /** Files that could not be indexed for a reason other than changing under the build (embedding provider or storage failure). Absent when none. */
   readonly filesFailed?: number | undefined;

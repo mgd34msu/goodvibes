@@ -43,12 +43,12 @@ import { DirectoryWalk } from '../utils/walk-dir.js';
  * `buildFull()` walks the whole tree once; concurrent calls coalesce through a
  * single-flight promise guard, mirroring MemoryStore.rebuildVectorIndexAsync.
  *
- * Lifecycle honesty: `reroot()`/`close()` bump an epoch counter; an in-flight
- * build re-checks the epoch after every await and aborts cleanly when stale
+ * Lifecycle honesty: `close()` bumps an epoch counter; an in-flight build
+ * re-checks the epoch after every await and aborts cleanly when stale
  * (per-file writes are atomic, all of a file's chunks are embedded before any
- * row is written, so an aborted build never writes wrong-rooted chunks into
- * the new database). Aborted builds return stats carrying
- * `abortReason: 'build aborted by reroot'` and never become `lastBuild`.
+ * row is written, so an aborted build never writes into a database opened
+ * again later). Aborted builds return stats carrying
+ * `abortReason: 'build aborted by close'` and never become `lastBuild`.
  *
  * The index never blocks a turn: buildFull() embeds a file's chunks in
  * batches (one provider request per EMBED_BATCH_SIZE chunks; a rate limit is
@@ -134,7 +134,6 @@ import type {
 const DEFAULT_MAX_FILES = Infinity;
 const DEFAULT_MAX_FILE_BYTES = Infinity;
 const DEFAULT_MAX_TOTAL_BYTES = Infinity;
-const BUILD_ABORTED_BY_REROOT = 'build aborted by reroot';
 const BUILD_ABORTED_BY_CLOSE = 'build aborted by close';
 /** Consecutive failures (provider down, bad key, full disk) after which a build stops instead of failing every remaining file. */
 const MAX_CONSECUTIVE_INDEX_FAILURES = 5;
@@ -188,14 +187,11 @@ export class CodeIndexStore {
   private readonly intelligence: CodeIntelligence;
   private intelligenceReadyPromise: Promise<void> | null = null;
   /**
-   * Lifecycle generation counter. Bumped by reroot() and close(); an in-flight
-   * runBuild() captures the value at start and re-checks it after EVERY await,
-   * aborting cleanly when stale so a build started against one root can never
-   * write wrong-rooted chunks into a database opened for a different root.
+   * Lifecycle generation counter. Bumped by close(); an in-flight runBuild()
+   * captures the value at start and re-checks it after EVERY await, aborting
+   * cleanly when stale so a build never writes into a database opened again.
    */
   private epoch = 0;
-  /** What bumped the epoch last, so an aborted build names the operation that happened. */
-  private epochBumpedBy: 'reroot' | 'close' = 'close';
   private lastSearchError: string | undefined;
   private authorizedRunUsed = false;
   private authorizedIndex: AuthorizedCodeIndex | null = null;
@@ -272,7 +268,6 @@ export class CodeIndexStore {
     this.authorizedIndex = null;
     if (!this.db) return;
     this.epoch++;
-    this.epochBumpedBy = 'close';
     this.db.close();
     this.db = null;
     this.available = false;
@@ -283,34 +278,6 @@ export class CodeIndexStore {
     this.buildStartedAtMs = null;
     this.progress = null;
   }
-
-  /**
-   * Re-root the store to a new working directory + db path (workspace swap).
-   * Bumps the build epoch (aborting any in-flight build at its next await),
-   * closes existing handles, reopens at the new path, and clears in-memory
-   * build state. Does NOT re-trigger a build, the caller decides when to
-   * call scheduleBuild()/buildFull() again, exactly as it decided to open the
-   * store originally.
-   */
-  async reroot(newRootDir: string, newDbPath: string): Promise<void> {
-    if (this.authorizedRunUsed) throw new Error('Live-tree operations are disabled on an authorized code index');
-    // An open still in flight finishes at the old path before it is closed.
-    if (this.opening) await this.opening;
-    this.epoch++;
-    this.close();
-    this.epochBumpedBy = 'reroot';
-    this.buildPromise = null;
-    this.building = false;
-    this.buildStartedAtMs = null;
-    this.lastBuild = null;
-    this.lastBuildError = undefined;
-    this.lastSearchError = undefined;
-    this.progress = null;
-    this.rootDir = newRootDir;
-    this.dbPath = newDbPath;
-    await this.init();
-  }
-
 
   isBuilding(): boolean {
     return this.building;
@@ -537,7 +504,7 @@ export class CodeIndexStore {
         if (this.epoch === buildEpoch) this.lastBuildError = `build failed: ${summarizeError(error)}`;
         throw error;
       }).finally(() => {
-        // A reroot() already reset these for the NEW lifecycle; a stale
+        // A close() already reset these for the NEW lifecycle; a stale
         // build's cleanup must not clobber state belonging to a newer epoch.
         if (this.epoch === buildEpoch) {
           this.building = false;
@@ -810,7 +777,7 @@ export class CodeIndexStore {
    *
    * Epoch honesty: all of a file's chunks are embedded (every await) BEFORE
    * any row is deleted or written, and the epoch is re-checked after each
-   * await, so a reroot() mid-file aborts with the database untouched for
+   * await, so a close() mid-file aborts with the database untouched for
    * that file (returns null; the caller abandons the build).
    */
   private async indexFileContent(
@@ -863,7 +830,7 @@ export class CodeIndexStore {
     }
 
     // All awaits are done, the delete+write below is synchronous, so the
-    // whole file lands atomically with respect to reroot()/close().
+    // whole file lands atomically with respect to close().
     if (this.epoch !== callEpoch || this.db !== db) return null;
     source.assertCurrent();
     // One transaction: a failure or a kill here leaves the file's old chunks, never a
@@ -878,7 +845,7 @@ export class CodeIndexStore {
   }
 
   private abortReason(): string {
-    return this.epochBumpedBy === 'close' ? BUILD_ABORTED_BY_CLOSE : BUILD_ABORTED_BY_REROOT;
+    return BUILD_ABORTED_BY_CLOSE;
   }
 
   private async ensureIntelligenceReady(): Promise<void> {

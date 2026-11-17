@@ -229,34 +229,6 @@ export class ProjectIndex {
     return this.closing;
   }
 
-  /**
-   * Re-root the project index to a new base directory.
-   *
-   * Flushes any pending writes to the current location, reads any existing
-   * index at the new location, and only then re-points this index. When the
-   * new index cannot be read the index stays on the old directory with its
-   * entries intact, so a failed swap does not leave it emptied and aimed at a
-   * file its next flush would overwrite.
-   *
-   * @param newBaseDir - Absolute path to the new project root.
-   */
-  async reroot(newBaseDir: string): Promise<void> {
-    this.assertOpen();
-    if (this.flushTimer !== null) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = null;
-    }
-    await this.forceFlush();
-    this.assertOpen();
-    const indexPath = join(newBaseDir, '.goodvibes', 'project-index.json');
-    const read = readIndexFile(indexPath);
-    this.projectRoot = newBaseDir;
-    this.baseDir = newBaseDir;
-    this.indexPath = indexPath;
-    this.files = read?.files ?? new Map();
-    this.createdAt = read?.createdAt ?? new Date().toISOString();
-  }
-
   private scheduleFlush(): void {
     if (this.flushTimer !== null) clearTimeout(this.flushTimer);
     this.flushTimer = setTimeout(() => {

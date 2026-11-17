@@ -151,15 +151,12 @@ export interface SessionInfo {
  *
  * Version 2 adds the session's contract trees, one `{ type: 'contract', contract }`
  * line per contract started in the session (docs/design/contract-runner.md
- * section 7.1). A file of an earlier version loads with no contracts.
+ * section 7.1).
  */
 export const CURRENT_SESSION_SCHEMA_VERSION = 2;
 
 /** A temp file this old cannot belong to a write still in progress. */
 const ORPHAN_TEMP_FILE_AGE_MS = 10 * 60 * 1000;
-
-/** The first session schema version that carries contract lines. */
-const CONTRACT_LINES_SINCE_VERSION = 2;
 
 /** A contract line's contract, when it has the fields every reader relies on. */
 function readContractLine(value: unknown): Contract | null {
@@ -183,21 +180,6 @@ function readContractLine(value: unknown): Contract | null {
  */
 export function sanitizeSessionName(name: string): string {
   return storedNameStem(name) || digestNameStem('session', name);
-}
-
-/**
- * The stem names had before letters of every script were kept (only a-z,
- * 0-9, `-` and `_`, else `session`). A file saved then is still found under
- * it, but only when the name recorded inside it is the one asked for.
- */
-function legacySessionStem(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/\s+/g, '-')
-    .replace(/[^a-z0-9_-]/g, '')
-    .replace(/-+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    || 'session';
 }
 
 export class SessionManager {
@@ -333,8 +315,7 @@ export class SessionManager {
   /**
    * The file a stored session `name` is in, or null when there is none. A file
    * whose recorded name is another name is not this session (two names can
-   * share a stem), unless `name` is the file's own name; a file saved before letters of every script were kept is
-   * found under its old stem when its recorded name is exactly this one.
+   * share a stem), unless `name` is the file's own name.
    */
   private _resolveSessionFile(name: string): string | null {
     const stem = this.sanitizeName(name);
@@ -345,9 +326,7 @@ export class SessionManager {
       const recorded = this._readExistingMetaRecord(filePath)?.name;
       return typeof recorded === 'string' && recorded !== name ? null : filePath;
     }
-    const legacyPath = join(this.sessionsDir, `${legacySessionStem(name)}.jsonl`);
-    if (legacyPath === filePath || !existsSync(legacyPath)) return null;
-    return this._readExistingMetaRecord(legacyPath)?.name === name ? legacyPath : null;
+    return null;
   }
 
   /** The meta of a session file from its first line alone, or null when it has no readable meta line. */
@@ -543,8 +522,6 @@ export class SessionManager {
           agentRecords.push(agentFields as unknown as AgentRecord);
         }
       } else if (record.type === 'contract') {
-        // Contract lines exist from version 2; a version 1 file loads with none.
-        if ((meta.schemaVersion ?? 0) < CONTRACT_LINES_SINCE_VERSION) continue;
         const contract = readContractLine(record.contract);
         if (contract === null) skipped++;
         else contracts.push(contract);

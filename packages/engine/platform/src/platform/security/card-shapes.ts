@@ -309,16 +309,46 @@ function uuidSpans(text: string): readonly Span[] {
 
 const IDENTIFIER_CHAR = /[A-Za-z_]/;
 const IDENTIFIER_JOIN = /[-_./]/;
+/** A word that names a card or its number: a run glued to it is a card, not an id (`cc4111...`, `Visa-4111 ...`, `No.4111 ...`, `/pay/4111...`). */
+const CARD_WORD = /^(?:cards?|cc|pan|visa|master\s?card|amex|discover|credit|debit|no|nr|num|number|pay|payment)$/i;
+/** A currency code after an amount-like run (`4111111111111111USD`): not an identifier suffix. */
+const CURRENCY_SUFFIX = /^[A-Z]{3}(?![A-Za-z0-9_])/;
+
+/** The letters that end immediately before `end` (the word a run is glued to). */
+function wordEndingAt(text: string, end: number): string {
+  let start = end;
+  while (start > 0 && /[A-Za-z]/.test(text[start - 1] ?? '')) start -= 1;
+  return text.slice(start, end);
+}
+
+/**
+ * Whether the run is grouped the way a card is written: split by spaces or
+ * hyphens into groups of 4-6 digits (`4111 1111 1111 1111`, amex 4-6-5). Ids
+ * are not (`cp-17316672000001-2` has a 14-digit and a 1-digit group, and
+ * `job-1731667200000 2 minutes` a 13-digit one).
+ */
+function writtenAsCard(run: string): boolean {
+  const groups = run.split(/[ -]+/);
+  return groups.length > 1 && groups.every((group) => group.length >= MIN_GROUPED_PAN_GROUP && group.length <= MAX_GROUPED_PAN_GROUP);
+}
 
 /**
  * Whether a digit run is part of an identifier token: a letter or underscore
  * touches it on either side, or it hangs off a word by `-`, `_`, `.` or `/`.
  * A card number in prose stands apart, after a space, a colon or a quote.
+ * Never for a run written as a card (spaces, card grouping), nor for one glued
+ * to a card word or followed by a currency code: those are card numbers
+ * however they are attached.
  */
 function gluedToIdentifier(text: string, start: number, end: number): boolean {
+  if (writtenAsCard(text.slice(start, end))) return false;
   const before = text[start - 1] ?? '', after = text[end] ?? '';
-  if (IDENTIFIER_CHAR.test(before) || IDENTIFIER_CHAR.test(after)) return true;
-  return IDENTIFIER_JOIN.test(before) && /[A-Za-z0-9_]/.test(text[start - 2] ?? '');
+  const letterBefore = IDENTIFIER_CHAR.test(before);
+  if (letterBefore && !CARD_WORD.test(wordEndingAt(text, start))) return true;
+  if (IDENTIFIER_CHAR.test(after) && !CURRENCY_SUFFIX.test(text.slice(end, end + 4))) return true;
+  if (letterBefore) return false;
+  if (!IDENTIFIER_JOIN.test(before) || !/[A-Za-z0-9_]/.test(text[start - 2] ?? '')) return false;
+  return !CARD_WORD.test(wordEndingAt(text, start - 1));
 }
 
 function findMatches(pattern: RegExp, text: string, kind: CardShapeKind, exclude: readonly Span[]): CardShapeFinding[] {

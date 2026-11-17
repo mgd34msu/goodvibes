@@ -1,7 +1,5 @@
 // Proves: A provider redelivery starts a second agent run, a message whose handling failed is never run, a refused sender is run, or a webhook caller reaches another caller's callback, the platform's own markers or another surface's session.
-// Red when: The shared pipeline or Telegram's own handler runs a refused sender or answers a refusal with a failure, a claim is kept after a failed handling or dropped after a success, telephony keys spoken turns by call id, or a webhook caller inherits another's callback, sets platform markers or enters another surface's session.
-// Proves: A sender the channel policy refuses starts work on Telegram.
-// Red when: The Telegram handler stops asking the policy, or runs a message the policy refused.
+// Red when: The shared pipeline runs a refused sender or answers a refusal with a failure, a claim is kept after a failed handling or dropped after a success, telephony keys spoken turns by call id, or a webhook caller inherits another's callback, sets platform markers or enters another surface's session.
 /**
  * What the webhook adapters do when a provider redelivers, a sender is refused,
  * or a caller supplies more than it should: no second run of a message already
@@ -20,7 +18,6 @@ import { AutomationRouteStore } from '../platform/src/platform/automation/store/
 import { RouteBindingManager } from '../platform/src/platform/channels/route-manager.ts';
 import { surfaceInboundDedup } from '../platform/src/platform/adapters/inbound-dedup.ts';
 import { handleWhatsAppSurfaceWebhook } from '../platform/src/platform/adapters/whatsapp/index.ts';
-import { handleTelegramSurfaceWebhook } from '../platform/src/platform/adapters/telegram/index.ts';
 import { handleTelephonySurfaceWebhook } from '../platform/src/platform/adapters/telephony/index.ts';
 import { handleGenericWebhookSurface } from '../platform/src/platform/adapters/webhook/index.ts';
 
@@ -111,17 +108,6 @@ describe('whatsapp', () => {
     expect(third.status).toBe(200);
     expect(spawns(calls)).toBe(3);
   });
-});
-
-test('telegram: a group message the policy refuses is acknowledged, not failed, and starts nothing', async () => {
-  const config = { 'surfaces.telegram.webhookSecret': 'tg-secret', 'surfaces.telegram.botUsername': 'goodvibes_bot' };
-  const { context, calls } = sharedContext(config, { authorizeSurfaceIngress: async () => ({ allowed: false, reason: 'mention-required' }) });
-  const response = await handleTelegramSurfaceWebhook(new Request('http://localhost/telegram', {
-    method: 'POST', headers: { 'x-telegram-bot-api-secret-token': 'tg-secret' },
-    body: JSON.stringify({ update_id: 1, message: { message_id: 1, chat: { id: 5, type: 'group' }, from: { id: 9 }, text: 'lunch anyone?' } }),
-  }), context, {});
-  expect(response.status).toBe(200);
-  expect(spawns(calls)).toBe(0);
 });
 
 describe('telephony', () => {

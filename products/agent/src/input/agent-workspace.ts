@@ -576,7 +576,23 @@ export class AgentWorkspace {
   }
 
   private async applyTuiSettingsImport(plan: TuiSettingsImportPlan | null, requestRender?: () => void): Promise<void> {
-    const outcome = await applyAgentWorkspaceTuiSettingsImport(this.context, plan);
+    let outcome: Awaited<ReturnType<typeof applyAgentWorkspaceTuiSettingsImport>>;
+    try {
+      outcome = await applyAgentWorkspaceTuiSettingsImport(this.context, plan);
+    } catch (error) {
+      // Started with `void` after the form closed: a throw would otherwise leave the
+      // status on the review prompt with no word of what was or was not imported.
+      const reason = error instanceof Error ? error.message : String(error);
+      this.status = `GoodVibes settings import stopped: ${reason}`;
+      this.lastActionResult = {
+        kind: 'error',
+        title: 'Import stopped',
+        detail: `The import stopped part-way: ${reason}. Some settings may already have changed; open Settings to check them, and the undo file beside the Agent's state holds their previous values.`,
+        safety: 'safe',
+      };
+      requestRender?.();
+      return;
+    }
     this.runtimeSnapshot = outcome.runtimeSnapshot ?? this.runtimeSnapshot;
     this.clampSelection();
     this.status = outcome.status;

@@ -953,12 +953,27 @@ export async function applyAgentWorkspaceTuiSettingsImport(
   const undoPath = shellPaths.resolveUserPath('agent', 'settings-import-undo.json');
   if (changing.length > 0) {
     // Previous values of secret-bearing keys are not written to a plain file.
-    writeDocument(undoPath, {
-      createdAt: new Date().toISOString(),
-      settings: changing.map((entry) => isSecretLikeSettingKey(entry.key)
-        ? { key: entry.key, previous: null, restorable: false }
-        : { key: entry.key, previous: configManager.get(entry.key as Parameters<typeof configManager.get>[0]) ?? null, restorable: true }),
-    });
+    // Without the undo file nothing is written: an import that cannot be reversed does not start.
+    try {
+      writeDocument(undoPath, {
+        createdAt: new Date().toISOString(),
+        settings: changing.map((entry) => isSecretLikeSettingKey(entry.key)
+          ? { key: entry.key, previous: null, restorable: false }
+          : { key: entry.key, previous: configManager.get(entry.key as Parameters<typeof configManager.get>[0]) ?? null, restorable: true }),
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return {
+        status: `Nothing was imported: ${reason}`,
+        runtimeSnapshot: null,
+        result: {
+          kind: 'error',
+          title: 'Nothing imported',
+          detail: `The undo file ${undoPath} could not be written, so no setting or sign-in was changed: ${reason}. Free the location or fix its permissions, then import again.`,
+          safety: 'safe',
+        },
+      };
+    }
   }
 
   const imported: string[] = [];
@@ -979,12 +994,17 @@ export async function applyAgentWorkspaceTuiSettingsImport(
   const importedPending: string[] = [];
   for (const entry of plan.subscriptionValues) {
     if (!manager) break;
-    if (entry.kind === 'active') {
-      await manager.saveSubscription(entry.value);
-      importedActive.push(entry.value.provider);
-    } else {
-      manager.savePending(entry.value);
-      importedPending.push(entry.value.provider);
+    try {
+      if (entry.kind === 'active') {
+        await manager.saveSubscription(entry.value);
+        importedActive.push(entry.value.provider);
+      } else {
+        manager.savePending(entry.value);
+        importedPending.push(entry.value.provider);
+      }
+    } catch (error) {
+      const label = entry.kind === 'active' ? 'sign-in' : 'pending sign-in';
+      skipped.push(`${entry.value.provider} ${label}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   skipped.push(...plan.subscriptions.filter((entry) => entry.status === 'skipped').map((entry) => entry.reason ?? 'subscription skipped'));

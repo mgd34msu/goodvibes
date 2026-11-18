@@ -114,6 +114,39 @@ Installation does not require a decision-model connection. A settings file that
 holds a value this version does not know is reported by name with the three
 valid values, and the product runs on Hybrid.
 
+## Permission modes
+
+`permissions.mode` chooses who answers a judgment call. The default is
+`jev-decides`.
+
+| Mode | Behavior |
+| --- | --- |
+| `ask-me` | Jev reads each judgment call's risk. Calls it reads as critical, irreversible or security-weakening ask you, with owner-only items; the rest run. With no working decision model, every judgment call your tool settings do not allow asks you. |
+| `jev-decides` (default) | Jev decides judgment calls; owner-only items ask you. With no working decision model it behaves as `ask-me`. |
+| `just-vibes` | Nothing interrupts you: Jev decides what it can, and anything that needs you is held and listed at the end of the run. |
+| `yolo` | No approval prompts from the permission gate, except for a change asked for from a channel. Authentication, workspace containment, secret storage and spending limits still apply, and an act only you perform is refused to the model. |
+
+- **`plan`** is a separate read-only posture: read-only tools run, and every
+  mutating or exec call is refused. `/plan` toggles it.
+- **For one session:** `Shift+Tab` in `goodvibes` cycles the mode of the
+  current session only and asks once before switching to `yolo`; the key is
+  the rebindable `cycle-permission-mode`.
+- **For one launch:** `--just-vibes` or `--yolo` on `goodvibes` or
+  `goodvibes-agent` picks a mode without changing settings.
+- **For good:** `/settings` (Permission Mode) saves the default; a channel
+  profile can set one per channel.
+- **`/decisions`** lists what Jev decided for you, and for each one lets you
+  undo it, turn it into a standing rule (never, always, or always ask me), or
+  keep it.
+- **`/held`** lists what `just-vibes` held, and approves or sets aside one
+  item or all of them.
+- **`/permissions`** shows the permission settings and where each came from,
+  and `/permissions rules` lists and revokes remembered approval rules. An
+  explicit `permissions.tools.<name>` set to `deny` blocks that tool.
+- **Older saved values still load:** `safe-owner`, `prompt`, `normal`,
+  `accept-edits` and `custom` as `ask-me`; `safe-jev` and `auto` as
+  `jev-decides`; `allow-all` as `yolo`.
+
 ## Decision Router
 
 Choose **Provider → Decision Router categories** in the terminal settings to

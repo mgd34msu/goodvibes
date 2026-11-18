@@ -138,12 +138,12 @@ export const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
     plaintext_allowed: SHARED_SETTING_ENUM_DESCRIPTIONS['storage.secretPolicy']['plaintext_allowed'],
   },
   'ui.systemMessages': {
-    panel: 'Show system messages in the activity feed only.',
+    panel: 'Routine system messages go to the Activity view (Ctrl+O) only. Left as the default, a notice you must see still shows on the main screen once (an update result, a setting ignored or read under a new name, a start-up fault); set to panel yourself, it stays in the Activity view too. Never hidden: errors, warnings and anything waiting for your answer.',
     conversation: SHARED_SETTING_ENUM_DESCRIPTIONS['ui.systemMessages']['conversation'],
     both: 'Show system messages in both the activity feed and the transcript.',
   },
   'ui.operationalMessages': {
-    panel: 'Show operational messages in the activity feed only.',
+    panel: 'Tool, agent, MCP and plugin messages go to the Activity view (Ctrl+O) only. Left as the default, one you must see or act on still shows on the main screen once; set to panel yourself, it stays in the Activity view too. Never hidden: errors, warnings and anything waiting for your answer.',
     conversation: SHARED_SETTING_ENUM_DESCRIPTIONS['ui.operationalMessages']['conversation'],
     both: 'Show operational messages in both the activity feed and the transcript.',
   },

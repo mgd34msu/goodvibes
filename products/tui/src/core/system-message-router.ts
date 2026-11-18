@@ -14,7 +14,9 @@ import { getSharedNotificationFeed } from '../views/notifications-feed.ts';
  * The TUI's panel is the Notifications history: a line whose target is `panel`
  * is recorded (and toasted) there and kept out of the transcript. Every
  * transcript notice is already recorded there by the conversation's notice
- * sink, so `both` and `conversation` show the same in this product.
+ * sink, so `both` and `conversation` show the same in this product. A
+ * high-priority error or warning reaches the transcript even under a `panel`
+ * the person chose (`targetChosen`).
  */
 const notificationsPanel: SystemMessageActivityFeed = {
   push(message, priority) {
@@ -31,12 +33,14 @@ export class SystemMessageRouter extends TerminalSystemMessageRouter {
     conversation: ConversationManager,
     target: (kind: SystemMessageKind) => SystemMessageTarget = defaultSystemMessageTarget,
     noise: NoiseGateDeps = {},
+    targetChosen?: (kind: SystemMessageKind) => boolean,
   ) {
     super(conversation, null, target, noise, {
       typedConversation: true,
       forceConversationPrefixes: ['[Error]', '[Failover]', '[Routing]', '[Compaction]', '[Context]', '[Rewind]', '[Revert]'],
       targetPanel: notificationsPanel,
       conversationFeedsPanel: true,
+      targetChosen,
     });
   }
 }
@@ -44,6 +48,7 @@ export function createSystemMessageRouter(
   conversation: ConversationManager,
   target: (kind: SystemMessageKind) => SystemMessageTarget = defaultSystemMessageTarget,
   noise: NoiseGateDeps = {},
+  targetChosen?: (kind: SystemMessageKind) => boolean,
 ): SystemMessageRouter {
-  return new SystemMessageRouter(conversation, target, noise);
+  return new SystemMessageRouter(conversation, target, noise, targetChosen);
 }

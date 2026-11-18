@@ -1,5 +1,5 @@
 import { createWorkstreamDraftService } from '@goodvibes-jev/engine/platform/platform/orchestration';
-import { configuredSystemMessageTarget } from '@goodvibes-jev/engine/terminal-shell/system-message-router';
+import { chosenSystemMessageTarget, configuredSystemMessageTarget } from '@goodvibes-jev/engine/terminal-shell/system-message-router';
 import { projectBootstrapShellCommandOptions } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
 import { createNativeWorkLedgerHost, registerNativeWorkLedgerCommand } from './native-work-ledger-host.ts';
 import { registerTuiLegacyImportCommands } from '../input/commands/legacy-work-ledger-import-runtime.ts';
@@ -212,6 +212,8 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
   const systemMessageRouter = createSystemMessageRouter(
     conversation,
     configuredSystemMessageTarget(() => getConfigSnapshot(configManager).ui),
+    {},
+    chosenSystemMessageTarget((key) => configManager.isExplicitlySet(key)),
   );
   orchestrator.setSystemMessageRouter(systemMessageRouter);
 

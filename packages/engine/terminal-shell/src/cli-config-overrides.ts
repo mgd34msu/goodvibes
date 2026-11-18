@@ -3,7 +3,8 @@
  * `--disable`, `--hostname`/`--port`, and a front-end's own launch-time
  * settings defaults onto a live ConfigManager.
  */
-import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { describeIngestionNotice, type ConfigKey, type ConfigManager, type SettingsIngestionNotice } from '@goodvibes-jev/engine/platform/platform/config';
+import type { NoticeLevel } from '@goodvibes-jev/engine/platform/platform/core';
 import { featureEnablementWrite, getFeatureSetting } from './cli-feature-settings.js';
 import { FEATURE_SETTINGS } from '@goodvibes-jev/engine/platform/platform/runtime/feature-flags/feature-settings';
 import type { GoodVibesCliCommand, GoodVibesCliFlags } from './cli-types.js';
@@ -57,6 +58,24 @@ export function applyTerminalRuntimeConfigDefaults(configManager: ConfigManager)
   applyRuntimeConfigDefault(configManager, 'display.showTokenSpeed', true);
   applyRuntimeConfigDefault(configManager, 'ui.systemMessages', 'conversation');
   applyRuntimeConfigDefault(configManager, 'ui.operationalMessages', 'conversation');
+}
+
+/**
+ * Shows every settings value the app could not read as written: first the ones
+ * the start-up load set aside (their copy on stderr is wiped when the full
+ * screen opens), then each later load's as it happens. A value read under its
+ * new name is information; one skipped or refused is a warning. Returns the
+ * unsubscribe function.
+ */
+export function announceSettingsIngestionNotices(
+  configManager: Pick<ConfigManager, 'getIngestionQuarantine' | 'subscribeIngestionNotices'>,
+  show: (line: string, level: NoticeLevel) => void,
+): () => void {
+  const announce = (notice: SettingsIngestionNotice): void => {
+    show(describeIngestionNotice(notice), notice.action === 'mapped' ? 'info' : 'warning');
+  };
+  for (const notice of configManager.getIngestionQuarantine()) announce(notice);
+  return configManager.subscribeIngestionNotices(announce);
 }
 
 /**

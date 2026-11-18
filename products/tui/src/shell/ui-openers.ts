@@ -27,8 +27,7 @@ import type { ServiceInspectionQuery } from '@/runtime/index.ts';
 import type { EmbeddingProviderPickerEntry, ModelPickerTargetInfo } from '../input/model-picker.ts';
 import { CommandPalette, buildPaletteEntries } from '../input/command-palette.ts';
 import { confirmThrough } from '../input/confirm-dialog.ts';
-import { bridgeNotificationFeedToToasts, getSharedToastCenter } from '../renderer/toast-center.ts';
-import { getSharedNotificationFeed } from '../views/notifications-feed.ts';
+import { getSharedToastCenter } from '../renderer/toast-center.ts';
 import { categorizeBuiltinCommands } from '../input/commands.ts';
 import { syncServiceSettingToPlatform } from './service-settings-sync.ts';
 import { classifyServiceSettingChange } from '@goodvibes-jev/engine/terminal-shell/service-setting-change';
@@ -375,8 +374,6 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
   const toasts = getSharedToastCenter();
   toasts.onChange = render;
   commandContext.showToast = (toast) => toasts.show(toast);
-  // The one print-less setting decides which entries toast (renderer/toast-center.ts).
-  bridgeNotificationFeedToToasts(getSharedNotificationFeed(), toasts, () => configManager.get('behavior.hitlMode'));
 
   commandContext.openCommandPalette = () => {
     // The palette is built live from the command registry, never a hardcoded

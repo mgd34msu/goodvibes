@@ -62,7 +62,7 @@ export interface DaemonRepairPromptOptions {
   readonly offer: DaemonRepairOffer;
   readonly config: DaemonRepairConfig;
   readonly session: DaemonRepairSessionMemory;
-  readonly systemMessageRouter: { high(message: string, level?: NoticeLevel): void };
+  readonly systemMessageRouter: { high(message: string, level?: NoticeLevel): void; userAction(message: string, level?: NoticeLevel): void };
   readonly render: () => void;
   /** Shows the question (the shell passes {@link createDaemonRepairQuestion} over its selection modal). */
   readonly ask: AskDaemonRepair;
@@ -99,12 +99,12 @@ export function createDaemonRepairPrompt(options: DaemonRepairPromptOptions): Da
       // A decline changes nothing at all, not the setting, not the service,
       // and is remembered for the rest of the session so it is never re-asked.
       session.decline();
-      systemMessageRouter.high(`[Daemon] Left as it is, nothing was changed. Set ${DAEMON_ENABLED_KEY} to true in settings whenever you want this machine to reach the platform again.`);
+      systemMessageRouter.userAction(`[Daemon] Left as it is, nothing was changed. Set ${DAEMON_ENABLED_KEY} to true in settings whenever you want this machine to reach the platform again.`);
       render();
       return;
     }
 
-    systemMessageRouter.high(offer.serviceInstalled
+    systemMessageRouter.userAction(offer.serviceInstalled
       ? '[Daemon] Starting the daemon service and connecting to it...'
       : '[Daemon] Installing and starting the daemon service, then connecting to it...');
     render();
@@ -116,7 +116,7 @@ export function createDaemonRepairPrompt(options: DaemonRepairPromptOptions): Da
     // unhandled rejection.
     void repair(offer)
       .then((result) => {
-        systemMessageRouter.high(result.summary);
+        systemMessageRouter.userAction(result.summary, result.repaired ? 'success' : 'error');
         for (const step of result.steps) systemMessageRouter.high(`[Daemon]   - ${step}`);
         render();
       })

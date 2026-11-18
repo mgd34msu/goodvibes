@@ -95,6 +95,14 @@ export interface SystemMessagePresentationPolicy {
   readonly targetPanel?: SystemMessageActivityFeed | undefined;
   /** Every conversation notice is already recorded in the panel, so a line that reaches the conversation is not pushed to it again. */
   readonly conversationFeedsPanel?: boolean | undefined;
+  /**
+   * Whether the person set the target for this kind of line themselves (a
+   * settings file or an override) rather than leaving the default. When given,
+   * a high-priority line, one the person must see or act on, reaches the
+   * conversation even where the default target is `panel`; a target the
+   * person chose keeps it out unless it is an error or a warning.
+   */
+  readonly targetChosen?: ((kind: SystemMessageKind) => boolean) | undefined;
 }
 export class TerminalSystemMessageRouter<Feed extends SystemMessageActivityFeed = SystemMessageActivityFeed> {
   /** Buffered provider "from last session" replay lines, folded on a microtask. */
@@ -128,7 +136,9 @@ export class TerminalSystemMessageRouter<Feed extends SystemMessageActivityFeed 
     const target = this.getTargetForKind(kind);
     const panel = this.feed ?? this.presentation.targetPanel ?? null;
     const delivery = resolveSystemMessageDelivery(target, panel !== null);
-    const toConversation = delivery.toConversation || this.presentation.forceConversationPrefixes.some((prefix) => message.startsWith(prefix));
+    const toConversation = delivery.toConversation
+      || this.presentation.forceConversationPrefixes.some((prefix) => message.startsWith(prefix))
+      || (priority === 'high' && this.mustShow(message, kind, level));
     if (delivery.toPanel && !(toConversation && this.presentation.conversationFeedsPanel === true)) {
       panel?.push(message, priority, activityKindFor(message, kind, runtimeEvent));
     }
@@ -138,6 +148,14 @@ export class TerminalSystemMessageRouter<Feed extends SystemMessageActivityFeed 
       else if (this.presentation.typedConversation) this.conversation.addTypedSystemMessage(message, kind, runtimeEvent);
       else this.conversation.addEventNotice(message, runtimeEvent);
     }
+  }
+  /** A high-priority line shows on the main screen unless the person chose its target; then only an error or a warning does. */
+  private mustShow(message: string, kind: SystemMessageKind, level: NoticeLevel | undefined): boolean {
+    const chosen = this.presentation.targetChosen;
+    if (chosen === undefined) return false;
+    if (!chosen(kind)) return true;
+    const declared = declaredNoticeLevel(message, level);
+    return declared === 'error' || declared === 'warning';
   }
   /** Store the line with the level its writer declared, so the transcript and the toast show it as given. */
   private addDeclared(message: string, priority: SystemMessagePriority, kind: SystemMessageKind | undefined, level: NoticeLevel | undefined): void {
@@ -182,7 +200,7 @@ export class TerminalSystemMessageRouter<Feed extends SystemMessageActivityFeed 
   high(message: string, level?: NoticeLevel | undefined): void {
     this.routeSystemMessage(message, 'high', undefined, level);
   }
-  /** Direct response to a user action, always visible on the main screen once. */
+  /** Direct response to a user action, or an offer waiting for the person's answer: always visible on the main screen once. */
   userAction(message: string, level?: NoticeLevel | undefined): void {
     this.addDeclared(message, 'high', undefined, level);
     this.feed?.push(message, 'high', activityKindFor(message));
@@ -234,4 +252,13 @@ export function configuredSystemMessageTarget(
     if (kind === 'operational') return ui.operationalMessages;
     return ui.systemMessages;
   };
+}
+
+/** The setting that holds the target for each kind of line. */
+export type SystemMessageTargetKey = 'ui.contractMessages' | 'ui.operationalMessages' | 'ui.systemMessages';
+
+/** Whether the person set a kind's target themselves, read live: one lookup per high-priority line. */
+export function chosenSystemMessageTarget(isExplicitlySet: (key: SystemMessageTargetKey) => boolean) {
+  return (kind: SystemMessageKind): boolean =>
+    isExplicitlySet(kind === 'contract' ? 'ui.contractMessages' : kind === 'operational' ? 'ui.operationalMessages' : 'ui.systemMessages');
 }

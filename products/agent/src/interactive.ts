@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { describeIngestionNotice } from '@goodvibes-jev/engine/platform/platform/config';
+import { announceSettingsIngestionNotices } from '@goodvibes-jev/engine/terminal-shell/cli-config-overrides';
 import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { isNativeConversationTurnReady, nativeConversationTurnInputOptions } from '@goodvibes-jev/engine/terminal-shell/native-ingress';
 import { readShellFrameFacts, createShellSubmissionPorts, createUiEventPublisher, readUiFrame } from '@goodvibes-jev/engine/terminal-shell/shell-frame-facts';
@@ -909,12 +909,12 @@ async function main(prepared: PreparedShellCliRuntime) {
     if (enabled !== true || wakeSetupRunning()) return;
     void runWakeSetupPlan(ctx.services.voiceSetup).then(
       (outcome) => {
-        systemMessageRouter.high(['Wake-Word Setup', outcome.rendered,
+        systemMessageRouter.userAction(['Wake-Word Setup', outcome.rendered,
           ...(proposesSpeechToText(outcome) ? ['(yes: /voice wake setup --yes yes installs it now)'] : [])].join('\n'));
         render();
       },
       (error: unknown) => {
-        systemMessageRouter.high(`Wake-Word Setup: ${error instanceof Error ? error.message : String(error)}`);
+        systemMessageRouter.high(`Wake-Word Setup: ${error instanceof Error ? error.message : String(error)}`, 'error');
         render();
       },
     );
@@ -1161,8 +1161,8 @@ async function main(prepared: PreparedShellCliRuntime) {
       }),
     });
   }
-  unsubs.push(configManager.subscribeIngestionNotices((notice) => {
-    if (!exiting) systemMessageRouter.high(describeIngestionNotice(notice));
+  unsubs.push(announceSettingsIngestionNotices(configManager, (line, level) => {
+    if (!exiting) systemMessageRouter.high(line, level);
   }));
   terminalOutputGuard = installFullScreenTerminalOutputGuard({
     stdout,

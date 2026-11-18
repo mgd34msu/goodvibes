@@ -166,13 +166,13 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
         render();
         return { handled: true, pendingPermission: null, recoveryPending };
       }
-      systemMessageRouter.high('[Approval] Not remembered. Answer the request: y allows once, a then Enter allows for this session, n denies.');
+      systemMessageRouter.userAction('[Approval] Not remembered. Answer the request: y allows once, a then Enter allows for this session, n denies.');
       render();
       return { handled: true, pendingPermission: { ...req, rememberArmed: undefined }, recoveryPending };
     }
     if (canRemember && data.toLowerCase().trim() === 'a') {
       // Remembering is never one bare key: Enter confirms it.
-      systemMessageRouter.high('[Approval] Press Enter to allow this for the rest of the session, or any other key to go back.');
+      systemMessageRouter.userAction('[Approval] Press Enter to allow this for the rest of the session, or any other key to go back.');
       render();
       return { handled: true, pendingPermission: { ...req, rememberArmed: true }, recoveryPending };
     }
@@ -195,13 +195,13 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
     if (data === '\x12') {
       const result = applyRecovery(recoveryPending);
       if (result.applied) {
-        systemMessageRouter.high(describeCrashRecovery(result), 'success');
+        systemMessageRouter.userAction(describeCrashRecovery(result), 'success');
       } else if (result.refusal === 'apply-failed') {
-        systemMessageRouter.high('[Recovery] The saved session could not be restored. The saved copy is still on disk and will be offered again at the next launch.', 'error');
+        systemMessageRouter.userAction('[Recovery] The saved session could not be restored. The saved copy is still on disk and will be offered again at the next launch.', 'error');
       } else if (result.refusal === 'unusable-snapshot') {
-        systemMessageRouter.high('[Recovery] The saved session was damaged and held no conversation, so it was discarded. Nothing was changed in this session.', 'warning');
+        systemMessageRouter.userAction('[Recovery] The saved session was damaged and held no conversation, so it was discarded. Nothing was changed in this session.', 'warning');
       } else {
-        systemMessageRouter.high('[Recovery] Failed to restore saved data. The saved copy, if any, was left on disk.', 'error');
+        systemMessageRouter.userAction('[Recovery] Failed to restore saved data. The saved copy, if any, was left on disk.', 'error');
       }
       render();
       return { handled: true, pendingPermission: null, recoveryPending: null };
@@ -210,7 +210,7 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
     // Only Esc on an empty composer discards. A lone Esc byte is the key; a
     // longer escape sequence is a focus or mouse report, an arrow or a paste.
     if (data === '\x1b' && (options.composerEmpty ?? true)) {
-      systemMessageRouter.high('[Recovery] Discarded recovery data.');
+      systemMessageRouter.userAction('[Recovery] Discarded recovery data.');
       removeRecoveryPoint();
       render();
       return { handled: true, pendingPermission: null, recoveryPending: null };
@@ -222,7 +222,7 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
 
     // Typing means "not now": the offer closes for this launch and the snapshot
     // stays on disk, so the next launch offers it again.
-    systemMessageRouter.high('[Recovery] Left the unsaved session on disk; it is offered again at the next launch.');
+    systemMessageRouter.userAction('[Recovery] Left the unsaved session on disk; it is offered again at the next launch.');
     render();
     return { handled: false, pendingPermission: null, recoveryPending: null };
   }

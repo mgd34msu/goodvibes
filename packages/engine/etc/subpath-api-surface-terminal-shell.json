@@ -17497,6 +17497,11 @@
   ],
   "./cli-config-overrides": [
     {
+      "name": "announceSettingsIngestionNotices",
+      "kind": "function",
+      "text": "export declare function announceSettingsIngestionNotices(configManager: Pick<ConfigManager, 'getIngestionQuarantine' | 'subscribeIngestionNotices'>, show: (line: string, level: NoticeLevel) => void): () => void; ;; via NoticeLevel = export type NoticeLevel = 'info' | 'success' | 'warning' | 'error'; ;; Pick = type Pick<T, K extends keyof T> = { [P in K]: T[P]; };"
+    },
+    {
       "name": "applyConfiguredHitlMode",
       "kind": "function",
       "text": "export declare function applyConfiguredHitlMode(configManager: ConfigManager, modeManager: Pick<ModeManager, 'setHITLMode' | 'attachRouter'>, router?: PrintLevelRouter): () => void; ;; via Pick = type Pick<T, K extends keyof T> = { [P in K]: T[P]; }; ;; PrintLevelRouter = export interface PrintLevelRouter { setQuietWhileTyping(enabled: boolean): void; setBatchWindowMs?(ms: number): void; setDefaultDomainVerbosity?(verbosity: DomainVerbosity): void; setDomainVerbosity(domain: string, verbosity: DomainVerbosity): void; }"
@@ -29128,7 +29133,7 @@
         "forceConversationPrefixes",
         "typedConversation"
       ],
-      "text": "export interface SystemMessagePresentationPolicy { readonly typedConversation: boolean; readonly forceConversationPrefixes: readonly string[]; readonly suppressCapturedOutput?: boolean; readonly targetPanel?: SystemMessageActivityFeed | undefined; readonly conversationFeedsPanel?: boolean | undefined; }"
+      "text": "export interface SystemMessagePresentationPolicy { readonly typedConversation: boolean; readonly forceConversationPrefixes: readonly string[]; readonly suppressCapturedOutput?: boolean; readonly targetPanel?: SystemMessageActivityFeed | undefined; readonly conversationFeedsPanel?: boolean | undefined; readonly targetChosen?: ((kind: SystemMessageKind) => boolean) | undefined; }"
     },
     {
       "name": "SystemMessagePriority",
@@ -29139,6 +29144,11 @@
       "name": "SystemMessageTarget",
       "kind": "type",
       "text": "export type SystemMessageTarget = 'conversation' | 'panel' | 'both';"
+    },
+    {
+      "name": "SystemMessageTargetKey",
+      "kind": "type",
+      "text": "export type SystemMessageTargetKey = 'ui.contractMessages' | 'ui.operationalMessages' | 'ui.systemMessages';"
     },
     {
       "name": "TerminalSystemMessageRouter",
@@ -29163,6 +29173,11 @@
       "name": "activityKindFor",
       "kind": "function",
       "text": "export declare function activityKindFor(message: string, kind?: SystemMessageKind | undefined, runtimeEvent?: RuntimeEventProvenance | undefined): SystemMessageActivity; ;; via RuntimeEventProvenance = export interface RuntimeEventProvenance { readonly type: string; readonly occurrenceId?: string | undefined; readonly variant?: string | undefined; }"
+    },
+    {
+      "name": "chosenSystemMessageTarget",
+      "kind": "function",
+      "text": "export declare function chosenSystemMessageTarget(isExplicitlySet: (key: SystemMessageTargetKey) => boolean): (kind: SystemMessageKind) => boolean;"
     },
     {
       "name": "configuredSystemMessageTarget",

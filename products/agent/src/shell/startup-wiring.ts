@@ -31,7 +31,7 @@ export interface SessionPersistenceAndRecoveryDeps {
   readonly homeDirectory: string;
   /** Declare-once session-storage handle (platform/runtime/session-surface.ts); threaded through every persistConversation/checkRecoveryFile/writeRecoveryFile call below instead of loose workingDirectory/homeDirectory options. */
   readonly surface: SessionSurface;
-  readonly systemMessageRouter: { high(message: string, level?: NoticeLevel): void; low(message: string): void };
+  readonly systemMessageRouter: { high(message: string, level?: NoticeLevel): void; low(message: string): void; userAction(message: string, level?: NoticeLevel): void };
   readonly render: () => void;
   readonly unsubs: Array<() => void>;
   readonly uiServicesTurns: {
@@ -101,10 +101,10 @@ export interface SessionPersistenceAndRecoveryResult {
  */
 export function announceRecoveryOffer(
   info: Pick<RecoveryFileInfo, 'timestamp' | 'title' | 'returnContext'>,
-  systemMessageRouter: { high(message: string, level?: NoticeLevel): void; low(message: string): void },
+  systemMessageRouter: { userAction(message: string, level?: NoticeLevel): void; low(message: string): void },
   render: () => void,
 ): void {
-  systemMessageRouter.high(`[Recovery] Found unsaved session from ${new Date(info.timestamp).toLocaleString()}. Title: "${info.title}". Press Ctrl+R to restore it or Esc to discard it. Typing leaves it saved for the next launch.`);
+  systemMessageRouter.userAction(`[Recovery] Found unsaved session from ${new Date(info.timestamp).toLocaleString()}. Title: "${info.title}". Press Ctrl+R to restore it or Esc to discard it. Typing leaves it saved for the next launch.`);
   for (const line of formatReturnContextForDisplay(info.returnContext)) {
     systemMessageRouter.low(`[Recovery] ${line}`);
   }
@@ -305,11 +305,12 @@ export function wireSessionPersistenceAndRecovery(
       deps.askWorkspaceRegistration(root, (accepted) => {
         // The line says what the store did, once it did it.
         void answerWorkspaceRegistrationPrompt(shellPaths, root, accepted).then((answer) => {
-          systemMessageRouter.high(answer.outcome === 'registered'
+          systemMessageRouter.userAction(answer.outcome === 'registered'
             ? `[Workspace] Registered ${root}, automatic checkpoints are now allowed here.`
             : answer.outcome === 'declined'
               ? `[Workspace] Not registered, automatic checkpoints stay off here (won't ask again for this location).`
-              : `[Workspace] ${accepted ? 'Not registered' : 'Your answer was not saved'}: ${answer.reason}. Automatic checkpoints stay off here; run "goodvibes-agent workspaces register --yes" in this directory to try again.`);
+              : `[Workspace] ${accepted ? 'Not registered' : 'Your answer was not saved'}: ${answer.reason}. Automatic checkpoints stay off here; run "goodvibes-agent workspaces register --yes" in this directory to try again.`,
+          answer.outcome === 'registered' || answer.outcome === 'declined' ? 'info' : 'warning');
           render();
         });
       });

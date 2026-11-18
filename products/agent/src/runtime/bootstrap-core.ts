@@ -18,6 +18,8 @@ import {
 import { createTerminalRenderScheduler } from '@goodvibes-jev/engine/terminal-shell/render-scheduler';
 import { ConversationManager } from '../core/conversation';
 import { publishToSharedFeed } from '../core/notices.ts';
+import { getSharedNotificationFeed } from '../core/notifications-feed.ts';
+import { bridgeNotificationFeedToToasts, getSharedToastCenter } from '../renderer/toast-center.ts';
 import { registerSessionConversation, unregisterSessionConversation } from './conversation-rewind-port.ts';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -234,7 +236,9 @@ export async function initializeBootstrapCore(
   const conversation = new ConversationManager(() => getTerminalSize(stdout).width);
   conversation.setConfigManager(configManager);
   // Every system notice is a toast and a /notifications entry in full (core/notices.ts); the transcript draws none.
+  // Toasting starts with the sink, so a notice written during start-up reaches the screen like any other.
   conversation.setNoticeSink(publishToSharedFeed);
+  bridgeNotificationFeedToToasts(getSharedNotificationFeed(), getSharedToastCenter(), () => configManager.get('behavior.hitlMode'));
   getConversationTitle = () => conversation.title;
   ownerConversationMessages = (sessionId) => sessionId === runtimeSessionIdRef.value ? conversation.readMessagesInPlace() : undefined;
 

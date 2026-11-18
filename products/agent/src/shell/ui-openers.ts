@@ -355,5 +355,5 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
   };
 
   // System notices: toasts plus the /notifications history (notification-surfaces.ts).
-  wireNotificationSurfaces({ commandContext, input, render, printLevel: () => configManager.get('behavior.hitlMode') });
+  wireNotificationSurfaces({ commandContext, input, render });
 }

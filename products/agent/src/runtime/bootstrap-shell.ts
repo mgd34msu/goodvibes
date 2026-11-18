@@ -1,5 +1,5 @@
 import { createWorkstreamDraftService } from '@goodvibes-jev/engine/platform/platform/orchestration';
-import { configuredSystemMessageTarget } from '@goodvibes-jev/engine/terminal-shell/system-message-router';
+import { chosenSystemMessageTarget, configuredSystemMessageTarget } from '@goodvibes-jev/engine/terminal-shell/system-message-router';
 import { projectBootstrapShellCommandOptions } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
 import { join } from 'node:path';
 import type { ConversationManager } from '../core/conversation';
@@ -136,6 +136,8 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     conversation,
     activityFeed,
     configuredSystemMessageTarget(() => getConfigSnapshot(configManager).ui),
+    {},
+    chosenSystemMessageTarget((key) => configManager.isExplicitlySet(key)),
   );
   orchestrator.setSystemMessageRouter(systemMessageRouter);
 

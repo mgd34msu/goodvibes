@@ -4,7 +4,10 @@
  * A toast appears in the top right corner (drawn by renderToasts in
  * surface-kit-parts.ts: a colored ┃ on both sides, the title bold, the body
  * wrapped in full) and disappears after five seconds. Newest first; at most
- * three are kept, older ones leave early rather than stacking down the screen.
+ * three are up at once, and a fourth waits for a free place rather than
+ * pushing one off early, so a burst (start-up) shows every toast its full time.
+ * Past six waiting, the oldest waiting information toast is dropped (it stays
+ * in the history); a warning or an error always waits its turn.
  *
  * Producers: commandContext.showToast (any command), and the shared
  * notification feed (bridgeNotificationFeedToToasts): every conversation
@@ -24,6 +27,8 @@ import type { ToastSpec, ToastTone } from './surface-kit-parts.js';
 const TOAST_DURATION_MS = 5000;
 /** How many toasts are shown at once. */
 const MAX_TOASTS = 3;
+/** How many information toasts may wait for a place; warnings and errors are never dropped. */
+const MAX_WAITING = 6;
 interface LiveToast {
     readonly id: number;
     readonly spec: ToastSpec;
@@ -39,15 +44,31 @@ const defaultScheduler: ToastScheduler = (run, delayMs) => {
 };
 export class ToastCenter {
     private toasts: LiveToast[] = [];
+    private waiting: Array<{
+        readonly spec: ToastSpec;
+        readonly durationMs: number;
+    }> = [];
     private nextId = 1;
     /** Called whenever the visible set changes (wired to the render request). */
     onChange: (() => void) | null = null;
     constructor(private readonly clock: () => number = Date.now, private readonly schedule: ToastScheduler = defaultScheduler) { }
     show(spec: ToastSpec, durationMs: number = TOAST_DURATION_MS): void {
-        const toast: LiveToast = { id: this.nextId++, spec, expiresAt: this.clock() + durationMs };
-        this.toasts = [toast, ...this.toasts].slice(0, MAX_TOASTS);
-        this.schedule(() => this.expire(toast.id), durationMs);
+        if (this.toasts.length >= MAX_TOASTS) {
+            this.waiting.push({ spec, durationMs });
+            if (this.waiting.length > MAX_WAITING) {
+                const info = this.waiting.findIndex((entry) => entry.spec.tone === 'info' || entry.spec.tone === 'success');
+                if (info >= 0)
+                    this.waiting.splice(info, 1);
+            }
+            return;
+        }
+        this.start(spec, durationMs);
         this.onChange?.();
+    }
+    private start(spec: ToastSpec, durationMs: number): void {
+        const toast: LiveToast = { id: this.nextId++, spec, expiresAt: this.clock() + durationMs };
+        this.toasts = [toast, ...this.toasts];
+        this.schedule(() => this.expire(toast.id), durationMs);
     }
     /** The toasts to draw now, newest first. */
     visible(): ToastSpec[] {
@@ -55,6 +76,7 @@ export class ToastCenter {
         return this.toasts.filter((t) => t.expiresAt > now).map((t) => t.spec);
     }
     clear(): void {
+        this.waiting = [];
         if (this.toasts.length === 0)
             return;
         this.toasts = [];
@@ -63,8 +85,13 @@ export class ToastCenter {
     private expire(id: number): void {
         const before = this.toasts.length;
         this.toasts = this.toasts.filter((t) => t.id !== id);
-        if (this.toasts.length !== before)
-            this.onChange?.();
+        if (this.toasts.length === before)
+            return;
+        while (this.toasts.length < MAX_TOASTS && this.waiting.length > 0) {
+            const next = this.waiting.shift()!;
+            this.start(next.spec, next.durationMs);
+        }
+        this.onChange?.();
     }
 }
 /** Each runtime owns its visible toasts without copying expiry/folding behavior. */

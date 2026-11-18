@@ -396,7 +396,7 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | Command | Purpose |
 | --- | --- |
 | `/accounts` | Review provider auth routes, subscription windows, and billing-path safety. |
-| `/activity` | Show running work, what needs you, what is coming up, and recent activity (also Ctrl+O). |
+| `/activity` | Show running work, what needs you, what is coming up, and recent activity (also Ctrl+O). Routine system and tool lines stay here; a notice you must see or act on (an error, an offer, a setting ignored or read under a new name, an update result) also shows on the main screen once. Setting `ui.systemMessages` or `ui.operationalMessages` to `panel` yourself keeps those here too, except errors, warnings and anything waiting for your answer. |
 | `/agent` | Open the GoodVibes Agent operator workspace. |
 | `/agent-profile` | Manage isolated Agent profiles and starter templates, including opt-in VIBE.md starter export/import with `--include-vibe`. |
 | `/approval` | Review approval classes and run exact confirmed approval actions. |

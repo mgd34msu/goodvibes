@@ -30,6 +30,7 @@ import { readTuiNotificationsMetadataOnly } from '../config/host-settings.ts';
 import { ConversationManager } from '../core/conversation';
 import { createShellNoticeSink } from './notification-dispatch.ts';
 import { getSharedNotificationFeed } from '../views/notifications-feed.ts';
+import { bridgeNotificationFeedToToasts, getSharedToastCenter } from '../renderer/toast-center.ts';
 import { registerSessionConversation, unregisterSessionConversation } from './conversation-rewind-port.ts';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -321,8 +322,11 @@ export async function initializeBootstrapCore(
   conversation.setConfigManager(configManager);
   // Every system notice is a toast and a notification-history entry, full
   // text (core/notices.ts); the transcript draws none of them.
-  // One history entry per event: see createShellNoticeSink.
+  // One history entry per event: see createShellNoticeSink. Toasting starts with
+  // the sink, so a notice written during start-up reaches the screen like any
+  // other; the one print-less setting decides which entries toast.
   conversation.setNoticeSink(createShellNoticeSink(getSharedNotificationFeed()));
+  bridgeNotificationFeedToToasts(getSharedNotificationFeed(), getSharedToastCenter(), () => configManager.get('behavior.hitlMode'));
   getConversationTitle = () => conversation.title;
 
   const compositor = new Compositor(stdout);

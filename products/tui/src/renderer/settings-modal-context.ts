@@ -67,12 +67,12 @@ export const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
     custom: 'Use the explicit host value in the related host setting.',
   },
   'ui.systemMessages': {
-    panel: 'Keep system messages out of the transcript: they go to Notifications only (toast and history). Errors still show in the transcript.',
+    panel: 'Keep system messages out of the transcript: they go to Notifications only (toast and history). Errors and warnings still show in the transcript.',
     conversation: 'Show system messages in the transcript; each is also kept in Notifications. The default here.',
     both: 'Same as conversation here: every transcript message is also kept in Notifications.',
   },
   'ui.operationalMessages': {
-    panel: 'Keep tool, agent, MCP and plugin activity out of the transcript: it goes to Notifications only (toast and history).',
+    panel: 'Keep tool, agent, MCP and plugin activity out of the transcript: it goes to Notifications only (toast and history). Errors and warnings still show in the transcript.',
     conversation: 'Show operational messages in the transcript; each is also kept in Notifications. The default here.',
     both: 'Same as conversation here: every transcript message is also kept in Notifications.',
   },

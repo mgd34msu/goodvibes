@@ -129,16 +129,17 @@ jobs:
           retention-days: 7
 
   previous-release-floor:
-    # Upgrades are checked from 3.3.0 onward; earlier releases have no installations.
+    # The upgrade check runs only when the release being published is 3.4.0 or later; 3.3.x patch releases skip it.
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
     outputs:
       run: ${{ steps.floor.outputs.run }}
     steps:
-      - name: Decide whether the previous release is one upgrades are checked from
+      - name: Decide whether this release runs the previous-release upgrade check
         id: floor
         env:
+          RELEASE_TAG: ${{ inputs.tag }}
           PREVIOUS_TAG: ${{ inputs.previous-tag }}
           PREVIOUS_SOURCE: ${{ inputs.previous-source }}
         run: |
@@ -146,11 +147,11 @@ jobs:
           run=true
           if [ -z "$PREVIOUS_TAG" ] && [ -z "$PREVIOUS_SOURCE" ]; then
             run=false
-          elif [ -n "$PREVIOUS_SOURCE" ] && [[ "$PREVIOUS_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+          elif [[ "$RELEASE_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
             major=${BASH_REMATCH[1]} minor=${BASH_REMATCH[2]}
-            if [ "$major" -lt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -lt 3 ]; }; then
+            if [ "$major" -lt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -lt 4 ]; }; then
               run=false
-              echo "::notice::The previous release $PREVIOUS_TAG is older than v3.3.0; the previous-release upgrade check is not run."
+              echo "::notice::$RELEASE_TAG is older than v3.4.0; the previous-release upgrade check is not run."
             fi
           fi
           echo "run=$run" >> "$GITHUB_OUTPUT"

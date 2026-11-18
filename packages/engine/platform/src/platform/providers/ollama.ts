@@ -78,7 +78,7 @@ export class OllamaProvider implements LLMProvider {
   constructor(opts: OllamaProviderOptions) {
     this.nativeHeaders = { ...(opts.apiKey ? { Authorization: `Bearer ${opts.apiKey}` } : {}), ...opts.defaultHeaders };
     this.name = opts.name;
-    this.models = opts.models;
+    this.models = [...(opts.models ?? [])];
     this.capabilities = opts.capabilities;
     this.baseURL = opts.baseURL;
     this.defaultModel = opts.defaultModel;

@@ -11,7 +11,9 @@
  *   - diffing against the previous list so a refresh can report what
  *     actually changed ("3 new, 1 retired") instead of a silent no-op;
  *   - an honest fallback chain: live fetch -> last on-disk cache (even if
- *     stale) -> the packaged dated-static list -- never a bare empty array.
+ *     stale) -> nothing of its own, so the pinned model catalog's rows for the
+ *     provider stand. No provider keeps a hand-written list in source: a list
+ *     written down once goes stale the day a model ships.
  */
 
 import fs from 'node:fs';
@@ -29,10 +31,11 @@ import type { ModelDefinition } from './registry-types.js';
 
 const LIVE_FETCH_TIMEOUT_MS = 15_000;
 
-export type LiveModelDiscoverySource = 'live' | 'cache' | 'dated-static';
+/** Where a provider's list came from: its endpoint now, its last answer on disk, or (no answer yet) the pinned model catalog. */
+export type LiveModelDiscoverySource = 'live' | 'cache' | 'catalog';
 
 export interface LiveModelDiscoveryResult {
-  /** The resolved model id list to use right now. Never empty when a dated-static baseline exists. */
+  /** The provider's own list right now. Empty when it has never answered: the pinned catalog's rows for it are the list then. */
   readonly models: readonly string[];
   /** Where `models` came from. */
   readonly source: LiveModelDiscoverySource;
@@ -42,8 +45,8 @@ export interface LiveModelDiscoveryResult {
   readonly removed: readonly string[];
   /** Set when `source !== 'live'` because a live fetch was attempted and failed. Honest failure reason. */
   readonly error?: string | undefined;
-  /** Set when `source === 'dated-static'`: the date the packaged list was last verified. */
-  readonly asOf?: string | undefined;
+  /** When the list was read from the provider (epoch ms); absent when it never answered. */
+  readonly listedAt?: number | undefined;
   /** Listed models kept although neither the endpoint nor the catalog states their capabilities. */
   readonly unclassifiedModels?: readonly string[] | undefined;
   /** What the listing does not establish, shown with the report (for example a list read from a related account). */
@@ -57,6 +60,8 @@ interface ModelListCacheFile {
   ttlMs: number;
   models: string[];
   unclassifiedModels?: string[];
+  /** Whose list this is (a sign-in's identity); a different one makes the file stale. */
+  key?: string;
 }
 
 /** Cache file path for a provider's live-discovered model list. */
@@ -83,7 +88,7 @@ function loadModelListCache(cachePath: string): ModelListCacheFile | null {
   }
 }
 
-function saveModelListCache(models: readonly string[], cachePath: string, unclassifiedModels: readonly string[] = []): void {
+function saveModelListCache(models: readonly string[], cachePath: string, unclassifiedModels: readonly string[] = [], key?: string): void {
   try {
     fs.mkdirSync(dirname(cachePath), { recursive: true });
     const payload: ModelListCacheFile = {
@@ -92,6 +97,7 @@ function saveModelListCache(models: readonly string[], cachePath: string, unclas
       ttlMs: TTL_24H_MS,
       models: [...models],
       ...(unclassifiedModels.length ? { unclassifiedModels: [...unclassifiedModels] } : {}),
+      ...(key ? { key } : {}),
     };
     // A unique temporary file per write: the TUI and the daemon may refresh the same cache at once.
     writeJsonFileAtomic(cachePath, payload);
@@ -127,11 +133,11 @@ export function formatModelDiscoveryReport(providerName: string, result: LiveMod
     return `${providerName}: ${parts.join(', ')}${result.note ? ` (${result.note})` : ''}`;
   }
   if (result.error) {
-    const fallback = result.source === 'cache' ? 'last known list' : `dated static list (as of ${result.asOf ?? 'unknown'})`;
+    const fallback = result.source === 'cache' ? 'its last listed models' : 'the pinned model catalog';
     return `${providerName}: live model refresh failed (${result.error}), using ${fallback}`;
   }
-  if (result.source === 'cache') return `${providerName}: using cached list (${result.models.length} models)`;
-  return `${providerName}: using bundled list (as of ${result.asOf ?? 'unknown'})`;
+  if (result.source === 'cache') return `${providerName}: using its last listed models (${result.models.length})`;
+  return `${providerName}: not listed yet, using the pinned model catalog`;
 }
 
 export interface LiveModelRefreshOptions {
@@ -143,10 +149,11 @@ export interface LiveModelRefreshOptions {
    * root through yet.
    */
   readonly cachePath?: string | undefined;
-  /** Complete, hand-maintained fallback list used when live discovery is unavailable or fails. */
-  readonly datedStaticModels: readonly string[];
-  /** The date the dated-static list was last verified, e.g. '2026-07-12'. */
-  readonly datedStaticAsOf: string;
+  /**
+   * Whose list this is, for a provider whose list depends on the sign-in (a
+   * subscription account): a cached list stored under another key is stale.
+   */
+  readonly cacheKey?: string | undefined;
   /** Whether the provider has credentials configured. When false, live fetch is skipped entirely. */
   readonly isConfigured: boolean;
   /** Performs the live fetch. Should reject on any failure (network, auth, parse). */
@@ -217,7 +224,7 @@ export interface LentModelListings {
  * Run a single live-discovery refresh cycle for one provider: take a host
  * registry's current listing when one is lent, otherwise try the cache for a
  * diff baseline, attempt a live fetch when configured, fall back to
- * cache-then-dated-static on failure, and persist a successful fetch.
+ * cache-then-pinned-catalog on failure, and persist a successful fetch.
  */
 export async function runLiveModelRefresh(opts: LiveModelRefreshOptions): Promise<LiveModelDiscoveryResult> {
   if (!opts.force && opts.borrowFrom) {
@@ -242,25 +249,20 @@ async function refreshListing(opts: LiveModelRefreshOptions): Promise<{ result: 
     }
   };
   assertCurrent();
-  const cache = opts.cachePath ? loadModelListCache(opts.cachePath) : null;
-  const baseline = cache?.models ?? opts.datedStaticModels;
+  const stored = opts.cachePath ? loadModelListCache(opts.cachePath) : null;
+  // A list another sign-in read is not this one's.
+  const cache = stored && (opts.cacheKey === undefined || stored.key === opts.cacheKey) ? stored : null;
+  const baseline = cache?.models ?? [];
   assertCurrent();
 
   if (cache && !opts.force && !isTtlCacheStale(cache)) {
-    return listed({ models: cache.models, source: 'cache', added: [], removed: [] }, cache.fetchedAt);
+    return listed({ models: cache.models, source: 'cache', added: [], removed: [], listedAt: cache.fetchedAt }, cache.fetchedAt);
   }
 
   if (!opts.isConfigured) {
     // No fetch is made without credentials, so this answer is current at any age of the file.
-    if (cache) return listed({ models: cache.models, source: 'cache', added: [], removed: [] });
-    const { added, removed } = diffModelIds(baseline, opts.datedStaticModels);
-    return listed({
-      models: opts.datedStaticModels,
-      source: 'dated-static',
-      added,
-      removed,
-      asOf: opts.datedStaticAsOf,
-    });
+    if (cache) return listed({ models: cache.models, source: 'cache', added: [], removed: [], listedAt: cache.fetchedAt });
+    return listed({ models: [], source: 'catalog', added: [], removed: [] });
   }
 
   try {
@@ -272,30 +274,22 @@ async function refreshListing(opts: LiveModelRefreshOptions): Promise<{ result: 
       throw new Error('live model list was empty');
     }
     const { added, removed } = diffModelIds(baseline, fetched);
-    if (opts.cachePath) saveModelListCache(fetched, opts.cachePath, unclassifiedModels);
+    if (opts.cachePath) saveModelListCache(fetched, opts.cachePath, unclassifiedModels, opts.cacheKey);
     assertCurrent();
-    return listed({ models: fetched, source: 'live', added, removed,
+    return listed({ models: fetched, source: 'live', added, removed, listedAt: Date.now(),
       ...(unclassifiedModels.length ? { unclassifiedModels } : {}) });
   } catch (err) {
     assertCurrent();
     const code = err instanceof Error && 'code' in err ? err.code : undefined;
     if (opts.skipUnavailableLocal && !cache && (code === 'ConnectionRefused' || code === 'ECONNREFUSED')) {
-      return listed({ models: opts.datedStaticModels, source: 'dated-static', added: [], removed: [],
-        asOf: opts.datedStaticAsOf, skippedReason: 'local-endpoint-unavailable' });
+      return listed({ models: [], source: 'catalog', added: [], removed: [], skippedReason: 'local-endpoint-unavailable' });
     }
     const message = summarizeError(err);
     logger.warn('[provider-models] Live model discovery failed', { provider: opts.providerName, error: message });
     if (cache) {
-      return listed({ models: cache.models, source: 'cache', added: [], removed: [], error: message }, cache.fetchedAt);
+      return listed({ models: cache.models, source: 'cache', added: [], removed: [], error: message, listedAt: cache.fetchedAt }, cache.fetchedAt);
     }
-    return listed({
-      models: opts.datedStaticModels,
-      source: 'dated-static',
-      added: [],
-      removed: [],
-      error: message,
-      asOf: opts.datedStaticAsOf,
-    });
+    return listed({ models: [], source: 'catalog', added: [], removed: [], error: message });
   }
 }
 
@@ -463,7 +457,7 @@ export async function fetchAnthropicModelIds(apiKey: string): Promise<string[]> 
 }
 
 /** Fetch the live model list from OpenAI's GET /v1/models endpoint, filtered to the ids that read as chat models. */
-export async function fetchOpenAIModelIds(apiKey: string): Promise<string[]> {
+export async function fetchOpenAIModelIds(apiKey: string): Promise<{ models: string[]; unclassifiedModels: string[] }> {
   const res = await fetchWithTimeout('https://api.openai.com/v1/models', {
     headers: { Authorization: `Bearer ${apiKey}` },
   }, LIVE_FETCH_TIMEOUT_MS, instrumentedFetch);
@@ -471,10 +465,13 @@ export async function fetchOpenAIModelIds(apiKey: string): Promise<string[]> {
     throw new Error(`OpenAI /v1/models returned ${res.status} ${res.statusText}`);
   }
   const body = await res.json() as { data?: ListedModelEntry[] };
-  // OpenAI's own listing mixes speech, image and moderation models with no type field, and the
-  // catalog lists every OpenAI chat model, so an id the catalog does not know is left out here.
-  return chatModelIds('openai', (body.data ?? []).flatMap((entry) => (typeof entry.id === 'string' ? [{ id: entry.id, entry }] : [])),
-    undefined, { keepUnclassified: false });
+  // OpenAI's listing mixes speech, image and moderation models with no type field. The catalog
+  // names the ones it knows; an id it does not know yet (a model released since the pin) is kept
+  // and reported as unclassified, so it can be chosen the day it ships.
+  const unclassifiedModels: string[] = [];
+  const models = await chatModelIds('openai', (body.data ?? []).flatMap((entry) => (typeof entry.id === 'string' ? [{ id: entry.id, entry }] : [])),
+    (modelId) => unclassifiedModels.push(modelId), { keepUnclassified: true });
+  return { models, unclassifiedModels };
 }
 
 /** Fetch the live model list from Google's Gemini ListModels endpoint. */
@@ -500,7 +497,7 @@ export async function fetchGeminiModelIds(apiKey: string): Promise<string[]> {
 }
 
 /**
- * Build a ModelDefinition for a live-discovered or dated-static model id that
+ * Build a ModelDefinition for a live-discovered or declared model id that
  * isn't already represented in the shared model catalog (models.dev). Used
  * to fill the gap when the third-party catalog snapshot lags behind a
  * provider's own live listing (e.g. a model released today).

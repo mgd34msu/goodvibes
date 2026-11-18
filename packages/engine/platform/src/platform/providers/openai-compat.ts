@@ -95,7 +95,12 @@ export interface OpenAICompatOptions {
   baseURL: string;
   apiKey: string;
   defaultModel: string;
-  models: string[];
+  /**
+   * Models declared for this provider by whoever set it up: a custom provider
+   * file, a plugin, a local server's own answer. Builtins declare none: their
+   * list is the backend's listing, else the pinned model catalog.
+   */
+  models?: readonly string[] | undefined;
   embeddingModel?: string | undefined;
   capabilities?: Partial<ProviderCapability> | undefined;
   /** Optional extra HTTP headers sent with every request to this provider. */
@@ -134,11 +139,11 @@ export interface OpenAICompatOptions {
   /**
    * How this backend's model list is discovered.
    *  - 'openai-endpoint' (default): live discovery from the backend's
-   *    OpenAI-style GET {baseURL}/models listing, with `models` demoted to a
-   *    dated-static baseline that is used until the first successful fetch
-   *    and whenever live discovery fails.
+   *    OpenAI-style GET {baseURL}/models listing; until it answers (and
+   *    when it fails with no list on disk) the declared `models`, else the
+   *    pinned model catalog's rows for the provider, are the list.
    *  - 'none': the backend has no model-listing API (verified per provider);
-   *    `models` is the complete dated-static list and no live fetch is made.
+   *    the declared `models`, else the pinned catalog's rows, are the list.
    */
   modelListing?: 'openai-endpoint' | 'none' | undefined;
   /** Override the model-listing URL (defaults to `${baseURL}/models`). */
@@ -149,7 +154,7 @@ export interface OpenAICompatOptions {
    * Takes precedence over `modelListingUrl`.
    */
   fetchLiveModels?: (() => Promise<string[]>) | undefined;
-  /** The date the static `models` list was last verified, e.g. '2026-07-12'. */
+  /** When a declared `models` list was written, e.g. '2026-07-12' (custom providers). */
   modelsAsOf?: string | undefined;
   /** On-disk cache path for live-discovered model lists (TTL cached). */
   modelsCachePath?: string | undefined;
@@ -269,24 +274,22 @@ export class OpenAICompatProvider implements LLMProvider {
   private readonly modelListing: 'openai-endpoint' | 'none';
   private readonly modelListingUrl: string | undefined;
   private readonly customFetchLiveModels: (() => Promise<string[]>) | undefined;
-  private readonly datedStaticModels: readonly string[];
-  private readonly modelsAsOf: string | undefined;
+  private readonly declaredModels: readonly string[];
   private readonly modelsCachePath: string | undefined;
 
   constructor(opts: OpenAICompatOptions) {
     this.name = opts.name;
-    this._models = [...opts.models];
-    this.datedStaticModels = [...opts.models];
+    this._models = [...(opts.models ?? [])];
+    this.declaredModels = [...(opts.models ?? [])];
     this.apiKey = opts.apiKey;
     this.defaultHeaders = opts.defaultHeaders ?? {};
     this.clientDefaultHeaders = opts.defaultHeaders;
     this.modelListing = opts.modelListing ?? 'openai-endpoint';
     this.modelListingUrl = opts.modelListingUrl;
     this.customFetchLiveModels = opts.fetchLiveModels;
-    this.modelsAsOf = opts.modelsAsOf;
     this.modelsCachePath = opts.modelsCachePath;
     this.modelSource = this.modelListing === 'none'
-      ? { kind: 'dated-static', asOf: opts.modelsAsOf ?? 'unknown' }
+      ? (this.declaredModels.length > 0 ? { kind: 'dated-static', asOf: opts.modelsAsOf ?? 'declared' } : { kind: 'catalog-backed' })
       : { kind: 'live-discovery' };
     this.capabilities = opts.capabilities;
     this.defaultModel = opts.defaultModel;
@@ -358,10 +361,9 @@ export class OpenAICompatProvider implements LLMProvider {
    * Re-check this backend's live model listing. Called at boot (background,
    * respects the on-disk TTL cache) and on-demand for a picker-open re-check
    * or an explicit user refresh (`force: true`). Always resolves, falls back
-   * to the on-disk cache, then to the dated-static baseline, and reports the
-   * honest failure reason rather than ever blanking the model list. When the
-   * backend has no listing API (`modelListing: 'none'`, verified per
-   * provider), this reports the dated-static source without a network call.
+   * to the on-disk cache, then to the declared models or the pinned catalog,
+   * and reports the honest failure reason. When the backend has no listing
+   * API (`modelListing: 'none'`, verified per provider), no request is made.
    */
   async refreshModels(force = false, options: ProviderModelRefreshOptions = {}): Promise<LiveModelDiscoveryResult> {
     const result = await runLiveModelRefresh({
@@ -369,15 +371,14 @@ export class OpenAICompatProvider implements LLMProvider {
       recordTo: options.recordTo,
       borrowFrom: options.borrowFrom,
       cachePath: this.modelsCachePath,
-      datedStaticModels: this.datedStaticModels,
-      datedStaticAsOf: this.modelsAsOf ?? 'unknown',
       isConfigured: this.modelListing !== 'none' && this.isConfigured(),
       fetchLive: () => this.fetchLiveModelIds(),
       skipUnavailableLocal: options.skipUnavailableLocal === true && !this.configured && this.allowAnonymous
         && ['127.0.0.1', '[::1]', 'localhost'].includes(new URL(this.baseURL).hostname),
       force,
     });
-    this._models = [...result.models];
+    // No listing yet: what was declared for the provider stands, else the pinned catalog's rows.
+    this._models = result.models.length > 0 ? [...result.models] : [...this.declaredModels];
     return result;
   }
 

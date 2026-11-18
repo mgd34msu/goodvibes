@@ -3,11 +3,7 @@
 // import. See utils/optional-dependency.ts for the failure a static import of
 // an absent optional package produces.
 import { loadBedrockLibrary } from './optional-bedrock.js';
-import { BEDROCK_DATED_STATIC_MODELS, BEDROCK_DATED_STATIC_MODELS_AS_OF, BedrockFamilyProvider } from './amazon-bedrock.js';
-
-/** Mantle shows the same names as direct Bedrock until its listing is read. */
-export const BEDROCK_MANTLE_DATED_STATIC_MODELS: readonly string[] = BEDROCK_DATED_STATIC_MODELS;
-export const BEDROCK_MANTLE_DATED_STATIC_MODELS_AS_OF = BEDROCK_DATED_STATIC_MODELS_AS_OF;
+import { BedrockFamilyProvider } from './amazon-bedrock.js';
 
 /**
  * Bedrock Mantle: the Bedrock family with the Mantle runtime client. Mantle has

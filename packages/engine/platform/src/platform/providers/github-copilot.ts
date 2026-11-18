@@ -9,34 +9,6 @@ import { runLiveModelRefresh, type LiveModelDiscoveryResult, type ProviderModelR
 import { toProviderError } from '../utils/error-display.js';
 import { instrumentedLlmCall } from '../runtime/llm-observability.js';
 
-/**
- * Dated fallback model list, used when no GitHub token is configured (so a
- * live /models call isn't possible) and as the offline baseline when a live
- * call fails with no prior cache. Re-dated 2026-07-13 when live discovery
- * (below) was wired up; the entries themselves are still only cross-checked
- * against the direct Anthropic API's /v1/models response and OpenAI's
- * published model docs, not against a live Copilot subscription's actual
- * /models response (no Copilot subscription was available in this
- * environment to verify against). `refreshModels()` replaces this list with
- * the subscription's real available model ids the first time it runs
- * successfully against real credentials.
- */
-export const COPILOT_DATED_STATIC_MODELS: readonly string[] = [
-  'claude-opus-4-8',
-  'claude-sonnet-5',
-  'claude-sonnet-4.6',
-  'claude-sonnet-4.5',
-  'gpt-5.6',
-  'gpt-4o',
-  'gpt-4.1',
-  'gpt-4.1-mini',
-  'gpt-4.1-nano',
-  'gpt-5.4',
-  'o1',
-  'o1-mini',
-  'o3-mini',
-];
-export const COPILOT_DATED_STATIC_MODELS_AS_OF = '2026-07-13';
 
 export interface GitHubCopilotProviderOptions {
   /** Previous credential-cache path, used once to retire its stored bearer. New sessions stay in this provider. */
@@ -140,7 +112,7 @@ interface CopilotModelsResponse {
  * /models and /chat/completions both answer 200 to this identity. Without an
  * integration id the listing leaves out entries VS Code hides from its picker
  * (`model_picker_enabled: false`) and keeps the chat models a user picks. A
- * refusal is reported with its status and the bundled list is used. Response shape is
+ * refusal is reported with its status and the last listed models (else the pinned catalog) stand. Response shape is
  * OpenAI-like (`{ data: [{ id, capabilities: { type } }] }`); only
  * `type: 'chat'` entries are kept so embedding-only models don't leak into
  * the chat model picker. Each kept entry's `supported_endpoints` and `vendor`
@@ -183,18 +155,17 @@ export class GitHubCopilotProvider implements LLMProvider {
   /**
    * Live-discovery: GET /models on the Copilot API host, verified working
    * for this provider's token-exchange auth mode (see `fetchCopilotModels`
-   * for the evidence trail). `COPILOT_DATED_STATIC_MODELS` below is the
-   * offline fallback used when no GitHub token is configured or a live call
-   * fails with no prior cache.
+   * for the evidence trail). With no token, or a live call that fails with
+   * no list on disk, the pinned model catalog's GitHub Copilot rows stand.
    */
   readonly modelSource: ProviderModelSource = { kind: 'live-discovery' };
 
   /**
-   * Populated synchronously with the dated-static baseline at construction
-   * (never empty), then replaced by `refreshModels()` with the live /models
-   * result. See `modelSource`.
+   * Empty until Copilot lists its models (the pinned catalog's rows are the
+   * list until then), then replaced by `refreshModels()` with the live
+   * /models result. See `modelSource`.
    */
-  private _models: string[] = [...COPILOT_DATED_STATIC_MODELS];
+  private _models: string[] = [];
   get models(): string[] {
     this.observeCredentials();
     return this._models;
@@ -219,7 +190,7 @@ export class GitHubCopilotProvider implements LLMProvider {
     if (owner !== this.modelOwner) {
       this.modelOwner = owner;
       this.modelFacts.clear(); this.modelsReadFor = null; this.selectedFor = null;
-      this._models = [...COPILOT_DATED_STATIC_MODELS];
+      this._models = [];
     }
     return owner;
   }
@@ -231,18 +202,18 @@ export class GitHubCopilotProvider implements LLMProvider {
    * refreshes the current account before reusing its model-list TTL cache) and on-demand for a picker-open
    * re-check or an explicit user refresh (`force: true`, bypasses the TTL
    * cache). Always resolves, falls back to the on-disk cache, then to the
-   * dated-static list, and reports the honest reason when live discovery
+   * pinned model catalog, and reports the honest reason when live discovery
    * fails rather than silently keeping stale data with no explanation.
    */
   async refreshModels(force = false, options: ProviderModelRefreshOptions = {}): Promise<LiveModelDiscoveryResult> {
     const owner = this.observeCredentials();
     // A sweep over every provider (the bulk refresh sets skipUnavailableLocal) is not the owner
-    // choosing Copilot: it reads the cache or the bundled list and exchanges no token. A refresh
+    // choosing Copilot: it reads the cached list (else the pinned catalog stands) and exchanges no token. A refresh
     // aimed at Copilot, or a chat with one of its models, is.
     if (owner !== null && options.skipUnavailableLocal !== true) this.selectedFor = owner;
     const selected = owner !== null && this.selectedFor === owner;
-    const retired = (): LiveModelDiscoveryResult => ({ models: [...COPILOT_DATED_STATIC_MODELS], source: 'dated-static',
-      added: [], removed: [], asOf: COPILOT_DATED_STATIC_MODELS_AS_OF,
+    const retired = (): LiveModelDiscoveryResult => ({ models: [], source: 'catalog',
+      added: [], removed: [],
       error: 'The Copilot account changed during discovery. Refresh the currently selected account.' });
     let result: LiveModelDiscoveryResult;
     try {
@@ -251,8 +222,6 @@ export class GitHubCopilotProvider implements LLMProvider {
         recordTo: options.recordTo,
         borrowFrom: options.borrowFrom,
         cachePath: this.options.modelsCachePath,
-        datedStaticModels: COPILOT_DATED_STATIC_MODELS,
-        datedStaticAsOf: COPILOT_DATED_STATIC_MODELS_AS_OF,
         isConfigured: selected,
         assertCurrent: () => { if (this.observeCredentials() !== owner) throw new Error('Copilot account changed during discovery'); },
         fetchLive: async () => {
@@ -283,7 +252,7 @@ export class GitHubCopilotProvider implements LLMProvider {
     const signal = callerSignal ? AbortSignal.any([callerSignal, owner.signal]) : owner.signal;
     const current = () => { signal.throwIfAborted(); this.sessions.assertCurrent(owner); signal.throwIfAborted(); };
     current();
-    const model = params.model ?? this.models[0]!;
+    const model = params.model;
     const anthropicTransport = this.usesAnthropicTransport(model);
     current();
     const request: ChatRequest = { ...params, model, signal,
@@ -374,7 +343,7 @@ export class GitHubCopilotProvider implements LLMProvider {
         routes: authRoutes,
       },
       models: {
-        defaultModel: this.models[0],
+        ...(this.models[0] ? { defaultModel: this.models[0] } : {}),
         models: this.models,
         aliases: ['copilot'],
       },

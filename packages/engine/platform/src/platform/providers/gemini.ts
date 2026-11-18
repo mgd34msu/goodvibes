@@ -53,25 +53,6 @@ const NOOP_CACHE_HIT_TRACKER: Pick<CacheHitTracker, 'recordTurn'> = {
   recordTurn: () => {},
 };
 
-/**
- * Dated fallback model list, used when no API key is configured (so a live
- * ListModels call isn't possible) and as the offline baseline when a live
- * call fails with no prior cache. Docs-verified (no Gemini API key was
- * available in the environment to live-verify) against ai.google.dev model
- * pages on 2026-07-12; update this list (and the date below) whenever it is
- * re-verified against a live key or current docs.
- */
-export const GEMINI_DATED_STATIC_MODELS: readonly string[] = [
-  'gemini-flash-latest',
-  'gemini-3.5-flash',
-  'gemini-pro-latest',
-  'gemini-3-pro',
-  'gemini-3.1-pro-preview',
-  'gemini-3-flash',
-  'gemini-2.0-flash',
-];
-export const GEMINI_DATED_STATIC_MODELS_AS_OF = '2026-07-12';
-
 interface GeminiCandidate {
   content: { parts: GeminiPart[]; role: string };
   finishReason: string;
@@ -146,11 +127,11 @@ export class GeminiProvider implements LLMProvider {
   private thoughtSignatures = new Map<string, string>();
 
   /**
-   * Populated synchronously with the dated-static baseline at construction
-   * (never empty), then replaced by `refreshModels()` with the live
+   * Empty until the provider lists its models (the pinned model catalog's
+   * rows are the list until then), then replaced by `refreshModels()` with the live
    * ListModels result. See `modelSource`.
    */
-  private _models: string[] = [...GEMINI_DATED_STATIC_MODELS];
+  private _models: string[] = [];
   get models(): string[] {
     return this._models;
   }
@@ -189,8 +170,8 @@ export class GeminiProvider implements LLMProvider {
    * Re-check Gemini's live model list. Called at boot (background, respects
    * the on-disk TTL cache) and on-demand for a picker-open re-check or an
    * explicit user refresh (`force: true`, bypasses the TTL cache). Always
-   * resolves, falls back to the on-disk cache, then to the dated-static
-   * list, and reports the honest reason when live discovery fails rather
+   * resolves, falls back to the on-disk cache, then to the pinned model
+   * catalog, and reports the honest reason when live discovery fails rather
    * than silently keeping stale data with no explanation.
    */
   async refreshModels(force = false, options: ProviderModelRefreshOptions = {}): Promise<LiveModelDiscoveryResult> {
@@ -199,8 +180,6 @@ export class GeminiProvider implements LLMProvider {
       recordTo: options.recordTo,
       borrowFrom: options.borrowFrom,
       cachePath: this.modelsCachePath,
-      datedStaticModels: GEMINI_DATED_STATIC_MODELS,
-      datedStaticAsOf: GEMINI_DATED_STATIC_MODELS_AS_OF,
       isConfigured: Boolean(this.apiKey),
       fetchLive: () => fetchGeminiModelIds(this.apiKey),
       force,

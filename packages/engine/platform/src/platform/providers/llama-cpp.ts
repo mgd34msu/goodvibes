@@ -87,7 +87,7 @@ export class LlamaCppProvider implements LLMProvider {
 
   constructor(opts: LlamaCppProviderOptions) {
     this.name = opts.name;
-    this.models = opts.models;
+    this.models = [...(opts.models ?? [])];
     this.capabilities = opts.capabilities;
     this.defaultModel = opts.defaultModel;
     this.reasoningFormat = opts.reasoningFormat ?? 'none';

@@ -22,23 +22,6 @@ export const BEDROCK_PROVIDER_LABELS = {
   'amazon-bedrock-mantle': 'Amazon Bedrock (Mantle)',
 } as const;
 
-/**
- * Model names shown before the first successful listing, in the one id space
- * every Bedrock-family provider uses: the model's catalog name. A listed
- * Bedrock id (`anthropic.claude-sonnet-4-6-v1:0`, or an inference profile such
- * as `global.anthropic.claude-sonnet-4-6-v1:0`) is shown under the same name
- * and sent as the id the account listed (see `bedrockModelName`), so a saved
- * choice keeps matching across a refresh and across a cache loss.
- */
-export const BEDROCK_DATED_STATIC_MODELS: readonly string[] = [
-  'claude-opus-4-8',
-  'claude-sonnet-5',
-  'claude-opus-4-6',
-  'claude-sonnet-4-6',
-  'claude-haiku-4-5',
-];
-export const BEDROCK_DATED_STATIC_MODELS_AS_OF = '2026-07-13';
-
 /** The model a Bedrock-family provider answers with when its current list includes it. */
 const BEDROCK_PREFERRED_DEFAULT_MODEL = 'claude-sonnet-4-6';
 
@@ -230,7 +213,8 @@ export class BedrockFamilyProvider extends AnthropicMessagesProvider {
       name: family.name,
       label,
       defaultModel: BEDROCK_PREFERRED_DEFAULT_MODEL,
-      models: [...BEDROCK_DATED_STATIC_MODELS],
+      // The account's listing, else the pinned catalog's Bedrock rows: no list is written here.
+      models: [],
       // Async because `@anthropic-ai/bedrock-sdk` is resolved here rather than
       // at module init; an install without the package fails this one request
       // with a message naming it instead of preventing the daemon from starting.
@@ -310,7 +294,7 @@ export class BedrockFamilyProvider extends AnthropicMessagesProvider {
   /**
    * Re-check the account's model list. Called at boot (background, respects
    * the on-disk TTL cache) and on demand (`force: true`). Always resolves:
-   * falls back to the on-disk cache, then to the dated-static list, and
+   * falls back to the on-disk cache, then to the pinned model catalog, and
    * reports the reason when live discovery fails.
    */
   async refreshModels(force = false, options: ProviderModelRefreshOptions = {}): Promise<LiveModelDiscoveryResult> {
@@ -320,8 +304,6 @@ export class BedrockFamilyProvider extends AnthropicMessagesProvider {
       recordTo: options.recordTo,
       borrowFrom: options.borrowFrom,
       cachePath: this.modelsCachePath,
-      datedStaticModels: BEDROCK_DATED_STATIC_MODELS,
-      datedStaticAsOf: BEDROCK_DATED_STATIC_MODELS_AS_OF,
       isConfigured: this.isConfigured(),
       fetchLive: () => fetchBedrockModelIds({ bearerToken: this.bearerToken }),
       force,
@@ -335,7 +317,7 @@ export class BedrockFamilyProvider extends AnthropicMessagesProvider {
       models,
       added,
       removed,
-      ...(this.listingNote && result.source !== 'dated-static' ? { note: this.listingNote } : {}),
+      ...(this.listingNote && result.source !== 'catalog' ? { note: this.listingNote } : {}),
     };
   }
 }

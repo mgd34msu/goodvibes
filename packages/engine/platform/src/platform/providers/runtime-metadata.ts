@@ -229,7 +229,7 @@ export async function buildStandardProviderAuthRoutes(
     // could never register anywhere. Such a provider now gets the api-key and
     // secret-ref routes under the derived convention, so it can be
     // credentialed and reported like any other. A provider that DOES declare
-    // an auth surface (openai-codex is subscription-only by design) never
+    // an auth surface (a subscription-only provider) never
     // reaches this branch.
     const derivedEnvVar = deriveProviderApiKeyEnvVar(options.providerId);
     pushApiKeyRoutes([derivedEnvVar], [derivedEnvVar]);

@@ -6,7 +6,7 @@
  *
  * Owns the `providerNativeModels` bucket: model definitions synthesized
  * directly from a provider's own `models` list (populated either
- * synchronously at registration from a dated-static baseline, or later via
+ * synchronously at registration from a declared list (a custom or plugin provider), or later via
  * `refreshModels()`), independent of the shared third-party model catalog.
  */
 
@@ -111,7 +111,7 @@ export async function sweepLiveModelDiscovery(
       const report: { providerId: string } & LiveModelDiscoveryResult = {
         providerId: provider.name,
         models: [],
-        source: 'dated-static',
+        source: 'catalog',
         added: [],
         removed: [],
         error: summarizeError(error),

@@ -94,27 +94,6 @@ const MODEL_ENDPOINTS = new Set(['/v1/messages', '/v1/messages?beta=true']);
 const VERTEX_LIVE_FETCH_TIMEOUT_MS = 15_000;
 const VERTEX_MODEL_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 
-/**
- * Dated fallback model list, used when no Google Cloud credentials are
- * configured (so a live publisher-model listing call isn't possible) and as
- * the offline baseline when a live call fails with no prior cache. Re-dated
- * 2026-07-13 when live discovery (below) was wired up; the entries
- * themselves are still only cross-checked against the direct Anthropic
- * API's /v1/models response, not against a live Vertex AI project's actual
- * publisher-model listing (no Google Cloud credentials were available in
- * this environment to verify against). `refreshModels()` replaces this list
- * with the project's real available model ids the first time it runs
- * successfully against real credentials.
- */
-export const VERTEX_DATED_STATIC_MODELS: readonly string[] = [
-  'claude-opus-4-8',
-  'claude-sonnet-5',
-  'claude-sonnet-4-6',
-  'claude-opus-4-6',
-  'claude-haiku-4-5',
-];
-export const VERTEX_DATED_STATIC_MODELS_AS_OF = '2026-07-13';
-
 interface AnthropicVertexClientOptions extends ClientOptions {
   readonly projectId?: string | null | undefined;
   readonly region?: string | null | undefined;
@@ -441,7 +420,8 @@ export class AnthropicVertexProvider extends AnthropicMessagesProvider {
       name: 'anthropic-vertex',
       label: 'Anthropic Vertex',
       defaultModel: 'claude-sonnet-4-6',
-      models: [...VERTEX_DATED_STATIC_MODELS],
+      // The project's listing, else the pinned catalog's rows: no list is written here.
+      models: [],
       // Async because the client class itself is built after
       // `@anthropic-ai/sdk` and `google-auth-library` resolve; `createClient`
       // accepts a promise for exactly this.
@@ -488,7 +468,7 @@ export class AnthropicVertexProvider extends AnthropicMessagesProvider {
    * (background, respects the on-disk TTL cache) and on-demand for a
    * picker-open re-check or an explicit user refresh (`force: true`,
    * bypasses the TTL cache). Always resolves, falls back to the on-disk
-   * cache, then to the dated-static list, and reports the honest reason
+   * cache, then to the pinned model catalog, and reports the honest reason
    * when live discovery fails rather than silently keeping stale data with
    * no explanation.
    */
@@ -498,8 +478,6 @@ export class AnthropicVertexProvider extends AnthropicMessagesProvider {
       recordTo: options.recordTo,
       borrowFrom: options.borrowFrom,
       cachePath: this.modelsCachePath,
-      datedStaticModels: VERTEX_DATED_STATIC_MODELS,
-      datedStaticAsOf: VERTEX_DATED_STATIC_MODELS_AS_OF,
       isConfigured: this.isConfigured(),
       fetchLive: () => fetchVertexModelIds(this.discoveryAuthClient),
       force,

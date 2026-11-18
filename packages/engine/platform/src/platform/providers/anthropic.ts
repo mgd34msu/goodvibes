@@ -55,27 +55,6 @@ function isAnthropicApiUrl(url: string): boolean {
 }
 const ANTHROPIC_API_VERSION = '2023-06-01';
 
-/**
- * Dated fallback model list, used when no API key is configured (so a live
- * /v1/models call isn't possible) and as the offline baseline when a live
- * call fails with no prior cache. Live-verified against a real Anthropic
- * API key's GET /v1/models response on 2026-07-12; update this list (and
- * the date below) whenever it is re-verified.
- */
-export const ANTHROPIC_DATED_STATIC_MODELS: readonly string[] = [
-  'claude-sonnet-5',
-  'claude-fable-5',
-  'claude-opus-4-8',
-  'claude-opus-4-7',
-  'claude-sonnet-4-6',
-  'claude-opus-4-6',
-  'claude-opus-4-5-20251101',
-  'claude-haiku-4-5-20251001',
-  'claude-sonnet-4-5-20250929',
-  'claude-opus-4-1-20250805',
-];
-export const ANTHROPIC_DATED_STATIC_MODELS_AS_OF = '2026-07-12';
-
 interface AnthropicResponseBody {
   content: AnthropicContentBlock[];
   stop_reason: string;
@@ -104,11 +83,11 @@ export class AnthropicProvider implements LLMProvider {
   readonly batch: ProviderBatchAdapter;
 
   /**
-   * Populated synchronously with the dated-static baseline at construction
-   * (never empty), then replaced by `refreshModels()` with the live
+   * Empty until the provider lists its models (the pinned model catalog's
+   * rows are the list until then), then replaced by `refreshModels()` with the live
    * /v1/models result. See `modelSource`.
    */
-  private _models: string[] = [...ANTHROPIC_DATED_STATIC_MODELS];
+  private _models: string[] = [];
   get models(): string[] {
     return this._models;
   }
@@ -437,7 +416,7 @@ export class AnthropicProvider implements LLMProvider {
    * respects the on-disk TTL cache) and on-demand for a picker-open
    * re-check or an explicit user refresh (`force: true`, bypasses the TTL
    * cache). Always resolves, falls back to the on-disk cache, then to the
-   * dated-static list, and reports the honest reason when live discovery
+   * pinned model catalog, and reports the honest reason when live discovery
    * fails rather than silently keeping stale data with no explanation.
    */
   async refreshModels(force = false, options: ProviderModelRefreshOptions = {}): Promise<LiveModelDiscoveryResult> {
@@ -446,8 +425,6 @@ export class AnthropicProvider implements LLMProvider {
       recordTo: options.recordTo,
       borrowFrom: options.borrowFrom,
       cachePath: this.modelsCachePath,
-      datedStaticModels: ANTHROPIC_DATED_STATIC_MODELS,
-      datedStaticAsOf: ANTHROPIC_DATED_STATIC_MODELS_AS_OF,
       isConfigured: this.isConfigured(),
       // The same /v1/models call that lists the ids also reports each model's
       // token limits, so the output cap is recorded here rather than fetched

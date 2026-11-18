@@ -45,8 +45,12 @@ export interface AnthropicCompatOptions {
   apiKey: string;
   /** Model ID to use when none is specified in ChatRequest */
   defaultModel: string;
-  /** List of model IDs exposed by this provider */
-  models: string[];
+  /**
+   * Models declared for this provider by whoever set it up (a custom provider
+   * file, a plugin). Builtins declare none: their list is the backend's
+   * listing, else the pinned model catalog.
+   */
+  models?: readonly string[] | undefined;
   /** Optional extra HTTP headers sent with every request */
   defaultHeaders?: Record<string, string> | undefined;
   /** Optional env vars or secret keys that can satisfy auth for this provider. */
@@ -78,11 +82,11 @@ export interface AnthropicCompatOptions {
   /**
    * How this backend's model list is discovered.
    *  - 'anthropic-endpoint' (default): live discovery from the backend's
-   *    Anthropic-style GET {baseURL}/models listing, with `models` demoted
-   *    to a dated-static baseline used until the first successful fetch and
-   *    whenever live discovery fails.
+   *    Anthropic-style GET {baseURL}/models listing; until it answers (and
+   *    when it fails with no list on disk) the declared `models`, else the
+   *    pinned model catalog's rows for the provider, are the list.
    *  - 'none': the backend has no model-listing API (verified per provider);
-   *    `models` is the complete dated-static list and no live fetch is made.
+   *    the declared `models`, else the pinned catalog's rows, are the list.
    */
   modelListing?: 'anthropic-endpoint' | 'none' | undefined;
   /**
@@ -92,7 +96,7 @@ export interface AnthropicCompatOptions {
    * host), and nothing here checks that.
    */
   modelListingUrl?: string | undefined;
-  /** The date the static `models` list was last verified, e.g. '2026-07-12'. */
+  /** When a declared `models` list was written, e.g. '2026-07-12' (custom providers). */
   modelsAsOf?: string | undefined;
   /** On-disk cache path for live-discovered model lists (TTL cached). */
   modelsCachePath?: string | undefined;
@@ -151,20 +155,18 @@ export class AnthropicCompatProvider implements LLMProvider {
   private readonly retryConfig?: Partial<RetryConfig> | undefined;
   private readonly modelListing: 'anthropic-endpoint' | 'none';
   private readonly modelListingUrl: string | undefined;
-  private readonly datedStaticModels: readonly string[];
-  private readonly modelsAsOf: string | undefined;
+  private readonly declaredModels: readonly string[];
   private readonly modelsCachePath: string | undefined;
 
   constructor(opts: AnthropicCompatOptions) {
     this.name = opts.name;
-    this._models = [...opts.models];
-    this.datedStaticModels = [...opts.models];
+    this._models = [...(opts.models ?? [])];
+    this.declaredModels = [...(opts.models ?? [])];
     this.modelListing = opts.modelListing ?? 'anthropic-endpoint';
     this.modelListingUrl = opts.modelListingUrl;
-    this.modelsAsOf = opts.modelsAsOf;
     this.modelsCachePath = opts.modelsCachePath;
     this.modelSource = this.modelListing === 'none'
-      ? { kind: 'dated-static', asOf: opts.modelsAsOf ?? 'unknown' }
+      ? (this.declaredModels.length > 0 ? { kind: 'dated-static', asOf: opts.modelsAsOf ?? 'declared' } : { kind: 'catalog-backed' })
       : { kind: 'live-discovery' };
     this.baseURL = opts.baseURL.replace(/\/$/, ''); // strip trailing slash
     this.apiKey = opts.apiKey;
@@ -214,10 +216,9 @@ export class AnthropicCompatProvider implements LLMProvider {
   /**
    * Re-check this backend's live model listing (Anthropic-style GET
    * {baseURL}/models). Always resolves, falls back to the on-disk cache,
-   * then the dated-static baseline, with the honest failure reason; never
-   * blanks the model list. When the backend has no listing API
-   * (`modelListing: 'none'`, verified per provider), reports the
-   * dated-static source without a network call.
+   * then to the declared models or the pinned catalog, with the honest
+   * failure reason. When the backend has no listing API (`modelListing:
+   * 'none'`, verified per provider), no request is made.
    */
   async refreshModels(force = false, options: ProviderModelRefreshOptions = {}): Promise<LiveModelDiscoveryResult> {
     const result = await runLiveModelRefresh({
@@ -225,13 +226,12 @@ export class AnthropicCompatProvider implements LLMProvider {
       recordTo: options.recordTo,
       borrowFrom: options.borrowFrom,
       cachePath: this.modelsCachePath,
-      datedStaticModels: this.datedStaticModels,
-      datedStaticAsOf: this.modelsAsOf ?? 'unknown',
       isConfigured: this.modelListing !== 'none' && this.isConfigured(),
       fetchLive: () => this.fetchLiveModelIds(),
       force,
     });
-    this._models = [...result.models];
+    // No listing yet: what was declared for the provider stands, else the pinned catalog's rows.
+    this._models = result.models.length > 0 ? [...result.models] : [...this.declaredModels];
     return result;
   }
 

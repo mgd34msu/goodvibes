@@ -73,7 +73,7 @@ export class LMStudioProvider implements LLMProvider {
   constructor(opts: LMStudioProviderOptions) {
     this.nativeHeaders = { ...(opts.apiKey ? { Authorization: `Bearer ${opts.apiKey}` } : {}), ...opts.defaultHeaders };
     this.name = opts.name;
-    this.models = opts.models;
+    this.models = [...(opts.models ?? [])];
     this.capabilities = opts.capabilities;
     this.defaultModel = opts.defaultModel;
     this.nativeChatUrl = deriveNativeChatUrl(opts.baseURL);

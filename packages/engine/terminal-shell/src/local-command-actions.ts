@@ -193,7 +193,7 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
               const unchanged = reports.filter(
                 (report) => report.source !== 'live' && !report.error && !report.skippedReason && !report.unclassifiedModels?.length,
               ).length;
-              if (unchanged > 0) ctx.print(`${unchanged} providers kept their cached or bundled lists (no live refresh).`);
+              if (unchanged > 0) ctx.print(`${unchanged} providers kept their last listed models or the pinned catalog (no live refresh).`);
             }
           } catch (e) {
             ctx.print(policy.imageFailure('Live model discovery failed', summarizeError(e)));

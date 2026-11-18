@@ -2,7 +2,7 @@
 
 ## Install
 
-The Jev TUI is part of the `goodvibes-jev` suite. Install released binaries with
+The GoodVibes TUI is part of the GoodVibes suite. Install released binaries with
 the [release installer](../../../docs/installation.md)
 (`curl -fsSL https://goodvibes.sh/install.sh | sh`, Linux or macOS, no build tools
 needed), or build and install from a checkout with
@@ -188,7 +188,7 @@ instance's live state rather than an orphaned crash. Keeping (or dismissing) sta
 Project runtime data lives under `.goodvibes/` in the working directory. The
 release installer keeps global data in `~/.goodvibes` unless `GOODVIBES_HOME` is
 set. The checkout installer sets `GOODVIBES_HOME` to
-`~/.local/share/goodvibes-jev-data`, so global paths shown as `~/.goodvibes`
+`~/.local/share/goodvibes-data`, so global paths shown as `~/.goodvibes`
 below resolve under that directory instead; a custom `--data-dir` relocates it.
 The specific files worth knowing:
 

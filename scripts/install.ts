@@ -6,6 +6,7 @@ import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, r
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { PAIRING_DEFERRED_EXIT } from '../products/tui/scripts/pairing-exit.ts';
+import { DAEMON_SERVICE_NAME } from '../packages/engine/platform/src/platform/daemon/daemon-service-default.ts';
 import { COMMANDS, CommandError, PACKAGE, SERVICE, assertOwnedFiles, atomicWrite, contained, dataOwner, discardAbandonedFirstInstall, isReleaseInUse, plainPath, present, quote, readDataId, readInstallation, receiptPath, recoverInterruptedUpdate, run, stopService, switchRelease, unitPath, validateLayout, withLock, type Installation, type Layout, type Run } from './installation.ts';
 
 export interface Options extends Layout { port: number; service: boolean; runtimeDir: string; nodePath?: string; workspace?: string; decisionPolicy?: DecisionModelPolicy }
@@ -22,13 +23,13 @@ export function parseOptions(args: string[], home = realpathSync(process.env.HOM
     else if (['--prefix', '--bin-dir', '--data-dir', '--port', '--runtime-dir', '--workspace', '--decision-policy'].includes(flag) && args[i + 1] && !args[i + 1]!.startsWith('--')) values[flag] = args[++i]!;
     else throw new Error(`Unknown or incomplete option: ${flag}`);
   }
-  const prefix = resolve(values['--prefix'] ?? join(home, '.local/share/goodvibes-jev'));
+  const prefix = resolve(values['--prefix'] ?? join(home, '.local/share/goodvibes'));
   const old = readInstallation(prefix);
   const runtimeDir = resolve(values['--runtime-dir'] ?? dirname(runtime.bunPath));
   const adjacentNode = join(runtimeDir, 'node');
   const nodePath = values['--runtime-dir'] || existsSync(adjacentNode) ? adjacentNode : resolve(runtime.findNode() ?? adjacentNode);
   const options = { home, prefix, binDir: resolve(values['--bin-dir'] ?? old?.binDir ?? join(home, '.local/bin')),
-    dataDir: resolve(values['--data-dir'] ?? old?.dataDir ?? join(home, '.local/share/goodvibes-jev-data')),
+    dataDir: resolve(values['--data-dir'] ?? old?.dataDir ?? join(home, '.local/share/goodvibes-data')),
     port: Number(values['--port'] ?? old?.port ?? 3421), service: service ?? old?.service ?? true,
     workspace: realpathSync(resolve(values['--workspace'] ?? old?.workspace ?? ROOT)),
     runtimeDir, nodePath, ...(values['--decision-policy'] === undefined ? {} : { decisionPolicy: parseDecisionModelPolicy(values['--decision-policy']) }) };
@@ -44,10 +45,10 @@ export function preflight(options: Options, old: Installation | undefined, execu
   if (contained(options.prefix, ROOT) || contained(ROOT, options.prefix) || contained(options.dataDir, ROOT)) throw new Error('Install programs and data outside the source checkout.');
   if (old) assertOwnedFiles(old);
   else {
-    if (present(options.prefix) && readdirSync(options.prefix).length) throw new Error(`Program directory ${options.prefix} is not empty and has no Jev installation receipt, so this installer does not own it; nothing was changed. Choose another --prefix, or remove it if nothing you need is there: rm -rf -- ${quote(options.prefix)}`);
+    if (present(options.prefix) && readdirSync(options.prefix).length) throw new Error(`Program directory ${options.prefix} is not empty and has no GoodVibes installation receipt, so this installer does not own it; nothing was changed. Choose another --prefix, or remove it if nothing you need is there: rm -rf -- ${quote(options.prefix)}`);
     for (const name of COMMANDS) if (present(join(options.binDir, name))) throw new Error(`Command already exists: ${join(options.binDir, name)}; nothing was changed. Choose --bin-dir, or uninstall the installation that owns it first.`);
     if (present(unitPath(options))) throw new Error(`A service definition this installer does not own already exists at ${unitPath(options)}; nothing was changed. Install with --no-service, or remove it after stopping it: systemctl --user disable --now ${SERVICE} && rm -- ${quote(unitPath(options))}`);
-    if (present(options.dataDir) && readdirSync(options.dataDir).length && !readDataId(options)) throw new Error('Data directory is not empty and is not owned by the Jev installer. Choose --data-dir.');
+    if (present(options.dataDir) && readdirSync(options.dataDir).length && !readDataId(options)) throw new Error('Data directory is not empty and is not owned by the GoodVibes installer. Choose --data-dir.');
   }
   if (options.service || old?.service) {
     try { execute('systemctl', ['--user', 'show-environment'], { capture: true }); }
@@ -61,7 +62,7 @@ export function preflight(options: Options, old: Installation | undefined, execu
 }
 export function wrapper(options: Options, name: typeof COMMANDS[number], arch = process.arch): string {
   const current = join(options.prefix, 'current');
-  const header = '#!/bin/sh\nset -eu\n# Managed by the goodvibes-jev installer.\n';
+  const header = '#!/bin/sh\nset -eu\n# Managed by the GoodVibes installer.\n';
   // An update moves current. Keep each process and its admitted runtime on the
   // same physical release for its entire lifetime, including subsequent execs.
   // The release's private bun and node are named by GOODVIBES_SUITE_RUNTIME for
@@ -118,7 +119,7 @@ export async function build(root: string, execute: Run): Promise<string> {
     }
   };
   assertClean('before the build');
-  console.log(`Building GoodVibes Jev from ${commit}...`);
+  console.log(`Building GoodVibes from ${commit}...`);
   execute('bun', ['install', '--frozen-lockfile'], { cwd: root });
   execute('bun', ['packages/engine/scripts/build.ts'], { cwd: root });
   for (const [product, script] of [['daemon', 'build:binary'], ['tui', 'build'], ['agent', 'build:binary'], ['webui', 'build']]) {
@@ -258,7 +259,7 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
       let unit = '';
       if (options.service) {
         unit = hooks.renderUnit ? await hooks.renderUnit(options) : (await import(pathToFileURL(join(ROOT, 'packages/engine/platform/src/platform/daemon/service-manager.ts')).href)).renderSystemdUnit({
-          name: 'goodvibes-jev', description: 'GoodVibes Jev daemon and WebUI', workingDirectory: options.workspace ?? ROOT,
+          name: DAEMON_SERVICE_NAME, description: 'GoodVibes daemon and WebUI', workingDirectory: options.workspace ?? ROOT,
           command: join(options.prefix, 'commands/goodvibes-daemon'), args: ['serve', '--hostname', '127.0.0.1', '--port', String(options.port)], env: {}, restartOnFailure: true });
       }
       if (old?.service) {
@@ -285,7 +286,7 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
         // TYPESAFE_API_KEY is classified daemon-needed by credential-scope-registry.ts.
         const key = process.env.TYPESAFE_API_KEY;
         if (key?.includes('\n') || key?.includes('\r') || key?.includes('\0')) throw new Error('TYPESAFE_API_KEY must be a single line.');
-        atomicWrite(environment, '# Private shell environment for GoodVibes Jev.\n' + (key ? `TYPESAFE_API_KEY=${quote(key)}\n` : '# TYPESAFE_API_KEY=your-key\n'));
+        atomicWrite(environment, '# Private shell environment for GoodVibes.\n' + (key ? `TYPESAFE_API_KEY=${quote(key)}\n` : '# TYPESAFE_API_KEY=your-key\n'));
       }
       const wrappers: Record<string, string> = Object.fromEntries(COMMANDS.map(name => [name, wrapper(options, name)]));
       const { runtimeDir: _runtimeDir, nodePath: _nodePath, ...installedOptions } = options;
@@ -355,7 +356,7 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
         }
         catch { console.warn(`Update succeeded; an unused previous release remains at ${path}.`); }
       }
-      console.log(`Installed GoodVibes Jev (${commit.slice(0, 12)}). Commands: ${options.binDir}`);
+      console.log(`Installed GoodVibes (${commit.slice(0, 12)}). Commands: ${options.binDir}`);
       if (options.service) console.log(`Workspace: ${options.workspace ?? ROOT}`);
       console.log(options.service ? `WebUI: http://127.0.0.1:${options.port}\nService: systemctl --user status ${SERVICE}` : `Start the daemon: ${join(options.binDir, 'goodvibes-daemon')} serve`);
       console.log(`Credentials: ${environment}\nUninstall: ${join(options.binDir, 'goodvibes-uninstall')} (add --purge to remove data)`);

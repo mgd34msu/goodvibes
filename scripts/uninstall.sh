@@ -1,7 +1,7 @@
 #!/bin/sh
 # Remove a released suite or an earlier receipt-owned checkout installation.
 set -eu
-prefix="${HOME:?}/.local/share/goodvibes-jev"
+prefix="${HOME:?}/.local/share/goodvibes"
 explicit_prefix=0
 purge=0
 while [ "$#" -gt 0 ]; do
@@ -45,7 +45,7 @@ if [ -f "$prefix/installation.json" ]; then
     echo "The installed uninstaller for $prefix is missing ($release_root/uninstall.js) and no Bun was found to run this checkout's copy; nothing was removed. Install Bun (https://bun.sh), then run: bun $checkout/scripts/uninstall.ts $*" >&2
     exit 1
   fi
-  echo "The installed uninstaller for $prefix is missing ($release_root/uninstall.js); nothing was removed. From a goodvibes-jev checkout, run: ./scripts/uninstall.sh $*" >&2
+  echo "The installed uninstaller for $prefix is missing ($release_root/uninstall.js); nothing was removed. From a GoodVibes source checkout, run: ./scripts/uninstall.sh $*" >&2
   exit 1
 fi
 if [ "$explicit_prefix" = 1 ]; then

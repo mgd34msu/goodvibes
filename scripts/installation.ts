@@ -3,9 +3,10 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { ProcessLockBusyError, withProcessLock } from '../packages/engine/platform/src/platform/utils/process-lock.ts';
+import { DAEMON_SERVICE_NAME } from '../packages/engine/platform/src/platform/daemon/daemon-service-default.ts';
 
-export const PACKAGE = 'goodvibes-jev';
-export const SERVICE = 'goodvibes-jev.service';
+export const PACKAGE = 'goodvibes';
+export const SERVICE = `${DAEMON_SERVICE_NAME}.service`;
 export const COMMANDS = ['goodvibes', 'goodvibes-agent', 'goodvibes-daemon', 'goodvibes-uninstall'] as const;
 export interface Layout { prefix: string; binDir: string; dataDir: string; home: string }
 export interface Installation extends Layout {
@@ -112,7 +113,7 @@ export function readInstallation(prefix: string): Installation | undefined {
   if ((value.schema !== 1 && value.schema !== 2) || value.package !== PACKAGE || value.prefix !== prefix || !/^[0-9a-f-]{36}$/.test(value.id)
     || !/^[0-9a-f]{40}-[0-9a-f-]{36}$/.test(value.release) || !/^[0-9a-f]{40}$/.test(value.sourceCommit)
     || typeof value.service !== 'boolean' || typeof value.unit !== 'string' || !value.wrappers
-    || !Number.isInteger(value.port) || value.port < 1024 || value.port > 65535) throw new Error('Invalid Jev installation receipt.');
+    || !Number.isInteger(value.port) || value.port < 1024 || value.port > 65535) throw new Error('Invalid GoodVibes installation receipt.');
   validateLayout(value);
   for (const name of COMMANDS) if (typeof value.wrappers[name] !== 'string') throw new Error('Invalid command ownership receipt.');
   return value;
@@ -128,12 +129,12 @@ function managedFileMatches(path: string, expected: string, schema: Installation
   return schema === 1 ? createHash('sha256').update(actual).digest('hex') === expected
     : actual.equals(Buffer.from(expected, 'utf8'));
 }
-export function dataOwner(layout: Layout): string { return join(layout.dataDir, '.goodvibes-jev-owner.json'); }
+export function dataOwner(layout: Layout): string { return join(layout.dataDir, '.goodvibes-owner.json'); }
 export function readDataId(layout: Layout): string | undefined {
   const marker = dataOwner(layout); plainPath(marker);
   if (!present(marker)) return undefined;
   const value = JSON.parse(readFileSync(marker, 'utf8')) as { package?: string; id?: string; dataDir?: string; prefix?: string };
-  if (value.package !== PACKAGE || value.dataDir !== layout.dataDir || typeof value.id !== 'string' || !/^[0-9a-f-]{36}$/.test(value.id)) throw new Error('Invalid Jev data ownership marker.');
+  if (value.package !== PACKAGE || value.dataDir !== layout.dataDir || typeof value.id !== 'string' || !/^[0-9a-f-]{36}$/.test(value.id)) throw new Error('Invalid GoodVibes data ownership marker.');
   const ownerPrefix = value.prefix ?? layout.prefix;
   const owner = readInstallation(ownerPrefix);
   if (ownerPrefix !== layout.prefix && owner?.id === value.id) throw new Error(`Data directory is in use by another installation: ${ownerPrefix}`);
@@ -269,7 +270,7 @@ export async function uninstall(prefix: string, purge: boolean, execute: Run = r
     const receipt = readInstallation(prefix);
     // Nothing is left to protect once the program directory is gone, so the lock files beside it go too; a later
     // install simply creates them again.
-    if (!receipt) { rmSync(lockPath(prefix), { force: true }); console.log(`No Jev installation at ${prefix}. Preserved data remains untouched.`); return; }
+    if (!receipt) { rmSync(lockPath(prefix), { force: true }); console.log(`No GoodVibes installation at ${prefix}. Preserved data remains untouched.`); return; }
     await withLock(receipt.dataDir, async () => {
       if (realpathSync(process.env.HOME ?? '') !== receipt.home) throw new Error('Run uninstall as the user who owns this installation.');
       recoverInterruptedUpdate(receipt, 'uninstall');
@@ -288,7 +289,7 @@ export async function uninstall(prefix: string, purge: boolean, execute: Run = r
       if (purge) { plainPath(receipt.dataDir); rmSync(receipt.dataDir, { recursive: true, force: true }); }
       rmSync(prefix, { recursive: true });
       rmSync(lockPath(receipt.dataDir), { force: true }); rmSync(lockPath(prefix), { force: true });
-      console.log(purge ? 'GoodVibes Jev uninstalled, including its data.' : `GoodVibes Jev uninstalled. Data and credentials preserved at ${receipt.dataDir}`);
+      console.log(purge ? 'GoodVibes uninstalled, including its data.' : `GoodVibes uninstalled. Data and credentials preserved at ${receipt.dataDir}`);
     });
   });
 }

@@ -3,7 +3,7 @@ import { uninstall } from './installation.ts';
 
 if (import.meta.main) {
   try {
-    let prefix = resolve(process.env.HOME ?? '', '.local/share/goodvibes-jev');
+    let prefix = resolve(process.env.HOME ?? '', '.local/share/goodvibes');
     let purge = false;
     const args = process.argv.slice(2);
     for (let i = 0; i < args.length; i++) {

@@ -1,6 +1,6 @@
 # Getting started
 
-GoodVibes Agent is the operator-assistant workspace in the GoodVibes Jev
+GoodVibes Agent is the operator-assistant workspace in the GoodVibes
 monorepo. The workspace tour below describes inherited capabilities; native
 setup and current authority requirements take precedence over historical
 confirmation or release behavior.
@@ -9,7 +9,7 @@ confirmation or release behavior.
 
 Install with the [release installer](../../../docs/installation.md)
 (`curl -fsSL https://goodvibes.sh/install.sh | sh`, Linux or macOS), or build from
-a `goodvibes-jev` checkout with `scripts/install-from-checkout.sh` (Linux x64/arm64
+a GoodVibes checkout with `scripts/install-from-checkout.sh` (Linux x64/arm64
 with glibc). Either installs Agent with the daemon, TUI and WebUI. Source
 development requires Bun **1.3.14** and Node **22 or later**. Upstream npm
 installation commands do not install this workspace.

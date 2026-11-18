@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the Jev suite from this checkout, without changing system runtimes.
+# Install the GoodVibes suite from this checkout, without changing system runtimes.
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 case "${1:-}" in
@@ -14,9 +14,9 @@ Bun and Node are supplied privately when needed. Git, curl, tar, unzip and
 sha256sum must be available. By default a systemd user service is enabled.
 
 Defaults:
-  Programs: $HOME/.local/share/goodvibes-jev
+  Programs: $HOME/.local/share/goodvibes
   Commands: $HOME/.local/bin
-  Data:     $HOME/.local/share/goodvibes-jev-data
+  Data:     $HOME/.local/share/goodvibes-data
   WebUI:    http://127.0.0.1:3421
 
 Export TYPESAFE_API_KEY before installation or put it in the installed
@@ -37,8 +37,8 @@ for command in git curl tar unzip sha256sum; do
   command -v "$command" >/dev/null || { echo "Install the prerequisite: $command" >&2; exit 1; }
 done
 getconf GNU_LIBC_VERSION >/dev/null 2>&1 || { echo 'A glibc Linux distribution is required (musl/Alpine is not supported).' >&2; exit 1; }
-[[ -f "$root/products/daemon/scripts/install-native.ts" ]] || { echo 'Run install-from-checkout.sh from a cloned goodvibes-jev repository (released binaries install with scripts/install.sh).' >&2; exit 1; }
-work=$(mktemp -d -t goodvibes-jev-bootstrap.XXXXXXXX)
+[[ -f "$root/products/daemon/scripts/install-native.ts" ]] || { echo 'Run install-from-checkout.sh from a clone of the GoodVibes repository (released binaries install with scripts/install.sh).' >&2; exit 1; }
+work=$(mktemp -d -t goodvibes-bootstrap.XXXXXXXX)
 trap 'rm -rf -- "$work"' EXIT
 mkdir -p "$work/bin"
 fetch() { curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 --retry 3 "$1" -o "$2"; }

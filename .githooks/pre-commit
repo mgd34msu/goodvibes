@@ -5,6 +5,14 @@
 # A successful local commit does not establish merge readiness.
 set -euo pipefail
 
+# Every staged file, documentation included: the repository is public, and a
+# literal in a real credential's shape must never reach a commit.
+if ! bun packages/engine/scripts/check-credential-literals.ts --staged; then
+  echo "" >&2
+  echo "[pre-commit] BLOCKED: a staged file holds a credential-shaped literal (see above)." >&2
+  exit 1
+fi
+
 # Keep credential checking for engine and product source/manifests/config.
 # Documentation-only edits do not invoke application tooling.
 STAGED_SRC=$(git diff --cached --name-only --diff-filter=ACMR \

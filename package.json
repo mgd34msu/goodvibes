@@ -59,6 +59,7 @@
     "check:browser": "bun packages/engine/scripts/browser-compat-check.ts",
     "check:metadata": "bun packages/engine/scripts/package-metadata-check.ts",
     "contracts:check": "bun packages/engine/scripts/check-contract-artifacts.ts",
+    "credential-literals:check": "bun packages/engine/scripts/check-credential-literals.ts",
     "credential-scope:check": "bun packages/engine/scripts/check-credential-scope.ts",
     "contracts:foundation-io:check": "bun packages/engine/scripts/check-foundation-io-types.ts --check",
     "docs:check": "bun packages/engine/scripts/generate-api-docs.ts --check && bun packages/engine/scripts/docs-completeness-check.ts",

@@ -104,6 +104,7 @@ MEASURE_TRACE=stats,fileWrites bun run measure -- --only <name>   # each counted
 | `packages/engine/errors/src`, `packages/engine/platform/src/platform/types/errors.ts`, `packages/engine/transport-http/src/retry.ts` | `bun run error:check` | Keep every error kind and its mapping in step. |
 | A setting key, its type, default or allowed values (`packages/engine/platform/src/platform/config` schema, feature settings) | `bun run --cwd products/webui generated:check` (also run by the web UI build inside `bun run build`) | Intended change: `bun run --cwd products/webui release:prepare`, then commit the diff under `products/webui/src/lib/generated/`; a removed or renamed key shows there. |
 | A secret-store write in `packages/engine/platform/src` | `bun run credential-scope:check` | Classify the key in `packages/engine/platform/src/platform/config/credential-scope-registry.ts`. The pre-commit hook runs this one. |
+| Any tracked file (source, fixtures, tests, docs, workflows, config) | `bun run credential-literals:check` | Never write a value in a real credential's shape (bot token, API key, JWT, key block, card number): build it at run time with `packages/engine/platform/src/platform/utils/fixture-credentials.ts`. The pre-commit hook runs this one on staged files. |
 
 ## Generated files: never open or grep
 

@@ -1,8 +1,31 @@
-# GoodVibes WebUI
+# GoodVibes web UI
 
-The browser product in the GoodVibes monorepo. The app, responsive shell, PWA,
-assets and behavior tests originate at upstream `goodvibes-webui` revision
-`dadf57700668fe4500b17b0b0b4520715ab25ef4` (WebUI 2.0.0).
+The GoodVibes web UI is the browser app for GoodVibes. The daemon serves it, so
+there is nothing separate to run. In it you chat with the agent, see what is
+running and what is waiting for you, browse what GoodVibes remembers, and use
+your mail and calendar. It works at phone size and can be installed on a phone's
+home screen as an app.
+
+## Open it
+
+The [suite installer](../../docs/installation.md) installs the built web UI and
+has the daemon serve it, by default at `http://127.0.0.1:3421`; the installer
+prints the address. `goodvibes-daemon webui status` shows where it is served
+and who can reach it. It needs no separate WebUI service.
+
+To use it from a phone or another computer, run
+`goodvibes-daemon webui enable --lan` so other devices on your network can
+reach it, then run `goodvibes pair` and open the QR code's link on the device
+or scan it with the sign-in page's camera scanner. Pairing, sign-in and every
+part of the app are described in the [operator guide](docs/operator-guide.md).
+Updates come with the rest of the suite; the development server below is for
+source work.
+
+## About this source
+
+The app, responsive shell, PWA, assets and behavior tests originate at upstream
+`goodvibes-webui` revision `dadf57700668fe4500b17b0b0b4520715ab25ef4` (WebUI
+2.0.0).
 
 The app consumes the engine's contract inspection, session gate presets and
 authenticated browser judgment transport. Declared status catalogs remain exact
@@ -14,14 +37,6 @@ Source integration and tests with scripted responses do not establish full
 connected-daemon parity or live-provider accuracy. The default browser matrix
 uses a synthetic daemon. Connected runtime and provider qualification require
 their own receipts for the tested source and configuration.
-
-## Run the installed WebUI
-
-The [suite installer](../../docs/installation.md) builds this workspace and
-serves it from the daemon at `http://127.0.0.1:3421` by default. It needs no
-separate WebUI service. Configure pairing and authentication as described in the
-[operator guide](docs/operator-guide.md). Use the suite installer for updates;
-the development server below is for source work.
 
 ## Development
 
@@ -53,5 +68,5 @@ asset cache stamps. Existing legacy URLs continue to map into Chat, Work,
 Library, Personal and Settings while preserving deep-link fragments.
 
 See [known limitations](docs/known-limitations.md) for the remaining
-integration work, and the [3.3.0 release notes](../../docs/releases/3.3.0.md)
+integration work, and the [3.3.1 release notes](../../docs/releases/3.3.1.md)
 for what changed in this release.

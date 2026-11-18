@@ -1,9 +1,21 @@
-# Daemon command executable and explicit host (partial migration)
+# GoodVibes daemon (`goodvibes-daemon`)
 
-Package: `@goodvibes-jev/daemon` · `private: true`.
-The repository root owns the shared release version for all suite products.
-[MIT license](LICENSE),
-Copyright (c) 2026 Mike Davis.
+`goodvibes-daemon` is the GoodVibes background service. It keeps scheduled jobs, chat channels, the knowledge and memory stores and web sessions running when no terminal is open, serves the web UI, and lets your phone, other devices and other machines connect. The `goodvibes` terminal app and the `goodvibes-agent` assistant connect to it.
+
+## Install and start
+
+The [suite installer](../../docs/installation.md) installs the daemon and sets it up as a user service (systemd on Linux, launchd on macOS) that starts by itself, so you rarely run it by hand. Commands you are likely to use:
+
+```sh
+goodvibes-daemon status            # ask the running daemon what it is doing
+goodvibes-daemon service-status    # whether the service is installed and running
+goodvibes-daemon restart-service   # restart the service
+goodvibes-daemon webui status      # where the web UI is served and who can reach it
+goodvibes-daemon config get controlPlane.port
+goodvibes-daemon help <command>    # any command's own arguments and flags
+```
+
+Run with no command, it serves in the foreground; `goodvibes-daemon install-service` registers it as a service yourself.
 
 ## Operator guides
 
@@ -13,9 +25,13 @@ Copyright (c) 2026 Mike Davis.
 - [Suite installation and uninstall](../../docs/installation.md): install released suite binaries and configure the Linux user service
 - [Troubleshooting](docs/troubleshooting.md): startup, authentication, binding, services and tool refusals
 
+## Reference
+
+The sections below describe how the daemon is built and composed, for operators and for developers working on it.
+
 Configured Slack and Discord inboxes require an established trusted screening host. A configured email inbox runs without one: its rows then carry `screening: not-screened` with the reason, and triage and label write-back stay off.
 
-## Product boundary
+### Product boundary
 
 This private workspace preserves the pinned daemon's command vocabulary and
 now builds the canonical `goodvibes-daemon` Bun command. Its checked-in
@@ -241,7 +257,7 @@ source. Use the supported Bun 1.3.14 runtime and built engine workspace.
 
 See [cli entrypoint contract](docs/cli-and-package-contracts.md#command-grammar-and-dispatch) for caller contracts.
 
-### Multiple explicitly owned inbox sources
+#### Multiple explicitly owned inbox sources
 
 Trusted launchers can combine `createSlackDaemonInboxSourceFactory` and
 `createEmailDaemonInboxSourceFactory` with
@@ -253,4 +269,11 @@ required for custom composition. The production constructor includes explicit
 unconfigured membership and explicit account-bound Slack, Discord and email
 sources.
 
-Current monorepo releases are documented in [release notes](../../docs/releases/); the current release is [3.3.0](../../docs/releases/3.3.0.md).
+## Release and license
+
+Current monorepo releases are documented in [release notes](../../docs/releases/); the current release is [3.3.1](../../docs/releases/3.3.1.md).
+
+Package: `@goodvibes-jev/daemon` · `private: true`.
+The repository root owns the shared release version for all suite products.
+[MIT license](LICENSE),
+Copyright (c) 2026 Mike Davis.

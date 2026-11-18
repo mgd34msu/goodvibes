@@ -1,153 +1,22 @@
-# goodvibes-tui
-
-## Install
-
-Use the [suite installer](../../docs/installation.md) to install released TUI,
-Agent, daemon and WebUI components from one monorepo version, then run
-`goodvibes` from your project directory. Configure your conversation provider
-in the application. Decision-model policies and execution permissions are
-separate; see [decision-model policies](../../docs/decision-model-policy.md).
-
-## Purchase approval and veto windows
-
-Type `/payments pending` in the owner terminal to read purchase notices from
-the selected paired daemon. Select a purchase, read its notice and deadline,
-then choose approve/deny or proceed-now/cancel. The menu retains that host and
-window reference; changing the connection requires reopening it. Escape closes
-the local view. An answer already sent may still complete on the host.
-
-This requires a paired administrative credential with `read:payments` and
-`write:payments`. `/payments card` asks for the card through masked input and
-sends it to the selected daemon in one `payments.cards.create` request;
-`/payments status` lists the cards the daemon holds (label, kind, brand, last four
-digits, expiry; never the number, CVV or name).
-
-## Native work controls (local Jev implementation)
-
-`/work` discovers the authenticated daemon's native project without legacy
-planning lookup; `/work <daemon-project-id>` selects it explicitly.
-In the Native Work modal, select a work item's control row: `s` starts, `i`
-inspects status, `c` cancels, and `r` explicitly resumes. The row names the
-attempt targeted by status/cancel; execution progress paints without a new key.
-
-Start/resume require an existing active attempt and the daemon's current paired
-operator authority. Execution controls do not create work or edit original criteria. Explicit source
-submission and conversational intake are described below. Opening a view never starts or resumes
-execution. Status/cancel retain the last observed attempt across a handoff within
-that view; older attempts cannot be rediscovered after reopening this surface.
-
-Reported work state, verified evidence, execution progress, admitted/current
-revisions and recovery state remain distinct. A lost response leaves the server
-outcome unknown. Closing or replacing host, token or workspace only aborts local
-requests and discards their results; use Cancel to request host cancellation.
-Pending and refused admissions, and cancellation before admission, have no
-execution receipt or progress. They display requested revisions, separately from
-admitted executions. Refused/interrupted admission recovery requires explicit
-resume; a cancelled intent requires a new native attempt.
-No control asks for owner approval or automatically retries/resumes execution.
-
-## Conversation input
-
-Composer messages and `goodvibes --prompt '<text>'` go directly to the selected
-conversation model. Jev does not approve, reject or reroute these messages.
-Messages submitted during a response are queued. Composer file references,
-paste content and supported images are passed through to the conversation.
-
-## Terminal workstream intake
-
-`/workstream start <request>` explicitly submits to native work intake.
-Jev determines the native outcome; the command name does not force
-work admission. Admitted work enters the existing native execution flow, while an
-ordinary turn requires its durable dispatch claim and native turn permit. There is
-no legacy runner fallback when native intake, the paired host or the journal is
-unavailable.
-
-The terminal captures the command before trimming, splitting or source expansion.
-The command tokens and one whitespace separator after `start` are syntax (CRLF
-counts as one separator). Everything after that separator is the exact request,
-including extra leading spaces, trailing whitespace, line breaks and Unicode.
-File/context references and folded paste/image markers remain declared unsupported
-sources; they are not expanded into replacement owner authority. Generic, model
-and nested command invocations cannot submit a new owner request.
-
-Use `/work intake-status`, `/work intake-retry`, `/work intake-resume` and
-`/work intake-cancel` to inspect or recover the retained native input. Uncertain
-writes retain the original request IDs and source; repeated submission while
-pending cannot replace them. Host/principal changes and late cancelled results
-cannot dispatch stale local turns.
-
-`/workstream list`, `status`, `cancel` and `reply` continue to address historical
-legacy contract IDs. They do not inspect or cancel newly admitted native work;
-use `/work` for native execution status and cancellation.
-
-## Explicit native source submission
-
-Both products use the same command contract:
-
-- `/work submit-file <path>` reads a regular UTF-8 JSON file containing exactly
-  `goal` (a string) and `criteria` (an ordered array of strings).
-- `/work submission-status` looks up the retained request without writing work.
-- `/work submission-retry` first looks up that same request. Only a `not-found`
-  result can lead to replay of the exact retained request.
-- `/work submission-discard` first looks up that same request. When the host
-  has it, its receipt is shown and nothing is dropped; otherwise the retained
-  request is removed and nothing is sent, so a corrected source can be
-  submitted.
-
-Example source file:
-
-```json
-{"goal":"  Deliver the original goal\nwithout rewriting it  ","criteria":["First criterion","Second criterion","First criterion"]}
-```
-
-Decoded goal/criterion strings are preserved verbatim, including whitespace,
-line breaks, order and duplicates. No model generates or changes criteria.
-Blank/whitespace-only values and missing criteria are rejected locally. Each
-string is limited to 20,000 UTF-16 code units; 1–100 criteria are required. Both
-the source file and complete encoded submission must fit 262,144 UTF-8 bytes.
-For paths containing spaces, use a file URL such as
-`file:///tmp/my%20source.json`, which survives both slash-command parsers.
-
-Initial submission generates request/input IDs and captures the live whole-ledger
-revision once. Before sending, the app durably publishes the exact source, IDs and
-revision in its private `native-work-submission.json` journal under its product
-state directory. The journal binds each request to the exact daemon endpoint,
-canonical workspace, project and live server-verified paired principal. It stores
-no bearer token. The journal has no record cap; the file is bounded at 2 MiB. A
-binding is removed once its submission has a validated receipt, or when
-`submission-discard` drops it after the host reported it does not have it; one
-whose outcome is not yet known is never evicted. Corrupt, oversized,
-symlink-backed or unconfirmable state fails closed without a submission.
-
-After a restart, use `submission-status` or `submission-retry` to recover the
-original request. Both first look it up using that same identity. Retry does not
-reread the source file, generate new IDs or refresh the revision. Only an explicit
-retry after `not-found` can send the identical durably confirmed request. A
-`not-found` lookup is not proof that a lost in-flight request cannot still arrive.
-A persistence failure sends nothing and retains any uncertain journal publication
-for inspection/recovery; it never deletes or silently replaces that identity.
-Changing credentials to another principal cannot replay the old principal's
-journal. Host, token, project and canonical-workspace changes or cleanup discard
-in-flight results; overlapping submission commands remain single-flight.
-
-A definite stale-ledger conflict permits an explicitly new `submit-file` command
-to capture a new identity/revision. An unresolved retained request must be looked
-up before submitting a new source. Submission/replay never starts execution.
-
-Submission requires an existing paired operator with native ledger read/write
-scopes. It never grants scopes, stores credentials or starts execution. The
-receipt identifies the created work/current attempt and preserves the original
-source; inspect `/work` and use its separate explicit Start control.
-
-## Upstream product reference
+# GoodVibes terminal app (`goodvibes`)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-GoodVibes is a terminal console for coding and operations work with an AI model. You run `goodvibes` in a project directory and get a full-screen terminal app where you talk to a model that can read and edit your files, run shell commands, search the web, and hand work off to background agents, asking your permission before anything that writes or executes.
+`goodvibes` is the GoodVibes terminal app for working in a project. You run `goodvibes` in a project directory and get a full-screen terminal app where you talk to a model that can read and edit your files, run shell commands and tests, search the web, and hand work off to helper agents. Reads and edits inside the project just happen; how often it stops to ask you about the rest is a setting (see [How much it asks you](../../README.md#how-much-it-asks-you)).
 
 It talks to many model providers (OpenAI, Anthropic, Gemini, Bedrock, Copilot, OpenRouter and other OpenAI-compatible gateways, plus local servers like Ollama and LM Studio that `/scan` finds on your machine and LAN), keeps its settings, sessions, and secrets on your own machine, and shows you the token count and running cost of every turn. Background work opens in large modals over the conversation: running agents, changed files and diffs, tokens and cost.
 
 <img src="docs/assets/splash.png" alt="GoodVibes starting up in a terminal: a glitch-art GOODVIBES wordmark in cyan-to-magenta gradient, the version and tagline beneath it, the active model and tool count, the working directory, a line offering to resume the last session, and a hint line reading Ctrl+P panels / ? help / F2 fleet. A status footer shows mode, token usage, context usage, and the daemon and web listener addresses." width="900">
+
+## Install and start
+
+Install with the [suite installer](../../docs/installation.md), which installs this app together with the personal assistant (`goodvibes-agent`), the daemon and the web UI:
+
+```sh
+curl -fsSL https://goodvibes.sh/install.sh | sh
+```
+
+Then run `goodvibes` in a project directory. On the first run it helps you choose a model provider and sign in, by API key or with a ChatGPT subscription; `/onboarding` reopens that setup at any time. The [getting started guide](docs/getting-started.md) covers providers and keys in full. How often you are asked, and the optional decision model, are explained in the [decision-model policies](../../docs/decision-model-policy.md).
 
 ---
 
@@ -180,7 +49,7 @@ The other modes:
 
 `/decisions` lists what Jev decided for you, with undo, never, always and ask. An explicit `permissions.tools.<name>` set to `deny` blocks that tool. Older saved values still load: `safe-owner`, `prompt`, `normal`, `accept-edits` and `custom` as `ask-me`, `safe-jev` and `auto` as `jev-decides`, `allow-all` as `yolo`. How the mode combines with the decision model setting is in [decision-model policies](../../docs/decision-model-policy.md#how-much-you-are-asked).
 
-`Shift+Tab` cycles the mode for the current session only, and asks before switching to `yolo`; the saved default is set with `/permissions` or in Settings, and `--just-vibes` or `--yolo` picks one for a single launch. `/plan` toggles plan mode directly.
+`Shift+Tab` cycles the mode for the current session only, and asks before switching to `yolo`; the saved default is set in `/settings` (Permission Mode), and `--just-vibes` or `--yolo` picks one for a single launch. `/plan` toggles plan mode directly.
 
 ### Models and providers
 
@@ -311,6 +180,147 @@ Paid and subscription models never move to a model you did not choose. A failed 
 
 ---
 
+## Reference
+
+The sections below describe specific commands in detail.
+
+### Purchase approval and veto windows
+
+Type `/payments pending` in the owner terminal to read purchase notices from
+the selected paired daemon. Select a purchase, read its notice and deadline,
+then choose approve/deny or proceed-now/cancel. The menu retains that host and
+window reference; changing the connection requires reopening it. Escape closes
+the local view. An answer already sent may still complete on the host.
+
+This requires a paired administrative credential with `read:payments` and
+`write:payments`. `/payments card` asks for the card through masked input and
+sends it to the selected daemon in one `payments.cards.create` request;
+`/payments status` lists the cards the daemon holds (label, kind, brand, last four
+digits, expiry; never the number, CVV or name).
+
+### Native work controls (local Jev implementation)
+
+`/work` discovers the authenticated daemon's native project without legacy
+planning lookup; `/work <daemon-project-id>` selects it explicitly.
+In the Native Work modal, select a work item's control row: `s` starts, `i`
+inspects status, `c` cancels, and `r` explicitly resumes. The row names the
+attempt targeted by status/cancel; execution progress paints without a new key.
+
+Start/resume require an existing active attempt and the daemon's current paired
+operator authority. Execution controls do not create work or edit original criteria. Explicit source
+submission and conversational intake are described below. Opening a view never starts or resumes
+execution. Status/cancel retain the last observed attempt across a handoff within
+that view; older attempts cannot be rediscovered after reopening this surface.
+
+Reported work state, verified evidence, execution progress, admitted/current
+revisions and recovery state remain distinct. A lost response leaves the server
+outcome unknown. Closing or replacing host, token or workspace only aborts local
+requests and discards their results; use Cancel to request host cancellation.
+Pending and refused admissions, and cancellation before admission, have no
+execution receipt or progress. They display requested revisions, separately from
+admitted executions. Refused/interrupted admission recovery requires explicit
+resume; a cancelled intent requires a new native attempt.
+No control asks for owner approval or automatically retries/resumes execution.
+
+### Conversation input
+
+Composer messages and `goodvibes --prompt '<text>'` go directly to the selected
+conversation model. Jev does not approve, reject or reroute these messages.
+Messages submitted during a response are queued. Composer file references,
+paste content and supported images are passed through to the conversation.
+
+### Terminal workstream intake
+
+`/workstream start <request>` explicitly submits to native work intake.
+Jev determines the native outcome; the command name does not force
+work admission. Admitted work enters the existing native execution flow, while an
+ordinary turn requires its durable dispatch claim and native turn permit. There is
+no legacy runner fallback when native intake, the paired host or the journal is
+unavailable.
+
+The terminal captures the command before trimming, splitting or source expansion.
+The command tokens and one whitespace separator after `start` are syntax (CRLF
+counts as one separator). Everything after that separator is the exact request,
+including extra leading spaces, trailing whitespace, line breaks and Unicode.
+File/context references and folded paste/image markers remain declared unsupported
+sources; they are not expanded into replacement owner authority. Generic, model
+and nested command invocations cannot submit a new owner request.
+
+Use `/work intake-status`, `/work intake-retry`, `/work intake-resume` and
+`/work intake-cancel` to inspect or recover the retained native input. Uncertain
+writes retain the original request IDs and source; repeated submission while
+pending cannot replace them. Host/principal changes and late cancelled results
+cannot dispatch stale local turns.
+
+`/workstream list`, `status`, `cancel` and `reply` continue to address historical
+legacy contract IDs. They do not inspect or cancel newly admitted native work;
+use `/work` for native execution status and cancellation.
+
+### Explicit native source submission
+
+Both products use the same command contract:
+
+- `/work submit-file <path>` reads a regular UTF-8 JSON file containing exactly
+  `goal` (a string) and `criteria` (an ordered array of strings).
+- `/work submission-status` looks up the retained request without writing work.
+- `/work submission-retry` first looks up that same request. Only a `not-found`
+  result can lead to replay of the exact retained request.
+- `/work submission-discard` first looks up that same request. When the host
+  has it, its receipt is shown and nothing is dropped; otherwise the retained
+  request is removed and nothing is sent, so a corrected source can be
+  submitted.
+
+Example source file:
+
+```json
+{"goal":"  Deliver the original goal\nwithout rewriting it  ","criteria":["First criterion","Second criterion","First criterion"]}
+```
+
+Decoded goal/criterion strings are preserved verbatim, including whitespace,
+line breaks, order and duplicates. No model generates or changes criteria.
+Blank/whitespace-only values and missing criteria are rejected locally. Each
+string is limited to 20,000 UTF-16 code units; 1–100 criteria are required. Both
+the source file and complete encoded submission must fit 262,144 UTF-8 bytes.
+For paths containing spaces, use a file URL such as
+`file:///tmp/my%20source.json`, which survives both slash-command parsers.
+
+Initial submission generates request/input IDs and captures the live whole-ledger
+revision once. Before sending, the app durably publishes the exact source, IDs and
+revision in its private `native-work-submission.json` journal under its product
+state directory. The journal binds each request to the exact daemon endpoint,
+canonical workspace, project and live server-verified paired principal. It stores
+no bearer token. The journal has no record cap; the file is bounded at 2 MiB. A
+binding is removed once its submission has a validated receipt, or when
+`submission-discard` drops it after the host reported it does not have it; one
+whose outcome is not yet known is never evicted. Corrupt, oversized,
+symlink-backed or unconfirmable state fails closed without a submission.
+
+After a restart, use `submission-status` or `submission-retry` to recover the
+original request. Both first look it up using that same identity. Retry does not
+reread the source file, generate new IDs or refresh the revision. Only an explicit
+retry after `not-found` can send the identical durably confirmed request. A
+`not-found` lookup is not proof that a lost in-flight request cannot still arrive.
+A persistence failure sends nothing and retains any uncertain journal publication
+for inspection/recovery; it never deletes or silently replaces that identity.
+Changing credentials to another principal cannot replay the old principal's
+journal. Host, token, project and canonical-workspace changes or cleanup discard
+in-flight results; overlapping submission commands remain single-flight.
+
+A definite stale-ledger conflict permits an explicitly new `submit-file` command
+to capture a new identity/revision. An unresolved retained request must be looked
+up before submitting a new source. Submission/replay never starts execution.
+
+Submission requires an existing paired operator with native ledger read/write
+scopes. It never grants scopes, stores credentials or starts execution. The
+receipt identifies the created work/current attempt and preserves the original
+source; inspect `/work` and use its separate explicit Start control.
+
+### TUI host credentials
+
+Native `/work`, headless intake and legacy-import reads use a TUI-owned device credential bound to the exact configured daemon origin when there is one. For the daemon on this machine (a loopback origin whose operator token file is yours) no pairing is needed: the TUI presents the operator token it already holds, and the daemon treats it as the owner's own machine. For a daemon on another machine, review `goodvibes host pair --bootstrap-shared` in an owner terminal; add `--apply` only after reviewing the persistent administrative scope. Use `--url <origin>` for a one-command endpoint override. `/host pair` is passive guidance, and companion `/pair` is unchanged. See [host pairing and recovery](docs/host-pairing.md).
+
+---
+
 ## Development
 
 ```sh
@@ -370,12 +380,8 @@ src/
 
 ## Stability
 
-GoodVibes ships as one suite version. Changes, including renamed settings and removed commands, are recorded in the [suite changelog](../../packages/engine/CHANGELOG.md) and the [release notes](../../docs/releases/); the current release is [3.3.0](../../docs/releases/3.3.0.md).
+GoodVibes ships as one suite version. Changes, including renamed settings and removed commands, are recorded in the [suite changelog](../../packages/engine/CHANGELOG.md) and the [release notes](../../docs/releases/); the current release is [3.3.1](../../docs/releases/3.3.1.md).
 
 ## License
 
 MIT
-
-### TUI host credentials
-
-Native `/work`, headless intake and legacy-import reads use a TUI-owned device credential bound to the exact configured daemon origin when there is one. For the daemon on this machine (a loopback origin whose operator token file is yours) no pairing is needed: the TUI presents the operator token it already holds, and the daemon treats it as the owner's own machine. For a daemon on another machine, review `goodvibes host pair --bootstrap-shared` in an owner terminal; add `--apply` only after reviewing the persistent administrative scope. Use `--url <origin>` for a one-command endpoint override. `/host pair` is passive guidance, and companion `/pair` is unchanged. See [host pairing and recovery](docs/host-pairing.md).

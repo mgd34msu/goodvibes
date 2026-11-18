@@ -189,7 +189,7 @@
     {
       "name": "FOUNDATION_METADATA",
       "kind": "const",
-      "text": "FOUNDATION_METADATA: { readonly productId: \"goodvibes\"; readonly productVersion: \"3.3.0\"; readonly operatorMethodCount: 636; readonly operatorEventCount: 36; readonly peerEndpointCount: 6; }"
+      "text": "FOUNDATION_METADATA: { readonly productId: \"goodvibes\"; readonly productVersion: \"3.3.1\"; readonly operatorMethodCount: 636; readonly operatorEventCount: 36; readonly peerEndpointCount: 6; }"
     },
     {
       "name": "GatewayEventTransport",
@@ -845,7 +845,7 @@
     {
       "name": "FOUNDATION_METADATA",
       "kind": "const",
-      "text": "FOUNDATION_METADATA: { readonly productId: \"goodvibes\"; readonly productVersion: \"3.3.0\"; readonly operatorMethodCount: 636; readonly operatorEventCount: 36; readonly peerEndpointCount: 6; }"
+      "text": "FOUNDATION_METADATA: { readonly productId: \"goodvibes\"; readonly productVersion: \"3.3.1\"; readonly operatorMethodCount: 636; readonly operatorEventCount: 36; readonly peerEndpointCount: 6; }"
     }
   ],
   "./generated/mock-daemon-fixtures": [

@@ -11,9 +11,10 @@ name: Voice runtimes
 # - By hand, to build a new version. After a successful run, stamp the printed
 #   WHISPER_ENGINES entry (url + bytes + sha256) into
 #   packages/engine/platform/src/platform/voice/provisioning/manifest.ts in the same PR.
-# - On a push to main that changes that manifest: the linux-x64 bundle it pins
-#   is downloaded from every origin the product tries (runtime-origins.ts) and
-#   checked against the pinned size and digest. Nothing is built or published.
+# - On a push to main that changes that manifest, its origins or this file: the
+#   linux-x64 bundle it pins is downloaded from every origin the product tries
+#   (runtime-origins.ts) and checked against the pinned size and digest.
+#   Nothing is built or published.
 #   A rebuild is not compared with the pin: the bundle's bytes depend on the
 #   compiler that built it, so a rebuild on a newer runner image has another
 #   digest and can never match. The run fails when no origin serves the pinned
@@ -47,6 +48,7 @@ on:
     paths:
       - packages/engine/platform/src/platform/voice/provisioning/manifest.ts
       - packages/engine/platform/src/platform/voice/provisioning/runtime-origins.ts
+      - .github/workflows/voice-runtimes.yml
 
 concurrency:
   # Never let two publish runs race the same append-only tag.

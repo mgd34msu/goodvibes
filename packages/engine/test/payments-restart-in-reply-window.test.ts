@@ -50,8 +50,8 @@ usePaymentsReadings();
 const ORIGIN = 'https://www.bestbuy.com';
 const PURCHASE = 'p-restart';
 const usd = parseCurrencyCode('USD') as CurrencyCode;
-const CARD: CardMaterial = { number: '4539578763621486', expiryMonth: '07', expiryYear: '2029', cvv: '318', cardholderName: 'Pat Fixture' };
-const METADATA: CardMetadata = { id: 'card-1', label: 'Test card', brand: 'visa', last4: '1486', kind: 'virtual',
+const CARD: CardMaterial = { number: '4012888888881881', expiryMonth: '07', expiryYear: '2029', cvv: '318', cardholderName: 'Pat Fixture' };
+const METADATA: CardMetadata = { id: 'card-1', label: 'Test card', brand: 'visa', last4: '1881', kind: 'virtual',
   expiryMonth: 7, expiryYear: 2029, issuerCapMinorUnits: null, addedAt: '2026-07-01T00:00:00.000Z' };
 const ADDRESS: PostalAddress = { name: 'Pat Fixture', line1: '500 Test Street', line2: '', city: 'Detroit', region: 'MI', postalCode: '48226', country: 'US' };
 const CONTROLS: CheckoutControls = {

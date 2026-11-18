@@ -220,7 +220,7 @@ test('Enter in the order form, text typed with submit and a key on the order con
 });
 
 test('once the daemon has typed the card into the page, a screenshot through the browser tool is refused', async () => {
-  const pan = '4539578763621486';
+  const pan = '4012888888881881';
   expect((await call({ action: 'navigate', url: shop.url })).success).toBe(true);
   const snapshot = await call({ action: 'snapshot' });
   const page = JSON.parse(snapshot.output!) as { sessionId: string; pageId: string; elements: { ref: string; name: string }[] };

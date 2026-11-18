@@ -67,7 +67,7 @@ const recordingPort: JudgmentPort = {
 installJudgmentPort(recordingPort);
 
 /** Obviously fake. No real card material appears in this repository. */
-const CARD = { number: '4539578763621486', expiryMonth: '07', expiryYear: '2029', cvv: '731', cardholderName: 'Avery Chen' };
+const CARD = { number: '4012888888881881', expiryMonth: '07', expiryYear: '2029', cvv: '731', cardholderName: 'Avery Chen' };
 const SHIPPING: PostalAddress = { name: 'Avery Chen', line1: '1194 Rue Saint-Denis', line2: '', city: 'Montréal', region: 'QC', postalCode: 'H2X 3J4', country: 'CA' };
 const OWNER = 'owner-telegram-1';
 const OWNER_DECISION = { allowed: true, reason: 'ok', policy: { ownerId: OWNER, allowlistUserIds: [OWNER] } } as unknown as ChannelPolicyDecision;
@@ -390,7 +390,7 @@ if (purchased === undefined) {
     senderAddress: 'orders@order-update.bestbuy.com',
     receivedAtMs: received,
     subject: 'Your order is on the way',
-    body: `Good news! Your Mechanical keyboard, tenkeyless has shipped. Order #BBY01-806512334. Carrier: UPS. Your parcel: 1Z999AA10123456784. Expected delivery ${dueWords}. Paid with Visa 4539 5787 6362 1486. Store #1123.`,
+    body: `Good news! Your Mechanical keyboard, tenkeyless has shipped. Order #BBY01-806512334. Carrier: UPS. Your parcel: 1Z999AA10123456784. Expected delivery ${dueWords}. Paid with Visa 4012 8888 8888 1881. Store #1123.`,
   };
   const promo = { ...shipping, receivedAtMs: placed + 20 * 60 * 1000, subject: 'Weekend deals: up to 40% off TVs', body: 'Shop the biggest TV sale of the season. Offers end Sunday. Unsubscribe anytime.' };
   asked.length = 0;

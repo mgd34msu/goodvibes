@@ -93,7 +93,7 @@ const SHIPPING_ADDRESS: PostalAddress = {
 // ── The sentinel card ───────────────────────────────────────────────────────
 
 const SENTINEL: CardMaterial = {
-  number: '4539578763621486',
+  number: '4012888888881881',
   expiryMonth: '07',
   expiryYear: '2029',
   cvv: '318',
@@ -103,8 +103,8 @@ const SENTINEL: CardMaterial = {
 /** Every spelling of the sentinel a page or a log could plausibly produce. */
 const SENTINEL_SPELLINGS: readonly string[] = [
   SENTINEL.number,
-  '4539 5787 6362 1486',
-  '4539-5787-6362-1486',
+  '4012 8888 8888 1881',
+  '4012-8888-8888-1881',
   SENTINEL.cvv,
   SENTINEL.cardholderName,
   `${SENTINEL.expiryMonth}/${SENTINEL.expiryYear}`,
@@ -114,7 +114,7 @@ const CARD_METADATA: CardMetadata = {
   id: 'card-1',
   label: 'Test card',
   brand: 'visa',
-  last4: '1486',
+  last4: '1881',
   kind: 'virtual',
   expiryMonth: 7,
   expiryYear: 2029,

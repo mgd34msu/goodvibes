@@ -127,7 +127,7 @@ async function paymentHost(config: ConfigManager, options: { failSubmit?: boolea
   });
   closers.push(() => registration.close());
   await registration.ready;
-  const card = await cards.create({ label: 'Test card', kind: 'virtual', number: '4539578763621486', expiryMonth: 7, expiryYear: 2029,
+  const card = await cards.create({ label: 'Test card', kind: 'virtual', number: '4012888888881881', expiryMonth: 7, expiryYear: 2029,
     cvv: '318', cardholderName: 'Pat Fixture', issuerCapMinorUnits: null });
   const invoke = (id: string, body: Record<string, unknown>, explicit = true) => catalog.invoke(id, asOwner(body, explicit));
   /** The refusal code a call ends in, or 'accepted'. */

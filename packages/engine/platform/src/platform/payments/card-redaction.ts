@@ -118,7 +118,7 @@ interface LiveSecret {
  * The separator characters a page's input mask might place between digit
  * groups: the plain hyphen and every Unicode dash in the same block (en
  * dash, em dash, minus sign and the rest), the underscore, and the dot used
- * by masks like `4539.5787.6362.1486`. Whitespace is handled by `\s` plus a
+ * by masks like `4012.8888.8888.1881`. Whitespace is handled by `\s` plus a
  * literal non-breaking space, which together cover the regular space, the
  * tab, the newline and every Unicode space separator a mask is likely to
  * use.

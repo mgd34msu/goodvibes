@@ -34,11 +34,10 @@
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { tmpdir, userInfo } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { defaultBrowsersPath } from '../../platform/src/platform/browser/browser-provision-io.ts';
 import { ConfigManager } from '../../platform/src/platform/config/manager.ts';
 import type { ConfigKey } from '../../platform/src/platform/config/schema.ts';
 import { composeDaemonBrowser, type BrowserCheckoutSeam, type DaemonBrowserGatewayService } from '../../platform/src/platform/control-plane/routes/browser-composition.ts';
@@ -52,8 +51,9 @@ import type { ToolResult } from '../../platform/src/platform/types/tools.ts';
 import { registerAgentBrowserTool } from '../../terminal-shell/src/agent-turn/browser-tool.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'gv-unbudgeted-path-'));
-// Where the product's own browser build was installed before the run: the account's browser cache, unless named.
-const installedBrowsers = process.env.GOODVIBES_TEST_BROWSERS_PATH?.trim() || defaultBrowsersPath(userInfo().homedir);
+// Where the driver's install put the product's own browser build: the account's browser cache, which the
+// test runner reads from the driver before it gives this file an isolated home.
+const installedBrowsers = process.env.GOODVIBES_LIVE_BROWSER_CACHE ?? '';
 // The product's browser cache for this home; set before anything loads the driver.
 process.env.PLAYWRIGHT_BROWSERS_PATH = join(root, 'browsers');
 // The browser's own output, written as it happens, so a start that never ends still leaves it in the log.
@@ -128,9 +128,10 @@ async function startShopper(): Promise<void> {
   const expected = (createRequire(import.meta.url)('playwright-core') as { chromium: { executablePath(): string } }).chromium.executablePath();
   const inCache = relative(join(root, 'browsers'), expected);
   const build = inCache.split(sep)[0]!;
+  if (!installedBrowsers) throw new Error('This proof runs through `bun run test:live`, which tells it where the browser build is installed.');
   if (!existsSync(join(installedBrowsers, inCache))) {
     throw new Error(`This proof drives the browser build the product installs for itself (${build}), and it is not in ${installedBrowsers}. `
-      + 'Install it with `bun packages/engine/node_modules/playwright-core/cli.js install chromium --no-shell`, or name the cache that holds it in GOODVIBES_TEST_BROWSERS_PATH.');
+      + 'Install it with `bun packages/engine/node_modules/playwright-core/cli.js install chromium --no-shell`.');
   }
   mkdirSync(join(root, 'browsers'), { recursive: true });
   symlinkSync(join(installedBrowsers, build), join(root, 'browsers', build));

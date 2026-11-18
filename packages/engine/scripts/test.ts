@@ -28,6 +28,7 @@
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { availableParallelism, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join, relative, resolve, sep } from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 import { isolatedTestEnvironment } from '../toolchain/src/test-runner/test-isolation.ts';
@@ -50,6 +51,23 @@ export const DEFAULT_SUITE_LIMIT_SECONDS = 600;
 
 /** Set for files under test/live/: a host without the sandbox fails them instead of letting them pass. */
 const EXEC_CONTAINMENT_REQUIRED_ENV = 'GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT';
+/**
+ * Set for files under test/live/: the browser cache the driver's own install
+ * (`playwright-core/cli.js install chromium`) fills on this machine. Each file
+ * gets an isolated HOME, so it cannot work the location out itself; the runner
+ * reads it from the driver, with the account's own environment, before isolating.
+ */
+const LIVE_BROWSER_CACHE_ENV = 'GOODVIBES_LIVE_BROWSER_CACHE';
+
+/** Where the driver installs and finds its browsers for this account: the parent of its chromium-<revision> directory. */
+function driverBrowserCache(): string {
+  const driver = createRequire(join(ENGINE_ROOT, 'package.json'))('playwright-core') as { readonly chromium: { executablePath(): string } };
+  const executable = driver.chromium.executablePath();
+  const parts = executable.split(sep);
+  const build = parts.findIndex((part) => part.startsWith('chromium-'));
+  if (build <= 0) throw new Error(`The browser driver names no chromium-<revision> directory in ${executable}.`);
+  return parts.slice(0, build).join(sep) || sep;
+}
 
 export type TestKind = 'default' | 'live' | 'e2e';
 
@@ -292,7 +310,7 @@ async function runFile(file: TestFile, index: number, root: string, options: Run
     cwd: file.cwd,
     detached: process.platform !== 'win32',
     stdio: ['ignore', outputFd, outputFd],
-    env: childEnvironment(options.env ?? process.env, own, root, file.cwd, file.kind === 'live' ? { [EXEC_CONTAINMENT_REQUIRED_ENV]: '1' } : {}),
+    env: childEnvironment(options.env ?? process.env, own, root, file.cwd, file.kind === 'live' ? { [EXEC_CONTAINMENT_REQUIRED_ENV]: '1', [LIVE_BROWSER_CACHE_ENV]: driverBrowserCache() } : {}),
   });
   closeSync(outputFd);
   children.add(child);

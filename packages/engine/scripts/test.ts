@@ -188,10 +188,12 @@ function readJunit(path: string): JunitResult | undefined {
 
 /**
  * Processes that outlived the file that started them in another process group
- * (a detached daemon). Each carries the file's temp root in its environment.
- * Linux only; elsewhere the group kill is the whole clean-up.
+ * (a detached daemon, a browser). Each carries the file's temp root in its
+ * environment, and is named by its program and, for a browser's helpers, its
+ * role, so a killed file's log says what it left running. Linux only;
+ * elsewhere the group kill is the whole clean-up.
  */
-function strayProcesses(ownRoot: string, group: number): number[] {
+function strayProcesses(ownRoot: string, group: number): { readonly pid: number; readonly what: string }[] {
   if (process.platform !== 'linux') return [];
   const marker = `${TEST_TMP_ROOT_ENV}=${ownRoot}\0`;
   let entries: string[];
@@ -201,7 +203,11 @@ function strayProcesses(ownRoot: string, group: number): number[] {
       // Field 5 of stat is the process group; members of the killed group are already going.
       const stat = readFileSync(`/proc/${name}/stat`, 'utf8');
       if (Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[2]) === group) return [];
-      return readFileSync(`/proc/${name}/environ`, 'latin1').includes(marker) ? [Number(name)] : [];
+      if (!readFileSync(`/proc/${name}/environ`, 'latin1').includes(marker)) return [];
+      const argv = readFileSync(`/proc/${name}/cmdline`, 'latin1').split('\0').filter(Boolean);
+      const role = argv.find((arg) => arg.startsWith('--type='));
+      const what = [argv[0] ?? stat.slice(stat.indexOf('(') + 1, stat.lastIndexOf(')')), ...(role ? [role] : [])].join(' ');
+      return [{ pid: Number(name), what: what.length > 160 ? `${what.slice(0, 160)}...` : what }];
     } catch { return []; }
   });
 }
@@ -305,7 +311,7 @@ async function runFile(file: TestFile, index: number, root: string, options: Run
   }
   const seconds = (performance.now() - started) / 1000;
   const strays = strayProcesses(own, child.pid);
-  for (const pid of strays) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
+  for (const { pid } of strays) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
   const output = readFileSync(outputPath, 'utf8');
   const result = readJunit(junit);
   const ran = result === undefined ? 0 : result.tests - result.skipped;
@@ -318,7 +324,7 @@ async function runFile(file: TestFile, index: number, root: string, options: Run
   if (options.namePattern === undefined && result !== undefined && result.skipped > 0) failures.push(`${result.skipped} test(s) skipped or marked todo`);
   if (result !== undefined) failures.push(...result.slow);
   if (blocked) failures.push(`tried the network:\n${blocked.trimEnd()}`);
-  if (strays.length > 0) failures.push(`left ${strays.length} process(es) running after it ended (pid ${strays.join(', ')}), killed`);
+  if (strays.length > 0) failures.push(`left ${strays.length} process(es) running after it ended (${strays.map(({ pid, what }) => `pid ${pid} ${what}`).join(', ')}), killed`);
   return failures.length > 0 ? { file, seconds, failure: failures.join('; '), output, ran } : { file, seconds, output, ran };
 }
 

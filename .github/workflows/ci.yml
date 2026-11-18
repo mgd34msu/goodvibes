@@ -96,9 +96,11 @@ jobs:
   # 22.04 allows unprivileged user namespaces without relaxing host security
   # (24.04's AppArmor default refuses them); never disable AppArmor, change
   # sysctls or run as root to make a failing host look supported.
-  # test/live/payments-unbudgeted-path drives a real Chromium: it uses the
-  # runner image's own Google Chrome (/usr/bin/google-chrome, one of the
-  # product's system browser paths) and fails, naming that, if none is found.
+  # test/live/payments-unbudgeted-path drives a real browser through the
+  # product: the build the product downloads for itself on a user's first
+  # browser call (its driver's Chrome for Testing revision), installed here the
+  # way the product installs it, because the suite has no network. Never the
+  # image's own Chrome or Chromium, which are newer builds than the driver's.
   live-sandbox:
     name: Live sandbox
     runs-on: ubuntu-22.04
@@ -112,6 +114,8 @@ jobs:
           packages: bubblewrap
       - name: Setup Bun + deps (cached)
         uses: ./.github/actions/setup
+      - name: Install the product's own browser build
+        run: timeout --signal=KILL 180s bun packages/engine/node_modules/playwright-core/cli.js install chromium --no-shell
       - name: Run the live sandbox tests
         run: bun run validate --job live-sandbox
 

@@ -19,18 +19,26 @@
  * from what arrived. Jev answers through a fixture port that reads no page as
  * a sign-in page.
  *
- * The one arrangement outside the product: the machine's installed Chromium is
- * linked where the product's browser cache expects its own build, so the
- * product finds a browser without downloading one (the suite has no network).
+ * The one arrangement outside the product: the suite has no network, so the
+ * browser build the product downloads for itself (the driver's own Chrome for
+ * Testing revision, `cli.js install chromium --no-shell`) is installed before
+ * the run and linked into this file's browser cache, where the product finds it
+ * as a user's machine has it after the first browser call. Never the machine's
+ * own Chrome or Chromium: the driver is built for its revision, and a browser
+ * of another version is not what a user runs.
+ *
+ * When the start fails, or the file is killed at its limit, its output holds
+ * each step of the start and the browser's own lines (the driver's
+ * `pw:browser` log), so the run's log says what was waited for.
  */
 import { afterAll, beforeEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { tmpdir, userInfo } from 'node:os';
+import { join, relative, sep } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { createBrowserProvisionIo } from '../../platform/src/platform/browser/browser-provision-io.ts';
+import { defaultBrowsersPath } from '../../platform/src/platform/browser/browser-provision-io.ts';
 import { ConfigManager } from '../../platform/src/platform/config/manager.ts';
 import type { ConfigKey } from '../../platform/src/platform/config/schema.ts';
 import { composeDaemonBrowser, type BrowserCheckoutSeam, type DaemonBrowserGatewayService } from '../../platform/src/platform/control-plane/routes/browser-composition.ts';
@@ -44,8 +52,12 @@ import type { ToolResult } from '../../platform/src/platform/types/tools.ts';
 import { registerAgentBrowserTool } from '../../terminal-shell/src/agent-turn/browser-tool.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'gv-unbudgeted-path-'));
+// Where the product's own browser build was installed before the run: the account's browser cache, unless named.
+const installedBrowsers = process.env.GOODVIBES_TEST_BROWSERS_PATH?.trim() || defaultBrowsersPath(userInfo().homedir);
 // The product's browser cache for this home; set before anything loads the driver.
 process.env.PLAYWRIGHT_BROWSERS_PATH = join(root, 'browsers');
+// The browser's own output, written as it happens, so a start that never ends still leaves it in the log.
+process.env.DEBUG = 'pw:browser';
 
 /** The checkout page: every control that takes the order POSTs to /order; the coupon control POSTs to /coupon. */
 const CHECKOUT = `<!doctype html><title>Checkout</title><h1>Checkout</h1>
@@ -112,12 +124,16 @@ afterAll(async () => {
  */
 async function startShopper(): Promise<void> {
   const homeDirectory = join(root, 'home');
-  // Where the product looks for its own browser build: the installed Chromium stands in for it.
-  const installed = createBrowserProvisionIo({ homeDirectory, surfaceRoot: 'goodvibes' }).systemBrowserCandidates()[0];
-  if (installed === undefined) throw new Error('This proof needs Chrome or Chromium installed on the machine.');
+  // The product's own browser build, linked where the product looks for it: <cache>/chromium-<revision>.
   const expected = (createRequire(import.meta.url)('playwright-core') as { chromium: { executablePath(): string } }).chromium.executablePath();
-  mkdirSync(dirname(expected), { recursive: true });
-  symlinkSync(installed, expected);
+  const inCache = relative(join(root, 'browsers'), expected);
+  const build = inCache.split(sep)[0]!;
+  if (!existsSync(join(installedBrowsers, inCache))) {
+    throw new Error(`This proof drives the browser build the product installs for itself (${build}), and it is not in ${installedBrowsers}. `
+      + 'Install it with `bun packages/engine/node_modules/playwright-core/cli.js install chromium --no-shell`, or name the cache that holds it in GOODVIBES_TEST_BROWSERS_PATH.');
+  }
+  mkdirSync(join(root, 'browsers'), { recursive: true });
+  symlinkSync(join(installedBrowsers, build), join(root, 'browsers', build));
 
   // The owner chose yolo: the gate admits every browser call and asks no one.
   const config = new ConfigManager({ surfaceRoot: 'goodvibes', workingDir: join(root, 'workspace'), homeDir: homeDirectory, configDir: join(root, 'config'), ownsDaemonTier: true });
@@ -138,10 +154,15 @@ async function startShopper(): Promise<void> {
 
   const front = startMerchant();
   merchant = front;
+  const started = performance.now();
+  const step = (what: string): void => { console.error(`browser start, ${((performance.now() - started) / 1000).toFixed(1)} s: ${what}`); };
+  step(`launching ${build} through the browser tool`);
   const launched = await call({ action: 'launch', headless: true });
   if (!launched.success) throw new Error(`The browser did not start: ${launched.error ?? 'no reason given'}`);
+  step('launched; opening the checkout');
   const opened = await call({ action: 'navigate', url: front.url });
   if (!opened.success) throw new Error(`The browser did not open the checkout: ${opened.error ?? 'no reason given'}`);
+  step('the checkout is open');
 }
 
 try { await startShopper(); }

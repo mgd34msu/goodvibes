@@ -70,10 +70,10 @@ cd ~/code/my-project
 goodvibes
 ```
 
-1. **Choose a model.** If your environment already holds a key for the
-   provider of the default model, you start straight away. If it holds a key
-   for another provider (for example `ANTHROPIC_API_KEY`), a welcome menu
-   offers to use that provider. Otherwise choose **Full guided setup**: paste
+1. **Choose a model.** The default model is OpenRouter's free one, so with
+   `OPENROUTER_API_KEY` set you start straight away. With a key for another
+   provider in your environment (for example `ANTHROPIC_API_KEY`), a welcome
+   menu offers to use that provider. Otherwise choose **Full guided setup**: paste
    an API key for any provider, or sign in with a ChatGPT subscription, then
    pick your default model. `/onboarding` reopens the setup at any time,
    `/model` switches models and `/scan` finds model servers on your machine
@@ -106,9 +106,9 @@ goodvibes
 - **Reach it from your phone or a chat app.** `goodvibes pair` prints a QR
   code that signs your phone in to the web app (run
   `goodvibes-daemon webui enable --lan` first so your phone can reach it).
-  `/channel pair telegram`
-  connects a Telegram bot; Slack, Discord, Signal, WhatsApp, Matrix and others
-  work the same way. ([web app](products/webui/docs/operator-guide.md#signing-in-and-pairing),
+  `/channel pair telegram` connects a Telegram bot; Slack, Discord, Signal,
+  WhatsApp, Matrix and others work the same way.
+  ([web app](products/webui/docs/operator-guide.md#signing-in-and-pairing),
   [channels](products/tui/docs/channels-remote-and-api.md#channel-command))
 - **Mail and calendar.** In `goodvibes-agent`, `/google connect` links Gmail and
   Google Calendar. Then ask `what's on my calendar tomorrow?`.

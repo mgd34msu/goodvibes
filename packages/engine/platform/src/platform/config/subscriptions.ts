@@ -35,8 +35,8 @@ export interface SubscriptionShellPaths {
 }
 
 /**
- * Where provider subscriptions (OAuth sessions for providers like
- * 'openai-subscriber') live: `~/.goodvibes/shared/subscriptions.json`, one
+ * Where provider subscriptions (OAuth sign-ins such as OpenAI's ChatGPT
+ * subscription) live: `~/.goodvibes/shared/subscriptions.json`, one
  * file read and written by every surface on the machine, the daemon, the
  * TUI, the agent.
  *
@@ -440,6 +440,23 @@ export class SubscriptionManager {
   }
 
   private readonly secrets: SubscriptionTokenStore | undefined;
+  private readonly changeListeners = new Set<(provider: string) => void>();
+
+  /**
+   * Called after this process signs in to, saves or signs out of a provider,
+   * so what depends on the sign-in (the provider's model list) is read again
+   * at once. A sign-in made by another process is seen at its next read.
+   */
+  public onDidChange(listener: (provider: string) => void): () => void {
+    this.changeListeners.add(listener);
+    return () => { this.changeListeners.delete(listener); };
+  }
+
+  private notifyChanged(provider: string): void {
+    for (const listener of [...this.changeListeners]) {
+      try { listener(provider); } catch { /* a listener's failure is its own */ }
+    }
+  }
 
   public constructor(path: string, options: SubscriptionManagerOptions = {}) {
     this.path = path;
@@ -624,6 +641,12 @@ export class SubscriptionManager {
       .filter((pending): pending is PendingSubscriptionLogin => pending !== null).sort((a, b) => a.provider.localeCompare(b.provider));
   }
 
+  /** Whether a sign-in for `provider` is stored and not ended, without reading its tokens (status reports). */
+  public hasSignIn(provider: string): boolean {
+    const record = this.read().subscriptions[provider];
+    return record !== undefined && record.revokedAt === undefined;
+  }
+
   public get(provider: string): ProviderSubscription | null {
     return this.withTokens(this.read().subscriptions[provider]);
   }
@@ -727,6 +750,7 @@ export class SubscriptionManager {
       store.subscriptions[provider] = stored;
       if (store.pending[provider]?.state === pending.state) delete store.pending[provider];
     });
+    this.notifyChanged(provider);
     return { ...subscription, ...(stored.tokenRevision !== undefined ? { tokenRevision: stored.tokenRevision } : {}) };
   }
 
@@ -913,8 +937,10 @@ export class SubscriptionManager {
     if (this.secrets && this.readTokenSecret(provider) !== null) {
       await this.secrets.delete(subscriptionTokensKey(provider));
       this.tokenSecrets.delete(provider);
+      this.notifyChanged(provider);
       return true;
     }
+    if (existed) this.notifyChanged(provider);
     return existed;
   }
 
@@ -936,6 +962,7 @@ export class SubscriptionManager {
       store.subscriptions[subscription.provider] = stored;
       delete store.pending[subscription.provider];
     });
+    this.notifyChanged(subscription.provider);
     return { ...subscription, ...(stored.tokenRevision !== undefined ? { tokenRevision: stored.tokenRevision } : {}) };
   }
 }

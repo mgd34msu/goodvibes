@@ -2,6 +2,7 @@ import {
   modelWorkspaceKey as modelKey,
   modelWorkspaceTargetSummary,
   modelWorkspaceProviderRows,
+  modelWorkspaceSignIn,
 } from '@goodvibes-jev/engine/terminal-shell/model-workspace-facts';
 /**
  * The provider/model picker, drawn with the modal surface kit.
@@ -247,6 +248,8 @@ function detailLines(picker: ModelPickerModal): string[] {
       }
       const fitLine = modelHardwareFitLine(selected);
       if (fitLine) lines.push(fitLine);
+      const signIn = picker.configuredProviders.has(selected.provider) ? modelWorkspaceSignIn(picker.configuredViaMap.get(selected.provider)) : undefined;
+      if (signIn) lines.push(`Sign-in: ${signIn}`);
       const unreachable = picker.unreachableProviders.get(selected.provider);
       if (unreachable !== undefined) lines.push(`Health: ${selected.provider} is unreachable: ${unreachable}`);
     }

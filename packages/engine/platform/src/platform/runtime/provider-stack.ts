@@ -190,6 +190,11 @@ export function createProviderStack(options: ProviderStackOptions): ProviderStac
   const stopCredentialWatch = options.secretsManager.onDidChange(() => void providerRegistry.refreshProviderCredentials().catch((error) => logger.warn('live credential refresh failed', { error: summarizeError(error) })));
   void providerRegistry.refreshProviderCredentials().catch((error) => logger.warn('boot credential refresh failed', { error: summarizeError(error) }));
   liveCredentialRegistries.add(providerRegistry);
+  // A sign-in, saved sign-in or sign-out in this process: the provider's sign-in order and its model
+  // list (stored per account) are read again now, in the background, not at the next turn.
+  const stopSubscriptionWatch = options.subscriptionManager.onDidChange?.((provider) => {
+    providerRegistry.noteSignInChanged(provider);
+  });
   const toolLLM = new ToolLLM({
     configManager,
     providerRegistry,
@@ -206,6 +211,7 @@ export function createProviderStack(options: ProviderStackOptions): ProviderStac
   // A disposed composition (a test, a one-shot command) must stop reacting to later secret and setting changes.
   options.registerDispose?.(() => {
     stopCredentialWatch();
+    stopSubscriptionWatch?.();
     unbindOptimizerConfig();
     liveCredentialRegistries.delete(providerRegistry);
     // Server-side resources a provider created (Gemini's prompt caches) are released, not left to expire.

@@ -63,14 +63,10 @@ function createDefaultFlags(): GoodVibesCliFlags {
  */
 const LOCAL_PROVIDER_IDS: ReadonlySet<string> = new Set(['ollama', 'lmstudio', 'lm-studio', 'llamacpp', 'llama-cpp', 'litellm', 'vllm', 'copilot-proxy']);
 
-/** Registered providers that are neither in the credential catalog nor local: the subscription login. */
-const SUBSCRIPTION_PROVIDER_IDS: readonly string[] = ['openai-subscriber'];
-
 function isKnownProviderId(prefix: string): boolean {
   return (
     Object.hasOwn(BUILTIN_PROVIDER_ENV_KEYS, prefix) ||
-    LOCAL_PROVIDER_IDS.has(prefix) ||
-    SUBSCRIPTION_PROVIDER_IDS.includes(prefix)
+    LOCAL_PROVIDER_IDS.has(prefix)
   );
 }
 

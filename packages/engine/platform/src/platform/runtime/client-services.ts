@@ -521,7 +521,7 @@ function composeClientRuntimeServices(
   });
   // Its store watches hold it; they end with this composition (registered first, so closed after its consumers).
   disposalScope.registry.add('secret store watches', () => secretsManager.close());
-  // Provider subscriptions (OAuth sessions like the 'openai-subscriber' login)
+  // Provider subscriptions (OAuth sign-ins such as OpenAI's ChatGPT subscription)
   // live in the platform's SHARED tier, not this surface's own root: the
   // daemon hosts every conversational turn, and a login completed on another
   // surface (the TUI, the agent) must be visible to it.

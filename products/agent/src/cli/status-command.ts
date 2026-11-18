@@ -1,4 +1,6 @@
 import { existsSync } from 'node:fs';
+import { readCliProviderSignInFacts } from '@goodvibes-jev/engine/terminal-shell/cli-status-facts';
+import { getProviderIdFromModel } from '@goodvibes-jev/engine/terminal-shell/agent-turn/provider-model';
 import { readConnectedHostReadiness } from '../runtime/connected-host-readiness.ts';
 import { canonicalizePairingHost, readAgentHostPairing } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-pairing-store';
 import { resolveConnectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
@@ -85,6 +87,7 @@ export async function runStatusCommand(runtime: StatusCommandRuntime): Promise<n
     configManager,
     workingDirectory,
     homeDirectory,
+    providerSignIn: readCliProviderSignInFacts(configManager, shellPaths, getProviderIdFromModel(configManager.get('provider.model'))),
     onboardingMarker,
     checkpoints,
     auth: {

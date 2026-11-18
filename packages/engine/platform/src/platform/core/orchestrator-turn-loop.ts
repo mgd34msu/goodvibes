@@ -326,6 +326,8 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
   // One compact-and-retry per turn when the provider rejects a request
   // as exceeding the context window; a second rejection surfaces as an error.
   let contextOverflowRetried = false;
+  // A sign-in move (OpenAI: subscription failed, API key answered) is told once per turn, not once per request.
+  const announcedSignInMoves = new Set<string>();
   let assertVerificationProvider: () => void | Promise<void> = assertActiveTurn;
   const completionGuard = new ResponseCompletionGuard({ request: context.text, conversation: context.conversation,
     onCompletionRequired: () => { context.setCompletionActivity?.('checking'); context.requestRender(); },
@@ -733,6 +735,16 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       });
       assertActiveTurn();
       hostInstructions.delivered();
+      const signIn = response.signInRoute;
+      if (signIn?.movedFrom && !announcedSignInMoves.has(`${signIn.movedFrom.route}>${signIn.route}`)) {
+        announcedSignInMoves.add(`${signIn.movedFrom.route}>${signIn.route}`);
+        const reason = signIn.movedFrom.reason.length > 200 ? `${signIn.movedFrom.reason.slice(0, 199)}…` : signIn.movedFrom.reason;
+        context.conversation.addNotice(
+          `${model.displayName} is answering through your ${model.provider} ${signIn.label}: the ${signIn.movedFrom.label} failed (${reason}). The same model is in use; this sign-in is billed its own way.`,
+          { level: 'warning' },
+        );
+        context.requestRender();
+      }
     } catch (chatErr) {
       assertActiveTurn();
       endStream(true);
@@ -743,7 +755,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       if (chatErr instanceof ProviderAttemptDeniedError) throw chatErr;
       if (!contextOverflowRetried && await isContextSizeExceededError(chatErr, 'core.turn-loop.context-exceeded')) {
         // The provider rejected the request as exceeding the model's context
-        // window (e.g. openai-codex 'context_length_exceeded'). This is the
+        // window (e.g. the OpenAI subscription route's 'context_length_exceeded'). This is the
         // authoritative signal that the effective window is smaller than the
         // catalog claims: learn the rejected size as the model's practical
         // ceiling, then compact immediately and retry the request once,
@@ -874,6 +886,10 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         retries: chatRetries,
         ...(costUsdCents === null ? {} : { costUsdCents }),
         costSource: usageCostSource(resolvedPricing),
+        ...(response.signInRoute ? { signIn: {
+          route: response.signInRoute.route, label: response.signInRoute.label,
+          ...(response.signInRoute.movedFrom ? { movedFrom: { ...response.signInRoute.movedFrom, reason: response.signInRoute.movedFrom.reason.slice(0, 400) } } : {}),
+        } } : {}),
         ...(response.rateLimit ? { rateLimit: response.rateLimit } : {}),
       });
     }

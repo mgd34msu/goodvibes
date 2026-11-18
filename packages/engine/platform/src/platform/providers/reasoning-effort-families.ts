@@ -157,7 +157,7 @@ const FAMILY_SPECS: Readonly<Record<ReasoningFamily, ReasoningEffortSpec>> = {
  * This is an identity lookup, not a guess about an unknown model family.
  */
 const DOCUMENTED_MODEL_SPECS = new Map([
-  ...['gpt-6.1-sol', 'openai:gpt-6.1-sol', 'openai/gpt-6.1-sol', 'openai-subscriber:gpt-6.1-sol']
+  ...['gpt-6.1-sol', 'openai:gpt-6.1-sol', 'openai/gpt-6.1-sol']
     .map(id => [id, effort(['low', 'medium', 'high', 'xhigh', 'max'], 'medium')] as const),
 ]);
 

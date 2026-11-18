@@ -18,6 +18,7 @@ import type {
   ProviderRuntimeMetadataDeps,
 } from './interface.js';
 import {
+  diffModelIds,
   fetchOpenAIModelIds,
   runLiveModelRefresh,
   type LiveModelDiscoveryResult,
@@ -42,7 +43,10 @@ import type { CacheHitTracker } from './cache-strategy.js';
 import { extractOpenAIStreamTextDelta } from './openai-stream-delta.js';
 import { summarizeError, toProviderError } from '../utils/error-display.js';
 import { resolveOpenAIClientApiKey } from './openai-compat.js';
-import { resolveEffortForRequest } from './reasoning-effort-families.js';
+import { resolveEffortForRequest, resolveReasoningEffortSpec } from './reasoning-effort-families.js';
+import { reasoningEffortLevels } from './reasoning-effort.js';
+import { fetchOpenAISubscriptionModelIds, OpenAISubscriptionRoute, subscriptionAccountKey, type OpenAISubscriptionStore } from './openai-codex.js';
+import { logger } from '../utils/logger.js';
 
 const NOOP_CACHE_HIT_TRACKER: Pick<CacheHitTracker, 'recordTurn'> = {
   recordTurn: () => {},
@@ -56,31 +60,51 @@ const NOOP_CACHE_HIT_TRACKER: Pick<CacheHitTracker, 'recordTurn'> = {
  */
 type OpenAIChatCreate = OpenAI['chat']['completions']['create'];
 
-/**
- * Dated fallback model list, used when no API key is configured (so a live
- * /v1/models call isn't possible) and as the offline baseline when a live
- * call fails with no prior cache. Docs-verified (no OPENAI_API_KEY was
- * available in the environment to live-verify against /v1/models) against
- * developers.openai.com model pages on 2026-07-12; update this list (and the
- * date below) whenever it is re-verified against a live key or current docs.
- */
-export const OPENAI_DATED_STATIC_MODELS: readonly string[] = [
-  'gpt-5.6',
-  'gpt-5.6-sol',
-  'gpt-5.6-terra',
-  'gpt-5.6-luna',
-  'gpt-5.4',
-  'gpt-5.4-mini',
-  'gpt-5',
-  'gpt-4.1',
-  'gpt-4o',
-  'o3-mini',
-];
-export const OPENAI_DATED_STATIC_MODELS_AS_OF = '2026-07-12';
+/** The two ways of signing in to OpenAI. Each is a route with its own endpoint and wire format. */
+export type OpenAISignInRoute = 'subscription' | 'api-key';
+
+export const OPENAI_SIGN_IN_ROUTE_LABELS: Readonly<Record<OpenAISignInRoute, string>> = {
+  subscription: 'ChatGPT subscription',
+  'api-key': 'API key',
+};
+
+/** Failures that belong to one sign-in, not to the request: the next sign-in may serve the same model. */
+function routeFailure(error: unknown): boolean {
+  if (!(error instanceof ProviderError)) return false;
+  if (error.category === 'billing') return true;
+  const status = error.statusCode;
+  if (status === undefined) return error.phase !== 'stream';
+  if (status === 401 || status === 403 || status === 404 || status === 408 || status === 409 || status === 429 || status >= 500) return true;
+  return status === 400 && refusedModel(error);
+}
+
+/** The endpoint refused the model id itself (unknown to it, or not served to this sign-in). */
+function refusedModel(error: unknown): boolean {
+  if (!(error instanceof ProviderError)) return false;
+  if (error.statusCode !== 404 && error.statusCode !== 400) return false;
+  return /model/i.test(error.message) && /(does not exist|not found|model_not_found|not supported|unsupported|unknown|not available|no access)/i.test(error.message);
+}
 
 /**
- * OpenAIProvider, wraps the official `openai` npm package.
- * Supports GPT-5 family models with full function/tool calling.
+ * OpenAI: one provider, one model list, two ways of signing in.
+ *
+ * - `subscription`: a ChatGPT plan signed in through Codex (chatgpt.com
+ *   backend, Responses wire format), see openai-codex.ts.
+ * - `api-key`: the OpenAI API (api.openai.com, Chat Completions), via the
+ *   official `openai` npm package.
+ *
+ * A request goes to the subscription when it is set up, else to the API key.
+ * When both are set up and the subscription fails for a reason of its own
+ * (sign-in ended, plan limit, model not on the plan, the service failing), the
+ * same model is asked again through the API key, and the response says which
+ * sign-in answered and why it moved, so the person is told once. Nothing has
+ * reached the caller before such a move: a request that already streamed
+ * output is never repeated.
+ *
+ * The model list is the provider's own, read from both endpoints when they
+ * answer (GET /v1/models, GET /codex/models), else their last answers on disk,
+ * else nothing of its own: the pinned model catalog's OpenAI rows are the list
+ * then. It applies to whichever sign-in is used.
  */
 export class OpenAIProvider implements LLMProvider {
   readonly name = 'openai';
@@ -88,15 +112,23 @@ export class OpenAIProvider implements LLMProvider {
   readonly credentialAuthority = 'resolver' as const;
   readonly modelSource: ProviderModelSource = { kind: 'live-discovery' };
 
-  /**
-   * Populated synchronously with the dated-static baseline at construction
-   * (never empty), then replaced by `refreshModels()` with the live
-   * /v1/models result. See `modelSource`.
-   */
-  private _models: string[] = [...OPENAI_DATED_STATIC_MODELS];
+  /** The provider's own listing (both sign-ins); empty until it answers, when the pinned catalog stands. */
+  private _models: string[] = [];
   get models(): string[] {
     return this._models;
   }
+  /** What the subscription's own listing says it serves; null while it has not answered. */
+  private subscriptionModels: ReadonlySet<string> | null = null;
+  /** Models the subscription refused this session (not on the plan): asked through the API key first from then on. */
+  private readonly subscriptionRefused = new Set<string>();
+  /** The sign-in that answered last, for status surfaces, and the one that answered each model. */
+  private lastAnswered: OpenAISignInRoute | null = null;
+  private readonly answeredBy = new Map<string, OpenAISignInRoute>();
+  /** When the provider's own list was last read from an endpoint (epoch ms), and from where. */
+  private listing: { readonly source: 'live' | 'cache' | 'catalog'; readonly listedAt?: number | undefined } = { source: 'catalog' };
+  private readonly subscription: OpenAISubscriptionRoute | null;
+  /** Called when an endpoint refuses a model as unknown: the lists are read again off the request path. */
+  private readonly onUnknownModel: (() => void) | undefined;
   readonly batch: ProviderBatchAdapter & {
     /** The newest batch created since `createdAfterMs` whose metadata holds `key: value`, or null when there is none. */
     findBatchByMetadata(key: string, value: string, createdAfterMs: number): Promise<ProviderBatchPollResult | null>;
@@ -125,10 +157,17 @@ export class OpenAIProvider implements LLMProvider {
     apiKey: string,
     cacheHitTracker: Pick<CacheHitTracker, 'recordTurn'> = NOOP_CACHE_HIT_TRACKER,
     modelsCachePath?: string,
+    options: {
+      /** The ChatGPT subscription sign-in store; absent, the provider has only the API-key route. */
+      readonly subscriptionManager?: OpenAISubscriptionStore | undefined;
+      readonly onUnknownModel?: (() => void) | undefined;
+    } = {},
   ) {
     this.apiKey = apiKey;
     this.cacheHitTracker = cacheHitTracker;
     this.modelsCachePath = modelsCachePath;
+    this.subscription = options.subscriptionManager ? new OpenAISubscriptionRoute(options.subscriptionManager) : null;
+    this.onUnknownModel = options.onUnknownModel;
     this.batch = {
       kind: 'provider-batch',
       endpoints: ['/v1/chat/completions'],
@@ -147,11 +186,114 @@ export class OpenAIProvider implements LLMProvider {
    * throws "Missing credentials..." on a falsy key.
    */
   private client(): Promise<OpenAI> {
+    // Embeddings and the Batch API are API-key services: a ChatGPT subscription does not serve them.
+    if (!this.apiKeyConfigured() && this.subscriptionConfigured()) {
+      return Promise.reject(new ProviderError('This OpenAI request needs an API key (OPENAI_API_KEY, or /secrets): the ChatGPT subscription serves chat only, not embeddings or the Batch API. Nothing was sent.', {
+        statusCode: 401, provider: this.name, operation: 'request', phase: 'auth',
+      }));
+    }
     this.openaiClient ??= createOpenAIClient({ apiKey: resolveOpenAIClientApiKey(this.apiKey) });
     return this.openaiClient;
   }
 
+  /** Whether the API-key route is set up. */
+  private apiKeyConfigured(): boolean {
+    return this.apiKey.trim().length > 0;
+  }
+
+  /** Whether the subscription route is set up. */
+  subscriptionConfigured(): boolean {
+    return this.subscription?.isConfigured() ?? false;
+  }
+
+  /**
+   * The sign-ins a request for `modelId` tries, in order: the subscription
+   * when it is set up, then the API key. A model the subscription is known
+   * not to serve (its own listing, or a refusal this session) goes to the API
+   * key first; with no API key it is still asked of the subscription, so the
+   * refusal is reported as it is.
+   */
+  signInRoutes(modelId?: string): OpenAISignInRoute[] {
+    const id = modelId ? normalizeOpenAIModelId(modelId) : undefined;
+    const subscription = this.subscriptionConfigured();
+    const apiKey = this.apiKeyConfigured();
+    const notOnPlan = id !== undefined && (this.subscriptionRefused.has(id) || (this.subscriptionModels !== null && !this.subscriptionModels.has(id)));
+    const routes: OpenAISignInRoute[] = [];
+    if (subscription && !(notOnPlan && apiKey)) routes.push('subscription');
+    if (apiKey) routes.push('api-key');
+    return routes;
+  }
+
+  /**
+   * The sign-in serving `modelId` (or the provider, without one): the one
+   * that answered it last, else the one the next request tries first. What a
+   * request costs follows it: a ChatGPT plan has no per-token price.
+   */
+  activeSignInRoute(modelId?: string): OpenAISignInRoute | null {
+    if (modelId !== undefined) return this.answeredBy.get(normalizeOpenAIModelId(modelId)) ?? this.signInRoutes(modelId)[0] ?? null;
+    return this.lastAnswered ?? this.signInRoutes()[0] ?? null;
+  }
+
   async chat(params: ChatRequest): Promise<ChatResponse> {
+    const routes = this.signInRoutes(params.model);
+    if (routes.length === 0) {
+      throw new ProviderError('OpenAI is not signed in: no request was sent. Sign in with your ChatGPT subscription (/subscription login openai start) or set an OpenAI API key (OPENAI_API_KEY, or /secrets).', {
+        statusCode: 401,
+        provider: this.name,
+        operation: 'chat',
+        phase: 'auth',
+      });
+    }
+    let movedFrom: { readonly route: OpenAISignInRoute; readonly label: string; readonly reason: string } | undefined;
+    for (const [index, route] of routes.entries()) {
+      // A route that already handed output to the caller is never asked again elsewhere.
+      let delivered = false;
+      const onDelta = params.onDelta ? (delta: Parameters<NonNullable<ChatRequest['onDelta']>>[0]) => { delivered = true; params.onDelta!(delta); } : undefined;
+      const attempt: ChatRequest = { ...params, ...(onDelta ? { onDelta } : {}) };
+      try {
+        const response = route === 'subscription'
+          ? (await instrumentedLlmCall(() => this.subscription!.chat(attempt), { provider: this.name, model: params.model ?? '' })).result
+          : await this.chatWithApiKey(attempt);
+        this.lastAnswered = route;
+        this.answeredBy.set(normalizeOpenAIModelId(params.model), route);
+        return {
+          ...response,
+          signInRoute: { route, label: OPENAI_SIGN_IN_ROUTE_LABELS[route], ...(movedFrom ? { movedFrom } : {}) },
+        };
+      } catch (error) {
+        if (error instanceof ProviderAttemptDeniedError || params.signal?.aborted) throw error;
+        if (refusedModel(error)) {
+          if (route === 'subscription') this.subscriptionRefused.add(normalizeOpenAIModelId(params.model));
+          // The lists may be behind the provider: read them again, off this request's path.
+          this.onUnknownModel?.();
+        }
+        const next = routes[index + 1];
+        if (next === undefined || delivered || !routeFailure(error)) {
+          // Every sign-in failed: the error says so, not only the last one's words.
+          if (movedFrom && error instanceof ProviderError) {
+            throw new ProviderError(`${error.message} (through the ${OPENAI_SIGN_IN_ROUTE_LABELS[route]}, after the ${movedFrom.label} failed: ${movedFrom.reason})`, {
+              ...(error.statusCode !== undefined ? { statusCode: error.statusCode } : {}),
+              ...(error.retryAfterMs !== undefined ? { retryAfterMs: error.retryAfterMs } : {}),
+              ...(error.category !== 'contract' ? { category: error.category } : {}),
+              provider: this.name,
+              operation: 'chat',
+              ...(error.phase !== undefined ? { phase: error.phase } : {}),
+              cause: error,
+            });
+          }
+          throw error;
+        }
+        movedFrom = { route, label: OPENAI_SIGN_IN_ROUTE_LABELS[route], reason: error instanceof Error ? error.message : String(error) };
+        logger.info('[openai] sign-in route failed; asking the same model through the next sign-in', {
+          model: params.model, from: route, to: next, reason: summarizeError(error),
+        });
+      }
+    }
+    // Unreachable: the loop returns or throws on its last route.
+    throw new ProviderError('OpenAI request was not sent.', { provider: this.name, operation: 'chat', phase: 'request' });
+  }
+
+  private async chatWithApiKey(params: ChatRequest): Promise<ChatResponse> {
     const { messages, tools, model, maxTokens, signal, systemPrompt, onRetry } = params;
     const { onDelta, canRetry } = trackDeliveredOutput(params.onDelta);
     // `reasoning_effort` is a documented top-level parameter of
@@ -333,36 +475,76 @@ export class OpenAIProvider implements LLMProvider {
     };
   }
 
+  /** Signed in either way: a subscription or an API key. */
   isConfigured(): boolean {
-    return this.apiKey.trim().length > 0;
+    return this.apiKeyConfigured() || this.subscriptionConfigured();
+  }
+
+  /** Where the provider's own list came from and when it was read (status surfaces). */
+  modelListing(): { readonly source: 'live' | 'cache' | 'catalog'; readonly listedAt?: number | undefined } {
+    return this.listing;
   }
 
   /**
-   * Re-check OpenAI's live model list. Called at boot (background, respects
-   * the on-disk TTL cache) and on-demand for a picker-open re-check or an
-   * explicit user refresh (`force: true`, bypasses the TTL cache). Always
-   * resolves, falls back to the on-disk cache, then to the dated-static
-   * list, and reports the honest reason when live discovery fails rather
-   * than silently keeping stale data with no explanation.
+   * Read OpenAI's model lists again: the API's (with an API key) and the
+   * subscription's (when signed in), side by side. Run in the background at
+   * start-up (an on-disk list younger than a day answers without a request),
+   * after a sign-in (the subscription's list is stored per account, so a new
+   * account reads its own), on an explicit refresh and on a picker open
+   * (`force`), and when an endpoint refuses a model as unknown. Never on a
+   * request's path. A sign-in whose endpoint does not answer keeps its last
+   * list on disk; with none, the pinned catalog's OpenAI rows stand.
    */
   async refreshModels(force = false, options: ProviderModelRefreshOptions = {}): Promise<LiveModelDiscoveryResult> {
-    const result = await runLiveModelRefresh({
-      providerName: this.name,
-      recordTo: options.recordTo,
-      borrowFrom: options.borrowFrom,
-      cachePath: this.modelsCachePath,
-      datedStaticModels: OPENAI_DATED_STATIC_MODELS,
-      datedStaticAsOf: OPENAI_DATED_STATIC_MODELS_AS_OF,
-      isConfigured: this.isConfigured(),
-      fetchLive: () => fetchOpenAIModelIds(this.apiKey),
-      force,
-    });
-    this._models = [...result.models];
-    return result;
+    const subscriptionToken = this.subscription?.storedAccessToken() ?? null;
+    const [api, plan] = await Promise.all([
+      runLiveModelRefresh({
+        providerName: this.name,
+        recordTo: options.recordTo,
+        borrowFrom: options.borrowFrom,
+        cachePath: this.modelsCachePath,
+        isConfigured: this.apiKeyConfigured(),
+        fetchLive: () => fetchOpenAIModelIds(this.apiKey),
+        force,
+      }),
+      this.subscription ? runLiveModelRefresh({
+        providerName: `${this.name}@subscription`,
+        recordTo: options.recordTo,
+        borrowFrom: options.borrowFrom,
+        cachePath: this.modelsCachePath?.replace(/\.json$/, '.subscription.json'),
+        cacheKey: subscriptionToken ? subscriptionAccountKey(subscriptionToken) ?? undefined : undefined,
+        isConfigured: subscriptionToken !== null,
+        fetchLive: async () => {
+          const accessToken = await this.subscription!.freshAccessToken();
+          if (accessToken === null) throw new Error('the subscription sign-in has ended');
+          return fetchOpenAISubscriptionModelIds(accessToken);
+        },
+        force,
+      }) : Promise.resolve(null),
+    ]);
+    const previous = this._models;
+    const models = [...new Set([...api.models, ...(plan?.models ?? [])])];
+    this._models = models;
+    this.subscriptionModels = plan && plan.source !== 'catalog' && plan.models.length > 0 ? new Set(plan.models) : null;
+    const sources = [api.source, plan?.source].filter((source): source is 'live' | 'cache' | 'catalog' => source !== undefined);
+    const source = sources.includes('live') ? 'live' : sources.includes('cache') ? 'cache' : 'catalog';
+    const listedAt = Math.max(api.listedAt ?? 0, plan?.listedAt ?? 0) || undefined;
+    this.listing = { source, ...(listedAt ? { listedAt } : {}) };
+    const errors = [api.error ? `API key: ${api.error}` : '', plan?.error ? `subscription: ${plan.error}` : ''].filter(Boolean);
+    const { added, removed } = diffModelIds(previous, models);
+    return {
+      models,
+      source,
+      added: previous.length === 0 ? [...api.added, ...(plan?.added ?? [])] : added,
+      removed: previous.length === 0 ? [...api.removed, ...(plan?.removed ?? [])] : removed,
+      ...(listedAt ? { listedAt } : {}),
+      ...(errors.length ? { error: errors.join('; ') } : {}),
+      ...(api.unclassifiedModels?.length ? { unclassifiedModels: api.unclassifiedModels } : {}),
+      ...(api.skippedReason ? { skippedReason: api.skippedReason } : {}),
+    };
   }
 
   async describeRuntime(deps: ProviderRuntimeMetadataDeps): Promise<ProviderRuntimeMetadata> {
-    const configured = Boolean(process.env.OPENAI_API_KEY || process.env.OPENAI_KEY);
     const { buildStandardProviderAuthRoutes, summarizeProviderAuth } = await import('./runtime-metadata.js');
     const authRoutes = await buildStandardProviderAuthRoutes({
       providerId: 'openai',
@@ -370,13 +552,18 @@ export class OpenAIProvider implements LLMProvider {
       serviceNames: ['openai'],
       subscriptionProviderId: 'openai',
     }, deps);
+    const order = this.signInRoutes();
+    const configured = order.length > 0;
     const auth = summarizeProviderAuth({
       configured,
-      detail: configured ? 'OpenAI API key available' : 'OPENAI_API_KEY or OPENAI_KEY not set',
+      detail: configured
+        ? `Requests use the ${order.map((route) => OPENAI_SIGN_IN_ROUTE_LABELS[route]).join(', then the ')}${order.length > 1 ? ' when the first fails' : ''}.`
+        : 'Not signed in: sign in with a ChatGPT subscription (/subscription login openai start) or set OPENAI_API_KEY.',
     }, authRoutes);
+    const active = this.activeSignInRoute();
     return {
       auth: {
-        mode: 'api-key',
+        mode: this.subscriptionConfigured() ? 'oauth' : 'api-key',
         configured: auth.configured,
         detail: auth.detail,
         envVars: ['OPENAI_API_KEY', 'OPENAI_KEY'],
@@ -403,10 +590,15 @@ export class OpenAIProvider implements LLMProvider {
       },
       policy: {
         local: false,
-        streamProtocol: 'openai-chat-completions',
-        reasoningMode: 'reasoning_effort',
-        cacheStrategy: 'implicit-openai-cache-observation',
-        notes: ['OpenAI embedding usage is subject to OpenAI API terms.'],
+        streamProtocol: active === 'subscription' ? 'openai-codex-responses-sse' : 'openai-chat-completions',
+        reasoningMode: active === 'subscription' ? 'responses-reasoning' : 'reasoning_effort',
+        ...(active === 'subscription' ? { supportedReasoningEfforts: reasoningEffortLevels(resolveReasoningEffortSpec({ provider: this.name, modelId: this.models[0] ?? '' })) } : {}),
+        cacheStrategy: active === 'subscription' ? 'subscription-session-cache-key' : 'implicit-openai-cache-observation',
+        notes: [
+          `Sign-in order: ${order.length ? order.map((route) => OPENAI_SIGN_IN_ROUTE_LABELS[route]).join(' → ') : 'none set up'}.`,
+          `Model list: ${this.listing.source === 'catalog' ? 'pinned model catalog (the provider has not listed its models yet)' : `${this.listing.source === 'live' ? 'read from OpenAI' : 'OpenAI\'s last listing on disk'}${this.listing.listedAt ? `, ${new Date(this.listing.listedAt).toISOString()}` : ''}`}.`,
+          'OpenAI embedding usage is subject to OpenAI API terms.',
+        ],
       },
     };
   }
@@ -598,4 +790,11 @@ function toRecord(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+/** The id OpenAI's endpoints take: a provider-qualified reference loses its prefix. */
+function normalizeOpenAIModelId(model: string): string {
+  if (model.startsWith('openai:')) return model.slice('openai:'.length);
+  if (model.startsWith('openai/')) return model.slice('openai/'.length);
+  return model;
 }

@@ -52,7 +52,7 @@ export function computeConfiguredProviderIds(
       configured.add(configName);
       configured.add(CATALOG_PROVIDER_NAME_ALIASES[configName] ?? configName);
       // Catalog-only spellings of this provider. A name that is a provider of its own
-      // (openai-subscriber, copilot) is a separate connection and is not configured by this key.
+      // (copilot) is a separate connection and is not configured by this key.
       for (const [alias, canonical] of Object.entries(CATALOG_PROVIDER_NAME_ALIASES)) {
         if (canonical === configName && !providers.has(alias)) configured.add(alias);
       }

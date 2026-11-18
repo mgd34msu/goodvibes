@@ -69,6 +69,9 @@ export function observeHeadlessTurn(bus: Pick<RuntimeEventBus, 'on'>, format: st
   // verification spend money too); the limit counts only the loop the caller asked to bound.
   let turns = 0;
   let limited: string | undefined;
+  // The sign-in that answered the top-level loop last (a provider with more than one), and the moves already told.
+  let signIn: Payload<TurnEvent, 'LLM_RESPONSE_RECEIVED'>['signIn'];
+  const toldMoves = new Set<string>();
   // A gate request is held until the gate decides it, so the frame can say whether the owner was asked.
   const requested = new Map<string, Record<string, unknown>>();
   const stream = format === 'stream-json';
@@ -103,9 +106,19 @@ export function observeHeadlessTurn(bus: Pick<RuntimeEventBus, 'on'>, format: st
       usage.cacheWriteTokens += payload.cacheWriteTokens ?? 0;
       if (payload.costUsdCents === undefined) usage.unpriced = true;
       else usage.costUsdCents += payload.costUsdCents;
+      if (payload.signIn && source === TOP_LEVEL_TURN_SOURCE) {
+        signIn = payload.signIn;
+        // A sign-in move is told once, on stderr in every output format: the same model answered another way.
+        const moved = payload.signIn.movedFrom;
+        if (moved && !toldMoves.has(`${moved.route}>${payload.signIn.route}`)) {
+          toldMoves.add(`${moved.route}>${payload.signIn.route}`);
+          process.stderr.write(`${payload.model} answered through your ${payload.provider} ${payload.signIn.label}: the ${moved.label} failed (${forwardedText(moved.reason)}).\n`);
+        }
+      }
       emit({ type: 'USAGE', turnId: payload.turnId, provider: payload.provider, model: payload.model, inputTokens: payload.inputTokens,
         outputTokens: payload.outputTokens, cacheReadTokens: payload.cacheReadTokens ?? 0, cacheWriteTokens: payload.cacheWriteTokens ?? 0,
-        ...(payload.costUsdCents === undefined ? {} : { costUsdCents: payload.costUsdCents }) });
+        ...(payload.costUsdCents === undefined ? {} : { costUsdCents: payload.costUsdCents }),
+        ...(payload.signIn ? { signIn: { route: payload.signIn.route, ...(payload.signIn.movedFrom ? { movedFrom: payload.signIn.movedFrom.route, reason: forwardedText(payload.signIn.movedFrom.reason) } : {}) } } : {}) });
       const max = options.maxTurns;
       if (max !== undefined && !limited && source === TOP_LEVEL_TURN_SOURCE && turns >= max && payload.toolCallCount > 0) {
         limited = `Stopped after ${turns} model responses (--max-turns ${max}); the model still asked for ${payload.toolCallCount} tool call(s).`;
@@ -195,6 +208,7 @@ export function observeHeadlessTurn(bus: Pick<RuntimeEventBus, 'on'>, format: st
       }
       const { unpriced, costUsdCents, ...counts } = usage;
       return { ...state, sessionId: runtime.sessionId, model: runtime.model, provider: runtime.provider,
+        ...(signIn ? { signIn: signIn.route } : {}),
         usage: { ...counts, ...(unpriced || counts.modelCalls === 0 ? {} : { costUsdCents }) } };
     },
   };

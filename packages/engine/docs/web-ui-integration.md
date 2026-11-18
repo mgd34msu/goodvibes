@@ -98,8 +98,8 @@ not call `sessions.followUp`.
 ```ts
 const created = await platformClient.chat.sessions.create({
   title: 'WebUI chat',
-  provider: 'openai-subscriber',
-  model: 'gpt-5.5',
+  provider: 'openai',
+  model: 'gpt-6.1-sol',
 });
 
 await platformClient.chat.events.stream(created.sessionId, {
@@ -114,11 +114,11 @@ await platformClient.chat.messages.create(created.sessionId, {
 ```
 
 `provider` is the selected runtime provider row id from the model catalog, for
-example `openai-subscriber`. `model` is the selected model id for that provider
-row, for example `gpt-5.5`. When a runtime provider is an alias for a catalog
-provider, the daemon also accepts the provider-qualified registry key as
-`model`, such as `openai:gpt-5.5`, as long as `provider` remains the selected
-runtime provider row id.
+example `openai`. `model` is the selected model id for that provider row, for
+example `gpt-6.1-sol`. The daemon also accepts the provider-qualified registry
+key as `model`, such as `openai:gpt-6.1-sol`, as long as `provider` remains the
+selected runtime provider row id. OpenAI's ChatGPT subscription and API key are
+two sign-ins of the one `openai` provider, not two rows.
 
 To stop a running reply, call `platformClient.chat.turns.cancel(sessionId)`; any
 partial reply is kept and marked as cancelled. To interrupt a running reply with

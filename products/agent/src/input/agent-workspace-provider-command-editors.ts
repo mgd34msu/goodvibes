@@ -23,7 +23,7 @@ const PROVIDER_COMMAND_EDITOR_SPECS: Readonly<Record<AgentWorkspaceProviderComma
     selectedFieldIndex: 0,
     message: 'Switch the Agent chat provider through the shell-owned command router. Add a model id when you want an exact provider/model route.',
     fields: [
-      { id: 'provider', label: 'Provider id', value: '', required: true, multiline: false, hint: 'Provider row id, such as openai-subscriber, openai, anthropic, or a custom provider.' },
+      { id: 'provider', label: 'Provider id', value: '', required: true, multiline: false, hint: 'Provider row id, such as openai, anthropic, or a custom provider.' },
       { id: 'model', label: 'Model id', value: '', required: false, multiline: false, hint: 'Optional model id or provider:model registry key. Blank uses the provider default selectable model.' },
     ],
   },

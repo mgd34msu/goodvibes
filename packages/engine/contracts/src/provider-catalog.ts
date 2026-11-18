@@ -1,6 +1,5 @@
 /** Registry-declared model catalogs. These identities never select a connection or grant access. */
 export const CATALOG_PROVIDER_NAME_ALIASES: Readonly<Record<string, string>> = Object.freeze({
-  'openai-subscriber': 'openai',
   gemini: 'google',
   inception: 'inceptionlabs',
   copilot: 'github-copilot',
@@ -12,6 +11,12 @@ export const CATALOG_PROVIDER_NAME_ALIASES: Readonly<Record<string, string>> = O
   'z-ai': 'zai',
   'cloudflare-gateway': 'cloudflare-ai-gateway',
   'ai-gateway': 'vercel-ai-gateway',
+  // The pinned catalog's ids for builtins registered under another name (same service, same endpoint).
+  togetherai: 'together',
+  'fireworks-ai': 'fireworks',
+  moonshotai: 'moonshot',
+  vercel: 'vercel-ai-gateway',
+  alibaba: 'qwen',
 });
 
 // The native virtual provider owns its sole `auto` model. It has no external

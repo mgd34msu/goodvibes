@@ -2,6 +2,7 @@ import {
   modelWorkspaceKey as modelKey,
   modelWorkspaceTargetSummary,
   modelWorkspaceProviderRows,
+  modelWorkspaceSignIn,
 } from '@goodvibes-jev/engine/terminal-shell/model-workspace-facts';
 /**
  * renderModelWorkspace, the model picker drawn with the surface kit.
@@ -208,6 +209,8 @@ function drawModelDetail(f: ModalFrame, picker: ModelPickerModal, p: KitInset): 
     const target = picker.getSelectedTargetInfo();
     if (target && !isTargetModel(target, model)) y = kv(c, p, y, 'Now', `${targetLabelFor(target.target)}: ${targetSummary(target)}`);
     y = kv(c, p, y, 'Status', configured ? 'configured' : 'not configured', configured ? t.success : t.warning);
+    const signIn = modelWorkspaceSignIn(picker.configuredViaMap.get(model.provider));
+    if (configured && signIn) y = kv(c, p, y, 'Sign-in', signIn);
     const unreachable = picker.unreachableProviders.get(model.provider);
     if (unreachable !== undefined) y = kv(c, p, y, 'Health', `unreachable: ${unreachable}`, t.warning);
     if (picker.isPinned(model)) y = kv(c, p, y, 'Pinned', 'yes');

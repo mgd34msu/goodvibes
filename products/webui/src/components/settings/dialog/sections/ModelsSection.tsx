@@ -236,6 +236,8 @@ function ProviderDetail({
   // names do not overlap, so the shallow merge cannot clobber either.
   const combined = useMemo(() => ({ ...asRecord(provider), ...asRecord(detail.data) }), [provider, detail.data]);
   const status = useMemo(() => deriveProviderStatus(combined), [combined]);
+  // Which sign-in requests use, in order (OpenAI: the subscription first, then the API key), as the provider reports it.
+  const signInOrder = firstString(readPath(combined, ['runtime', 'auth']), ['detail']);
   const providerModels = useProviderModelOptions(provider, modelProviders, sourceReady && !detail.isFetching);
   const models: ModelOption[] = providerModels.models;
   const title = bestTitle(provider, providerId);
@@ -316,6 +318,7 @@ function ProviderDetail({
       </SettingsBlock>
 
       <SettingsBlock title="Sign-in routes" description="Each way this provider can authenticate, with its own state.">
+        {signInOrder ? <p className="settings-note">{signInOrder}</p> : null}
         {status.routes.length === 0 ? (
           <p className="settings-empty">No sign-in route detail reported for this provider.</p>
         ) : (

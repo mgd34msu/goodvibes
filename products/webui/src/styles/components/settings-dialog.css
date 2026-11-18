@@ -230,6 +230,14 @@
   line-height: var(--leading-ui);
 }
 
+/* A plain sentence above a settings list (the order a provider's sign-ins are used in). */
+.settings-note {
+  margin: 0 0 8px;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  line-height: var(--leading-ui);
+}
+
 .settings-config-group__title,
 .settings-block__title {
   margin: 0;

@@ -198,9 +198,9 @@ export interface ProviderBatchAdapter {
  * - `live-discovery` , the provider fetches its own model list from a live
  *   API (its `models` array may start empty and populate asynchronously;
  *   see `live-model-discovery.ts` for the shared fetch/cache/diff helpers).
- * - `dated-static`   , the provider ships a complete, hand-maintained model
- *   list as of a specific date (`asOf`), because the backend has no
- *   model-listing API. Must be paired with a non-empty `models` array.
+ * - `dated-static`   , the provider's `models` array is its own definition,
+ *   not a maker's catalog: a virtual provider's single model (the Decision
+ *   Router's `auto`). No maker's model list is ever written down in source.
  * - `catalog-backed` , the provider's own `models` array is intentionally
  *   secondary; its real selectable models come from the shared, independently
  *   refreshed model catalog (e.g. the synthetic failover provider).
@@ -410,6 +410,13 @@ export interface ProviderResponseIdentity {
   readonly responseId: ProviderResponseIdentityField;
 }
 
+/** The sign-in that answered a request, and the one tried first when it failed. */
+export interface ProviderSignInRouteReport {
+  readonly route: string;
+  readonly label: string;
+  readonly movedFrom?: { readonly route: string; readonly label: string; readonly reason: string } | undefined;
+}
+
 export interface ChatResponse {
   /** Host provenance when independent decision-model checking was disabled or unavailable. */
   decisionPolicy?: DecisionModelPolicyState;
@@ -417,6 +424,12 @@ export interface ChatResponse {
   decisionRoute?: DecisionRouterRouteInfo | undefined;
   /** Optional bounded response provenance. Absence means the adapter did not capture it. */
   responseIdentity?: ProviderResponseIdentity | undefined;
+  /**
+   * Which of the provider's sign-ins answered (a provider with more than one,
+   * such as OpenAI's subscription and API key), and the one it moved from
+   * when the first failed for a reason of its own. The caller tells the person.
+   */
+  signInRoute?: ProviderSignInRouteReport | undefined;
   content: string;
   toolCalls: ToolCall[];
   usage: {

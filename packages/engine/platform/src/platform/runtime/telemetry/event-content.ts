@@ -190,6 +190,8 @@ const EVENT_FIELD_CLASS = {
   qualityGrade: 'shown',
   question: 'content',
   rateLimit: 'shown',
+  // Which sign-in answered (subscription or API key) and the failure that moved it: provider status text, never content.
+  signIn: 'shown',
   reason: 'shown',
   reasonCode: 'shown',
   reasoning: 'content',

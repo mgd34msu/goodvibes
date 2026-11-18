@@ -171,8 +171,9 @@ key error, inspect:
 curl -sS http://127.0.0.1:3421/api/models/current
 ```
 
-Use authenticated access where required. Runtime provider ids such as
-`openai-subscriber` may differ from catalog provider prefixes such as `openai`.
+Use authenticated access where required. OpenAI's ChatGPT subscription and API
+key are two sign-ins of the one `openai` provider; there is no separate
+subscription provider id.
 
 ## Attachments fail
 

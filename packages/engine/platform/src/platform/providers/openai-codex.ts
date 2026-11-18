@@ -2,12 +2,8 @@ import { revalidateProviderAttempt } from './attempt-guard.js';
 import type {
   ChatRequest,
   ChatResponse,
-  LLMProvider,
   PartialToolCall,
   ProviderMessage,
-  ProviderModelSource,
-  ProviderRuntimeMetadata,
-  ProviderRuntimeMetadataDeps,
 } from './interface.js';
 import type { ToolCall, ToolDefinition } from '../types/tools.js';
 import { ProviderError } from '../types/errors.js';
@@ -18,35 +14,56 @@ import { arch, platform, release } from 'node:os';
 import type { SubscriptionManager } from '../config/subscriptions.js';
 import { toProviderError } from '../utils/error-display.js';
 import { parseRateLimitHeaders } from './rate-limit-headers.js';
-import { instrumentedLlmCall } from '../runtime/llm-observability.js';
 import { mapCodexStopReason } from './stop-reason-maps.js';
-import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
+import { fetchWithTimeout, instrumentedFetch } from '../utils/fetch-with-timeout.js';
 import { toolCallArgumentFields } from './tool-formats.js';
 import { SseLineBuffer } from './sse-line-buffer.js';
-import { resolveReasoningEffortSpec } from './reasoning-effort-families.js';
-import { reasoningEffortLevels } from './reasoning-effort.js';
-
-const OPENAI_CODEX_BASE_URL = 'https://chatgpt.com/backend-api';
-const OPENAI_CODEX_PROVIDER_NAME = 'openai-subscriber';
 
 /**
- * Dated fallback model list for the ChatGPT/Codex subscription surface. This
- * backend (chatgpt.com/backend-api) has no public model-listing endpoint, so
- * unlike the direct OpenAI API key provider this is a dated-static list only
- *, docs-verified (no live subscription session was available in this
- * environment to cross-check) against developers.openai.com Codex model
- * pages on 2026-07-12; update this list (and the date below) whenever it is
- * re-verified.
+ * The subscription route of the `openai` provider: a ChatGPT plan signed in
+ * through Codex, served by chatgpt.com/backend-api in the Responses wire
+ * format. It is not a provider of its own; `OpenAIProvider` owns the model
+ * list and chooses this route first when the sign-in is set up.
  */
-export const OPENAI_CODEX_DATED_STATIC_MODELS: readonly string[] = [
-  'gpt-5.6-sol',
-  'gpt-5.6-terra',
-  'gpt-5.6-luna',
-  'gpt-5.3-codex',
-  'gpt-5.4',
-  'gpt-5.4-mini',
-];
-export const OPENAI_CODEX_DATED_STATIC_MODELS_AS_OF = '2026-07-12';
+const OPENAI_CODEX_BASE_URL = 'https://chatgpt.com/backend-api';
+/** Errors name the provider the user chose; the route is said in the message. */
+const OPENAI_CODEX_PROVIDER_NAME = 'openai';
+const MODEL_LIST_TIMEOUT_MS = 15_000;
+
+/**
+ * The models the signed-in plan serves, from the backend's own model list
+ * (GET /codex/models, the list Codex clients read). Entries are read by their
+ * `slug`, else `id`; the ids are the same as the API's, so no name is mapped.
+ */
+export async function fetchOpenAISubscriptionModelIds(accessToken: string): Promise<string[]> {
+  const accountId = extractAccountId(accessToken);
+  const res = await fetchWithTimeout(`${OPENAI_CODEX_BASE_URL}/codex/models`, {
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      'chatgpt-account-id': accountId,
+      originator: 'pi',
+      accept: 'application/json',
+      'User-Agent': getOpenAICodexUserAgent(),
+    },
+  }, MODEL_LIST_TIMEOUT_MS, instrumentedFetch);
+  if (!res.ok) throw new Error(`OpenAI subscription model list returned ${res.status} ${res.statusText}`);
+  const body = await res.json() as { models?: unknown; data?: unknown };
+  const entries = Array.isArray(body.models) ? body.models : Array.isArray(body.data) ? body.data : [];
+  const ids = entries.flatMap((entry: unknown) => {
+    if (typeof entry === 'string') return [entry];
+    if (!entry || typeof entry !== 'object') return [];
+    const record = entry as Record<string, unknown>;
+    if (record['visibility'] === 'hide' || record['visibility'] === 'hidden') return [];
+    const id = typeof record['slug'] === 'string' ? record['slug'] : typeof record['id'] === 'string' ? record['id'] : null;
+    return id ? [id] : [];
+  });
+  return [...new Set(ids)];
+}
+
+/** The ChatGPT account a sign-in belongs to, or null when the token does not say. */
+export function subscriptionAccountKey(accessToken: string): string | null {
+  try { return extractAccountId(accessToken); } catch { return null; }
+}
 
 function getOpenAICodexUserAgent(): string {
   return `pi (${platform()} ${release()}; ${arch()})`;
@@ -460,26 +477,32 @@ export async function chatWithOpenAICodex(
     }, { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), ...(params.maxRetries !== undefined ? { maxRetries: params.maxRetries } : {}), canRetry }, params.onRetry);
 }
 
-export class OpenAICodexProvider implements LLMProvider {
-  readonly name = OPENAI_CODEX_PROVIDER_NAME;
-  readonly credentialAuthority = 'subscription' as const;
-  readonly modelSource: ProviderModelSource = {
-    kind: 'dated-static',
-    asOf: OPENAI_CODEX_DATED_STATIC_MODELS_AS_OF,
-  };
-  readonly models: string[] = [...OPENAI_CODEX_DATED_STATIC_MODELS];
-  /** One cache key for this provider's lifetime, so consecutive turns share a prompt cache. */
+/** What the `openai` provider needs of the subscription store. */
+export type OpenAISubscriptionStore = Pick<SubscriptionManager, 'get' | 'saveSubscription' | 'resolveAccessToken'>;
+
+/** The subscription route: whether it is set up, and one request through it. */
+export class OpenAISubscriptionRoute {
+  /** One cache key for this route's lifetime, so consecutive turns share a prompt cache. */
   private readonly promptCacheSessionId = crypto.randomUUID();
 
-  constructor(
-    private readonly subscriptionManager: Pick<SubscriptionManager, 'get' | 'saveSubscription' | 'resolveAccessToken'>,
-  ) {}
+  constructor(private readonly subscriptionManager: OpenAISubscriptionStore) {}
 
+  /** A stored, unrevoked ChatGPT sign-in. Expiring tokens refresh inside chat(); their age does not unset the route. */
   isConfigured(): boolean {
     const subscription = this.subscriptionManager.get('openai');
-    // Expiring credentials refresh inside chat(); their age does not remove
-    // a working subscription from the planner's configured providers.
     return Boolean(subscription?.accessToken && subscription.revokedAt === undefined);
+  }
+
+  /** The stored access token (for listing models), or null when not signed in. */
+  storedAccessToken(): string | null {
+    const subscription = this.subscriptionManager.get('openai');
+    return subscription?.accessToken && subscription.revokedAt === undefined ? subscription.accessToken : null;
+  }
+
+  /** A usable access token for a request off the chat path (listing models), renewed when near expiry; null when not signed in or ended. */
+  async freshAccessToken(): Promise<string | null> {
+    const fresh = await resolveFreshOpenAIAccessToken(this.subscriptionManager);
+    return fresh.kind === 'refreshed' ? fresh.accessToken : null;
   }
 
   async chat(params: ChatRequest): Promise<ChatResponse> {
@@ -487,88 +510,50 @@ export class OpenAICodexProvider implements LLMProvider {
     // silently here, so the ordinary expiry case never surfaces anything.
     const resolved = await resolveFreshOpenAIAccessToken(this.subscriptionManager);
     if (resolved.kind === 'unconfigured') {
-      throw new ProviderError('No active OpenAI subscription token found. Run /subscription login openai start.', {
+      throw new ProviderError('No active OpenAI subscription sign-in. Run /subscription login openai start.', {
         statusCode: 401,
-        provider: this.name,
+        provider: OPENAI_CODEX_PROVIDER_NAME,
         operation: 'chat',
         phase: 'auth',
       });
     }
     if (resolved.kind !== 'refreshed') throw this.subscriptionEndedError();
     const accessToken = resolved.accessToken;
-    return (await instrumentedLlmCall(async () => {
+    try {
+      return await chatWithOpenAICodex(accessToken, params, this.promptCacheSessionId);
+    } catch (error) {
+      if (!isAuthRejection(error)) throw error;
+      // The backend rejected the stored token: expired past its timestamp,
+      // or revoked mid-lifetime (a Codex login elsewhere, a password
+      // change). Both recover the same way: one shared refresh attempt,
+      // then one retry.
+      const outcome = await refreshOpenAISubscriptionAfterRejection(this.subscriptionManager, accessToken);
+      if (outcome.kind === 'session-dead') throw this.subscriptionEndedError();
+      // Refresh unjudgeable (token endpoint unreachable or broken): the
+      // session may be fine, so surface the original rejection rather than
+      // telling the user to sign in again.
+      if (outcome.kind === 'unavailable') throw error;
+      params.onRetry?.(1, 1, 0, error instanceof Error ? error : new Error(String(error)));
       try {
-        return await chatWithOpenAICodex(accessToken, params, this.promptCacheSessionId);
-      } catch (error) {
-        if (!isAuthRejection(error)) throw error;
-        // The backend rejected the stored token: expired past its timestamp,
-        // or revoked mid-lifetime (a Codex login elsewhere, a password
-        // change). Both recover the same way: one shared refresh attempt,
-        // then one retry.
-        const outcome = await refreshOpenAISubscriptionAfterRejection(this.subscriptionManager, accessToken);
-        if (outcome.kind === 'session-dead') throw this.subscriptionEndedError();
-        // Refresh unjudgeable (token endpoint unreachable or broken): the
-        // session may be fine, so surface the original rejection rather than
-        // telling the user to sign in again.
-        if (outcome.kind === 'unavailable') throw error;
-        params.onRetry?.(1, 1, 0, error instanceof Error ? error : new Error(String(error)));
-        try {
-          return await chatWithOpenAICodex(outcome.accessToken, params, this.promptCacheSessionId);
-        } catch (retryError) {
-          // A fresh token the responses surface still refuses: the account
-          // has lost the entitlement (plan lapsed, suspension). Still a
-          // subscription problem, never an API-key one.
-          if (isAuthRejection(retryError)) throw this.subscriptionEndedError();
-          throw retryError;
-        }
+        return await chatWithOpenAICodex(outcome.accessToken, params, this.promptCacheSessionId);
+      } catch (retryError) {
+        // A fresh token the responses surface still refuses: the account
+        // has lost the entitlement (plan lapsed, suspension).
+        if (isAuthRejection(retryError)) throw this.subscriptionEndedError();
+        throw retryError;
       }
-    }, { provider: this.name, model: params.model ?? '' })).result;
+    }
   }
 
   private subscriptionEndedError(): ProviderError {
     return new ProviderError(
-      'Your OpenAI subscription session has ended and could not be refreshed. Sign in to OpenAI again to keep using the subscription.',
+      'Your OpenAI subscription sign-in has ended and could not be refreshed. Sign in to OpenAI again (/subscription login openai start) to keep using the subscription.',
       {
         statusCode: 401,
-        provider: this.name,
+        provider: OPENAI_CODEX_PROVIDER_NAME,
         operation: 'chat',
         phase: 'auth',
       },
     );
-  }
-
-  async describeRuntime(deps: ProviderRuntimeMetadataDeps): Promise<ProviderRuntimeMetadata> {
-    const { buildStandardProviderAuthRoutes } = await import('./runtime-metadata.js');
-    const authRoutes = await buildStandardProviderAuthRoutes({
-      providerId: this.name,
-      subscriptionProviderId: 'openai',
-    }, deps);
-    return {
-      auth: {
-        mode: 'oauth',
-        configured: authRoutes.some((route) => route.route === 'subscription-oauth' && route.configured),
-        detail: 'OpenAI subscriber routing depends on a stored ChatGPT/Codex subscription session.',
-        routes: authRoutes,
-      },
-      models: {
-        models: this.models,
-      },
-      usage: {
-        streaming: true,
-        toolCalling: true,
-        parallelTools: true,
-        promptCaching: true,
-        notes: ['This provider uses the OpenAI subscription-backed Codex responses surface instead of a direct API key.'],
-      },
-      policy: {
-        local: false,
-        streamProtocol: 'openai-codex-responses-sse',
-        reasoningMode: 'responses-reasoning',
-        supportedReasoningEfforts: reasoningEffortLevels(
-          resolveReasoningEffortSpec({ provider: this.name, modelId: this.models[0] ?? '' }),
-        ),
-        cacheStrategy: 'subscription-session-cache-key',
-      },
-    };
   }
 }

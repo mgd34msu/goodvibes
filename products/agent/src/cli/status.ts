@@ -1,4 +1,4 @@
-import { captureCliStatusFacts, secretPolicyLabel } from '@goodvibes-jev/engine/terminal-shell/cli-status-facts';
+import { captureCliStatusFacts, describeCliSignIns, secretPolicyLabel, type CliProviderSignInFacts } from '@goodvibes-jev/engine/terminal-shell/cli-status-facts';
 import { yesNo } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import type { ConnectedHostReadiness } from '../runtime/connected-host-readiness.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -30,6 +30,8 @@ export interface CliStatusOptions {
   readonly configManager: Pick<ConfigManager, 'get'>;
   readonly workingDirectory: string;
   readonly homeDirectory: string;
+  /** How the configured model's provider is signed in and where its model list came from (read from files by the caller). */
+  readonly providerSignIn?: CliProviderSignInFacts;
   /** The marker that decides whether setup is done (`readOnboardingDoneMarker`); absent when not read. */
   readonly onboardingMarker?: OnboardingCheckMarkerState;
   readonly nativeReadiness?: ConnectedHostReadiness;
@@ -90,6 +92,8 @@ export interface CliStatusSnapshot {
     readonly provider: string;
     readonly model: string;
     readonly reasoning: string;
+    /** Sign-ins in the order requests use them, and the model list's source and age. */
+    readonly signIn?: CliProviderSignInFacts | undefined;
   };
   readonly auth: {
     readonly permissionMode: unknown;
@@ -380,7 +384,7 @@ export function buildCliStatusSnapshot(options: CliStatusOptions): CliStatusSnap
     crashLog: summarizeCrashLog(surfaceCrashLogPath(options.homeDirectory, GOODVIBES_AGENT_SURFACE_ROOT)),
     workingDirectory: options.workingDirectory,
     homeDirectory: options.homeDirectory,
-    provider: { ...common.provider },
+    provider: { ...common.provider, ...(options.providerSignIn ? { signIn: options.providerSignIn } : {}) },
     auth: {
       ...common.auth,
       permissionLabel: posture.label,
@@ -432,6 +436,10 @@ export function renderCliStatus(options: CliStatusOptions, snapshot: CliStatusSn
     `  provider ${getProviderIdFromModel(config.get('provider.model'))}`,
     `  model ${String(config.get('provider.model'))}`,
     `  reasoning ${String(config.get('provider.reasoningEffort'))}`,
+    ...(snapshot.provider.signIn ? [
+      `  sign-in ${describeCliSignIns(snapshot.provider.signIn)}`,
+      `  model list ${snapshot.provider.signIn.modelList}`,
+    ] : []),
     '',
     'Decision model',
     `  policy: ${snapshot.decisionModel.policyLabel} (judgment.policy)`,

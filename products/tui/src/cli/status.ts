@@ -1,4 +1,4 @@
-import { captureCliStatusFacts, secretPolicyLabel } from '@goodvibes-jev/engine/terminal-shell/cli-status-facts';
+import { captureCliStatusFacts, describeCliSignIns, secretPolicyLabel, type CliProviderSignInFacts } from '@goodvibes-jev/engine/terminal-shell/cli-status-facts';
 import { yesNo } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { effectivePermissionMode, presetForMode } from '@goodvibes-jev/engine/platform/platform/gate/presets';
 import { describeConfiguredPermissions } from '../permissions/configured-posture.ts';
@@ -25,6 +25,8 @@ export interface CliStatusOptions {
   readonly configManager: Pick<ConfigManager, 'get'>;
   readonly workingDirectory: string;
   readonly homeDirectory: string;
+  /** How the configured model's provider is signed in and where its model list came from (read from files by the caller). */
+  readonly providerSignIn?: CliProviderSignInFacts;
   /** The first-run check marker (per user); absent or `exists: false` when first run was not marked. */
   readonly onboardingMarker?: OnboardingCheckMarkerState;
   readonly auth?: CliAuthStatus;
@@ -113,6 +115,8 @@ export interface CliStatusSnapshot {
     readonly provider: string;
     readonly model: string;
     readonly reasoning: string;
+    /** Sign-ins in the order requests use them, and the model list's source and age. */
+    readonly signIn?: CliProviderSignInFacts | undefined;
     /**
      * What the configured reasoning level actually becomes on the configured
      * model. The level alone is not the whole truth: a model that does not
@@ -576,6 +580,7 @@ export function buildCliStatusSnapshot(options: CliStatusOptions): CliStatusSnap
     homeDirectory: options.homeDirectory,
     provider: {
       ...common.provider,
+      ...(options.providerSignIn ? { signIn: options.providerSignIn } : {}),
       reasoningResolved: describeConfiguredEffort(
         String(config.get('provider.model') ?? ''),
         String(config.get('provider.reasoningEffort') ?? ''),
@@ -639,6 +644,10 @@ export function renderCliStatus(options: CliStatusOptions): string {
       String(config.get('provider.model') ?? ''),
       String(config.get('provider.reasoningEffort') ?? ''),
     )}`,
+    ...(snapshot.provider.signIn ? [
+      `  sign-in: ${describeCliSignIns(snapshot.provider.signIn)}`,
+      `  model list: ${snapshot.provider.signIn.modelList}`,
+    ] : []),
     '',
     'Decision model:',
     `  policy: ${snapshot.decisionModel.policyLabel} (judgment.policy)`,

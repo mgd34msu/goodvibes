@@ -423,23 +423,25 @@ Remote session-local selection:
 POST /api/companion/chat/sessions
 Content-Type: application/json
 
-{ "title": "Mobile chat", "provider": "openai-subscriber", "model": "gpt-5.5" }
+{ "title": "Mobile chat", "provider": "openai", "model": "gpt-6.1-sol" }
 ```
 
 `provider` and `model` must be sent together, on create and on `PATCH`. Sending only one answers `400` with `code: "INVALID_MODEL_ROUTE"`, so a client that wants to change just the model sends the session's current `provider` with it. Creating a session with no body, when the daemon has no current model to fall back on, answers `400` with `code: "NO_MODEL_CONFIGURED"`.
 
 `provider` is the selected runtime provider row id from `GET /api/models`.
-`model` is the selected model id for that provider row. If the provider row is
-an alias for a catalog provider, such as `openai-subscriber` routing catalog
-model `openai:gpt-5.5`, the daemon also accepts the provider-qualified registry
-key as the `model` value:
+`model` is the selected model id for that provider row. The daemon also accepts
+the provider-qualified registry key as the `model` value:
 
 ```json
-{ "provider": "openai-subscriber", "model": "openai:gpt-5.5" }
+{ "provider": "openai", "model": "openai:gpt-6.1-sol" }
 ```
 
-Do not send `provider: "openai"` for a subscription-backed runtime provider
-row whose id is `openai-subscriber`; that is a different runtime route.
+OpenAI is one provider with two ways of signing in: a ChatGPT subscription and
+an API key. There is no separate subscription provider row. A request uses the
+subscription when it is set up, else the API key; with both set up, a request the
+subscription fails (sign-in ended, plan limit, model not on the plan, service
+failure) is asked again of the same model through the API key, and the turn says
+so once. The model list is the same whichever sign-in is used.
 
 ```http
 PATCH /api/companion/chat/sessions/{sessionId}

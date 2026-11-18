@@ -15,7 +15,9 @@ Provider and model state should be visible in:
 - the same `models` routes with `includeParameters:true`, `action:"route"`, or `action:"provider"` for full capabilities, readiness dimensions, the local hardware profile, fit scores, setup/download guidance, local endpoint candidates with exact endpoint inspection, model-list smoke commands and triage, saved benchmark evidence, route-change hints, usage windows, issues, notes, and auth-flow hints;
 - lower-level `agent_harness` modes `model_routing`, `model_route`, `local_model_cookbook` (what `models action:"local"` reads; `query` filters its recipes), `provider_accounts`, `provider_account`, and confirmed `run_local_model_smoke`, which remain available for compatibility and detailed harness inspection; provider/account mutations stay on confirmed workspace or settings routes.
 
-When a selected model is provider-qualified, Agent keeps the runtime provider row and raw model id separate. For example, `openai-subscriber` plus `openai:gpt-5.5` should route as provider `openai-subscriber` and model `gpt-5.5` where the public route expects provider/model fields.
+When a selected model is provider-qualified, Agent keeps the runtime provider row and raw model id separate. For example, `openai:gpt-6.1-sol` routes as provider `openai` and model `gpt-6.1-sol` where the public route expects provider/model fields.
+
+OpenAI is one provider with two sign-ins, a ChatGPT subscription and an API key, and one model list. Requests use the subscription when it is set up, else the API key. With both set up, a request the subscription fails is asked again of the same model through the API key, and the turn says so once. `goodvibes-agent status` shows the provider, the sign-in order and where the model list came from (the provider's own listing and its age, or the pinned model catalog).
 
 ## Local provider definitions
 

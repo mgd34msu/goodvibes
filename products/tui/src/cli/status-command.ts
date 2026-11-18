@@ -1,4 +1,6 @@
 import { existsSync } from 'node:fs';
+import { readCliProviderSignInFacts } from '@goodvibes-jev/engine/terminal-shell/cli-status-facts';
+import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/providers/provider-model';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { GoodVibesCliParseResult } from '@goodvibes-jev/engine/terminal-shell/cli-types';
 import { readPersistedWorkspaceTrust } from '@goodvibes-jev/engine/platform/platform/runtime/workspace-trust';
@@ -77,6 +79,7 @@ export async function runStatusCommand(runtime: StatusCommandRuntime): Promise<n
     configManager,
     workingDirectory,
     homeDirectory,
+    providerSignIn: readCliProviderSignInFacts(configManager, shellPaths, getProviderIdFromModel(configManager.get('provider.model'))),
     onboardingMarker,
     auth: readAuthPaths({ workingDirectory, homeDirectory }),
     service,

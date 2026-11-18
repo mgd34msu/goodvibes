@@ -10,6 +10,18 @@ export function modelWorkspaceRoute(provider: string, model: string): string {
   if (!model) return provider;
   return model.startsWith(`${provider}:`) ? model : `${provider}:${model}`;
 }
+/**
+ * Which sign-in a provider's requests use, in words, from how it is set up
+ * (ProviderConfiguredStatus.configuredVia): a subscription sign-in comes first
+ * when it is set up (OpenAI: then the API key), else the key.
+ */
+export function modelWorkspaceSignIn(via: string | undefined): string | undefined {
+  if (via === 'subscription') return 'subscription sign-in first (then an API key, when one is set)';
+  if (via === 'env') return 'API key from the environment';
+  if (via === 'secrets') return 'API key from the secret store';
+  if (via === 'anonymous') return 'no key needed';
+  return undefined;
+}
 export function modelWorkspaceTargetSummary(
   info: {
     readonly enabled: boolean;

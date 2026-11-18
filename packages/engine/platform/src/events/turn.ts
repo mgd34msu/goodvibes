@@ -132,6 +132,11 @@ export type TurnEvent =
      * downstream sums must report it, never $0 it).
      */
     costSource?: 'user' | 'provider' | 'catalog' | 'subscription' | 'unknown' | undefined;
+    /**
+     * The sign-in that answered, for a provider with more than one (OpenAI:
+     * `subscription`, `api-key`), and the one tried first when it failed.
+     */
+    signIn?: { route: string; label: string; movedFrom?: { route: string; label: string; reason: string } | undefined } | undefined;
     finishReason?: string | undefined;
     providerRequestId?: string | undefined;
     /**

@@ -25,6 +25,8 @@ export interface NativeHeadlessTurnResult {
     readonly sessionId?: string | undefined;
     readonly model?: string | undefined;
     readonly provider?: string | undefined;
+    /** The sign-in that answered last, for a provider with more than one (OpenAI: `subscription` or `api-key`). */
+    readonly signIn?: string | undefined;
     readonly events?: number | undefined;
     readonly usage?: HeadlessUsage | undefined;
     /** Set on failures: `outcome-unknown` means the host may have acted, `unavailable` that nothing was sent. */

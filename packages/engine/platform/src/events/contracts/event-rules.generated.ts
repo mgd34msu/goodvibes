@@ -835,6 +835,15 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     retries: { kind: 'number', optional: true },
     costUsdCents: { kind: 'number', optional: true },
     costSource: { kind: 'enum', values: ['catalog', 'provider', 'subscription', 'unknown', 'user'], optional: true },
+    signIn: { kind: 'object', optional: true, fields: [
+      { key: 'route', kind: 'string' },
+      { key: 'label', kind: 'string' },
+      { key: 'movedFrom', kind: 'object', optional: true, fields: [
+        { key: 'route', kind: 'string' },
+        { key: 'label', kind: 'string' },
+        { key: 'reason', kind: 'string' },
+      ] },
+    ] },
     finishReason: { kind: 'string', optional: true },
     providerRequestId: { kind: 'string', optional: true },
     originTool: { kind: 'string', optional: true },

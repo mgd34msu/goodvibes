@@ -38,8 +38,9 @@ The full write-up, with upgrade notes and measured speed figures, is in
   order issued.
 - Send less common tool definitions as one line each; the first call to one
   returns its full definition.
-- Add per-tool MCP rules: `/mcp deny <server> <tool> [--keep]`,
-  `/mcp allow <server> <tool>` and `/mcp clear <server> <tool>`, also in
+- Add per-tool MCP rules: `/mcp deny <server> <tool> [--keep]` (which only
+  ever tightens), `/mcp allow <server> <tool>` and `/mcp clear <server> <tool>`
+  (which lifts any rule on the tool), also in
   Settings, the `/mcp` form, the daemon routes and the web UI. An allowed tool
   is not held to the server's path and host scope.
 - Add a `screening` field (`screened`, or `not-screened` with a reason) to mail
@@ -94,10 +95,19 @@ The full write-up, with upgrade notes and measured speed figures, is in
   between stores at start; unknown keys are reported.
 - Clean up worktrees at every start without removing one that holds
   uncommitted or untracked changes; never force a removal; save commits on a
-  detached HEAD to a `goodvibes/saved-<commit>` branch first; delete a branch
-  only when merged; show at start, in `/status` and in the daemon's log what
+  detached HEAD to a `goodvibes/saved-<commit>` branch before removing the
+  folder; delete a branch only when merged; show on the main screen of both
+  terminal apps at start, in `/status` and in the daemon's log what
   was removed and what is kept for the owner's decision, with the commands to
   save, keep or discard it.
+- Show notices that need the owner (errors, warnings, offers such as restoring
+  an unsaved session, settings values ignored or read under a new name,
+  update results, start-up faults) on the main screen of both terminal apps,
+  start-up included; a `panel` target the owner chose keeps them in the
+  Activity view except errors, warnings and anything waiting for an answer.
+- Give the browser tool's start its own 20-second deadline, with an error that
+  names the browser, whether its process started or ended, its last lines and
+  the next step; end a read of a page whose script is stuck after 15 seconds.
 - Make an ordinary read cost no decision-model request (one before), a
   twelve-call turn 2 decision requests instead of 16, a 200-record knowledge
   search 24 instead of 200 and an Agent route plan 3 instead of 614, as counted
@@ -121,6 +131,9 @@ The full write-up, with upgrade notes and measured speed figures, is in
 - Never send a call whose arguments hold a credential to the decision model.
 - Keep fetch off private-network hosts the owner has not listed.
 - Authenticate Teams activities on every request.
+- Patch the glob-matching library the build tools and bundled language servers
+  use so a crafted pattern cannot stall them; the dependency audit fails if any
+  installed copy lacks the patch.
 
 ### Removed
 
@@ -142,6 +155,14 @@ The full write-up, with upgrade notes and measured speed figures, is in
   packet and worklist files, `triggers-v2.json` and `triggers.json`, per-app
   `memory.sqlite` files never folded into the shared store, transcript
   journals, the old shared recovery directory and single-file companion chats.
+
+### Known limits
+
+- On Apple Silicon Macs, stopping or restarting the daemon can occasionally end
+  in a crash instead of a clean exit, after shutdown has begun (observed once in
+  26 shutdown checks in CI). The cause is inside the runtime the daemon is
+  built on and is not yet identified; start the daemon again if it is not
+  running. Tracked for the next release.
 
 ## [3.2.0] - 2026-11-13
 

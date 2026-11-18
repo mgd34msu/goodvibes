@@ -166,7 +166,65 @@ async function describeLaunchFailure(message: string, profileDirectory: string, 
       'Install the browser system dependencies (Debian/Ubuntu: apt-get install libnss3 libatk-bridge2.0-0 libgtk-3-0 libasound2; Arch: pacman -S nss atk at-spi2-atk gtk3 alsa-lib).',
     );
   }
-  return new BrowserSessionError(`The browser failed to start: ${message.split('\n')[0]}`, null);
+  return new BrowserSessionError(`The browser failed to start: ${message.split('\n')[0]}${describeBrowserOutput(readLaunchLog(message).output)}`, null);
+}
+
+/**
+ * How long a browser may take to start and open its first page. A healthy
+ * start takes about a second, a cold first start on a busy machine a few; a
+ * start still unfinished after this is not coming, and without a deadline of
+ * its own the driver's (three minutes) would hold the turn with no answer.
+ */
+const LAUNCH_DEADLINE_MS = 20_000;
+
+/** What the driver's call log of a launch records: the process, whether it ended, and what the browser printed. */
+interface LaunchLog {
+  readonly pid: number | null;
+  readonly exit: string | null;
+  readonly output: readonly string[];
+}
+
+function readLaunchLog(message: string): LaunchLog {
+  let pid: number | null = null;
+  let exit: string | null = null;
+  const output: string[] = [];
+  // The driver colours its call log; the escapes are not part of what was logged.
+  for (const line of message.replace(/\u001b\[[0-9;]*m/g, '').split('\n')) {
+    const launched = /<launched> pid=(\d+)/.exec(line);
+    if (launched) { pid = Number(launched[1]); continue; }
+    const exited = /<process did exit: exitCode=([^,]*), signal=([^>]*)>/.exec(line);
+    if (exited) { exit = `exit code ${exited[1]!}, signal ${exited[2]!}`; continue; }
+    const printed = /\[pid=\d+\]\[(?:err|out)\] ?(.*)$/.exec(line);
+    if (printed && printed[1]!.trim()) output.push(printed[1]!.trim());
+  }
+  return { pid, exit, output };
+}
+
+function describeBrowserOutput(output: readonly string[]): string {
+  if (output.length === 0) return ' The browser printed nothing.';
+  const last = output.slice(-5).map(line => (line.length > 300 ? `${line.slice(0, 300)}...` : line));
+  return ` Last lines the browser printed: ${last.map(line => `"${line}"`).join(' | ')}`;
+}
+
+/**
+ * A start that passed its deadline: what was waited for, what was seen, and
+ * the browser process ended. The driver only asks a stuck browser to close and
+ * waits longer before killing it, so the process group it started (the
+ * browser leads its own) is ended here, now.
+ */
+function launchDeadlineFailure(message: string, executablePath: string): BrowserSessionError {
+  const log = readLaunchLog(message);
+  let observed: string;
+  if (log.pid === null) observed = 'its process never started';
+  else if (log.exit !== null) observed = `its process started (pid ${String(log.pid)}) and ended (${log.exit}) before it opened a page`;
+  else {
+    try { process.kill(process.platform === 'win32' ? log.pid : -log.pid, 'SIGKILL'); } catch { /* already gone */ }
+    observed = `its process started (pid ${String(log.pid)}) and was still running, but it never finished connecting to the driver and opening its first page, so it was stopped`;
+  }
+  return new BrowserSessionError(
+    `The browser did not finish starting within ${String(LAUNCH_DEADLINE_MS / 1000)} s: waited for ${executablePath} to start and open its first page; ${observed}.${describeBrowserOutput(log.output)}`,
+    'Call action:"launch" again, since a first start on a busy machine can be slow. If it stops the same way, run action:"provision" with repair:true to reinstall the browser, and read the lines the browser printed for its own reason.',
+  );
 }
 
 export interface BrowserSessionManagerDeps {
@@ -438,8 +496,10 @@ export class BrowserSessionManager {
         args: [...STEALTH_ARGS],
         ignoreDefaultArgs: [...SUPPRESSED_DEFAULT_ARGS],
         viewport: options.viewport ?? { width: 1280, height: 900 },
+        timeout: LAUNCH_DEADLINE_MS,
       });
     } catch (error) {
+      if (error instanceof Error && error.name === 'TimeoutError') throw launchDeadlineFailure(error.message, provision.executablePath);
       throw await describeLaunchFailure(error instanceof Error ? error.message : String(error), profileDirectory, options);
     }
     this.#unpublishedContexts.add(context);

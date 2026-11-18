@@ -44,6 +44,7 @@ import {
   isDeadlineError,
   launchNote,
   normalizeUrl,
+  pageRead,
   readElementData,
   UntrustedEffectError,
 } from './browser-engine-contract.js';
@@ -659,7 +660,7 @@ export class BrowserEngine {
     target = { ...target }; ownership = ownership && { ...ownership };
     const work = new BrowserControlIdentityWork(ownership);
     return this.withTarget(target, async ({ page }) => {
-      const facts = await work.wait(() => page.evaluate(readMarketplaceListingFacts));
+      const facts = await work.wait(() => pageRead(() => page.evaluate(readMarketplaceListingFacts)));
       return { url: page.url(), ...facts };
     }, work);
   }
@@ -1192,7 +1193,7 @@ export class BrowserEngine {
       const amount = args.amount ?? 600;
       const delta = args.direction === 'up' ? -amount : amount;
       await work.wait(() => page.mouse.wheel(0, delta));
-      const position = await work.wait(() => page.evaluate(() => ({ scrollY: window.scrollY, scrollHeight: document.body.scrollHeight })));
+      const position = await work.wait(() => pageRead(() => page.evaluate(() => ({ scrollY: window.scrollY, scrollHeight: document.body.scrollHeight }))));
       return { sessionId, pageId, scrolledBy: delta, ...position };
     }, work);
   }
@@ -1510,12 +1511,12 @@ export class BrowserEngine {
         const { locator, revalidate, assertCurrent } = await scope.resolve(args.ref);
         await revalidate(); assertCurrent();
         matched = 1;
-        extracted.push(await work.wait(() => locator.evaluate(readElementData, [...fields])));
+        extracted.push(await work.wait(() => pageRead(() => locator.evaluate(readElementData, [...fields]))));
         assertCurrent();
       } else {
         const selector = args.selector?.trim() || 'body';
         const all = page.locator(selector);
-        matched = await work.wait(() => all.count().catch(() => 0));
+        matched = await work.wait(() => pageRead(() => all.count().catch(() => 0)));
         if (matched === 0) {
           throw new BrowserSessionError(
             `Nothing on this page matches ${selector}.`,
@@ -1524,7 +1525,7 @@ export class BrowserEngine {
         }
         const take = args.all === true ? Math.min(matched, limit) : 1;
         for (let index = 0; index < take; index += 1) {
-          extracted.push(await work.wait(() => all.nth(index).evaluate(readElementData, [...fields])));
+          extracted.push(await work.wait(() => pageRead(() => all.nth(index).evaluate(readElementData, [...fields]))));
         }
       }
 

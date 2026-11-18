@@ -81,6 +81,30 @@ export async function boundedBrowserCall<T>(
   }
 }
 
+/**
+ * One read of the page itself (a script evaluated in it, a count, its title).
+ * The driver gives page script no deadline, so a page whose script is stuck in
+ * a loop or a blocking request would hold the call, and the turn, for as long
+ * as it stays stuck. Cancellation is the caller's own race; this is the end
+ * when nobody cancels. A late answer of the abandoned read is dropped.
+ */
+export async function pageRead<T>(run: () => Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const work = run();
+  work.catch(() => undefined);
+  const stop = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new BrowserSessionError(
+      `The page did not answer a read within ${seconds(DEFAULT_ACTION_TIMEOUT_MS)}: its script is busy or stuck.`,
+      'Call action:"navigate" to load the page again, or action:"screenshot" to see what it shows.',
+    )), DEFAULT_ACTION_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([work, stop]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** The refusal for a browser call that passed its deadline: the action, the deadline and the next step. */
 export function deadlineError(call: { readonly action: string; readonly deadlineMs: number; readonly next: string }): BrowserSessionError {
   return new BrowserSessionError(

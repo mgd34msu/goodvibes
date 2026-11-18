@@ -5,6 +5,7 @@ import { containsIssuerCredential } from '../utils/redaction.js';
 
 import { BrowserControlIdentityWork } from './browser-control-identity.js';
 import { hasAdmittedBrowserWork } from './browser-action-admission.js';
+import { pageRead } from './browser-engine-contract.js';
 import type { BrowserElementRef, BrowserSnapshot, CardFieldGuard } from './browser-types.js';
 import { captureBrowserControlSnapshot, BrowserControlSnapshotError, type BrowserControlSnapshot } from './browser-control-snapshot-data.js';
 
@@ -369,8 +370,8 @@ async function credentialFrameChain(frame: Frame, work: BrowserPageReadWork, ass
     const parent = selected.parentFrame();
     if (!parent) return chain;
     const selectedFrame = selected;
-    const element = await work.wait(() => selectedFrame.frameElement()); assertSource();
-    const selector = await work.wait(() => element.evaluate(selectorOfFrameElement)); assertSource();
+    const element = await work.wait(() => pageRead(() => selectedFrame.frameElement())); assertSource();
+    const selector = await work.wait(() => pageRead(() => element.evaluate(selectorOfFrameElement))); assertSource();
     if (typeof selector !== 'string' || !selector || selectedFrame.parentFrame() !== parent) throw new Error('Complete browser frames are unavailable.');
     chain.unshift(selector); selected = parent;
   }
@@ -426,9 +427,9 @@ export async function captureCredentialPage(
     let password = false;
     for (const frame of frames) {
       const chain = await credentialFrameChain(frame, work, assertSource);
-      const result = await work.wait(() => frame.evaluate(collectElements, {
+      const result = await work.wait(() => pageRead(() => frame.evaluate(collectElements, {
         limit: Number.MAX_SAFE_INTEGER, identityOnly: true, ...(checkout ? { checkout: true as const } : {}),
-      } satisfies Parameters<typeof collectElements>[0])); assertSource();
+      } satisfies Parameters<typeof collectElements>[0]))); assertSource();
       const captured = credentialDocument(result, checkout);
       password ||= captured.password;
       documents.push({ frameChain: chain, ...captured.document });
@@ -696,9 +697,9 @@ async function frameChainFor(frame: Frame, work: BrowserControlIdentityWork): Pr
   let current: Frame | null = frame;
   while (current && current.parentFrame()) {
     const original = current;
-    const element = await work.wait(() => original.frameElement().catch(() => null));
+    const element = await work.wait(() => pageRead(() => original.frameElement().catch(() => null)));
     if (!element) return null;
-    const selector = await work.wait(() => element.evaluate(selectorOfFrameElement).catch(() => ''));
+    const selector = await work.wait(() => pageRead(() => element.evaluate(selectorOfFrameElement).catch(() => '')));
     if (!selector) return null;
     chain.unshift(selector);
     current = current.parentFrame();
@@ -757,8 +758,8 @@ export async function takeSnapshot(
     }
     const chain = main ? [] : await frameChainFor(frame, work);
     if (chain === null) { if (options.controls) throw new Error('Complete browser controls unavailable'); continue; }
-    const collected = captureOwnedJson(await work.wait(() => frame.evaluate(collectElements, options.controls ? Number.MAX_SAFE_INTEGER : limit - raw.length)
-      .catch(error => { if (options.controls) throw error; return [] as RawElement[]; })), nodeTypes.isProxy) as RawElement[];
+    const collected = captureOwnedJson(await work.wait(() => pageRead(() => frame.evaluate(collectElements, options.controls ? Number.MAX_SAFE_INTEGER : limit - raw.length)
+      .catch(error => { if (options.controls) throw error; return [] as RawElement[]; }))), nodeTypes.isProxy) as RawElement[];
     // A hidden password step in the control's own document is caught when the
     // action re-identifies its control (passwordInDocument).
     password ||= collected.some(element => element.tag === 'input' && element.control?.type === 'password');
@@ -833,7 +834,7 @@ export async function takeSnapshot(
     sessionId,
     pageId,
     url: page.url(),
-    title: await work.wait(() => page.title().catch(() => '')),
+    title: await work.wait(() => pageRead(() => page.title().catch(() => ''))),
     snapshotId,
     elements: Object.freeze(elements),
     truncated: !options.controls && raw.length >= limit,
@@ -902,7 +903,7 @@ export async function resolveRef(
   };
   const scope = frameScope(page, recorded.frameChain);
   const locator = scope.locator(element.selector).first();
-  const count = await work.wait(() => scope.locator(recorded.selector).count());
+  const count = await work.wait(() => pageRead(() => scope.locator(recorded.selector).count()));
   current();
   if (count !== 1) {
     throw new StaleElementError(
@@ -910,7 +911,7 @@ export async function resolveRef(
       'Call action:"snapshot" to get current refs, then retry.',
     );
   }
-  const actual = admitLiveDescriptor(await work.wait(() => locator.evaluate(describeElement)));
+  const actual = admitLiveDescriptor(await work.wait(() => pageRead(() => locator.evaluate(describeElement))));
   current();
   // Reading a quote must work before card entry enables the order button.
   // Effect consumers use the default mode and still refuse disabled controls.
@@ -939,10 +940,10 @@ export async function resolveRef(
   const approved = JSON.stringify(actual);
   const revalidate = async () => {
     if (actual.type === 'password' && !hasAdmittedBrowserWork(work)) throw new StaleElementError('The password control has no current action decision.', 'Obtain a decision for the exact browser action.');
-    const count = await work.wait(() => scope.locator(recorded.selector).count());
+    const count = await work.wait(() => pageRead(() => scope.locator(recorded.selector).count()));
     current();
     if (count !== 1) throw new StaleElementError('The selected control is no longer unique.', 'Call action:"snapshot" again.');
-    const latest = admitLiveDescriptor(await work.wait(() => locator.evaluate(describeElement)));
+    const latest = admitLiveDescriptor(await work.wait(() => pageRead(() => locator.evaluate(describeElement))));
     current();
     if (JSON.stringify(latest) !== approved) throw new StaleElementError('The selected control changed after its identity reading.', 'Call action:"snapshot" again.');
   };

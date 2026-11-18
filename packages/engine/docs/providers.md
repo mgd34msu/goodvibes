@@ -48,7 +48,7 @@ configured only with a bearer token, a complete access-key pair or a profile:
 
 | Provider id | Label | Primary env var(s) |
 |-------------|-------|--------------------|
-| `openai` | OpenAI | `OPENAI_API_KEY` (or `OPENAI_KEY`) |
+| `openai` | OpenAI | `OPENAI_API_KEY` (or `OPENAI_KEY`); a ChatGPT subscription sign-in is the other way in, used first when it is set up |
 | `anthropic` | Anthropic | `ANTHROPIC_API_KEY` (or `CLAUDE_API_KEY`) |
 | `gemini` | Gemini | `GEMINI_API_KEY` (or `GOOGLE_API_KEY`, `GOOGLE_GEMINI_API_KEY`) |
 | `inceptionlabs` | Inception Labs | `INCEPTION_API_KEY` |
@@ -94,7 +94,9 @@ the normal environment/secret setup described above.
 
 
 `openrouter` and `aihubmix` are registered the same way as every other row
-above (a built-in entry with a fixed base URL and a starter model list), but
+above (a built-in entry with a fixed base URL and a default model; its model
+list is its own listing, else its last listing on disk, else the pinned model
+catalog's rows for it), but
 neither has an entry in the curated brand-label map, so `GET /api/models`
 reports them with the id's default capitalization rather than a designed
 brand label. This is current behavior, not a documentation simplification.

@@ -143,11 +143,13 @@ When every backend for a free synthetic model is exhausted and cooldowns are too
 
 ### Paid and subscription exhaustion
 
-Paid and subscription models do not auto-switch to a different model, because the user made a deliberate, cost-conscious choice. When a paid or subscription model is exhausted, the system shows recovery options instead:
+Paid and subscription models do not switch to a model you did not choose, because the choice of model was deliberate and cost-conscious. When every backend of a paid synthetic model is exhausted, the turn stops and shows recovery options instead:
 
-- wait for the cooldown to expire and retry
+- wait a few minutes for the rate limit to reset and retry
 - switch model with `/model`
-- switch to a free synthetic model
+- switch to a free model with `/model`, choosing the free tier
+
+Any other paid or subscription model follows the rules under "Failover notices and cost delta" below: the same model on another sign-in first, then only your own `provider.fallbackModels`, else the turn stops and says why.
 
 ### Model picker grouping
 

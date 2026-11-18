@@ -307,7 +307,7 @@ This includes but is not limited to when a provider moves a model from free to p
 
 Refreshes happen automatically when a new session is started or resumed after the 24-hour catalog TTL expires. For long-running sessions, please ensure that the models are refreshed daily.
 
-Paid and subscription models never auto-switch to a different model. That choice stays yours. When one is exhausted, GoodVibes says so and offers to wait out the cooldown, change model, or move to a free synthetic model. Full failover behavior: [docs/providers-and-routing.md](docs/providers-and-routing.md).
+Paid and subscription models never move to a model you did not choose. A failed model is tried again only as the same model on another sign-in of its provider (OpenAI: the subscription, then the API key), and then only as the models you list in `provider.fallbackModels`, in your order; with none listed, the turn stops and says why. When every backend of a paid synthetic model is exhausted, GoodVibes says so and offers to wait out the cooldown, change model, or move to a free model. Full failover behavior: [docs/providers-and-routing.md](docs/providers-and-routing.md).
 
 ---
 

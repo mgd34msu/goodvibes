@@ -37,3 +37,50 @@ e054c80100249341c6eebc02d21ff64ebc94abc3:docs/audit/sdk-nullable-context-windows
 # it at runtime; ignore only these exact pre-repair historical findings.
 fa73eda00b5b147d48a569d4535b5571a3c4b0d9:packages/engine/test/error-display-readings.test.ts:github-pat:262
 fa73eda00b5b147d48a569d4535b5571a3c4b0d9:packages/engine/test/error-display-readings.test.ts:generic-api-key:262
+
+# Synthetic fixtures that .gitleaks.toml used to allowlist by path and exact
+# value, which put each value into the config file itself. The fixtures now
+# assemble their values at run time (utils/fixture-credentials.ts) or are gone;
+# these are only the exact published findings of their historical versions.
+f5644f6205ce9fa1e2145ad09207a6db3aff4508:docs/inventory/agent.md:generic-api-key:1128
+b7beb21a23fdd01d57ac13d8f1212aa091efc868:packages/engine/platform/src/platform/gate/batteries/side-effect.ts:curl-auth-header:102
+b7beb21a23fdd01d57ac13d8f1212aa091efc868:packages/engine/platform/src/platform/runtime/batteries/at-rest-credential.ts:generic-api-key:49
+b7beb21a23fdd01d57ac13d8f1212aa091efc868:packages/engine/platform/src/platform/runtime/batteries/at-rest-credential.ts:generic-api-key:54
+b7beb21a23fdd01d57ac13d8f1212aa091efc868:packages/engine/platform/src/platform/runtime/batteries/at-rest-credential.ts:generic-api-key:59
+b7beb21a23fdd01d57ac13d8f1212aa091efc868:packages/engine/platform/src/platform/runtime/batteries/at-rest-credential.ts:jwt:64
+b7beb21a23fdd01d57ac13d8f1212aa091efc868:packages/engine/platform/src/platform/tools/batteries/credential-value.ts:discord-client-id:60
+b7beb21a23fdd01d57ac13d8f1212aa091efc868:packages/engine/platform/src/platform/tools/batteries/secret-finding.ts:aws-access-token:53
+b7beb21a23fdd01d57ac13d8f1212aa091efc868:packages/engine/platform/src/platform/tools/batteries/secret-finding.ts:generic-api-key:53
+b7beb21a23fdd01d57ac13d8f1212aa091efc868:packages/engine/platform/src/platform/tools/batteries/secret-line.ts:generic-api-key:61
+2c5d59600f4471606561e845c1c9840b98b61903:packages/engine/test/at-rest-redaction.test.ts:generic-api-key:132
+2c5d59600f4471606561e845c1c9840b98b61903:packages/engine/test/at-rest-redaction.test.ts:generic-api-key:134
+2c5d59600f4471606561e845c1c9840b98b61903:packages/engine/test/at-rest-redaction.test.ts:generic-api-key:40
+2c5d59600f4471606561e845c1c9840b98b61903:packages/engine/test/at-rest-redaction.test.ts:github-pat:132
+2c5d59600f4471606561e845c1c9840b98b61903:packages/engine/test/at-rest-redaction.test.ts:github-pat:134
+2c5d59600f4471606561e845c1c9840b98b61903:packages/engine/test/at-rest-redaction.test.ts:github-pat:40
+b4f19364ddd894f25d5be6ec19bb3ef41231e7f9:packages/engine/test/at-rest-redaction.test.ts:generic-api-key:42
+b4f19364ddd894f25d5be6ec19bb3ef41231e7f9:packages/engine/test/at-rest-redaction.test.ts:github-pat:42
+b94de62a8e88571ae33407d5c8b358ea40d1f418:packages/engine/test/export-session-export.test.ts:generic-api-key:521
+b4f19364ddd894f25d5be6ec19bb3ef41231e7f9:packages/engine/test/narrowed-constraints.test.ts:github-pat:88
+844fa9de86fc1fa192fab6e55cff23e53b688ce6:packages/engine/test/replay-run-snapshot-store.test.ts:generic-api-key:18
+844fa9de86fc1fa192fab6e55cff23e53b688ce6:packages/engine/test/replay-run-snapshot-store.test.ts:github-pat:18
+4336fd37e8c2052ffb7233fd0ae9b0fab8d5ec46:products/agent/src/test/agent/calendar-registry.test.ts:generic-api-key:128
+4336fd37e8c2052ffb7233fd0ae9b0fab8d5ec46:products/agent/src/test/agent/skill-standard.test.ts:generic-api-key:65
+4336fd37e8c2052ffb7233fd0ae9b0fab8d5ec46:products/agent/src/test/cli/redaction-credential-names.test.ts:gcp-api-key:152
+4336fd37e8c2052ffb7233fd0ae9b0fab8d5ec46:products/agent/src/test/cli/redaction-credential-names.test.ts:generic-api-key:151
+4336fd37e8c2052ffb7233fd0ae9b0fab8d5ec46:products/agent/src/test/cli/redaction-credential-names.test.ts:generic-api-key:152
+4336fd37e8c2052ffb7233fd0ae9b0fab8d5ec46:products/agent/src/test/config/service-registry.test.ts:generic-api-key:323
+4336fd37e8c2052ffb7233fd0ae9b0fab8d5ec46:products/agent/src/test/verification/live-verifier.test.ts:generic-api-key:236
+4336fd37e8c2052ffb7233fd0ae9b0fab8d5ec46:products/agent/src/test/verification/live-verifier.test.ts:generic-api-key:266
+
+# Untrusted-content taint fixture: base64 of a sentence saying it is not a
+# secret. Removed from the test; this is its one published finding.
+2c5d59600f4471606561e845c1c9840b98b61903:packages/engine/test/security-content-taint.test.ts:generic-api-key:71
+
+# Two literals GitHub secret scanning reported in published history (alerts 3
+# and 4): a key-shaped test value, and a bot token in a decision-battery
+# fixture, which the owner revokes. Both are gone from the tree. A published
+# commit cannot change without rewriting public history, so without these a
+# full-history scan would report the same two findings on every run.
+9bc4aab22382dc33b3558dda0e96fc283f5e8ac2:products/agent/src/test/tools/agent-accounts-authority.test.ts:generic-api-key:116
+cedfc9d374af0e463458c6a5228688388d93e215:packages/engine/platform/src/platform/gate/batteries/side-effect.ts:telegram-bot-api-token:107

@@ -228,10 +228,40 @@ jobs:
         uses: ./.github/actions/setup
       - name: Dependency audit
         run: bun run security:audit
-      - name: Secret scan
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+      # gitleaks from its tagged source; the Go checksum database verifies it.
+      - name: Install gitleaks
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" go install github.com/zricethezav/gitleaks/v8@v8.24.3
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      # Every tracked file as this commit holds it, whatever push first carried
+      # it. Nothing is exempt here: .gitleaksignore names only historical
+      # commits, and .gitleaks.toml allowlists no value.
+      - name: Secret scan of the tree
+        run: |
+          tree="$RUNNER_TEMP/tree"
+          mkdir -p "$tree"
+          git archive HEAD | tar -x -C "$tree"
+          gitleaks dir "$tree" --config .gitleaks.toml --redact --no-banner --exit-code 1
+      # Every commit this push or pull request adds (a run without a range,
+      # such as a manual one, reads the whole history), so a literal added
+      # and removed again inside one push is still reported.
+      - name: Secret scan of the new commits
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          range=""
+          if [ "$EVENT" = pull_request ]; then
+            range="$BASE..HEAD"
+          elif [ "$EVENT" = push ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            range="$BEFORE..HEAD"
+          fi
+          if [ -n "$range" ]; then
+            gitleaks git . --config .gitleaks.toml --gitleaks-ignore-path .gitleaksignore --log-opts="$range" --redact --no-banner --exit-code 1
+          else
+            gitleaks git . --config .gitleaks.toml --gitleaks-ignore-path .gitleaksignore --redact --no-banner --exit-code 1
+          fi
 
   # The daemon built and run on each other release platform, on pushes to main
   # (and a manual run), not on pull requests. Each target builds and runs in one

@@ -1,6 +1,6 @@
 # gitleaks configuration
 #
-# Starts from the stock ruleset and narrows two classes of false match. Both
+# Starts from the stock ruleset and narrows one class of false match. The
 # entries below match a specific SHAPE that key material never has, so a real
 # credential committed to this tree is still reported.
 #
@@ -21,193 +21,21 @@
 # `keys.auth`. Key material itself never has that shape, so a real subscription
 # key pasted into the tree is still reported.
 #
-# The second class is one literal fixture in the untrusted-content taint tests.
-# That check exists because a long verbatim token: an account reference, a
-# booking code: copied out of a mailbox into an outgoing message is derivation
-# even when no prose comes with it. Demonstrating it needs a string that is
-# long, has no spaces, and is not English, which is the same description as a
-# credential; the generic-api-key rule scores it as one. The fixture spells out
-# what it is: it base64-decodes to `exampletokenvaluenotreallyasecret0198`.
-#
-# It is allowlisted as that exact literal rather than by path or by file, so
-# any OTHER high-entropy string appearing in the security tests is still
-# reported. The entry is needed in config rather than fixed in the file because
-# the string is already in committed history, which a later edit cannot reach.
+# Nothing else is allowlisted here, and never a value: a value written into this
+# file is itself a credential-shaped literal in a public tree. A finding in
+# history that is known not to be a live credential is exempted only as its
+# exact fingerprint (commit:path:rule:line) in .gitleaksignore, with the reason.
+# CI scans the whole tree of the commit it builds (where no exemption applies)
+# and every commit the push or pull request adds; `bun run
+# credential-literals:check` fails on a credential-shaped literal in any
+# tracked file before that.
 
 [extend]
 useDefault = true
 
 [allowlist]
-description = "Web Push subscription field names (RFC 8291) and one taint-test fixture, neither is key material"
+description = "Web Push subscription field names (RFC 8291), which are not key material"
 regexes = [
   '''^(?:[A-Za-z_$][A-Za-z0-9_$]*\.)*keys\.p256dh$''',
   '''^(?:[A-Za-z_$][A-Za-z0-9_$]*\.)*keys\.auth$''',
-  '''^ZXhhbXBsZXRva2VudmFsdWVub3RyZWFsbHlhc2VjcmV0MDE5OA$''',
 ]
-
-# Historical credential/privacy examples are intentional test inputs, not issued
-# credentials. Each exception below requires BOTH the exact authored path and
-# the complete exact fixture value. New values at these paths remain scanned.
-# Rules, full history traversal, and the existing field-name exceptions remain
-# active. Current inline fixture comments cannot suppress older committed text.
-
-[[rules]]
-id = "aws-access-token"
-
-[[rules.allowlists]]
-description = "Exact historical synthetic fixture at its authored path"
-condition = "AND"
-regexTarget = "secret"
-paths = [ '''^packages/engine/platform/src/platform/tools/batteries/secret\-finding\.ts$''' ]
-regexes = [ '''^(?:AKIAQ4F7ZL2PXM3N8TRW)$''' ]
-
-[[rules]]
-id = "curl-auth-header"
-
-[[rules.allowlists]]
-description = "Exact historical synthetic fixture at its authored path"
-condition = "AND"
-regexTarget = "secret"
-paths = [ '''^packages/engine/platform/src/platform/gate/batteries/side\-effect\.ts$''' ]
-regexes = [ '''^(?:ghp_4f9aX2kLmQ8rT1vB7nC3dE5)$''' ]
-
-[[rules]]
-id = "discord-client-id"
-
-[[rules.allowlists]]
-description = "Exact historical synthetic fixture at its authored path"
-condition = "AND"
-regexTarget = "secret"
-paths = [ '''^packages/engine/platform/src/platform/tools/batteries/credential\-value\.ts$''' ]
-regexes = [ '''^(?:112233445566778899)$''' ]
-
-[[rules]]
-id = "gcp-api-key"
-
-[[rules.allowlists]]
-description = "Exact historical synthetic fixture at its authored path"
-condition = "AND"
-regexTarget = "secret"
-paths = [ '''^products/agent/src/test/cli/redaction\-credential\-names\.test\.ts$''' ]
-regexes = [ '''^(?:AIzaSyAbcdefghijklmnopqrstuvwxyz0123456)$''' ]
-
-[[rules]]
-id = "generic-api-key"
-
-[[rules.allowlists]]
-description = "Exact historical synthetic fixture at its authored path"
-condition = "AND"
-regexTarget = "secret"
-paths = [ '''^docs/inventory/agent\.md$''' ]
-regexes = [ '''^(?:abc123def456ghi789)$''' ]
-
-[[rules.allowlists]]
-description = "Exact historical synthetic fixture at its authored path"
-condition = "AND"
-regexTarget = "secret"
-paths = [ '''^packages/engine/platform/src/platform/runtime/batteries/at\-rest\-credential\.ts$''' ]
-regexes = [ '''^(?:key\-3ax6xnjp29jd6fds4gc373sgvjxteol0|sk\-or\-v1\-7c1e2b9a04d38f6e5a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d|sk\-proj\-4fQ9xT2mLk8vRw7ZbN3cYp1JhG6sDe0A)$''' ]
-
-[[rules.allowlists]]
-description = "Exact historical synthetic fixture at its authored path"
-condition = "AND"
-regexTarget = "secret"
-paths = [ '''^packages/engine/platform/src/platform/tools/batteries/secret\-finding\.ts$''' ]
-regexes = [ '''^(?:kB9s2Lq7Xv0Yw3Rt6Pm1Nz8Jc4Hd5Fg2Ae7Ub0Oi)$''' ]
-
-[[rules.allowlists]]
-description = "Exact historical synthetic fixture at its authored path"
-condition = "AND"
-regexTarget = "secret"
-paths = [ '''^packages/engine/platform/src/platform/tools/batteries/secret\-line\.ts$''' ]
-regexes = [ '''^(?:MIIEowIBAAKCAQEAu1SU1LfVLPHCozMxH2Mo4lgOEePzNm0tRgeLezV6ffAt0gun)$''' ]
-
-[[rules.allowlists]]
-description = "Exact historical synthetic fixture at its authored path"
-condition = "AND"
-regexTarget = "secret"
-paths = [ '''^packages/engine/test/at\-rest\-redaction\.test\.ts$''' ]
-regexes = [ '''^(?:ghp_0123456789012345678901234567890123456789)$''' ]
-
-[[rules.allowlists]]
-description = "Exact historical synthetic fixture at its authored path"
-condition = "AND"
-regexTarget = "secret"
-paths = [ '''^packages/engine/test/export\-session\-export\.test\.ts$''' ]
-regexes = [ '''^(?:sk\-abcdefghijklmnopqrstuvwxyz0123)$''' ]
-
-[[rules.allowlists]]
-description = "Exact historical synthetic fixture at its authored path"
-condition = "AND"
-regexTarget = "secret"
-paths = [ '''^packages/engine/test/replay\-run\-snapshot\-store\.test\.ts$''' ]
-regexes = [ '''^(?:ghp_0123456789012345678901234567890123456789)$''' ]
-
-[[rules.allowlists]]
-description = "Exact historical synthetic fixture at its authored path"
-condition = "AND"
-regexTarget = "secret"
-paths = [ '''^products/agent/src/test/agent/calendar\-registry\.test\.ts$''' ]
-regexes = [ '''^(?:sk\-abc123def456ghi789jkl)$''' ]
-
-[[rules.allowlists]]
-description = "Exact historical synthetic fixture at its authored path"
-condition = "AND"
-regexTarget = "secret"
-paths = [ '''^products/agent/src/test/agent/skill\-standard\.test\.ts$''' ]
-regexes = [ '''^(?:abc123def456ghi789)$''' ]
-
-[[rules.allowlists]]
-description = "Exact historical synthetic fixture at its authored path"
-condition = "AND"
-regexTarget = "secret"
-paths = [ '''^products/agent/src/test/cli/redaction\-credential\-names\.test\.ts$''' ]
-regexes = [ '''^(?:AIzaSyAbcdefghijklmnopqrstuvwxyz0123456|sk\-proj\-abcdefghijklmnopqrstuvwxyz012345)$''' ]
-
-[[rules.allowlists]]
-description = "Exact historical synthetic fixture at its authored path"
-condition = "AND"
-regexTarget = "secret"
-paths = [ '''^products/agent/src/test/config/service\-registry\.test\.ts$''' ]
-regexes = [ '''^(?:TOTALLY_MISSING_KEY_XYZ_999)$''' ]
-
-[[rules.allowlists]]
-description = "Exact historical synthetic fixture at its authored path"
-condition = "AND"
-regexTarget = "secret"
-paths = [ '''^products/agent/src/test/verification/live\-verifier\.test\.ts$''' ]
-regexes = [ '''^(?:tok_abc123xyz)$''' ]
-
-[[rules]]
-id = "github-pat"
-
-[[rules.allowlists]]
-description = "Exact historical synthetic fixture at its authored path"
-condition = "AND"
-regexTarget = "secret"
-paths = [ '''^packages/engine/test/at\-rest\-redaction\.test\.ts$''' ]
-regexes = [ '''^(?:ghp_012345678901234567890123456789012345)$''' ]
-
-[[rules.allowlists]]
-description = "Exact historical synthetic fixture at its authored path"
-condition = "AND"
-regexTarget = "secret"
-paths = [ '''^packages/engine/test/narrowed\-constraints\.test\.ts$''' ]
-regexes = [ '''^(?:ghp_012345678901234567890123456789012345)$''' ]
-
-[[rules.allowlists]]
-description = "Exact historical synthetic fixture at its authored path"
-condition = "AND"
-regexTarget = "secret"
-paths = [ '''^packages/engine/test/replay\-run\-snapshot\-store\.test\.ts$''' ]
-regexes = [ '''^(?:ghp_012345678901234567890123456789012345)$''' ]
-
-[[rules]]
-id = "jwt"
-
-[[rules.allowlists]]
-description = "Exact historical synthetic fixture at its authored path"
-condition = "AND"
-regexTarget = "secret"
-paths = [ '''^packages/engine/platform/src/platform/runtime/batteries/at\-rest\-credential\.ts$''' ]
-regexes = [ '''^(?:eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiJ1c2VyLTQyIn0\.dBjftJeZ4CVP\-mB92K27uhbUJU1p1r_wW1gFWFOEjXk|eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiJ1c2VyLTQyIn0\.dBjftJeZ4CVP\-mB92K27uhbUJU1p1r_wW1gFWFOEjXk\\\\)$''' ]

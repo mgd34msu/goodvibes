@@ -40,7 +40,7 @@ export const handleBundleCommand = createSupportBundleCommand<
   {
     site: 'terminal-shell.support-bundle.export',
     providerSite: 'tui.support-bundle.setup',
-    packageName: '@goodvibes-jev/tui',
+    packageName: 'goodvibes',
     bundleType: 'goodvibes.support',
     title: 'GoodVibes support bundle',
     commandBase: () => 'goodvibes support-bundle',

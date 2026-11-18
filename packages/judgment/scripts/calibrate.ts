@@ -31,7 +31,7 @@ import {
   type CalibrationReport,
 } from '../src/index.ts';
 
-const stateDir = join(process.env['XDG_STATE_HOME'] ?? join(homedir(), '.local', 'state'), 'goodvibes-jev', 'judgment');
+const stateDir = join(process.env['XDG_STATE_HOME'] ?? join(homedir(), '.local', 'state'), 'goodvibes', 'judgment');
 const { values, positionals } = parseArgs({
   args: process.argv.slice(2),
   allowPositionals: true,

@@ -11,7 +11,7 @@ import { judgmentProcessSignal } from '../../judgment/scripts/process-owner.ts';
  * runner records. Two user tasks also go through the hoisted task route
  * planner, and two provider errors through the hoisted user error line.
  *
- * Readings are remembered under $XDG_STATE_HOME/goodvibes-jev/routing-proof,
+ * Readings are remembered under $XDG_STATE_HOME/goodvibes/routing-proof,
  * so a rerun asks only what is new.
  *
  *   TYPESAFE_API_KEY=... bun run --cwd packages/engine routing:proof
@@ -35,7 +35,7 @@ import { readUserFacingErrorLine } from '../platform/src/platform/routing/user-e
 
 type RegistryOptions = ConstructorParameters<typeof ProviderRegistry>[0];
 
-const stateDir = join(process.env['XDG_STATE_HOME'] ?? join(homedir(), '.local', 'state'), 'goodvibes-jev', 'routing-proof');
+const stateDir = join(process.env['XDG_STATE_HOME'] ?? join(homedir(), '.local', 'state'), 'goodvibes', 'routing-proof');
 mkdirSync(stateDir, { recursive: true });
 
 installJudgmentPort(createSystemOnePort(judgmentConfigFromEnv(process.env, { signal: judgmentProcessSignal() })));

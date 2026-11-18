@@ -2,8 +2,8 @@
  * shared VM or model-selected workspace is available here. */
 import { randomUUID } from 'node:crypto';
 import { closeSync, constants, mkdirSync, openSync, readSync, unlinkSync, writeSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { resolveGoodVibesHome } from '../../config/goodvibes-home.js';
 import {
   assertContractInputAuthority,
   assertContractInputReadAccess,
@@ -83,7 +83,7 @@ export function createCapturedReplHistory(authority: ContractInputAuthority, sig
  */
 function journalFd(history: History): number {
   if (history.file.fd !== undefined) return history.file.fd;
-  const directory = join(process.env.GOODVIBES_HOME ?? join(homedir(), '.local', 'share', 'goodvibes-jev-data'), '.goodvibes', 'repl-history');
+  const directory = join(resolveGoodVibesHome(), '.goodvibes', 'repl-history');
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const path = join(directory, `${randomUUID()}.jsonl`);
   const fd = openSync(path, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | constants.O_NOFOLLOW, 0o600);

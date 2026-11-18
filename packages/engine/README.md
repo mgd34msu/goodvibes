@@ -3,7 +3,7 @@
 [![CI](https://github.com/mgd34msu/goodvibes/actions/workflows/ci.yml/badge.svg)](https://github.com/mgd34msu/goodvibes/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-The engine is the typed TypeScript platform layer behind the GoodVibes Jev products: sessions, provider/model routing, in-process agents, a knowledge and memory store, a control-plane HTTP and realtime API, and the transports that carry it all. The daemon is its own product, built on the engine. Full-surface consumers embed runtime behavior in a Bun process and connect to daemon services as clients. Companion consumers, including the WebUI and mobile clients, use HTTP, SSE and WebSocket. The workspace package `@goodvibes-jev/engine` carries the platform through explicit subpaths such as `@goodvibes-jev/engine/platform`, `@goodvibes-jev/engine/contracts` and `@goodvibes-jev/engine/errors`.
+The engine is the typed TypeScript platform layer behind the GoodVibes products: sessions, provider/model routing, in-process agents, a knowledge and memory store, a control-plane HTTP and realtime API, and the transports that carry it all. The daemon is its own product, built on the engine. Full-surface consumers embed runtime behavior in a Bun process and connect to daemon services as clients. Companion consumers, including the WebUI and mobile clients, use HTTP, SSE and WebSocket. The workspace package `@goodvibes-jev/engine` carries the platform through explicit subpaths such as `@goodvibes-jev/engine/platform`, `@goodvibes-jev/engine/contracts` and `@goodvibes-jev/engine/errors`.
 
 Use the [monorepo installation guide](../../docs/installation.md) to install the
 application suite. Current behavior for
@@ -56,7 +56,7 @@ flowchart LR
 Prepare the engine through the monorepo workspace:
 
 ```bash
-# From the goodvibes-jev repository root:
+# From the repository root:
 bun install
 bun run build
 ```
@@ -142,7 +142,7 @@ Full index: [docs/README.md](./docs/README.md).
 
 ```bash
 git clone https://github.com/mgd34msu/goodvibes.git
-cd goodvibes-jev
+cd goodvibes
 bun install
 bun run build
 ```

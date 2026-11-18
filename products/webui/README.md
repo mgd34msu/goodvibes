@@ -1,6 +1,6 @@
 # GoodVibes WebUI
 
-The browser product in the GoodVibes Jev monorepo. The app, responsive shell, PWA,
+The browser product in the GoodVibes monorepo. The app, responsive shell, PWA,
 assets and behavior tests originate at upstream `goodvibes-webui` revision
 `dadf57700668fe4500b17b0b0b4520715ab25ef4` (WebUI 2.0.0).
 

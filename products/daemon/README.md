@@ -21,7 +21,7 @@ This private workspace preserves the pinned daemon's command vocabulary and
 now builds the canonical `goodvibes-daemon` Bun command. Its checked-in
 executable launcher prefers the emitted CLI, so frozen installation can create
 consumer links before build. If emitted output is absent, a verified private
-`goodvibes-jev` monorepo checkout can run `src/cli/entrypoint.ts` in the same Bun
+GoodVibes monorepo checkout can run `src/cli/entrypoint.ts` in the same Bun
 process. A package merely containing `src` is not a source checkout; missing
 installed output reports the required root build command. Emitted runtime errors
 remain errors and never trigger a fallback to different code. It dispatches the

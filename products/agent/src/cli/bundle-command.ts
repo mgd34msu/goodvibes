@@ -75,7 +75,7 @@ export const handleBundleCommand = createSupportBundleCommand<
   {
     site: 'agent.cli.bundle-export',
     providerSite: 'agent.support-bundle.setup',
-    packageName: '@goodvibes-jev/agent',
+    packageName: 'goodvibes-agent',
     bundleType: 'goodvibes-agent.support',
     title: 'GoodVibes Agent support bundle',
     commandBase: (runtime) => runtime.cli.binary + ' bundle',

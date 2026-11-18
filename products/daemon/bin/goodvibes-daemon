@@ -58,7 +58,7 @@ if (typeof Bun === 'undefined') {
     else if (sourceCheckout() && isFile(source)) entrypoint = source;
     else {
       console.error('goodvibes-daemon: no runnable emitted CLI or verified source checkout is available.');
-      console.error('From the goodvibes-jev repository root, run `bun run build`, then retry this command.');
+      console.error('From the repository root, run `bun run build`, then retry this command.');
       console.error('Installed packages require their built dist/cli/entrypoint.js; this launcher does not download or install artifacts.');
       process.exitCode = 1;
     }

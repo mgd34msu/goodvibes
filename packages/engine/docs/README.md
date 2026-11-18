@@ -1,6 +1,6 @@
 # GoodVibes engine documentation
 
-These documents describe `packages/engine` in the GoodVibes Jev monorepo. The
+These documents describe `packages/engine` in the GoodVibes monorepo. The
 platform facade and its supporting libraries are subpaths of the engine workspace
 package. Public imports use explicit package entrypoints. Start with the
 [repository README](../../../README.md) and [suite installation guide](../../../docs/installation.md)

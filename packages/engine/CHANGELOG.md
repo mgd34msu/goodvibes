@@ -1,5 +1,57 @@
 # Changelog
 
+## [3.3.1] - 2026-11-18
+
+The full write-up is in
+[docs/releases/3.3.1.md](https://github.com/mgd34msu/goodvibes/blob/v3.3.1/docs/releases/3.3.1.md).
+
+### Changed
+
+- Make OpenAI one provider with two ways of signing in, a ChatGPT
+  subscription and an API key, and one model list. Requests use the
+  subscription when it is set up, otherwise the API key; with both, a request
+  the subscription fails is asked again of the same model through the API key
+  before any output reached you, and the turn says so once. Subscription usage
+  has no per-token price; embeddings and the Batch API need the API key.
+- Take every provider's model list from the provider: its own listing, else
+  its last listing saved on disk, else the pinned model catalog. A model OpenAI
+  lists that the catalog does not know yet can be selected, marked
+  unclassified. Lists are read in the background at start (a list less than a
+  day old is reused), after a sign-in or sign-out, when a model list is
+  opened, after a refusal of an unknown model (at most once a minute per
+  provider) and, in `goodvibes`, on `/refresh-models`.
+- A failed turn no longer moves to a model chosen by its place in the model
+  list. It tries the same model on another sign-in of the provider, then only
+  the models in the new setting `provider.fallbackModels`, in your order
+  (empty by default); otherwise it stops and says why and what to do next.
+- `goodvibes status`, `goodvibes doctor` and `goodvibes-agent status` show the
+  configured provider's sign-ins in the order requests use them and where its
+  model list came from and how old it is.
+
+### Removed
+
+- Remove the `openai-subscriber` provider. A setting or saved model that names
+  it is not rewritten: the terminal apps run on another model for that session
+  and say so, and a daemon turn fails with an error naming the model. Change it to
+  `openai:<model>`. A ChatGPT sign-in made with 3.3.0 keeps working.
+
+### Security
+
+- Replace credential-shaped sample values in the product's own fixtures and
+  proofs with generated placeholders or published test values; the project's
+  checks now refuse such values in source. One of them, shaped like a Telegram
+  bot token, was in the 3.3.0 source and binaries; it is not a working token
+  (Telegram's API answers 401 Unauthorized for it) and needs no action.
+
+### Known limits
+
+- On Apple Silicon Macs, stopping or restarting the daemon can occasionally end
+  in a crash; it was observed once in 32 shutdown checks in CI up to the 3.3.0
+  release (not once in 26, as the 3.3.0 notes said).
+- The shape of the ChatGPT subscription's model list and the wording of its
+  refusal for a model the plan does not serve were not verified against the
+  live service.
+
 ## [3.3.0] - 2026-11-17
 
 The full write-up, with upgrade notes and measured speed figures, is in

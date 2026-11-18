@@ -19,6 +19,8 @@
  * must be updated in the SAME commit that would move it. The tarball is
  * byte-reproducible (see the tar/gzip flags below), so a rebuild of identical
  * inputs matches the pinned sha256 and a sideloaded copy installs identically.
+ * The compiler is one of those inputs: whisper-cli's bytes follow it, so a
+ * rebuild on another toolchain (a newer CI runner image) has another sha256.
  *
  * Output: the bundle tarball, its byte count and sha256, the durable hosted URL,
  * and the ready-to-paste WHISPER_ENGINES entry. Upload the tarball AND a

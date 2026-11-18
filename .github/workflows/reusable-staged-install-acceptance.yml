@@ -128,11 +128,39 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  previous-release-floor:
+    # Upgrades are checked from 3.3.0 onward; earlier releases have no installations.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      run: ${{ steps.floor.outputs.run }}
+    steps:
+      - name: Decide whether the previous release is one upgrades are checked from
+        id: floor
+        env:
+          PREVIOUS_TAG: ${{ inputs.previous-tag }}
+          PREVIOUS_SOURCE: ${{ inputs.previous-source }}
+        run: |
+          set -euo pipefail
+          run=true
+          if [ -z "$PREVIOUS_TAG" ] && [ -z "$PREVIOUS_SOURCE" ]; then
+            run=false
+          elif [ -n "$PREVIOUS_SOURCE" ] && [[ "$PREVIOUS_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            major=${BASH_REMATCH[1]} minor=${BASH_REMATCH[2]}
+            if [ "$major" -lt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -lt 3 ]; }; then
+              run=false
+              echo "::notice::The previous release $PREVIOUS_TAG is older than v3.3.0; the previous-release upgrade check is not run."
+            fi
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
   previous-release-upgrade:
     # Four original hosted accounts exercise the real previous published suite.
     # A release with no earlier version tag has nothing to upgrade from.
     # Either input alone still runs the job so its identity check refuses a partial pair; only both empty (a first release) skips.
-    if: inputs.previous-tag != '' || inputs.previous-source != ''
+    needs: previous-release-floor
+    if: needs.previous-release-floor.outputs.run == 'true'
     strategy:
       fail-fast: false
       matrix:

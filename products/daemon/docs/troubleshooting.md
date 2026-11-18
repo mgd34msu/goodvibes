@@ -147,6 +147,18 @@ script is retired by running the installer again. Uninstall
 stops, unregisters and removes the managed definition, also for a service that is
 already stopped. See [service command details](commands-reference.md#install-service).
 
+## A stop or restart on an Apple Silicon Mac ended in a crash
+
+Occasionally, after shutdown has begun (Ctrl-C, `stop-service`,
+`restart-service` or an update handover), the daemon on an Apple Silicon Mac
+ends in a crash instead of a clean exit: the shell or the service log shows
+"trace trap" and macOS writes a crash report to
+`~/Library/Logs/DiagnosticReports`. In CI it was observed once in 26 shutdown
+checks. The cause is inside the runtime the daemon is built on and is not yet
+identified. If the daemon is not running afterwards, start it again
+(`goodvibes-daemon start-service`); no repair step is needed, and its SQLite
+stores recover an interrupted exit when they next open.
+
 ## Hosted work stalls, ends or refuses a tool
 
 Check the session id, effective detach policy, attachment renewal and termination

@@ -62,7 +62,8 @@ export interface AcceptanceFailureRecord {
   /** What the current installer said about the daemon's service on its last run. */
   serviceSetup?: InstallerServiceSetup;
 }
-export type ServiceDefinitionName = 'goodvibes-jev.service' | 'goodvibes.service' | 'sh.goodvibes.daemon.plist';
+/** The daemon's own definition file (named in daemon-service-default.ts), or any other definition that starts the installed daemon. */
+export type ServiceDefinitionName = `${string}.service` | `${string}.plist` | 'other-definition';
 export type InstallerServiceSetup = 'installed' | 'installed-not-running' | 'not-reported' | 'no-manager' | 'existing-definition'
   | 'skipped' | 'not-attempted' | `install-service-exit-${number}`;
 export function installerServiceSetup(stdout: string): InstallerServiceSetup;

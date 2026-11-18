@@ -24,7 +24,14 @@ function readInstallerRepository() {
 export const repository = readInstallerRepository();
 const escapeRegExp = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const products = ['goodvibes', 'goodvibes-daemon', 'goodvibes-agent'];
-const unit = 'goodvibes.service', label = 'sh.goodvibes.daemon';
+/** The daemon registers its own service (`goodvibes-daemon install-service`; the installer
+ * writes none). On Linux that is a systemd user unit named goodvibes-jev on an account that
+ * has none (DAEMON_SERVICE_NAME in packages/engine/platform/src/platform/daemon/
+ * daemon-service-default.ts). A unit an earlier release registered as goodvibes keeps that
+ * name and is managed, never duplicated. goodvibes-daemon is the name an older installer used.
+ * On macOS it is the LaunchAgent sh.goodvibes.daemon. */
+const currentUnit = 'goodvibes-jev.service', productUnits = [currentUnit, 'goodvibes.service'];
+const retiredUnit = 'goodvibes-daemon.service', label = 'sh.goodvibes.daemon';
 
 /** Harness inspection only. Consume the dedicated credential before any child
  * environment is captured; the installer, assets and updater stay anonymous. */
@@ -575,9 +582,21 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
     assert.equal(realpathSync(home), home);
   };
   const bin = join(home, '.local/bin'), data = join(home, '.goodvibes');
-  const servicePath = process.platform === 'linux' ? join(home, '.config/systemd/user', unit)
-    : join(home, 'Library/LaunchAgents', `${label}.plist`);
-  for (const path of [data, servicePath, ...products.map(name => join(bin, name))])
+  const unitPath = name => join(home, '.config/systemd/user', name);
+  // Every definition the product's service can have. A fresh install must register the current
+  // name; the previous-release scenario takes the one name that release registered (see
+  // pinPreviousServiceUnit), and an upgrade must keep supervising under it.
+  const serviceDefinitions = process.platform === 'linux' ? productUnits.map(unitPath) : [join(home, 'Library/LaunchAgents', `${label}.plist`)];
+  let unit = process.platform === 'linux' && !previousRelease ? currentUnit : undefined;
+  const selectedUnit = () => { assert.ok(unit, 'The daemon service unit has not been identified yet.'); return unit; };
+  const servicePath = () => process.platform === 'linux' ? unitPath(selectedUnit()) : serviceDefinitions[0];
+  const pinPreviousServiceUnit = () => {
+    if (process.platform !== 'linux') return;
+    const present = productUnits.filter(name => lstatSync(unitPath(name), { throwIfNoEntry: false }) !== undefined);
+    assert.equal(present.length, 1, 'The previous release must register exactly one daemon service unit.');
+    unit = present[0];
+  };
+  for (const path of [data, ...serviceDefinitions, ...products.map(name => join(bin, name))])
     assert.equal(lstatSync(path, { throwIfNoEntry: false }), undefined, 'Existing GoodVibes ownership is not an acceptance fixture.');
   for (const path of [join(home, '.local'), bin, join(home, '.config'), join(home, '.config/systemd'), join(home, '.config/systemd/user'),
     join(home, 'Library'), join(home, 'Library/LaunchAgents')]) {
@@ -612,7 +631,7 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
       await invoke('sudo', ['-n', 'systemctl', 'start', `user@${account.uid}.service`]);
     }
     await invoke('systemctl', ['--user', 'show-environment']);
-    for (const name of [unit, 'goodvibes-daemon.service']) {
+    for (const name of [...productUnits, retiredUnit]) {
       const probe = await runOwnedCommand('systemctl', ['--user', 'show', name, '--property=LoadState', '--value'], { env });
       assert.equal(probe.stdout.trim(), 'not-found', 'An existing native service must never be adopted.');
     }
@@ -652,14 +671,18 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
     assert.equal(result.ok, true); assert.equal(result.data.key, key); return result.data.value;
   };
   const assertServiceOwned = () => {
-    assertHome(); const stat = lstatSync(servicePath); assert.ok(stat.isFile() && !stat.isSymbolicLink());
-    assert.ok(readFileSync(servicePath, 'utf8').includes(daemon), 'The service must retain this exact admitted executable.');
+    assertHome(); const path = servicePath(), stat = lstatSync(path);
+    assert.ok(stat.isFile() && !stat.isSymbolicLink() && stat.uid === account.uid);
+    assert.ok(readFileSync(path, 'utf8').includes(daemon), 'The service must retain this exact admitted executable.');
+    for (const other of serviceDefinitions) if (other !== path) {
+      assert.equal(lstatSync(other, { throwIfNoEntry: false }), undefined, 'The daemon must run under one service definition, never a duplicate.');
+    }
   };
   const service = async action => {
     checkpoint('service.ownership');
     assertServiceOwned();
     checkpoint(action === 'restart' ? 'service.restart' : 'service.running');
-    if (process.platform === 'linux') await invoke('systemctl', ['--user', action === 'restart' ? 'restart' : 'is-active', unit]);
+    if (process.platform === 'linux') await invoke('systemctl', ['--user', action === 'restart' ? 'restart' : 'is-active', selectedUnit()]);
     else {
       if (action === 'restart') await invoke('launchctl', ['kickstart', '-k', `gui/${account.uid}/${label}`]);
       else { const status = await invoke('launchctl', ['print', `gui/${account.uid}/${label}`]); assert.match(status, /state = running/); }
@@ -670,11 +693,12 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
   const verifyPreserved = async () => {
     if (preserved !== undefined) assert.equal(readFileSync(sentinel, 'utf8'), preserved);
     for (const name of products) assert.ok(!existsSync(join(bin, name)), 'Uninstall must remove original installed programs.');
-    assert.equal(lstatSync(servicePath, { throwIfNoEntry: false }), undefined, 'Uninstall must retire its original native service.');
-    const stopped = process.platform === 'linux'
-      ? await runOwnedCommand('systemctl', ['--user', 'is-active', unit], { env })
-      : await runOwnedCommand('launchctl', ['print', `gui/${account.uid}/${label}`], { env });
-    assert.notEqual(stopped.code, 0, 'The original service must stop before uninstall is acknowledged.');
+    for (const path of serviceDefinitions) assert.equal(lstatSync(path, { throwIfNoEntry: false }), undefined, 'Uninstall must retire its original native service.');
+    for (const probe of process.platform === 'linux' ? productUnits.map(name => ['systemctl', ['--user', 'is-active', name]])
+      : [['launchctl', ['print', `gui/${account.uid}/${label}`]]]) {
+      const stopped = await runOwnedCommand(probe[0], probe[1], { env });
+      assert.notEqual(stopped.code, 0, 'The original service must stop before uninstall is acknowledged.');
+    }
   };
   const host = {
     async admit() { assertHome(); },
@@ -705,7 +729,7 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
         assert.equal(JSON.parse(readFileSync(join(bin, 'playwright-core', '.goodvibes-release.json'), 'utf8')).version, expectedVersion);
       }
       if (expected.serviceDisabled) {
-        assert.equal(lstatSync(servicePath, { throwIfNoEntry: false }), undefined, 'Previous programs must be verified before service activation.');
+        for (const path of serviceDefinitions) assert.equal(lstatSync(path, { throwIfNoEntry: false }), undefined, 'Previous programs must be verified before service activation.');
         return;
       }
       await waitForAcceptanceReadiness(() => service('check'), async () => {
@@ -743,7 +767,7 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
       async servicePid() {
         await service('check');
         if (process.platform === 'linux') {
-          const value = await invoke('systemctl', ['--user', 'show', unit, '--property=MainPID', '--value']);
+          const value = await invoke('systemctl', ['--user', 'show', selectedUnit(), '--property=MainPID', '--value']);
           assert.match(value, /^[1-9]\d*$/); const pid = Number(value); assert.ok(Number.isSafeInteger(pid) && pid <= 2147483647); return pid;
         }
         const printed = await invoke('launchctl', ['print', `gui/${account.uid}/${label}`]);
@@ -753,15 +777,15 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
       async stopService() {
         assertServiceOwned();
         const command = process.platform === 'linux' ? 'systemctl' : 'launchctl';
-        await invoke(command, process.platform === 'linux' ? ['--user', 'stop', unit] : ['bootout', `gui/${account.uid}/${label}`]);
+        await invoke(command, process.platform === 'linux' ? ['--user', 'stop', selectedUnit()] : ['bootout', `gui/${account.uid}/${label}`]);
         await waitForNativeServiceRetirement(() => runOwnedCommand(command, process.platform === 'linux'
-          ? ['--user', 'is-active', unit] : ['print', `gui/${account.uid}/${label}`],
+          ? ['--user', 'is-active', selectedUnit()] : ['print', `gui/${account.uid}/${label}`],
           { cwd: home, env, timeoutMs: 300_000, signal }), { signal });
       },
       async startService() {
         assertServiceOwned();
-        if (process.platform === 'linux') await invoke('systemctl', ['--user', 'start', unit]);
-        else await invoke('launchctl', ['bootstrap', `gui/${account.uid}`, servicePath]);
+        if (process.platform === 'linux') await invoke('systemctl', ['--user', 'start', selectedUnit()]);
+        else await invoke('launchctl', ['bootstrap', `gui/${account.uid}`, servicePath()]);
       },
   };
   let initialPid, updatedPid, rolledBackPid, previousRuntimeObservation, previousPort, previousWebuiIndex;
@@ -817,6 +841,7 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
     async startPreviousService() {
       await invoke('sh', [previousInstaller], { GOODVIBES_VERSION: previousTag, GOODVIBES_WAKE_MODEL: '0', GOODVIBES_SHADOW_REMOVE: '0' },
         false, readFileSync(previousInstaller, 'utf8'));
+      pinPreviousServiceUnit();
     },
     async verifyPreviousService() {
       // All baseline readers/settings were checked while service-off. The

@@ -16,15 +16,20 @@ GoodVibes has a layered provider system. Each layer registers providers in a dif
 
 All of these flow into the same runtime routing, picker, metadata, and health surfaces.
 
+### Where a provider's model list comes from
+
+No provider keeps a list of models in the program. A provider's list is what its own endpoint answers (its models listing, for example OpenAI's `/v1/models` and, when signed in with a subscription, the plan's own list), else its last answer on disk, else the pinned model catalog's rows for it (the models.dev snapshot each release pins). A model the provider lists that the catalog does not know yet is selectable the day it ships, marked unclassified. A model you type that no list names is still sent, and the provider's refusal, if it refuses, is reported as it is.
+
+The lists are read again in the background, never on a request's path: at start-up (a list on disk younger than a day answers without a request), after a sign-in (a subscription's list is stored per account), when the model picker opens (again answered from disk while a list is younger than a day), on `/refresh-models` (always read), and when an endpoint refuses a model as unknown (at most once a minute per provider). Each read is one listing request per sign-in. `goodvibes doctor` and `goodvibes-agent status` show the provider, the sign-in order and where the list came from and how old it is.
+
 ## Native chat/runtime providers
 
 Native providers carry their own client for a vendor's first-party API, rather than going through the shared OpenAI-compatible adapter. The current built-ins:
 
 | Provider | What it talks to |
 | --- | --- |
-| `openai` | OpenAI's own API with an OpenAI API key |
+| `openai` | OpenAI, with two ways of signing in: a ChatGPT subscription (the Codex surface, `/subscription login openai start`) and an OpenAI API key. One provider, one model list. Requests use the subscription when it is set up, else the API key; with both set up, a request the subscription fails is asked again of the same model through the API key, and the turn says so once |
 | `anthropic` | The Anthropic Messages API with an Anthropic API key |
-| `openai-codex` | The ChatGPT/Codex subscription surface, authenticated with a subscription token instead of an API key |
 | `gemini` | The Google Gemini API |
 | `amazon-bedrock` | AWS Bedrock, authenticated with AWS credentials; the live model list comes from Bedrock's own catalog call |
 | `amazon-bedrock-mantle` | Bedrock Mantle, the Anthropic-shaped surface of the same AWS account, sharing its Bedrock control plane |
@@ -152,15 +157,21 @@ A provider whose endpoint did not return its model list during the startup model
 
 ### Failover notices and cost delta
 
-Besides the backend rotation inside a single synthetic model described above, the TUI has a second, broader failover path. When a turn ends in a provider failure (`TURN_ERROR` with a `provider_error` or `provider_exhausted` stop reason) before any tool has started, and an optimizer-driven fallback chain has a viable next provider that has not already been tried this turn, the TUI switches to it and resubmits the turn, whether or not the original model was synthetic. A turn that failed for another reason (a hook denied the call, for example), or in which a tool had already started, is not resubmitted: the error is shown instead, because a second run would repeat the tool's side effects. A synthetic model is itself a fallback ladder over real backends, so this broader path never fails over *into* a synthetic model after a real one failed, only between real providers.
+Besides the backend rotation inside a single synthetic model described above, a failed model never moves to a model you did not choose:
+
+1. The same model on another sign-in of the same provider comes first, inside the request: OpenAI asks the API key after the subscription fails. The turn says once which sign-in answered and why.
+2. Only when every sign-in of the provider has failed does the turn move to another model, and then only by your own fallback order, `provider.fallbackModels` (a list of provider-qualified ids, for example `["anthropic:claude-sonnet-5"]`): the first entry not yet tried this turn whose provider is signed in. The TUI switches to it and resubmits the turn.
+3. With no fallback order set, or every entry tried, the turn stops and says so: `[Failover] Stopped:` with why nothing else was tried and what to do next. No model is picked by list position, tier or age.
+
+A turn that failed for another reason (a hook denied the call, for example), or in which a tool had already started, is not resubmitted: the error is shown instead, because a second run would repeat the tool's side effects.
 
 When this happens, the transcript shows a notice naming both the source and destination providers alongside the full user-facing error description (the same message-and-action text a plain `[Error]` line would show). If the catalog contains per-1M-token pricing for both models, the notice also includes the cost delta in the form:
 
 ```
-[Failover] anthropic -> openai (Network error: could not reach the provider. Check your connection and retry, or switch models with /model.) [cost/1M: input $3.00→$10.00, output $15.00→$30.00]
+[Failover] openai:gpt-6.1-sol -> anthropic:claude-sonnet-5, entry 1 of your fallback order (provider.fallbackModels) (Rate limited: ...) [cost/1M: input $2.00→$3.00, output $10.00→$15.00]
 ```
 
-If pricing data is unavailable for either model, the notice says `[cost data unavailable]` instead of fabricating a number. The error class in the notice comes from what the error itself carries (an HTTP 401 or 429, a connection error code), so the switch and the resubmission start the moment the turn fails, without waiting on any model. A second line follows once the providers' declared setup has been read, naming the billing class the switch left and joined, for example `[Failover] billing: API key → Subscription: billing class changed`; a side whose setup is not established says `Unknown`. When the fallback chain is exhausted (every candidate already tried this turn, or none exist), the transcript shows `[Failover] Chain exhausted: no alternative provider available.` followed by the original error, and the model selection reverts to what the user had configured for the next turn.
+If pricing data is unavailable for either model, the notice says `[cost data unavailable]` instead of fabricating a number. The error class in the notice comes from what the error itself carries (an HTTP 401 or 429, a connection error code), so the switch and the resubmission start the moment the turn fails, without waiting on any model. A second line follows once the providers' declared setup has been read, naming the billing class the switch left and joined, for example `[Failover] billing: API key → Subscription: billing class changed`; a side whose setup is not established says `Unknown`. When nothing is left to try, the transcript shows the error and `[Failover] Stopped:` with the reason and the next step, and the model selection reverts to what you had configured for the next turn.
 
 ### Chain visibility in the model picker
 

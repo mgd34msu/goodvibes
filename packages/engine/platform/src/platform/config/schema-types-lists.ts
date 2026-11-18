@@ -9,6 +9,7 @@ export type ListConfigKey =
   | 'conversationGate.gatedSurfaces'
   | 'contract.gates'
   | 'notifications.webhookUrls'
+  | 'provider.fallbackModels'
   | 'sandbox.egressAllowlist'
   | 'sandbox.workspaceWritable'
   | 'surfaces.email.imap.authservIds'

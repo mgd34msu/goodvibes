@@ -44,7 +44,8 @@ import { CatalogContextWindowResolver } from './context-window-catalog.js';
 import { splitModelRegistryKey, withRegistryKey } from './registry-helpers.js';
 import { computeConfiguredProviderIds } from './registry-configured-ids.js';
 import { initProviderCatalog, refreshProviderCatalog } from './registry-catalog-lifecycle.js';
-import { findAlternativeModel, RegistryRoutingReadings } from './registry-routing.js';
+import { RegistryRoutingReadings } from './registry-routing.js';
+import { chooseFailover, readFallbackOrder, type FailoverChoice } from './failover.js';
 import type { ModelTierStore } from '../routing/model-tiers.js';
 import { buildModelRegistry, diffCustomModels, findModelDefinition, findModelDefinitionForProvider } from './registry-models.js';
 import { assertProviderCredentialAuthority } from './credential-authority-contract.js';
@@ -235,6 +236,7 @@ export class ProviderRegistry {
       persistenceRoot: this.getPersistenceRoot(),
       cachePolicy: this.configManager, // cache.enabled / cache.stableTtl, read per request like their hit-rate siblings
       settings: this.configManager, // cloudflare.accountId and cloudflare.aiGatewayId for the Cloudflare AI Gateway base URL
+      refreshModels: (providerId) => this.refreshModelsSoon(providerId),
     });
     if (!this.providers.has('decision-router')) this.register(new DecisionRouterProvider({
       settings: () => this.configManager.get('provider.decisionRouter'),
@@ -277,6 +279,41 @@ export class ProviderRegistry {
     }
   }
 
+  /** When each provider's list was last read again because an endpoint refused a model as unknown. */
+  private readonly unknownModelRefreshes = new Map<string, number>();
+
+  /**
+   * Read one provider's model list again, in the background, after its
+   * endpoint refused a model as unknown: at most once a minute per provider,
+   * so a run of refusals costs one listing, and never on the request's path.
+   */
+  private refreshModelsSoon(providerId: string): void {
+    const now = Date.now();
+    if (now - (this.unknownModelRefreshes.get(providerId) ?? 0) < 60_000) return;
+    this.unknownModelRefreshes.set(providerId, now);
+    void this.refreshLiveModelDiscovery(providerId, { force: true }).catch((error: unknown) => {
+      logger.warn('[providers] model list refresh after an unknown-model refusal failed', { providerId, error: summarizeError(error) });
+    });
+  }
+
+  /**
+   * A subscription sign-in of `provider` started, changed or ended in this
+   * process: what reads it (configured state, the sign-in order, prices) is
+   * recomputed, and the provider's model list is read again in the background
+   * (a new account's list is fetched; the stored one belonged to another).
+   */
+  noteSignInChanged(provider: string): void {
+    this.syntheticCanonicalModels = buildSyntheticCanonicalModels(this.catalogModels, this.catalogProviderUsable);
+    this._invalidateModelRegistry();
+    if (!this.providers.has(provider)) return;
+    void this.refreshLiveModelDiscovery(provider).catch((error: unknown) => {
+      logger.warn('[providers] model list refresh after a sign-in change failed', { provider, error: summarizeError(error) });
+    });
+    if (this.runtimeBus) {
+      emitProvidersChanged(this.runtimeBus, { sessionId: 'system', traceId: `providers:sign-in:${Date.now()}`, source: 'provider-registry' }, { added: [], removed: [], updated: [provider] });
+    }
+  }
+
   /** Release what providers hold outside this process (Gemini's server-side cache resources). Call once at shutdown. */
   async disposeProviders(): Promise<void> {
     await Promise.all([...this.providers.values()].map((provider) => disposeProvider(provider)));
@@ -295,7 +332,16 @@ export class ProviderRegistry {
     return { cachePath: getCatalogCachePath(root), tmpPath: getCatalogTmpPath(root) };
   }
 
-  private getCatalogBuiltins(): ModelDefinition[] { return getCatalogModelDefinitionsFrom(this.catalogModels, this.routingReadings.tiers) as ModelDefinition[]; }
+  /**
+   * The catalog's rows as model definitions. A catalog provider that is one
+   * sign-in of a registered provider (`openai-codex`, OpenAI on a ChatGPT
+   * plan) lists the same models as that provider: its rows are folded into
+   * the provider's own, so each model is listed once per maker.
+   */
+  private getCatalogBuiltins(): ModelDefinition[] {
+    return (getCatalogModelDefinitionsFrom(this.catalogModels, this.routingReadings.tiers) as ModelDefinition[])
+      .filter((model) => !SIGN_IN_CATALOG_IDS.has(model.provider));
+  }
 
   private getSyntheticBuiltins(): ModelDefinition[] { return getSyntheticModelDefinitions(this.catalogModels, this.syntheticCanonicalModels) as ModelDefinition[]; }
 
@@ -543,7 +589,6 @@ export class ProviderRegistry {
    */
   has(id: string): boolean {
     if (this.providers.has(id)) return true;
-    if (id === 'openai-subscriber') return false;
     const aliased = CATALOG_PROVIDER_NAME_ALIASES[id]!;
     return aliased !== undefined && this.providers.has(aliased);
   }
@@ -566,9 +611,7 @@ export class ProviderRegistry {
   }
 
   /**
-   * Retrieve the provider registered under a name (or its catalog alias). An
-   * `openai:` model is the API-key provider and an `openai-subscriber:` model the
-   * subscription; a stored subscription never redirects `openai`.
+   * Retrieve the provider registered under a name (or its catalog alias).
    * Returns `undefined` if no provider with that name (or its catalog alias) is registered.
    *
    * Prefer {@link require} when you know the provider must exist and want a clear
@@ -579,8 +622,6 @@ export class ProviderRegistry {
   tryGet(name: string): LLMProvider | undefined {
     const p = this.providers.get(name);
     if (p) return p;
-    // A subscription is an authentication route, not permission to use API billing.
-    if (name === 'openai-subscriber') return undefined;
     // Check alias map. The catalog may use a different name than the registered provider
     const aliased = CATALOG_PROVIDER_NAME_ALIASES[name]!;
     if (aliased) {
@@ -603,7 +644,7 @@ export class ProviderRegistry {
     if (p) return p;
     // Check alias map. The catalog may use a different name than the registered provider
     const aliased = CATALOG_PROVIDER_NAME_ALIASES[name]!;
-    if (aliased && name !== 'openai-subscriber') {
+    if (aliased) {
       const pa = this.providers.get(aliased);
       if (pa) return pa;
     }
@@ -665,7 +706,7 @@ export class ProviderRegistry {
       if (provider) throw new Error(`No model '${modelId}' for provider '${provider}' in registry.`);
       throw new Error(`No model '${modelId}' in registry.`);
     }
-    return this.require(provider ?? (resolvedModelId.startsWith('openai-subscriber:') ? 'openai-subscriber' : def.provider));
+    return this.require(provider ?? def.provider);
   }
 
   /** All registered model definitions. */
@@ -714,6 +755,9 @@ export class ProviderRegistry {
    * Manual prices are read live on every call, no restart.
    */
   resolveModelPricing(modelRef: string, providerId?: string): ResolvedModelPricing {
+    // A provider with more than one sign-in (OpenAI) prices by the one serving the model: a plan has no per-token price.
+    const signedIn = this.signInRouteFor(modelRef, providerId);
+    if (signedIn === 'subscription') return { status: 'subscription' };
     const index = this.pricingIndex();
     return resolveModelPricingFromDeps(buildRegistryModelPricingDeps({
       getManualPrices: () => this.configManager.get('pricing.modelPrices'),
@@ -729,6 +773,20 @@ export class ProviderRegistry {
       providerAliases: CATALOG_PROVIDER_NAME_ALIASES,
       isKnownProviderId: (id) => this.providers.has(id) || index.catalogProviderIds.has(id),
     }), modelRef, providerId);
+  }
+
+  /**
+   * Which sign-in serves a model on a provider that has more than one (OpenAI:
+   * `subscription` or `api-key`), or null for a provider with one way in.
+   */
+  signInRouteFor(modelRef: string, providerId?: string): string | null {
+    const separator = modelRef.indexOf(':');
+    const providerName = providerId ?? (separator > 0 ? modelRef.slice(0, separator) : undefined);
+    if (!providerName) return null;
+    const provider = this.tryGet(providerName) as (LLMProvider & { activeSignInRoute?: (modelId?: string) => string | null }) | undefined;
+    if (typeof provider?.activeSignInRoute !== 'function') return null;
+    const modelId = separator > 0 && modelRef.slice(0, separator) === providerName ? modelRef.slice(separator + 1) : modelRef;
+    return provider.activeSignInRoute(modelId);
   }
 
   /**
@@ -853,12 +911,11 @@ export class ProviderRegistry {
    * 'openrouter:openrouter/free' can otherwise be unresolvable for the entire
    * lifetime of a catalog-less boot.
    *
-   * Deliberately narrow: only resolves when `providerId` is an actually
-   * registered provider AND that provider's own static `models` list already
-   * declares `resolvedModelId` (e.g. the builtin openrouter provider declares
-   * 'openrouter/free' in builtin-registry.ts). A genuinely unknown or
-   * misconfigured registryKey still falls through to the "not in registry"
-   * error below so callers keep an honest signal instead of a guess.
+   * Resolves when `providerId` is a registered provider: the configured model
+   * is the person's own choice, attempted as written even when no list knows
+   * it yet, and the provider's refusal, if it refuses, is reported as it is.
+   * A key whose provider is not registered still falls through to the "not in
+   * registry" error below.
    */
   private buildConfiguredModelFallback(registryKey: string): ModelDefinition | null {
     let providerId: string;
@@ -869,13 +926,13 @@ export class ProviderRegistry {
       return null;
     }
     const provider = this.tryGet(providerId);
-    if (!provider || !provider.models.includes(resolvedModelId)) return null;
+    if (!provider) return null;
     return this.contextWindowOverrideStore().apply({
       id: resolvedModelId,
       provider: providerId,
       registryKey: `${providerId}:${resolvedModelId}`,
       displayName: resolvedModelId,
-      description: `${resolvedModelId}, builtin provider default; model catalog has not hydrated yet.`,
+      description: `${resolvedModelId}, the configured model; no model list names it yet.`,
       capabilities: { toolCalling: true, codeEditing: true, reasoning: false, multimodal: false },
       contextWindow: knownFallbackContextWindow(providerId, resolvedModelId),
       contextWindowProvenance: 'fallback', contextWindowOrigin: { kind: 'family_default' },
@@ -1104,10 +1161,21 @@ export class ProviderRegistry {
     return this._readyPromise ?? Promise.resolve();
   }
 
-  /** An alternative when the current provider fails non-transiently (registry-routing.ts): its failover group, else a same-tier model elsewhere. */
-  findAlternativeModel(currentRegistryKey: string): ModelDefinition | null {
-    const registry = this.getModelRegistry();
-    return findAlternativeModel(findModelDefinition(currentRegistryKey, registry), registry, this.syntheticCanonicalModels);
+  /**
+   * What follows when `registryKey` failed on every sign-in of its provider
+   * (providers/failover.ts): the next model of the person's fallback order
+   * (`provider.fallbackModels`) not in `visited`, or a stop with its reason
+   * and next step. Never a model of the registry's own choosing.
+   */
+  chooseFailover(registryKey: string, visited: Iterable<string> = []): FailoverChoice {
+    const definition = findModelDefinition(registryKey, this.getModelRegistry());
+    const separator = registryKey.indexOf(':');
+    const current = definition ?? {
+      registryKey,
+      provider: separator > 0 ? registryKey.slice(0, separator) : registryKey,
+      displayName: separator > 0 ? registryKey.slice(separator + 1) : registryKey,
+    };
+    return chooseFailover({ registry: this, current, visited, fallbackOrder: readFallbackOrder(this.configManager.get('provider.fallbackModels')) });
   }
 
   /** Model tier readings (routing.model-tier), for the route planner. */
@@ -1239,6 +1307,9 @@ export class ProviderRegistry {
     };
   }
 }
+
+/** Catalog providers that are a sign-in of a registered provider, listed under that provider instead. */
+const SIGN_IN_CATALOG_IDS: ReadonlySet<string> = new Set(['openai-codex']);
 
 /** A provider's own cleanup, logged and never thrown: a replaced or closing provider must not fail its caller. */
 async function disposeProvider(provider: LLMProvider): Promise<void> {

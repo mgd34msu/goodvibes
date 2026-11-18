@@ -53,6 +53,15 @@ function worktreeSetupList(value: unknown): boolean {
 
 export const listConfigSettings: readonly ListConfigSetting[] = [
   {
+    key: 'provider.fallbackModels',
+    type: 'object',
+    default: [...coreConfigDefaults.provider.fallbackModels],
+    description: 'Your fallback order: the models a turn moves to, in order, when the selected model fails on every sign-in of its provider (OpenAI tries the same model through the API key after the subscription first). Empty (default): the turn stops and says so; no other model is chosen for you. Applies from the next failure.',
+    validate: (value) => stringList(value) && value.every((entry) => /^[^:\s]+:\S/.test(entry.trim())),
+    closedShape: true,
+    validationHint: 'list of provider-qualified model ids, for example ["anthropic:claude-sonnet-5"]',
+  },
+  {
     key: 'cluster.peers',
     type: 'object',
     default: [...clusterConfigDefaults.cluster.peers],

@@ -48,7 +48,7 @@ import { createContractQuestionComposer } from '@goodvibes-jev/engine/terminal-s
 import './input/commands.ts';
 import '@goodvibes-jev/engine/platform/platform/tools';
 import './input/input-history.ts';
-import { describeContextWindowSource } from '@goodvibes-jev/engine/platform/platform/providers';
+import { chooseFailover, describeContextWindowSource, readFallbackOrder } from '@goodvibes-jev/engine/platform/platform/providers';
 import './renderer/git-status.ts';
 
 import { createShellLayout } from './renderer/layout-engine.ts';
@@ -1412,6 +1412,10 @@ async function main(prepared: PreparedShellCliRuntime) {
     isActive: () => !lifecycle.isTerminalRestored(),
     userTurn,
     providerOptimizer: ctx.services.providerOptimizer,
+    // The person's own fallback order decides, never a list position (providers/failover.ts).
+    chooseFailover: (failed, visited) => chooseFailover({
+      registry: providerRegistry, current: failed, visited, fallbackOrder: readFallbackOrder(configManager.get('provider.fallbackModels')),
+    }),
     costLookup: providerRegistry,
     retryTurn,
     failoverState,

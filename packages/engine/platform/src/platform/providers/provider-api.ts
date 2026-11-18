@@ -18,6 +18,7 @@ import type { FavoritesData, FavoritesStore, FavoritesUsageRestriction } from '.
 import type { LLMProvider, ProviderRuntimeMetadata } from './interface.js';
 import { reasoningEffortLevels } from './reasoning-effort.js';
 import type { ModelDefinition } from './registry-types.js';
+import type { FailoverChoice } from './failover.js';
 import {
   getProviderRuntimeSnapshot,
   getProviderUsageSnapshot,
@@ -49,7 +50,14 @@ export interface ProviderApiSyntheticRouting {
 
 export interface ProviderApiModelRouting {
   readonly kind: 'direct' | 'synthetic';
-  readonly failoverStrategy: 'none' | 'synthetic-wrapper' | 'same-tier-provider' | 'intra-synthetic';
+  /**
+   * What a failure of this model moves to: `intra-synthetic` (another backend
+   * of the synthetic model), `fallback-order` (the next model of the person's
+   * `provider.fallbackModels`, named in `alternative`), or `none` (the turn
+   * stops and says so). The same model on another sign-in of its provider is
+   * tried before any of these, inside the request.
+   */
+  readonly failoverStrategy: 'none' | 'fallback-order' | 'intra-synthetic';
   readonly alternative?: ProviderApiModelReference | undefined;
   readonly synthetic?: ProviderApiSyntheticRouting | undefined;
 }
@@ -178,7 +186,7 @@ export interface ProviderApi {
 
 export interface ProviderApiRegistry {
   describeRuntime(name: string): Promise<ProviderRuntimeMetadata | null>;
-  findAlternativeModel(currentRegistryKey: string): ModelDefinition | null;
+  chooseFailover(registryKey: string, visited?: Iterable<string>): FailoverChoice;
   getCostFromCatalog(modelId: string): CatalogModelPricing | null;
   getPricingForModel(modelId: string, provider: string): ProviderModelPricing | null;
   resolveModelPricing(modelRef: string, providerId?: string): ResolvedModelPricing;
@@ -325,18 +333,18 @@ function buildModelRouting(
     };
   }
 
-  const alternative = deps.providerRegistry.findAlternativeModel(model.registryKey);
-  if (!alternative) {
+  const choice = deps.providerRegistry.chooseFailover(model.registryKey);
+  if (choice.kind === 'stop') {
     return {
       kind: 'direct',
       failoverStrategy: 'none',
     };
   }
-
+  const separator = choice.registryKey.indexOf(':');
   return {
     kind: 'direct',
-    failoverStrategy: alternative.provider === 'synthetic' ? 'synthetic-wrapper' : 'same-tier-provider',
-    alternative: toModelReference(alternative),
+    failoverStrategy: 'fallback-order',
+    alternative: { modelId: choice.registryKey.slice(separator + 1), providerId: choice.provider, registryKey: choice.registryKey },
   };
 }
 

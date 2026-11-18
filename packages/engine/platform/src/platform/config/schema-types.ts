@@ -89,6 +89,7 @@ export interface GoodVibesConfig {
     optimizerMode: 'off' | 'manual' | 'auto' | 'pinned'; // default: 'off'. Provider routing optimizer ('off' = optimizer inactive)
     optimizerPinnedModel: string; // default: ''. Provider-qualified model id applied when optimizerMode is 'pinned'
     visionFallbackModel: string; // default: ''. Model that reads an attached image when the session's model cannot
+    fallbackModels: string[];   // default: []. The person's fallback order: models a failed turn moves to, in order
     localContextIngestion: boolean; // default: true. Ingest max_context_length from local/custom provider /v1/models
   };
   behavior: {

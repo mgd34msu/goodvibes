@@ -25,6 +25,7 @@ export const coreConfigDefaults = {
     optimizerMode: 'off',
     optimizerPinnedModel: '',
     visionFallbackModel: '',
+    fallbackModels: [] as string[],
     localContextIngestion: true,
   },
   behavior: {

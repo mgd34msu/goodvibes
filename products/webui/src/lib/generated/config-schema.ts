@@ -4589,6 +4589,13 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "description": "The OAuth consent screen's last-known publishing status (\"testing\" or \"in-production\"), cached after being read from the Cloud Console since it cannot be probed any other way. An app left in \"Testing\" is issued refresh tokens that expire after seven days; moving it to \"In production\" (self-certified, no Google review needed) removes that expiry. Empty until a setup or verification run has read it."
   },
   {
+    "key": "provider.fallbackModels",
+    "type": "object",
+    "default": [],
+    "description": "Your fallback order: the models a turn moves to, in order, when the selected model fails on every sign-in of its provider (OpenAI tries the same model through the API key after the subscription first). Empty (default): the turn stops and says so; no other model is chosen for you. Applies from the next failure.",
+    "validationHint": "list of provider-qualified model ids, for example [\"anthropic:claude-sonnet-5\"]"
+  },
+  {
     "key": "cluster.peers",
     "type": "object",
     "default": [],

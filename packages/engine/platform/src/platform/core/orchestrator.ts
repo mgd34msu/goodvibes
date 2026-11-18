@@ -1330,13 +1330,14 @@ export class Orchestrator {
       : await readFormattedError(error, { site: 'core.orchestrator.turn-error', ...display }).catch(() => formatError(error, display));
     this.conversation.addNotice(msg, { level: 'error' });
     this.requestRender();
-    // Graceful degradation, suggest alternative when provider fails non-transiently
+    // When the provider fails non-transiently, name the next model of the person's own
+    // fallback order (providers/failover.ts); a model is never suggested by list position.
     const autoSwitch = configManager.get('behavior.suggestAlternativeOnProviderFail') as boolean;
     if (!judgmentFailed && autoSwitch && await isNonTransientProviderFailure(err, 'core.orchestrator.suggest-alternative')) {
       const currentModel = providerRegistry.getCurrentModel();
-      const alt = currentModel ? providerRegistry.findAlternativeModel(currentModel.registryKey) : null;
-      if (alt) {
-        this.conversation.addNotice(`[Provider] ${currentModel?.provider ?? 'Unknown'} failed. Alternative available: ${alt.displayName} (${alt.provider}). Use /model to switch.`, { level: 'info' });
+      const choice = providerRegistry.chooseFailover(currentModel.registryKey);
+      if (choice.kind === 'switch') {
+        this.conversation.addNotice(`[Provider] ${currentModel.displayName} failed on ${currentModel.provider}. Next in your fallback order: ${choice.displayName} (${choice.provider}). Use /model to switch.`, { level: 'info' });
       }
     }
     this._turnFailed = true;

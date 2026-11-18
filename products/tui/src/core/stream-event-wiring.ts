@@ -9,7 +9,7 @@ import { createUserTurnOwner, type FailoverRetry, type UserTurnOwner } from './u
 import { ProviderSetupReadings, describeProviderSetup, type ProviderSetupClassification } from '../providers/provider-classification.ts';
 import type { FailoverTurnState } from './active-model-identity.ts';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { ProviderRuntimeMetadata, ReasoningEffortSpec } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { FailoverChoice, ProviderRuntimeMetadata, ReasoningEffortSpec } from '@goodvibes-jev/engine/platform/platform/providers';
 import { remapEffortForServingModel } from '../providers/reasoning-effort-surface.ts';
 
 // Preserve the existing wiring API while shared-state consumers use the leaf.
@@ -43,21 +43,8 @@ interface StreamProviderRegistry {
   getRegistered?(providerId: string): object;
 }
 
-/**
- * Minimal fallback-chain node shape returned by ProviderOptimizer.testFallback().
- * Only the fields consumed by the failover path are declared here.
- */
-interface FailoverChainNode {
-  readonly position: number;
-  readonly providerId: string;
-  readonly modelId: string;
-  readonly capable: boolean;
-}
-
-/** Minimal ProviderOptimizer surface required by the failover path. */
+/** Minimal ProviderOptimizer surface: the fallback log the routing chip and /provider read. */
 interface FailoverOptimizer {
-  readonly enabled: boolean;
-  testFallback(profile?: Record<string, unknown>): { readonly chain: readonly FailoverChainNode[] };
   recordFallbackTransition(from: string, to: string, reason: string): void;
   /** Recent fallback transitions, read by the routing chip to skip double-narrating a failover. */
   readonly fallbackLog: readonly { readonly from: string; readonly to: string; readonly reason: string; readonly ts: number }[];
@@ -124,17 +111,20 @@ export interface WireStreamEventMetricsOptions {
    * owns a private one on the same feed (a caller that wires it alone).
    */
   readonly userTurn?: UserTurnOwner;
-  /**
-   * When provided and enabled, the optimizer is consulted on TURN_ERROR to
-   * attempt the next viable provider before surfacing the error to the user.
-   * When absent or optimizer.enabled is false, behaviour is identical to the
-   * pre-failover baseline: error surfaces immediately via systemMessageRouter.
-   */
+  /** Where switches are logged (the routing chip reads the log so a failover is not narrated twice). */
   readonly providerOptimizer?: FailoverOptimizer;
   /**
+   * The engine's failover owner (providers/failover.ts) bound to this
+   * session's registry and settings: given the model that failed on every
+   * sign-in of its provider and the keys tried this turn, the person's next
+   * fallback model, or a stop with its reason and next step. Absent, a
+   * failure surfaces as an error and nothing else is tried.
+   */
+  readonly chooseFailover?: (failed: { readonly registryKey: string; readonly provider: string; readonly displayName: string }, visited: ReadonlySet<string>) => FailoverChoice;
+  /**
    * Callback the caller provides to re-submit the last user turn on a
-   * different provider after a successful failover switch.  Called only when
-   * the optimizer is enabled and a viable next provider exists in the chain.
+   * different model after a failover switch. Called only when the person's
+   * fallback order names a model not yet tried this turn.
    *
    * The re-submission rolls the conversation back to its pre-submission
    * message count, which deletes everything the failed turn added, including
@@ -314,7 +304,7 @@ export function wireStreamEventMetrics(
 ): WireStreamEventMetricsResult {
   const {
     events, metrics, orchestrator, providerRegistry,
-    systemMessageRouter, render, providerOptimizer, retryTurn, costLookup,
+    systemMessageRouter, render, providerOptimizer, chooseFailover, retryTurn, costLookup,
     isApprovalPending, stallThresholdMs, stallTimers, failoverState, getConfiguredRegistryKey,
     getConfiguredReasoningEffort,
   } = options;
@@ -509,10 +499,9 @@ export function wireStreamEventMetrics(
     metrics.tokenSpeed = elapsed > 0 ? tokenCount / elapsed : 0;
   }));
 
-  // Per-user-turn visited-provider set: tracks providers already attempted this
-  // turn so failover cannot ping-pong between two mutually-failing providers.
-  // True invariant: at most one retry per provider per user turn; exhaustion
-  // fires after the chain is consumed. Cleared when the user turn ends.
+  // Per-user-turn set of the models (registry keys) already tried this turn, so
+  // failover cannot ping-pong between two failing models: at most one attempt
+  // per model per user turn. Cleared when the user turn ends.
   const failoverVisited = new Set<string>();
 
   // However the user turn ended (completed, failed, cancelled while failing
@@ -617,35 +606,28 @@ export function wireStreamEventMetrics(
     // provider's and nothing has run yet: a denied call would be asked again, and tools
     // already executed would run a second time with their results rolled out of the transcript.
     // An event without a stop reason comes from an older emitter and is read as a provider failure.
+    // The same model on the provider's other sign-ins was already tried inside the request
+    // (OpenAI: subscription, then API key); what is left is the person's own fallback order.
     const providerFailure = event.stopReason === undefined || event.stopReason === 'provider_error' || event.stopReason === 'provider_exhausted';
-    if (!providerFailure || toolStartedInTurn || providerOptimizer?.enabled !== true || retryTurn === undefined) {
+    if (!providerFailure || toolStartedInTurn || chooseFailover === undefined || retryTurn === undefined) {
       surface(false);
       return;
     }
-    const fromProvider = providerRegistry.getCurrentModel().provider;
-    // Mark the failing provider as visited so it will never be selected again
-    // in this user turn, even if a later attempt fails on another one.
-    failoverVisited.add(fromProvider);
-    // Find the first capable node that is NOT already visited this turn and
-    // is NOT synthetic. Synthetic nodes are skipped permanently by design:
-    // a synthetic model is itself a fallback ladder over real backends, so
-    // failing over INTO one after a real backend already failed is unsound
-    // double-indirection (it can route straight back to the failed provider).
-    const next = providerOptimizer.testFallback({}).chain.find(
-      (node) => node.capable && !failoverVisited.has(node.providerId) && node.providerId !== 'synthetic',
-    );
-    if (!next) {
-      // Chain exhausted, all capable candidates have been visited or none exist.
-      // The user turn ends here, and its end restores the configured selection.
-      announce(`[Failover] Chain exhausted: no alternative provider available. Original error: ${errorClass}`);
+    const failed = providerRegistry.getCurrentModel();
+    const fromProvider = failed.provider;
+    const fromRegistryKey = failed.registryKey ?? `${failed.provider}:${failed.id ?? ''}`;
+    failoverVisited.add(fromRegistryKey);
+    const choice = chooseFailover({ registryKey: fromRegistryKey, provider: fromProvider, displayName: failed.displayName ?? failed.id ?? fromRegistryKey }, failoverVisited);
+    if (choice.kind === 'stop') {
+      // Nothing else is tried: the error, why nothing else was tried, and what to do next.
+      systemMessageRouter.high(`[Error] ${errorClass}`, 'error');
+      announce(`[Failover] Stopped: ${choice.reason} ${choice.next}`);
       notifyErrorSurfaced(true);
       render();
       refineErrorLater(errVal, shown, failure.isLatestAttempt);
       return;
     }
-    const toRegistryKey = `${next.providerId}:${next.modelId}`;
-    // Capture FROM registry key before switching, needed for cost comparison.
-    const fromRegistryKey = providerRegistry.getCurrentModel().registryKey;
+    const toRegistryKey = choice.registryKey;
     // The effort remap that comes with the switch is carried, not announced:
     // retryTurn's rollback below would delete it (see reconcileEffortWithServingModel).
     let effortNote: string | undefined;
@@ -657,9 +639,9 @@ export function wireStreamEventMetrics(
       surface(false);
       return;
     }
-    // Record the selected provider as visited before the retry fires so a
-    // later failure from that provider also skips it.
-    failoverVisited.add(next.providerId);
+    // Record the chosen model as tried before the retry fires so a later
+    // failure of it moves on down the order.
+    failoverVisited.add(toRegistryKey);
     // Remember the user's configured selection so the turn-end restore
     // targets it, and so both shell surfaces can name it while the switch
     // is in force. Sticky across a second hop within the same turn.
@@ -667,11 +649,11 @@ export function wireStreamEventMetrics(
     if (configuredRegistryKey) {
       failoverState?.begin({ configuredRegistryKey, servingRegistryKey: toRegistryKey });
     }
-    providerOptimizer.recordFallbackTransition(fromProvider, next.providerId, errorClass);
+    providerOptimizer?.recordFallbackTransition(fromProvider, choice.provider, errorClass);
     const costSuffix = buildCostDeltaSuffix(costLookup, fromRegistryKey, toRegistryKey);
     // Handed to retryTurn so it outlives that call's transcript rollback (see
     // the retryTurn option doc). Emitting it here instead would delete it.
-    const failoverNotice = `[Failover] ${fromProvider} -> ${next.providerId} (${errorClass})${costSuffix}`
+    const failoverNotice = `[Failover] ${fromRegistryKey} -> ${toRegistryKey}, ${choice.because} (${errorClass})${costSuffix}`
       + (effortNote ? `\n[Failover] ${effortNote}` : '');
     const retry = failure.failOver();
     const guarded: FailoverRetry = {
@@ -683,7 +665,7 @@ export function wireStreamEventMetrics(
     };
     try {
       if (retryTurn(failoverNotice, guarded)) {
-        narrateBilling(fromProvider, next.providerId, stillCurrent);
+        narrateBilling(fromProvider, choice.provider, stillCurrent);
         render();
         return;
       }

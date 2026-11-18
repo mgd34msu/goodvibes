@@ -40597,6 +40597,15 @@ export type TurnEvent =
     retries?: number | undefined;
     costUsdCents?: number | undefined;
     costSource?: 'user' | 'provider' | 'catalog' | 'subscription' | 'unknown' | undefined;
+    signIn?: {
+        route: string;
+        label: string;
+        movedFrom?: {
+            route: string;
+            label: string;
+            reason: string;
+        } | undefined;
+    } | undefined;
     finishReason?: string | undefined;
     providerRequestId?: string | undefined;
     originTool?: string | undefined;
@@ -40976,7 +40985,7 @@ export type YesNoVerdict = (typeof YES_NO_VERDICTS)[number];
 
 // Warnings were encountered during analysis:
 //
-// platform/src/events/turn.ts:175:134 - (ae-forgotten-export) The symbol "TurnCompletedMetadata" needs to be exported by the entry point index.d.ts
+// platform/src/events/turn.ts:180:134 - (ae-forgotten-export) The symbol "TurnCompletedMetadata" needs to be exported by the entry point index.d.ts
 
 // (No @packageDocumentation comment for this package)
 

@@ -141,7 +141,7 @@ export {
   buildSyntheticCanonicalModels,
   nameToSlug,
 } from './model-catalog-synthetic.js';
-export { OpenAICodexProvider } from './openai-codex.js';
+export { OpenAISubscriptionRoute, fetchOpenAISubscriptionModelIds } from './openai-codex.js';
 export { OpenAICompatProvider } from './openai-compat.js';
 export { OpenAIProvider } from './openai.js';
 export { OllamaProvider } from './ollama.js';
@@ -279,3 +279,8 @@ export type { ModelFamily, ModelFamilyInput } from './model-family.js';
 export { DecisionRouterProvider, prepareDecisionRouterTurn, describeDecisionRoute } from './decision-router.js';
 export type { DecisionRouterRouteInfo, PreparedDecisionRoute, DecisionRouterProviderOptions } from './decision-router.js';
 export type { DecisionRoutingContext } from './decision-router-context.js';
+
+export { chooseFailover, readFallbackOrder } from './failover.js';
+export type { FailoverChoice, FailoverRegistry, FailoverRequest } from './failover.js';
+export { OPENAI_SIGN_IN_ROUTE_LABELS } from './openai.js';
+export type { OpenAISignInRoute } from './openai.js';

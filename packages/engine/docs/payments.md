@@ -1,14 +1,16 @@
 # Payments: design
 
-**Status:** partially implemented. This document is the design of record.
+**Status:** implemented. Purchases are off until `payments.enabled` is turned
+on, and every budget starts at 0, so until the owner sets one every purchase asks
+first. This document is the design of record.
 Before card entry, code checks the checkout is still the merchant's page with
 the quote's submit control; after the card is typed, the live quote is read once
 against what the owner was shown, and that reading is bound to the click. A verified
 replacement price for the same purchase re-enters the budget decision and opens a
-new window (§8.4). Native startup can restore an eligible original payment window
-and retain its replies. Complete downtime/backlog coverage remains unfinished;
-current-source integration and release qualification remain pending. The retained
-requirements below are not completion claims.
+new window (§8.4). After a restart the daemon restores an eligible waiting window
+and keeps its replies where §8.6.1 says it can; any other interrupted window ends
+unbought and the owner is told. What is not wired yet is marked in §9.1.1, and
+the known limits are listed in §12.2.
 **The behaviors recorded here are contractual. Do not revise them silently.**
 Choices made under zero-deferrals where no owner ruling existed are listed in
 §12.1 as rulings taken, with their reasoning, so they can be overturned
@@ -246,11 +248,11 @@ The daemon's surface root is `tui`, so these sit under `~/.goodvibes/tui/`.
 
 ## 4. Timezone and the day boundary
 
-**The daemon has no timezone concept today.** Searched: no global timezone or
-locale config key exists; the only IANA timezone strings in the platform are
-per-schedule fields in `platform/automation/schedules.ts` (read by
-`platform/automation/cron.ts`), and `device.location.*` is a paired-phone
-GPS permission, unrelated. This capability adds the first one.
+**Before this capability the daemon had no timezone concept.** No global
+timezone or locale config key existed; the only IANA timezone strings in the
+platform were per-schedule fields in `platform/automation/schedules.ts` (read by
+`platform/automation/cron.ts`), and `device.location.*` is a paired-phone GPS
+permission, unrelated. This capability added the first one, `daemon.timezone`.
 
 ### 4.1 The setting
 
@@ -1692,8 +1694,9 @@ When decision models are off (operation without a decision model) the judge does
 answers not confident, with the recourse "not judged, because decision models
 are off", so the merchant is treated as not major and the owner is asked, unless
 the owner has listed the domain themselves in `payments.majorRetailersAdditional`.
-(Automated checkout itself still needs decision models for the cart reading, so
-today a daemon with no decision model in use refuses the checkout before the merchant is judged.)
+(With no decision model in use, code reads the checkout page, and the purchase
+is put to the owner as an approval that lists what was not checked; silence
+never buys.)
 
 The judge returns a `recourse` phrase that comes from a fixed table keyed by the
 recourse reading's closed answer set (an established retailer with a returns
@@ -1723,11 +1726,14 @@ domain **that takes the card**. If an established retailer hands off to a paymen
 page on an unrelated registrable domain, the protection the qualification rested
 on may not follow it, that is not-major, and the notification says why.
 
-*Not wired yet.* The storefront the purchase started on is not passed to the
-merchant classification today, so a hand-off from a storefront to a payment page
-on another domain is not flagged as not-major, and the marketplace policy
-described above is not applied to a live purchase. The classification judges
-the domain that takes the card, as it does for any merchant.
+*Not wired yet.* No caller passes the storefront the purchase started on to the
+merchant classification, so a hand-off from a storefront to a payment page on
+another domain is not flagged as not-major. The classification judges the
+domain that takes the card, as it does for any merchant. The sale-format rule
+above does apply to live purchases: the listing is read from the checkout's
+page, and one read as an auction, a Best Offer or any other format that is not
+fixed-price is refused. A listing that cannot be read is not refused on an
+owner-added domain; on a per-seller marketplace it asks the owner first.
 
 #### eBay is per-listing, not per-domain
 
@@ -2705,8 +2711,9 @@ code.
     the false-refusal rate is unknown until it meets real merchants.
 14. **Backfill coverage varies by channel (§8.6.1).** Telegram has a readable
     history; a channel without one ends a window the restart interrupted,
-    unbought, with the owner told. Only Telegram carries purchase notices today;
-    a new notice channel needs a reply archive before its windows can resume.
+    unbought, with the owner told. Besides the owner inbox, only Telegram carries
+    purchase notices today; a new notice channel needs a reply archive before
+    its windows can resume.
 15. **eBay account age is not checked (§9.1.1).** `minAccountAgeDays` exists in
     `MarketplaceListingThresholds` and defaults to `null`, meaning no check. eBay
     does not expose a member-since date in a place that can be read reliably and

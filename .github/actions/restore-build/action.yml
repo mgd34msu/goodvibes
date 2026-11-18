@@ -12,5 +12,8 @@ runs:
     - name: Unpack workspace package output
       shell: bash
       working-directory: ${{ github.workspace }}
+      # -m: each file takes the time it was unpacked. The output was built from this
+      # same commit, and must not read as older than the checkout's sources (the
+      # bundle budget would call it stale, and an incremental build would redo it).
       run: |
-        tar -xzf "$RUNNER_TEMP/workspace-build-output/workspace-build-output.tgz" -C .
+        tar -xzmf "$RUNNER_TEMP/workspace-build-output/workspace-build-output.tgz" -C .

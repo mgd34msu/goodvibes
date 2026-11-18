@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readWebBindingFromDaemon } from './scripts/daemon-binding';
+import { readWebBindingFromDaemon } from './scripts/daemon-binding.ts';
 
 // Directory this config file lives in (products/webui), resolved independent
 // of process.cwd(), this config is the seam every `vite build` invocation

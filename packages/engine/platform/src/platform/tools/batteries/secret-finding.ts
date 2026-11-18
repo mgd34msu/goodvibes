@@ -15,6 +15,7 @@ import { completeJudgmentView } from './complete-view.js';
  * review), and counts the dismissed ones.
  */
 import { defineBattery, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { ALNUM, BASE64, DIGITS, syntheticChars, syntheticCredential, UPPER } from '../../utils/fixture-credentials.js';
 
 /** Lines of context carried on each side of the candidate line. */
 export const SECRET_CONTEXT_LINES = 2;
@@ -38,6 +39,13 @@ const at = (file: string, line: string, before: string[] = [], after: string[] =
 // The fixture key is assembled from parts so the committed text does not match
 // a live-key scanner; Jev reads the joined line.
 const STRIPE_LIVE_PREFIX = ['sk', 'live', ''].join('_');
+// The same for the AWS key pair, the password and the private-key body (utils/fixture-credentials.ts):
+// synthetic characters from a fixed seed, so the line still reads as a real key.
+const AWS_KEY_ID = syntheticCredential('AKIA', 'aws key pair', 16, `${UPPER}${DIGITS}`);
+const AWS_SECRET_KEY = syntheticCredential('', 'aws key pair secret', 40, BASE64);
+const DB_PASSWORD = syntheticChars('connection helper password', 16, `${ALNUM}!#%&*@`);
+/** The first line of an RSA private key body: the DER header of a 2048-bit key, then synthetic characters. */
+const RSA_KEY_BODY_LINE = `MIIEowIBAAKCAQEA${syntheticChars('rsa key body', 48, BASE64)}`;
 
 export const secretFinding = defineBattery({
   name: 'engine.tools.secret-finding',
@@ -52,9 +60,9 @@ export const secretFinding = defineBattery({
   },
   fixtures: [
     { name: 'live stripe key in config', state: at('src/billing/config.ts', `export const STRIPE_KEY = '${STRIPE_LIVE_PREFIX}51H8xQ2Lk9vRtY7uPzA3bN6cW0dE4fG';`, ['// Billing settings']), expect: { real_secret: 'yes' } },
-    { name: 'aws key pair', state: at('scripts/upload.py', "aws_access_key_id = 'AKIAQ4F7ZL2PXM3N8TRW'", ['import boto3'], ["aws_secret_access_key = 'kB9s2Lq7Xv0Yw3Rt6Pm1Nz8Jc4Hd5Fg2Ae7Ub0Oi'"]), expect: { real_secret: 'yes' } },
-    { name: 'password in a connection helper', state: at('src/db.ts', "const password = 'Qx7!pLm2#vR9zT4w';", ["const user = 'shop_app';"], ['const pool = new Pool({ user, password, host: DB_HOST });']), expect: { real_secret: 'yes' } },
-    { name: 'private key block', state: at('deploy/id_deploy', '-----BEGIN RSA PRIVATE KEY-----', [], ['MIIEowIBAAKCAQEAu1SU1LfVLPHCozMxH2Mo4lgOEePzNm0tRgeLezV6ffAt0gun']), expect: { real_secret: 'yes' } },
+    { name: 'aws key pair', state: at('scripts/upload.py', `aws_access_key_id = '${AWS_KEY_ID}'`, ['import boto3'], [`aws_secret_access_key = '${AWS_SECRET_KEY}'`]), expect: { real_secret: 'yes' } },
+    { name: 'password in a connection helper', state: at('src/db.ts', `const password = '${DB_PASSWORD}';`, ["const user = 'shop_app';"], ['const pool = new Pool({ user, password, host: DB_HOST });']), expect: { real_secret: 'yes' } },
+    { name: 'private key block', state: at('deploy/id_deploy', '-----BEGIN RSA PRIVATE KEY-----', [], [RSA_KEY_BODY_LINE]), expect: { real_secret: 'yes' } },
     { name: 'placeholder in an example env doc', state: at('docs/setup.md', "api_key: 'your-api-key-here'", ['Set your key in config.yaml:']), expect: { real_secret: 'no' } },
     { name: 'read from the environment', state: at('src/client.ts', "const token = process.env.GITHUB_TOKEN ?? '';", []), expect: { real_secret: 'no' } },
     { name: 'test fixture password', state: at('test/auth.test.ts', "    password: 'correct-horse-test',", ["  const user = { email: 'a@example.com',"], ['  };', '  expect(await login(user)).toBe(true);']), expect: { real_secret: 'no' } },

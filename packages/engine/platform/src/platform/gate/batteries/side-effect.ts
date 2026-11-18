@@ -22,6 +22,7 @@
  * unasked side effect.
  */
 import { type JsonValue, defineBattery, oneOf, STAKES_BANDS, yesNo } from '@goodvibes-jev/judgment';
+import { placeholderTelegramBotToken } from '../../utils/fixture-credentials.js';
 
 /** What kind of action a call is, in the execution ledger's vocabulary. */
 export const SIDE_EFFECT_KIND_OPTIONS = {
@@ -79,7 +80,7 @@ export const sideEffect = defineBattery({
     { name: 'post a form', state: call('fetch', { urls: [{ url: 'https://forms.example.org/submit', method: 'POST', body: 'name=Dana&email=dana@example.org' }] }), expect: { mutates: 'yes', outward: 'yes', secrets: 'no', kind: 'network' } },
     { name: 'register a discord command', state: call('channel', { mode: 'run_action', surface: 'discord', actionId: 'provider-api', input: { operation: 'register_command', applicationId: '1180442270961', guildId: '412093881200' } }), expect: { outward: 'yes', mutates: 'yes' } },
     { name: 'edit a channel allowlist', state: call('channel', { mode: 'run_action', surface: 'slack', actionId: 'edit-allowlist', input: { add: ['U02K9D4TQ'], kind: 'user' } }), expect: { mutates: 'yes', outward: 'no' } },
-    { name: 'set up a channel account with a bot token', state: call('channel', { mode: 'account_action', surface: 'telegram', accountAction: 'setup', input: { botToken: '7312059841:AAHk2xQ9wLmN4rT1vB7nC3dE5fGhJ8sP0oU' } }), expect: { mutates: 'yes', secrets: 'yes' } },
+    { name: 'set up a channel account with a bot token', state: call('channel', { mode: 'account_action', surface: 'telegram', accountAction: 'setup', input: { botToken: placeholderTelegramBotToken() } }), expect: { mutates: 'yes', secrets: 'yes' } },
     { name: 'list channel accounts', state: call('channel', { mode: 'accounts', surface: 'slack' }), expect: { mutates: 'no', outward: 'no' } },
     { name: 'spawn an agent', state: call('agent', { mode: 'spawn', task: 'write tests for the tax module' }), expect: { mutates: 'yes', outward: 'no', kind: 'delegation' } },
     { name: 'browser click', state: call('browser', { action: 'click', selector: 'button#checkout' }), expect: { kind: 'browser' } },

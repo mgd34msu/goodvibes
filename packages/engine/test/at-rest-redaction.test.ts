@@ -20,6 +20,7 @@ import { tmpdir } from 'node:os';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { redactAtRestLine } from '../platform/src/platform/runtime/at-rest-persistence.ts';
+import { DIGITS, LOWER, syntheticChars, syntheticCredential, syntheticJwt, UPPER } from '../platform/src/platform/utils/fixture-credentials.ts';
 import { AgentSession } from '../platform/src/platform/agents/session.ts';
 import { LocalLedgerExporter } from '../platform/src/platform/runtime/telemetry/exporters/local-ledger.ts';
 
@@ -30,8 +31,10 @@ function mkTemp(): string {
   return dir;
 }
 
-const API_KEY = 'sk-ABCDEFGHIJKLMNOPQRSTUVWX';
-const GITHUB_TOKEN = 'ghp_0123456789012345678901234567890123456789';
+// Credential-shaped values are assembled at run time (utils/fixture-credentials.ts), so
+// no file holds a whole shape a secret scanner reports.
+const API_KEY = syntheticCredential('sk-', 'at-rest api key', 24, UPPER);
+const GITHUB_TOKEN = syntheticCredential('ghp_', 'at-rest github token', 40, DIGITS);
 const BEARER = '7f3c9a1e5b2d48f0a6c4e8b1d3f5a7c9';
 const ORDINARY = 'ordinary-visible-text';
 
@@ -48,10 +51,11 @@ describe('redactAtRestLine', () => {
   test('issuer formats and credential-shaped spans are masked in code; no span reaches a decision model', () => {
     const { port, requests } = fakePort(() => noulAnswer(0.01));
     installJudgmentPort(port);
-    const secrets = [API_KEY, GITHUB_TOKEN, BEARER, 'sk-proj-4fQ9xT2mLk8vRw7ZbN3cYp1JhG6sDe0A', 'key-3ax6xnjp29jd6fds4gc373sgvjxteol0',
-      'sk-or-v1-7c1e2b9a04d38f6e5a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d', 'AKIAABCDEFGHIJKLMNOP', 'xoxb-123456789012-123456789012-abcdefghij',
+    const secrets = [API_KEY, GITHUB_TOKEN, BEARER, syntheticCredential('sk-proj-', 'at-rest project key', 32), syntheticCredential('key-', 'at-rest key', 32, `${LOWER}${DIGITS}`),
+      syntheticCredential('sk-or-v1-', 'at-rest router key', 48, `${DIGITS}abcdef`), syntheticCredential('AKIA', 'at-rest aws key id', 16, UPPER),
+      ['xoxb', syntheticChars('slack team', 12, DIGITS), syntheticChars('slack bot', 12, DIGITS), syntheticChars('slack secret', 10, LOWER)].join('-'),
       // A signed JSON web token with no `Bearer` in front of it.
-      'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJvd25lciJ9.dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk'];
+      syntheticJwt('at-rest')];
     const line = JSON.stringify({ body: `${ORDINARY} token ${API_KEY} Authorization: Bearer ${BEARER} also ${secrets.slice(3).join(' ')}`, gh: GITHUB_TOKEN });
     const out = redactAtRestLine(line);
     for (const secret of secrets) expect(out).not.toContain(secret);

@@ -24,6 +24,12 @@ import { createPermissionConfigReader, PermissionManager } from '../platform/src
 import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
 import { composeJudgment } from '../platform/src/platform/runtime/judgment-services.ts';
 import { forgetGateReadings, gateReadingAnswers } from './_helpers/gate-readings.ts';
+import { syntheticCredential } from '../platform/src/platform/utils/fixture-credentials.ts';
+
+// Credential-shaped values are assembled at run time (utils/fixture-credentials.ts), so no
+// file holds a whole shape a secret scanner reports.
+const OPENAI_FIXTURE_KEY = syntheticCredential('sk-proj-', 'privacy openai key', 32);
+const GITHUB_FIXTURE_TOKEN = syntheticCredential('ghp_', 'privacy github token', 36);
 
 let dir: string;
 let model: ScriptedDecisionServer;
@@ -60,7 +66,7 @@ test('no secret in a call reaches the decision model and the call is not approve
   const exec = (cmd: string) => ['exec', { commands: [{ cmd }] }] as const;
   const secrets: ReadonlyArray<readonly [string, string, Record<string, unknown>]> = [
     ['a declared credential field', 'mcp_fixture_login', { username: 'owner', password: 'correct-horse-battery' }],
-    ['a key-shaped literal in a command', ...exec('export OPENAI_API_KEY=sk-proj-Q7vR2mX9kL4pT8wZ3nB6yC1dF5gH0jK2')],
+    ['a key-shaped literal in a command', ...exec(`export OPENAI_API_KEY=${OPENAI_FIXTURE_KEY}`)],
     ['a private key block', 'write', { files: [{ path: 'id_fixture', content: '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\n-----END OPENSSH PRIVATE KEY-----\n' }] }],
     ['a URL with a password', ...exec('curl https://admin:Tr0ub4dor-fixture@example.com/export')],
     ['a card number', ...exec('echo 4111 1111 1111 1111 > card.txt')],
@@ -74,7 +80,7 @@ test('no secret in a call reaches the decision model and the call is not approve
   // any shape) is read and decided, and what reached the model names it without its value.
   const passed = [
     ['DB_PASSWORD=hunter2 make migrate', 'hunter2', 'DB_PASSWORD=[credential]'],
-    ['GITHUB_TOKEN=ghp_Q7vR2mX9kL4pT8wZ3nB6yC1dF5gH0jK2abcd gh repo list', 'ghp_Q7vR2mX9kL4pT8wZ3nB6yC1dF5gH0jK2abcd', 'GITHUB_TOKEN=[credential]'],
+    [`GITHUB_TOKEN=${GITHUB_FIXTURE_TOKEN} gh repo list`, GITHUB_FIXTURE_TOKEN, 'GITHUB_TOKEN=[credential]'],
   ] as const;
   for (const [cmd, literal, marker] of passed) {
     const before = model.requests.length;

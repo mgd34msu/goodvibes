@@ -70,14 +70,18 @@ cd ~/code/my-project
 goodvibes
 ```
 
-1. **Choose a model.** The default model is OpenRouter's free one, so with
-   `OPENROUTER_API_KEY` set you start straight away. With a key for another
-   provider in your environment (for example `ANTHROPIC_API_KEY`), a welcome
-   menu offers to use that provider. Otherwise choose **Full guided setup**: paste
-   an API key for any provider, or sign in with a ChatGPT subscription, then
-   pick your default model. `/onboarding` reopens the setup at any time,
-   `/model` switches models and `/scan` finds model servers on your machine
-   and network.
+1. **Set up a model.** The first time, a **Welcome to GoodVibes** menu
+   appears; choose **Full guided setup**. Its first page asks what GoodVibes
+   should be able to do: work only in the terminal, or also in a browser, from
+   other devices and with outside apps. Next, **AI provider access**: paste an
+   API key for any provider that takes one, or sign in with a ChatGPT
+   subscription. Then **Default model**: pick the model and how hard it should
+   think. Later pages cover other features, and the last one reviews what you
+   chose. If GoodVibes already finds a provider key in your environment, it
+   skips this: the welcome menu offers that provider, or, with
+   `OPENROUTER_API_KEY` (the default model is OpenRouter's free one), you start
+   at once. `/onboarding` reopens the setup at any time, `/model` switches
+   models and `/scan` finds model servers on your machine and network.
 2. **Ask about the project.** Type `What does this project do, and how do I run
    its tests?` and press Enter. It reads the files it needs and answers.
 3. **Ask for a change.** Type `Add a --verbose flag to the CLI and run the
@@ -117,9 +121,13 @@ goodvibes
   `/knowledge search <words>` or `/knowledge ask <question>` finds it later.
   The assistant keeps its own store: `goodvibes-agent search "release checklist"`.
   ([knowledge](products/tui/docs/knowledge-artifacts-and-multimodal.md))
-- **Buy something within limits.** Purchases are off until you turn them on.
-  Add a card with `/payments card` and set your limits in the `payments.*`
-  settings (they start at 0, so every purchase asks you). Inside your limits a
+- **Buy something within limits.** Purchases are off until you set
+  `payments.enabled`. Add a card with `/payments card`, then set your limits:
+  a daily budget for item prices (`payments.budget.dailyItem`), a ceiling per
+  purchase (`payments.budget.perPurchaseCeiling`) and a daily allowance for
+  tax, fees and delivery (`payments.budget.dailyOverage`). All three start at
+  0: until you set the first two, every purchase asks you, and a purchase whose
+  tax, fees and delivery do not fit the third is refused. Inside your limits a
   purchase goes ahead after a 10-minute window in which one word stops it;
   over a limit, it asks you and says by how much.
   ([purchases](packages/engine/docs/payments.md))
@@ -191,10 +199,11 @@ In `goodvibes`, `Shift+Tab` changes the mode for the current session.
 
 The decision model makes routine calls so you are asked less. It is optional:
 coding, commands, tests, chat and the rest work without one, and you are asked
-instead. To use the hosted Jev, set `TYPESAFE_API_KEY`. To use another decision
-model, or one you run yourself, choose it in `/settings` under Judgment. Left
-at the default, `jev-decides` hands calls only to the hosted Jev model that
-GoodVibes has measured; choose `jev-decides` yourself to use another one.
+instead. To set one up, choose it in `/settings` under Judgment; the
+[decision model guide](docs/decision-model-policy.md) walks through the
+choices. By default, GoodVibes lets a decision model answer for you only when
+its accuracy has been checked, which today means the hosted Jev. To let a
+different one answer, choose the `jev-decides` mode yourself in `/settings`.
 
 The `judgment.policy` setting says what happens when a decision model is set:
 
@@ -247,4 +256,5 @@ By topic:
 
 ## License
 
-MIT.
+MIT. Each program and package carries its own copy, for example
+[the terminal app's](products/tui/LICENSE).

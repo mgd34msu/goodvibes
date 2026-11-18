@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { constants as osConstants, tmpdir, userInfo } from 'node:os';
-import { isAbsolute, join, resolve, sep } from 'node:path';
+import { basename, isAbsolute, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { boundedNativeProcessClose, drainNativeProcessGroup, signalNativeProcessGroup } from '../products/daemon/scripts/native-execution-process.mjs';
@@ -110,7 +110,30 @@ export function acceptanceFailureRecord(evidence, error) {
     ...(Number.isInteger(evidence.exitCode) && evidence.exitCode !== 0 && evidence.nativeStartupFailure
       && ['sqlite', 'darwin-original'].includes(evidence.nativeStartupFailure.stage) && nativeStartupFailureCodes.has(evidence.nativeStartupFailure.code)
       ? { nativeStartupFailure: { stage: evidence.nativeStartupFailure.stage, code: evidence.nativeStartupFailure.code } } : {}),
-    ...(error?.code === 'ERR_ACCEPTANCE_READINESS_TIMEOUT' ? { lastProbeError: safeError(error.cause) } : {}) };
+    ...(error?.code === 'ERR_ACCEPTANCE_READINESS_TIMEOUT' ? { lastProbeError: safeError(error.cause) } : {}),
+    ...(Array.isArray(evidence.serviceDefinitions) && evidence.serviceDefinitions.every(name => serviceDefinitionNames.has(name))
+      ? { serviceDefinitions: [...evidence.serviceDefinitions] } : {}),
+    ...(typeof evidence.serviceSetup === 'string' && (serviceSetupOutcomes.has(evidence.serviceSetup) || /^install-service-exit-\d{1,3}$/.test(evidence.serviceSetup))
+      ? { serviceSetup: evidence.serviceSetup } : {}) };
+}
+
+/** The service definitions found when the service was last checked: fixed file names only. */
+const serviceDefinitionNames = new Set(['goodvibes-jev.service', 'goodvibes.service', 'sh.goodvibes.daemon.plist']);
+const serviceSetupOutcomes = new Set(['installed', 'installed-not-running', 'not-reported', 'no-manager', 'existing-definition', 'skipped', 'not-attempted']);
+
+/** What the current installer's own lines (scripts/install.sh setup_daemon_service) said about setting up
+ * the daemon's service on its last run, as one fixed word. `not-attempted`: a daemon was already running,
+ * so the upgrade restart path ran instead. */
+export function installerServiceSetup(stdout) {
+  const exited = /NOTE: goodvibes-daemon install-service exited (\d{1,3})\b/.exec(stdout)?.[1];
+  if (exited !== undefined) return `install-service-exit-${Number(exited)}`;
+  if (stdout.includes('NOTE: the service is installed but not running yet.')) return 'installed-not-running';
+  if (stdout.includes('Setting up the goodvibes daemon as a ')) return 'installed';
+  if (stdout.includes('NOTE: goodvibes-daemon could not report on its service')) return 'not-reported';
+  if (stdout.includes('No user service manager (systemd/launchd) is available')) return 'no-manager';
+  if (stdout.includes('A daemon service definition already exists at ')) return 'existing-definition';
+  if (stdout.includes('Daemon service setup skipped (GOODVIBES_DAEMON_SERVICE=0)')) return 'skipped';
+  return 'not-attempted';
 }
 
 export function markAcceptanceCheckpoint(evidence, check) {
@@ -118,6 +141,7 @@ export function markAcceptanceCheckpoint(evidence, check) {
   evidence.diagnostics = undefined; evidence.nativeDaemonFailure = undefined; evidence.nativeStartupFailure = undefined;
   evidence.httpStatus = undefined;
   evidence.observedRelease = undefined;
+  evidence.serviceDefinitions = undefined;
 }
 
 /** Every attempt observes the actual service before the status/HTTP proof.
@@ -671,7 +695,9 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
     assert.equal(result.ok, true); assert.equal(result.data.key, key); return result.data.value;
   };
   const assertServiceOwned = () => {
-    assertHome(); const path = servicePath(), stat = lstatSync(path);
+    assertHome();
+    evidence.serviceDefinitions = serviceDefinitions.filter(path => lstatSync(path, { throwIfNoEntry: false }) !== undefined).map(path => basename(path));
+    const path = servicePath(), stat = lstatSync(path);
     assert.ok(stat.isFile() && !stat.isSymbolicLink() && stat.uid === account.uid);
     assert.ok(readFileSync(path, 'utf8').includes(daemon), 'The service must retain this exact admitted executable.');
     for (const other of serviceDefinitions) if (other !== path) {
@@ -702,7 +728,10 @@ async function performPublishedAcceptance({ tag, source, target, signal, scenari
   };
   const host = {
     async admit() { assertHome(); },
-    async install() { await invoke('sh', [installer], installEnv, false, delivery?.installerSource ?? readFileSync(installer, 'utf8'), delivery?.installerSourcePath); },
+    async install() {
+      evidence.serviceSetup = undefined;
+      evidence.serviceSetup = installerServiceSetup(await invoke('sh', [installer], installEnv, false, delivery?.installerSource ?? readFileSync(installer, 'utf8'), delivery?.installerSourcePath));
+    },
     async verifyInstalled(expected = {}) {
       const expectedVersion = expected.version ?? version, expectedReaders = expected.readers ?? readers;
       for (const name of products) {

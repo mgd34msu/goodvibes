@@ -57,12 +57,21 @@ export interface AcceptanceFailureRecord {
   nativeDaemonFailure?: NativeDaemonFailure;
   nativeStartupFailure?: NativeStartupFailure;
   error: { name: string; code?: string }; lastProbeError?: { name: string; code?: string };
+  /** Service definition file names present when the service was last checked. */
+  serviceDefinitions?: readonly ServiceDefinitionName[];
+  /** What the current installer said about the daemon's service on its last run. */
+  serviceSetup?: InstallerServiceSetup;
 }
+export type ServiceDefinitionName = 'goodvibes-jev.service' | 'goodvibes.service' | 'sh.goodvibes.daemon.plist';
+export type InstallerServiceSetup = 'installed' | 'installed-not-running' | 'not-reported' | 'no-manager' | 'existing-definition'
+  | 'skipped' | 'not-attempted' | `install-service-exit-${number}`;
+export function installerServiceSetup(stdout: string): InstallerServiceSetup;
 export function acceptanceFailureRecord(evidence: {
   stage: string; check?: string; command?: string; exitCode?: number; exitSignal?: NodeJS.Signals; diagnostics?: readonly string[];
   httpStatus?: number;
   observedRelease?: 'previous' | 'target' | 'other';
   nativeDaemonFailure?: NativeDaemonFailure; nativeStartupFailure?: NativeStartupFailure;
+  serviceDefinitions?: readonly string[]; serviceSetup?: string;
 }, error: unknown): AcceptanceFailureRecord;
 export function markAcceptanceCheckpoint(evidence: Parameters<typeof acceptanceFailureRecord>[0], check?: string): void;
 export function waitForAcceptanceReadiness(serviceReady: () => Promise<void>, verifyReady: () => Promise<void>,

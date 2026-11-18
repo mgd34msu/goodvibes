@@ -291,7 +291,10 @@ jobs:
         run: |
           node products/daemon/scripts/native-execution-artifact.mjs record "$GITHUB_SHA" "$GITHUB_SHA"
           node products/daemon/scripts/verify-native-execution.mjs "$GITHUB_SHA" "$GITHUB_SHA"
-          daemon="$PWD/products/daemon/native/goodvibes-daemon-$NATIVE_TARGET"
+          # The program the build wrote for this target (toolchain.config.json's
+          # appArtifact): goodvibes-daemon-macos-<arch>, the name the release ships.
+          daemon="$PWD/products/daemon/native/goodvibes-daemon-macos-${NATIVE_TARGET#darwin-}"
+          test -x "$daemon"
           target="gui/$(id -u)/sh.goodvibes.daemon"
           launchd_pid() { launchctl print "$target" | sed -n 's/^[[:space:]]*pid = \([0-9][0-9]*\)[[:space:]]*$/\1/p' | head -n 1; }
           # launchd spawns a bootstrapped job at once; allow it 10 seconds to show a pid.

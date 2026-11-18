@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { proveNativeMemoryRoundTrip } from './boot-smoke-reading.mjs';
+import { reportNativeChildEnd } from './darwin-crash-reports.mjs';
 import { syntheticSystemOneAnswers } from './hosted-session-protocol.mjs';
 import { nativeExecutionSource, retainNativeExecutionFiles, verifyNativeExecutionArtifact } from './native-execution-artifact.mjs';
 import { assertNativeProcessGroupDrained, boundedNativeProcessClose, drainNativeProcessGroup, signalNativeProcessGroup, spawnNativeProcessGroup } from './native-execution-process.mjs';
@@ -26,7 +27,11 @@ const root = mkdtempSync(join(realpathSync(tmpdir()), 'daemon-native-execution-'
 const artifacts = join(root, 'artifacts'), work = join(root, 'foreign-work'), home = join(root, 'home');
 const tree = join(root, 'tree'), daemon = join(root, 'selected-daemon');
 const token = 'synthetic-native-memory-token';
-let judgment, judgmentError, host, hostStopped, hostExited = false, hostPid;
+let judgment, judgmentError, host, hostStopped, hostExited = false, hostPid, hostEnd;
+// The host's own output, kept for the report of an unexpected end.
+let output = '', errors = '';
+// Crash reports written from here on belong to this run.
+const startedAt = Date.now();
 const requests = [];
 const requestShapes = { modelFactShape: 0, fieldNameShape: 0, settingFormShape: 0, other: 0 };
 let cleanupRefused = false;
@@ -134,6 +139,7 @@ try {
     const timer = setTimeout(() => { expired = true; signalNativeProcessGroup(child); }, 20_000);
     try {
       const result = await boundedNativeProcessClose(stopped, 20_000, 'Native command close deadline'); assert(!expired, 'Portable native command exceeded its deadline/output bound');
+      if (result.signal !== null) await reportNativeChildEnd({ label: `goodvibes-daemon ${argv.join(' ')}`, pid: child.pid, since: startedAt, result, stdout, stderr });
       assert.equal(result.signal, null, stderr);
       assertNativeProcessGroupDrained(child);
       original.retained.assertCurrent(); relocated.assertCurrent();
@@ -180,7 +186,7 @@ try {
   host = spawnNativeProcessGroup(binary, ['serve', '--hostname', '127.0.0.1', '--port', String(port)], {
     cwd: work, env: { ...childEnv, ...judgmentEnv, GOODVIBES_DAEMON_TOKEN: token, GOODVIBES_NATIVE_STARTUP_OBSERVATION: '1' }, stdio: ['ignore', 'pipe', 'pipe'],
   });
-  hostPid = host.pid; let output = '', errors = '', startupBannerObservedAt;
+  hostPid = host.pid; let startupBannerObservedAt;
   host.stdout.on('data', chunk => {
     output += chunk;
     if (startupBannerObservedAt === undefined && output.includes(' starting:')) startupBannerObservedAt = startupProgress.snapshot().elapsedMs;
@@ -192,7 +198,7 @@ try {
     startupProgress.append(chunk, requests.length);
   });
   hostStopped = new Promise((yes, no) => {
-    host.once('error', no); host.once('close', (code, signal) => { hostExited = true; yes({ code, signal }); });
+    host.once('error', no); host.once('close', (code, signal) => { hostExited = true; hostEnd = { code, signal }; yes(hostEnd); });
   }); void hostStopped.catch(() => {});
   while (!hasNativeStartupReadyBanner(output, version)) {
     assert.ifError(judgmentError);
@@ -249,6 +255,13 @@ try {
     semanticQualification: 'synthetic-only', modelAcquisition: 'disabled',
     status: 'running', startupElapsedMs, bootSemanticRequests: 0, memoryRoundTripSemanticRequests: requests.length,
     malformedSettingsExit: malformed.code, nativeVectorAvailable: vector.vector.available, cleanShutdown: true }));
+} catch (error) {
+  // The host ended on its own (a crash, a failed start, an unclean shutdown):
+  // print what it wrote and, after a signal, the crash report macOS made of it.
+  if (hostEnd && (hostEnd.signal !== null || hostEnd.code !== 0)) {
+    await reportNativeChildEnd({ label: 'goodvibes-daemon serve', pid: hostPid, since: startedAt, result: hostEnd, stdout: output, stderr: errors });
+  }
+  throw error;
 } finally {
   try {
     try { if (host && hostStopped) await drainNativeProcessGroup(host, hostStopped); }

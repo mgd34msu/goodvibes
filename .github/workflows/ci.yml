@@ -313,7 +313,7 @@ jobs:
             via "$1" "$daemon" stop-service
             not_in_domain; test "$(status_pid "$1")" = stopped
             via "$1" "$daemon" start-service
-            wait_pid
+            wait_pid >/dev/null
             via "$1" "$daemon" uninstall-service
             not_in_domain; test ! -e "$HOME/Library/LaunchAgents/sh.goodvibes.daemon.plist"
           }
@@ -336,6 +336,21 @@ jobs:
           else
             echo "::warning title=launchd over SSH::Remote Login could not be reached on this runner, so the service commands were not run from an SSH login; the round from this session above did run."
           fi
+      # A daemon that died by a signal anywhere above (the verifier's own
+      # children print their output and report themselves) leaves a macOS crash
+      # report: print each one's exception, messages and crashed thread, and
+      # keep the files.
+      - name: Show the daemon's crash reports
+        if: failure() && matrix.platform == 'darwin'
+        run: node products/daemon/scripts/darwin-crash-reports.mjs --copy-to "$RUNNER_TEMP/daemon-crash-reports"
+      - name: Keep the daemon's crash reports
+        if: failure() && matrix.platform == 'darwin'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: daemon-crash-reports-${{ matrix.target }}
+          path: ${{ runner.temp }}/daemon-crash-reports
+          retention-days: 7
+          if-no-files-found: ignore
 
   # The one job a branch rule and the release gate require (release.yml's
   # ci-green reads its "CI ok" check run). It fails when any other job did not

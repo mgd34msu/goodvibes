@@ -23,7 +23,7 @@
  * linked where the product's browser cache expects its own build, so the
  * product finds a browser without downloading one (the suite has no network).
  */
-import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test';
+import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -90,15 +90,27 @@ function startMerchant() {
   };
 }
 
-let merchant: ReturnType<typeof startMerchant>;
-let browser: DaemonBrowserGatewayService;
+let merchant: ReturnType<typeof startMerchant> | undefined;
+let browser: DaemonBrowserGatewayService | undefined;
 let seam: BrowserCheckoutSeam | undefined;
 let call: (args: Record<string, unknown>) => Promise<ToolResult>;
 let ownerAsked = 0;
-let previousPort: ReturnType<typeof installJudgmentPort>;
+const previousPort = installJudgmentPort(fakePort(() => noulAnswer(0.01)).port);
 
-beforeAll(async () => {
-  previousPort = installJudgmentPort(fakePort(() => noulAnswer(0.01)).port);
+afterAll(async () => {
+  await browser?.shutdown();
+  merchant?.stop();
+  installJudgmentPort(previousPort);
+  rmSync(root, { recursive: true, force: true });
+});
+
+/**
+ * The one browser the cases share, started before any case at module scope:
+ * how long a real browser takes to start, and to open its first page, is not
+ * what this file proves, so it counts against the file's limit and never
+ * against a case's.
+ */
+async function startShopper(): Promise<void> {
   const homeDirectory = join(root, 'home');
   // Where the product looks for its own browser build: the installed Chromium stands in for it.
   const installed = createBrowserProvisionIo({ homeDirectory, surfaceRoot: 'goodvibes' }).systemBrowserCandidates()[0];
@@ -113,8 +125,9 @@ beforeAll(async () => {
   const permissions = new PermissionManager(async () => { ownerAsked++; return { approved: false }; },
     createPermissionConfigReader(config), new PolicyRuntimeState(), null, null, null, { heldForOwner: new HeldForOwnerLedger(), surfaceOf: () => undefined });
   const registry = new ToolRegistry(permissions);
-  browser = composeDaemonBrowser({ homeDirectory, onBrowserCheckout: composed => { seam = composed; } })!;
-  registerAgentBrowserTool(registry, { browser: () => browser });
+  const composed = composeDaemonBrowser({ homeDirectory, onBrowserCheckout: checkout => { seam = checkout; } })!;
+  browser = composed;
+  registerAgentBrowserTool(registry, { browser: () => composed });
   // The model has loaded the browser tool's full parameters, as it does before its first call.
   registry.deferredCallRefusal('load', 'browser');
   const deps: ToolExecutionDeps = { permissionManager: permissions, toolRegistry: registry,
@@ -123,22 +136,24 @@ beforeAll(async () => {
   let calls = 0;
   call = async args => (await executeToolCalls(deps, `turn-${String(++calls)}`, [{ id: `call-${String(calls)}`, name: 'browser', arguments: args }]))[0]!;
 
-  merchant = startMerchant();
-  expect((await call({ action: 'launch', headless: true })).success).toBe(true);
-});
+  const front = startMerchant();
+  merchant = front;
+  const launched = await call({ action: 'launch', headless: true });
+  if (!launched.success) throw new Error(`The browser did not start: ${launched.error ?? 'no reason given'}`);
+  const opened = await call({ action: 'navigate', url: front.url });
+  if (!opened.success) throw new Error(`The browser did not open the checkout: ${opened.error ?? 'no reason given'}`);
+}
 
-beforeEach(() => { merchant.clear(); });
+try { await startShopper(); }
+catch (error) { await browser?.shutdown(); merchant?.stop(); throw error; }
+const shop = merchant!;
+const engine = browser!;
 
-afterAll(async () => {
-  await browser?.shutdown();
-  merchant?.stop();
-  installJudgmentPort(previousPort);
-  rmSync(root, { recursive: true, force: true });
-});
+beforeEach(() => { shop.clear(); });
 
 /** Opens the checkout fresh and returns the ref of each control by its name. */
 async function openCheckout(): Promise<Map<string, string>> {
-  expect((await call({ action: 'navigate', url: merchant.url })).success).toBe(true);
+  expect((await call({ action: 'navigate', url: shop.url })).success).toBe(true);
   const snapshot = await call({ action: 'snapshot' });
   expect(snapshot.error).toBeUndefined();
   const elements = (JSON.parse(snapshot.output!) as { elements: { ref: string; name: string }[] }).elements;
@@ -153,10 +168,10 @@ function expectOrderRefusal(result: ToolResult): void {
 
 /** A later action on the same page reaches the merchant; by then no order has arrived. */
 async function expectNoOrderReachedTheMerchant(refs: Map<string, string>): Promise<void> {
-  const coupon = merchant.next('/coupon');
+  const coupon = shop.next('/coupon');
   expect((await call({ action: 'click', ref: refs.get('Apply coupon') })).success).toBe(true);
   await coupon;
-  expect(merchant.orders()).toEqual([]);
+  expect(shop.orders()).toEqual([]);
 }
 
 test.each(['Place order', 'Buy now'])(
@@ -184,7 +199,7 @@ test('Enter in the order form, text typed with submit and a key on the order con
 
 test('once the daemon has typed the card into the page, a screenshot through the browser tool is refused', async () => {
   const pan = '4539578763621486';
-  expect((await call({ action: 'navigate', url: merchant.url })).success).toBe(true);
+  expect((await call({ action: 'navigate', url: shop.url })).success).toBe(true);
   const snapshot = await call({ action: 'snapshot' });
   const page = JSON.parse(snapshot.output!) as { sessionId: string; pageId: string; elements: { ref: string; name: string }[] };
   const card = page.elements.find(element => element.name === 'Card number')!.ref;
@@ -199,16 +214,16 @@ test('once the daemon has typed the card into the page, a screenshot through the
 });
 
 test('a payment click the merchant received but never answered is reported as outcome unknown, not as never sent', async () => {
-  expect((await call({ action: 'navigate', url: merchant.url })).success).toBe(true);
+  expect((await call({ action: 'navigate', url: shop.url })).success).toBe(true);
   const page = JSON.parse((await call({ action: 'snapshot' })).output!) as { sessionId: string; pageId: string; elements: { ref: string; name: string }[] };
   const confirm = page.elements.find(element => element.name === 'Confirm and pay')!.ref;
   // The click as the payment flow makes it, with a one-second deadline.
   const owner = { assertCurrent: () => {} };
   markPaymentCheckoutAction(owner);
-  const arrived = merchant.next('/held-order');
-  const clicked = browser.click({ sessionId: page.sessionId, pageId: page.pageId }, { ref: confirm, timeoutMs: 1_000 }, owner).then(() => null, (error: unknown) => error);
+  const arrived = shop.next('/held-order');
+  const clicked = engine.click({ sessionId: page.sessionId, pageId: page.pageId }, { ref: confirm, timeoutMs: 1_000 }, owner).then(() => null, (error: unknown) => error);
   await arrived;
   const failure = await clicked;
-  merchant.release();
+  shop.release();
   expect((failure as Error | null)?.name).toBe('BrowserClickOutcomeUnknownError');
 });

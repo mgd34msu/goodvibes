@@ -5,20 +5,15 @@
 
 The engine is the typed TypeScript platform layer behind the GoodVibes products: sessions, provider/model routing, in-process agents, a knowledge and memory store, a control-plane HTTP and realtime API, and the transports that carry it all. The daemon is its own product, built on the engine. Full-surface consumers embed runtime behavior in a Bun process and connect to daemon services as clients. Companion consumers, including the WebUI and mobile clients, use HTTP, SSE and WebSocket. The workspace package `@goodvibes-jev/engine` carries the platform through explicit subpaths such as `@goodvibes-jev/engine/platform`, `@goodvibes-jev/engine/contracts` and `@goodvibes-jev/engine/errors`.
 
-Use the [monorepo installation guide](../../docs/installation.md) to install the
-application suite. Current behavior for
+This page is for developers building on the engine. To install and use
+GoodVibes itself, start at the [repository README](../../README.md) and the
+[installation guide](../../docs/installation.md). Current behavior for
 [completion verification](docs/runtime-orchestration.md#completion-verification),
 [project review inventory](docs/contract-criteria.md#project-review-inventory) and
 [owner-configured tool access](docs/tool-safety.md#owner-configured-access) lives
 in the engine.
 
 Public contract, config keys, route paths, event shapes, and file layouts follow the semver policy in `docs/semver-policy.md`. Pin exact versions and read `CHANGELOG.md` before upgrading.
-
-**Hosted-turn cancellation is scoped to owned execution.**
-Its settlement boundary covers the turn's owned provider, tool, hook, and hook-Agent
-work. Independent workflow-trigger automations may continue; `TURN_CANCEL` is not a
-global “all side effects stopped” receipt. Uncooperative owned work must stay pending
-rather than be reported drained. See the [cancellation contract and platform limits](docs/hosted-turn-cancellation.md).
 
 ```mermaid
 flowchart LR
@@ -133,6 +128,7 @@ This is a starting point, not the full list. There is no root `@goodvibes-jev/en
 - **Knowledge and memory.** The SQLite-backed knowledge/wiki system, ingestion, retrieval, and project planning artifacts: [docs/knowledge.md](./docs/knowledge.md).
 - **Provider and model runtime.** Daemon-side routing, failover, and catalogs across model providers: [docs/providers.md](./docs/providers.md).
 - **Errors.** A typed `EngineErrorKind` model. Match on `err.kind`, never on `err.message`: [docs/error-kinds.md](./docs/error-kinds.md).
+- **Hosted-turn cancellation is scoped to owned execution.** Its settlement boundary covers the turn's owned provider, tool, hook, and hook-Agent work. Independent workflow-trigger automations may continue; `TURN_CANCEL` is not a global “all side effects stopped” receipt. Uncooperative owned work must stay pending rather than be reported drained. See the [cancellation contract and platform limits](docs/hosted-turn-cancellation.md).
 
 Full index: [docs/README.md](./docs/README.md).
 
@@ -229,8 +225,8 @@ there. Release workflows derive the previous release tag from Git history.
 
 The monorepo owns versioning and release workflows. The root version governs
 the engine, judgment and daemon; the other product manifests retain their own
-versions. The application products are private workspaces and the suite is
-installed from this checkout. Export and compatibility rules are recorded in
+versions. The application products are private workspaces; the suite is
+installed from checksum-verified release binaries by the repository installer. Export and compatibility rules are recorded in
 [the semver policy](./docs/semver-policy.md); release machinery and its explicit
 gates are described in release and publishing.
 Update an installed suite with the [repository installer](../../docs/installation.md#automatic-updates-and-rollback).
@@ -239,8 +235,8 @@ Update an installed suite with the [repository installer](../../docs/installatio
 
 Report vulnerabilities through the repository [security policy](../../SECURITY.md).
 Engine security boundaries and dependency posture are described in
-[docs/security.md](./docs/security.md). Updating the installed suite rebuilds
-the selected repository commit and its locked dependencies.
+[docs/security.md](./docs/security.md). Updating the installed suite installs
+the selected release's checksum-verified binaries.
 
 ## License
 

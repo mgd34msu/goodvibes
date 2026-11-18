@@ -1,5 +1,8 @@
 # Getting started
 
+`goodvibes` is the GoodVibes terminal app for working in a project. This guide
+covers installing it, configuring a model provider and the first run.
+
 ## Install
 
 The GoodVibes TUI is part of the GoodVibes suite. Install released binaries with

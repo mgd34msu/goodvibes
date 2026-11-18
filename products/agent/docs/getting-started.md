@@ -1,9 +1,10 @@
 # Getting started
 
-GoodVibes Agent is the operator-assistant workspace in the GoodVibes
-monorepo. The workspace tour below describes inherited capabilities; native
-setup and current authority requirements take precedence over historical
-confirmation or release behavior.
+GoodVibes Agent (`goodvibes-agent`) is the GoodVibes personal assistant: chat,
+research, mail and calendar, reminders, notes and memory in one terminal
+workspace. This guide covers installing it, its first run and each area of the
+workspace. Where an area described below and the setup requirements differ,
+the setup requirements apply.
 
 ## Requirements and installation
 

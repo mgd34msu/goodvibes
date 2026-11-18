@@ -78,7 +78,7 @@ install build dependencies or compile anything. One release version is used for
 the complete suite. To select a release explicitly:
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.3.0 sh
+curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.3.1 sh
 ```
 
 Commands install in `~/.local/bin` by default; existing `~/.goodvibes` data is

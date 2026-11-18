@@ -12,7 +12,7 @@ Missing assets or mismatched checksums stop installation before replacing progra
 To pin the complete suite:
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.1.2 sh
+curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.3.1 sh
 ```
 
 The installer uses POSIX shell, curl or wget, tar, and sha256sum or shasum.
@@ -121,8 +121,8 @@ installer again also retries the restore from that record. An installer that is
 killed outright (SIGKILL, power loss, out of memory) cannot recover or print
 anything, so the next installation or uninstall does it: when the process that
 holds a `*.update-transaction` claim is no longer running, it puts the previous
-files back from that record, releases the claims and continues. `goodvibes
-update`, the daemon's automatic update, the daemon's start and the terminal
+files back from that record, releases the claims and continues. `/update`
+in the terminal apps, the daemon's automatic update, the daemon's start and the terminal
 apps release such a claim the same way when an update left it and no partial
 file (`.update-download`, `.update-previous`, `.rollback-exchange`) remains
 beside any program it names; anything else they report with the file and the

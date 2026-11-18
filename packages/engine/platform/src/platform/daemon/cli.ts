@@ -37,7 +37,7 @@ function installServiceAndExit(config: ConfigManager, workingDir: string): never
     workingDirectory: workingDir,
     homeDirectory: unitHome,
     binaryBaseName: 'goodvibes',
-    defaultServiceName: resolveDaemonServiceDefault(unitHome),
+    defaultServiceName: resolveDaemonServiceDefault(),
     defaultServiceDescription: 'goodvibes omnichannel daemon host',
   });
   try {

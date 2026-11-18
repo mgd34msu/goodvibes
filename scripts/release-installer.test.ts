@@ -65,7 +65,6 @@ function run(uninstall = false, fault?: 'prefix', platform?: 'darwin', controls:
     setup_daemon_service() { :; }
     restart_running_daemon() { :; }
     restart_running_agent() { :; }
-    migrate_legacy_installer_unit() { :; }
     uninstall_services_and_processes() { :; }
     if [ -n "\${FIXTURE_INJECT:-}" ]; then eval "$FIXTURE_INJECT"; fi
     main

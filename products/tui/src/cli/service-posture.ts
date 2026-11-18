@@ -21,7 +21,7 @@ import { realpathSync } from 'node:fs';
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
-import { resolveDaemonServiceDefault, resolveServiceUnitHome } from '@goodvibes-jev/engine/platform/platform/daemon/daemon-service-default';
+import { resolveServiceUnitHome } from '@goodvibes-jev/engine/platform/platform/daemon/daemon-service-default';
 import { serviceStateDirectory } from '@goodvibes-jev/engine/platform/platform/daemon/service-manager';
 import type { PlatformServiceManager } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { buildManagedDaemonServiceManager, resolveConfiguredServiceName } from '@goodvibes-jev/engine/terminal-shell/managed-daemon-service';
@@ -288,9 +288,9 @@ export interface CliServiceNameSource {
   describeConfigKeySource?(key: string): { readonly tier: string; readonly effectiveOrigin?: string | undefined } | undefined;
 }
 
-/** The daemon unit's name: the owner's `service.serviceName`, else the platform's one default (the installer's name). */
-export function resolveCliServiceName(configManager: CliServiceNameSource, homeDirectory: string = resolveServiceUnitHome()): string {
-  return resolveConfiguredServiceName(configManager as Parameters<typeof resolveConfiguredServiceName>[0], resolveDaemonServiceDefault(homeDirectory));
+/** The daemon unit's name: the owner's `service.serviceName`, else the platform's one default. */
+export function resolveCliServiceName(configManager: CliServiceNameSource): string {
+  return resolveConfiguredServiceName(configManager as Parameters<typeof resolveConfiguredServiceName>[0]);
 }
 
 function runStatusCommand(command: string, args: readonly string[], options: CliServicePostureOptions): CliServiceStatusCommandResult {
@@ -315,7 +315,7 @@ function reconcileSystemdServiceStatus(
 ): ManagedServiceStatus {
   if (status.platform !== 'systemd') return status;
 
-  const name = resolveCliServiceName(runtime.configManager, runtime.homeDirectory);
+  const name = resolveCliServiceName(runtime.configManager);
   const result = runStatusCommand(
     'systemctl',
     ['--user', 'show', `${name}.service`, '--property=LoadState,ActiveState,UnitFileState,MainPID', '--no-page'],
@@ -345,7 +345,7 @@ function reconcileSystemdServiceStatus(
 /**
  * The daemon's service manager for the terminal app's `service` commands: the
  * one definition the daemon CLI also installs
- * (terminal-shell/managed-daemon-service.ts), under the installer's unit name,
+ * (terminal-shell/managed-daemon-service.ts), under the platform's one unit name,
  * so `service status` reports the unit the installer or the daemon wrote, and
  * `service install` never adds a second unit for the same port.
  */

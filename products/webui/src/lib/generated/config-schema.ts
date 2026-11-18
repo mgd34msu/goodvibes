@@ -3157,7 +3157,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "service.serviceName",
     "type": "string",
     "default": "",
-    "description": "Name of the daemon's service unit, used by the installer, the daemon's and the terminal apps' service commands and onboarding alike. Empty (the default) uses the installer's name: goodvibes-jev on Linux and Windows (goodvibes when a unit an earlier build installed under that name is present and none holds goodvibes-jev), sh.goodvibes.daemon on macOS (the launchd label)."
+    "description": "Name of the daemon's service unit, used by the installer, the daemon's and the terminal apps' service commands and onboarding alike. Empty (the default) uses goodvibes (goodvibes.service under systemd) on Linux and Windows, and sh.goodvibes.daemon (the launchd label) on macOS."
   },
   {
     "key": "service.logPath",

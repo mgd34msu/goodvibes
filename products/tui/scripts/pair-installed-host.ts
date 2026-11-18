@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { beginTuiHostPairing, completeTuiHostPairing, readTuiHostPairing, tuiHostPairingStorePath, type TuiHostPairingSecret } from '../src/runtime/tui-host-credential-store.ts';
 import { readTuiLegacyPairingBootstrap } from '../src/runtime/tui-host-pairing-bootstrap.ts';
 import { PAIRING_DEFERRED_EXIT } from './pairing-exit.ts';
+import { DAEMON_SERVICE_NAME } from '@goodvibes-jev/engine/platform/platform/daemon/daemon-service-default';
 
 // The explicitly invoked local installer provisions its own client and daemon.
 // Generic host pairing still requires the owner-terminal confirmation flow.
@@ -12,7 +13,7 @@ const [prefixArg, homeArg, portArg, workspaceArg] = process.argv.slice(2);
 if (!prefixArg || !homeArg || !portArg || !workspaceArg) throw new Error('Expected installation prefix, data directory, port and workspace.');
 const prefix = resolve(prefixArg), home = resolve(homeArg), port = Number(portArg);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid installed daemon port.');
-const pid = execFileSync('systemctl', ['--user', 'show', 'goodvibes-jev.service', '--property=MainPID', '--value'], { encoding: 'utf8' }).trim();
+const pid = execFileSync('systemctl', ['--user', 'show', `${DAEMON_SERVICE_NAME}.service`, '--property=MainPID', '--value'], { encoding: 'utf8' }).trim();
 const executable = realpathSync(join(prefix, 'current', 'daemon', `goodvibes-daemon-linux-${process.arch === 'arm64' ? 'arm64' : 'x64'}`));
 if (readlinkSync(`/proc/${pid}/exe`) !== executable) throw new Error('Pairing requires the daemon running from this installation.');
 const host = `http://127.0.0.1:${port}`;

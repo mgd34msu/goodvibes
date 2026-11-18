@@ -37,16 +37,9 @@
  * - Every failure is reported and none of them break boot. Discovery failing is
  *   a reason to say so, not a reason to refuse to start.
  */
-import { DAEMON_SERVICE_NAME, PlatformServiceManager, resolveDaemonServiceDefault, resolveServiceUnitHome, type ManagedServiceActionResult, type ManagedServiceStatus } from '../../daemon/index.js';
+import { PlatformServiceManager, resolveDaemonServiceDefault, resolveServiceUnitHome, type ManagedServiceActionResult, type ManagedServiceStatus } from '../../daemon/index.js';
 import { logger, summarizeError } from '../../utils/index.js';
 import type { ConfigManager } from '../../config/manager.js';
-
-/** The daemon's managed service name (what the installer registers; platform/daemon owns it). */
-export const MANAGED_DAEMON_SERVICE_NAME = DAEMON_SERVICE_NAME;
-/** The unit name older installs registered. */
-export const LEGACY_DAEMON_SERVICE_NAME = 'goodvibes-daemon';
-/** The unit name earlier builds promoted themselves to. */
-const EARLIER_DAEMON_SERVICE_NAME = 'goodvibes';
 
 /** The service manager's action-runner result, under this module's name. */
 export type DaemonServiceActionResult = ManagedServiceActionResult;
@@ -95,17 +88,13 @@ export interface DaemonServiceControlOptions {
 /**
  * Build the detector/starter over `PlatformServiceManager`.
  *
- * When `service.serviceName` is configured, that is an explicit operator
- * choice and is trusted exclusively; otherwise the platform's default name and
- * the older unit names are all checked, so an install that predates a rename
- * is still found.
+ * The one unit is the owner's `service.serviceName` when configured, else the
+ * platform's default name.
  */
 export function createDaemonServiceControl(options: DaemonServiceControlOptions): DaemonServiceControl {
   const unitHome = options.homeDirectory ?? resolveServiceUnitHome();
   const configuredName = String(options.configManager.get('service.serviceName') ?? '').trim();
-  const candidateNames = configuredName
-    ? [configuredName]
-    : [...new Set([resolveDaemonServiceDefault(unitHome), MANAGED_DAEMON_SERVICE_NAME, EARLIER_DAEMON_SERVICE_NAME, LEGACY_DAEMON_SERVICE_NAME])];
+  const candidateNames = [configuredName || resolveDaemonServiceDefault()];
   // Pin each manager's view of `service.serviceName` to its candidate so the
   // manager's own resolution yields exactly that unit; the schema default would
   // otherwise shadow every `defaultServiceName`. Only `get` is consulted by the

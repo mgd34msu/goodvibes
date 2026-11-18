@@ -10,10 +10,10 @@ before changing configuration.
 ```sh
 goodvibes-daemon --help
 goodvibes-daemon service-status --json
-journalctl --user -u goodvibes-jev.service -n 100 --no-pager
+journalctl --user -u goodvibes.service -n 100 --no-pager
 ```
 
-The journal command is for the default Linux systemd user unit (`goodvibes-jev`; an install from an earlier build may still be `goodvibes`, and `goodvibes-daemon service-status` names the one in use). On macOS, inspect
+The journal command is for the default Linux systemd user unit (`goodvibes`; `goodvibes-daemon service-status` names the one in use). On macOS, inspect
 the selected launchd unit and its stdout/stderr paths; `service-status` names the
 platform/name/definition. A custom service name/path must be checked as configured.
 The shipped partial launcher refuses install/start/restart unless supplied
@@ -137,13 +137,12 @@ systemd/launchd still has a loaded running unit. A manually launched process can
 answer on the port without belonging to any managed unit.
 
 ```sh
-systemctl --user status goodvibes-jev.service
+systemctl --user status goodvibes.service
 launchctl print gui/$(id -u)/sh.goodvibes.daemon
 ```
 
 Use the command matching your OS and configured service name. Do not kill an
-unidentified listener. A `goodvibes-daemon.service` unit left by an older install
-script is retired by running the installer again. Uninstall
+unidentified listener. Uninstall
 stops, unregisters and removes the managed definition, also for a service that is
 already stopped. See [service command details](commands-reference.md#install-service).
 

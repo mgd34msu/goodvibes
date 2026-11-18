@@ -52,23 +52,6 @@ or mismatched download rather than a compromised release host.
 
 ## Existing installations and services
 
-Version 3.1.1 installations using
-`https://github.com/mgd34msu/goodvibes-jev/releases/latest` cannot discover the
-new release after the repository was renamed to `goodvibes`. Their updater
-rejects GitHub's repository-rename redirect before downloading a replacement.
-Waiting for another automatic check does not resolve this error.
-
-Run the public installer once to migrate that installation:
-
-```sh
-curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.1.2 sh
-```
-
-This replaces the suite and restarts its managed daemon while preserving saved
-data and settings, including disabled automatic updates. This migration has been
-verified from a running 3.1.1 installation on Linux x64 and ARM64. It requires
-this one-time command; the old updater cannot discover the renamed repository.
-
 The release installer retains the original installer’s command paths and
 `~/.goodvibes` data. It handles upgrades, running daemon/agent restarts, systemd
 user services and launchd agents. PATH setup and checks for older commands remain
@@ -86,10 +69,8 @@ and keeps the working directory it named; the restart that follows applies it. A
 definition GoodVibes did not write is never written over or removed; the installer
 names it and the command that hands it back to the daemon. The service's name and
 whether GoodVibes wrote it come from `goodvibes-daemon service-status --json`
-(`serviceName`, `path`, `definitionOwner`). A daemon still running under the unit
-an older installer created, `goodvibes-daemon.service`, is moved to the daemon's
-own service (written, started and verified before the old unit is retired; rolled
-back when it does not come up).
+(`serviceName`, `path`, `definitionOwner`): `goodvibes.service` on Linux and
+`sh.goodvibes.daemon` on macOS, unless `service.serviceName` names another.
 
 The restart after an upgrade starts the daemon's worktree clean-up for its
 working directory, as every start of the daemon, `goodvibes` and

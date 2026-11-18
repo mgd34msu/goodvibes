@@ -226,7 +226,7 @@ export function buildLifecycleResultLines(
  * Run one of start / stop / restart against the managed service.
  *
  * The installed check happens BEFORE the platform verb is dispatched, not
- * after: `systemctl --user enable --now goodvibes.service` against a unit that
+ * after: `systemctl --user enable --now <unit>.service` against a unit that
  * does not exist fails with systemd's own wording, which reads like a broken
  * service rather than an absent one. Exit 4 is the same "not installed" answer
  * `service-status` gives, so a script reading one reads the other.
@@ -349,9 +349,9 @@ function notOurs(action: 'install' | 'refresh' | 'uninstall', owner: 'other' | '
  * definitions live in the service's own state directory, which nothing else
  * writes; a systemd unit or LaunchAgent is read (see `readManagedDefinitionOwner`).
  */
-function definitionOwner(status: ManagedServiceStatus, binaryPath: string): ManagedDefinitionOwner {
+function definitionOwner(status: ManagedServiceStatus): ManagedDefinitionOwner {
   if (status.platform !== 'systemd' && status.platform !== 'launchd') return status.installed ? 'product' : 'absent';
-  return readManagedDefinitionOwner(status.path, binaryPath);
+  return readManagedDefinitionOwner(status.path);
 }
 
 /** `<path>.bak.<YYYYMMDDHHMMSS>`: a rewrite never destroys the previous content, which may hold the owner's own edits. */
@@ -370,7 +370,7 @@ function backupDefinition(path: string, now: Date = new Date()): string {
  */
 function refreshService(input: DaemonServiceCliInput, initial: PlatformServiceManager): DaemonServiceCliResult {
   const before = initial.status();
-  const owner = definitionOwner(before, input.binaryPath);
+  const owner = definitionOwner(before);
   if (owner === 'other' || owner === 'unreadable') return notOurs('refresh', owner, before);
   const kept = owner === 'product' && input.workingDirectoryExplicit !== true ? readDefinitionWorkingDirectory(before.path) : undefined;
   const manager = kept === undefined || kept === (input.workingDirectory ?? input.homeDir)
@@ -410,7 +410,7 @@ export async function runDaemonServiceCli(input: DaemonServiceCliInput): Promise
   switch (input.subcommand) {
     case 'install-service': {
       const existing = manager.status();
-      const owner = definitionOwner(existing, input.binaryPath);
+      const owner = definitionOwner(existing);
       if (owner === 'other' || owner === 'unreadable') return notOurs('install', owner, existing);
       const installed = manager.install();
       if (installed.actionError) return failed('install', installed);
@@ -430,7 +430,7 @@ export async function runDaemonServiceCli(input: DaemonServiceCliInput): Promise
     case 'uninstall-service': {
       const before = manager.status();
       if (before.actionError) return failed('uninstall', before);
-      const owner = definitionOwner(before, input.binaryPath);
+      const owner = definitionOwner(before);
       if (owner === 'other' || owner === 'unreadable') return notOurs('uninstall', owner, before);
       if (!before.installed) {
         return {
@@ -473,7 +473,7 @@ export async function runDaemonServiceCli(input: DaemonServiceCliInput): Promise
     case 'service-status': {
       const status = manager.status();
       if (status.actionError) return failed('status', status);
-      const owner = definitionOwner(status, input.binaryPath);
+      const owner = definitionOwner(status);
       if (input.json) {
         return {
           ok: true,

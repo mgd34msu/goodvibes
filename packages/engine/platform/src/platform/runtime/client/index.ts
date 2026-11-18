@@ -113,8 +113,6 @@ export {
   autostartInstalledDaemon,
   createDaemonServiceControl,
   describeDaemonAutostart,
-  LEGACY_DAEMON_SERVICE_NAME,
-  MANAGED_DAEMON_SERVICE_NAME,
 } from './daemon-autostart.js';
 export type {
   DaemonAutostartInactionReason,

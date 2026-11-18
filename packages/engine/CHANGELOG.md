@@ -87,8 +87,9 @@ The full write-up, with upgrade notes and measured speed figures, is in
   session store to the new layout on first start.
 - Keep the knowledge store in one SQLite file; upgrade a 3.2.0 store in place
   after taking a copy.
-- Have the daemon write and refresh its own service definition; the installers
-  call `install-service` and `refresh-service`.
+- Have the daemon write and refresh its own service definition; the release
+  installer calls `install-service` and `refresh-service`. The service has one
+  name: `goodvibes.service` on Linux, `sh.goodvibes.daemon` on macOS.
 - Answer 409 `DECISION_MODELS_DISABLED` when a daemon feature needs a decision
   model and none is in use.
 - Stop rewriting old settings keys at load and moving settings or credentials
@@ -141,8 +142,13 @@ The full write-up, with upgrade notes and measured speed figures, is in
 - Remove the `team`, `packet` and `worklist` tools and stop reading their
   files; agent cohorts, spawn context and the work plan do their jobs.
 - Remove `payments.checkout.fillCard`; the daemon-run purchase types the card.
-- Remove `goodvibes-daemon migrate-service`, `/triggers migrate` and the
-  trigger migrate method.
+- Remove `goodvibes-daemon migrate-service`, the handling of earlier daemon
+  service names, `/triggers migrate` and the trigger migrate method.
+- Remove `MANAGED_DAEMON_SERVICE_NAME` and `LEGACY_DAEMON_SERVICE_NAME` from
+  `platform/runtime/client`. `DAEMON_SERVICE_NAME`, `DARWIN_DAEMON_SERVICE_LABEL`
+  and `resolveDaemonServiceDefault(platform?)` in `platform/daemon` name the
+  daemon's service; `resolveDaemonServiceDefault` no longer takes a home
+  directory.
 - Remove the `config` form of `/mcp deny`, the feature flag `killed` state and
   the state inspector.
 - Remove the settings `controlPlane.allowRemote`, `email.*`,

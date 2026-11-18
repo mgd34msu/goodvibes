@@ -9,7 +9,7 @@ import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { DAEMON_SERVICE_NAME, DARWIN_DAEMON_SERVICE_LABEL, resolveDaemonServiceDefault } from '@goodvibes-jev/engine/platform/platform/daemon/daemon-service-default';
+import { resolveDaemonServiceDefault } from '@goodvibes-jev/engine/platform/platform/daemon/daemon-service-default';
 import { PlatformServiceManager } from '@goodvibes-jev/engine/platform/platform/daemon/service-manager';
 
 /** Structurally derived from `PlatformServiceManager`'s own constructor, the
@@ -21,28 +21,20 @@ type ManagedServiceManagerOptions = ConstructorParameters<typeof PlatformService
 type ManagedServiceDefinition = NonNullable<ManagedServiceManagerOptions['definitionOverride']>;
 export type ManagedServiceActionRunner = NonNullable<ManagedServiceManagerOptions['actionRunner']>;
 
-// The release installer's systemd name and Darwin LaunchAgent label, owned by
-// the platform (daemon-service-default.ts). Any explicit stored name or
-// invocation overlay outranks this fallback.
-export const MANAGED_SERVICE_NAME = process.platform === 'darwin' ? DARWIN_DAEMON_SERVICE_LABEL : DAEMON_SERVICE_NAME;
+// The daemon's one unit name on this platform, owned by the platform
+// (daemon-service-default.ts). Any explicit stored name or invocation overlay
+// outranks this fallback.
+export const MANAGED_SERVICE_NAME = resolveDaemonServiceDefault();
 export const MANAGED_SERVICE_DESCRIPTION = 'GoodVibes daemon (shared session broker + companion host)';
 
-/**
- * The line the release installer (scripts/install.sh) wrote into the unit and
- * plist it created before the daemon wrote its own definition. Read only, to
- * recognise those files as this product's; nothing writes it any more.
- */
-const RELEASE_INSTALLER_MARKER = 'managed by goodvibes install.sh';
 /** The description the daemon's own `--install-service` and service routes give the unit they write. */
 const DAEMON_ROUTE_SERVICE_DESCRIPTION = 'goodvibes omnichannel daemon host';
 
 /**
  * Who wrote the service definition at a path: `absent` (nothing there),
  * `product` (this product's own definition: it names
- * {@link MANAGED_SERVICE_DESCRIPTION} or the daemon routes' description, carries
- * the release installer's old marker, or is a LaunchAgent whose program is this
- * daemon binary, which is how
- * plists written before the description key were shaped), `other` (anything
+ * {@link MANAGED_SERVICE_DESCRIPTION} or the daemon routes' description; a
+ * LaunchAgent carries it in its `GoodVibesManagedBy` key), `other` (anything
  * else, a symlink included: a definition the owner keeps elsewhere is never
  * written through), or `unreadable`.
  */
@@ -68,19 +60,15 @@ function readDefinitionFile(path: string): DefinitionFile {
 }
 
 /** One read of the definition file; the service manager is not asked. */
-export function readManagedDefinitionOwner(path: string, binaryPath: string): ManagedDefinitionOwner {
+export function readManagedDefinitionOwner(path: string): ManagedDefinitionOwner {
   const file = readDefinitionFile(path);
   if ('state' in file) return file.state;
-  const { contents } = file;
-  if ([MANAGED_SERVICE_DESCRIPTION, DAEMON_ROUTE_SERVICE_DESCRIPTION, RELEASE_INSTALLER_MARKER].some((mark) => contents.includes(mark))) return 'product';
-  const program = /<key>ProgramArguments<\/key>\s*<array>\s*<string>([^<]*)<\/string>/.exec(contents)?.[1];
-  return program !== undefined && xmlUnescape(program) === binaryPath ? 'product' : 'other';
+  return [MANAGED_SERVICE_DESCRIPTION, DAEMON_ROUTE_SERVICE_DESCRIPTION].some((mark) => file.contents.includes(mark)) ? 'product' : 'other';
 }
 
 /**
  * The absolute working directory an existing unit or plist names, or undefined
- * when it names none (the release installer's units had none) or one this
- * reader cannot take literally (a `-`/`~` prefixed systemd value).
+ * when it names none or one this reader cannot take literally (a `-`/`~` prefixed systemd value).
  */
 export function readDefinitionWorkingDirectory(path: string): string | undefined {
   const file = readDefinitionFile(path);
@@ -161,7 +149,6 @@ export function buildManagedDaemonServiceManager(params: BuildManagedDaemonServi
     surfaceRoot: params.surfaceRoot ?? 'tui',
     readOnly: true,
   });
-  const defaultServiceName = resolveDaemonServiceDefault(params.unitHomeDir);
   // The unit's ExecStart deliberately carries NO endpoint flags
   // (--hostname/--port): the daemon resolves controlPlane.hostMode/host/port
   // from the user's settings at boot, so a later config change (or a host
@@ -179,7 +166,7 @@ export function buildManagedDaemonServiceManager(params: BuildManagedDaemonServi
   const defaultDaemonHome = join(params.homeDir, '.goodvibes', 'daemon');
   const daemonHome = params.daemonHomeDirectory ?? defaultDaemonHome;
   const definition: ManagedServiceDefinition = {
-    name: resolveConfiguredServiceName(configManager, defaultServiceName),
+    name: resolveConfiguredServiceName(configManager),
     description: MANAGED_SERVICE_DESCRIPTION,
     workingDirectory,
     command: params.binaryPath,
@@ -195,7 +182,7 @@ export function buildManagedDaemonServiceManager(params: BuildManagedDaemonServi
     // GOODVIBES_HOME-relocated) tree home above, see `unitHomeDir`'s doc.
     homeDirectory: params.unitHomeDir,
     definitionOverride: definition,
-    defaultServiceName,
+    defaultServiceName: MANAGED_SERVICE_NAME,
     defaultServiceDescription: MANAGED_SERVICE_DESCRIPTION,
     actionRunner: params.actionRunner,
     assertCurrent: params.assertCurrent,

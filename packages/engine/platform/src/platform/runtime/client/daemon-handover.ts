@@ -27,7 +27,8 @@ import {
   type UpdateFileIo,
 } from '../self-update.js';
 import { detectInstallKind } from '../install-kind.js';
-import { MANAGED_DAEMON_SERVICE_NAME, createDaemonServiceControl, type DaemonServiceControl } from './daemon-autostart.js';
+import { createDaemonServiceControl, type DaemonServiceControl } from './daemon-autostart.js';
+import { resolveDaemonServiceDefault } from '../../daemon/daemon-service-default.js';
 import type { ConfigManager } from '../../config/manager.js';
 import { DAEMON_RELEASES_LATEST_URL } from '../../config/schema-domain-update.js';
 
@@ -268,12 +269,12 @@ export interface DaemonRestartOutcome {
 
 /**
  * The daemon's service name as this host has it: the configured override when
- * one is set, the installer's managed name otherwise.
+ * one is set, the platform's one default otherwise.
  */
 export function resolveHandoverServiceName(configManager: { get(key: string): unknown }): string {
   const raw = configManager.get('service.serviceName');
   const configured = raw === undefined || raw === null ? '' : String(raw).trim();
-  return configured || MANAGED_DAEMON_SERVICE_NAME;
+  return configured || resolveDaemonServiceDefault();
 }
 
 export interface DaemonRestartOptions {

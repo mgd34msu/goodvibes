@@ -91,7 +91,7 @@ The fullscreen `/config` workspace exposes service settings under `Service`:
 | `service.autostart` | `false` | Install/enable or disable/remove the OS autostart service |
 | `service.restartOnFailure` | `true` | Restart the managed daemon service after failure |
 | `service.platform` | `auto` | Target service manager platform |
-| `service.serviceName` | empty: `goodvibes-jev` on Linux and Windows (the unit the release installer registers; an older `goodvibes` unit keeps its name while no `goodvibes-jev` unit exists), `sh.goodvibes.daemon` on macOS | The daemon's service unit name. The installer, `goodvibes service`, `goodvibes-daemon service-*` and the daemon's own promotion all use this one name and one unit definition |
+| `service.serviceName` | empty: `goodvibes` on Linux and Windows (`goodvibes.service` under systemd), `sh.goodvibes.daemon` on macOS | The daemon's service unit name. The installer, `goodvibes service`, `goodvibes-daemon service-*` and the daemon's own promotion all use this one name and one unit definition |
 | `service.logPath` | *(empty)* | File path for daemon/service logs; empty means `~/.goodvibes/daemon/service/<platform>.log`, the one service state directory every terminal and the daemon read (it also holds the pid file the manual platform starts, stops and restarts the service by) |
 
 Changing `service.autostart` from the TUI is intended to reconcile the OS service, not just update JSON. On Linux this means writing/enabling/disabling the user `systemd` service. When service mode is enabled for the first time, the TUI installs the service definition, reloads user units, and starts/enables the daemon service if autostart is on. Disabling service mode or autostart removes/disables the OS-level autostart path.

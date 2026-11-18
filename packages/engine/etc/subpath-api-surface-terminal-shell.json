@@ -21773,7 +21773,7 @@
     {
       "name": "readManagedDefinitionOwner",
       "kind": "function",
-      "text": "export declare function readManagedDefinitionOwner(path: string, binaryPath: string): ManagedDefinitionOwner;"
+      "text": "export declare function readManagedDefinitionOwner(path: string): ManagedDefinitionOwner;"
     },
     {
       "name": "resolveConfiguredServiceName",

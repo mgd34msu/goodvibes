@@ -488,7 +488,7 @@ export function resolveDaemonFacadeRuntime(
       workingDirectory: runtimeServices.workingDirectory,
       homeDirectory: resolveServiceUnitHome(),
       binaryBaseName: 'goodvibes',
-      defaultServiceName: resolveDaemonServiceDefault(resolveServiceUnitHome()),
+      defaultServiceName: resolveDaemonServiceDefault(),
       defaultServiceDescription: 'goodvibes omnichannel daemon host',
       featureFlags: runtimeServices.featureFlags,
     }),

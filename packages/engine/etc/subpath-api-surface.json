@@ -30330,7 +30330,7 @@
     {
       "name": "DAEMON_SERVICE_NAME",
       "kind": "const",
-      "text": "DAEMON_SERVICE_NAME = \"goodvibes-jev\""
+      "text": "DAEMON_SERVICE_NAME = \"goodvibes\""
     },
     {
       "name": "DARWIN_DAEMON_SERVICE_LABEL",
@@ -30649,7 +30649,7 @@
     {
       "name": "resolveDaemonServiceDefault",
       "kind": "function",
-      "text": "export declare function resolveDaemonServiceDefault(homeDirectory: string, platform?: string): string;"
+      "text": "export declare function resolveDaemonServiceDefault(platform?: string): string;"
     },
     {
       "name": "resolveHostBinding",
@@ -30795,7 +30795,7 @@
     {
       "name": "DAEMON_SERVICE_NAME",
       "kind": "const",
-      "text": "DAEMON_SERVICE_NAME = \"goodvibes-jev\""
+      "text": "DAEMON_SERVICE_NAME = \"goodvibes\""
     },
     {
       "name": "DARWIN_DAEMON_SERVICE_LABEL",
@@ -30805,7 +30805,7 @@
     {
       "name": "resolveDaemonServiceDefault",
       "kind": "function",
-      "text": "export declare function resolveDaemonServiceDefault(homeDirectory: string, platform?: string): string;"
+      "text": "export declare function resolveDaemonServiceDefault(platform?: string): string;"
     },
     {
       "name": "resolveServiceUnitHome",
@@ -59676,11 +59676,6 @@
       "text": "export interface InboundInputsActivation { activate(client: SessionInputsWireClient): void; deactivate(reason: string): void; }"
     },
     {
-      "name": "LEGACY_DAEMON_SERVICE_NAME",
-      "kind": "const",
-      "text": "LEGACY_DAEMON_SERVICE_NAME = \"goodvibes-daemon\""
-    },
-    {
       "name": "LocalPermissionPrompt",
       "kind": "type",
       "text": "export type LocalPermissionPrompt = (request: PermissionPromptRequest, options?: PermissionExecutionOptions) => Promise<PermissionPromptDecision>; ;; via PermissionExecutionOptions = export interface PermissionExecutionOptions { readonly hookOwner?: TurnHookOwner | undefined; readonly signal?: AbortSignal | undefined; readonly definition?: import('../types/tools.js').ToolDefinition | undefined; } ;; PermissionPromptDecision = export interface PermissionPromptDecision { approved: boolean; remember?: boolean | undefined; rememberTier?: RememberTier | undefined; reason?: string | undefined; modifiedArgs?: Record<string, unknown> | undefined; settledBy?: 'sandbox' | undefined; } ;; PermissionPromptRequest = export interface PermissionPromptRequest { callId: string; tool: string; args: Record<string, unknown>; category: PermissionCategory; analysis: PermissionRequestAnalysis; workingDirectory?: string | undefined; attribution?: PermissionAttribution | undefined; rememberOptions?: readonly RememberTierOption[] | undefined; ownerOnly?: OwnerOnlyKind | undefined; containable?: true | undefined; } ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
@@ -59693,11 +59688,6 @@
         "list"
       ],
       "text": "export interface LocalTaskSource { list(limit: number): readonly RuntimeTask[]; get(taskId: string): RuntimeTask | null; } ;; via RuntimeTask = export interface RuntimeTask { id: string; kind: TaskKind; title: string; description?: string | undefined; status: TaskLifecycleState; owner: string; cancellable: boolean; parentTaskId?: string | undefined; childTaskIds: string[]; queuedAt: number; startedAt?: number | undefined; endedAt?: number | undefined; retryPolicy?: TaskRetryPolicy | undefined; retryDelayMs?: number | undefined; retryAt?: number | undefined; exitCode?: number | undefined; error?: string | undefined; progress?: string | undefined; result?: unknown | undefined; correlationId?: string | undefined; turnId?: string | undefined; }"
-    },
-    {
-      "name": "MANAGED_DAEMON_SERVICE_NAME",
-      "kind": "const",
-      "text": "MANAGED_DAEMON_SERVICE_NAME = \"goodvibes-jev\""
     },
     {
       "name": "MemorySpineActivation",

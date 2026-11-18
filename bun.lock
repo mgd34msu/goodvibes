@@ -188,7 +188,9 @@
     },
   },
   "patchedDependencies": {
+    "picomatch@4.0.7": "patches/picomatch@4.0.7.patch",
     "eslint-plugin-jsx-a11y@6.10.2": "patches/eslint-plugin-jsx-a11y@6.10.2.patch",
+    "picomatch@2.3.2": "patches/picomatch@2.3.2.patch",
   },
   "overrides": {
     "bash-language-server": "file:vendor/bash-language-server",

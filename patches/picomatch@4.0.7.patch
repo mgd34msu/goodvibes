@@ -1,0 +1,72 @@
+diff --git a/lib/parse.js b/lib/parse.js
+index 29207512c60183b4bb9bf5112be3b9b5f4a9a9fd..a6b2a6685652330bdc4401a909a195ee0125939f 100644
+--- a/lib/parse.js
++++ b/lib/parse.js
+@@ -284,6 +284,51 @@ const repeatedExtglobRecursion = pattern => {
+   return depth;
+ };
+ 
++// Whether a branch holds a `*` outside brackets, quotes and escapes: a glob
++// star, which compiles to an unbounded quantifier.
++const hasUnboundedStar = branch => {
++  let bracket = 0;
++  let quote = 0;
++  let escaped = false;
++
++  for (const ch of branch) {
++    if (escaped === true) {
++      escaped = false;
++      continue;
++    }
++
++    if (ch === '\\') {
++      escaped = true;
++      continue;
++    }
++
++    if (ch === '"') {
++      quote = quote === 1 ? 0 : 1;
++      continue;
++    }
++
++    if (quote === 1) {
++      continue;
++    }
++
++    if (ch === '[') {
++      bracket++;
++      continue;
++    }
++
++    if (ch === ']' && bracket > 0) {
++      bracket--;
++      continue;
++    }
++
++    if (bracket === 0 && ch === '*') {
++      return true;
++    }
++  }
++
++  return false;
++};
++
+ const analyzeRepeatedExtglob = (body, options) => {
+   if (options.maxExtglobRecursion === false) {
+     return { risky: false };
+@@ -306,6 +351,15 @@ const analyzeRepeatedExtglob = (body, options) => {
+     }
+   }
+ 
++  // GHSA-fc5q-39xc-vjpf: a branch with a glob star inside `+(...)`/`*(...)`
++  // nests one unbounded quantifier in another (`+(*)`, `+(*a)`, `+(a*)`), which
++  // backtracks exponentially on a short crafted string, with one branch or many.
++  // Such a pattern is kept literal. A `*(x)` sequence of single characters is
++  // still reduced to a flat character class below.
++  if (branches.some(branch => hasUnboundedStar(branch) && !getStarExtglobSequenceChars(branch))) {
++    return { risky: true };
++  }
++
+   // A repeated extglob is "risky" (prone to catastrophic backtracking) when a
+   // branch is itself a `*(...)` sequence, since that nests an unbounded quantifier
+   // inside the outer `+(...)`/`*(...)`. When *every* branch reduces to single

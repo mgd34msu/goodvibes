@@ -67,8 +67,8 @@ call, and the table says who answers it.
 The shipped calibration record covers the hosted endpoint and `jev-latest`
 (answered by `jev-1.14.0`). While `jev-decides` is only the default, Jev decides
 only when the endpoint, the model and every fallback target that can answer
-match that record. Choosing `jev-decides` yourself (in Settings,
-`/permissions`, with Shift+Tab, for a hosted session or in a channel profile)
+match that record. Choosing `jev-decides` yourself (in `/settings`,
+with Shift+Tab, for a hosted session or in a channel profile)
 lets Jev decide on any working decision model. `/held` lists, approves or sets aside what `just-vibes` held, and
 `/decisions` lists what Jev decided for you with undo, never, always and ask.
 `yolo` still keeps authentication, workspace containment, secret storage and

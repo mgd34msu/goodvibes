@@ -40,6 +40,8 @@ interface HttpListenerConfig {
   allowedOrigins?: string[] | undefined;
   hookDispatcher?: HookDispatcher | undefined;
   configManager: ConfigManager;
+  /** The daemon's admission (work-admission.ts): while a self-update's restart holds it closed, no hook is fired. */
+  workAdmission?: import('./work-admission.js').DaemonWorkAdmission | undefined;
   serveFactory?: typeof Bun.serve | undefined;
   /** Max requests per 60-second window per IP. Default: 60. */
   rateLimit?: number | undefined;
@@ -482,6 +484,9 @@ export class HttpListener {
           next: [admission.kind === 'refused' ? admission.next : 'Ask the owner to fire it from his own credential.'],
         }, { status: 403 });
       }
+      // Firing a hook starts work: during a self-update's hold it is refused with the router's code and fired by a retry.
+      const closed = this.config.workAdmission?.refusalResponse();
+      if (closed) return closed;
       return this.handleWebhook(req);
     }
 

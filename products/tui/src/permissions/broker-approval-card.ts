@@ -111,12 +111,12 @@ export function handleBrokerApprovalChange(params: BrokerApprovalChangeParams): 
           expectedRevision: current.revision,
         }).then((outcome) => {
           if (outcome.applied || !outcome.record || !isActiveStatus(outcome.record.status)) return;
-          params.notify?.(`[Approval] ${outcome.refusal.reason} It is shown again.`);
+          params.notify?.(`Your answer was not taken: ${outcome.refusal.reason} The request is shown again.`);
           const latest = outcome.record;
           defer(() => handleBrokerApprovalChange({ ...params, approval: latest }));
         }, (error: unknown) => {
           // The card is already cleared, so without this the answer would vanish and the tool call would keep waiting.
-          params.notify?.(`[Approval] Your answer for ${current.request.tool} was not recorded (${error instanceof Error ? error.message : String(error)}). The request is asked again if it is still waiting.`);
+          params.notify?.(`Your answer was not recorded (${error instanceof Error ? error.message : String(error)}). The request is asked again if it is still waiting.`);
           defer(() => handleBrokerApprovalChange(params));
         });
       }, broker),

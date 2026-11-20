@@ -410,13 +410,13 @@ none
                     {
                       "type": "object",
                       "additionalProperties": {
-                        "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.pairRequests.items.properties.metadata.additionalProperties"
+                        "$ref": "#/properties/distributed/properties/pairRequests/items/properties/metadata/additionalProperties"
                       }
                     },
                     {
                       "type": "array",
                       "items": {
-                        "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.pairRequests.items.properties.metadata.additionalProperties"
+                        "$ref": "#/properties/distributed/properties/pairRequests/items/properties/metadata/additionalProperties"
                       }
                     }
                   ]
@@ -585,13 +585,13 @@ none
                     {
                       "type": "object",
                       "additionalProperties": {
-                        "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.peers.items.properties.metadata.additionalProperties"
+                        "$ref": "#/properties/distributed/properties/peers/items/properties/metadata/additionalProperties"
                       }
                     },
                     {
                       "type": "array",
                       "items": {
-                        "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.peers.items.properties.metadata.additionalProperties"
+                        "$ref": "#/properties/distributed/properties/peers/items/properties/metadata/additionalProperties"
                       }
                     }
                   ]
@@ -681,13 +681,13 @@ none
                   {
                     "type": "object",
                     "additionalProperties": {
-                      "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.work.items.properties.payload"
+                      "$ref": "#/properties/distributed/properties/work/items/properties/payload"
                     }
                   },
                   {
                     "type": "array",
                     "items": {
-                      "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.work.items.properties.payload"
+                      "$ref": "#/properties/distributed/properties/work/items/properties/payload"
                     }
                   }
                 ]
@@ -748,13 +748,13 @@ none
                   {
                     "type": "object",
                     "additionalProperties": {
-                      "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.work.items.properties.result"
+                      "$ref": "#/properties/distributed/properties/work/items/properties/result"
                     }
                   },
                   {
                     "type": "array",
                     "items": {
-                      "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.work.items.properties.result"
+                      "$ref": "#/properties/distributed/properties/work/items/properties/result"
                     }
                   }
                 ]
@@ -844,13 +844,13 @@ none
                     {
                       "type": "object",
                       "additionalProperties": {
-                        "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.work.items.properties.metadata.additionalProperties"
+                        "$ref": "#/properties/distributed/properties/work/items/properties/metadata/additionalProperties"
                       }
                     },
                     {
                       "type": "array",
                       "items": {
-                        "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.work.items.properties.metadata.additionalProperties"
+                        "$ref": "#/properties/distributed/properties/work/items/properties/metadata/additionalProperties"
                       }
                     }
                   ]
@@ -938,13 +938,13 @@ none
                     {
                       "type": "object",
                       "additionalProperties": {
-                        "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.audit.items.properties.metadata.additionalProperties"
+                        "$ref": "#/properties/distributed/properties/audit/items/properties/metadata/additionalProperties"
                       }
                     },
                     {
                       "type": "array",
                       "items": {
-                        "$ref": "$.endpoints[5].outputSchema.properties.distributed.properties.audit.items.properties.metadata.additionalProperties"
+                        "$ref": "#/properties/distributed/properties/audit/items/properties/metadata/additionalProperties"
                       }
                     }
                   ]
@@ -1055,13 +1055,13 @@ Create a pending pair request and receive a challenge for operator approval.
           {
             "type": "object",
             "additionalProperties": {
-              "$ref": "$.endpoints[0].inputSchema.properties.metadata.additionalProperties"
+              "$ref": "#/properties/metadata/additionalProperties"
             }
           },
           {
             "type": "array",
             "items": {
-              "$ref": "$.endpoints[0].inputSchema.properties.metadata.additionalProperties"
+              "$ref": "#/properties/metadata/additionalProperties"
             }
           }
         ]
@@ -1188,13 +1188,13 @@ Create a pending pair request and receive a challenge for operator approval.
               {
                 "type": "object",
                 "additionalProperties": {
-                  "$ref": "$.endpoints[0].outputSchema.properties.request.properties.metadata.additionalProperties"
+                  "$ref": "#/properties/request/properties/metadata/additionalProperties"
                 }
               },
               {
                 "type": "array",
                 "items": {
-                  "$ref": "$.endpoints[0].outputSchema.properties.request.properties.metadata.additionalProperties"
+                  "$ref": "#/properties/request/properties/metadata/additionalProperties"
                 }
               }
             ]
@@ -1269,13 +1269,13 @@ Exchange an approved pair request and challenge for a scoped peer token. Answers
           {
             "type": "object",
             "additionalProperties": {
-              "$ref": "$.endpoints[1].inputSchema.properties.metadata.additionalProperties"
+              "$ref": "#/properties/metadata/additionalProperties"
             }
           },
           {
             "type": "array",
             "items": {
-              "$ref": "$.endpoints[1].inputSchema.properties.metadata.additionalProperties"
+              "$ref": "#/properties/metadata/additionalProperties"
             }
           }
         ]
@@ -1438,13 +1438,13 @@ Exchange an approved pair request and challenge for a scoped peer token. Answers
               {
                 "type": "object",
                 "additionalProperties": {
-                  "$ref": "$.endpoints[1].outputSchema.properties.peer.properties.metadata.additionalProperties"
+                  "$ref": "#/properties/peer/properties/metadata/additionalProperties"
                 }
               },
               {
                 "type": "array",
                 "items": {
-                  "$ref": "$.endpoints[1].outputSchema.properties.peer.properties.metadata.additionalProperties"
+                  "$ref": "#/properties/peer/properties/metadata/additionalProperties"
                 }
               }
             ]
@@ -1569,13 +1569,13 @@ Report peer liveness, capability, command, version, and client-mode metadata.
           {
             "type": "object",
             "additionalProperties": {
-              "$ref": "$.endpoints[2].inputSchema.properties.metadata.additionalProperties"
+              "$ref": "#/properties/metadata/additionalProperties"
             }
           },
           {
             "type": "array",
             "items": {
-              "$ref": "$.endpoints[2].inputSchema.properties.metadata.additionalProperties"
+              "$ref": "#/properties/metadata/additionalProperties"
             }
           }
         ]
@@ -1734,13 +1734,13 @@ Report peer liveness, capability, command, version, and client-mode metadata.
               {
                 "type": "object",
                 "additionalProperties": {
-                  "$ref": "$.endpoints[2].outputSchema.properties.peer.properties.metadata.additionalProperties"
+                  "$ref": "#/properties/peer/properties/metadata/additionalProperties"
                 }
               },
               {
                 "type": "array",
                 "items": {
-                  "$ref": "$.endpoints[2].outputSchema.properties.peer.properties.metadata.additionalProperties"
+                  "$ref": "#/properties/peer/properties/metadata/additionalProperties"
                 }
               }
             ]
@@ -1811,13 +1811,13 @@ Complete, fail, or cancel a claimed work item. Answers 404 for work that is unkn
         {
           "type": "object",
           "additionalProperties": {
-            "$ref": "$.endpoints[4].inputSchema.properties.result"
+            "$ref": "#/properties/result"
           }
         },
         {
           "type": "array",
           "items": {
-            "$ref": "$.endpoints[4].inputSchema.properties.result"
+            "$ref": "#/properties/result"
           }
         }
       ]
@@ -1844,13 +1844,13 @@ Complete, fail, or cancel a claimed work item. Answers 404 for work that is unkn
           {
             "type": "object",
             "additionalProperties": {
-              "$ref": "$.endpoints[4].inputSchema.properties.metadata.additionalProperties"
+              "$ref": "#/properties/metadata/additionalProperties"
             }
           },
           {
             "type": "array",
             "items": {
-              "$ref": "$.endpoints[4].inputSchema.properties.metadata.additionalProperties"
+              "$ref": "#/properties/metadata/additionalProperties"
             }
           }
         ]
@@ -1936,13 +1936,13 @@ Complete, fail, or cancel a claimed work item. Answers 404 for work that is unkn
             {
               "type": "object",
               "additionalProperties": {
-                "$ref": "$.endpoints[4].outputSchema.properties.work.properties.payload"
+                "$ref": "#/properties/work/properties/payload"
               }
             },
             {
               "type": "array",
               "items": {
-                "$ref": "$.endpoints[4].outputSchema.properties.work.properties.payload"
+                "$ref": "#/properties/work/properties/payload"
               }
             }
           ]
@@ -2003,13 +2003,13 @@ Complete, fail, or cancel a claimed work item. Answers 404 for work that is unkn
             {
               "type": "object",
               "additionalProperties": {
-                "$ref": "$.endpoints[4].outputSchema.properties.work.properties.result"
+                "$ref": "#/properties/work/properties/result"
               }
             },
             {
               "type": "array",
               "items": {
-                "$ref": "$.endpoints[4].outputSchema.properties.work.properties.result"
+                "$ref": "#/properties/work/properties/result"
               }
             }
           ]
@@ -2099,13 +2099,13 @@ Complete, fail, or cancel a claimed work item. Answers 404 for work that is unkn
               {
                 "type": "object",
                 "additionalProperties": {
-                  "$ref": "$.endpoints[4].outputSchema.properties.work.properties.metadata.additionalProperties"
+                  "$ref": "#/properties/work/properties/metadata/additionalProperties"
                 }
               },
               {
                 "type": "array",
                 "items": {
-                  "$ref": "$.endpoints[4].outputSchema.properties.work.properties.metadata.additionalProperties"
+                  "$ref": "#/properties/work/properties/metadata/additionalProperties"
                 }
               }
             ]
@@ -2234,13 +2234,13 @@ Claim queued work for the authenticated peer.
               {
                 "type": "object",
                 "additionalProperties": {
-                  "$ref": "$.endpoints[3].outputSchema.properties.work.items.properties.payload"
+                  "$ref": "#/properties/work/items/properties/payload"
                 }
               },
               {
                 "type": "array",
                 "items": {
-                  "$ref": "$.endpoints[3].outputSchema.properties.work.items.properties.payload"
+                  "$ref": "#/properties/work/items/properties/payload"
                 }
               }
             ]
@@ -2301,13 +2301,13 @@ Claim queued work for the authenticated peer.
               {
                 "type": "object",
                 "additionalProperties": {
-                  "$ref": "$.endpoints[3].outputSchema.properties.work.items.properties.result"
+                  "$ref": "#/properties/work/items/properties/result"
                 }
               },
               {
                 "type": "array",
                 "items": {
-                  "$ref": "$.endpoints[3].outputSchema.properties.work.items.properties.result"
+                  "$ref": "#/properties/work/items/properties/result"
                 }
               }
             ]
@@ -2397,13 +2397,13 @@ Claim queued work for the authenticated peer.
                 {
                   "type": "object",
                   "additionalProperties": {
-                    "$ref": "$.endpoints[3].outputSchema.properties.work.items.properties.metadata.additionalProperties"
+                    "$ref": "#/properties/work/items/properties/metadata/additionalProperties"
                   }
                 },
                 {
                   "type": "array",
                   "items": {
-                    "$ref": "$.endpoints[3].outputSchema.properties.work.items.properties.metadata.additionalProperties"
+                    "$ref": "#/properties/work/items/properties/metadata/additionalProperties"
                   }
                 }
               ]

@@ -240,6 +240,7 @@ async function main(): Promise<void> {
       userAuth,
       configManager: config,
       runtimeBus,
+      workAdmission: runtimeServices.workAdmission,
     });
     const { daemonToken, httpToken } = readDaemonCliTokens(process.env);
 

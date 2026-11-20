@@ -299,6 +299,8 @@ export interface RuntimeServices {
   readonly cacheRegistry: CacheRegistry;
   /** Controller the governor uses to pause/resume the deferrable background jobs under pressure. */
   readonly pauseController: PauseController;
+  /** Whether the daemon takes new work (the graph's one admission): closed for a self-update's restart; the hook listener asks it too. */
+  readonly workAdmission?: import('@goodvibes-jev/engine/platform/platform/runtime/bootstrap').ComposedRuntimeServices['workAdmission'];
   readonly sessionLiveTurnControls: SessionLiveTurnControlsHolder;
   /** Unified live process registry (agents, WRFC chains, workflows, watchers, background processes) backing the Fleet panel; archive-aware, finished subtrees can be moved to the session archive view. */
   readonly processRegistry: ArchivableProcessRegistry;

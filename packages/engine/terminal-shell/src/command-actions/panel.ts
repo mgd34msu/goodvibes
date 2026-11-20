@@ -20,7 +20,7 @@ import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { SurfaceModal, SurfaceModalCloseReason, SurfaceModalHost } from '../surface-modal-host.js';
 import type { SelectionItem } from '../selection-modal.js';
 import { tokenizeSlashCommand } from '../slash-command-parser.js';
-import { beginModal, finishModal, scrollCountText, type KitHint, type SurfaceLayer } from '../renderer/surface-kit.js';
+import { beginModal, finishModal, MODAL_MARK_INSET, scrollCountText, type KitHint, type SurfaceLayer } from '../renderer/surface-kit.js';
 import { drawList, type KitRow } from '../renderer/surface-kit-list.js';
 import { activeTokens } from '../renderer/theme.js';
 import { listByName } from './lists.js';
@@ -308,7 +308,8 @@ export class GuidedPanel implements SurfaceModal {
       const value = row.action ? (this.rowValues.get(row.action.id) ?? (row.action.risk !== 'none' ? riskWords(row.action.risk) : '')) : '';
       return { label: rowLabel(row), ...(value ? { right: value } : {}), selected: index === this.selected };
     });
-    const listed = drawList(f.canvas, { mouseNavigation: true, rows: kitRows, top: f.top, bottom: f.bottom, x0: f.l + 1, x1: f.r, scrollKey: { owner: this, name: 'guided-menu' } });
+    // drawList paints the bar MODAL_MARK_INSET columns out from the text on each side: the bar spans title column to esc's edge.
+    const listed = drawList(f.canvas, { mouseNavigation: true, rows: kitRows, top: f.top, bottom: f.bottom, x0: f.l + 1 + MODAL_MARK_INSET, x1: f.r - MODAL_MARK_INSET, scrollKey: { owner: this, name: 'guided-menu' } });
     f.hintRight = scrollCountText(listed.above, listed.below);
     return finishModal(f);
   }

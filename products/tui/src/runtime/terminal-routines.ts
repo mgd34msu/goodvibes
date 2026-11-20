@@ -219,7 +219,7 @@ function readRoutineIds(path: string, now: number): { readonly all: readonly str
 /** The ids of the routines the daemon holds now. */
 async function daemonRoutineIds(rpc: OperatorRpcAvailable): Promise<ReadonlySet<string>> {
   const output = await rpc.platformClient.operator.invoke('automation.jobs.list', {});
-  const jobs = ('jobs' in output ? output.jobs : output.items) as readonly { readonly id: string }[];
+  const jobs = output.items as readonly { readonly id: string }[];
   return new Set(jobs.map((job) => job.id));
 }
 

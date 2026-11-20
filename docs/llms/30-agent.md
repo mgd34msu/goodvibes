@@ -199,7 +199,8 @@ The Agent's rebindable keys differ from the terminal app's. Its file is `~/.good
 | `copy-selection` | `Ctrl+Shift+C` | Copy selected text. |
 | `clear-cancel` | `Ctrl+C` | Clear the composer, cancel generation, twice to exit. |
 | `screen-clear` | `Ctrl+L` | Repaint. |
-| `workspace-picker` | `Ctrl+P` | Open the Agent workspace. |
+| `command-palette` | `Ctrl+P` | Open help: every command and keyboard shortcut in one searchable list (the same as `?` and `/help`). |
+| `workspace-picker` | `Ctrl+G` | Open the Agent workspace. |
 | `workspace-close` | `Ctrl+X` | Close the Agent workspace. |
 | `workspace-close-all` | `Ctrl+Shift+X` | Close the Agent workspace. |
 | `workspace-tab-next` | `Ctrl+]` | Next workspace category. |
@@ -276,7 +277,7 @@ On top of the files under "Project instructions", the Agent applies:
 | Command | In the Agent |
 | --- | --- |
 | `status`, `doctor` | Also report the connected host, its compatibility, Agent Knowledge readiness, relay settings, the Agent's role and checkpoint registration. `doctor` findings read `[warning:<area>:<id>]` with `cause`, `impact` and `action`; it exits `1` only for a must-fix finding, and `--strict` (not in the help) exits `1` on any finding. `status` always exits `0`. |
-| `setup` / `onboarding` | Opens the Agent workspace instead of the onboarding wizard. `setup pair [--name <device-name>] [--apply]` and `setup unpair` replace `host pair` and `host unpair`. |
+| `setup` / `onboarding` | Opens the Agent on `/setup`. `setup pair [--name <device-name>] [--apply]` and `setup unpair` replace `host pair` and `host unpair`. |
 | `auth` | Read only: `auth`, `auth status`, `auth review`, `auth users`, `auth sessions`. User administration is done with `goodvibes auth` or in the daemon. |
 | `tasks` | `tasks list` and `tasks show <taskId>` read the connected host's tasks; submission is refused. |
 | `bundle` | `bundle export [path]`, `bundle inspect <path>`, `bundle import <path> [--yes]`. Import checks every value before changing any and without `--yes` lists what it would set and exits `2`. A host on another machine (`controlPlane.host`) gets its settings with its own pairing or `GOODVIBES_CONNECTED_HOST_TOKEN`, never this machine's daemon token; with neither the import is refused and nothing is sent. |
@@ -609,7 +610,7 @@ With no workspace at the default place: `No OpenClaw workspace found at the defa
 ## The Agent workspace
 
 The Agent workspace is a full-screen view of categories, each a list of actions: forms, pickers, read-only reports and confirmed changes.
-It opens with `/agent [category]` (aliases `/home`, `/operator`), `Ctrl+P`, `goodvibes-agent setup`, `/setup` or `/welcome`.
+It opens with `/agent [category]` (aliases `/home`, `/operator`), `Ctrl+G` or `/welcome`. `/setup` opens one topic's rows of it at a time (below).
 `Ctrl+]` and `Ctrl+[` move between categories; `/` searches actions by name, category, command or detail; `Ctrl+X` or `Esc` closes it.
 Typing a letter on Home closes the workspace and puts the letter in the composer.
 
@@ -618,7 +619,7 @@ The workspace has these 26 categories, in this order, in seven groups; there are
 | Group | Category id | Label | Actions | Holds |
 | --- | --- | --- | --- | --- |
 | START | `home` | Home | 10 | Lanes into Start, Personal Ops, Research, Documents, Automation, Messaging, Memory and Work; the interaction mode (quiet, balanced, operator). |
-| ONBOARDING | `setup` | Start | 16 | Local model, provider sign-in start and finish, main model, settings import from the terminal app, reasoning effort, history, custom provider, credentials, secret policy, setup resume points, "Just start chatting". |
+| SETUP | `setup` | Setup | 12 | Not listed: `/setup` opens it with only one topic's rows. `Choose a model`: local model, main model, reasoning effort. `Sign in or out of a provider`: sign-in start and finish, sign-out, see a sign-in. `Add a provider of your own`: custom provider. `Store a password or key`: credentials, secret policy. `History and privacy`: save history. `Bring over settings from the terminal app`: settings import. |
 | ONBOARDING | `account-model` | Models | 20 | Provider and model choice, reasoning, pins, and the advanced routes (helper, tool, TTS, embeddings, system prompt, cache). |
 | ONBOARDING | `assistant-behavior` | Behavior | 11 | How chat behaves during normal work and long-running tasks. |
 | ONBOARDING | `tools-permissions` | Tools & Permissions | 13 | The permission mode and tool settings. |

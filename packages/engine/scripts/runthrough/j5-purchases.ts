@@ -26,6 +26,8 @@
  *  - inside the limits: completes without asking, submits once to the merchant;
  *  - over a limit: stops, naming the limit and by how much;
  *  - a total that changed at checkout: not submitted;
+ *  - the decision model answers what nobody can read: nothing is bought and
+ *    the owner is told;
  *  - with no decision model (judgment.policy No Decision Model) a purchase
  *    inside the limits asks the owner, saying what could not be checked
  *    (that it is not a subscription), and nothing is submitted unasked.
@@ -231,7 +233,23 @@ try {
     `purchase ${short(changed.state ?? 'no state', 400)}; submissions ${submissions.length - changedBefore}`,
     submissions.length === changedBefore && changed.state !== undefined && /total|mismatch|changed|differ/i.test(JSON.stringify(changed.state)));
 
-  // 5. No decision model: inside the limits the purchase still asks, and says what was not checked.
+  // 5. The decision model answers, but nothing it says can be read: inside the limits nothing is bought, and the owner is told.
+  decision.unreadable = true;
+  const unreadableBefore = submissions.length;
+  const unreadable = await purchase('rt-unreadable', '5.00', '5.00');
+  await Bun.sleep(65_000); // longer than the one-minute veto window: a purchase that would go ahead has gone by now
+  decision.unreadable = false;
+  const unreadableStatus = await api(s.daemon, owner, 'GET', '/api/payments/purchase/status?purchaseId=rt-unreadable');
+  const unreadableInbox = (await invoke(s.daemon, owner, 'inbox.list', {})).text;
+  const unreadableWindows = (unreadable.state?.windows as Array<{ kind?: string; notice?: string; windowId?: string }> | undefined) ?? [];
+  journey.check('when the decision model\'s answers cannot be read, nothing is bought and the owner is told', 'scripted decision model answers every question unreadably; the same purchase flow (5.00) inside the limits; wait past the veto window',
+    `purchase ${short(unreadable.state ?? 'no state', 500)}; after ${short(unreadableStatus.text, 400)}; inbox ${short(unreadableInbox, 600)}; submissions ${submissions.length - unreadableBefore}`,
+    submissions.length === unreadableBefore && unreadable.state !== undefined
+      && (unreadableWindows.some((window) => window.kind === 'approval') || /could not|unreadable|not read|failed/i.test(JSON.stringify(unreadable.state) + unreadableStatus.text)));
+  const unreadableWindow = unreadableWindows[0];
+  if (unreadableWindow?.windowId) await api(s.daemon, owner, 'POST', '/api/payments/purchase/deny', { purchaseId: 'rt-unreadable', windowId: unreadableWindow.windowId, confirm: true }, { 'x-goodvibes-explicit-user-request': 'true' });
+
+  // 6. No decision model: inside the limits the purchase still asks, and says what was not checked.
   const policySet = await daemonSet('judgment.policy', 'No Decision Model');
   await s.restartDaemon();
   owner = operatorToken(s.home);

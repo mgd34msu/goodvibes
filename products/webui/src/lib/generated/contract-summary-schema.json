@@ -187,6 +187,30 @@
             "updatedAt": {
               "type": "number"
             },
+            "held": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "input-unavailable",
+                    "claim-unavailable"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "at": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "code",
+                "reason",
+                "at"
+              ],
+              "additionalProperties": false
+            },
             "revision": {
               "type": "string"
             }
@@ -402,6 +426,30 @@
           },
           "updatedAt": {
             "type": "number"
+          },
+          "held": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "input-unavailable",
+                  "claim-unavailable"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "at": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "code",
+              "reason",
+              "at"
+            ],
+            "additionalProperties": false
           },
           "revision": {
             "type": "string"

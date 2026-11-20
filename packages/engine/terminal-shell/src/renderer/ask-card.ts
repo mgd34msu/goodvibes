@@ -25,6 +25,7 @@
  * Pure rendering; the keys live in ask-card-input.ts, which reads the same
  * buttons and default from this file so the two never disagree.
  */
+import { homedir } from 'node:os';
 import type { AskChoice, AskPresentation, PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { decodeBase64, resolveEditText } from '@goodvibes-jev/engine/platform/platform/control-plane/approval-hunk-apply';
 import { getDisplayWidth } from '@goodvibes-jev/engine/platform/platform/utils/terminal-width';
@@ -208,7 +209,8 @@ function editChangeLines(text: { readonly find: string; readonly replace: string
  * its header and first lines; a longer change ends in a trailer counting the
  * rest. Null for any other ask, or in hunk mode (the hunks draw themselves).
  */
-export function askChangeLines(request: Pick<PermissionPromptRequest, 'tool' | 'args'>, hunkState: HunkSelectionState | undefined): string[] | null {
+export function askChangeLines(request: Pick<PermissionPromptRequest, 'tool' | 'args' | 'workingDirectory'>, hunkState: HunkSelectionState | undefined): string[] | null {
+  const shown = (path: string): string => relativize(path, request.workingDirectory);
   if (hunkState || (request.tool !== 'write' && request.tool !== 'edit')) return null;
   const args = request.args ?? {};
   const target = typeof args['path'] === 'string' ? args['path'] : typeof args['file'] === 'string' ? args['file'] : '';
@@ -220,7 +222,7 @@ export function askChangeLines(request: Pick<PermissionPromptRequest, 'tool' | '
       const path = typeof entry['path'] === 'string' ? entry['path'] : '(no path)';
       const text = typeof entry['content_base64'] === 'string' ? decodeBase64(entry['content_base64'])
         : typeof entry['content'] === 'string' ? entry['content'] : null;
-      if (text !== null) out.push(...contentChange(path, text));
+      if (text !== null) out.push(...contentChange(shown(path), text));
     }
   }
   if (typeof args['content'] === 'string') out.push(...contentChange(target || '(new content)', args['content']));
@@ -230,7 +232,7 @@ export function askChangeLines(request: Pick<PermissionPromptRequest, 'tool' | '
       const entry = edit as Record<string, unknown>;
       const text = editText(entry);
       if (!text) continue;
-      out.push(`@@ ${typeof entry['path'] === 'string' ? entry['path'] : target} @@`);
+      out.push(`@@ ${shown(typeof entry['path'] === 'string' ? entry['path'] : target)} @@`);
       out.push(...cappedChange(editChangeLines(text)));
     }
   }
@@ -256,11 +258,14 @@ function hunkRows(hunkState: HunkSelectionState, width: number): CardRow[] {
   return rows;
 }
 
+/** A path as a person reads it: relative to the folder the ask runs in, else with `~` for the home folder. */
 function relativize(path: string, cwd: string | undefined): string {
-  if (!cwd || !path.startsWith('/')) return path;
-  if (path === cwd) return '.';
-  const prefix = cwd.endsWith('/') ? cwd : `${cwd}/`;
-  return path.startsWith(prefix) ? path.slice(prefix.length) : path;
+  if (!path.startsWith('/')) return path;
+  if (cwd && path === cwd) return '.';
+  const prefix = cwd ? (cwd.endsWith('/') ? cwd : `${cwd}/`) : undefined;
+  if (prefix && path.startsWith(prefix)) return path.slice(prefix.length);
+  const home = homedir().replace(/\/+$/, '');
+  return home && path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
 }
 
 /** What the ask acts on: every command in full (wrapped, never cut), every path, address or line. */
@@ -316,12 +321,10 @@ function bodyRows(presentation: AskPresentation, request: PermissionPromptReques
       ...presentation.details.flatMap((detail) => labelled(detail.label, detail.value, width, detail.label === 'Arguments' ? t.textFaint : t.textMuted)),
     ]);
   }
-  const replyMode = isCommandPromptAsk(request) ? 'exec-answer' : state.replyMode;
-  if (replyMode) {
+  if (isCommandPromptAsk(request)) {
     // A command's prompt is often a password: one dot per character, never in clear.
     const typed = state.replyBuffer ?? '';
-    const shown = replyMode === 'exec-answer' ? '•'.repeat([...typed].length) : typed;
-    push(insetRows(labelled(replyMode === 'exec-answer' ? 'Answer' : 'Why not:', `${shown}▏`, width - 4, t.text)));
+    push(insetRows(labelled('Answer', `${'•'.repeat([...typed].length)}▏`, width - 4, t.text)));
   }
   return rows;
 }
@@ -404,8 +407,12 @@ export function renderAskCard(
   const tierX1 = width - MODAL_PAD_X - 1;
   const tierRows = tiers.map((tier, i): KitRow => ({ label: `${i + 1}  ${tier.label}`, desc: tier.detail, selected: i === submenuIndex }));
   const tierHeight = tierRows.reduce((sum, row) => sum + measureRow(row, tierX0, tierX1), 0);
-  // Under the scrolling body, always in view: blank, buttons, the remember choices, blank, keys.
-  const pinned = (buttonRows > 0 ? buttonRows + 1 : 0) + (tierRows.length > 0 ? tierHeight + 1 : 0) + 1 + keyHeight;
+  // The reason being typed with a refusal, under the buttons ("Why not:").
+  const reason = state.replyMode === 'deny-reason' && !isCommandPromptAsk(request)
+    ? wrapLines(`${state.replyBuffer ?? ''}▏`, Math.max(8, inner - BODY_INDENT - LABEL_PAD))
+    : [];
+  // Under the scrolling body, always in view: blank, buttons, the reason, the remember choices, blank, keys.
+  const pinned = (buttonRows > 0 ? buttonRows + 1 : 0) + (reason.length > 0 ? reason.length + 1 : 0) + (tierRows.length > 0 ? tierHeight + 1 : 0) + 1 + keyHeight;
   const cannotUndo = presentation.mark === 'cannot-undo';
   const f = beginModal(screenWidth, screenHeight, {
     title: presentation.question,
@@ -466,6 +473,15 @@ export function renderAskCard(
       if (bx + getDisplayWidth(why) + 2 <= f.r) f.canvas.right(f.r, y, why, { fg: t.textFaint });
     }
     y++;
+  }
+  if (reason.length > 0) {
+    y++;
+    reason.forEach((line, i) => {
+      f.canvas.fill(f.l, y, f.r - f.l + 3, 1, t.backgroundElement);
+      if (i === 0) f.canvas.put(f.l + BODY_INDENT, y, 'Why not:', { fg: t.textFaint });
+      f.canvas.put(f.l + BODY_INDENT + LABEL_PAD, y, line, { fg: t.text });
+      y++;
+    });
   }
   if (tierRows.length > 0) {
     y++;

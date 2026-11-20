@@ -259,6 +259,12 @@ function questionOf(kind: AskKind, request: PermissionPromptRequest, facts: Pick
       return { question, title: question };
     }
     case 'mcp-tool': {
+      // The mcp tool's own call names its target as mcp:<server>:<tool>.
+      const qualified = typeof args['qualifiedName'] === 'string' ? /^mcp:([^:]+):(.+)$/.exec(args['qualifiedName']) : null;
+      if (qualified) {
+        const question = `Let ${qualified[1]} use ${qualified[2]}?`;
+        return { question, title: question };
+      }
       const server = request.attribution?.kind === 'mcp-server' ? request.attribution.serverName
         : typeof args['server'] === 'string' ? args['server'] : request.tool.startsWith('mcp__') ? request.tool.split('__')[1] ?? 'a tool server' : 'a tool server';
       const toolName = typeof args['tool'] === 'string' ? args['tool'] : request.tool.startsWith('mcp__') ? request.tool.split('__').pop() ?? 'a tool' : 'a tool';

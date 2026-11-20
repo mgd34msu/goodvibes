@@ -66,7 +66,7 @@ export async function createRuntimeServices(options: RuntimeServicesOptions): Pr
     void contractRecovery.then((report) => {
       if (!report || report.refused.length === 0) return;
       const receipts = daemonReceiptStoreAt(daemonReceiptsPath(services.configManager));
-      for (const { refusal } of report.refused) receipts.record(`${refusal.reason} ${refusal.state}. Next: ${refusal.next.join(' ')}`);
+      for (const { refusal } of report.refused) receipts.record(`${refusal.reason} Now: ${refusal.state}. Next: ${refusal.next.join(' ')}`);
     });
     // What a contract asks its owner (retry or cancel a failed unit, accept an unchecked result, ...) waits in the
     // owner inbox beside everything else, and an answer there is the contract's reply; contracts.reply still answers it too.

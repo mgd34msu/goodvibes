@@ -362,7 +362,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // A contract whose checkpoint was refused at start is shown to the owner with what to do, not only logged.
   void contractRecovery.then((report) => {
     for (const { refusal } of report?.refused ?? []) {
-      systemMessageRouter.high(`[Contracts] ${refusal.reason} ${refusal.state}. Next: ${refusal.next.join(' ')}`, 'warning');
+      systemMessageRouter.high(`[Contracts] ${refusal.reason} Now: ${refusal.state}. Next: ${refusal.next.join(' ')}`, 'warning');
     }
   });
   // The work-plan writes recovery queued are flushed by the graph's contract-runner disposal, which runs after this.

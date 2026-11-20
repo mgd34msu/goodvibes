@@ -597,7 +597,7 @@ export class BrowserEngine {
     }
     const body = request.postDataBuffer();
     const response = await pinnedFetch(checked.url.toString(), {
-      method: request.method(), headers, redirect: 'manual', ...(body ? { body } : {}),
+      method: request.method(), headers, redirect: 'manual', ...(body ? { body: new Uint8Array(body) } : {}),
     }, checked.addresses);
     const answered: Record<string, string> = {};
     response.headers.forEach((value, name) => { if (!PINNED_DROPPED_RESPONSE_HEADERS.has(name)) answered[name] = value; });

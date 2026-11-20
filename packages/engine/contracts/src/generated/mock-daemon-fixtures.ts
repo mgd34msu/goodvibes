@@ -1348,6 +1348,65 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "text": "sample"
             }
           ]
+        },
+        "presentation": {
+          "kind": "run-command",
+          "mark": "ask",
+          "question": "sample",
+          "place": {
+            "short": "sample",
+            "full": "sample"
+          },
+          "subject": {
+            "kind": "command",
+            "lines": [
+              "sample"
+            ]
+          },
+          "body": "sample",
+          "consequence": {
+            "text": "sample",
+            "withPlace": "sample",
+            "tone": "plain"
+          },
+          "choices": [
+            {
+              "id": "sample",
+              "label": "sample",
+              "key": "sample",
+              "default": false,
+              "danger": false,
+              "value": "sample"
+            }
+          ],
+          "remember": {
+            "offered": false,
+            "tiers": [
+              {
+                "tier": "sample",
+                "label": "sample",
+                "detail": "sample"
+              }
+            ],
+            "why": "sample"
+          },
+          "typeToRefuse": false,
+          "countdown": {
+            "verb": "sample",
+            "at": 0
+          },
+          "origin": {
+            "sessionTitle": "sample",
+            "by": "sample"
+          },
+          "why": "sample",
+          "details": [
+            {
+              "label": "sample",
+              "value": "sample"
+            }
+          ],
+          "title": "sample"
         }
       },
       "delivery": {
@@ -1464,6 +1523,65 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "text": "sample"
             }
           ]
+        },
+        "presentation": {
+          "kind": "run-command",
+          "mark": "ask",
+          "question": "sample",
+          "place": {
+            "short": "sample",
+            "full": "sample"
+          },
+          "subject": {
+            "kind": "command",
+            "lines": [
+              "sample"
+            ]
+          },
+          "body": "sample",
+          "consequence": {
+            "text": "sample",
+            "withPlace": "sample",
+            "tone": "plain"
+          },
+          "choices": [
+            {
+              "id": "sample",
+              "label": "sample",
+              "key": "sample",
+              "default": false,
+              "danger": false,
+              "value": "sample"
+            }
+          ],
+          "remember": {
+            "offered": false,
+            "tiers": [
+              {
+                "tier": "sample",
+                "label": "sample",
+                "detail": "sample"
+              }
+            ],
+            "why": "sample"
+          },
+          "typeToRefuse": false,
+          "countdown": {
+            "verb": "sample",
+            "at": 0
+          },
+          "origin": {
+            "sessionTitle": "sample",
+            "by": "sample"
+          },
+          "why": "sample",
+          "details": [
+            {
+              "label": "sample",
+              "value": "sample"
+            }
+          ],
+          "title": "sample"
         }
       },
       "delivery": {
@@ -1580,6 +1698,65 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 "text": "sample"
               }
             ]
+          },
+          "presentation": {
+            "kind": "run-command",
+            "mark": "ask",
+            "question": "sample",
+            "place": {
+              "short": "sample",
+              "full": "sample"
+            },
+            "subject": {
+              "kind": "command",
+              "lines": [
+                "sample"
+              ]
+            },
+            "body": "sample",
+            "consequence": {
+              "text": "sample",
+              "withPlace": "sample",
+              "tone": "plain"
+            },
+            "choices": [
+              {
+                "id": "sample",
+                "label": "sample",
+                "key": "sample",
+                "default": false,
+                "danger": false,
+                "value": "sample"
+              }
+            ],
+            "remember": {
+              "offered": false,
+              "tiers": [
+                {
+                  "tier": "sample",
+                  "label": "sample",
+                  "detail": "sample"
+                }
+              ],
+              "why": "sample"
+            },
+            "typeToRefuse": false,
+            "countdown": {
+              "verb": "sample",
+              "at": 0
+            },
+            "origin": {
+              "sessionTitle": "sample",
+              "by": "sample"
+            },
+            "why": "sample",
+            "details": [
+              {
+                "label": "sample",
+                "value": "sample"
+              }
+            ],
+            "title": "sample"
           }
         }
       ],
@@ -1682,6 +1859,65 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "text": "sample"
             }
           ]
+        },
+        "presentation": {
+          "kind": "run-command",
+          "mark": "ask",
+          "question": "sample",
+          "place": {
+            "short": "sample",
+            "full": "sample"
+          },
+          "subject": {
+            "kind": "command",
+            "lines": [
+              "sample"
+            ]
+          },
+          "body": "sample",
+          "consequence": {
+            "text": "sample",
+            "withPlace": "sample",
+            "tone": "plain"
+          },
+          "choices": [
+            {
+              "id": "sample",
+              "label": "sample",
+              "key": "sample",
+              "default": false,
+              "danger": false,
+              "value": "sample"
+            }
+          ],
+          "remember": {
+            "offered": false,
+            "tiers": [
+              {
+                "tier": "sample",
+                "label": "sample",
+                "detail": "sample"
+              }
+            ],
+            "why": "sample"
+          },
+          "typeToRefuse": false,
+          "countdown": {
+            "verb": "sample",
+            "at": 0
+          },
+          "origin": {
+            "sessionTitle": "sample",
+            "by": "sample"
+          },
+          "why": "sample",
+          "details": [
+            {
+              "label": "sample",
+              "value": "sample"
+            }
+          ],
+          "title": "sample"
         }
       }
     }
@@ -1782,6 +2018,65 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "text": "sample"
             }
           ]
+        },
+        "presentation": {
+          "kind": "run-command",
+          "mark": "ask",
+          "question": "sample",
+          "place": {
+            "short": "sample",
+            "full": "sample"
+          },
+          "subject": {
+            "kind": "command",
+            "lines": [
+              "sample"
+            ]
+          },
+          "body": "sample",
+          "consequence": {
+            "text": "sample",
+            "withPlace": "sample",
+            "tone": "plain"
+          },
+          "choices": [
+            {
+              "id": "sample",
+              "label": "sample",
+              "key": "sample",
+              "default": false,
+              "danger": false,
+              "value": "sample"
+            }
+          ],
+          "remember": {
+            "offered": false,
+            "tiers": [
+              {
+                "tier": "sample",
+                "label": "sample",
+                "detail": "sample"
+              }
+            ],
+            "why": "sample"
+          },
+          "typeToRefuse": false,
+          "countdown": {
+            "verb": "sample",
+            "at": 0
+          },
+          "origin": {
+            "sessionTitle": "sample",
+            "by": "sample"
+          },
+          "why": "sample",
+          "details": [
+            {
+              "label": "sample",
+              "value": "sample"
+            }
+          ],
+          "title": "sample"
         }
       },
       "delivery": {

@@ -491,6 +491,75 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
                 },
                 "host": {
                   "type": "string"
+                },
+                "riskFamily": {
+                  "type": "string"
+                },
+                "reading": {
+                  "type": "object",
+                  "properties": {
+                    "family": {
+                      "type": "string"
+                    },
+                    "stakes": {
+                      "type": "string",
+                      "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "critical"
+                      ]
+                    },
+                    "facts": {
+                      "type": "object",
+                      "properties": {
+                        "mutates": {
+                          "type": "boolean"
+                        },
+                        "outward": {
+                          "type": "boolean"
+                        },
+                        "secrets": {
+                          "type": "boolean"
+                        },
+                        "irreversible": {
+                          "type": "boolean"
+                        },
+                        "beyondProject": {
+                          "type": "boolean"
+                        },
+                        "weakensSecurity": {
+                          "type": "boolean"
+                        },
+                        "obfuscated": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "mutates",
+                        "outward",
+                        "secrets",
+                        "irreversible",
+                        "beyondProject",
+                        "weakensSecurity",
+                        "obfuscated"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "uncertain": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "family",
+                    "stakes",
+                    "facts",
+                    "uncertain"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": [
@@ -755,6 +824,12 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
                 "expired",
                 "remembered"
               ]
+            },
+            "argsDigest": {
+              "type": "string"
+            },
+            "relayRequestId": {
+              "type": "string"
             }
           },
           "required": [
@@ -764,6 +839,62 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
         },
         "expiresAt": {
           "type": "number"
+        },
+        "revision": {
+          "type": "number"
+        },
+        "sequence": {
+          "type": "number"
+        },
+        "homeNode": {
+          "type": "string"
+        },
+        "requester": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "in-process",
+                "wire",
+                "record-reader"
+              ]
+            },
+            "holds": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "releasedAt": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        "cause": {
+          "type": "string",
+          "enum": [
+            "requester-left",
+            "requester-restarted",
+            "cancelled-by-actor",
+            "owner-decision-stale",
+            "deadline",
+            "deadline-while-down",
+            "remembered-rule"
+          ]
         },
         "metadata": {
           "type": "object",
@@ -818,6 +949,9 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
               "actorSurface": {
                 "type": "string"
               },
+              "actorNode": {
+                "type": "string"
+              },
               "createdAt": {
                 "type": "number"
               },
@@ -842,8 +976,324 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
         "request",
         "createdAt",
         "updatedAt",
+        "revision",
+        "sequence",
+        "homeNode",
+        "requester",
         "metadata",
         "audit"
+      ],
+      "additionalProperties": false
+    },
+    "reading": {
+      "type": "object",
+      "properties": {
+        "ref": {
+          "type": "object",
+          "properties": {
+            "node": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "node",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "revision": {
+          "type": "number"
+        },
+        "sequence": {
+          "type": "number"
+        },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "waiting",
+            "decided",
+            "ended"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "claimed",
+            "approved",
+            "denied",
+            "cancelled",
+            "expired"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "waiting-for-approver",
+            "waiting-for-owner",
+            "claimed-by-you",
+            "claimed-by-other",
+            "approved",
+            "denied",
+            "amended",
+            "remembered-approved",
+            "remembered-denied",
+            "cancelled-requester-left",
+            "cancelled-requester-restarted",
+            "cancelled-by-actor",
+            "cancelled-owner-decision-stale",
+            "expired",
+            "expired-while-down"
+          ]
+        },
+        "waitingOn": {
+          "type": "object",
+          "properties": {
+            "who": {
+              "type": "string",
+              "enum": [
+                "owner",
+                "approver"
+              ]
+            },
+            "claimedBy": {
+              "type": "string"
+            },
+            "homeNode": {
+              "type": "string"
+            },
+            "homeReachable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "who",
+            "homeNode",
+            "homeReachable"
+          ],
+          "additionalProperties": false
+        },
+        "deadline": {
+          "type": "object",
+          "properties": {
+            "expiresAt": {
+              "type": "number"
+            },
+            "remainingMs": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "expiresAt",
+            "remainingMs"
+          ],
+          "additionalProperties": false
+        },
+        "allowedActions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "claim",
+              "approve",
+              "deny",
+              "amend",
+              "cancel"
+            ]
+          }
+        },
+        "refusedActions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "claim",
+                  "approve",
+                  "deny",
+                  "amend",
+                  "cancel"
+                ]
+              },
+              "code": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "action",
+              "code",
+              "reason"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "decision": {
+          "type": "object",
+          "properties": {
+            "disposition": {
+              "type": "string",
+              "enum": [
+                "approved",
+                "denied",
+                "amended",
+                "cancelled",
+                "expired",
+                "remembered"
+              ]
+            },
+            "by": {
+              "type": "string"
+            },
+            "surface": {
+              "type": "string"
+            },
+            "node": {
+              "type": "string"
+            },
+            "at": {
+              "type": "number"
+            },
+            "cause": {
+              "type": "string",
+              "enum": [
+                "requester-left",
+                "requester-restarted",
+                "cancelled-by-actor",
+                "owner-decision-stale",
+                "deadline",
+                "deadline-while-down",
+                "remembered-rule"
+              ]
+            }
+          },
+          "required": [
+            "disposition",
+            "by",
+            "surface",
+            "node",
+            "at"
+          ],
+          "additionalProperties": false
+        },
+        "receipt": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "delivered",
+                "waiting",
+                "undeliverable",
+                "requester-reads-record",
+                "not-applicable"
+              ]
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        "requester": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "in-process",
+                "wire",
+                "record-reader"
+              ]
+            },
+            "principal": {
+              "type": "string"
+            },
+            "surface": {
+              "type": "string"
+            },
+            "mine": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "mine"
+          ],
+          "additionalProperties": false
+        },
+        "work": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "not-reported"
+              ]
+            },
+            "callId": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "callId"
+          ],
+          "additionalProperties": false
+        },
+        "next": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "move": {
+                "type": "string",
+                "enum": [
+                  "wait",
+                  "decide",
+                  "refresh",
+                  "raise-again",
+                  "nothing"
+                ]
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "move",
+              "text"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "ref",
+        "revision",
+        "sequence",
+        "phase",
+        "status",
+        "reason",
+        "allowedActions",
+        "refusedActions",
+        "receipt",
+        "requester",
+        "work",
+        "next"
       ],
       "additionalProperties": false
     },
@@ -1001,6 +1451,566 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
           "required": [
             "state",
             "to"
+          ],
+          "additionalProperties": false
+        },
+        "revision": {
+          "type": "number"
+        },
+        "reading": {
+          "type": "object",
+          "properties": {
+            "ref": {
+              "type": "object",
+              "properties": {
+                "node": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "node",
+                "id"
+              ],
+              "additionalProperties": false
+            },
+            "revision": {
+              "type": "number"
+            },
+            "sequence": {
+              "type": "number"
+            },
+            "phase": {
+              "type": "string",
+              "enum": [
+                "waiting",
+                "decided",
+                "ended"
+              ]
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "claimed",
+                "approved",
+                "denied",
+                "cancelled",
+                "expired"
+              ]
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "waiting-for-approver",
+                "waiting-for-owner",
+                "claimed-by-you",
+                "claimed-by-other",
+                "approved",
+                "denied",
+                "amended",
+                "remembered-approved",
+                "remembered-denied",
+                "cancelled-requester-left",
+                "cancelled-requester-restarted",
+                "cancelled-by-actor",
+                "cancelled-owner-decision-stale",
+                "expired",
+                "expired-while-down"
+              ]
+            },
+            "waitingOn": {
+              "type": "object",
+              "properties": {
+                "who": {
+                  "type": "string",
+                  "enum": [
+                    "owner",
+                    "approver"
+                  ]
+                },
+                "claimedBy": {
+                  "type": "string"
+                },
+                "homeNode": {
+                  "type": "string"
+                },
+                "homeReachable": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "who",
+                "homeNode",
+                "homeReachable"
+              ],
+              "additionalProperties": false
+            },
+            "deadline": {
+              "type": "object",
+              "properties": {
+                "expiresAt": {
+                  "type": "number"
+                },
+                "remainingMs": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "expiresAt",
+                "remainingMs"
+              ],
+              "additionalProperties": false
+            },
+            "allowedActions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "claim",
+                  "approve",
+                  "deny",
+                  "amend",
+                  "cancel"
+                ]
+              }
+            },
+            "refusedActions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "claim",
+                      "approve",
+                      "deny",
+                      "amend",
+                      "cancel"
+                    ]
+                  },
+                  "code": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "action",
+                  "code",
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "decision": {
+              "type": "object",
+              "properties": {
+                "disposition": {
+                  "type": "string",
+                  "enum": [
+                    "approved",
+                    "denied",
+                    "amended",
+                    "cancelled",
+                    "expired",
+                    "remembered"
+                  ]
+                },
+                "by": {
+                  "type": "string"
+                },
+                "surface": {
+                  "type": "string"
+                },
+                "node": {
+                  "type": "string"
+                },
+                "at": {
+                  "type": "number"
+                },
+                "cause": {
+                  "type": "string",
+                  "enum": [
+                    "requester-left",
+                    "requester-restarted",
+                    "cancelled-by-actor",
+                    "owner-decision-stale",
+                    "deadline",
+                    "deadline-while-down",
+                    "remembered-rule"
+                  ]
+                }
+              },
+              "required": [
+                "disposition",
+                "by",
+                "surface",
+                "node",
+                "at"
+              ],
+              "additionalProperties": false
+            },
+            "receipt": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "delivered",
+                    "waiting",
+                    "undeliverable",
+                    "requester-reads-record",
+                    "not-applicable"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            },
+            "requester": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "in-process",
+                    "wire",
+                    "record-reader"
+                  ]
+                },
+                "principal": {
+                  "type": "string"
+                },
+                "surface": {
+                  "type": "string"
+                },
+                "mine": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "kind",
+                "mine"
+              ],
+              "additionalProperties": false
+            },
+            "work": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "not-reported"
+                  ]
+                },
+                "callId": {
+                  "type": "string"
+                },
+                "sessionId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "state",
+                "callId"
+              ],
+              "additionalProperties": false
+            },
+            "next": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "move": {
+                    "type": "string",
+                    "enum": [
+                      "wait",
+                      "decide",
+                      "refresh",
+                      "raise-again",
+                      "nothing"
+                    ]
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "move",
+                  "text"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "ref",
+            "revision",
+            "sequence",
+            "phase",
+            "status",
+            "reason",
+            "allowedActions",
+            "refusedActions",
+            "receipt",
+            "requester",
+            "work",
+            "next"
+          ],
+          "additionalProperties": false
+        },
+        "presentation": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "run-command",
+                "answer-command-prompt",
+                "change-files",
+                "fetch",
+                "start-agent",
+                "hand-off-work",
+                "change-setting",
+                "mcp-tool",
+                "other-tool",
+                "purchase",
+                "question",
+                "decision",
+                "claim",
+                "queued-action",
+                "report"
+              ]
+            },
+            "mark": {
+              "type": "string",
+              "enum": [
+                "ask",
+                "cannot-undo",
+                "question"
+              ]
+            },
+            "question": {
+              "type": "string"
+            },
+            "place": {
+              "type": "object",
+              "properties": {
+                "short": {
+                  "type": "string"
+                },
+                "full": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "short",
+                "full"
+              ],
+              "additionalProperties": false
+            },
+            "subject": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "command",
+                    "paths",
+                    "urls",
+                    "text",
+                    "money"
+                  ]
+                },
+                "lines": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "kind",
+                "lines"
+              ],
+              "additionalProperties": false
+            },
+            "body": {
+              "type": "string"
+            },
+            "consequence": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "withPlace": {
+                  "type": "string"
+                },
+                "tone": {
+                  "type": "string",
+                  "enum": [
+                    "plain",
+                    "cannot-undo"
+                  ]
+                }
+              },
+              "required": [
+                "text",
+                "withPlace",
+                "tone"
+              ],
+              "additionalProperties": false
+            },
+            "choices": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "key": {
+                    "type": "string"
+                  },
+                  "default": {
+                    "type": "boolean"
+                  },
+                  "danger": {
+                    "type": "boolean"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "label"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "remember": {
+              "type": "object",
+              "properties": {
+                "offered": {
+                  "type": "boolean"
+                },
+                "tiers": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "tier": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "detail": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "tier",
+                      "label",
+                      "detail"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "why": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "offered"
+              ],
+              "additionalProperties": false
+            },
+            "typeToRefuse": {
+              "type": "boolean"
+            },
+            "countdown": {
+              "type": "object",
+              "properties": {
+                "verb": {
+                  "type": "string"
+                },
+                "at": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "verb",
+                "at"
+              ],
+              "additionalProperties": false
+            },
+            "origin": {
+              "type": "object",
+              "properties": {
+                "sessionTitle": {
+                  "type": "string"
+                },
+                "by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "by"
+              ],
+              "additionalProperties": false
+            },
+            "why": {
+              "type": "string"
+            },
+            "details": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "label",
+                  "value"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "mark",
+            "question",
+            "choices",
+            "remember",
+            "typeToRefuse",
+            "why",
+            "details",
+            "title"
           ],
           "additionalProperties": false
         }

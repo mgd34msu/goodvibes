@@ -329,6 +329,7 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
           host: http.host, port: http.port, configManager: runtime.configManager,
           userAuth: runtime.localUserAuthManager, hookDispatcher: runtime.hookDispatcher,
           pairingTokens: runtime.pairingTokens, runtimeBus: runtime.runtimeBus,
+          workAdmission: runtime.workAdmission,
           serveFactory: createSafeHostServeFactory('Configured HTTP listener', http.serveFactory),
         });
         ownListener('HTTP listener', listener);

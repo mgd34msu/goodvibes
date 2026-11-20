@@ -38,6 +38,8 @@ export interface FakeDecision {
   answer(rule: DecisionRule): void;
   /** While true every request fails with a 503, as a model that went away. */
   failing: boolean;
+  /** Answers every question in a shape no reader accepts: the model answered, but nothing it said can be read. */
+  unreadable: boolean;
   stop(): void;
 }
 
@@ -64,7 +66,7 @@ function answerFor(question: Question, chosen: DecisionAnswer | undefined): Reco
 export function startFakeDecision(model = 'rt-jev'): FakeDecision {
   const rules: DecisionRule[] = [];
   const requests: DecisionRequest[] = [];
-  const state = { failing: false };
+  const state = { failing: false, unreadable: false };
   const server = Bun.serve({
     hostname: '127.0.0.1', port: 0,
     async fetch(request) {
@@ -78,6 +80,7 @@ export function startFakeDecision(model = 'rt-jev'): FakeDecision {
       const stateText = JSON.stringify(body.state ?? null);
       const answers: Record<string, unknown> = {};
       for (const [name, question] of Object.entries(body.questions ?? {})) {
+        if (state.unreadable) { answers[name] = { type: 'unreadable', value: '???' }; continue; }
         const rule = [...rules].reverse().find((candidate) => candidate.question.test(name) && (!candidate.state || candidate.state.test(stateText)));
         answers[name] = answerFor(question, rule?.answer);
       }
@@ -92,6 +95,8 @@ export function startFakeDecision(model = 'rt-jev'): FakeDecision {
     answer(rule) { rules.push(rule); },
     get failing() { return state.failing; },
     set failing(value: boolean) { state.failing = value; },
+    get unreadable() { return state.unreadable; },
+    set unreadable(value: boolean) { state.unreadable = value; },
     stop() { server.stop(true); },
   };
 }

@@ -6,6 +6,7 @@ import { registerInboxSurface } from '@goodvibes/engine/platform/platform/intake
 import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath } from '@goodvibes/engine/platform/platform/workspace';
 import { startDaemonFixture } from '@goodvibes/daemon/testing';
 import { seedProviderMetadataCacheFixture, seedProviderModelListCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
+import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 import { closeE2EFixture, type E2EHome } from './harness.ts';
 import { startScriptedDecisionServer } from '@goodvibes/judgment/testing';
 import type { DecisionModelPolicy } from '@goodvibes/engine/errors';
@@ -30,7 +31,9 @@ export async function startE2ENativeHost(home: E2EHome, options: { readonly poli
     // authority must not answer the Agent's first-start checkpoint question.
     const daemon = await startDaemonFixture({ root: join(home.root, 'native-host'), hostSessions: false,
       configure(configManager) {
-        configManager.set('judgment.endpoint', daemonJudgments.baseURL);
+        // The decision model's address with the credential it is sent (the fixture's TYPESAFE_API_KEY), in one update as the owner writes it.
+        const decision = configManager.setMany([{ key: 'judgment.endpoint', value: daemonJudgments.baseURL }, { key: 'judgment.keySource', value: 'env' }, { key: 'judgment.keyName', value: 'TYPESAFE_API_KEY' }], localOwnerActor());
+        if (!decision.ok) throw new Error(`E2E decision endpoint was not set: ${decision.refusal.reason}`);
         if (options.policy) configManager.set('judgment.policy', options.policy);
         seedProviderMetadataCacheFixture({ configManager, homeDirectory: join(home.root, 'native-host/home'),
           workingDirectory: join(home.root, 'native-host/workspace'), surfaceRoot: 'goodvibes' });

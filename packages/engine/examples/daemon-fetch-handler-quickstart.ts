@@ -2,10 +2,13 @@
  * Compose a minimal fetch handler from daemon route-handler factories.
  *
  * The route handlers authenticate every request through the host's
- * `resolveAuthenticatedPrincipal`. Here it accepts one bearer token,
- * `GOODVIBES_DAEMON_TOKEN`, and resolves it to an admin; while the variable is
- * unset the status route answers 401. Replace it with real principal resolution
- * (user sessions, scoped tokens) before exposing a host built from this file.
+ * `resolveAuthenticatedPrincipal`, which returns the request's principal: who
+ * the caller is, which credential it presented, what it may do, and the actor
+ * its effects are recorded under. Here one bearer token,
+ * `GOODVIBES_DAEMON_TOKEN`, is the operator's shared token and resolves to the
+ * owner; while the variable is unset the status route answers 401. Replace it
+ * with real principal resolution (user sessions, scoped tokens) before
+ * exposing a host built from this file.
  */
 import { timingSafeEqual } from 'node:crypto';
 import {
@@ -13,7 +16,8 @@ import {
   createDaemonTelemetryRouteHandlers,
   jsonErrorResponse,
 } from '@goodvibes/engine/platform/daemon';
-import type { AuthenticatedPrincipal } from '@goodvibes/engine/daemon-api';
+import { NO_OWNER_USER, actorFromPrincipal } from '@goodvibes/engine/daemon-api';
+import type { AuthenticatedPrincipal, RequestPrincipal } from '@goodvibes/engine/daemon-api';
 import { getOperatorContract } from '@goodvibes/engine/platform/contracts';
 import enginePackage from '@goodvibes/engine/package.json' with { type: 'json' };
 
@@ -22,14 +26,33 @@ function extractAuthToken(request: Request): string {
   return /^Bearer (.+)$/.exec(request.headers.get('authorization') ?? '')?.[1] ?? '';
 }
 
+/** Who the token's holder is: the operator, with every scope. */
+const operator: AuthenticatedPrincipal = { principalId: 'shared-token', principalKind: 'token', admin: true, scopes: ['*'] };
+
+/**
+ * The request principal the operator token authenticates as. The actor is
+ * derived from the principal and its credential by the engine's own rule
+ * (`actorFromPrincipal`): the shared operator token is the owner. This host
+ * has no sign-in users, so no user is the owner (`NO_OWNER_USER`), and its one
+ * credential never changes, so its authentication revision stays 0.
+ */
+const operatorPrincipal: RequestPrincipal = Object.freeze({
+  ...operator,
+  credentialKind: 'shared-token',
+  scopeSet: new Set(operator.scopes),
+  roles: [],
+  authRevision: 0,
+  actor: actorFromPrincipal({ ...operator, credentialKind: 'shared-token' }, NO_OWNER_USER),
+});
+
 /** The quickstart's one principal, for a request that carries `GOODVIBES_DAEMON_TOKEN`; null otherwise. */
-function resolveAuthenticatedPrincipal(request: Request): AuthenticatedPrincipal | null {
+function resolveAuthenticatedPrincipal(request: Request): RequestPrincipal | null {
   const expected = process.env.GOODVIBES_DAEMON_TOKEN;
   if (!expected) return null;
   const supplied = Buffer.from(extractAuthToken(request));
   const wanted = Buffer.from(expected);
   if (supplied.length !== wanted.length || !timingSafeEqual(supplied, wanted)) return null;
-  return { principalId: 'quickstart-admin', principalKind: 'token', admin: true, scopes: ['*'] };
+  return operatorPrincipal;
 }
 
 const controlHandlers = createDaemonControlRouteHandlers({

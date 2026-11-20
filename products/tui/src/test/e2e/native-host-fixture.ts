@@ -10,7 +10,14 @@ import { beginTuiHostPairing, completeTuiHostPairing } from '../../runtime/tui-h
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 import { seedBenchmarkCacheFixture } from '../helpers/benchmark-cache-fixture.ts';
 import { startScriptedDecisionServer } from '@goodvibes/judgment/testing';
+import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 import { closeE2EFixture, type E2EHome } from './harness.ts';
+
+/** The decision model's address with the credential it is sent (the fixture's TYPESAFE_API_KEY), in one update as the owner writes it. */
+function setDecisionEndpoint(config: { setMany: TuiConfigManager['setMany'] }, endpoint: string, options?: { readonly daemonNotRunning: true }): void {
+  const result = config.setMany([{ key: 'judgment.endpoint', value: endpoint }, { key: 'judgment.keySource', value: 'env' }, { key: 'judgment.keyName', value: 'TYPESAFE_API_KEY' }], localOwnerActor(), options);
+  if (!result.ok) throw new Error(`E2E decision endpoint was not set: ${result.refusal.reason}`);
+}
 
 /**
  * `judgments` is the decision model the program asks (judgment.endpoint and
@@ -35,7 +42,7 @@ export async function startE2ENativeHost(home: E2EHome) {
     const daemon = await startDaemonFixture({ root, hostSessions: false,
       configure(configManager) {
         const homeDirectory = join(root, 'home'), workingDirectory = join(root, 'workspace');
-        configManager.set('judgment.endpoint', daemonJudgments.baseURL);
+        setDecisionEndpoint(configManager, daemonJudgments.baseURL);
         seedProviderMetadataCacheFixture({ configManager, homeDirectory, workingDirectory });
         seedBenchmarkCacheFixture({ homeDirectory, workingDirectory, surfaceRoot: 'goodvibes' });
         const models = getProviderModelsCachePath(configManager.getControlPlaneConfigDir(), 'openai');
@@ -66,7 +73,7 @@ export async function startE2ENativeHost(home: E2EHome) {
     config.set('controlPlane.publicBaseUrl', daemon.baseUrl, offline);
     config.set('daemon.enabled', true, offline);
     config.set('hostedSessions.routeConversationTurns', false, offline);
-    config.set('judgment.endpoint', judgments.baseURL, offline);
+    setDecisionEndpoint(config, judgments.baseURL, offline);
     return { daemon, judgments, env: { TYPESAFE_API_KEY: 'local-e2e-judgment-fixture-not-a-secret', TYPESAFE_BASE_URL: judgments.baseURL },
       async stop() { await closeE2EFixture(null, () => daemon.stop(), () => judgments.assertNoUnexpected(), () => daemonJudgments.assertNoUnexpected(), restore); },
     };

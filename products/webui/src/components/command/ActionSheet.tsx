@@ -15,7 +15,7 @@
  * invokeOwnerMethod), which the payment and grant handlers require. No action
  * text is written here.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   actionButton,
@@ -108,7 +108,11 @@ function localDateTime(iso: string): string {
   return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(at.getHours())}:${pad(at.getMinutes())}`;
 }
 
-function ListBlank({ input, values, onChange, placeholder }: { readonly input: InputData; readonly values: Readonly<Record<string, string>>; readonly onChange: (value: string) => void; readonly placeholder?: string | undefined }) {
+function ListBlank({ input, values, onChange, onLabel, placeholder }: {
+  readonly input: InputData; readonly values: Readonly<Record<string, string>>; readonly onChange: (value: string) => void;
+  /** The chosen row's name, which the sentence and the done line say instead of its id. */
+  readonly onLabel: (label: string | undefined) => void; readonly placeholder?: string | undefined;
+}) {
   const list = !Array.isArray(input.choices) && input.choices ? input.choices : undefined;
   const operator = list ? COMMAND_ACTIONS.lists[list.list] : undefined;
   const earlier = list?.dependsOn ? { [list.dependsOn]: values[list.dependsOn] ?? '' } : {};
@@ -122,6 +126,8 @@ function ListBlank({ input, values, onChange, placeholder }: { readonly input: I
     },
   });
   const value = values[input.id] ?? '';
+  const chosen = rows.data?.find((row) => row.value === value)?.label;
+  useEffect(() => { onLabel(chosen); }, [chosen, onLabel]);
   if (!operator || !('method' in operator) || (list?.allowOther && (rows.data?.length ?? 0) === 0)) {
     return <Input aria-label={input.label} value={value} placeholder={placeholder ?? list?.allowOther?.reason ?? input.help} onChange={(event) => onChange(event.target.value)} />;
   }
@@ -136,9 +142,9 @@ function ListBlank({ input, values, onChange, placeholder }: { readonly input: I
   );
 }
 
-function Blank({ action, input, values, onChange, current }: {
+function Blank({ action, input, values, onChange, onLabel, current }: {
   readonly action: ActionData; readonly input: InputData; readonly values: Readonly<Record<string, string>>;
-  readonly onChange: (value: string) => void; readonly current?: string | undefined;
+  readonly onChange: (value: string) => void; readonly onLabel: (label: string | undefined) => void; readonly current?: string | undefined;
 }) {
   const value = values[input.id] ?? '';
   const help = input.required === true ? input.help : `${input.help}. Usual: ${input.required.defaultMeans}.`;
@@ -173,7 +179,7 @@ function Blank({ action, input, values, onChange, current }: {
   if (input.choices) {
     return (
       <Field label={input.label} help={help}>
-        <ListBlank input={input} values={values} onChange={onChange} placeholder={placeholder} />
+        <ListBlank input={input} values={values} onChange={onChange} onLabel={onLabel} placeholder={placeholder} />
       </Field>
     );
   }
@@ -266,6 +272,27 @@ export function ActionSheet({ open, onClose, command, action: actionId, prefill 
   const [values, setValues] = useState<Record<string, string>>(() => (found ? initialValues(found.action, prefill) : {}));
   const [preview, setPreview] = useState<Preview | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  /** The names of the things chosen from live lists, by blank id: the sentence says a schedule's name, not its id. */
+  const [labels, setLabels] = useState<Record<string, string>>({});
+  const labelSetters = useMemo(() => new Map<string, (label: string | undefined) => void>(), []);
+  const labelFor = (id: string) => {
+    let setter = labelSetters.get(id);
+    if (!setter) {
+      setter = (label) => setLabels((now) => {
+        if (now[id] === label) return now;
+        const next = { ...now };
+        if (label === undefined) delete next[id]; else next[id] = label;
+        return next;
+      });
+      labelSetters.set(id, setter);
+    }
+    return setter;
+  };
+  /** The reading or the refusal is scrolled into view when it arrives, beside the button. */
+  const outcomeRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (preview || problem) outcomeRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [preview, problem]);
   const operator = found && 'method' in found.action.operator ? found.action.operator : undefined;
   const sent = useMemo(() => (found ? shownValues(found.action, values) : {}), [found, values]);
   const key = JSON.stringify(sent);
@@ -291,7 +318,7 @@ export function ActionSheet({ open, onClose, command, action: actionId, prefill 
       if (!found) return;
       const shape = asActionShape(found.action);
       toast({
-        title: actionDoneLine(shape, sent) || found.action.label,
+        title: actionDoneLine(shape, { ...sent, ...labels }) || found.action.label,
         description: `From a terminal: ${renderTypedLine(asCommandShape(found.command), found.action.id, withoutSecrets(shape, sent))}`,
         tone: 'success',
       });
@@ -313,7 +340,7 @@ export function ActionSheet({ open, onClose, command, action: actionId, prefill 
   const needsCheck = operator?.preview !== undefined && !fresh;
   const disabled = terminalOnly !== undefined || blocked !== undefined || missing.length > 0 || run.isPending || check.isPending;
   const set = (id: string) => (value: string) => setValues((now) => ({ ...now, [id]: value }));
-  const blank = (input: InputData) => <Blank key={input.id} action={found.action} input={input} values={values} onChange={set(input.id)} current={current[input.id]} />;
+  const blank = (input: InputData) => <Blank key={input.id} action={found.action} input={input} values={values} onChange={set(input.id)} onLabel={labelFor(input.id)} current={current[input.id]} />;
   return (
     <Dialog
       open={open}
@@ -345,9 +372,11 @@ export function ActionSheet({ open, onClose, command, action: actionId, prefill 
             {group.inputs.map(blank)}
           </div>
         )))}
-        <p className="gv-action-sheet__sentence">{actionSentence(shape, sent)}</p>
-        {fresh && preview ? <p className="gv-action-sheet__preview" role="status">{preview.summary}</p> : null}
-        {problem ? <p className="gv-action-sheet__problem" role="alert">{problem}</p> : null}
+        <div ref={outcomeRef} className="gv-action-sheet__outcome">
+          <p className="gv-action-sheet__sentence">{actionSentence(shape, { ...sent, ...labels })}</p>
+          {fresh && preview ? <p className="gv-action-sheet__preview" role="status">{preview.summary}</p> : null}
+          {problem ? <p className="gv-action-sheet__problem" role="alert">{problem}</p> : null}
+        </div>
         {terminalOnly ? <p className="gv-action-sheet__hint">{terminalOnly}</p> : null}
         <p className="gv-action-sheet__line">From a terminal: <code>{renderTypedLine(asCommandShape(found.command), found.action.id, withoutSecrets(shape, sent))}</code></p>
       </div>

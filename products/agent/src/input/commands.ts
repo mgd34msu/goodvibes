@@ -11,9 +11,7 @@ import { registerConfigCommand } from './commands/config.ts';
 import { registerScheduleRuntimeCommands } from './commands/schedule-runtime.ts';
 import { registerOperatorRuntimeCommands } from './commands/operator-runtime.ts';
 import { registerNotifyRuntimeCommands } from './commands/notify-runtime.ts';
-import { registerProductRuntimeCommands } from './commands/product-runtime.ts';
 import { registerPlatformAccessRuntimeCommands } from './commands/platform-access-runtime.ts';
-import { registerSubscriptionRuntimeCommands } from './commands/subscription-runtime.ts';
 import { registerSecurityRuntimeCommands } from './commands/security-runtime.ts';
 import { registerMcpRuntimeCommands } from './commands/mcp-runtime.ts';
 import { registerSessionContentCommands } from './commands/session-content.ts';
@@ -33,7 +31,6 @@ import { registerAgentWorkspaceRuntimeCommands } from './commands/agent-workspac
 import { registerAgentRuntimeProfileRuntimeCommands } from './commands/agent-runtime-profile-runtime.ts';
 import { registerDelegationRuntimeCommands } from './commands/delegation-runtime.ts';
 import { registerPersonasRuntimeCommands } from './commands/personas-runtime.ts';
-import { registerVibeRuntimeCommands } from './commands/vibe-runtime.ts';
 import { registerAgentSkillsRuntimeCommands } from './commands/agent-skills-runtime.ts';
 import { registerRoutinesRuntimeCommands } from './commands/routines-runtime.ts';
 import { registerChannelsRuntimeCommands } from './commands/channels-runtime.ts';
@@ -82,7 +79,6 @@ export function registerBuiltinCommands(
   registerIntelligenceRuntimeCommands(registry);
   registerCalendarRuntimeCommands(registry);
   registerAgentRuntimeProfileRuntimeCommands(registry);
-  registerVibeRuntimeCommands(registry);
   registerPersonasRuntimeCommands(registry);
   registerAgentSkillsRuntimeCommands(registry);
   registerRoutinesRuntimeCommands(registry);
@@ -94,9 +90,7 @@ export function registerBuiltinCommands(
   registerConfigCommand(registry);
   registerOperatorRuntimeCommands(registry);
   registerNotifyRuntimeCommands(registry);
-  registerProductRuntimeCommands(registry);
   registerPlatformAccessRuntimeCommands(registry);
-  registerSubscriptionRuntimeCommands(registry);
   registerSecurityRuntimeCommands(registry);
   registerMcpRuntimeCommands(registry);
   registerExperienceRuntimeCommands(registry);

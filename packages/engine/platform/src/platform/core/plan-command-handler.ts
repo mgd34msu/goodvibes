@@ -1,10 +1,10 @@
 /**
- * The execution-strategy subcommands of /project-plan:
- *   /project-plan mode auto|single|cohort|background|remote
- *   /project-plan explain
- *   /project-plan override <strategy>
- *   /project-plan status
- *   /project-plan clear
+ * The planner actions of /work:
+ *   /work planner-mode auto|single|cohort|background|remote
+ *   /work planner-explain
+ *   /work planner-override <strategy>
+ *   /work planner
+ *   /work planner-reset
  *
  * The strategy they set is read when /workstream drafts a plan (whether the
  * goal is split into parts); no conversation turn reads it, and every answer
@@ -93,9 +93,9 @@ export function handlePlanCommand(
       if (!strategy) {
         return {
           ok: false,
-          output: 'Usage: /project-plan override <strategy>\n'
+          output: 'Usage: /work planner-override <strategy>\n'
             + 'Strategies: auto | single | cohort | background | remote\n'
-            + 'Use /project-plan override auto to clear the override.',
+            + 'Use /work planner-override auto to clear the override.',
         };
       }
       const result = deps.adaptivePlanner.override(strategy);
@@ -158,14 +158,14 @@ export function handlePlanCommand(
       return {
         ok: false,
         output: [
-          `Unknown /project-plan strategy subcommand: '${subcommand}'.`,
+          `Unknown planner action: '${subcommand}'.`,
           '',
           'Available commands:',
-          '  /project-plan mode [auto|single|cohort|background|remote]  - get or set mode',
-          '  /project-plan override <strategy>                          - force a strategy',
-          '  /project-plan explain                                      - explain last decision',
-          '  /project-plan status                                       - show current state',
-          '  /project-plan clear                                        - reset to auto',
+          '  /work planner-mode <auto|single|cohort|background|remote>  - set the mode',
+          '  /work planner-override <strategy>                          - force a strategy',
+          '  /work planner-explain                                      - explain the last decision',
+          '  /work planner                                              - show the current state',
+          '  /work planner-reset                                        - reset to auto',
           '',
           STRATEGY_READER,
         ].join('\n'),

@@ -1,24 +1,14 @@
 /**
- * /email command, direct email access via IMAP/SMTP.
- *
- * Subcommands:
- *   status                                        Show config readiness (redacted, no secrets)
- *   config                                        Show current mailbox settings (password redacted)
- *   set <field> <value> [--yes]                   Set a mailbox setting; --yes required for the password
- *   check [n]                                     List up to n unread inbox summaries (default 10);
- *                                                  includes a 2-line body preview of the newest message
- *   send --yes <to> <subject words> -- <body words>  Send a plain-text email; preview without --yes
- *                                                  (--yes before the recipient; inside the text it is text)
- *
- * Settable fields (email-settings.ts), each a `surfaces.email.*` setting, the
- * mailbox the daemon reads too:
- *   host, imap.host, imap.port, imap.secure, imap.mailbox, smtp.host, smtp.port,
- *   smtp.secure, user, from, password (requires --yes)
+ * This app's host for `/mail` (one description shared with the terminal app,
+ * terminal-shell/mail-command.ts): direct mail over IMAP/SMTP with the Agent's
+ * own mail service, on the `surfaces.email.*` settings the daemon reads too.
  *
  * Safety policy:
- *   - All inbox reads use EXAMINE (read-only); unread status is never modified.
- *   - Sending requires explicit --yes; previews are shown without it.
- *   - No credential values are ever printed; the password is displayed as [stored].
+ *   - Inbox reads use EXAMINE (read-only); unread status is never modified.
+ *   - Every message read is recorded as untrusted content, so a later send in
+ *     the same turn is checked against it.
+ *   - A send asks first (the description marks it as sending something out).
+ *   - No credential value is ever printed; the password shows as [stored].
  *   - The password goes to the secret store; settings.json holds only a
  *     goodvibes:// reference.
  */
@@ -28,17 +18,16 @@ import { getSessionUntrustedContentLedger } from '../../trust/untrusted-content.
 import { describeSenderClaim, type DisplayedSenderConfidence } from '../../agent/untrusted-content.ts';
 import type { CommandContext } from '../command-registry.ts';
 import { readRefusal } from '@goodvibes-jev/engine/errors';
-import { commandRefusal, requireYesFlag, stripLeadingYesFlag, stripYesFlag } from './confirmation.ts';
+import { commandRefusal } from './confirmation.ts';
+import { registerMailCommand, type MailMessage } from '@goodvibes-jev/engine/terminal-shell/mail-command';
+import type { ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
 import { EmailService } from '@goodvibes-jev/engine/platform/platform/email';
 import { nodeEmailTransport } from '@goodvibes-jev/engine/platform/platform/email/node';
 import { requireSecretsManager, requireShellPaths } from './runtime-services.ts';
 import { openEffectiveConfigView, routeConfigWrite } from '../../config/daemon-config-routing.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { LOCAL_WRITE_VERB, OUTWARD_VERB, READ_VERB, ownerOnlyVerb, withCommandVerbs, type CommandVerbs } from './command-verbs.ts';
 import {
-  MAILBOX_CREDENTIAL_FIELDS,
   MAILBOX_FIELDS,
-  MAILBOX_FIELD_LIST,
   mailboxServiceDeps,
   persistMailboxField,
   readMailboxStatus,
@@ -54,15 +43,9 @@ function plainText(text: string): string {
   return text.replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, ' ');
 }
 
-function readLimitArg(arg: string | undefined, fallback: number): number {
-  if (!arg) return fallback;
-  const n = parseInt(arg, 10);
-  return isFinite(n) && n > 0 ? Math.min(n, 100) : fallback;
-}
-
 /**
  * The mailbox settings as the connected host holds them (they are daemon-owned,
- * so the form, `/email set` and the host's scheduled sends all see one value):
+ * so the form, `/mail set` and the host's scheduled sends all see one value):
  * one snapshot read from the host, this process's view without one.
  */
 async function getConfigManager(ctx: CommandContext): Promise<{ get: (key: string) => unknown }> {
@@ -89,7 +72,7 @@ async function buildEmailService(ctx: CommandContext): Promise<EmailService> {
   }));
 }
 
-async function formatStatus(ctx: CommandContext): Promise<void> {
+async function formatStatus(ctx: CommandContext): Promise<string> {
   const cm = await getConfigManager(ctx);
   const status = readMailboxStatus((key) => cm.get(key));
   const { settings } = status;
@@ -108,8 +91,8 @@ async function formatStatus(ctx: CommandContext): Promise<void> {
   }
   lines.push('  These are the surfaces.email.* settings, the same mailbox the daemon uses.');
   lines.push('  policy: credentials are never printed; the password displays as [stored]');
-  lines.push('  Usage: /email set <field> <value> [--yes], see /email config');
-  ctx.print(lines.join('\n'));
+  lines.push('  /mail settings shows each setting; /mail set changes one; /mail password stores the password.');
+  return lines.join('\n');
 }
 
 /**
@@ -162,52 +145,55 @@ export function formatInboxSummaries(summaries: Awaited<ReturnType<EmailService[
   return lines.join('\n');
 }
 
-async function handleCheck(
-  args: readonly string[],
-  ctx: CommandContext,
-): Promise<void> {
-  const limit = readLimitArg(args[0], 10);
-  const service = await buildEmailService(ctx);
-  const summaries = await service.checkInbox(limit);
-
-  if (summaries.length === 0) {
-    ctx.print('Inbox: no unread messages.');
-    return;
-  }
-  ctx.print(formatInboxSummaries(summaries));
+async function listMail(ctx: CommandContext, count: number): Promise<string> {
+  const summaries = await (await buildEmailService(ctx)).checkInbox(count);
+  return summaries.length === 0 ? 'Inbox: no unread messages.' : formatInboxSummaries(summaries);
 }
 
-/**
- * Parse send args with optional body separator.
- * Format: <to> <subject words...> [-- <body words...>]
- * Returns { to, subject, body } or null if to/subject are missing.
- */
-function parseSendArgs(args: readonly string[]): { to: string; subject: string; body: string } | null {
-  const to = args[0];
-  if (!to) return null;
-
-  const rest = args.slice(1);
-  const sepIdx = rest.indexOf('--');
-
-  let subjectParts: string[];
-  let bodyParts: string[];
-
-  if (sepIdx === -1) {
-    subjectParts = rest;
-    bodyParts = [];
-  } else {
-    subjectParts = rest.slice(0, sepIdx);
-    bodyParts = rest.slice(sepIdx + 1);
-  }
-
-  const subject = subjectParts.join(' ').trim();
-  if (!subject) return null;
-
-  const body = bodyParts.join(' ').trim();
-  return { to, subject, body };
+async function inboxRows(ctx: CommandContext): Promise<readonly ListRow[]> {
+  const { messages } = await (await buildEmailService(ctx)).listInbox({ limit: 30, unreadOnly: false });
+  return messages.map((message) => ({
+    value: String(message.uid), label: plainText(message.subject || '(no subject)'), detail: plainText(message.senderClaim.claimedAddress || '(unknown)'),
+    ...(message.unread ? { state: 'unread' } : {}),
+  }));
 }
 
-async function formatConfig(ctx: CommandContext): Promise<void> {
+async function readMail(ctx: CommandContext, uid: number): Promise<string> {
+  const message = await (await buildEmailService(ctx)).readMessage(uid);
+  if (!message) throw commandRefusal(`No message ${uid} is in the mailbox.`, '/mail list shows the messages');
+  const attachments = message.attachments.map((entry) => `${plainText(entry.filename)} (${entry.sizeBytes} bytes)`);
+  return [
+    `From:    ${plainText(message.from)} (a claim from the message header)`,
+    `Subject: ${plainText(message.subject)}`,
+    `Date:    ${plainText(message.date)}`,
+    ...(attachments.length > 0 ? [`Files:   ${attachments.join(', ')}`] : []),
+    '',
+    // The body keeps its lines; each line loses control characters and direction overrides.
+    message.bodyText.trim() ? message.bodyText.trimEnd().split('\n').map(plainText).join('\n') : '(no plain-text body)',
+  ].join('\n');
+}
+
+async function draftMail(ctx: CommandContext, message: MailMessage): Promise<string> {
+  const result = await (await buildEmailService(ctx)).createDraft(message);
+  return `Draft saved to the account (${result.uid !== null ? `uid ${result.uid}` : `folder ${result.mailbox}`}). Nothing was sent.`;
+}
+
+/** Messages this process sent (or tried to): a send has no idempotency key, so an identical one needs "Send it again". */
+const sentThisSession = new Set<string>();
+
+async function sendMail(ctx: CommandContext, message: MailMessage, again: boolean): Promise<string> {
+  const fingerprint = `${message.to}\0${message.subject}\0${message.body}`;
+  if (sentThisSession.has(fingerprint) && !again) {
+    throw commandRefusal('This exact message was already sent (or a send was attempted and its outcome is unknown) from this session, so it was not sent again.',
+      'Check the Sent folder first; to send it anyway choose "Send it again" (/mail send ... --again)');
+  }
+  sentThisSession.add(fingerprint);
+  // The registry has asked the owner by now (the description marks a send as sending something out).
+  await (await buildEmailService(ctx)).sendMail({ ...message, confirm: true });
+  return `Email sent to ${message.to} with subject "${message.subject}".`;
+}
+
+async function formatConfig(ctx: CommandContext): Promise<string> {
   const cm = await getConfigManager(ctx);
   const status = readMailboxStatus((key) => cm.get(key));
   const { settings } = status;
@@ -224,237 +210,62 @@ async function formatConfig(ctx: CommandContext): Promise<void> {
     `  password:      ${status.passwordStored ? '[stored]' : '[not set]'}`,
     `  from:          ${settings.fromAddress ?? '[not set]'}`,
     '',
-    `  Settable fields: ${MAILBOX_FIELD_LIST} (password needs --yes)`,
     '  host sets IMAP and SMTP together; imap.host and smtp.host override it.',
-    '  Usage: /email set <field> <value> [--yes]',
+    '  /mail set <setting> <value> changes one; /mail password stores the password.',
   ];
-  ctx.print(lines.join('\n'));
+  return lines.join('\n');
 }
 
-async function handleSet(
-  args: readonly string[],
-  ctx: CommandContext,
-): Promise<void> {
-  const parsed = stripYesFlag(args);
-  const rawArgs = [...parsed.rest];
-
-  const rawKey = rawArgs[0];
-  const rawValue = rawArgs.slice(1).join(' ');
-
-  if (!rawKey) {
-    throw commandRefusal(`Usage: /email set <field> <value> [--yes]\nFields: ${MAILBOX_FIELD_LIST} (password needs --yes)`);
-  }
-
-  // Accepts `imap.host`, `surfaces.email.imap.host`, and the older `imapHost`.
-  const field = resolveMailboxField(rawKey);
-  if (field === null) {
-    throw commandRefusal(`Unknown mailbox field: ${rawKey}\nFields: ${MAILBOX_FIELD_LIST} (password needs --yes)`);
-  }
-  const configKey = MAILBOX_FIELDS[field];
-
-  // The mailbox password is taken through the masked prompt when the terminal has
-  // one, so it is never typed into the command line or kept in input history.
-  const maskedPasswordEntry = field === 'password' && rawValue === '' && ctx.beginConcealedInput !== undefined;
-  if (rawValue === '' && !maskedPasswordEntry) {
-    throw commandRefusal(`Usage: /email set ${configKey} <value>\nValue is required.`);
-  }
-
-  const cm = ctx.platform.configManager as unknown as {
-    get: (key: string) => unknown;
-    setDynamic: (key: string, value: unknown) => void;
-  };
-  // The mailbox keys are daemon-owned: one writer, the connected host, reached by the routed write.
+/** The routed writer for the daemon-owned mailbox keys: one writer, the connected host. */
+function mailboxWriter(ctx: CommandContext) {
+  const cm = ctx.platform.configManager as unknown as { get: (key: string) => unknown; setDynamic: (key: string, value: unknown) => void };
   const homeDir = requireShellPaths(ctx).homeDirectory;
-  const writeRouted = (key: string, value: unknown) => routeConfigWrite(ctx.platform.configManager, key, value, { homeDir });
+  return { cm, write: (key: string, value: unknown) => routeConfigWrite(ctx.platform.configManager, key, value, { homeDir }) };
+}
 
-  if (field === 'password') {
-    // Secret path: --yes is required; raw value is routed through SecretsManager
-    if (!parsed.yes) {
-      const lines = [
-        'Email Password Set Preview',
-        `  key: ${configKey}`,
-        '  value: [redacted, raw password will be stored as a secure secret]',
-        '  policy: the raw password is never written to settings.json; only a',
-        '          goodvibes:// reference is stored there',
-      ];
-      ctx.print(lines.join('\n'));
-      requireYesFlag(
-        ctx,
-        'store the mailbox password',
-        ctx.beginConcealedInput === undefined ? '/email set password <password> --yes' : '/email set password --yes (the password is then asked for masked)',
-      );
-      return;
-    }
-
-    const secretsManager = requireSecretsManager(ctx);
-    const storePassword = async (password: string): Promise<void> => {
-      const result = await persistMailboxField(cm, secretsManager, field, password, writeRouted);
-      if (!result.ok) {
-        throw commandRefusal(result.error ?? `Could not store ${configKey}.`, undefined, 'COMMAND_FAILED');
-      }
-      ctx.print(
-        `Email config updated\n` +
-        `  key:  ${configKey}\n` +
-        `  value: [stored as secret; reference: ${(result.secretRef ?? '').slice(0, 40)}...]\n` +
-        '  policy: raw password stored in secrets manager; settings.json contains only the goodvibes:// ref',
-      );
-    };
-    if (maskedPasswordEntry) {
-      ctx.print('[email] Enter the mailbox password (masked), Enter to store, Esc to stop.');
-      ctx.beginConcealedInput?.({
-        label: 'Email password',
-        onSubmit: async (value) => {
-          if (value.length === 0) {
-            ctx.print('[email] No password entered; nothing was stored.');
-            return;
-          }
-          await storePassword(value);
-        },
-        onCancel: () => { ctx.print('[email] Stopped. Nothing was stored.'); },
-      });
-      return;
-    }
-    if (ctx.beginConcealedInput !== undefined) {
-      ctx.print('Note: the password was typed on the command line and may be kept in input history. Next time run /email set password --yes to enter it masked.');
-    }
-    await storePassword(rawValue);
-    return;
-  }
-
-  // Non-secret path: coerce, validate, and persist through the shared field helper
-  const secretsManager = requireSecretsManager(ctx);
+async function setMailboxField(ctx: CommandContext, rawField: string, value: string): Promise<string> {
+  const field = resolveMailboxField(rawField);
+  if (field === null || field === 'password') throw commandRefusal(`${rawField} is not a mailbox setting this action changes.`, '/mail settings lists them; /mail password stores the password');
+  const configKey = MAILBOX_FIELDS[field];
+  const { cm, write } = mailboxWriter(ctx);
   let result: Awaited<ReturnType<typeof persistMailboxField>>;
   try {
-    result = await persistMailboxField(cm, secretsManager, field, rawValue, writeRouted);
+    result = await persistMailboxField(cm, requireSecretsManager(ctx), field, value, write);
   } catch (error) {
     throw commandRefusal(`${configKey} was not changed: ${summarizeError(error)}`);
   }
-  if (!result.ok) {
-    throw commandRefusal(`${configKey} was not changed: ${result.error ?? 'the value was refused'}`, undefined, 'COMMAND_FAILED');
-  }
+  if (!result.ok) throw commandRefusal(`${configKey} was not changed: ${result.error ?? 'the value was refused'}`, undefined, 'COMMAND_FAILED');
   // The value the write reports the connected host holding now, not this process's local copy.
-  ctx.print(`Email config updated\n  key:   ${configKey}\n  value: ${String(result.value)}`);
+  return `${configKey} is now ${String(result.value)}.`;
 }
 
-async function handleSend(
-  args: readonly string[],
-  ctx: CommandContext,
-): Promise<void> {
-  // --yes is read only before the recipient: the same word in the subject or body is text and is sent.
-  const parsed = stripLeadingYesFlag(args, 0);
-  const remaining = [...parsed.rest];
-
-  const sendArgs = parseSendArgs(remaining);
-  if (!sendArgs) {
-    throw commandRefusal('Usage: /email send --yes <to> <subject words...> [-- <body words...>]\nRecipient and subject are required; --yes goes before the recipient.');
-  }
-
-  const { to, subject, body } = sendArgs;
-
-  if (!parsed.yes) {
-    const lines = [
-      'Email Send Preview',
-      `  to: ${to}`,
-      `  subject: ${subject}`,
-      `  body: ${body || '(empty)'}`,
-      '  policy: this is a preview; rerun with --yes before the recipient to send',
-    ];
-    ctx.print(lines.join('\n'));
-    requireYesFlag(ctx, `send email to ${to}`, `/email send --yes ${to} ${subject}${body ? ` -- ${body}` : ''}`);
-    return;
-  }
-
-  const service = await buildEmailService(ctx);
-  await service.sendMail({
-    to,
-    subject,
-    body,
-    confirm: true,
-  });
-  ctx.print(`Email sent to ${to} with subject "${subject}"`);
+async function storeMailboxPassword(ctx: CommandContext, password: string): Promise<string> {
+  const { cm, write } = mailboxWriter(ctx);
+  const result = await persistMailboxField(cm, requireSecretsManager(ctx), 'password', password, write);
+  if (!result.ok) throw commandRefusal(result.error ?? 'The mailbox password could not be stored.', undefined, 'COMMAND_FAILED');
+  return `The mailbox password is stored as a secret (reference ${(result.secretRef ?? '').slice(0, 40)}...); settings hold only the reference.`;
 }
 
-/**
- * The mail settings that decide where the stored password is presented and
- * how: re-pointing them sends the owner's credential somewhere else, so only
- * the owner's own keystrokes count.
- */
-const EMAIL_SERVER_SET = ownerOnlyVerb('credential', 'changes where or as whom the stored mail password is presented, or stores the password');
-
-const EMAIL_VERBS: CommandVerbs = {
-  defaultVerb: 'status',
-  verbs: {
-    status: READ_VERB,
-    config: READ_VERB,
-    check: OUTWARD_VERB,
-    send: OUTWARD_VERB,
-    set: (rest) => {
-      const key = (rest.find((arg) => !arg.startsWith('-')) ?? '').trim();
-      const field = resolveMailboxField(key);
-      return field !== null && MAILBOX_CREDENTIAL_FIELDS.has(field) ? EMAIL_SERVER_SET : LOCAL_WRITE_VERB;
-    },
-  },
-  otherwise: READ_VERB,
-};
-
-/**
- * Where a `/email set password <value>` line holds the password, under any
- * spelling of the field (`password`, `email.passwordRef`, ...): every word of
- * the value, which `handleSet` joins with spaces.
- */
-function mailboxPasswordPositions(args: readonly string[]): number[] {
-  if ((args[0] ?? '').trim().toLowerCase() !== 'set') return [];
-  const words: number[] = [];
-  for (let index = 1; index < args.length; index++) if (args[index] !== '--yes') words.push(index);
-  const key = words[0] === undefined ? '' : args[words[0]]!;
-  return resolveMailboxField(key) === 'password' ? words.slice(1) : [];
+/** Turn a mail error into a refusal that says it in plain words, never a raw exception. */
+async function plainly<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (readRefusal(error)) throw error;
+    throw commandRefusal(`Email error: ${error instanceof Error ? error.message : String(error)}`, undefined, 'COMMAND_FAILED');
+  }
 }
 
 export function registerEmailRuntimeCommands(registry: CommandRegistry): void {
-  registry.register(withCommandVerbs({
-    name: 'email',
-    effect: 'external-network',
-    aliases: [],
-    description: 'Direct IMAP/SMTP email: configure, check inbox, or send a confirmed message',
-    usage: 'status | config | set <key> <value> [--yes] | check [n] | send --yes <to> <subject...> [-- <body...>]',
-    argsHint: 'status|config|set|check|send',
-    secretArgs: { select: mailboxPasswordPositions },
-    async handler(args, ctx) {
-      const sub = (args[0] ?? 'status').trim().toLowerCase();
-
-      try {
-        if (sub === 'status') {
-          await formatStatus(ctx);
-          return;
-        }
-
-        if (sub === 'config') {
-          await formatConfig(ctx);
-          return;
-        }
-
-        if (sub === 'set') {
-          await handleSet(args.slice(1), ctx);
-          return;
-        }
-
-        if (sub === 'check') {
-          await handleCheck(args.slice(1), ctx);
-          return;
-        }
-
-        if (sub === 'send') {
-          await handleSend(args.slice(1), ctx);
-          return;
-        }
-
-        throw commandRefusal('Usage: /email status | config | set <key> <value> [--yes] | check [n] | send --yes <to> <subject...> [-- <body...>]');
-      } catch (err) {
-        // MIN-3: print config/validation errors as plain language, never a raw exception
-        if (readRefusal(err)) throw err;
-        const msg = err instanceof Error ? err.message : String(err);
-        throw commandRefusal(`Email error: ${msg}`, undefined, 'COMMAND_FAILED');
-      }
-    },
-  }, EMAIL_VERBS));
+  registerMailCommand<CommandContext>(registry, {
+    status: (ctx) => plainly(() => formatStatus(ctx)),
+    list: (ctx, count) => plainly(() => listMail(ctx, count)),
+    inbox: (ctx) => inboxRows(ctx),
+    read: (ctx, uid) => plainly(() => readMail(ctx, uid)),
+    draft: (ctx, message) => plainly(() => draftMail(ctx, message)),
+    send: (ctx, message, again) => plainly(() => sendMail(ctx, message, again)),
+    settings: (ctx) => plainly(() => formatConfig(ctx)),
+    setField: (ctx, field, value) => plainly(() => setMailboxField(ctx, field, value)),
+    setPassword: (ctx, password) => plainly(() => storeMailboxPassword(ctx, password)),
+  });
 }

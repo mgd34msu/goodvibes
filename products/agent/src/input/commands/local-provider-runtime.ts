@@ -1,16 +1,20 @@
-import { createLocalProviderCommands } from '@goodvibes-jev/engine/terminal-shell/local-provider-commands';
-import type { CommandContext } from '../command-registry.ts';
-import { requireProviderApi, requireShellPaths, requireSecretsManager } from './runtime-services.ts';
+import { registerProviderCommand } from '@goodvibes-jev/engine/terminal-shell/provider-command';
+import { formatAgentRecordSource } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
+import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import { requireProviderApi, requireSecretsManager, requireServiceRegistry, requireShellPaths, requireSubscriptionManager } from './runtime-services.ts';
 
-export const { registerLocalProviderRuntimeCommands } = createLocalProviderCommands<CommandContext>(
-  { requireProviderApi, requireShellPaths, requireSecretsManager },
-  {
+/** `/provider` is one description shared with the other terminal app (terminal-shell/provider-command.ts); here a subscription sign-in always finishes with the pasted code. */
+export function registerLocalProviderRuntimeCommands(registry: CommandRegistry): void {
+  registerProviderCommand<CommandContext>(registry, {
+    requireProviderApi,
+    requireShellPaths,
+    requireSecretsManager,
+    requireSubscriptionManager,
+    requireServiceRegistry,
+    beforeSelection: (_ctx, _provider, complete) => complete(),
     surfaceRoot: 'agent',
-    hidden: true,
-    allowInlineKey: true,
-    captureMissingKey: false,
-    explicitModelSelection: true,
+    signInListens: false,
     codeEditing: false,
-    beforeSelection: (_context, _provider, complete) => complete(),
-  },
-);
+    formatSource: formatAgentRecordSource,
+  });
+}

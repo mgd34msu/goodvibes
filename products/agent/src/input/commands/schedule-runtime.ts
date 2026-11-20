@@ -26,8 +26,8 @@ function connectionOf(ctx: CommandContext): AgentConnectedHostConnection {
   return resolveAgentConnectedHostConnection(ctx.platform.configManager, requireShellPaths(ctx).homeDirectory);
 }
 
-async function hostAction(ctx: CommandContext, action: OperatorActionId, scheduleId: string): Promise<string> {
-  const request = buildOperatorActionRequest({ action, scheduleId });
+async function hostAction(ctx: CommandContext, action: OperatorActionId, scheduleId: string, target: 'scheduleId' | 'runId' = 'scheduleId'): Promise<string> {
+  const request = buildOperatorActionRequest({ action, [target]: scheduleId });
   if (!request.ok) throw commandRefusal(request.error, undefined, 'USAGE');
   const connection = connectionOf(ctx);
   const result = await postOperatorAction(connection, request);
@@ -109,6 +109,8 @@ const CONNECTED_SCHEDULES: ScheduleHost<CommandContext> = {
   async remove(ctx, id) { await hostAction(ctx, 'automation.schedules.delete', id); },
   async setPaused(ctx, id, paused) { await hostAction(ctx, paused ? 'automation.schedules.pause' : 'automation.schedules.resume', id); },
   async runNow(ctx, id) { return hostAction(ctx, 'automation.schedules.run', id); },
+  async stopRun(ctx, runId) { return hostAction(ctx, 'automation.runs.cancel', runId, 'runId'); },
+  async retryRun(ctx, runId) { return hostAction(ctx, 'automation.runs.retry', runId, 'runId'); },
 };
 
 export function registerScheduleRuntimeCommands(registry: CommandRegistry): void {

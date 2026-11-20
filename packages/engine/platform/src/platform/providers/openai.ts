@@ -267,7 +267,7 @@ export class OpenAIProvider implements LLMProvider {
   async chat(params: ChatRequest): Promise<ChatResponse> {
     const routes = this.signInRoutes(params.model);
     if (routes.length === 0) {
-      throw new ProviderError('OpenAI is not signed in: no request was sent. Sign in with your ChatGPT subscription (/subscription login openai start) or set an OpenAI API key (OPENAI_API_KEY, or /secrets).', {
+      throw new ProviderError('OpenAI is not signed in: no request was sent. Sign in with your ChatGPT subscription (/provider sign-in openai) or set an OpenAI API key (OPENAI_API_KEY, or /secrets).', {
         statusCode: 401,
         provider: this.name,
         operation: 'chat',
@@ -588,7 +588,7 @@ export class OpenAIProvider implements LLMProvider {
       configured,
       detail: configured
         ? `Requests use the ${order.map((route) => OPENAI_SIGN_IN_ROUTE_LABELS[route]).join(', then the ')}${order.length > 1 ? ' when the first fails' : ''}.`
-        : 'Not signed in: sign in with a ChatGPT subscription (/subscription login openai start) or set OPENAI_API_KEY.',
+        : 'Not signed in: sign in with a ChatGPT subscription (/provider sign-in openai) or set OPENAI_API_KEY.',
     }, authRoutes);
     const active = this.activeSignInRoute();
     return {

@@ -311,7 +311,7 @@ export function buildAgentWorkspaceCompanionAccessSnapshot(context: CommandConte
  * Honest email-connect status for the inbox connect wizard's entry state
  *, config validation only, no network I/O. With a connected host the inbox
  * settings are the host's, so this shows the workspace's reading of the host
- * (agent-workspace-host-mailbox.ts), the fact `/email status` reports, and says
+ * (agent-workspace-host-mailbox.ts), the fact `/mail status` reports, and says
  * it is reading until that lands. Best-effort: never throws, returns null on
  * any read failure.
  */

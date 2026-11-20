@@ -9,9 +9,6 @@ interface CommonUiInput<Context> {
   readonly bookmarkModal: CommonModal;
   readonly profilePickerModal: CommonModal;
   readonly sessionPickerModal: CommonModal;
-  shortcutsOverlayActive: boolean;
-  shortcutsScrollOffset: number;
-  readonly overlayFilters: { readonly shortcuts: { clear(): void } };
   indicatorFocused: boolean;
   openMcpWorkspace(context: Context): unknown;
 }
@@ -32,14 +29,6 @@ export function createCommonShellUiOpeners<Context>(options: {
     openBookmarkModal: () => open(input.bookmarkModal),
     openProfilePicker: () => open(input.profilePickerModal),
     openSessionPicker: () => open(input.sessionPickerModal),
-    // Open, never toggle: asked twice, the overlay is open. Esc (and the
-    // overlay's own key routes) close it.
-    openShortcutsOverlay: () => {
-      input.shortcutsOverlayActive = true;
-      input.shortcutsScrollOffset = 0;
-      input.overlayFilters.shortcuts.clear();
-      render();
-    },
     openMcpWorkspace: () => {
       input.openMcpWorkspace(commandContext);
       render();

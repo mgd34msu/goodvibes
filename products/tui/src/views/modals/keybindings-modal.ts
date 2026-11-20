@@ -127,7 +127,7 @@ class KeybindingsModalSurface implements ConfigModalSurface {
       if (!key) return;
       const model = this.sortedModels().find((m) => m.registryKey === key);
       if (!model || !model.selectable) { ctx.setStatus('This model is not selectable.'); return; }
-      runModalCommand(ctx, 'model', [model.registryKey], `/model ${model.registryKey}`);
+      runModalCommand(ctx, 'model', ['use', model.registryKey], `/model use ${model.registryKey}`);
     }
   }
 }

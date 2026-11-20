@@ -745,7 +745,7 @@ A key combination is an object with `key` (a single character or a key name such
 }
 ```
 
-`/keybindings` lists the current bindings and the file path.
+`/help keys` lists the current bindings and the file path.
 An unknown action is ignored with the notice `keybindings: unknown action "<name>" ignored`.
 An invalid combination keeps the default: `keybindings: invalid key combination for "<name>" ignored; the default stays`.
 Two actions on one key are reported: `keybindings: <key> is bound to <a> and <b>; only <b> responds to it`.
@@ -758,7 +758,7 @@ Every view opens as a modal over the dimmed conversation; `Esc` closes one level
 
 | View | How to open | What it holds |
 | --- | --- | --- |
-| Command palette | `Ctrl+P`, `Ctrl+K`, `/palette` | Every command, view and setting, searchable. Old pane names (fleet, tokens, git) are search words. |
+| Command palette | `Ctrl+P`, `Ctrl+K`, `?`, `/help` | Every command, view and setting, searchable. Old pane names (fleet, tokens, git) are search words. |
 | Your agents | `F2`, `Ctrl+O`, `/agents`, `/cockpit` | The work board, the same panel as the Agent's: rows waiting for you first (`Waiting for you`), then one line per running agent (`● Helper agent   Writing docs/usage.md   15s  2 files read`, sub-agents indented under their parent), the agents that finished this session (or `no finished agents this session`), `Scheduled` (schedules and watches with their cadence and last run), and one line `Background services  N healthy ›`. The platform's own heartbeats, pollers and the code index are counted there, never as running; an unhealthy one is listed under that line by itself (`Daemon heartbeat stopped answering · 3 min ago`). Keys: `Enter` opens the selected row (an agent or background process full screen; a contract, workflow or hosted agent full height in the panel; a pick or merge conflict acts; a stalled service restarts where it can), `s` stops it and what it started (asks first; `Ctrl+X` too), `n` starts a new agent (a coding agent found on `PATH`, hosted by the GoodVibes service), `b` opens or closes the background services, `p` pauses or resumes a schedule. Also: `i` interrupts, `D` discards a contract's worktree, `f` follows the newest running agent, `v` shows the archive (`a` archives or restores one, `A` archives everything finished), `/` filters. Empty: `nothing running` and `Ask for something and helper agents show up here.` A fleet that cannot be read: `Couldn't read what is running: <reason>` with `r` to try again. On a screen 90 columns or wider the selected row's detail is on the right: model, time, files read and changed, tokens, and cost only when priced. |
 | Usage | `/usage`, `/cost` | Context bar with the compaction threshold, session tokens and cost, per-turn bars, per-agent cost and the budget alert. |
 | Changes | `/changes`, `/diff`, `/review` | Changed files with +/- counts, a tinted diff, a semantic summary; `]` and `[` move between hunks, `space` stages a hunk, `c` adds a review comment for the model, `m` marks reviewed, `o` opens the file in the editor. |
@@ -818,7 +818,6 @@ Arguments are separated by spaces; quote an argument that contains spaces with `
 A quote character inside a word is an ordinary character, so `["a","b"]` is one word.
 A backslash outside quotes is an ordinary character (`C:\dir`).
 An unclosed quote refuses the whole line instead of being guessed.
-A command marked hidden runs when typed but is left out of `/commands`.
 A command that would change or delete something important asks for confirmation in a dialog; some take `--yes` instead.
 A command that needs the daemon says `[<command>] <reason>` and changes nothing when no daemon answers.
 A command the model runs on the owner's behalf passes the permission gate like any tool call; a few commands (`/host`, `/remote dispatch`, `/project-plan <goal>`, `/workstream start`) refuse unless the owner typed them.
@@ -829,8 +828,7 @@ The sections below explain the commands grouped by task. Each entry gives the pu
 
 ### Help, navigation and display
 
-`?` on an empty composer, `/help` (aliases `/h`, `/?`), `/commands` (alias `/cmds`), `/palette` (alias `/k`) and `Ctrl+P` all open the same list: every command as a plain title with its slash name on the right, grouped by task (Suggested, Session, Views, Settings, every other command), and the keyboard shortcuts as the last group, each with its key on the right. Typing searches titles, names, descriptions and search words; a search also lists the shortcuts it matches. The detail pane shows the selected command's summary, what it can do (its actions, for a guided command) and `Finds:` with the words that find it; on an 80-column terminal there is no detail pane and the selected row's summary is one dim line under the list. Enter runs the command (a guided command opens its list of things to do); `tab` puts it in the composer to type arguments. A shortcut row is read, not run. `/help <command>` prints one command's actions and typed lines. Without an interface `/help` prints every command with its usage, and `/palette` prints `The command palette is unavailable in this context.`
-`/shortcuts` (aliases `/keys`, `/keybinds`) shows the keyboard reference. `/keybindings` (alias `/kb`) lists the current bindings and the path of `keybindings.json`.
+`?` on an empty composer, `/help` and `Ctrl+P` (or `Ctrl+K`) all open the same list: every command as a plain title with its slash name on the right, grouped by task (Suggested, Session, Views, Settings, every other command), and the keyboard shortcuts as the last group, each with its key on the right. Typing searches titles, names, descriptions and search words; a search also lists the shortcuts it matches. The detail pane shows the selected command's summary, what it can do (its actions, for a guided command) and `Finds:` with the words that find it; on an 80-column terminal there is no detail pane and the selected row's summary is one dim line under the list. Enter runs the command (a guided command opens its list of things to do); `tab` puts it in the composer to type arguments. A shortcut row is read, not run. `/help <command>` prints one command's actions and typed lines, and `/help keys` prints every key with the file that changes them (`~/.goodvibes/tui/keybindings.json`). The list's last shortcut row names that file too. Without an interface `/help` prints every command with its usage.
 `/find` (alias `/findtext`) searches this conversation's transcript, the same as `Ctrl+F`. `/search` searches the web instead.
 
 `/expand [all|thinking|tool|code]` and `/collapse [all|thinking|tool|code]` open or fold every transcript block of that type. Without an argument they act on all blocks.

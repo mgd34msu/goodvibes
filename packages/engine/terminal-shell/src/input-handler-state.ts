@@ -15,8 +15,6 @@ export abstract class TerminalInputHandlerState extends TerminalComposerControll
   public lastCtrlCTime = 0;
   public bodyTopRow = 2;
   public modalReturnFocus: 'prompt' | 'indicator' = 'prompt';
-  public shortcutsOverlayActive = false;
-  public shortcutsScrollOffset = 0;
   public inputHistory: InputHistory | null = null;
   public historySearch: HistorySearch = new HistorySearch(() => this.inputHistory?.getEntries() ?? []);
   public lastBlockCopyTime = 0;

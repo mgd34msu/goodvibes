@@ -46,14 +46,14 @@ const ACCESS_COMMAND_SUBMISSION_HANDLERS: Readonly<Record<AgentWorkspaceAccessCo
   'trust-bundle-export': (editor, readField) => {
     if (!isAffirmative(readField('confirm'))) return unconfirmed(editor, 'Trust bundle export not confirmed. Type yes, then press Enter.');
     return dispatchCommandEditorSubmission(
-      `/trust bundle export ${quoteSlashCommandArg(readField('path'))} --yes`,
+      `/security save-trust ${quoteSlashCommandArg(readField('path'))} --replace --yes`,
       'Opening trust bundle export',
       'The workspace handed a confirmed trust bundle export command to the shell-owned command router.',
       'safe',
     );
   },
   'trust-bundle-inspect': (_editor, readField) => dispatchCommandEditorSubmission(
-    `/trust bundle inspect ${quoteSlashCommandArg(readField('path'))}`,
+    `/security read-trust ${quoteSlashCommandArg(readField('path'))}`,
     'Opening trust bundle inspection',
     'The workspace handed a read-only trust bundle inspect command to the shell-owned command router.',
     'read-only',

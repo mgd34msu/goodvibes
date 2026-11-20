@@ -97,8 +97,7 @@ export function rollbackUpdate(options: RollbackUpdateOptions): void {
 }
 export function registerUpdateCommand(registry: CommandRegistry): void { registry.register(selfUpdateCommand); }
 const selfUpdateCommand = createSelfUpdateCommand<CommandContext>({
-  description: 'Check for a newer GoodVibes release and update or restore the installed suite',
-  usage: '[check|apply|rollback|daemon [check]]', help: 'Usage: /update [check|apply|rollback|daemon [check]]', version: VERSION,
+  version: VERSION, elsewhere: 'the terminal app (goodvibes)',
   workspaceDistribution: IS_WORKSPACE_DISTRIBUTION, workspaceGuidance: WORKSPACE_UPDATE_GUIDANCE,
   repairRequired: (version, ctx) => installedSuiteNeedsRepair({ execPath: process.execPath, platform: process.platform, arch: process.arch, version,
     webuiDirectory: retainSuiteUpdateConfiguration(ctx.platform.configManager).webuiDirectory }),

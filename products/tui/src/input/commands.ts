@@ -2,8 +2,6 @@ import { registerTriggerCommands } from './commands/trigger-supervisor.ts';
 import { registerHostPairingCommands } from './commands/host-pairing.ts';
 import { CommandRegistry } from './command-registry.ts';
 import type { SlashCommand } from './command-registry.ts';
-import { policyCommand } from './commands/policy.ts';
-import { providerCommand } from './commands/provider.ts';
 import { evalCommand } from './commands/eval.ts';
 import { sessionCommand, resumeCommand, saveCommand } from './commands/session.ts';
 import { memoryCommand } from './commands/memory.ts';
@@ -27,7 +25,7 @@ import { registerReplayRuntimeCommands } from './commands/replay-runtime.ts';
 import { registerChannelRuntimeCommands } from './commands/channel-runtime.ts';
 import { registerTelegramIntakeCommands } from './commands/telegram-intake-runtime.ts';
 import { registerProductRuntimeCommands } from './commands/product-runtime.ts';
-import { registerPlatformRuntimeCommands } from './commands/platform-runtime.ts';
+import { registerSecurityRuntimeCommands } from './commands/security-runtime.ts';
 import { registerProfileSyncRuntimeCommands } from './commands/profile-sync-runtime.ts';
 import { registerManagedRuntimeCommands } from './commands/managed-runtime.ts';
 import { registerPlatformAccessRuntimeCommands } from './commands/platform-access-runtime.ts';
@@ -35,7 +33,6 @@ import { registerPlatformServicesRuntimeCommands } from './commands/platform-ser
 import { registerMarketplaceRuntimeCommands } from './commands/marketplace-runtime.ts';
 import { registerGuidanceRuntimeCommands } from './commands/guidance-runtime.ts';
 import { registerRemoteRuntimeCommands } from './commands/remote-runtime.ts';
-import { registerSubscriptionRuntimeCommands } from './commands/subscription-runtime.ts';
 import { registerHooksRuntimeCommands } from './commands/hooks-runtime.ts';
 import { registerEditorRuntimeCommands } from './commands/editor-runtime.ts';
 import { registerControlRoomRuntimeCommands } from './commands/control-room-runtime.ts';
@@ -74,7 +71,6 @@ import { registerWebSearchRuntimeCommands } from './commands/websearch-runtime.t
 import { registerImageRuntimeCommands } from './commands/image-runtime.ts';
 import { registerPermissionsRuntimeCommands } from './commands/permissions-runtime.ts';
 import { registerReviewRuntimeCommands } from './commands/review-runtime.ts';
-import { registerPaletteRuntimeCommands } from './commands/palette-runtime.ts';
 import { registerCiRuntimeCommands } from './commands/ci-runtime.ts';
 import { registerCheckinRuntimeCommands } from './commands/checkin-runtime.ts';
 import { registerHostedRuntimeCommands } from './commands/hosted-runtime.ts';
@@ -104,7 +100,6 @@ export interface BuiltinCommandGroup {
 export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: 'Automation', register: registerTriggerCommands },
   { category: 'Shell & Session', register: registerShellCoreCommands },
-  { category: 'Shell & Session', register: registerPaletteRuntimeCommands },
   { category: 'Configuration', register: registerConfigCommand },
   { category: 'Operator', register: registerOperatorRuntimeCommands },
   { category: 'Plugins', register: registerPluginRuntimeCommands },
@@ -119,7 +114,7 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: 'Channels', register: registerChannelRuntimeCommands },
   { category: 'Channels', register: registerTelegramIntakeCommands },
   { category: 'Product', register: registerProductRuntimeCommands },
-  { category: 'Platform', register: registerPlatformRuntimeCommands },
+  { category: 'Security', register: registerSecurityRuntimeCommands },
   { category: 'Profiles', register: registerProfileSyncRuntimeCommands },
   { category: 'Managed Runtime', register: registerManagedRuntimeCommands },
   { category: 'Platform Access', register: registerPlatformAccessRuntimeCommands },
@@ -127,7 +122,6 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: 'Marketplace', register: registerMarketplaceRuntimeCommands },
   { category: 'Guidance', register: registerGuidanceRuntimeCommands },
   { category: 'Remote', register: registerRemoteRuntimeCommands },
-  { category: 'Subscriptions', register: registerSubscriptionRuntimeCommands },
   { category: 'Hooks', register: registerHooksRuntimeCommands },
   { category: 'Editor', register: registerEditorRuntimeCommands },
   { category: 'Control Room', register: registerControlRoomRuntimeCommands },
@@ -180,8 +174,6 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   // /profile-sync's named-config-preset bundles, which have nothing to do with
   // what the platform knows about the person who owns it.
   { category: 'Owner Profile', register: registerProfileRuntimeCommands },
-  { category: 'Policy', register: (registry) => registry.register(policyCommand) },
-  { category: 'Providers', register: (registry) => registry.register(providerCommand) },
   { category: 'Eval', register: (registry) => registry.register(evalCommand) },
   { category: 'Sessions & Replay', register: registerHostedRuntimeCommands },
   { category: 'Sessions & Replay', register: (registry) => registry.register(sessionCommand) },

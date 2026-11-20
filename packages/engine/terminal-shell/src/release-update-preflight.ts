@@ -1,5 +1,9 @@
 import { PREVIOUS_FILE_SUFFIX } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
 import { describeDaemonUpdates, type DaemonUpdateVerbs } from './daemon-update-status.js';
+import { commandRefusal } from './command-confirmation.js';
+import { defineCommand, type DescribedCommand } from './command-actions/define.js';
+import type { CommandActionContext, InputDescription } from './command-actions/types.js';
+import { choiceInput, readAction, textInput } from './described-command-kit.js';
 import { detectInstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/install-kind';
 import type { InstallKind } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import {
@@ -115,10 +119,23 @@ export interface SelfUpdateInvocation {
   readonly currentVersion: string;
   readonly print: (line: string) => void;
 }
-export function createSelfUpdateCommand<Context extends { print(message: string): void }>(policy: {
-  readonly description: string;
-  readonly usage: string;
-  readonly help: string;
+/** What `/update` does in one app beyond check, apply and roll back: this install's update state, kept in a file. */
+export interface InstallReviewPolicy<Context> {
+  /** This install's update state: version, latest release, install kind, rollback copy and the facts an upgrade keeps. */
+  review(context: Context): Promise<string>;
+  /** Whether a file is at this path now. */
+  exists(context: Context, path: string): boolean;
+  save(context: Context, path: string): Promise<string>;
+  read(context: Context, path: string): string;
+}
+
+/**
+ * `/update`, described once (command-actions/) for both terminal apps: look
+ * for a newer release, install it, go back to the kept previous version, see
+ * the daemon's own updates, and (where the app keeps one) this install's
+ * update state and its file. `/install`'s facts are in "See this install".
+ */
+export function createSelfUpdateCommand<Context extends CommandActionContext & { print(message: string): void }>(policy: {
   readonly workspaceDistribution: boolean;
   readonly workspaceGuidance: string;
   readonly version: string;
@@ -127,73 +144,129 @@ export function createSelfUpdateCommand<Context extends { print(message: string)
   readonly rollback: (options: Omit<SelfUpdateInvocation, 'fetchImpl' | 'currentVersion'>, context: Context) => void;
   readonly onRecovery?: ((error: unknown, context: Context) => void) | undefined;
   readonly repairRequired?: ((tag: string, context: Context) => boolean) | undefined;
-  readonly extra?: ((args: string[], context: Context) => Promise<boolean>) | undefined;
-  /** The connected daemon, for `/update daemon [check]`: its own update loop, which this app's update does not cover. */
+  /** The connected daemon's own update loop, which this app's update does not cover. */
   readonly daemon?: ((context: Context) => DaemonUpdateVerbs) | undefined;
-}): import('./command-registry.js').TerminalSlashCommand<Context> {
-  return {
-    name: 'update',
-    effect: 'mixed',
-    aliases: ['upgrade'],
-    description: policy.description,
-    usage: policy.usage,
-    async handler(args, context) {
-      const sub = args[0] ?? 'check';
-      // Read from the daemon, so it answers in a workspace distribution too.
-      if (sub === 'daemon' && policy.daemon) {
-        context.print(await describeDaemonUpdates(policy.daemon(context), args[1] === 'check'));
-        return;
-      }
-      if (policy.workspaceDistribution) {
-        context.print(policy.workspaceGuidance);
-        return;
-      }
-      if (sub === 'check') {
-        try {
-          const result = await policy.check(fetch as UpdateFetchLike, policy.version);
-          const repair = result.isCurrent && compareVersions(policy.version, result.latestTag) === 0 && policy.repairRequired?.(result.latestTag, context) === true;
-          context.print(
-            repair ? `Installed suite repair required at ${result.latestTag}. Run /update apply to align the installed products and companions.` : result.isCurrent
-              ? `Already current: running v${normalizeVersion(policy.version)} (latest release is ${result.latestTag}).`
-              : `Update available: ${result.latestTag} (running v${normalizeVersion(policy.version)}). Run /update apply to install it.`,
-          );
-        } catch (error) {
-          context.print(`Could not check for updates: ${error instanceof Error ? error.message : String(error)}`);
-        }
-        return;
-      }
-      if (sub === 'apply') {
-        try {
-          await policy.apply(
-            {
-              fetchImpl: fetch as UpdateFetchLike,
-              execPath: process.execPath,
-              platform: process.platform,
-              arch: process.arch,
-              currentVersion: policy.version,
-              print: context.print,
-            },
-            context,
-          );
-        } catch (error) {
-          context.print(`Update failed: ${error instanceof Error ? error.message : String(error)}`);
-          if (suiteUpdateRequiresRecovery(error)) policy.onRecovery?.(error, context);
-        }
-        return;
-      }
-      if (sub === 'rollback') {
-        try {
-          policy.rollback({ execPath: process.execPath, platform: process.platform, arch: process.arch, print: context.print }, context);
-        } catch (error) {
-          context.print(`Rollback failed: ${error instanceof Error ? error.message : String(error)}`);
-          if (suiteUpdateRequiresRecovery(error)) policy.onRecovery?.(error, context);
-        }
-        return;
-      }
-      if (await policy.extra?.(args, context)) return;
-      context.print(policy.help);
-    },
+  readonly install?: InstallReviewPolicy<Context> | undefined;
+  /** Where the parts this app lacks are. */
+  readonly elsewhere: string;
+}): DescribedCommand<Context> {
+  const install = (): InstallReviewPolicy<Context> => {
+    if (!policy.install) throw commandRefusal('This program keeps no install review; nothing was done.', `It is in ${policy.elsewhere}.`);
+    return policy.install;
   };
+  const inWorkspace = (): void => {
+    if (policy.workspaceDistribution) throw commandRefusal(policy.workspaceGuidance);
+  };
+  const pathInput = (help: string): InputDescription => textInput({ id: 'path', label: 'File', help, why: 'a file path', kind: 'path', typed: { position: 1 } });
+  const terminal = { terminalOnly: 'It updates the programs on the terminal app\'s machine.' } as const;
+  return defineCommand<Context>({
+    name: 'update',
+    title: 'Updates',
+    summary: 'See whether a newer release is out, install it, or go back to the version before',
+    group: 'Product',
+    report: 'check',
+    actions: [
+      readAction<Context>({
+        id: 'check', label: 'See whether a newer release is out', word: 'check',
+        sentence: 'Asks the release page for the newest release and compares it with the one running.',
+        operator: terminal,
+        async run(_values, context) {
+          inWorkspace();
+          let result: ReleaseUpdateCheck;
+          try {
+            result = await policy.check(fetch as UpdateFetchLike, policy.version);
+          } catch (error) {
+            throw commandRefusal(`Could not check for updates: ${error instanceof Error ? error.message : String(error)}`);
+          }
+          const repair = result.isCurrent && compareVersions(policy.version, result.latestTag) === 0 && policy.repairRequired?.(result.latestTag, context) === true;
+          if (repair) return `The installed programs need repair at ${result.latestTag}. Align them: /update apply`;
+          return result.isCurrent
+            ? `Already current: running v${normalizeVersion(policy.version)} (latest release is ${result.latestTag}).`
+            : `Update available: ${result.latestTag} (running v${normalizeVersion(policy.version)}). Install it: /update apply`;
+        },
+      }),
+      {
+        id: 'apply', label: 'Install the newer release', word: 'apply', inputs: [],
+        sentence: 'The newest release is downloaded, checked and installed for every GoodVibes program here, until you change it; the version replaced is kept for going back.',
+        done: '', touches: 'another-machine', lasts: 'kept', risk: 'none', undoneBy: 'rollback',
+        ownerOnly: { reason: 'it replaces the programs you are running', instead: 'Ask the owner to run /update apply.' },
+        operator: terminal, example: {},
+        async run(_values, context) {
+          inWorkspace();
+          try {
+            await policy.apply({ fetchImpl: fetch as UpdateFetchLike, execPath: process.execPath, platform: process.platform, arch: process.arch, currentVersion: policy.version, print: context.print }, context);
+          } catch (error) {
+            if (suiteUpdateRequiresRecovery(error)) policy.onRecovery?.(error, context);
+            throw commandRefusal(`Update failed: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        },
+      },
+      {
+        id: 'rollback', label: 'Go back to the previous version', word: 'rollback', inputs: [],
+        sentence: 'The version kept by the last update is put back for every GoodVibes program here, until you change it.',
+        done: '', touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'apply',
+        ownerOnly: { reason: 'it replaces the programs you are running', instead: 'Ask the owner to run /update rollback.' },
+        operator: terminal, example: {},
+        async run(_values, context) {
+          inWorkspace();
+          try {
+            policy.rollback({ execPath: process.execPath, platform: process.platform, arch: process.arch, print: context.print }, context);
+          } catch (error) {
+            if (suiteUpdateRequiresRecovery(error)) policy.onRecovery?.(error, context);
+            throw commandRefusal(`Rollback failed: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        },
+      },
+      readAction<Context>({
+        id: 'daemon', label: 'See the daemon\'s updates', word: 'daemon',
+        inputs: [choiceInput({
+          id: 'now', label: 'Check now', help: 'Ask the daemon to look for a newer release now', typed: { flag: '--check', switchOn: 'yes' },
+          choices: [{ value: 'no', label: 'Show what it last found' }, { value: 'yes', label: 'Look now' }],
+          optional: { default: 'no', means: 'show what it last found' },
+        })],
+        sentence: 'Shows the connected daemon\'s own update state: its version, the newest release it found and when it looks again.',
+        operator: terminal, example: { now: 'yes' },
+        async run(values, context) {
+          if (!policy.daemon) throw commandRefusal('This program reaches no daemon of its own.');
+          return describeDaemonUpdates(policy.daemon(context), values.now === 'yes');
+        },
+      }),
+      readAction<Context>({
+        id: 'review', label: 'See this install', word: 'review',
+        sentence: 'Shows the version installed, the newest release, how it was installed, whether a previous version is kept and what an update keeps.',
+        operator: terminal,
+        async run(_values, context) { return install().review(context); },
+      }),
+      {
+        id: 'save-review', label: 'Save this install\'s update state to a file', word: 'save-review',
+        inputs: [
+          pathInput('Where to write it; it holds no secret'),
+          choiceInput({
+            id: 'replace', label: 'If the file exists', help: 'Keep it, or write over it', typed: { flag: '--replace', switchOn: 'yes' },
+            choices: [{ value: 'no', label: 'Keep it and stop' }, { value: 'yes', label: 'Write over it', risk: 'cannot-be-undone' }],
+            optional: { default: 'no', means: 'keep it and stop' },
+          }),
+        ],
+        sentence: 'What "See this install" shows will be written to {path}, until you change it; it is a record, not an update.',
+        done: '', touches: 'this-machine', lasts: 'kept', risk: 'none',
+        operator: terminal, example: { path: 'update-review.json' },
+        async run(values, context) {
+          const policyInstall = install();
+          if (values.replace !== 'yes' && policyInstall.exists(context, values.path!)) {
+            throw commandRefusal(`${values.path} already exists; nothing was written.`, `Write over it: /update save-review ${values.path} --replace`);
+          }
+          return policyInstall.save(context, values.path!);
+        },
+      },
+      readAction<Context>({
+        id: 'read-review', label: 'Read a saved update state', word: 'read-review',
+        inputs: [pathInput('An update state saved earlier')],
+        sentence: 'Reads the update state saved in {path} and shows what it recorded.',
+        operator: terminal, example: { path: 'update-review.json' },
+        async run(values, context) { return install().read(context, values.path!); },
+      }),
+    ],
+  });
 }
 
 export { retainSuiteUpdateConfiguration, type SuiteUpdateConfigurationSource } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';

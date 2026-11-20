@@ -322,7 +322,7 @@ function failureReport(ctx: CommandContext, id: string) {
 
 function showFailure(ctx: CommandContext, id: string, view: FailureReportView): string {
   const { registry, report } = failureReport(ctx, id);
-  if (view === 'report') return registry.exportAsJson(report.id) ?? `The report ${report.id} could not be written as JSON.`;
+  if (view === 'json') return registry.exportAsJson(report.id) ?? `The report ${report.id} could not be written as JSON.`;
   if (view === 'bundle') {
     const json = registry.exportBundleAsJson(report.id, { replaySnapshot: requireReplayEngine(ctx).getSnapshot() as ReplaySnapshotInput });
     if (!json) throw commandRefusal(`The bundle of ${report.id} could not be built.`);

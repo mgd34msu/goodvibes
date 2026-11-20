@@ -310,7 +310,7 @@ export function localModelBenchmarkPlan(recipe: LocalModelRecipe): LocalModelBen
     ],
     workspaceActionRoute: 'agent_harness mode:"run_workspace_action" actionId:"account-run-local-model-benchmark" fields.confirm:"yes" fields.modelRefs:"<local-route>,<baseline-route>" explicitUserRequest:"<the user request, in their own words>"',
     compareRoute: `agent_model_compare run prompt:"local model benchmark: ${recipe.label}" benchmarkKind:"local-model-route" taskType:"local-model-route" explicitUserRequest:"<the user request, in their own words>"`,
-    refreshRoute: 'agent_harness mode:"run_command" command:"/refresh-models" explicitUserRequest:"<the user request, in their own words>"',
+    refreshRoute: 'agent_harness mode:"run_command" command:"/model refresh" explicitUserRequest:"<the user request, in their own words>"',
     notes: [
       'Use the workspace action when the user wants a form with benchmark defaults; use compareRoute when the model already has exact modelRefs.',
       'Run the same prompt against the local route and a baseline route before selecting a winner.',

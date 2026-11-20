@@ -8,7 +8,7 @@
  *     alt+r try again   alt+o use another model   alt+i details
  *
  *     Tip: name a backup model once and GoodVibes switches by itself:
- *     /model fallback
+ *     /model backup
  *
  * The keys and the tip are drawn only on the newest failure that no prompt
  * followed; the first two rows stay. Details (alt+i) go under the cause. Every
@@ -117,7 +117,8 @@ export function renderTurnFailureRow(reading: TurnFailureReading, width: number,
   const t = activeTokens();
   const dim: Style = { fg: t.textMuted };
   const faint: Style = { fg: t.textFaint };
-  const command: Style = { fg: t.info };
+  // A command to type, cyan (the theme's primary), as the approved row draws `/model backup`.
+  const command: Style = { fg: t.primary };
   const lines: Line[] = [];
 
   // 1: ✕ The model didn't answer.

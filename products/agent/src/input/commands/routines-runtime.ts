@@ -11,7 +11,8 @@ import {
   routineScheduleName,
   type RoutineSchedulePromotionPreview,
 } from '../../agent/routine-schedule-promotion.ts';
-import { parseRoutineSchedulePromotionArgs } from '../../agent/routine-schedule-args.ts';
+import { parseChannelDeliveryTarget, parseLinkDeliveryTarget, parseRouteDeliveryTarget, parseWebhookDeliveryTarget, validateDeliveryTargets, type RoutineScheduleDeliveryTargetSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-delivery-targets';
+import type { ParsedRoutineSchedulePromotionArgs } from '../../agent/routine-schedule-promotion.ts';
 import {
   formatRoutineScheduleCorrelation,
   formatRoutineScheduleFailure,
@@ -26,16 +27,11 @@ import {
   RoutineScheduleReceiptStore,
 } from '../../agent/routine-schedule-receipts.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { parseAgentLocalLibraryArgs, type ParsedAgentLocalLibraryArgs } from './agent-local-library-args.ts';
+import { defineCommand, defineList, type ActionDescription, type ActionValues, type InputDescription, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { choiceInput, listInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
 import { requireShellPaths } from './runtime-services.ts';
 import { commandRefusal } from './confirmation.ts';
 import { readRefusal } from '@goodvibes-jev/engine/errors';
-
-const ROUTINE_VALUE_FLAGS = ['name', 'description', 'steps', 'tags', 'triggers', 'requires-env', 'requires-command', 'requires-commands'] as const;
-
-function parseRoutineArgs(args: readonly string[]): ParsedAgentLocalLibraryArgs {
-  return parseAgentLocalLibraryArgs(args, { valueFlags: ROUTINE_VALUE_FLAGS });
-}
 
 function splitList(value: string | undefined): readonly string[] {
   if (!value) return [];
@@ -53,12 +49,6 @@ function registryFromContext(ctx: CommandContext): AgentRoutineRegistry {
 
 function receiptStoreFromContext(ctx: CommandContext): RoutineScheduleReceiptStore {
   return RoutineScheduleReceiptStore.fromShellPaths(requireShellPaths(ctx));
-}
-
-function requiredFlag(flags: ReadonlyMap<string, string>, key: string): string {
-  const value = flags.get(key)?.trim();
-  if (!value) throw new Error(`Missing --${key}.`);
-  return value;
 }
 
 function formatRoutineReceipt(title: string, routine: Pick<AgentRoutineRecord, 'id' | 'name'>, extra: readonly string[] = []): string {
@@ -85,7 +75,7 @@ function renderList(title: string, registry: AgentRoutineRegistry, routines: rea
   if (routines.length === 0) {
     return emptyMessage
       ? `${title}\n  ${emptyMessage}`
-      : `${title}\n  No local Agent routines yet.\n  No Agent-local routines yet. Create one with /routines create --name <name> --description <summary> --steps <steps>.`;
+      : `${title}\n  No routines yet. Make one: /routines create --name <name> --description <summary> <steps>.`;
   }
   return [
     `${title} (${routines.length})`,
@@ -136,7 +126,7 @@ function renderDiscoveredRoutines(routines: readonly DiscoveredRoutineRecord[]):
     `Discovered Agent routine files (${routines.length})`,
     ...routines.map(summarizeDiscoveredRoutine),
     '',
-    'Import one with: /routines import-discovered <name>',
+    'Import one: /routines import <name>',
   ].join('\n');
 }
 
@@ -166,38 +156,14 @@ function frontmatterAnyList(routine: DiscoveredRoutineRecord, keys: readonly str
   return [];
 }
 
-/** A failed step is the command's failed result: a refusal passes through, anything else is reported as failed. */
-function printError(_ctx: CommandContext, error: unknown): never {
-  if (readRefusal(error)) throw error;
-  throw commandRefusal(`Error: ${error instanceof Error ? error.message : String(error)}`, undefined, 'COMMAND_FAILED');
-}
-
-async function importDiscoveredRoutine(args: readonly string[], ctx: CommandContext, routineRegistry: AgentRoutineRegistry): Promise<void> {
-  const parsed = parseRoutineArgs(args);
-  const name = parsed.rest.join(' ').trim();
-  if (!name) {
-    throw commandRefusal('Usage: /routines import-discovered <name> [--enabled]');
+/** Run one step against the routine store; a failure that is not a refusal is reported as one. */
+function step<T>(work: () => T): T {
+  try {
+    return work();
+  } catch (error) {
+    if (readRefusal(error)) throw error;
+    throw commandRefusal(`Error: ${error instanceof Error ? error.message : String(error)}`, undefined, 'COMMAND_FAILED');
   }
-  const discovered = findDiscoveredRoutine(await discoverRoutines(requireShellPaths(ctx)), name);
-  if (!discovered) {
-    throw commandRefusal(`Unknown discovered Agent routine ${name}\nRun /routines discover to inspect available routine files.`);
-  }
-  if (parsed.flags.get('enabled') === 'true') assertActorMayEnable(actorOf(ctx), 'routine', discovered.name, 'fresh');
-  const routine = routineRegistry.create({
-    name: discovered.name,
-    description: discovered.description || `Imported routine from ${discovered.origin} markdown file.`,
-    steps: discovered.steps,
-    tags: frontmatterList(discovered, 'tags'),
-    triggers: frontmatterList(discovered, 'triggers'),
-    requirements: buildAgentSkillRequirements({
-      env: frontmatterAnyList(discovered, ['requiresEnv', 'requires-env', 'requires_env']),
-      commands: frontmatterAnyList(discovered, ['requiresCommands', 'requires-commands', 'requires_commands', 'commands']),
-    }),
-    enabled: parsed.flags.get('enabled') === 'true',
-    source: 'imported',
-    provenance: `discovered:${discovered.origin}:${discovered.path}`,
-  });
-  ctx.print(formatRoutineReceipt('Imported Agent routine', routine, [`  enabled ${routine.enabled ? 'yes' : 'no'}`]));
 }
 
 function latestAttemptFor(
@@ -216,10 +182,10 @@ function latestAttemptFor(
 }
 
 /** Print the schedule preview, or, with --yes, create the connected schedule and record the receipt. */
-export async function runRoutineSchedulePromotion(
+async function runRoutineSchedulePromotion(
   ctx: CommandContext,
   routine: AgentRoutineRecord,
-  parsed: ReturnType<typeof parseRoutineSchedulePromotionArgs>,
+  parsed: ParsedRoutineSchedulePromotionArgs,
 ): Promise<void> {
   const preview = buildRoutineSchedulePreview(routine, parsed);
   const blockers = routinePromotionBlockers(routine);
@@ -267,244 +233,311 @@ export async function runRoutineSchedulePromotion(
   ctx.print(`${result.ok ? formatRoutineScheduleSuccess(result) : formatRoutineScheduleFailure(result)}\n  ${receiptLine}`);
 }
 
-async function promoteRoutine(args: readonly string[], routineRegistry: AgentRoutineRegistry, ctx: CommandContext): Promise<void> {
-  const parsed = parseRoutineSchedulePromotionArgs(args);
-  if (parsed.errors.length > 0) {
-    ctx.print([
-      'Usage: /routines promote <id> (--cron <expr>|--every <interval>|--at <iso-time>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--disabled] --yes',
-      ...parsed.errors.map((error) => `  ${error}`),
-    ].join('\n'));
-    return;
-  }
-  const routine = routineRegistry.get(parsed.routineId ?? '');
-  if (!routine) {
-    throw commandRefusal(`Unknown Agent routine: ${parsed.routineId ?? ''}`);
-  }
-  await runRoutineSchedulePromotion(ctx, routine, parsed);
+const ROUTINES = defineList<CommandContext>({
+  name: 'routines',
+  async read(ctx) {
+    return registryFromContext(ctx).list().map((routine): ListRow => {
+      const readiness = evaluateAgentRoutineReadiness(routine);
+      return { value: routine.id, label: routine.name, detail: routine.description, state: !readiness.ready ? 'needs setup' : routine.enabled ? 'on' : 'off' };
+    });
+  },
+  operator: { terminalOnly: 'Routines are kept in this Agent\'s home.' },
+});
+const DISCOVERED = defineList<CommandContext>({
+  name: 'routines.discovered',
+  async read(ctx) {
+    return (await discoverRoutines(requireShellPaths(ctx))).map((routine): ListRow => ({ value: routine.name, label: routine.name, detail: routine.path, state: routine.origin }));
+  },
+  operator: { terminalOnly: 'Routine files are read from this machine.' },
+});
+const RECEIPTS = defineList<CommandContext>({
+  name: 'routines.receipts',
+  async read(ctx) {
+    return receiptStoreFromContext(ctx).snapshot().receipts.map((receipt): ListRow => ({ value: receipt.id, label: receipt.scheduleName, detail: receipt.createdAt, state: receipt.status }));
+  },
+  operator: { terminalOnly: 'Schedule receipts are kept in this Agent\'s home.' },
+});
+
+const LOCAL_ONLY = { terminalOnly: 'Routines are kept in this Agent\'s home.' } as const;
+const ROUTINE: InputDescription = listInput({ id: 'routine', label: 'Routine', help: 'Your routines', list: ROUTINES, other: 'a routine id or name' });
+const OPTIONAL = (means: string) => ({ default: '', means });
+const ENABLED: InputDescription = choiceInput({
+  id: 'enabled', label: 'Switched on', help: 'Whether it may be started at once',
+  choices: [{ value: 'no', label: 'Not yet' }, { value: 'yes', label: 'Switched on' }],
+  typed: { flag: '--enabled', switchOn: 'yes' }, optional: { default: 'no', means: 'not yet' },
+});
+const REVIEW_OWNER_ONLY = {
+  reason: 'marking a routine reviewed is your decision that it may run',
+  instead: 'Ask the owner to review it with /routines review.',
+};
+
+type RoutineAction = ActionDescription<CommandContext>;
+function change(fields: Pick<RoutineAction, 'id' | 'label' | 'word' | 'inputs' | 'sentence' | 'example' | 'run'> & Partial<Pick<RoutineAction, 'risk' | 'undoneBy' | 'ownerOnly' | 'lasts' | 'touches' | 'operator'>>): RoutineAction {
+  return { done: '', touches: 'this-machine', lasts: 'kept', risk: 'none', operator: LOCAL_ONLY, ...fields };
 }
 
-export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: CommandContext): Promise<void> {
-  const sub = (args[0] ?? 'list').toLowerCase();
-  const routineRegistry = registryFromContext(ctx);
-  try {
-    if (sub === 'list' || sub === 'open') {
-      ctx.print(renderList('Agent Routines', routineRegistry, routineRegistry.list()));
-      return;
+/** The schedule a promotion asks for, read from the values the way the old option parser read the line. */
+function promotionOf(values: ActionValues): ParsedRoutineSchedulePromotionArgs {
+  const errors: string[] = [];
+  const deliveryTargets: RoutineScheduleDeliveryTargetSpec[] = [];
+  const add = (raw: string | undefined, parse: (value: string) => RoutineScheduleDeliveryTargetSpec | string): void => {
+    for (const value of (raw ?? '').split('\n').map((entry) => entry.trim()).filter(Boolean)) {
+      const target = parse(value);
+      if (typeof target === 'string') errors.push(target);
+      else deliveryTargets.push(target);
     }
-    if (sub === 'enabled') {
-      const snapshot = routineRegistry.snapshot();
-      ctx.print(renderList('Enabled Agent Routines', routineRegistry, snapshot.enabledRoutines));
-      return;
-    }
-    if (sub === 'attention' || sub === 'needs-setup') {
-      const routines = routineRegistry.list().filter((routine) => !evaluateAgentRoutineReadiness(routine).ready);
-      ctx.print(renderList('Agent Routines needing setup', routineRegistry, routines, 'No Agent-local routines need setup.'));
-      return;
-    }
-    if (sub === 'discover' || sub === 'discovered') {
-      ctx.print(renderDiscoveredRoutines(await discoverRoutines(requireShellPaths(ctx))));
-      return;
-    }
-    if (sub === 'import-discovered' || sub === 'import-routine') {
-      await importDiscoveredRoutine(args.slice(1), ctx, routineRegistry);
-      return;
-    }
-    if (sub === 'search') {
-      const query = args.slice(1).join(' ').trim();
-      ctx.print(renderList(query ? `Agent Routines matching "${query}"` : 'Agent Routines', routineRegistry, routineRegistry.search(query)));
-      return;
-    }
-    if (sub === 'show') {
-      const id = args[1];
-      if (!id) {
-        throw commandRefusal('Usage: /routines show <id>');
-      }
-      const routine = routineRegistry.get(id);
-      ctx.print(routine ? renderRoutine(routine) : `Unknown Agent routine: ${id}`);
-      return;
-    }
-    if (sub === 'receipts' || sub === 'history') {
-      ctx.print(formatRoutineScheduleReceipts(receiptStoreFromContext(ctx).snapshot()));
-      return;
-    }
-    if (sub === 'reconcile' || sub === 'sync' || sub === 'status') {
-      const shellPaths = requireShellPaths(ctx);
-      const connection = resolveAgentConnectedHostConnection(ctx.platform.configManager, shellPaths.homeDirectory);
-      const result = await reconcileRoutineScheduleReceipts(connection, receiptStoreFromContext(ctx).snapshot());
-      ctx.print(formatRoutineScheduleCorrelation(result));
-      return;
-    }
-    if (sub === 'receipt') {
-      const id = args[1];
-      if (!id) {
-        throw commandRefusal('Usage: /routines receipt <receipt-id>');
-      }
-      const receipt = receiptStoreFromContext(ctx).get(id);
-      ctx.print(receipt ? formatRoutineScheduleReceipt(receipt) : `Unknown routine schedule receipt ${id}`);
-      return;
-    }
-    if (sub === 'create') {
-      const parsed = parseRoutineArgs(args.slice(1));
-      const steps = parsed.flags.get('steps')?.trim() || parsed.rest.join(' ').trim();
-      if (parsed.flags.get('enabled') === 'true') assertActorMayEnable(actorOf(ctx), 'routine', requiredFlag(parsed.flags, 'name'), 'fresh');
-      const routine = routineRegistry.create({
-        name: requiredFlag(parsed.flags, 'name'),
-        description: requiredFlag(parsed.flags, 'description'),
-        steps,
-        triggers: splitList(parsed.flags.get('triggers')),
-        tags: splitList(parsed.flags.get('tags')),
-        requirements: buildAgentSkillRequirements({
-          env: splitList(parsed.flags.get('requires-env')),
-          commands: splitList(parsed.flags.get('requires-command') ?? parsed.flags.get('requires-commands')),
-        }),
-        enabled: parsed.flags.get('enabled') === 'true',
-        source: 'user',
-        provenance: 'Command',
-      });
-      ctx.print(formatRoutineReceipt('Created Agent routine', routine));
-      return;
-    }
-    if (sub === 'update') {
-      const id = args[1];
-      if (!id) {
-        throw commandRefusal('Usage: /routines update <id> [--name ...] [--description ...] [--steps ...]');
-      }
-      const parsed = parseRoutineArgs(args.slice(2));
-      const existing = routineRegistry.get(id);
-      // A flag that is not given keeps what the routine already requires of that kind.
-      const keptRequirements = (kind: 'env' | 'command'): readonly string[] =>
-        (existing?.requirements ?? []).filter((requirement) => requirement.kind === kind).map((requirement) => requirement.name);
-      const updated = routineRegistry.update(id, {
-        name: parsed.flags.get('name'),
-        description: parsed.flags.get('description'),
-        steps: parsed.flags.get('steps'),
-        triggers: parsed.flags.has('triggers') ? splitList(parsed.flags.get('triggers')) : undefined,
-        tags: parsed.flags.has('tags') ? splitList(parsed.flags.get('tags')) : undefined,
-        requirements: parsed.flags.has('requires-env') || parsed.flags.has('requires-command') || parsed.flags.has('requires-commands')
-          ? buildAgentSkillRequirements({
-            env: parsed.flags.has('requires-env') ? splitList(parsed.flags.get('requires-env')) : keptRequirements('env'),
-            commands: parsed.flags.has('requires-command') || parsed.flags.has('requires-commands')
-              ? splitList(parsed.flags.get('requires-command') ?? parsed.flags.get('requires-commands'))
-              : keptRequirements('command'),
-          })
-          : undefined,
-        provenance: 'Command',
-      });
-      ctx.print(formatRoutineReceipt('Updated Agent routine', updated));
-      return;
-    }
-    if (sub === 'enable' || sub === 'disable') {
-      const id = args[1];
-      if (!id) {
-        throw commandRefusal(`Usage: /routines ${sub} <id>`);
-      }
-      if (sub === 'enable') assertActorMayEnable(actorOf(ctx), 'routine', id, routineRegistry.get(id)?.reviewState);
-      const routine = routineRegistry.setEnabled(id, sub === 'enable');
-      ctx.print(formatRoutineReceipt(`${sub === 'enable' ? 'Enabled' : 'Disabled'} Agent routine`, routine));
-      return;
-    }
-    if (sub === 'start' || sub === 'run') {
-      const id = args[1];
-      if (!id) {
-        throw commandRefusal(`Usage: /routines ${sub} <id>`);
-      }
-      const found = routineRegistry.get(id);
-      if (!found) {
-        throw commandRefusal(`Unknown Agent routine ${id}. List them with /routines list.`);
-      }
-      const readiness = evaluateAgentRoutineReadiness(found);
-      const readinessLine = `  readiness: ${readiness.ready ? 'ready' : `needs setup (${readiness.missing.map(formatAgentSkillRequirement).join(', ')})`}`;
-      // A model running the command reads the printed steps as its tool result,
-      // so the print is the start. The owner's start sends the steps as a message,
-      // since printed text is display-only and never reaches the model.
-      if (ctx.invokedByModel !== true) {
-        if (!ctx.submitTurn) {
-          ctx.print([
-            `Not started: Agent routine ${found.id} runs as a message in the conversation, and this surface cannot send one.`,
-            readinessLine,
-            '  next open the Agent and run /routines start there, or send these steps as a message:',
-            '',
-            found.steps,
-          ].join('\n'));
-          return;
-        }
-        const routine = routineRegistry.markStarted(found.id);
-        ctx.print([
-          `Started Agent routine ${routine.id}: its steps were sent as your next message (after the current turn, if one is running).`,
-          `  name ${routine.name}`,
-          readinessLine,
-        ].join('\n'));
-        ctx.submitTurn(`Run Agent routine ${routine.name} (${routine.id}).\n\n${routine.steps}`);
-        return;
-      }
-      const routine = routineRegistry.markStarted(found.id);
-      ctx.print([
-        `Started Agent routine ${routine.id}`,
-        `  id ${routine.id}`,
-        `  name ${routine.name}`,
-        readinessLine,
-        '  policy same main conversation; no hidden job, runtime mutation, or external side effect was started',
-        '',
-        routine.steps,
-      ].join('\n'));
-      return;
-    }
-    if (sub === 'review') {
-      const id = args[1];
-      if (!id) {
-        throw commandRefusal('Usage: /routines review <id>');
-      }
-      assertActorMayMarkReviewed(actorOf(ctx), 'routine', id);
-      const routine = routineRegistry.markReviewed(id);
-      ctx.print(formatRoutineReceipt('Reviewed Agent routine', routine));
-      return;
-    }
-    if (sub === 'stale') {
-      const id = args[1];
-      if (!id) {
-        throw commandRefusal('Usage: /routines stale <id> <reason...>');
-      }
-      const routine = routineRegistry.markStale(id, args.slice(2).join(' '));
-      ctx.print(formatRoutineReceipt('Marked Agent routine stale', routine));
-      return;
-    }
-    if (sub === 'promote') {
-      await promoteRoutine(args.slice(1), routineRegistry, ctx);
-      return;
-    }
-    if (sub === 'delete' || sub === 'remove') {
-      const parsed = parseRoutineArgs(args.slice(1));
-      const id = parsed.rest[0];
-      if (!id) {
-        throw commandRefusal('Usage: /routines delete <id>');
-      }
-      const removed = routineRegistry.deleteRoutine(id);
-      ctx.print(formatRoutineReceipt('Deleted Agent routine', removed));
-      return;
-    }
-    throw commandRefusal('Usage: /routines [list|enabled|attention|discover|import-discovered|search|show|receipts|reconcile|receipt|create|update|enable|disable|start|review|stale|promote|delete]');
-  } catch (error) {
-    printError(ctx, error);
-  }
+  };
+  add(values.channel, parseChannelDeliveryTarget);
+  add(values.route, parseRouteDeliveryTarget);
+  add(values.webhook, parseWebhookDeliveryTarget);
+  add(values.link, parseLinkDeliveryTarget);
+  const kind = values.how as 'cron' | 'every' | 'at';
+  if (values.tz && kind !== 'cron') errors.push(`A time zone only applies to a calendar pattern; an "${kind}" schedule would ignore it.`);
+  const deliveryError = validateDeliveryTargets(deliveryTargets, 'routine promotion command');
+  if (deliveryError) errors.push(deliveryError);
+  return {
+    routineId: values.routine!, schedule: { kind, value: values.when! }, deliveryTargets,
+    ...(values.name ? { name: values.name } : {}), ...(values.tz ? { timezone: values.tz } : {}),
+    ...(values.provider ? { provider: values.provider } : {}), ...(values.model ? { model: values.model } : {}),
+    enabled: values.paused !== 'yes', yes: true, errors,
+  };
 }
 
 export function registerRoutinesRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
+  registry.register(defineCommand<CommandContext>({
     name: 'routines',
-    // Deleting a routine cannot be undone: the registry asks once (command-confirmation.ts).
-    confirm(args) {
-      const sub = (args[0] ?? '').toLowerCase();
-      const id = args.slice(1).find((word) => !word.startsWith('--'));
-      if ((sub !== 'delete' && sub !== 'remove') || !id) return undefined;
-      return { title: `Delete Agent routine ${id}?`, detail: `The routine ${id} is removed from the Agent-local registry and cannot be recovered.`, confirmLabel: 'Delete' };
-    },
-    // A search or a stale reason is free text, kept as typed.
-    rawRest: (args) => ((args[0] ?? '').toLowerCase() === 'search' ? 1 : (args[0] ?? '').toLowerCase() === 'stale' ? 2 : undefined),
-    effect: 'local-state',
-    aliases: ['routine'],
-    description: 'Manage Agent-local routines',
-    firstScreen: false,
-    usage: '[list|enabled|attention|discover|import-discovered <name>|search <query>|show <id>|receipts|reconcile|receipt <id>|create --name <name> --description <summary> --steps <steps> [--requires-env A,B] [--requires-command gh,jq]|update <id> [--name ...] [--description ...] [--steps ...]|enable <id>|disable <id>|start <id>|review <id>|stale <id> <reason...>|promote <id> --cron <expr> [--delivery-channel slack] --yes|delete <id>]',
-    handler: runRoutinesRuntimeCommand,
-  });
+    title: 'Routines',
+    summary: 'Repeatable steps the Agent runs when you ask, or on a schedule on the connected host',
+    group: 'Agent',
+    report: 'list',
+    firstScreenRows: [
+      'list', 'start', 'create', 'promote',
+      { label: 'See, find or change a routine…', actions: ['show', 'search', 'update', 'enable', 'disable', 'review', 'stale', 'delete'] },
+      { label: 'Import a routine file…', actions: ['discover', 'import'] },
+      { label: 'Routines on a schedule…', actions: ['receipts', 'receipt', 'reconcile'] },
+    ],
+    actions: [
+      readAction<CommandContext>({
+        id: 'list', label: 'See your routines', word: 'list',
+        inputs: [choiceInput({ id: 'only', label: 'Only', help: 'Some of them', choices: [{ value: 'enabled', label: 'Switched on' }, { value: 'attention', label: 'Needing setup' }], typed: { flag: '--only' }, optional: { default: '', means: 'all of them' } })],
+        sentence: 'Lists your routines: whether each is on, reviewed and ready, and how often it was started.', example: { only: 'enabled' }, operator: LOCAL_ONLY,
+        async rowValue(ctx) {
+          const snapshot = registryFromContext(ctx).snapshot();
+          const all = registryFromContext(ctx).list().length;
+          return all === 0 ? 'none yet' : `${all} routine${all === 1 ? '' : 's'}, ${snapshot.enabledRoutines.length} on`;
+        },
+        async run(values, ctx) {
+          const store = registryFromContext(ctx);
+          if (values.only === 'enabled') return renderList('Routines switched on', store, store.snapshot().enabledRoutines);
+          if (values.only === 'attention') return renderList('Routines needing setup', store, store.list().filter((routine) => !evaluateAgentRoutineReadiness(routine).ready), 'No routine needs setup.');
+          return renderList('Routines', store, store.list());
+        },
+      }),
+      readAction<CommandContext>({
+        id: 'show', label: 'See one routine', word: 'show', inputs: [ROUTINE],
+        sentence: 'Shows routine {routine} in full: its steps, what it needs, and its review state.', example: { routine: 'morning-brief' }, operator: LOCAL_ONLY,
+        async run(values, ctx) {
+          const routine = registryFromContext(ctx).get(values.routine!);
+          if (!routine) throw commandRefusal(`No routine ${values.routine}.`, '/routines list shows them.');
+          return renderRoutine(routine);
+        },
+      }),
+      readAction<CommandContext>({
+        id: 'search', label: 'Find a routine', word: 'search',
+        inputs: [textInput({ id: 'words', label: 'Words', help: 'What to look for in their names, steps and tags', why: 'your own words', typed: { tail: true } })],
+        sentence: 'Lists the routines that mention {words}.', example: { words: 'invoices' }, operator: LOCAL_ONLY,
+        async run(values, ctx) { const store = registryFromContext(ctx); return renderList(`Routines matching "${values.words}"`, store, store.search(values.words!)); },
+      }),
+      change({
+        id: 'create', label: 'Make a routine', word: 'create',
+        inputs: [
+          textInput({ id: 'name', label: 'Name', help: 'What it is called', why: 'a name you choose', typed: { flag: '--name' } }),
+          textInput({ id: 'description', label: 'Summary', help: 'One line on what it does', why: 'your own words', typed: { flag: '--description' } }),
+          textInput({ id: 'steps', label: 'Steps', help: 'What the Agent does, step by step', why: 'your own words', kind: 'long-text', typed: { tail: true } }),
+          textInput({ id: 'env', label: 'Needs settings', help: 'Environment variables it needs, separated by commas', why: 'variable names', typed: { flag: '--requires-env' }, optional: OPTIONAL('none') }),
+          textInput({ id: 'commands', label: 'Needs programs', help: 'Programs it needs on this machine, separated by commas', why: 'program names', typed: { flag: '--requires-command' }, optional: OPTIONAL('none') }),
+          textInput({ id: 'tags', label: 'Tags', help: 'Words to find it by, separated by commas', why: 'your own words', typed: { flag: '--tags' }, optional: OPTIONAL('none') }),
+          textInput({ id: 'triggers', label: 'When to suggest it', help: 'Words that bring it up, separated by commas', why: 'your own words', typed: { flag: '--triggers' }, optional: OPTIONAL('only when you ask') }),
+          ENABLED,
+        ],
+        sentence: 'A routine {name} ("{description}") is kept with the steps given, until you change it.', example: { name: 'morning-brief', description: 'Summarise my morning', steps: 'Read my inbox and calendar, then summarise.' },
+        undoneBy: 'delete',
+        async run(values, ctx) {
+          if (values.enabled === 'yes') assertActorMayEnable(actorOf(ctx), 'routine', values.name!, 'fresh');
+          const routine = step(() => registryFromContext(ctx).create({
+            name: values.name!, description: values.description!, steps: values.steps!, triggers: splitList(values.triggers), tags: splitList(values.tags),
+            requirements: buildAgentSkillRequirements({ env: splitList(values.env), commands: splitList(values.commands) }),
+            enabled: values.enabled === 'yes', source: 'user', provenance: 'Command',
+          }));
+          return formatRoutineReceipt('Made routine', routine);
+        },
+      }),
+      change({
+        id: 'update', label: 'Change a routine', word: 'update',
+        inputs: [
+          ROUTINE,
+          textInput({ id: 'name', label: 'Name', help: 'A new name', why: 'a name you choose', typed: { flag: '--name' }, optional: OPTIONAL('keep it') }),
+          textInput({ id: 'description', label: 'Summary', help: 'A new one-line summary', why: 'your own words', typed: { flag: '--description' }, optional: OPTIONAL('keep it') }),
+          textInput({ id: 'steps', label: 'Steps', help: 'New steps', why: 'your own words', kind: 'long-text', typed: { tail: true }, optional: OPTIONAL('keep them') }),
+          textInput({ id: 'env', label: 'Needs settings', help: 'New environment variables it needs', why: 'variable names', typed: { flag: '--requires-env' }, optional: OPTIONAL('keep them') }),
+          textInput({ id: 'commands', label: 'Needs programs', help: 'New programs it needs', why: 'program names', typed: { flag: '--requires-command' }, optional: OPTIONAL('keep them') }),
+          textInput({ id: 'tags', label: 'Tags', help: 'New tags', why: 'your own words', typed: { flag: '--tags' }, optional: OPTIONAL('keep them') }),
+          textInput({ id: 'triggers', label: 'When to suggest it', help: 'New words that bring it up', why: 'your own words', typed: { flag: '--triggers' }, optional: OPTIONAL('keep them') }),
+        ],
+        sentence: 'Routine {routine} takes the changes given, until you change it.', example: { routine: 'morning-brief', steps: 'Read my inbox only.' },
+        async run(values, ctx) {
+          const store = registryFromContext(ctx);
+          const existing = store.get(values.routine!);
+          // A kind of requirement not given keeps what the routine already requires of that kind.
+          const kept = (kind: 'env' | 'command'): readonly string[] => (existing?.requirements ?? []).filter((requirement) => requirement.kind === kind).map((requirement) => requirement.name);
+          const updated = step(() => store.update(values.routine!, {
+            name: values.name || undefined, description: values.description || undefined, steps: values.steps || undefined,
+            triggers: values.triggers ? splitList(values.triggers) : undefined, tags: values.tags ? splitList(values.tags) : undefined,
+            requirements: values.env || values.commands
+              ? buildAgentSkillRequirements({ env: values.env ? splitList(values.env) : kept('env'), commands: values.commands ? splitList(values.commands) : kept('command') })
+              : undefined,
+            provenance: 'Command',
+          }));
+          return formatRoutineReceipt('Changed routine', updated);
+        },
+      }),
+      change({
+        id: 'enable', label: 'Switch a routine on', word: 'enable', inputs: [ROUTINE],
+        sentence: 'Routine {routine} may be started, until you change it.', example: { routine: 'morning-brief' }, undoneBy: 'disable',
+        async run(values, ctx) {
+          const store = registryFromContext(ctx);
+          assertActorMayEnable(actorOf(ctx), 'routine', values.routine!, store.get(values.routine!)?.reviewState);
+          return formatRoutineReceipt('Switched on routine', step(() => store.setEnabled(values.routine!, true)));
+        },
+      }),
+      change({
+        id: 'disable', label: 'Switch a routine off', word: 'disable', inputs: [ROUTINE],
+        sentence: 'Routine {routine} is not started, until you change it.', example: { routine: 'morning-brief' }, undoneBy: 'enable',
+        async run(values, ctx) { return formatRoutineReceipt('Switched off routine', step(() => registryFromContext(ctx).setEnabled(values.routine!, false))); },
+      }),
+      change({
+        id: 'start', label: 'Start a routine', word: 'start', inputs: [ROUTINE],
+        sentence: 'The steps of routine {routine} are sent as your next message in this conversation.', example: { routine: 'morning-brief' }, lasts: 'not-a-change',
+        async run(values, ctx) {
+          const store = registryFromContext(ctx);
+          const found = store.get(values.routine!);
+          if (!found) throw commandRefusal(`No routine ${values.routine}.`, '/routines list shows them.');
+          const readiness = evaluateAgentRoutineReadiness(found);
+          const readinessLine = `  readiness: ${readiness.ready ? 'ready' : `needs setup (${readiness.missing.map(formatAgentSkillRequirement).join(', ')})`}`;
+          // A model running the command reads the printed steps as its tool result,
+          // so the print is the start. The owner's start sends the steps as a message,
+          // since printed text is display-only and never reaches the model.
+          if (ctx.invokedByModel !== true) {
+            if (!ctx.submitTurn) throw commandRefusal([`Not started: routine ${found.id} runs as a message in the conversation, and this surface cannot send one.`, readinessLine, '', found.steps].join('\n'));
+            const routine = step(() => store.markStarted(found.id));
+            ctx.submitTurn(`Run Agent routine ${routine.name} (${routine.id}).\n\n${routine.steps}`);
+            return [`Started routine ${routine.id}: its steps were sent as your next message (after the current turn, if one is running).`, readinessLine].join('\n');
+          }
+          const routine = step(() => store.markStarted(found.id));
+          return [
+            `Started routine ${routine.id} (${routine.name})`,
+            readinessLine,
+            '  the same conversation; no hidden job, setting change or outside action was started',
+            '',
+            routine.steps,
+          ].join('\n');
+        },
+      }),
+      change({
+        id: 'review', label: 'Mark a routine reviewed', word: 'review', inputs: [ROUTINE],
+        sentence: 'Routine {routine} is marked reviewed, so it may be switched on and run, until you change it.', example: { routine: 'morning-brief' },
+        risk: 'loosens-a-protection', ownerOnly: REVIEW_OWNER_ONLY, undoneBy: 'stale',
+        async run(values, ctx) {
+          assertActorMayMarkReviewed(actorOf(ctx), 'routine', values.routine!);
+          return formatRoutineReceipt('Reviewed routine', step(() => registryFromContext(ctx).markReviewed(values.routine!)));
+        },
+      }),
+      change({
+        id: 'stale', label: 'Mark a routine out of date', word: 'stale',
+        inputs: [ROUTINE, textInput({ id: 'reason', label: 'Why', help: 'What is out of date', why: 'your own words', kind: 'long-text', typed: { tail: true } })],
+        sentence: 'Routine {routine} is marked out of date because "{reason}", until you change it.', example: { routine: 'morning-brief', reason: 'the inbox moved' },
+        async run(values, ctx) { return formatRoutineReceipt('Marked out of date', step(() => registryFromContext(ctx).markStale(values.routine!, values.reason!))); },
+      }),
+      change({
+        id: 'delete', label: 'Delete a routine', word: 'delete', inputs: [ROUTINE],
+        sentence: 'Routine {routine} is removed from this Agent.', example: { routine: 'morning-brief' }, risk: 'cannot-be-undone',
+        async run(values, ctx) { return formatRoutineReceipt('Deleted routine', step(() => registryFromContext(ctx).deleteRoutine(values.routine!))); },
+      }),
+      readAction<CommandContext>({
+        id: 'discover', label: 'See routine files you could import', word: 'discover',
+        sentence: 'Lists the routine Markdown files in this project\'s and your own routine folders.', operator: { terminalOnly: 'Routine files are read from this machine.' },
+        async run(_values, ctx) { return renderDiscoveredRoutines(await discoverRoutines(requireShellPaths(ctx))); },
+      }),
+      change({
+        id: 'import', label: 'Import a routine file', word: 'import',
+        inputs: [listInput({ id: 'file', label: 'Routine file', help: 'Routine files found in your routine folders', list: DISCOVERED, other: 'a routine file name or path' }), ENABLED],
+        sentence: 'The routine in {file} is added to this Agent, not yet reviewed, until you change it.', example: { file: 'morning-brief' }, undoneBy: 'delete',
+        async run(values, ctx) {
+          const discovered = findDiscoveredRoutine(await discoverRoutines(requireShellPaths(ctx)), values.file!);
+          if (!discovered) throw commandRefusal(`No routine file ${values.file}.`, '/routines discover lists them.');
+          if (values.enabled === 'yes') assertActorMayEnable(actorOf(ctx), 'routine', discovered.name, 'fresh');
+          const routine = step(() => registryFromContext(ctx).create({
+            name: discovered.name, description: discovered.description || `Imported routine from ${discovered.origin} markdown file.`, steps: discovered.steps,
+            tags: frontmatterList(discovered, 'tags'), triggers: frontmatterList(discovered, 'triggers'),
+            requirements: buildAgentSkillRequirements({
+              env: frontmatterAnyList(discovered, ['requiresEnv', 'requires-env', 'requires_env']),
+              commands: frontmatterAnyList(discovered, ['requiresCommands', 'requires-commands', 'requires_commands', 'commands']),
+            }),
+            enabled: values.enabled === 'yes', source: 'imported', provenance: `discovered:${discovered.origin}:${discovered.path}`,
+          }));
+          return formatRoutineReceipt('Imported routine', routine, [`  enabled ${routine.enabled ? 'yes' : 'no'}`]);
+        },
+      }),
+      change({
+        id: 'promote', label: 'Run a routine on a schedule', word: 'promote',
+        stepTitles: ['Which routine?', 'When?', 'Where does the answer go?', 'Anything else?'],
+        inputs: [
+          { ...ROUTINE, step: 1 },
+          choiceInput({ id: 'how', label: 'When', help: 'How you say when it runs', choices: [{ value: 'cron', label: 'On a calendar pattern', help: 'Five cron fields, such as 0 9 * * 1-5' }, { value: 'every', label: 'Every so often', help: 'An interval such as 15m, 2h or 1d' }, { value: 'at', label: 'Once, at a date and time', help: 'Such as 2026-12-01T09:00' }], typed: { flag: '--how' }, step: 2 }),
+          textInput({ id: 'when', label: 'Timing', help: 'The pattern, interval or date and time', why: 'a cron pattern, an interval or a date', typed: { flag: '--when' }, step: 2 }),
+          textInput({ id: 'tz', label: 'Time zone', help: 'For a calendar pattern', why: 'a time zone such as Europe/Vienna', typed: { flag: '--timezone' }, optional: OPTIONAL('the host\'s'), step: 2 }),
+          { ...textInput({ id: 'channel', label: 'To a channel', help: 'A channel such as slack or telegram:123; one per --delivery-channel', why: 'a channel as configuration writes it', typed: { flag: '--delivery-channel' }, optional: OPTIONAL('none'), step: 3 }), typed: { flag: '--delivery-channel', repeats: true } },
+          { ...textInput({ id: 'route', label: 'To a route', help: 'A delivery route id', why: 'a route id', typed: { flag: '--delivery-route' }, optional: OPTIONAL('none'), step: 3 }), typed: { flag: '--delivery-route', repeats: true } },
+          { ...textInput({ id: 'webhook', label: 'To a web address', help: 'A webhook address', why: 'a web address', typed: { flag: '--delivery-webhook' }, optional: OPTIONAL('none'), step: 3 }), typed: { flag: '--delivery-webhook', repeats: true } },
+          { ...textInput({ id: 'link', label: 'To a linked surface', help: 'A linked surface such as web', why: 'a linked surface', typed: { flag: '--delivery-link' }, optional: OPTIONAL('none'), step: 3 }), typed: { flag: '--delivery-link', repeats: true } },
+          textInput({ id: 'name', label: 'Schedule name', help: 'What the schedule is called', why: 'a name you choose', typed: { flag: '--name' }, optional: OPTIONAL('the routine\'s name'), step: 4 }),
+          textInput({ id: 'provider', label: 'Provider', help: 'The provider a run uses', why: 'a provider id', typed: { flag: '--provider' }, optional: OPTIONAL('the host\'s usual'), step: 4 }),
+          textInput({ id: 'model', label: 'Model', help: 'The model a run uses', why: 'a model id', typed: { flag: '--model' }, optional: OPTIONAL('the host\'s usual'), step: 4 }),
+          choiceInput({ id: 'paused', label: 'Start paused', help: 'Kept, but runs only once resumed', choices: [{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes' }], typed: { flag: '--disabled', switchOn: 'yes' }, optional: { default: 'no', means: 'no' }, step: 4 }),
+        ],
+        sentence: 'Routine {routine} runs on the connected host at the times given ({when}), whether or not this Agent is open, until you change it.', example: { routine: 'morning-brief', how: 'cron', when: '0 9 * * 1-5' },
+        touches: 'another-machine', operator: { terminalOnly: 'The schedule is made with this Agent\'s link to its host.' },
+        async run(values, ctx) {
+          const parsed = promotionOf(values);
+          if (parsed.errors.length > 0) throw commandRefusal(['No schedule was made:', ...parsed.errors.map((error) => `  ${error}`)].join('\n'));
+          const routine = registryFromContext(ctx).get(values.routine!);
+          if (!routine) throw commandRefusal(`No routine ${values.routine}.`, '/routines list shows them.');
+          await runRoutineSchedulePromotion(ctx, routine, parsed);
+        },
+      }),
+      readAction<CommandContext>({
+        id: 'receipts', label: 'See routines put on a schedule', word: 'receipts',
+        sentence: 'Lists every time a routine was put on a schedule on the connected host, and how it went.', operator: { terminalOnly: 'Schedule receipts are kept in this Agent\'s home.' },
+        async run(_values, ctx) { return formatRoutineScheduleReceipts(receiptStoreFromContext(ctx).snapshot()); },
+      }),
+      readAction<CommandContext>({
+        id: 'receipt', label: 'See one schedule receipt', word: 'receipt',
+        inputs: [listInput({ id: 'receipt', label: 'Receipt', help: 'Times a routine was put on a schedule', list: RECEIPTS })],
+        sentence: 'Shows schedule receipt {receipt}: what was asked of the host and what it answered.', example: { receipt: 'rcpt-1a2b' }, operator: { terminalOnly: 'Schedule receipts are kept in this Agent\'s home.' },
+        async run(values, ctx) {
+          const receipt = receiptStoreFromContext(ctx).get(values.receipt!);
+          if (!receipt) throw commandRefusal(`No schedule receipt ${values.receipt}.`, '/routines receipts lists them.');
+          return formatRoutineScheduleReceipt(receipt);
+        },
+      }),
+      readAction<CommandContext>({
+        id: 'reconcile', label: 'Check scheduled routines against the host', word: 'reconcile',
+        sentence: 'Compares the routines this Agent put on a schedule with the schedules the connected host has now.', operator: { terminalOnly: 'It reads the host through this Agent\'s link.' },
+        async run(_values, ctx) {
+          const connection = resolveAgentConnectedHostConnection(ctx.platform.configManager, requireShellPaths(ctx).homeDirectory);
+          return formatRoutineScheduleCorrelation(await reconcileRoutineScheduleReceipts(connection, receiptStoreFromContext(ctx).snapshot()));
+        },
+      }),
+    ],
+  }));
 }

@@ -98,8 +98,6 @@ export interface InputHandlerLike {
   commandMode: boolean;
   modalReturnFocus: 'prompt' | 'indicator';
   indicatorFocused: boolean;
-  shortcutsOverlayActive: boolean;
-  shortcutsScrollOffset: number;
   selectionCallback: SelectionModalCallback | null;
   autocomplete: AutocompleteEngine | null;
 

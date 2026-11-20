@@ -267,8 +267,8 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
     label: 'Subscription Panel',
     kind: 'workspace',
     summary: 'Operator subscription surface for provider review, auth, and bundles.',
-    command: '/subscription',
-    preferredModelRoute: `Use mode:"workspace_actions" or ${agentHarnessModes('run_command')} for confirmed /subscription mirrors.`,
+    command: '/provider',
+    preferredModelRoute: `Use mode:"workspace_actions" or ${agentHarnessModes('run_command')} for confirmed /provider sign-in lines.`,
     available: (context) => typeof context.openAgentWorkspace === 'function' || typeof context.openSubscriptionWorkspace === 'function',
     open: (context, args, assertCurrent) => {
       assertCurrent?.();
@@ -632,16 +632,7 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
     available: (context) => typeof context.openCommandPalette === 'function',
     open: (context) => openSimpleContextSurface(context, 'help-overlay', 'openCommandPalette'),
   },
-  {
-    id: 'shortcuts-overlay',
-    label: 'Shortcuts Overlay',
-    kind: 'overlay',
-    summary: 'Keyboard shortcut reference overlay.',
-    command: '/shortcuts',
-    preferredModelRoute: `Use ${agentHarnessModes('shortcuts', 'keybindings')} for model-readable discovery, mode:"run_keybinding" for supported shell-safe actions, and confirmed keybinding edits for binding changes.`,
-    available: (context) => typeof context.openShortcutsOverlay === 'function',
-    open: (context) => openSimpleContextSurface(context, 'shortcuts-overlay', 'openShortcutsOverlay'),
-  },
+
   {
     id: 'onboarding',
     label: 'Agent Workspace Onboarding',
@@ -722,8 +713,6 @@ function uiSurfaceModelRoute(surface: UiSurfaceDefinition): string {
       return 'workspace action:"open"';
     case 'help-overlay':
       return 'workspace action:"commands|shortcuts"';
-    case 'shortcuts-overlay':
-      return 'workspace action:"shortcuts|keybindings"';
     default:
       return 'workspace action:"open"';
   }
@@ -734,7 +723,7 @@ const UI_CALLBACK_NAMES = ['openAgentWorkspace', 'openWorkspacePicker', 'openSec
   'openProviderPicker', 'openProviderModelPickerWithTarget', 'openReasoningEffortPicker', 'openSelection', 'openSessionPicker',
   'openProfilePicker', 'openBookmarkModal', 'openContextInspector', 'openProcessModal', 'openLiveTail', 'openConversationSearch',
   'openPromptHistorySearch', 'openSlashCommandMode', 'executeCommand', 'openFilePicker', 'openBlockActions', 'openCommandPalette',
-  'openShortcutsOverlay', 'print', 'renderRequest'] as const;
+  'print', 'renderRequest'] as const;
 
 function captureUiRequest(context: CommandContext, args: AgentHarnessUiSurfaceArgs, options: CatalogRankingOptions) {
   return captureStatefulCatalogRequest(context, args, options, [

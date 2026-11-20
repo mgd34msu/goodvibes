@@ -1,3 +1,7 @@
+import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { settingsCommandDescription } from '@goodvibes-jev/engine/terminal-shell/settings-command';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import type { ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   createContextInspectionCommand,
 } from '@goodvibes-jev/engine/terminal-shell/context-inspection-command';
@@ -11,21 +15,7 @@ import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platf
 import { handleContextWindowSubcommand } from './context-window.ts';
 
 export function registerOperatorRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
-    name: 'settings',
-    aliases: ['cfg-ui'],
-    description: 'Open the fullscreen configuration workspace, at a category or setting when one is named',
-    usage: '[category|key]',
-    handler(args, ctx) {
-      if (!ctx.openSettingsModal) {
-        ctx.print('Configuration workspace is not available in this runtime.');
-        return;
-      }
-      const target = args[0];
-      const landed: unknown = ctx.openSettingsModal(target);
-      if (target && landed === 'not-found') ctx.print(settingsTargetNotFoundMessage(target));
-    },
-  });
+  registry.register(SETTINGS_COMMAND);
 
   registry.register(contextInspectionCommand);
 
@@ -109,3 +99,45 @@ const contextInspectionCommand = createContextInspectionCommand<CommandContext>(
   estimate: (message) => estimateConversationTokens([message]),
   total: (messages) => estimateConversationTokens(messages),
 });
+
+/** One line per setting: its name, the key small beside it, and its value. */
+function settingLine(setting: ConfigSetting, value: unknown): string {
+  return `  ${setting.label} · ${setting.key} = ${JSON.stringify(value) ?? String(value)}`;
+}
+
+function findSetting(ctx: CommandContext, key: string): ConfigSetting {
+  const setting = ctx.platform.configManager.getSchema().find((candidate) => candidate.key === key);
+  if (!setting) throw commandRefusal(`No setting named ${key}.`, '/settings list <words> finds one.');
+  return setting;
+}
+
+/** `/settings`: the description both programs share (terminal-shell/settings-command.ts), with the terminal app's store. */
+const SETTINGS_COMMAND = defineCommand<CommandContext>(settingsCommandDescription<CommandContext>({
+  async open(where, ctx) {
+    if (!ctx.openSettingsModal) throw commandRefusal('The settings screen cannot be shown here.', 'See them as text: /settings list.');
+    const landed: unknown = ctx.openSettingsModal(where || undefined);
+    if (where && landed === 'not-found') return settingsTargetNotFoundMessage(where);
+  },
+  async list(words, ctx) {
+    const config = ctx.platform.configManager;
+    const q = words.trim().toLowerCase();
+    const rows = config.getSchema().filter((setting) => !setting.deprecated
+      && (!q || `${setting.label} ${setting.key} ${setting.description}`.toLowerCase().includes(q)));
+    if (rows.length === 0) return `No setting matches "${words}".`;
+    return [`${rows.length} setting(s)${q ? ` matching "${words}"` : ''}:`, ...rows.map((setting) => settingLine(setting, config.get(setting.key)))].join('\n');
+  },
+  async get(key, ctx) {
+    const setting = findSetting(ctx, key);
+    const config = ctx.platform.configManager;
+    return [setting.label, settingLine(setting, config.get(setting.key)), `  set in: ${config.sourceOf(setting.key)}`, `  ${setting.description}`].join('\n');
+  },
+  async set(key, value, ctx) {
+    // The one line that stores a value everywhere, a credential key going to the secret store (/config set).
+    await ctx.executeCommand?.('config', ['set', key, value]);
+  },
+  async reset(key, ctx) {
+    const setting = findSetting(ctx, key);
+    ctx.platform.configManager.reset(setting.key);
+    return `${setting.label} (${setting.key}) is back to its default: ${JSON.stringify(ctx.platform.configManager.get(setting.key))}.`;
+  },
+}));

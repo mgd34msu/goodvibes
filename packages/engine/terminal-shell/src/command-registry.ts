@@ -96,8 +96,8 @@ export type TerminalCommandEffect = 'read-only' | 'local-state' | 'connected-hos
  * counts positions the same way, so `{ subcommands: { set: [2] } }` is the
  * value. `flags` names options whose value is a secret, in either
  * `--flag value` or `--flag=value` form. `select` is for a command whose
- * secret depends on what the arguments name (`/email set password <value>`
- * under any of the field's spellings): it returns the secret positions.
+ * secret depends on what the arguments name (a described command's secret
+ * blank, wherever options put it): it returns the secret positions.
  * A command that declares `{}` states that it takes no typed secret.
  */
 export interface CommandSecretArgs {

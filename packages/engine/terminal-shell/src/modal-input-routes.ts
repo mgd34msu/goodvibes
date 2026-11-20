@@ -430,16 +430,12 @@ export function handleEscapeOnlyModalToken(state: EscapeOnlyModalRouteState, tok
 export type ModalTokenSnapshot = {
     selectionCallback: ((result: SelectionResult | null) => void) | null;
     getSelectionCallback?: (() => ((result: SelectionResult | null) => void) | null) | undefined;
-    shortcutsOverlayActive: boolean;
-    shortcutsScrollOffset: number;
     prompt: string;
     cursorPos: number;
     nextImageId: number;
 };
 export function withModalState(state: ModalTokenSnapshot, handled: boolean, overrides: Partial<{
     selectionCallback: ((result: SelectionResult | null) => void) | null;
-    shortcutsOverlayActive: boolean;
-    shortcutsScrollOffset: number;
     prompt: string;
     cursorPos: number;
     nextImageId: number;
@@ -450,8 +446,6 @@ export function withModalState(state: ModalTokenSnapshot, handled: boolean, over
         // routing. Write back its live owner, including an explicit clear.
         selectionCallback: overrides.selectionCallback !== undefined ? overrides.selectionCallback
             : state.getSelectionCallback ? state.getSelectionCallback() : state.selectionCallback,
-        shortcutsOverlayActive: overrides.shortcutsOverlayActive ?? state.shortcutsOverlayActive,
-        shortcutsScrollOffset: overrides.shortcutsScrollOffset ?? state.shortcutsScrollOffset,
         prompt: overrides.prompt ?? state.prompt,
         cursorPos: overrides.cursorPos ?? state.cursorPos,
         nextImageId: overrides.nextImageId ?? state.nextImageId,

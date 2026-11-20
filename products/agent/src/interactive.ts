@@ -984,8 +984,9 @@ async function main(prepared: PreparedShellCliRuntime) {
   const toolCount = toolRegistry.list().length;
   conversation.splashOptions = {
     workingDir,
-    model: runtime.model,
-    provider: runtime.provider,
+    // Read when the splash is drawn, so it names the model in use now (first run may have chosen it).
+    get model() { return runtime.model; },
+    get provider() { return runtime.provider; },
     toolCount,
   };
 

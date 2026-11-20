@@ -19,22 +19,11 @@ import {
 } from '../../agent/runtime-profile.ts';
 import { formatAgentRecordSource } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { commandRefusal, stripYesFlag } from './confirmation.ts';
+import { commandRefusal } from './confirmation.ts';
+import { defineCommand, defineList, type ActionDescription, type InputDescription, type ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { choiceInput, listInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
 import { requireShellPaths } from './runtime-services.ts';
 import { readRefusal } from '@goodvibes-jev/engine/errors';
-
-function parseFlag(args: readonly string[], name: string): string | undefined {
-  const index = args.indexOf(name);
-  if (index < 0) return undefined;
-  const value = args[index + 1];
-  return value && !value.startsWith('--') ? value : undefined;
-}
-
-function parseCsvFlag(args: readonly string[], name: string): readonly string[] | undefined {
-  const raw = parseFlag(args, name);
-  if (!raw) return undefined;
-  return raw.split(',').map((entry) => entry.trim()).filter(Boolean);
-}
 
 function profileLine(profile: AgentRuntimeProfileInfo): string {
   const created = profile.createdAt ? `  created ${profile.createdAt}` : '';
@@ -57,16 +46,16 @@ function templateLine(template: AgentRuntimeProfileTemplateSummary): string {
 function renderProfiles(homeDirectory: string): string {
   const profiles = listAgentRuntimeProfiles(homeDirectory);
   const selected = readAgentRuntimeProfileSelection(homeDirectory);
-  const defaultLine = selected ? `  default: ${selected.id}${selected.exists ? '' : ' (missing)'}` : '  default: (base Agent home)';
+  const defaultLine = selected ? `  starts next: ${selected.id}${selected.exists ? '' : ' (missing)'}` : '  starts next: the base Agent home';
   if (profiles.length === 0) {
     return [
-      'Agent Profiles',
+      'Agent homes',
       defaultLine,
-      '  No isolated Agent profiles yet.',
-      '  Create one with /agent-profile create <name> --template <id>.',
+      '  No separate Agent homes yet.',
+      '  Make one with /agent-home create <name> --starter <id>.',
     ].join('\n');
   }
-  return ['Agent Profiles', defaultLine, ...profiles.map(profileLine)].join('\n');
+  return ['Agent homes', defaultLine, ...profiles.map(profileLine)].join('\n');
 }
 
 function renderProfileDetail(homeDirectory: string, name: string): string {
@@ -74,7 +63,7 @@ function renderProfileDetail(homeDirectory: string, name: string): string {
   const info = listAgentRuntimeProfiles(homeDirectory).find((entry) => entry.id === profile.id) ?? { ...profile, createdAt: null };
   const starter = info.starterTemplateId ? [`  starter: ${info.starterTemplateId} (${info.starterTemplateName ?? info.starterTemplateId})`] : [];
   return [
-    `Agent profile: ${profile.id}`,
+    `Agent home ${profile.id}`,
     `  home ${profile.homeDirectory}`,
     ...starter,
     `  use goodvibes-agent --agent-profile ${profile.id}`,
@@ -88,11 +77,11 @@ function renderTemplates(homeDirectory: string): string {
     ...templates.map(templateLine),
     '',
     'Authoring flow:',
-    '  /agent-profile template export research ./agent-starter.json',
+    '  /agent-home export-starter research ./agent-starter.json',
     '  edit the JSON file',
-    '  /agent-profile template import ./agent-starter.json',
-    '  /agent-profile create <name> --template <imported-id>',
-    '  /agent-profile create-from-discovered <name>',
+    '  /agent-home import-starter ./agent-starter.json',
+    '  /agent-home create <name> --starter <imported-id>',
+    '  /agent-home create-learned <name>',
   ].join('\n');
 }
 
@@ -105,14 +94,14 @@ function renderGuide(homeDirectory: string): string {
     `  local starters ${localCount}`,
     '',
     '1. Pick a base starter:',
-    '   /agent-profile templates',
+    '   /agent-home starters',
     '2. Export a starter JSON file:',
-    '   /agent-profile template export research ./agent-starter.json',
+    '   /agent-home export-starter research ./agent-starter.json',
     '3. Edit id, name, description, persona, skills, routines, and optional vibe in that JSON file.',
     '4. Import it into this Agent home:',
-    '   /agent-profile template import ./agent-starter.json',
-    '5. Create an Agent profile from the imported starter:',
-    '   /agent-profile create <name> --template <imported-id>',
+    '   /agent-home import-starter ./agent-starter.json',
+    '5. Make an Agent home from the imported starter:',
+    '   /agent-home create <name> --starter <imported-id>',
     '',
     'This writes only Agent-local starter/profile state. It does not mutate connected GoodVibes host, default knowledge, or non-Agent knowledge segments.',
   ].join('\n');
@@ -131,255 +120,259 @@ function renderTemplatePreview(homeDirectory: string, templateId: string): strin
     file.template.vibe ? '  vibe included' : '',
     '',
     'Export/edit/import to customize this starter:',
-    `  /agent-profile template export ${file.template.id} ./agent-starter.json --include-vibe`,
+    `  /agent-home export-starter ${file.template.id} ./agent-starter.json --include-vibe`,
+  ].join('\n');
+}
+
+/** Run one step against the Agent's home; a failure that is not a refusal is reported as one. */
+function step<T>(work: () => T): T {
+  try {
+    return work();
+  } catch (error) {
+    if (readRefusal(error)) throw error;
+    throw commandRefusal(`Error: ${error instanceof Error ? error.message : String(error)}`, undefined, 'COMMAND_FAILED');
+  }
+}
+async function stepAsync<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (readRefusal(error)) throw error;
+    throw commandRefusal(`Error: ${error instanceof Error ? error.message : String(error)}`, undefined, 'COMMAND_FAILED');
+  }
+}
+const homeOf = (ctx: CommandContext): string => requireShellPaths(ctx).homeDirectory;
+const csv = (value: string | undefined): readonly string[] | undefined => value ? value.split(',').map((entry) => entry.trim()).filter(Boolean) : undefined;
+
+const HOMES = defineList<CommandContext>({
+  name: 'agent-home.homes',
+  async read(ctx) {
+    const selected = readAgentRuntimeProfileSelection(homeOf(ctx));
+    return listAgentRuntimeProfiles(homeOf(ctx)).map((profile): ListRow => ({ value: profile.id, label: profile.id, detail: profile.homeDirectory, ...(selected?.id === profile.id ? { state: 'starts next' } : {}) }));
+  },
+  operator: { terminalOnly: 'Agent homes are folders of this Agent on this machine.' },
+});
+const STARTERS = defineList<CommandContext>({
+  name: 'agent-home.starters',
+  async read(ctx) {
+    return listAgentRuntimeProfileTemplates(homeOf(ctx)).map((template): ListRow => ({ value: template.id, label: template.name, detail: template.description, state: template.source === 'local' ? 'yours' : 'built in' }));
+  },
+  operator: { terminalOnly: 'Starter templates are files of this Agent on this machine.' },
+});
+
+const HOME: InputDescription = listInput({ id: 'home', label: 'Home', help: 'Your Agent homes', list: HOMES });
+const NAME: InputDescription = textInput({ id: 'name', label: 'Name', help: 'A short name for the home', why: 'a name you choose', typed: { position: 1 } });
+const STARTER: InputDescription = listInput({ id: 'starter', label: 'Starter', help: 'Built-in and your own starter templates', list: STARTERS });
+const PATH: InputDescription = textInput({ id: 'path', label: 'File', help: 'A starter JSON file', why: 'a file on this machine', kind: 'path', typed: { position: 2 } });
+const REPLACE_STARTER: InputDescription = choiceInput({
+  id: 'replace', label: 'If a starter has that id', help: 'One of your starters may already use it',
+  choices: [{ value: 'no', label: 'Stop and say so' }, { value: 'yes', label: 'Replace it', help: 'What it holds now is lost.', risk: 'cannot-be-undone' }],
+  typed: { flag: '--replace', switchOn: 'yes' }, optional: { default: 'no', means: 'stop and say so' },
+});
+const VIBE: InputDescription = choiceInput({
+  id: 'vibe', label: 'VIBE.md', help: 'Whether the personality file goes in too',
+  choices: [{ value: 'no', label: 'Leave it out' }, { value: 'yes', label: 'Include it' }],
+  typed: { flag: '--include-vibe', switchOn: 'yes' }, optional: { default: 'no', means: 'leave it out' },
+});
+/** What a starter made from this Agent's learned behaviour takes, beyond its id. */
+const LEARNED: readonly InputDescription[] = [
+  textInput({ id: 'title', label: 'Display name', help: 'The name it shows', why: 'a name you choose', typed: { flag: '--name' }, optional: { default: '', means: 'its id' } }),
+  textInput({ id: 'description', label: 'Description', help: 'One line on what it is for', why: 'your own words', typed: { flag: '--description' }, optional: { default: '', means: 'a description made from what it holds' } }),
+  textInput({ id: 'persona', label: 'Persona', help: 'The persona it starts with', why: 'a persona name from /personas', typed: { flag: '--persona' }, optional: { default: '', means: 'the active persona' } }),
+  textInput({ id: 'skills', label: 'Skills', help: 'all, or skill names separated by commas', why: 'skill names', typed: { flag: '--skills' }, optional: { default: '', means: 'the enabled skills' } }),
+  textInput({ id: 'routines', label: 'Routines', help: 'all, or routine names separated by commas', why: 'routine names', typed: { flag: '--routines' }, optional: { default: '', means: 'the enabled routines' } }),
+  VIBE,
+  REPLACE_STARTER,
+];
+const LOCAL_ONLY = { terminalOnly: 'Agent homes are folders of this Agent on this machine.' } as const;
+
+type HomeAction = ActionDescription<CommandContext>;
+function change(fields: Pick<HomeAction, 'id' | 'label' | 'word' | 'inputs' | 'sentence' | 'example' | 'run'> & Partial<Pick<HomeAction, 'risk' | 'undoneBy' | 'lasts'>>): HomeAction {
+  return { done: '', touches: 'this-machine', lasts: 'kept', risk: 'none', operator: LOCAL_ONLY, ...fields };
+}
+
+function useHome(homeDirectory: string, name: string): string {
+  const previous = readAgentRuntimeProfileSelection(homeDirectory);
+  const selected = setAgentRuntimeProfileSelection(homeDirectory, name);
+  return [
+    `The Agent starts in home ${selected.id} from the next launch.`,
+    `  home ${selected.homeDirectory}`,
+    previous ? `  before: ${previous.id}` : '  before: the base Agent home',
+    '  one launch elsewhere: goodvibes-agent --agent-profile <name>',
   ].join('\n');
 }
 
 export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
-    name: 'agent-profile',
-    // Choosing the default, creating a profile and writing a new template file
-    // run at once. Deleting a profile, replacing an existing template (--replace)
-    // and exporting over an existing file cannot be undone: the registry asks once.
-    confirm(args, ctx) {
-      const sub = (args[0] ?? '').toLowerCase();
-      if (sub === 'delete') {
-        const name = args.slice(1).find((word) => !word.startsWith('--'));
-        if (!name) return undefined;
-        return { title: `Delete Agent profile ${name}?`, detail: `The profile ${name} and everything in its home (config, sessions, memory, notes, personas, skills, routines) are deleted and cannot be recovered.`, confirmLabel: 'Delete' };
-      }
-      const mode = (args[1] ?? '').toLowerCase();
-      if ((sub === 'template' || sub === 'starter') && mode === 'export' && args[2] && args[3]) {
-        const target = requireShellPaths(ctx).resolveWorkspacePath(args[3]);
-        if (!existsSync(target)) return undefined;
-        return { title: `Replace ${target}?`, detail: `${target} already exists; the exported starter template replaces it, and what it holds now cannot be recovered.`, confirmLabel: 'Replace' };
-      }
-      if (args.includes('--replace') && (sub === 'create-from-discovered' || sub === 'create-discovered'
-        || ((sub === 'template' || sub === 'starter') && ['import', 'from-discovered', 'import-discovered'].includes(mode)))) {
-        return { title: 'Replace the starter template if one has this id?', detail: 'With --replace, a local starter template of the same id is overwritten and its current contents cannot be recovered. Without --replace an existing template is never touched.', confirmLabel: 'Replace' };
-      }
-      return undefined;
-    },
-    effect: 'mixed',
-    aliases: ['runtime-profile', 'agent-profiles'],
-    description: 'Manage isolated Agent profiles and starter templates',
-    firstScreen: false,
-    usage: '[list|show|default|use|templates|guide|template show|template export|template import|template from-discovered|create|create-from-discovered|delete]',
-    async handler(args, ctx) {
-      const shellPaths = requireShellPaths(ctx);
-      const homeDirectory = shellPaths.homeDirectory;
-      const parsed = stripYesFlag(args);
-      const commandArgs = [...parsed.rest];
-      const sub = (commandArgs[0] ?? 'list').toLowerCase();
-
-      try {
-        if (sub === 'list' || sub === 'profiles') {
-          ctx.print(renderProfiles(homeDirectory));
-          return;
-        }
-
-        if (sub === 'templates' || sub === 'starters') {
-          ctx.print(renderTemplates(homeDirectory));
-          return;
-        }
-
-        if (sub === 'show' || sub === 'path' || sub === 'home') {
-          const name = commandArgs[1];
-          if (!name) {
-            throw commandRefusal('Usage: /agent-profile show <name>');
-          }
-          ctx.print(renderProfileDetail(homeDirectory, name));
-          return;
-        }
-
-        if (sub === 'default') {
-          const target = commandArgs[1];
-          if (target === 'clear' || target === 'none' || target === 'base') {
-            const previous = readAgentRuntimeProfileSelection(homeDirectory);
-            clearAgentRuntimeProfileSelection(homeDirectory);
-            ctx.print([
-              'Default Agent profile cleared. Next launch uses the base Agent home unless --agent-profile is provided.',
-              previous ? `  previous default ${previous.id} (put it back with /agent-profile default ${previous.id})` : '  there was no default before',
-            ].join('\n'));
-            return;
-          }
-          if (target) {
-            const previous = readAgentRuntimeProfileSelection(homeDirectory);
-            const selected = setAgentRuntimeProfileSelection(homeDirectory, target);
-            ctx.print([
-              `Default Agent profile selected: ${selected.id}`,
-              `  home ${selected.homeDirectory}`,
-              previous ? `  previous default ${previous.id}` : '  previous default none (the base Agent home)',
-              '  next launch: goodvibes-agent',
-              '  explicit override goodvibes-agent --agent-profile <name>',
-            ].join('\n'));
-            return;
-          }
-          const selected = readAgentRuntimeProfileSelection(homeDirectory);
-          ctx.print(selected
-            ? [
-              `Default Agent profile: ${selected.id}${selected.exists ? '' : ' (missing)'}`,
-              `  home ${selected.homeDirectory}`,
-              '  next launch: goodvibes-agent',
-            ].join('\n')
-            : 'No default Agent profile selected. Next launch uses the base Agent home.');
-          return;
-        }
-
-        if (sub === 'use' || sub === 'select' || sub === 'switch') {
-          const name = commandArgs[1];
-          if (!name) {
-            throw commandRefusal('Usage: /agent-profile use <name>');
-          }
-          const previous = readAgentRuntimeProfileSelection(homeDirectory);
-          const selected = setAgentRuntimeProfileSelection(homeDirectory, name);
-          ctx.print([
-            `Default Agent profile selected: ${selected.id}`,
-            `  home ${selected.homeDirectory}`,
-            previous ? `  previous default ${previous.id}` : '  previous default none (the base Agent home)',
-            '  next launch: goodvibes-agent',
-            '  explicit override goodvibes-agent --agent-profile <name>',
-          ].join('\n'));
-          return;
-        }
-
-        if (sub === 'guide' || sub === 'author') {
-          ctx.print(renderGuide(homeDirectory));
-          return;
-        }
-
-        if (sub === 'template' || sub === 'starter') {
-          const mode = (commandArgs[1] ?? 'show').toLowerCase();
-          if (mode === 'show' || mode === 'preview') {
-            const templateId = commandArgs[2];
-            if (!templateId) {
-              throw commandRefusal('Usage: /agent-profile template show <id>');
-            }
-            ctx.print(renderTemplatePreview(homeDirectory, templateId));
-            return;
-          }
-          if (mode === 'export') {
-            const templateId = commandArgs[2];
-            const pathArg = commandArgs[3];
-            if (!templateId || !pathArg) {
-              throw commandRefusal('Usage: /agent-profile template export <id> <path> [--include-vibe]');
-            }
-            const targetPath = shellPaths.resolveWorkspacePath(pathArg);
-            mkdirSync(dirname(targetPath), { recursive: true });
-            const template = exportAgentRuntimeProfileTemplate(homeDirectory, templateId, targetPath, {
-              includeVibe: commandArgs.includes('--include-vibe'),
-              shellPaths,
-            });
-            ctx.print([
-              `Agent starter template exported: ${template.id}`,
-              `  path ${template.path ?? targetPath}`,
-              template.vibeIncluded ? '  vibe included' : '',
-              '  edit it, then import it with /agent-profile template import <path> [--replace]',
-            ].filter(Boolean).join('\n'));
-            return;
-          }
-          if (mode === 'import') {
-            const pathArg = commandArgs[2];
-            if (!pathArg) {
-              throw commandRefusal('Usage: /agent-profile template import <path> [--replace]');
-            }
-            const sourcePath = shellPaths.resolveWorkspacePath(pathArg);
-            const template = importAgentRuntimeProfileTemplate(homeDirectory, sourcePath, { replace: commandArgs.includes('--replace') });
-            ctx.print(`Agent starter template imported: ${template.id}\n  origin ${formatAgentRecordSource(template.source).toLowerCase()}\n  use /agent-profile create <name> --template ${template.id}`);
-            return;
-          }
-          if (mode === 'from-discovered' || mode === 'import-discovered') {
-            const templateId = commandArgs[2];
-            if (!templateId) {
-              throw commandRefusal('Usage: /agent-profile template from-discovered <id> [--name <name>] [--description <summary>] [--persona <name>] [--skills all|name,name] [--routines all|name,name] [--include-vibe] [--replace]');
-            }
-            const template = await createAgentRuntimeProfileTemplateFromDiscovered(shellPaths, {
-              id: templateId,
-              name: parseFlag(commandArgs, '--name'),
-              description: parseFlag(commandArgs, '--description'),
-              persona: parseFlag(commandArgs, '--persona'),
-              skills: parseCsvFlag(commandArgs, '--skills'),
-              routines: parseCsvFlag(commandArgs, '--routines'),
-              includeVibe: commandArgs.includes('--include-vibe'),
-              replace: commandArgs.includes('--replace'),
-            });
-            ctx.print([
-              `Agent starter template created from discovered behavior: ${template.id}`,
-              `  persona ${template.personaName}`,
-              `  skills ${template.skillNames.join(', ')}`,
-              `  routines ${template.routineNames.join(', ')}`,
-              template.vibeIncluded ? '  vibe included' : '',
-              `  use /agent-profile create <name> --template ${template.id}`,
-            ].filter(Boolean).join('\n'));
-            return;
-          }
-          throw commandRefusal('Usage: /agent-profile template [show <id>|export <id> <path> [--include-vibe]|import <path>|from-discovered <id>]');
-        }
-
-        if (sub === 'create') {
-          const name = commandArgs[1];
-          const templateId = parseFlag(commandArgs, '--template') ?? parseFlag(commandArgs, '--starter');
-          if (!name) {
-            throw commandRefusal('Usage: /agent-profile create <name> [--template <id>]');
-          }
-          const profile = createAgentRuntimeProfile(homeDirectory, name, { templateId });
-          ctx.print([
-            `Agent profile created: ${profile.id}`,
-            `  home ${profile.homeDirectory}`,
-            profile.starterTemplateId ? `  starter: ${profile.starterTemplateId}` : '',
-            profile.starterTemplateApplication?.vibePath ? `  vibe ${profile.starterTemplateApplication.vibePath}` : '',
-            ...(profile.starterTemplateApplication?.reviewCommands.length
-              ? ['  review before they apply:', ...profile.starterTemplateApplication.reviewCommands.map((command) => `    ${command}`)]
-              : []),
-            `  launch goodvibes-agent --agent-profile ${profile.id}`,
-          ].filter(Boolean).join('\n'));
-          return;
-        }
-
-        if (sub === 'create-from-discovered' || sub === 'create-discovered') {
-          const profileName = commandArgs[1];
-          if (!profileName) {
-            throw commandRefusal('Usage: /agent-profile create-from-discovered <name> [--template-id <id>] [--profile-name <display>] [--description <summary>] [--persona <name>] [--skills all|name,name] [--routines all|name,name] [--include-vibe] [--replace]');
-          }
-          const created = await createAgentRuntimeProfileFromDiscovered(shellPaths, {
-            profileName,
-            templateId: parseFlag(commandArgs, '--template-id') ?? parseFlag(commandArgs, '--starter-id'),
-            name: parseFlag(commandArgs, '--profile-name') ?? parseFlag(commandArgs, '--name'),
-            description: parseFlag(commandArgs, '--description'),
-            persona: parseFlag(commandArgs, '--persona'),
-            skills: parseCsvFlag(commandArgs, '--skills'),
-            routines: parseCsvFlag(commandArgs, '--routines'),
-            includeVibe: commandArgs.includes('--include-vibe'),
-            replace: commandArgs.includes('--replace'),
+  registry.register(defineCommand<CommandContext>({
+    name: 'agent-home',
+    title: 'Agent homes',
+    summary: 'Separate Agent homes, each with its own settings, memory and sessions, and the starters they are made from',
+    group: 'Agent',
+    report: 'list',
+    firstScreenRows: [
+      'list', 'create', 'use', 'use-base',
+      { label: 'See or delete a home…', actions: ['show', 'next', 'delete', 'create-learned'] },
+      { label: 'Starter templates…', actions: ['starters', 'starter', 'guide', 'export-starter', 'import-starter', 'starter-learned'] },
+    ],
+    actions: [
+      readAction<CommandContext>({
+        id: 'list', label: 'See your Agent homes', word: 'list',
+        sentence: 'Lists your Agent homes, their folders, and which one the Agent starts in next.',
+        operator: LOCAL_ONLY,
+        async rowValue(ctx) {
+          const count = listAgentRuntimeProfiles(homeOf(ctx)).length;
+          return count === 0 ? 'only the base home' : `${count} home${count === 1 ? '' : 's'}`;
+        },
+        async run(_values, ctx) { return step(() => renderProfiles(homeOf(ctx))); },
+      }),
+      readAction<CommandContext>({
+        id: 'show', label: 'See one Agent home', word: 'show', inputs: [HOME],
+        sentence: 'Shows home {home}: its folder, the starter it was made from, and how to launch it.', example: { home: 'research' }, operator: LOCAL_ONLY,
+        async run(values, ctx) { return step(() => renderProfileDetail(homeOf(ctx), values.home!)); },
+      }),
+      readAction<CommandContext>({
+        id: 'next', label: 'See which home starts next', word: 'next',
+        sentence: 'Says which Agent home the next launch starts in.', operator: LOCAL_ONLY,
+        async run(_values, ctx) {
+          const selected = readAgentRuntimeProfileSelection(homeOf(ctx));
+          return selected
+            ? `The next launch starts in home ${selected.id}${selected.exists ? '' : ' (its folder is missing)'}.\n  home ${selected.homeDirectory}`
+            : 'The next launch starts in the base Agent home.';
+        },
+      }),
+      change({
+        id: 'use', label: 'Start in a home from now on', word: 'use', inputs: [HOME],
+        sentence: 'Every launch of the Agent starts in home {home}, until you change it.', example: { home: 'research' }, undoneBy: 'use-base',
+        async run(values, ctx) { return step(() => useHome(homeOf(ctx), values.home!)); },
+      }),
+      change({
+        id: 'use-base', label: 'Start in the base home from now on', word: 'use-base', inputs: [],
+        sentence: 'Every launch of the Agent starts in the base home, until you change it.', example: {}, undoneBy: 'use',
+        async run(_values, ctx) {
+          return step(() => {
+            const home = homeOf(ctx);
+            const previous = readAgentRuntimeProfileSelection(home);
+            clearAgentRuntimeProfileSelection(home);
+            return `The Agent starts in the base home from the next launch.${previous ? `\n  before: ${previous.id} (put it back: /agent-home use ${previous.id})` : ''}`;
           });
-          ctx.print([
-            `Agent profile created from discovered behavior: ${created.profile.id}`,
+        },
+      }),
+      change({
+        id: 'create', label: 'Make an Agent home', word: 'create',
+        inputs: [NAME, { ...STARTER, required: { default: '', defaultMeans: 'an empty home' }, typed: { flag: '--starter' } }],
+        sentence: 'A new Agent home {name} is made, from the starter given, until you change it.', example: { name: 'research', starter: 'research' }, undoneBy: 'delete',
+        async run(values, ctx) {
+          return step(() => {
+            const profile = createAgentRuntimeProfile(homeOf(ctx), values.name!, { templateId: values.starter || undefined });
+            return [
+              `Made Agent home ${profile.id}`,
+              `  home ${profile.homeDirectory}`,
+              profile.starterTemplateId ? `  starter: ${profile.starterTemplateId}` : '',
+              profile.starterTemplateApplication?.vibePath ? `  vibe ${profile.starterTemplateApplication.vibePath}` : '',
+              ...(profile.starterTemplateApplication?.reviewCommands.length
+                ? ['  review before they apply:', ...profile.starterTemplateApplication.reviewCommands.map((command) => `    ${command}`)]
+                : []),
+              `  launch it: goodvibes-agent --agent-profile ${profile.id}, or /agent-home use ${profile.id}`,
+            ].filter(Boolean).join('\n');
+          });
+        },
+      }),
+      change({
+        id: 'create-learned', label: 'Make a home from what this Agent has learned', word: 'create-learned',
+        inputs: [NAME, textInput({ id: 'starter', label: 'Starter id', help: 'The id of the starter made for it', why: 'an id you choose', typed: { flag: '--starter-id' }, optional: { default: '', means: 'the home\'s name' } }), ...LEARNED],
+        sentence: 'A starter is made from this Agent\'s persona, skills, routines and (if chosen) VIBE.md, and a new home {name} is made from it, until you change it.', example: { name: 'research', skills: 'all' }, undoneBy: 'delete',
+        async run(values, ctx) {
+          const created = await stepAsync(() => createAgentRuntimeProfileFromDiscovered(requireShellPaths(ctx), {
+            profileName: values.name!, templateId: values.starter || undefined, name: values.title || undefined, description: values.description || undefined,
+            persona: values.persona || undefined, skills: csv(values.skills), routines: csv(values.routines), includeVibe: values.vibe === 'yes', replace: values.replace === 'yes',
+          }));
+          return [
+            `Made Agent home ${created.profile.id} from what this Agent has learned`,
             `  home ${created.profile.homeDirectory}`,
             `  starter: ${created.template.id}`,
             `  persona ${created.template.personaName}`,
             `  skills ${created.template.skillNames.join(', ')}`,
             `  routines ${created.template.routineNames.join(', ')}`,
             created.template.vibeIncluded ? '  vibe included' : '',
-            `  launch goodvibes-agent --agent-profile ${created.profile.id}`,
-          ].filter(Boolean).join('\n'));
-          return;
-        }
-
-        if (sub === 'delete') {
-          const name = commandArgs[1];
-          if (!name) {
-            throw commandRefusal('Usage: /agent-profile delete <name>');
-          }
-          if (!deleteAgentRuntimeProfile(homeDirectory, name)) throw commandRefusal(`Agent profile not found ${name}`, 'Use /agent-profile list to see saved profiles.');
-          ctx.print(`Agent profile deleted: ${name}`);
-          return;
-        }
-
-        throw commandRefusal('Usage: /agent-profile [list|show <name>|default [<name>|clear]|use <name>|templates|guide|template show <id>|template export <id> <path> [--include-vibe]|template import <path> [--replace]|create <name> [--template <id>]|create-from-discovered <name> [--include-vibe]|delete <name>]');
-      } catch (error) {
-        if (readRefusal(error)) throw error;
-        throw commandRefusal(`Error: ${error instanceof Error ? error.message : String(error)}`, undefined, 'COMMAND_FAILED');
-      }
-    },
-  });
+            `  launch it: goodvibes-agent --agent-profile ${created.profile.id}`,
+          ].filter(Boolean).join('\n');
+        },
+      }),
+      change({
+        id: 'delete', label: 'Delete an Agent home', word: 'delete', inputs: [HOME],
+        sentence: 'Home {home} and everything in it (settings, sessions, memory, notes, personas, skills, routines) are deleted.', example: { home: 'research' }, risk: 'cannot-be-undone',
+        async run(values, ctx) {
+          return step(() => {
+            if (!deleteAgentRuntimeProfile(homeOf(ctx), values.home!)) throw commandRefusal(`No Agent home ${values.home}.`, '/agent-home list shows them.');
+            return `Deleted Agent home ${values.home}.`;
+          });
+        },
+      }),
+      readAction<CommandContext>({
+        id: 'starters', label: 'See starter templates', word: 'starters',
+        sentence: 'Lists the built-in and your own starter templates, with the persona, skills and routines each brings.', operator: LOCAL_ONLY,
+        async run(_values, ctx) { return step(() => renderTemplates(homeOf(ctx))); },
+      }),
+      readAction<CommandContext>({
+        id: 'starter', label: 'See one starter template', word: 'starter', inputs: [STARTER],
+        sentence: 'Shows starter {starter}: its persona, skills, routines and whether it brings VIBE.md.', example: { starter: 'research' }, operator: LOCAL_ONLY,
+        async run(values, ctx) { return step(() => renderTemplatePreview(homeOf(ctx), values.starter!)); },
+      }),
+      readAction<CommandContext>({
+        id: 'guide', label: 'Read how to write a starter', word: 'guide',
+        sentence: 'Shows the steps to save a starter to a file, change it, add it back and make a home from it.', operator: LOCAL_ONLY,
+        async run(_values, ctx) { return step(() => renderGuide(homeOf(ctx))); },
+      }),
+      change({
+        id: 'export-starter', label: 'Save a starter to a file', word: 'export-starter',
+        inputs: [STARTER, PATH, VIBE, choiceInput({
+          id: 'overwrite', label: 'If the file exists', help: 'Keep it, or write over it',
+          choices: [{ value: 'no', label: 'Keep it and stop' }, { value: 'yes', label: 'Write over it', risk: 'cannot-be-undone' }],
+          typed: { flag: '--overwrite', switchOn: 'yes' }, optional: { default: 'no', means: 'keep it and stop' },
+        })],
+        sentence: 'Starter {starter} is written to {path} to change and add back, until you change it.', example: { starter: 'research', path: 'agent-starter.json' },
+        async run(values, ctx) {
+          const shellPaths = requireShellPaths(ctx);
+          const target = shellPaths.resolveWorkspacePath(values.path!);
+          if (existsSync(target) && values.overwrite !== 'yes') throw commandRefusal(`${target} already exists; nothing was written.`, `Write over it: /agent-home export-starter ${values.starter} ${values.path} --overwrite`);
+          return step(() => {
+            mkdirSync(dirname(target), { recursive: true });
+            const template = exportAgentRuntimeProfileTemplate(shellPaths.homeDirectory, values.starter!, target, { includeVibe: values.vibe === 'yes', shellPaths });
+            return [`Saved starter ${template.id} to ${template.path ?? target}`, template.vibeIncluded ? '  vibe included' : '', `  change it, then add it back: /agent-home import-starter ${values.path}`].filter(Boolean).join('\n');
+          });
+        },
+      }),
+      change({
+        id: 'import-starter', label: 'Add a starter from a file', word: 'import-starter',
+        inputs: [{ ...PATH, typed: { position: 1 } }, REPLACE_STARTER],
+        sentence: 'The starter in {path} is added to your starters, until you change it.', example: { path: 'agent-starter.json' },
+        async run(values, ctx) {
+          const shellPaths = requireShellPaths(ctx);
+          return step(() => {
+            const template = importAgentRuntimeProfileTemplate(shellPaths.homeDirectory, shellPaths.resolveWorkspacePath(values.path!), { replace: values.replace === 'yes' });
+            return `Added starter ${template.id} (${formatAgentRecordSource(template.source).toLowerCase()}).\n  make a home from it: /agent-home create <name> --starter ${template.id}`;
+          });
+        },
+      }),
+      change({
+        id: 'starter-learned', label: 'Make a starter from what this Agent has learned', word: 'starter-learned',
+        inputs: [textInput({ id: 'starter', label: 'Starter id', help: 'The id of the new starter', why: 'an id you choose', typed: { position: 1 } }), ...LEARNED],
+        sentence: 'Starter {starter} is made from this Agent\'s persona, skills, routines and (if chosen) VIBE.md, until you change it.', example: { starter: 'my-research', skills: 'all' },
+        async run(values, ctx) {
+          const template = await stepAsync(() => createAgentRuntimeProfileTemplateFromDiscovered(requireShellPaths(ctx), {
+            id: values.starter!, name: values.title || undefined, description: values.description || undefined, persona: values.persona || undefined,
+            skills: csv(values.skills), routines: csv(values.routines), includeVibe: values.vibe === 'yes', replace: values.replace === 'yes',
+          }));
+          return [
+            `Made starter ${template.id} from what this Agent has learned`,
+            `  persona ${template.personaName}`,
+            `  skills ${template.skillNames.join(', ')}`,
+            `  routines ${template.routineNames.join(', ')}`,
+            template.vibeIncluded ? '  vibe included' : '',
+            `  make a home from it: /agent-home create <name> --starter ${template.id}`,
+          ].filter(Boolean).join('\n');
+        },
+      }),
+    ],
+  }));
 }

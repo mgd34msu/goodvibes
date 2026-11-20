@@ -1,7 +1,5 @@
 /** Trust evidence construction is shared; product command authority remains in its registrar. */
-import { existsSync, readFileSync } from 'node:fs';
-import type { CommandConfirmation } from './command-confirmation.js';
-import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
+import { readFileSync } from 'node:fs';
 export interface TrustReviewBundle {
   readonly version: 1;
   readonly capturedAt: number;
@@ -117,62 +115,4 @@ export function createTrustReviewTools<Context>(sources: TrustReviewSources<Cont
     ].join('\n');
   }
   return { buildTrustReviewBundle, formatTrustReview, inspectTrustBundle };
-}
-
-/**
- * `/trust bundle export <path>` over an existing file replaces it, which cannot
- * be undone: both apps' `/trust` declare this as their registry confirmation,
- * so it asks once; a new file is written at once.
- */
-export function trustBundleExportConfirmation(args: readonly string[], resolvePath: (path: string) => string): CommandConfirmation | undefined {
-  const words = args.filter((word) => word !== '--yes');
-  if (words[0] !== 'bundle' || words[1] !== 'export' || !words[2]) return undefined;
-  const target = resolvePath(words[2]);
-  if (!existsSync(target)) return undefined;
-  return { title: `Replace ${target}?`, detail: `${target} already exists; the trust bundle replaces it, and what it holds now cannot be recovered.`, confirmLabel: 'Replace' };
-}
-
-/** Shared trust review/export/inspect flow; inspection errors are product-owned policy. */
-export function createTrustCommandFlow<Context extends { print(text: string): void }, Bundle>(tools: {
-  readonly buildTrustReviewBundle: (context: Context) => Promise<Bundle>;
-  readonly formatTrustReview: (bundle: Bundle) => string;
-  readonly inspectTrustBundle: (path: string) => string;
-}) {
-  return async (
-    context: Context,
-    args: readonly string[],
-    ports: {
-      readonly resolvePath: (path: string) => string;
-      readonly inspectError?: ((error: unknown) => void) | undefined;
-    },
-  ): Promise<boolean> => {
-    const sub = args[0] ?? 'review';
-    if (sub === 'review') {
-      context.print(tools.formatTrustReview(await tools.buildTrustReviewBundle(context)));
-      return true;
-    }
-    if (sub !== 'bundle') return false;
-    const mode = args[1];
-    if (mode !== 'export' && mode !== 'inspect') return false;
-    const path = args[2];
-    if (!path) {
-      context.print(`Usage: /trust bundle ${mode} <path>`);
-      return true;
-    }
-    if (mode === 'export') {
-      const bundle = await tools.buildTrustReviewBundle(context);
-      const target = ports.resolvePath(path);
-      // Owner-only (0600): the bundle lists secret key names and service names.
-      atomicWriteFileSync(target, JSON.stringify(bundle, null, 2) + '\n', { mkdirp: true });
-      context.print(`Trust bundle exported to ${target}`);
-      return true;
-    }
-    try {
-      context.print(tools.inspectTrustBundle(ports.resolvePath(path)));
-    } catch (error) {
-      if (ports.inspectError) ports.inspectError(error);
-      else throw error;
-    }
-    return true;
-  };
 }

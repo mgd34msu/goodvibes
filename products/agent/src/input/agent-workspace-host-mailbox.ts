@@ -1,12 +1,12 @@
 /**
  * The connected host's inbox state for the workspace.
  *
- * The mailbox keys (`surfaces.email.*`) are daemon-owned: `/email set` and the
- * connect form write them to the connected host only, and `/email status` reads
+ * The mailbox keys (`surfaces.email.*`) are daemon-owned: `/mail set` and the
+ * connect form write them to the connected host only, and `/mail status` reads
  * them from there. The workspace snapshot is built synchronously, so it cannot
  * ask the host itself; the workspace takes one reading when it opens (and after
  * the connect form saves) and the snapshot shows that reading, the same fact
- * `/email status` reports. Until the first reading lands the snapshot says it
+ * `/mail status` reports. Until the first reading lands the snapshot says it
  * is reading from the host instead of reporting this process's local copy.
  *
  * Cost: one effective-config read from the host per workspace open, and one

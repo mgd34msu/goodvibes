@@ -1,6 +1,5 @@
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import type { SearchManager, SearchConversation, SearchHistory as InfiniteBuffer } from './transcript-search.js';
-import type { OverlayFilter, OverlayFilters } from './overlay-filter.js';
 import { isTextBackspace } from './delete-key-policy.js';
 import type { HistorySearch } from './input-history.js';
 type SearchRouteState = {
@@ -91,49 +90,6 @@ export function handleSearchModeToken(state: SearchRouteState, token: InputToken
     }
     state.requestRender();
     return true;
-}
-type OverlayRouteState = {
-    shortcutsOverlayActive: boolean;
-    shortcutsScrollOffset: number;
-    /** The overlays' always-live search rows (absent in minimal test states). */
-    overlayFilters?: OverlayFilters | undefined;
-    requestRender: () => void;
-    handleEscape: () => void;
-};
-function routeFilteredOverlayKey(token: InputToken, offset: number, filter: OverlayFilter | undefined): number {
-    const max = filter ? filter.maxScroll : 100;
-    if (token.type === 'key') {
-        if (token.logicalName === 'up')
-            return Math.max(0, Math.min(offset, max) - 1);
-        if (token.logicalName === 'down')
-            return Math.min(offset + 1, max);
-        if (token.logicalName === 'pageup')
-            return Math.max(0, Math.min(offset, max) - 10);
-        if (token.logicalName === 'pagedown')
-            return Math.min(offset + 10, max);
-        if (filter && isTextBackspace(token.logicalName ?? '') && filter.query.length > 0) {
-            filter.query = filter.query.slice(0, -1);
-            return 0;
-        }
-        return offset;
-    }
-    if (token.type === 'text' && filter) {
-        filter.query += token.value;
-        return 0;
-    }
-    return offset;
-}
-export function handleOverlayToken(state: OverlayRouteState, token: InputToken): boolean {
-    if (state.shortcutsOverlayActive) {
-        if (token.type === 'key' && token.logicalName === 'escape') {
-            state.handleEscape();
-            return true;
-        }
-        state.shortcutsScrollOffset = routeFilteredOverlayKey(token, state.shortcutsScrollOffset, state.overlayFilters?.shortcuts);
-        state.requestRender();
-        return true;
-    }
-    return false;
 }
 type HistorySearchRouteState = {
     historySearch: HistorySearch;

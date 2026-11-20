@@ -154,7 +154,7 @@ class ServicesModalSurface implements ConfigModalSurface {
         label: 'Services',
         header,
         rows,
-        emptyText: this.loading ? 'Loading configured services…' : 'No services configured. Try /services auth-review.',
+        emptyText: this.loading ? 'Loading configured services…' : 'No services configured. Try /services check.',
       }],
     };
   }

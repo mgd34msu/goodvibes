@@ -3,7 +3,7 @@
  * `surfaces.email.*`, the same ones the daemon reads, so a mailbox configured
  * here is the mailbox the daemon answers with.
  *
- * `/email set`, the workspace connect form and the status readers all go
+ * `/mail set`, the workspace connect form and the status readers all go
  * through this file: one field table, one validation, one persistence path.
  */
 import {
@@ -19,7 +19,7 @@ import type { Secret } from '@goodvibes-jev/engine/platform/platform/security';
 import type { ConfigKey } from '../../config/index.ts';
 import { persistSecretBackedConfigValue } from '../../config/secret-config.ts';
 
-/** Every field the owner can set, by the name `/email set` takes, and the setting it writes. */
+/** Every field the owner can set, by the name `/mail set` takes, and the setting it writes. */
 export const MAILBOX_FIELDS = {
   host: 'surfaces.email.host',
   'imap.host': 'surfaces.email.imap.host',
@@ -182,6 +182,6 @@ export function readMailboxStatus(getConfig: (key: string) => unknown): MailboxS
     .filter((problem) => !problem.startsWith('the mailbox password'));
   const passwordStored = configString(getConfig, MAILBOX_FIELDS.password).length > 0
     || configString(getConfig, 'surfaces.email.imap.password').length > 0;
-  if (!passwordStored) problems.push('the mailbox password is not stored: /email set password --yes');
+  if (!passwordStored) problems.push('the mailbox password is not stored: /mail set password --yes');
   return { settings, passwordStored, problems, ready: problems.length === 0 };
 }

@@ -158,8 +158,8 @@ function grantOf(subscription: ProviderSubscription | SubscriptionGrant): Subscr
 }
 
 /**
- * A sign-in in the at-rest form an export file holds, for `/subscription
- * bundle export`: the owner asked for a file that carries the tokens to another
+ * A sign-in in the at-rest form an export file holds, for `/provider
+ * export`: the owner asked for a file that carries the tokens to another
  * machine, which is a store of his choosing, so the tokens are taken out for a
  * store write. The one place a handed-out record becomes text again.
  */
@@ -235,7 +235,7 @@ function storedForm(subscription: SubscriptionGrant, revision: number): StoredSu
 export class SubscriptionSessionEndedError extends Error {
   readonly code = 'SUBSCRIPTION_SESSION_ENDED';
   constructor(readonly provider: string, options?: { readonly cause?: unknown }) {
-    super(`The ${provider} sign-in has ended: the provider refused to renew it. Sign in again with /subscription login ${provider} start.`, options);
+    super(`The ${provider} sign-in has ended: the provider refused to renew it. Sign in again with /provider sign-in ${provider}.`, options);
     this.name = 'SubscriptionSessionEndedError';
   }
 }
@@ -646,7 +646,7 @@ export class SubscriptionManager {
         // The records are gone from use; the tokens are in the secret store, except in a file written before it held them.
         recovery:
           'Every provider subscription sign-in record was kept in this file, so each provider shows as signed out until you sign in again '
-          + '(/subscription login <provider> start). Their tokens are kept in the secret store (GOODVIBES_SUBSCRIPTION_TOKENS_<PROVIDER>), not here; '
+          + '(/provider sign-in <provider>). Their tokens are kept in the secret store (GOODVIBES_SUBSCRIPTION_TOKENS_<PROVIDER>), not here; '
           + 'a file written before that may still hold them, so delete the moved-aside copy once you no longer need it.',
         validate: (parsed) => {
           if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -779,7 +779,7 @@ export class SubscriptionManager {
     const started = this.read();
     const pending = livePending(started, provider);
     if (!pending) {
-      throw new Error(`No pending OAuth login for ${provider}${started.pending[provider] ? ' (the started login expired)' : ''}. Start with /subscription login ${provider} start.`);
+      throw new Error(`No pending OAuth login for ${provider}${started.pending[provider] ? ' (the started login expired)' : ''}. Start with /provider sign-in ${provider}.`);
     }
 
     const tokenResponse = await exchangeOAuthAuthorizationCode(config, {
@@ -831,7 +831,7 @@ export class SubscriptionManager {
     if (now?.state === state) return;
     throw new Error(now
       ? `This ${provider} sign-in was replaced by a newer one started at ${new Date(now.createdAt).toISOString()} (state ${now.state.slice(0, 8)}...); nothing was saved. Finish the newer sign-in instead.`
-      : `This ${provider} sign-in was ended while it completed (signed out, or finished elsewhere); nothing was saved. Start with /subscription login ${provider} start to sign in again.`);
+      : `This ${provider} sign-in was ended while it completed (signed out, or finished elsewhere); nothing was saved. Start with /provider sign-in ${provider} to sign in again.`);
   }
 
   /**

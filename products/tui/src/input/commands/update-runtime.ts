@@ -15,7 +15,7 @@ import { recordSwapFailure, type UpdateSwapProgress } from '@goodvibes-jev/engin
  * path. Apply/rollback preserve earlier programs and check saved-data readers
  * before changing live files. Running programs use the replacement on restart.
  * `/update review` prints this install's update state (installed and latest
- * version, install kind, rollback copy) and `bundle export` saves it to a file.
+ * version, install kind, rollback copy) and `/update save-review` saves it to a file.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -32,7 +32,8 @@ import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform
 import { resolveArtifactNames } from '../../runtime/release-artifacts.ts';
 import { detectInstallKind, fallbackUpdateCommand, type InstallKind, type UpdateFetchLike } from '../../runtime/update-check.ts';
 import { resolveCliServiceName, type CliServiceNameSource } from '../../cli/service-posture.ts';
-import { requireShellPaths, requireSubscriptionManager } from './runtime-services.ts';
+import { requireProfileManager, requireSecretsManager, requireShellPaths, requireSubscriptionManager } from './runtime-services.ts';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import { createDaemonVerbCaller } from '../../runtime/client/operator-endpoint.ts';
 
 const REPO_RELEASES_LATEST_URL = DAEMON_REPO_RELEASES_LATEST_URL;
@@ -216,7 +217,7 @@ export function rollbackUpdate(options: RollbackUpdateOptions): void {
   options.print(formatSuiteUpdateReport(result, 'restored', result.programs.includes('goodvibes-daemon') && service.managed ? [`Daemon restart: ${service.restartCommand}`] : []));
 }
 
-/** What `/update review` prints and `/update bundle export` saves, built once for both. */
+/** What `/update review` prints and `/update save-review` saves, built once for both. */
 interface UpdateReview {
   readonly version: 2;
   readonly exportedAt: number;
@@ -269,7 +270,7 @@ function formatUpdateReview(review: UpdateReview, title: string): string {
     `  latest release: ${latest}`,
     `  channel: ${review.channel}`,
     `  install kind: ${review.installKind}`,
-    `  rollback copy: ${review.rollbackRetained ? 'kept beside this program; /update rollback restores it' : 'none kept (an /update apply keeps one)'}`,
+    `  rollback copy: ${review.rollbackRetained ? 'kept beside this program; /update rollback restores it' : 'none kept (/update apply keeps one)'}`,
     `  subscription providers: ${review.subscriptionProviders.length}${review.subscriptionProviders.length > 0 ? ` (${review.subscriptionProviders.join(', ')})` : ''}; sign-ins survive an update`,
     `  sandbox profile: ${review.sandboxProfile}`,
   ].join('\n');
@@ -291,43 +292,9 @@ function parseUpdateReview(text: string): UpdateReview {
     || !Array.isArray(record.subscriptionProviders)
     || !latest || (typeof latest.tag !== 'string' && typeof latest.unknown !== 'string')
   ) {
-    throw new Error('the file is not an update review saved by /update bundle export');
+    throw new Error('the file is not an update state saved by /update save-review');
   }
   return record as unknown as UpdateReview;
-}
-
-/** `/update bundle export|inspect <path>`: save this install's update review to a file, or read one back. */
-export async function handleUpdateBundleSubcommand(args: readonly string[], ctx: CommandContext): Promise<true> {
-  const shellPaths = requireShellPaths(ctx);
-  const mode = args[1];
-  const pathArg = args.slice(2).find((arg) => arg !== '--yes');
-  if (mode !== 'export' && mode !== 'inspect') {
-    ctx.print('Usage: /update bundle export <path> [--yes] | /update bundle inspect <path>');
-    return true;
-  }
-  if (!pathArg) {
-    ctx.print(`Usage: /update bundle ${mode} <path>${mode === 'export' ? ' [--yes]' : ''}`);
-    return true;
-  }
-  const targetPath = shellPaths.resolveWorkspacePath(pathArg);
-  if (mode === 'export') {
-    // The review holds no secret; --yes guards only against replacing a file that is already there.
-    if (existsSync(targetPath) && !args.includes('--yes')) {
-      ctx.print(`Not saved: ${targetPath} already exists. Nothing was changed; run /update bundle export ${pathArg} --yes to replace it.`);
-      return true;
-    }
-    const review = buildUpdateReview(ctx, await readLatestRelease());
-    mkdirSync(dirname(targetPath), { recursive: true });
-    writeFileSync(targetPath, JSON.stringify(review, null, 2) + '\n', 'utf-8');
-    ctx.print(`Update review saved to ${targetPath}. It records this install's update state for support or before an upgrade; it is not an update and nothing applies it.`);
-    return true;
-  }
-  try {
-    ctx.print(formatUpdateReview(parseUpdateReview(readFileSync(targetPath, 'utf-8')), `Update Review (saved ${targetPath})`));
-  } catch (error) {
-    ctx.print(`Cannot inspect ${targetPath}: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  return true;
 }
 
 export function registerUpdateCommand(registry: CommandRegistry): void {
@@ -335,10 +302,6 @@ export function registerUpdateCommand(registry: CommandRegistry): void {
 }
 
 const selfUpdateCommand = createSelfUpdateCommand<CommandContext>({
-  description:
-    'Check for a newer GoodVibes release and, for binary installs, download/verify/apply it or roll back to the kept previous version',
-  usage: '[check|apply|rollback|review|daemon [check]|bundle export <path> [--yes]|bundle inspect <path>]',
-  help: 'Usage: /update [check|apply|rollback|review|daemon [check]|bundle export <path> [--yes]|bundle inspect <path>]',
   version: VERSION,
   workspaceDistribution: IS_WORKSPACE_DISTRIBUTION,
   workspaceGuidance: WORKSPACE_UPDATE_GUIDANCE,
@@ -349,16 +312,33 @@ const selfUpdateCommand = createSelfUpdateCommand<CommandContext>({
   apply: async (options, ctx) => { await applyUpdate({ ...options, configManager: ctx.platform.configManager }); },
   rollback: (options, ctx) => rollbackUpdate({ ...options, configManager: ctx.platform.configManager }),
   daemon: (ctx) => createDaemonVerbCaller({ configManager: ctx.platform.configManager, homeDirectory: () => requireShellPaths(ctx).homeDirectory }),
-  extra: async (args, ctx) => {
-    const sub = args[0] ?? 'check';
-    if (sub === 'review') {
-      ctx.print([
-        formatUpdateReview(buildUpdateReview(ctx, await readLatestRelease()), 'Update Review'),
-        '  use /update check to look for a newer release, /update apply to install it, /update rollback to return to the kept previous version',
-      ].join('\n'));
-      return true;
-    }
-    if (sub === 'bundle') return handleUpdateBundleSubcommand(args, ctx);
-    return false;
+  install: {
+    async review(ctx) {
+      // What /install showed (saved profiles, stored secret names) sits with the update state.
+      const profiles = requireProfileManager(ctx).list().length;
+      const secretKeys = (await requireSecretsManager(ctx).list()).length;
+      return [
+        formatUpdateReview(buildUpdateReview(ctx, await readLatestRelease()), 'This install'),
+        `  saved settings profiles: ${profiles}`,
+        `  stored secrets: ${secretKeys}`,
+      ].join('\n');
+    },
+    exists: (ctx, path) => existsSync(requireShellPaths(ctx).resolveWorkspacePath(path)),
+    async save(ctx, path) {
+      const targetPath = requireShellPaths(ctx).resolveWorkspacePath(path);
+      const review = buildUpdateReview(ctx, await readLatestRelease());
+      mkdirSync(dirname(targetPath), { recursive: true });
+      writeFileSync(targetPath, JSON.stringify(review, null, 2) + '\n', 'utf-8');
+      return `Saved this install's update state to ${targetPath}. It records the update state for support or before an upgrade; nothing applies it.`;
+    },
+    read(ctx, path) {
+      const targetPath = requireShellPaths(ctx).resolveWorkspacePath(path);
+      try {
+        return formatUpdateReview(parseUpdateReview(readFileSync(targetPath, 'utf-8')), `Update state (saved ${targetPath})`);
+      } catch (error) {
+        throw commandRefusal(`Cannot read ${targetPath}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
   },
+  elsewhere: 'the terminal app (goodvibes)',
 });

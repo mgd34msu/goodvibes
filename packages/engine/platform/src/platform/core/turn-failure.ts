@@ -104,7 +104,7 @@ export interface TurnChanges {
 const HEADLINE_NO_ANSWER = 'The model didn\'t answer.';
 const HEADLINE_STOPPED = 'The turn stopped.';
 const TIP_TEXT = 'Tip: name a backup model once and GoodVibes switches by itself:';
-const TIP_COMMAND = '/model fallback';
+const TIP_COMMAND = '/model backup';
 const PROVIDER_STOPS: ReadonlySet<string> = new Set(['provider_error', 'provider_exhausted']);
 const COUNT_WORDS = ['', '', 'twice', 'three times', 'four times', 'five times', 'six times', 'seven times', 'eight times', 'nine times', 'ten times'];
 

@@ -10,16 +10,14 @@ import {
   buildPinSuccessText,
 } from '../../renderer/compaction-preview.ts';
 import { ensureProviderKeyThenSelect } from '../provider-key-intake.ts';
-import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import { createCompactCommand } from '@goodvibes-jev/engine/terminal-shell/everyday-commands';
-import { helpForCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { createHelpCommand } from '@goodvibes-jev/engine/terminal-shell/help-command';
+import { shortcutGroups } from '../../renderer/shortcut-groups.ts';
 import { registerModelCommands } from '@goodvibes-jev/engine/terminal-shell/model-command';
 
 const coreActions = createShellCoreActions<CommandContext>(
-  { requireKeybindingsManager, startFreshConversation },
+  { startFreshConversation },
   {
-    hidden: false,
-    shortcutOverlay: true,
     freshConversation: (ctx, savedAs) =>
       ctx.showToast?.({
         title: 'Fresh conversation',
@@ -31,56 +29,22 @@ const coreActions = createShellCoreActions<CommandContext>(
 
 export function registerShellCoreCommands(registry: CommandRegistry): void {
   const basicCommands = createBasicShellCommands<CommandContext>();
-  const navigation = createShellNavigationCommands<CommandContext>({
-    shortcutsHidden: false,
-    shortcutsFallback: 'Press ? for every command and keyboard shortcut.',
-  });
+  const navigation = createShellNavigationCommands<CommandContext>();
 
   // `/model` and `/effort` are one description each, shared with the other terminal app; a missing key is asked for before a switch lands.
   registerModelCommands<CommandContext>(registry, { requireProviderApi, beforeSelection: ensureProviderKeyThenSelect });
 
-  registry.register(navigation.shortcuts);
-
-
-  registry.register(coreActions.keybindings);
-
   registry.register(basicCommands.paste);
 
 
-  registry.register({
-    name: 'help',
-    aliases: ['h', '?'],
-    description: 'Open help: every command and keyboard shortcut in one searchable list; picking a command runs it. /help <command> shows one command\'s actions and lines',
-    argsHint: '[command]',
-    handler(args, ctx) {
-      const named = args[0]?.replace(/^\//, '');
-      if (named) {
-        const command = registry.get(named);
-        if (!command) throw commandRefusal(`No command named /${named}.`, '/help lists every command.');
-        ctx.print(helpForCommand(command));
-        return;
-      }
-      // `?`, /help, /commands and Ctrl+P open the same palette, built live from
-      // the registry and the key table (terminal-shell/command-palette.ts).
-      if (ctx.openCommandPalette) {
-        ctx.openCommandPalette();
-        return;
-      }
-      const commands = registry
-        .getAll()
-        .slice()
-        .sort((a, b) => a.name.localeCompare(b.name));
-      ctx.print(
-        [
-          'Commands:',
-          ...commands.map((cmd) => {
-            const argsHint = cmd.argsHint ?? cmd.usage;
-            return `  /${cmd.name}${argsHint ? ` ${argsHint}` : ''} — ${cmd.description}`;
-          }),
-        ].join('\n'),
-      );
+  registry.register(createHelpCommand<CommandContext>({
+    commands: () => registry.getAll(),
+    command: (name) => registry.get(name),
+    keys: (ctx) => {
+      const km = requireKeybindingsManager(ctx);
+      return { lines: shortcutGroups(km).flatMap((group) => [group.title, ...group.items.map(([key, what]) => `  ${key.padEnd(20)}  ${what}`)]), file: km.getConfigPath() };
     },
-  });
+  }));
 
   registry.register(coreActions.clear);
 

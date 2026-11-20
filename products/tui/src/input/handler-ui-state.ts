@@ -1,4 +1,4 @@
-export { handleOverlayToken, handleHistorySearchToken, handleSearchModeToken } from '@goodvibes-jev/engine/terminal-shell/overlay-input-routes';
+export { handleHistorySearchToken, handleSearchModeToken } from '@goodvibes-jev/engine/terminal-shell/overlay-input-routes';
 
 import type { OnboardingWizardController, OnboardingWizardMode, OnboardingWizardSnapshot } from './onboarding/onboarding-wizard.ts';
 import type { OnboardingWizardTopic } from './onboarding/onboarding-wizard-types.ts';

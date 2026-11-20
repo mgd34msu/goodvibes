@@ -7,14 +7,13 @@ export type ModalEntry = readonly [name: string, active: boolean, render: () => 
 type ActiveModal = { readonly active: boolean };
 type CommonConversationModals = Readonly<Record<'modelPicker' | 'settingsModal' | 'mcpWorkspace' | 'sessionPickerModal'
   | 'profilePickerModal' | 'bookmarkModal' | 'blockActionsMenu' | 'selectionModal' | 'contextInspectorModal', ActiveModal>> & {
-  readonly shortcutsOverlayActive: boolean;
   readonly surfaceModals: { modals(): readonly StackedModal[] };
 };
 /** Product-only workspaces join this predicate at their composition boundary. */
 export function isCommonConversationModalOpen(input: CommonConversationModals): boolean {
   return input.modelPicker.active || input.settingsModal.active || input.mcpWorkspace.active || input.sessionPickerModal.active
     || input.profilePickerModal.active || input.bookmarkModal.active || input.blockActionsMenu.active || input.selectionModal.active
-    || input.contextInspectorModal.active || input.shortcutsOverlayActive
+    || input.contextInspectorModal.active
     || input.surfaceModals.modals().some((modal) => !isTrackedModal(modal));
 }
 

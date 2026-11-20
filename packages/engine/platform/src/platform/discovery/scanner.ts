@@ -26,6 +26,8 @@ export interface DiscoveredServer {
   serverType: ServerType;
   modelContextWindows?: Record<string, number>; // modelId -> context window tokens
   modelOutputLimits?: Record<string, number>;   // modelId -> max output tokens
+  /** modelId -> the model's size as the server reports it in the listing the scan already reads ("3.2B"). */
+  modelSizes?: Record<string, string>;
 }
 
 /** A server that answered but was left out of a scan, and why. */
@@ -368,6 +370,8 @@ export interface ModelLimits {
   readonly contextWindows: Record<string, number>;
   /** modelId -> max output tokens. A missing entry means the server did not report one. */
   readonly outputLimits: Record<string, number>;
+  /** modelId -> size as the server reports it (Ollama's details.parameter_size, LM Studio's params_string). A missing entry: not reported. */
+  readonly sizes: Record<string, string>;
 }
 
 /**
@@ -459,6 +463,7 @@ async function readModelLimits(
   const origin = `http://${host}:${port}`;
   const contextWindows: Record<string, number> = {};
   const outputLimits: Record<string, number> = {};
+  const sizes: Record<string, string> = {};
   const record = (model: string, context: number | null, output: number | null, via = ''): void => {
     if (context !== null) contextWindows[model] = context;
     if (output !== null && wantOutput) outputLimits[model] = output;
@@ -479,6 +484,10 @@ async function readModelLimits(
           body: JSON.stringify({ name: model }),
         });
         if (data) record(model, ollamaLimit(data, 'context_length', 'num_ctx'), ollamaLimit(data, 'num_predict', 'num_predict'));
+        // The same answer carries the model's size in its details.
+        const details = data?.details;
+        const size = typeof details === 'object' && details !== null ? (details as JsonObject).parameter_size : undefined;
+        if (typeof size === 'string' && size.trim() !== '') sizes[model] = size.trim();
       });
       break;
     }
@@ -495,7 +504,9 @@ async function readModelLimits(
       if (serverType === 'lm-studio') {
         // LM Studio's rich endpoint (/api/v1/models) carries max_context_length per model;
         // the generic per-model reading below is the fallback for context and the source of output limits.
-        const discovered = await discoverContextWindows(`${origin}/v1`, undefined, signal);
+        const listedSizes = new Map<string, string>();
+        const discovered = await discoverContextWindows(`${origin}/v1`, undefined, signal, listedSizes);
+        for (const [modelId, size] of listedSizes) if (models.includes(modelId) || models.length === 0) sizes[modelId] = size;
         for (const [modelId, ctx] of discovered) {
           if (models.includes(modelId) || models.length === 0) record(modelId, ctx, null, ' (via discoverContextWindows)');
         }
@@ -526,7 +537,7 @@ async function readModelLimits(
   }
 
   signal?.throwIfAborted();
-  return { contextWindows, outputLimits };
+  return { contextWindows, outputLimits, sizes };
 }
 
 /**
@@ -634,6 +645,7 @@ export async function scanHosts(
       servers.push({
         name, host, port, baseURL, models: result.models, serverType,
         modelContextWindows: limits.contextWindows, modelOutputLimits: limits.outputLimits,
+        ...(Object.keys(limits.sizes).length > 0 ? { modelSizes: limits.sizes } : {}),
       });
       logger.info(`[Scan] Found ${name} at ${host}:${port} (${result.models.length} models)`);
     } catch (error) {

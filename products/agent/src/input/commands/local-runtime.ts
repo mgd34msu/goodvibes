@@ -3,20 +3,19 @@ import { createLocalCommandActions } from '@goodvibes-jev/engine/terminal-shell/
 import 'path';
 import 'node:fs';
 import 'node:fs/promises';
-import type { CommandRegistry, CommandContext, SlashCommand } from '../command-registry.ts';
+import type { CommandRegistry, CommandContext } from '../command-registry.ts';
 
 import '@goodvibes-jev/engine/platform/platform/utils';
 import '@goodvibes-jev/engine/platform/platform/config';
-import { requireProviderApi, requireServiceRegistry } from './runtime-services.ts';
-import { describePendingProjectService, pendingProjectServiceLines, projectServiceRef } from '@goodvibes-jev/engine/platform/platform/config';
-import { assertTarget, type TargetRef } from '@goodvibes-jev/engine/platform/platform/utils/target-ref';
+import { requireProviderApi, requireServiceRegistry, requireShellPaths } from './runtime-services.ts';
+import { registerServicesCommand } from '@goodvibes-jev/engine/terminal-shell/services-command';
 import {
   credentialWriteScopeWasRelocated,
   resolveCredentialDeleteScope,
   resolveCredentialWriteScope,
 } from '../../config/credential-scope.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { commandRefusal, requireYesFlag, stripYesFlag, withOwnerConfirmation, type ConfirmableCommand } from './confirmation.ts';
+import { commandRefusal, requireYesFlag, stripYesFlag } from './confirmation.ts';
 import { collectAgentMedia, mediaCollectCommand } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { formatAgentMediaGenerationResult, generateAgentMedia } from '@goodvibes-jev/engine/terminal-shell/agent-turn/media-generation';
 import { readRefusal } from '@goodvibes-jev/engine/errors';
@@ -110,68 +109,9 @@ const secretsCommand = createSecretsCommand<CommandContext>({
       : '',
 });
 
-/**
- * The services this app sends stored credentials to, and the confirmation a
- * project's services file entry needs before it is used. Confirming is the
- * owner's: a model-run line is always put to the owner.
- */
-const servicesCommand = withOwnerConfirmation<CommandContext, SlashCommand & Pick<ConfirmableCommand<CommandContext>, 'confirm'>>({
-  name: 'services',
-  effect: 'mixed',
-  readVerbs: ['list'],
-  description: 'List API services and confirm the ones a project\'s services file defines',
-  firstScreen: false,
-  usage: '[list|trust <name> --yes]',
-  argsHint: '[list|trust] [name]',
-  subcommands: { list: '', trust: '<name> --yes' },
-  confirm: (args, ctx) => {
-    if (args[0] !== 'trust' || !args[1]) return undefined;
-    // The question names what the entry sends and where; the yes approves that entry only.
-    const pending = requireServiceRegistry(ctx).pendingProjectServices().find((service) => service.name === args[1]);
-    if (!pending) return undefined; // The handler says why there is nothing to confirm.
-    return {
-      title: `Use the service ${args[1]} from this project's services file?`,
-      detail: `${describePendingProjectService(pending)}.\nA project's services file is part of the checkout, so whoever wrote the repository chose which of your stored keys ${args[1]} sends and to which host. Once confirmed, ${args[1]} is used as shown here; if the repository changes its keys, header or host it waits for confirmation again.`,
-      confirmLabel: 'Use it',
-      reviewed: projectServiceRef(pending),
-    };
-  },
-  handler(args, ctx, reviewed?: unknown) {
-    const services = requireServiceRegistry(ctx);
-    const pendingLines = () => pendingProjectServiceLines(services.pendingProjectServices());
-    if (args[0] === 'trust') {
-      const name = args[1];
-      if (!name) {
-        ctx.print(['[services] Usage: /services trust <name> --yes', ...pendingLines()].join('\n'));
-        return;
-      }
-      try {
-        // Confirmed: the entry must still be the one shown, and that one is approved.
-        const shown = reviewed as TargetRef<'project-service'> | undefined;
-        const now = services.pendingProjectServices().find((service) => service.name === name);
-        if (shown) assertTarget(shown, now ? projectServiceRef(now) : null, `/services trust ${name}`);
-        const result = services.confirmProjectService(name, shown ? now?.digest : undefined);
-        ctx.print(result.ok
-          ? '[services] ' + name + ' from this project is used from now on\n  ' + describePendingProjectService(result.service)
-          : '[services] Nothing was confirmed: ' + result.reason + '.');
-      } catch (error) {
-        if (readRefusal(error)) throw error;
-        throw commandRefusal('[services] Nothing was confirmed: the confirmation could not be saved (' + summarizeError(error) + ').');
-      }
-      return;
-    }
-    const all = services.getAll();
-    const names = Object.keys(all).sort((a, b) => a.localeCompare(b));
-    ctx.print([
-      names.length ? '[services]' : '[services] No services configured. Add entries to ' + (services.userServicesFilePath || 'your services file') + '.',
-      ...names.map((name) => '  ' + name.padEnd(20) + ' ' + (all[name]?.authType ?? '').padEnd(10) + ' ' + (all[name]?.baseUrl ?? '(no url)')),
-      ...pendingLines(),
-    ].join('\n'));
-  },
-});
-
 export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
-  registry.register(servicesCommand);
+  // `/services` is one description shared with the other terminal app (terminal-shell/services-command.ts).
+  registerServicesCommand<CommandContext>(registry, { requireServiceRegistry, requireShellPaths });
 
   registry.register({
     name: 'notifications',

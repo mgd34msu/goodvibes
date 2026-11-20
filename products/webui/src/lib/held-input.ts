@@ -17,7 +17,7 @@
  *
  * Cost: memory and one sessionStorage write per change; no request.
  */
-import { RELAY_PAIRING_STORAGE_KEY, WEBUI_TOKEN_STORE_KEY } from './client-lifetime';
+import { currentIdentityKey } from './client-lifetime';
 
 export interface HeldAttachment {
   readonly name: string;
@@ -203,16 +203,11 @@ function fingerprint(text: string): string {
 
 /**
  * This page's daemon and account: the origin it talks to and a fingerprint of
- * the sign-in it holds (the stored token and relay pairing named by
- * `identityKeys`), so a reload keeps held input for the same account and
- * another account never sees it.
+ * the sign-in it holds (`identity`: the sign-in marker's generation and the
+ * memory hold, never a credential), so a reload keeps held input for the same
+ * sign-in and another account never sees it.
  */
-export function currentHeldInputScope(identityKeys: readonly string[]): HeldInputScope {
-  let identity = '';
-  try {
-    const storage = globalThis.localStorage;
-    identity = identityKeys.map((key) => storage?.getItem(key) ?? '').join('\n');
-  } catch { identity = ''; }
+export function currentHeldInputScope(identity: string): HeldInputScope {
   let daemon = '';
   try { daemon = globalThis.location?.origin ?? ''; } catch { daemon = ''; }
   return { daemon, account: fingerprint(identity) };
@@ -220,5 +215,5 @@ export function currentHeldInputScope(identityKeys: readonly string[]): HeldInpu
 
 /** The held-input store of the daemon and account this page is signed in to now. */
 export function heldInputsForThisPage(): HeldInputs {
-  return heldInputsFor(currentHeldInputScope([WEBUI_TOKEN_STORE_KEY, RELAY_PAIRING_STORAGE_KEY]));
+  return heldInputsFor(currentHeldInputScope(currentIdentityKey()));
 }

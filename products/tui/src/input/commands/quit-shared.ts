@@ -143,11 +143,13 @@ export function countWorkingTree(status: Pick<StatusResult, 'files'>): WorkingTr
 const UNTRACKED_SHOWN = 10;
 
 /**
- * `/commit-all`: commit the working tree of the repository this session runs in.
+ * `/git commit` (and, without `--yes`, the preview `/git status` ends with):
+ * commit the working tree of the repository this session runs in.
  *
- * Bare, it changes nothing: it prints the repository root (which may be above
- * the working directory), the counts of staged, unstaged and untracked files,
- * the untracked ones by name, and the commit it would make. `--yes` makes it.
+ * Without `--yes` it changes nothing: it prints the repository root (which may
+ * be above the working directory), the counts of staged, unstaged and
+ * untracked files, the untracked ones by name, and the commit it would make.
+ * `--yes` makes it.
  * A set staged by hand is never added to: `--yes` then commits exactly that set
  * and leaves everything else as it is. Without a hand-staged set, `--yes`
  * stages every change, untracked files included, and commits it.
@@ -172,7 +174,7 @@ export async function executeCommitAll(
   if (confirmed && ctx.invokedByModel === true) {
     throw new RefusalError(refusal({
       code: 'OWNER_ONLY', state: 'nothing was committed',
-      reason: '/commit-all --yes commits the owner\'s whole working tree and runs only when the owner types it',
+      reason: '/git commit commits the owner\'s whole working tree and runs only when the owner types it',
       next: ['Use the git tools to stage and commit the files this task changed'],
     }));
   }
@@ -183,19 +185,19 @@ export async function executeCommitAll(
   const counts = countWorkingTree(before);
   const total = counts.staged.length + counts.unstaged.length + counts.untracked.length;
   if (total === 0) {
-    ctx.print(`[commit-all] ${repoRoot}: nothing to commit, the working tree is clean.`);
+    ctx.print(`${repoRoot}: nothing to commit, the working tree is clean.`);
     return;
   }
   const handStaged = counts.staged.length > 0;
   if (!confirmed) {
     const shown = counts.untracked.slice(0, UNTRACKED_SHOWN);
     ctx.print([
-      `[commit-all] Repository: ${repoRoot}`,
+      `Committing (/git commit) in ${repoRoot}:`,
       `  staged ${counts.staged.length}, unstaged ${counts.unstaged.length}, untracked ${counts.untracked.length}`,
       ...(shown.length > 0 ? [`  untracked: ${shown.join(', ')}${counts.untracked.length > shown.length ? `, and ${counts.untracked.length - shown.length} more` : ''}`] : []),
       handStaged
-        ? `  Nothing changed yet. /commit-all --yes commits only the ${counts.staged.length} staged file${counts.staged.length === 1 ? '' : 's'}; the rest stays as it is.`
-        : `  Nothing changed yet. /commit-all --yes stages all ${total} file${total === 1 ? '' : 's'}, untracked included, and commits them.`,
+        ? `  commits only the ${counts.staged.length} staged file${counts.staged.length === 1 ? '' : 's'}; the rest stays as it is.`
+        : `  stages all ${total} file${total === 1 ? '' : 's'}, untracked included, and commits them.`,
     ].join('\n'));
     return;
   }
@@ -209,7 +211,7 @@ export async function executeCommitAll(
     const message = buildWriteQuitCommitMessage(changes);
     const result = await git.commit(message);
     const shortHash = result.hash ? result.hash.slice(0, 7) : 'unknown';
-    ctx.print(`[commit-all] Committed ${changes.length} file${changes.length === 1 ? '' : 's'} in ${repoRoot}: ${shortHash} ${message}`
+    ctx.print(`Committed ${changes.length} file${changes.length === 1 ? '' : 's'} in ${repoRoot}: ${shortHash} ${message}`
       + (handStaged && (counts.unstaged.length + counts.untracked.length) > 0 ? ' (only the staged set; the rest is unchanged)' : ''));
   } catch (error) {
     throw new RefusalError(refusal({

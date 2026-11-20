@@ -67,6 +67,10 @@ export interface ScheduleHost<Ctx extends ScheduleCommandContext> {
   remove(ctx: Ctx, id: string): Promise<void>;
   setPaused(ctx: Ctx, id: string, paused: boolean): Promise<void>;
   runNow(ctx: Ctx, id: string): Promise<string>;
+  /** Stop a run that is going; the answer says how it ended. */
+  stopRun(ctx: Ctx, runId: string): Promise<string>;
+  /** Run a failed run again; the answer names the new run. */
+  retryRun(ctx: Ctx, runId: string): Promise<string>;
 }
 
 let installedHost: ScheduleHost<ScheduleCommandContext> | undefined;
@@ -255,7 +259,7 @@ export const SCHEDULE_COMMAND: CommandDescription<ScheduleCommandContext> = {
   summary: 'Run something at set times, with or without the app open',
   group: 'Automation',
   report: 'see-schedules',
-  firstScreenRows: ['see-schedules', 'add', 'run-now', 'pause', 'resume', 'change', 'remove'],
+  firstScreenRows: ['see-schedules', 'add', 'run-now', 'pause', 'resume', 'change', 'remove', { label: 'A run that is going or failed…', actions: ['stop-run', 'retry-run'] }],
   actions: [
     {
       id: 'see-schedules', label: 'See your schedules', word: 'list', inputs: [],
@@ -361,6 +365,26 @@ export const SCHEDULE_COMMAND: CommandDescription<ScheduleCommandContext> = {
         ctx.renderRequest?.();
         return undefined;
       },
+    },
+    {
+      id: 'stop-run', label: 'Stop a run that is going', word: 'stop-run',
+      inputs: [{ id: 'run', label: 'Run', help: 'The run id Run one now printed', kind: 'text', freeTextReason: 'a run id', required: true, typed: { position: 1 } }],
+      sentence: 'Run {run} is stopped; its schedule keeps its usual times.',
+      done: 'Stopped run {run}.',
+      touches: 'this-machine', lasts: 'not-a-change', risk: 'cannot-be-undone',
+      operator: { method: 'automation.runs.cancel', fields: { runId: 'run' } },
+      example: { run: 'run-1a2b' },
+      async run(values, ctx) { return hostOf().stopRun(ctx, values.run!); },
+    },
+    {
+      id: 'retry-run', label: 'Run a failed run again', word: 'retry-run',
+      inputs: [{ id: 'run', label: 'Run', help: 'The run id of the run that failed', kind: 'text', freeTextReason: 'a run id', required: true, typed: { position: 1 } }],
+      sentence: 'Run {run} runs again as a new run; its schedule keeps its usual times.',
+      done: '',
+      touches: 'this-machine', lasts: 'not-a-change', risk: 'none',
+      operator: { method: 'automation.runs.retry', fields: { runId: 'run' } },
+      example: { run: 'run-1a2b' },
+      async run(values, ctx) { return hostOf().retryRun(ctx, values.run!); },
     },
     {
       id: 'change', label: 'Change a schedule', word: 'change',

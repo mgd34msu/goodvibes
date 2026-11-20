@@ -62,7 +62,6 @@ import { InputHistory } from './input-history.ts';
 import type { ConversationManager } from '../core/conversation';
 import { BlockActionsMenu } from '../renderer/block-actions.ts';
 import { ContextInspectorModal } from '../renderer/context-inspector.ts';
-import { OverlayFilters } from './overlay-filter.ts';
 import { BookmarkModal } from './bookmark-modal.ts';
 import { SettingsModal } from './settings-modal.ts';
 import { McpWorkspace } from './mcp-workspace.ts';
@@ -122,7 +121,6 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
   public selectionModal = new SelectionModal();
   public searchManager = new SearchManager();
   public contextInspectorModal = new ContextInspectorModal();
-  public readonly overlayFilters = new OverlayFilters();
   public bookmarkModal: BookmarkModal;
   public blockActionsMenu = new BlockActionsMenu();
   /** The one stack of open modals: kit modals and the handler's own (surface-modal-host.ts). */

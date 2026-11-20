@@ -172,8 +172,8 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
 
   /**
    * Open the fuzzy command palette, a searchable picker over every registered
-   * slash command (generated live from the registry). Bound to Ctrl+K and the
-   * /palette command. Selecting a command pre-fills it into the composer.
+   * slash command and key (generated live from the registry and the key table).
+   * Bound to Ctrl+P, Ctrl+K, `?` and /help. Enter runs a command; tab fills the composer.
    */
   openCommandPalette?: () => void;
   /**

@@ -75,6 +75,8 @@ interface RoutineOwner {
   setEnabled(id: string, enabled: boolean): Promise<void>;
   update(id: string, patch: { readonly schedule?: AutomationScheduleDefinition | undefined; readonly name?: string | undefined; readonly prompt?: string | undefined }): Promise<void>;
   run(id: string): Promise<string>;
+  stopRun(runId: string): Promise<string>;
+  retryRun(runId: string): Promise<string>;
 }
 
 async function daemonOwner(ctx: CommandContext, rpc: OperatorRpcAvailable): Promise<RoutineOwner> {
@@ -105,6 +107,8 @@ async function daemonOwner(ctx: CommandContext, rpc: OperatorRpcAvailable): Prom
       const run = await operator.invoke('automation.jobs.run', { jobId });
       return `run: ${run.runId}  status: ${run.status}`;
     },
+    stopRun: async (runId) => { await operator.invoke('automation.runs.cancel', { runId }); return ''; },
+    retryRun: async (runId) => `Started run ${(await operator.invoke('automation.runs.retry', { runId })).run.id}.`,
   };
 }
 
@@ -135,6 +139,11 @@ async function localOwner(ctx: CommandContext): Promise<RoutineOwner | string> {
         const run = await manager.runNow(id);
         return `run: ${run.id}  agent: ${run.agentId ?? 'not started yet'}`;
       },
+      stopRun: async (runId) => {
+        if (!(await manager.cancelRun(runId))) throw new Error(`No run ${runId} is going; nothing was stopped.`);
+        return '';
+      },
+      retryRun: async (runId) => `Started run ${(await manager.retryRun(runId)).id}.`,
     };
   }
   const refusal = 'Another goodvibes terminal on this machine runs the routines while the daemon is off; change them there, or turn the daemon on (daemon.enabled in /settings) so every terminal shares one list. Nothing was changed.';
@@ -151,6 +160,8 @@ async function localOwner(ctx: CommandContext): Promise<RoutineOwner | string> {
     setEnabled: refuse,
     update: refuse,
     run: refuse,
+    stopRun: refuse,
+    retryRun: refuse,
   };
 }
 
@@ -198,6 +209,8 @@ const TERMINAL_SCHEDULES: ScheduleHost<CommandContext> = {
   async remove(ctx, id) { await changing(ctx, (owner) => owner.remove(id)); },
   async setPaused(ctx, id, paused) { await changing(ctx, (owner) => owner.setEnabled(id, !paused)); },
   async runNow(ctx, id) { return changing(ctx, (owner) => owner.run(id)); },
+  async stopRun(ctx, runId) { return changing(ctx, (owner) => owner.stopRun(runId)); },
+  async retryRun(ctx, runId) { return changing(ctx, (owner) => owner.retryRun(runId)); },
 };
 
 export function registerScheduleRuntimeCommands(registry: CommandRegistry): void {

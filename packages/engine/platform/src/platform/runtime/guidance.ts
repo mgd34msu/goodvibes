@@ -224,7 +224,7 @@ export function evaluateContextualGuidance(
       category: 'recovery',
       title: 'One or more MCP servers require authentication',
       summary: `${snapshot.authRequiredMcpCount} MCP server${snapshot.authRequiredMcpCount === 1 ? '' : 's'} cannot operate until auth is completed.`,
-      commands: ['/mcp', '/services auth-review'],
+      commands: ['/mcp', '/services check'],
     });
   }
 

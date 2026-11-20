@@ -84,7 +84,7 @@ const RUNNING_AGENTS = defineList<CommandActionContext>({
   operator: { terminalOnly: 'The agents are the terminal app\'s own.' },
 });
 
-export type FailureReportView = 'summary' | 'report' | 'bundle';
+export type FailureReportView = 'summary' | 'json' | 'bundle';
 
 /** What each app does for `/health`. An optional part an app does not have is refused with `elsewhere`. */
 export interface HealthCommandPolicy<Ctx> {
@@ -153,14 +153,14 @@ function healthActions<Ctx extends CommandActionContext>(policy: HealthCommandPo
           id: 'view', label: 'As', help: 'How much to show', typed: { flag: '--as' },
           choices: [
             { value: 'summary', label: 'A summary', help: 'What failed, why, and the evidence counts' },
-            { value: 'report', label: 'The report as JSON' },
+            { value: 'json', label: 'The report as JSON' },
             { value: 'bundle', label: 'The whole bundle as JSON', help: 'With the replay snapshot, for a support thread' },
           ],
           optional: { default: 'summary', means: 'a summary' },
         }),
       ],
       sentence: 'Shows a failure report of this session: what failed, its cause and the evidence.',
-      example: { report: 'latest', view: 'report' },
+      example: { report: 'latest', view: 'json' },
       async run(values, ctx) { return failures().show(ctx, values.report || 'latest', (values.view || 'summary') as FailureReportView); },
     }),
     {

@@ -146,7 +146,7 @@ export class AgentWorkspace {
   /**
    * The inbox settings are the connected host's: one reading when the
    * workspace opens, and the snapshot is rebuilt when it lands so the inbox
-   * line says what `/email status` says instead of this process's local copy.
+   * line says what `/mail status` says instead of this process's local copy.
    */
   private readHostMailbox(): void {
     const context = this.context;

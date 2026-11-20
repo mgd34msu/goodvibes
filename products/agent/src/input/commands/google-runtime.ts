@@ -10,7 +10,7 @@
  * whether a person could get to the feature.
  *
  * So the surface is deliberately one command rather than subcommands under
- * `/email` and `/calendar`. One Google account, one OAuth client and one
+ * `/mail` and `/calendar`. One Google account, one OAuth client and one
  * credential serve both mail and calendar; splitting the setup across two
  * commands would have meant two half-flows sharing hidden state, and would
  * have left whichever one the user did not run looking broken.

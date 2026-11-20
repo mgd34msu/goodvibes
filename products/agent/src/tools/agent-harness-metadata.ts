@@ -265,15 +265,15 @@ function commandModelNotes(commandName: string): Omit<CommandExecutionPolicy, 'e
   if (root === 'email') {
     return {
       confirmation,
-      preferredModelTool: `${agentHarnessModes('run_command')} (use /email set to configure, /email config to view settings)`,
-      boundary: 'Email IMAP reads are read-only (EXAMINE); sends require explicit --yes confirmation and route only to the configured account. Use /email set email.<key> <value> to configure email settings; use /email config to view current settings. /email set is the reviewed path for email.* keys: it validates each field and stores the password as a secret reference. The generic settings action routes an email.* write to the daemon that owns the key, under the same recorded admission; prefer /email set. Setting the mail servers, ports, security, username or password changes where the stored password is presented, so only the owner typing /email set counts; a model invocation is refused.',
+      preferredModelTool: `${agentHarnessModes('run_command')} (use /mail set to configure, /mail settings to view them, /mail password to store the password)`,
+      boundary: 'Email IMAP reads are read-only (EXAMINE); a send asks the owner first and goes only to the configured account. Use /mail set <setting> <value> to configure the mailbox; use /mail settings to view the current settings. /mail set is the reviewed path for email.* keys: it validates each field and stores the password as a secret reference. The generic settings action routes an email.* write to the daemon that owns the key, under the same recorded admission; prefer /mail set. Setting the mail servers, ports, security, username or password changes where the stored password is presented, so only the owner typing /mail set counts; a model invocation is refused.',
     };
   }
   if (root === 'calendar' || root === 'cal') {
     return {
       confirmation,
       preferredModelTool: agentHarnessModes('run_command'),
-      boundary: '/calendar list, upcoming, subscriptions and accounts read and need no admission. add, delete, import and export change local ICS events (--yes required) under the local-write admission; subscribe and refresh fetch a feed under the outward one. unsubscribe (deletes a stored feed address), connect and disconnect (sign a calendar account in or out) are the owner\'s to type: a model invocation is refused before it runs. Calendar configuration is set via /calendar subcommands.',
+      boundary: '/calendar upcoming, all, get, subscriptions and accounts read and need no admission. add, delete, import and export change the local ICS events (delete asks first); subscribe and refresh read a feed from outside. unsubscribe (deletes a stored feed address), connect and disconnect (sign a calendar account in or out) and a feed on the private network are the owner\'s to type: a model invocation is refused before it runs. /calendar alone lists every action.',
     };
   }
   if (root === 'channels' || root === 'channel' || root === 'notify') {

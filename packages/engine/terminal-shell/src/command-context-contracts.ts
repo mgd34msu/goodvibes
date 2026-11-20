@@ -88,7 +88,6 @@ export interface TerminalCommandShellUiOpeners<Target extends ModelPickerTarget>
   openFirstRun?: () => void;
   openSessionPicker?: () => void;
   openProfilePicker?: () => void;
-  openShortcutsOverlay?: () => void;
   getScrollTop?: () => number;
   openSessionView?: (target: { readonly kind: 'agent' | 'process'; readonly id: string }) => boolean;
   openNotifications?: () => void;

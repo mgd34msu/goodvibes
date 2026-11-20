@@ -4,11 +4,11 @@
  * Reads policy.bundleSource / policy.bundlePath and, when the policy-as-code
  * gate is on (policy.registryEnabled) and a file source is configured, loads that bundle into
  * the registry as a CANDIDATE at startup, making the config keys live without
- * requiring a /policy command. Promotion requires simulation evidence and a
+ * requiring a /security policy action. Promotion requires simulation evidence and a
  * passing divergence gate; once promoted, the same unchanged bundle is enforced
  * again at the next start (policy-activation.json records it, with the file it
  * was read from: a bundle promoted or rolled back to from another file than
- * policy.bundlePath, one loaded with /policy load, is the one read at start).
+ * policy.bundlePath, one loaded with /security load-policy, is the one read at start).
  * A bundle loaded at start that is not restored as active says why. Never throws, a
  * missing, unreadable, malformed or unverifiable bundle is logged, recorded on the
  * policy runtime state as the reason the configured bundle is not loaded, and skipped

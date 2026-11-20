@@ -85,6 +85,7 @@ const EVENT_FIELD_CLASS = {
   category: 'shown',
   changedFields: 'shown',
   changedFiles: 'shown',
+  changes: 'shown',
   checkId: 'shown',
   checkpoint: 'shown',
   checkpointId: 'shown',

@@ -291,16 +291,15 @@ export class SharedSessionBroker {
    * Returns the number of sessions that currently have a pending input
    * (i.e. pendingInputCount > 0), plus turns running outside these records
    * (setExternalTurnCounter). A working-directory move waits until it is 0,
-   * and memory consolidation runs only then.
+   * and memory consolidation runs only then. An owner that cannot count its
+   * turns throws through: an unknown count is never read as idle.
    */
   countBusySessions(): number {
     let count = 0;
     for (const session of this.sessions.values()) {
       if (session.pendingInputCount > 0) count++;
     }
-    let external = 0;
-    try { external = this.externalTurnCounter?.() ?? 0; } catch { /* an owner that cannot count adds nothing */ }
-    return count + external;
+    return count + (this.externalTurnCounter?.() ?? 0);
   }
 
   /**

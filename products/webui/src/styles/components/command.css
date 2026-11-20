@@ -299,6 +299,7 @@
 .gv-action-sheet__line { margin: 0; color: var(--text-3); font-size: 0.875em; }
 .gv-action-buttons { display: inline-flex; gap: 6px; flex-wrap: wrap; }
 .gv-action-sheet__group { display: flex; flex-direction: column; gap: 12px; }
+.gv-action-sheet__outcome { display: flex; flex-direction: column; gap: 8px; }
 .gv-action-sheet__step { margin: 0; font-weight: 600; }
 .gv-action-sheet__more { border-top: 1px solid var(--line); padding-top: 10px; }
 .gv-action-sheet__more > summary { cursor: pointer; font-weight: 600; margin-bottom: 10px; }
@@ -335,3 +336,4 @@
   .gv-command-screen .gv-row__trailing { width: 100%; justify-content: flex-start; padding-left: 28px; }
   .gv-command-screen__nested { padding-left: 12px; }
 }
+.gv-command-screen .gv-row__meta { white-space: normal; overflow-wrap: anywhere; }

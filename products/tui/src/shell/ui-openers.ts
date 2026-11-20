@@ -1,5 +1,5 @@
 import { createModelPickerCommandOpeners } from '@goodvibes-jev/engine/terminal-shell/model-picker-open';
-import { shortcutGroups } from '../renderer/shortcuts-overlay.ts';
+import { shortcutGroups } from '../renderer/shortcut-groups.ts';
 import { createSettingsWorkspaceOpener } from '@goodvibes-jev/engine/terminal-shell/shell-ui-openers';
 import { modelPickerCatalogServices } from '@goodvibes-jev/engine/terminal-shell/model-picker-targets';
 import { createCommonShellUiOpeners } from '@goodvibes-jev/engine/terminal-shell/shell-ui-openers';
@@ -406,7 +406,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
       shortcuts: () => paletteShortcuts(commandContext.workspace?.keybindingsManager),
       describe: (id) => (id === 'model' ? commandContext.session.runtime.model || undefined : undefined),
       // A command gone since the palette opened, or one that refuses, says so like a typed one.
-      run: (name) => runPickedCommand(commandContext.executeCommand, name, [], (message) => commandContext.print(message)),
+      run: (name, args) => runPickedCommand(commandContext.executeCommand, name, [...args], (message) => commandContext.print(message)),
       fill: (name) => {
         // The command and a trailing space so the inline args hint shows what it wants.
         input.prompt = `/${name} `;
@@ -425,5 +425,8 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
 /** Every row of the shortcut groups, as the help palette lists them. */
 function paletteShortcuts(keybindingsManager: KeybindingsManager | undefined): readonly PaletteShortcut[] {
   if (!keybindingsManager) return [];
-  return shortcutGroups(keybindingsManager).flatMap((group) => group.items.map(([key, description]) => ({ key, description })));
+  return [
+    ...shortcutGroups(keybindingsManager).flatMap((group) => group.items.map(([key, description]) => ({ key, description }))),
+    { key: 'keybindings.json', description: `Change any key: edit ${keybindingsManager.getConfigPath()}` },
+  ];
 }

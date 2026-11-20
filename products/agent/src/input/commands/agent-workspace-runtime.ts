@@ -1,6 +1,6 @@
-import { handleNativeIntakeCommand, handleNativeSubmissionCommand } from '@goodvibes-jev/engine/terminal-shell/native/work-command';
+import { registerWorkCommand } from '@goodvibes-jev/engine/terminal-shell/native/work-command';
 import '../../runtime/native-conversation-intake.ts';
-import { nativeWorkExecutionLines } from '@goodvibes-jev/engine/terminal-shell/native';
+import { openAgentLegacyImport } from './legacy-work-ledger-import-runtime.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { AGENT_WORKSPACE_CATEGORIES } from '../agent-workspace-categories.ts';
 import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
@@ -16,59 +16,18 @@ export function registerAgentWorkspaceRuntimeCommands(registry: CommandRegistry)
     ctx.openAgentWorkspace(categoryId);
   }
 
-  registry.register({
-    name: 'work',
-    effect: 'ui-navigation',
-    description: 'Inspect native work, recover ordinary input, or explicitly start, cancel or resume an existing attempt',
-    usage:
-      '[daemon-project-id] | start|status|cancel|resume <work-id> | submit-file <JSON-path> | submission-status | submission-retry | submission-discard | intake-status | intake-retry | intake-resume | intake-cancel',
-    async handler(args, ctx) {
-      const action = args[0];
-      if (await handleNativeIntakeCommand(args, ctx, true)) return;
-      const view = ctx.nativeWorkLedger;
-      const submitFile = view?.submitFile,
-        submissionStatus = view?.submissionStatus,
-        retrySubmission = view?.retrySubmission,
-        discardSubmission = view?.discardSubmission;
-      const submission =
-        submitFile && submissionStatus && retrySubmission && discardSubmission
-          ? {
-              submitFile: (path: string) => submitFile.call(view, path),
-              status: () => submissionStatus.call(view),
-              retry: () => retrySubmission.call(view),
-              discard: () => discardSubmission.call(view),
-            }
-          : undefined;
-      if (await handleNativeSubmissionCommand(args, (text) => ctx.print(text), submission)) return;
-      if (action === 'start' || action === 'status' || action === 'cancel' || action === 'resume') {
-        if (args.length !== 2) {
-          throw commandRefusal('Usage: /work start|status|cancel|resume <work-id>');
-        }
-        if (!ctx.nativeWorkLedger?.execute) {
-          throw commandRefusal(`Nothing was run: native execution controls are unavailable on this host, so /work ${action} cannot run here.`, undefined, 'COMMAND_FAILED');
-        }
-        const result = await ctx.nativeWorkLedger.execute(action, args[1]!);
-        const state = ctx.nativeWorkLedger.state;
-        const lines = result
-          ? nativeWorkExecutionLines(result)
-          : [
-              state.status !== 'ready'
-                ? state.reason
-                : 'No new native execution result. A request may already be pending or this action was superseded.',
-            ];
-        ctx.print(
-          (lines.length ? lines : ['No native execution binding is available.'])
-            .map((line) => line.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, ' '))
-            .join('\n'),
-        );
-        return;
-      }
-      if (args.length > 1) {
-        throw commandRefusal('Usage: /work [daemon-project-id] | start|status|cancel|resume <work-id>');
-      }
-      if (args[0]) ctx.nativeWorkLedger?.selectProject(args[0]);
-      openAgentWorkspace(ctx, 'work');
+  // `/work` (terminal-shell/native/work-command.ts): the Agent's work view is a workspace section.
+  registerWorkCommand<CommandContext>(registry, {
+    view: (ctx) => ctx.nativeWorkLedger,
+    open(ctx, project) {
+      if (project) ctx.nativeWorkLedger?.selectProject(project);
+      if (!ctx.openAgentWorkspace) throw commandRefusal('The Agent workspace needs the interactive shell.');
+      ctx.openAgentWorkspace('work');
     },
+    // A hosted turn found by an intake step resumes here.
+    allowHostedDispatch: true,
+    openImport: openAgentLegacyImport,
+    requests: { unavailable: 'Work requests, the planner and past plans belong to the terminal app; ask for work in the chat here, or hand coding work on with /agents hand-off.' },
   });
   // `/agent`, described once (command-actions/): one action, the workspace at a section.
   registry.register(defineCommand<CommandContext>({

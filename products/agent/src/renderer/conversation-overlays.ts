@@ -22,12 +22,12 @@ import { renderMcpWorkspace } from './mcp-workspace.ts';
 import { renderSessionPickerModal } from './session-picker-modal.ts';
 import { renderProfilePickerModal } from './profile-picker-modal.ts';
 import { renderBookmarkModal } from './bookmark-modal.ts';
-import { renderShortcutsOverlay } from './shortcuts-overlay.ts';
 import { renderAutocompleteOverlay } from './autocomplete-overlay.ts';
 import { renderAgentWorkspace } from './agent-workspace.ts';
 import { renderBlockActionsMenu } from './block-actions-overlay.ts';
 import type { SurfaceLayer } from './surface-kit.ts';
 import { getSharedToastCenter } from './toast-center.ts';
+import { firstRunOwnsScreen } from '@goodvibes-jev/engine/terminal-shell/first-run';
 
 export interface ConversationOverlayContext {
   readonly input: InputHandler;
@@ -127,11 +127,6 @@ export function buildConversationLayers(context: ConversationLayerContext): Surf
     ['liveTail', input.liveTailModal.active, () => renderLiveTailModal(input.liveTailModal, w, h)],
     ['blockActions', input.blockActionsMenu.active, () => renderBlockActionsMenu(input.blockActionsMenu, w, h)],
     ['selection', input.selectionModal.active, () => renderSelectionModalOverlay(input.selectionModal, w, h)],
-    [
-      'shortcuts',
-      input.shortcutsOverlayActive,
-      () => renderShortcutsOverlay(w, h, context.keybindingsManager, input.shortcutsScrollOffset, input.overlayFilters.shortcuts),
-    ],
   ];
   return composeConversationLayers({
     entries,
@@ -142,5 +137,7 @@ export function buildConversationLayers(context: ConversationLayerContext): Surf
     headerRows: context.headerRows,
     footerRows: context.footerRows,
     toasts: getSharedToastCenter(),
+    // First run's screens own the screen: notices wait.
+    screenOwned: firstRunOwnsScreen(),
   });
 }

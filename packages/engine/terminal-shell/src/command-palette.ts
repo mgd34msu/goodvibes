@@ -29,7 +29,7 @@ import type { SurfaceLayer } from './renderer/surface-kit.js';
 import { renderCommandPalette } from './renderer/command-palette.js';
 import { isTextBackspace } from './delete-key-policy.js';
 import type { PaletteEntry, PaletteGroup, PaletteRunMode, PaletteSection, PaletteView } from './command-palette-types.js';
-export type { PaletteEntry, PaletteGroup, PaletteRunMode, PaletteSection, PaletteView } from './command-palette-types.js';
+export type { PaletteEntry, PaletteGroup, PaletteRunMode, PaletteSection, PaletteView, ShortcutGroup } from './command-palette-types.js';
 
 /** What the palette reads from a registered command (both apps' registries hold this much). */
 export interface PaletteCommand {
@@ -77,21 +77,28 @@ const CURATED: ReadonlyArray<readonly [string, CuratedEntry]> = [
   ['replay', { title: 'Replay a session', group: 'Session' }],
   ['agents', { title: 'Agents', group: 'Views', keywords: ['hosted', 'acp', 'claude code', 'codex', 'opencode', 'steer', 'stop'] }],
   ['usage', { title: 'Usage', group: 'Views', keywords: ['budget', 'compact', 'price'] }],
-  ['changes', { title: 'Changes', group: 'Views', keywords: ['files', 'stage', 'commit', 'hunk'] }],
+  ['changes', { title: 'See changes', group: 'Views', keywords: ['files', 'stage', 'commit', 'hunk'] }],
   ['notifications', { title: 'Notifications', group: 'Views', keywords: ['notifications', 'alerts', 'messages', 'history', 'toasts'] }],
-  ['context', { title: 'Context inspector', group: 'Views', keywords: ['tokens', 'window'] }],
+  ['context', { title: 'See what fills the context', group: 'Views', keywords: ['tokens', 'window'] }],
   ['work-plan', { title: 'Work plan', group: 'Views', keywords: ['todo', 'plan'] }],
   ['hosted', { title: 'Hosted sessions', group: 'Views', keywords: ['daemon'] }],
   ['health', { title: 'Health', group: 'Views', keywords: ['doctor'] }],
   ['settings', { title: 'Settings', group: 'Settings', keywords: ['preferences', 'options', 'theme'] }],
   ['model', { title: 'Switch model', group: 'Settings', keywords: ['provider', 'llm'] }],
   ['effort', { title: 'Reasoning effort', group: 'Settings', keywords: ['thinking'] }],
-  ['shortcuts', { title: 'Keyboard shortcuts', group: 'Settings', keywords: ['keys', 'help'] }],
-  ['keybindings', { title: 'Keybindings', group: 'Settings', keywords: ['keys'] }],
   ['verbosity', { title: 'How much the app prints', group: 'Settings', keywords: ['quiet', 'notifications', 'print'] }],
   ['profiles', { title: 'Profiles', group: 'Settings' }],
   ['local-auth', { title: 'Local accounts', group: 'Settings', keywords: ['accounts', 'users', 'auth', 'password', 'local-auth'] }],
   ['tts', { title: 'Voice and speech', group: 'Settings', keywords: ['voice'] }],
+];
+
+/** Rows that run a command with words already given, placed in a curated group. */
+const CURATED_LINES: ReadonlyArray<{ readonly id: string; readonly command: string; readonly args: readonly string[]; readonly title: string; readonly summary: string; readonly group: Exclude<PaletteGroup, 'Suggested' | 'Commands' | 'Keyboard shortcuts'>; readonly keywords: readonly string[] }> = [
+  {
+    id: 'settings:permissions.mode', command: 'settings', args: ['open', 'permissions.mode'],
+    title: 'Change how often it asks', summary: 'Opens settings at the permission mode: ask me, Jev decides, just vibes or YOLO.',
+    group: 'Settings', keywords: ['permissions', 'mode', 'approval', 'ask', 'jev', 'yolo'],
+  },
 ];
 
 /** The Suggested group before there is any usage to learn from. */
@@ -179,6 +186,21 @@ export function buildPaletteEntries(
     if (ob !== undefined) return 1;
     return a.id.localeCompare(b.id);
   });
+  // Rows that are a command with its words, for a command this build registers.
+  const registered = new Set(commands.map((command) => command.name));
+  const after = new Map<string, number>();
+  for (const line of CURATED_LINES) {
+    if (!registered.has(line.command)) continue;
+    const entry: PaletteEntry = {
+      id: line.id, kind: 'command', title: line.title, summary: line.summary, description: line.summary,
+      category: categories.get(line.command) ?? 'Other', group: line.group, aliases: [], keywords: line.keywords,
+      actions: [], needsArgs: false, right: `/${line.command} ${line.args.join(' ')}`, line: { command: line.command, args: line.args },
+    };
+    // After the last curated row of its group, so it reads with its neighbours.
+    const index = entries.reduce((last, candidate, at) => candidate.group === line.group ? at : last, -1);
+    entries.splice(index + 1 + (after.get(line.group) ?? 0), 0, entry);
+    after.set(line.group, (after.get(line.group) ?? 0) + 1);
+  }
   // The keyboard shortcuts, last, in the app's own order.
   shortcuts.forEach((shortcut, index) => {
     entries.push({
@@ -429,7 +451,7 @@ export interface CommandPaletteHost {
   readonly shortcuts?: (() => readonly PaletteShortcut[]) | undefined;
   readonly describe?: ((id: string) => string | undefined) | undefined;
   /** Runs the command as if typed bare: a described command opens its guided path. */
-  readonly run: (name: string) => Promise<void>;
+  readonly run: (name: string, args: readonly string[]) => Promise<void>;
   /** Puts `/name ` in the composer, command mode armed, so arguments can be typed. */
   readonly fill: (name: string) => void;
   readonly render: () => void;
@@ -445,8 +467,8 @@ export function openCommandPaletteOn(host: CommandPaletteHost): void {
     onChanged: host.render,
     ...(host.describe ? { describe: host.describe } : {}),
     onRun: (entry, mode) => {
-      if (mode === 'run') { void host.run(entry.id).finally(() => host.render()); return; }
-      host.fill(entry.id);
+      if (mode === 'run') { void host.run(entry.line?.command ?? entry.id, entry.line?.args ?? []).finally(() => host.render()); return; }
+      host.fill(entry.line ? `${entry.line.command} ${entry.line.args.join(' ')}` : entry.id);
       host.render();
     },
   });

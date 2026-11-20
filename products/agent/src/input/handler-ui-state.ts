@@ -1,4 +1,4 @@
-export { handleOverlayToken, handleHistorySearchToken } from '@goodvibes-jev/engine/terminal-shell/overlay-input-routes';
+export { handleHistorySearchToken } from '@goodvibes-jev/engine/terminal-shell/overlay-input-routes';
 import { handleSearchModeToken as search } from '@goodvibes-jev/engine/terminal-shell/overlay-input-routes';
 export const handleSearchModeToken = (...args: Parameters<typeof search>) => search(args[0], args[1], args[2], args[3], false);
 

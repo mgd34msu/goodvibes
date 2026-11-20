@@ -42,16 +42,13 @@ type Handled<Fields extends keyof FeedContextMutableInit> = Pick<FeedContextMuta
 type PromptResult = Handled<'prompt' | 'cursorPos' | 'commandMode'>;
 type ModalResult = Handled<
   | 'selectionCallback'
-  | 'shortcutsOverlayActive'
-  | 'shortcutsScrollOffset'
   | 'prompt'
   | 'cursorPos'
   | 'nextImageId'
 >;
 type MutableKey = keyof FeedContextMutableInit;
 const PROMPT_KEYS = ['prompt', 'cursorPos', 'commandMode'] as const satisfies readonly MutableKey[];
-const MODAL_RESULT_KEYS = ['selectionCallback', 'shortcutsOverlayActive',
-  'shortcutsScrollOffset', 'prompt', 'cursorPos', 'nextImageId'] as const satisfies readonly MutableKey[];
+const MODAL_RESULT_KEYS = ['selectionCallback', 'prompt', 'cursorPos', 'nextImageId'] as const satisfies readonly MutableKey[];
 const INDICATOR_KEYS = ['indicatorFocused'] as const satisfies readonly MutableKey[];
 const COMMAND_KEYS = ['prompt', 'cursorPos', 'commandMode', 'nextPasteId', 'nextImageId'] as const satisfies readonly MutableKey[];
 const KEY_KEYS = ['prompt', 'cursorPos', 'inputScrollTop', 'commandMode', 'indicatorFocused'] as const satisfies readonly MutableKey[];

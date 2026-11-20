@@ -1,10 +1,19 @@
-import { timingSafeEqual } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { actorFromPrincipal, type Actor, type OwnerIdentity } from '@goodvibes-jev/engine/daemon-api/http-policy';
 import type { UserAuthManager } from './user-auth.js';
 import type { AuthenticatedNativePairingToken, SettingsPairingAuthority, NativeContinuationGrant, NativeContinuationAuthority, NativeCredential } from '../pairing/pairing-token-store.js';
 import type { RevisionSource } from '../utils/revision.js';
 
 export const OPERATOR_SESSION_COOKIE_NAME = 'goodvibes_session';
+/**
+ * The browser's readable sign-in marker, set beside the HttpOnly credential cookie and
+ * cleared with it: `<generation>.<principal, base64url>`. It names who is signed in and
+ * changes with every sign-in, so a page can tell an identity change without ever seeing
+ * the credential. It authenticates nothing.
+ */
+export const IDENTITY_MARKER_COOKIE_NAME = 'goodvibes_identity';
+/** How long a browser keeps a credential that does not expire by itself (a device or operator token): the longest a browser keeps a cookie. */
+export const NON_EXPIRING_BROWSER_CREDENTIAL_MS = 400 * 24 * 60 * 60 * 1_000;
 
 export type AuthenticatedOperatorRequest =
   | {
@@ -272,27 +281,61 @@ export function operatorRequestActor(authenticated: AuthenticatedOperatorRequest
   }, owner);
 }
 
+/**
+ * The credential cookie: HttpOnly (no page script reads it) and SameSite=Strict (no
+ * other site's page or link carries it); Secure when the request came over TLS. A page
+ * on the same host at another port is the same site, so a state-changing request on
+ * this cookie is also held to the page's Origin (http/browser-origin.ts).
+ */
 export function buildOperatorSessionCookie(token: string, options: SessionCookieOptions): string {
-  const maxAgeSeconds = Math.max(0, Math.floor((options.expiresAt - Date.now()) / 1_000));
-  const secure = isSecureRequest(options.req, options.trustProxy);
-  const parts = [
-    `${OPERATOR_SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
-    'Path=/',
-    'HttpOnly',
-    'SameSite=Lax',
-    `Expires=${new Date(options.expiresAt).toUTCString()}`,
-    `Max-Age=${maxAgeSeconds}`,
-  ];
-  if (secure) parts.push('Secure');
-  return parts.join('; ');
+  return browserCookie(OPERATOR_SESSION_COOKIE_NAME, encodeURIComponent(token), options, true);
 }
 
 export function buildExpiredOperatorSessionCookie(req: Request, trustProxy = false): string {
+  return expiredBrowserCookie(OPERATOR_SESSION_COOKIE_NAME, req, trustProxy, true);
+}
+
+/** The readable marker beside the credential cookie, with the same end. */
+export function buildIdentityMarkerCookie(marker: string, options: SessionCookieOptions): string {
+  return browserCookie(IDENTITY_MARKER_COOKIE_NAME, marker, options, false);
+}
+
+export function buildExpiredIdentityMarkerCookie(req: Request, trustProxy = false): string {
+  return expiredBrowserCookie(IDENTITY_MARKER_COOKIE_NAME, req, trustProxy, false);
+}
+
+/** A new marker for a sign-in of `principal`: a fresh generation, so every sign-in is a change a page can see. */
+export function mintIdentityMarker(principal: string): string {
+  const generation = randomBytes(12).toString('base64url');
+  return `${generation}.${Buffer.from(principal, 'utf8').toString('base64url')}`;
+}
+
+/** The marker the request carries, when it has the marker's shape. */
+export function readIdentityMarker(req: Request): string | null {
+  const marker = parseCookies(req.headers.get('cookie')).get(IDENTITY_MARKER_COOKIE_NAME)?.trim();
+  return marker && /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$/.test(marker) ? marker : null;
+}
+
+function browserCookie(name: string, value: string, options: SessionCookieOptions, httpOnly: boolean): string {
+  const maxAgeSeconds = Math.max(0, Math.floor((options.expiresAt - Date.now()) / 1_000));
   const parts = [
-    `${OPERATOR_SESSION_COOKIE_NAME}=`,
+    `${name}=${value}`,
     'Path=/',
-    'HttpOnly',
-    'SameSite=Lax',
+    ...(httpOnly ? ['HttpOnly'] : []),
+    'SameSite=Strict',
+    `Expires=${new Date(options.expiresAt).toUTCString()}`,
+    `Max-Age=${maxAgeSeconds}`,
+  ];
+  if (isSecureRequest(options.req, options.trustProxy)) parts.push('Secure');
+  return parts.join('; ');
+}
+
+function expiredBrowserCookie(name: string, req: Request, trustProxy: boolean, httpOnly: boolean): string {
+  const parts = [
+    `${name}=`,
+    'Path=/',
+    ...(httpOnly ? ['HttpOnly'] : []),
+    'SameSite=Strict',
     'Expires=Thu, 01 Jan 1970 00:00:00 GMT',
     'Max-Age=0',
   ];

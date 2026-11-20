@@ -515,7 +515,7 @@ export async function handleOpenAiSubscriptionFinishForHandler(handler: InputHan
       handler.requestRender();
       return;
     }
-    // The same reading `/subscription login openai finish` uses: a provider
+    // The same reading `/provider finish openai` uses: a provider
     // error in the pasted address is reported, and an address from another
     // login attempt (its state differs) is refused.
     const authorization = readAuthorizationInput(handler.onboardingWizard.getTextFieldValue('providers.openai-callback-code'), pending.state);

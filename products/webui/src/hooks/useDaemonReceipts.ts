@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { client as platformClient, type DaemonReceipt } from '../lib/goodvibes';
-import { takeRelayPairingCorruptionNotice } from '../lib/relay-pairing';
 
 /**
  * useDaemonReceipts, read the daemon's undelivered receipts once per connect
@@ -17,12 +16,6 @@ import { takeRelayPairingCorruptionNotice } from '../lib/relay-pairing';
  * receipt, or one seen on a prior connect, never re-appears even if a
  * reconnect re-reads. A failed read marks nothing delivered daemon-side,
  * so it is retried on the next attach edge.
- *
- * ALSO carries any pending LOCAL notice (relay-pairing.ts's
- * takeRelayPairingCorruptionNotice, a corrupt stored record this device just
- * discarded), consumed once on mount, independent of connection/sign-in state,
- * since it describes something this browser already did to itself rather than
- * anything the daemon reported.
  */
 export interface DaemonReceiptsState {
   readonly receipts: readonly DaemonReceipt[];
@@ -45,14 +38,6 @@ export function useDaemonReceipts(connected: boolean, signedIn: boolean): Daemon
   // Latches true once we've consumed for the current connect; a drop resets it
   // so the next reconnect is a fresh attach edge.
   const consumedForConnectRef = useRef(false);
-
-  useEffect(() => {
-    const localNotice = takeRelayPairingCorruptionNotice();
-    if (localNotice && !seenIdsRef.current.has(localNotice.id)) {
-      seenIdsRef.current.add(localNotice.id);
-      setReceipts((current) => [...current, localNotice]);
-    }
-  }, []);
 
   useEffect(() => {
     const attached = connected && signedIn;

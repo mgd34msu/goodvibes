@@ -1,5 +1,5 @@
 /**
- * `/policy`, the versioned policy-bundle workflow, as engine logic: load a
+ * The versioned policy-bundle workflow `/security` runs, as engine logic: load a
  * candidate, see what it changes (the rule diff and the recorded calls it
  * decides differently), lint, preflight, promote, roll back, report status.
  *
@@ -129,7 +129,7 @@ async function handleLoad(args: string[], context: PolicyCommandContext): Promis
   const policyState = getPolicyState(context);
   const file = args[0];
   if (!file) {
-    context.print('[policy] Nothing was loaded: name the bundle file to load, `/policy load <bundle-file>`.');
+    context.print('[policy] Nothing was loaded: name the bundle file to load, `/security load-policy <bundle-file>`.');
     return;
   }
   let bundle: SignedPolicyBundle<PolicyBundlePayload>;
@@ -149,7 +149,7 @@ async function handleLoad(args: string[], context: PolicyCommandContext): Promis
   if (candidate) {
     policyState.notify();
     context.print(bundleSummary('[policy] Candidate loaded', candidate));
-    context.print('[policy] Next: run `/policy simulate` to see which recorded calls it would decide differently, then `/policy promote --yes`.');
+    context.print('[policy] Next: run `/security simulate-policy` to see which recorded calls it would decide differently, then `/security enforce-policy`.');
     await refreshLintAfterPolicyChange(context);
   }
 }
@@ -169,8 +169,8 @@ function printImpact(context: PolicyCommandContext, impact: PolicyImpact): void 
  * decided again by code with no model request. Promotion then confirms it.
  */
 /**
- * Per registry, the digest of the candidate `/policy simulate` last showed:
- * `/policy promote --yes` enforces only that candidate, never one loaded since.
+ * Per registry, the digest of the candidate `/security simulate-policy` last showed:
+ * `/security enforce-policy` enforces only that candidate, never one loaded since.
  */
 const simulatedCandidates = new WeakMap<object, string>();
 
@@ -185,7 +185,7 @@ async function handleSimulate(_args: string[], context: PolicyCommandContext): P
   const candidate = registry.getCandidate();
   const current = registry.getCurrent();
   if (!candidate) {
-    context.print('[policy] No candidate bundle loaded. Run `/policy load <bundle-file>` first.');
+    context.print('[policy] No candidate bundle loaded. Run `/security load-policy <bundle-file>` first.');
     return;
   }
   if (!registry.markSimulating()) {
@@ -203,7 +203,7 @@ async function handleSimulate(_args: string[], context: PolicyCommandContext): P
     registry.abandonSimulation();
     policyState.notify();
     if (isAbortError(error)) throw error;
-    context.print(`[policy] Review failed: ${summarizeError(error)}. The candidate is back in "loaded" state; run \`/policy simulate\` again.`);
+    context.print(`[policy] Review failed: ${summarizeError(error)}. The candidate is back in "loaded" state; run \`/security simulate-policy\` again.`);
     return;
   }
   registry.attachImpact(impact);
@@ -218,7 +218,7 @@ async function handleSimulate(_args: string[], context: PolicyCommandContext): P
   policyState.notify();
   await handleDiff([], context);
   printImpact(context, impact);
-  context.print('[policy] Run `/policy promote --yes` to enforce the candidate with these changes.');
+  context.print('[policy] Run `/security enforce-policy` to enforce the candidate with these changes.');
   const reviewed = registry.getCandidate();
   if (reviewed) context.print(bundleSummary('[policy] Candidate state', reviewed));
 }
@@ -229,8 +229,8 @@ async function handleDiff(_args: string[], context: PolicyCommandContext): Promi
   if (!diff) {
     const current = registry.getCurrent();
     const candidate = registry.getCandidate();
-    if (!current) context.print('[policy] No active bundle. Load a bundle with `/policy load`.');
-    else if (!candidate) context.print('[policy] No candidate bundle. Load a candidate with `/policy load`.');
+    if (!current) context.print('[policy] No active bundle. Load a bundle with `/security load-policy`.');
+    else if (!candidate) context.print('[policy] No candidate bundle. Load a candidate with `/security load-policy`.');
     else context.print('[policy] Diff unavailable.');
     return;
   }
@@ -265,7 +265,7 @@ async function handleLint(_args: string[], context: PolicyCommandContext): Promi
   const current = registry.getCurrent();
   const candidate = registry.getCandidate();
   if (!current && !candidate) {
-    context.print('[policy] No policy bundles loaded. Use `/policy load` to begin.');
+    context.print('[policy] No policy bundles loaded. Use `/security load-policy` to begin.');
     return;
   }
   const findings = [
@@ -273,7 +273,7 @@ async function handleLint(_args: string[], context: PolicyCommandContext): Promi
     ...(candidate ? (await lintPolicyConfig({ mode: 'custom', rules: candidate.rules })).map((finding) => ({ scope: 'candidate', ...finding })) : []),
   ];
   if (registry.getCurrent() !== current || registry.getCandidate() !== candidate) {
-    context.print('[policy] Policy bundles changed while lint was running. Run `/policy lint` again.');
+    context.print('[policy] Policy bundles changed while lint was running. Run `/security lint-policy` again.');
     return;
   }
   if (findings.length === 0) {
@@ -293,7 +293,7 @@ async function handlePreflight(_args: string[], context: PolicyCommandContext): 
   const candidate = registry.getCandidate();
   const lintFindings = await policyState.refreshLint(registry);
   if (registry.getCurrent() !== current || registry.getCandidate() !== candidate) {
-    context.print('[policy] Policy bundles changed while preflight was running. Run `/policy preflight` again.');
+    context.print('[policy] Policy bundles changed while preflight was running. Run `/security preflight` again.');
     return;
   }
   const review = buildPolicyPreflightReview({
@@ -321,15 +321,15 @@ async function handlePromote(args: string[], context: PolicyCommandContext): Pro
   const registry = getRegistry(context);
   const policyState = getPolicyState(context);
   const candidate = registry.getCandidate();
-  // Promotion is the operator's confirmation of the list `/policy simulate` showed.
+  // Promotion is the operator's confirmation of the list `/security simulate-policy` showed.
   if (candidate?.state === 'promoting' && !args.includes('--yes')) {
     if (candidate.impact) printImpact(context, candidate.impact);
-    context.print('[policy] Not promoted yet. Run `/policy promote --yes` to enforce the candidate with the changes above.');
+    context.print('[policy] Not promoted yet. Run `/security enforce-policy` to enforce the candidate with the changes above.');
     return;
   }
   // The candidate enforced is the one simulate showed: a candidate loaded or changed since is refused.
   if (candidate && simulatedCandidates.get(registry) !== candidateDigest(candidate)) {
-    context.print('[policy] Not promoted: the candidate is not the one `/policy simulate` showed (it was loaded or changed since, or never simulated). Run `/policy simulate` to see its changes, then `/policy promote --yes`.');
+    context.print('[policy] Not promoted: the candidate is not the one `/security simulate-policy` showed (it was loaded or changed since, or never simulated). Run `/security simulate-policy` to see its changes, then `/security enforce-policy`.');
     return;
   }
   const result = registry.promote();
@@ -340,7 +340,7 @@ async function handlePromote(args: string[], context: PolicyCommandContext): Pro
       code: 'POLICY_PROMOTION_BLOCKED',
       state: 'the active enforcement policy is unchanged',
       reason: `Not promoted: ${result.error}`,
-      next: ['Run /policy simulate to see what the candidate changes, then /policy promote --yes.'],
+      next: ['Run /security simulate-policy to see what the candidate changes, then /security enforce-policy.'],
     }));
   }
   const current = registry.getCurrent();
@@ -361,7 +361,7 @@ async function handleRollback(_args: string[], context: PolicyCommandContext): P
       code: 'POLICY_ROLLBACK_FAILED',
       state: 'the active enforcement policy is unchanged',
       reason: `Rollback failed: ${result.error}`,
-      next: ['Run /policy status to see the bundle history.'],
+      next: ['Run /security policy to see the bundle history.'],
     }));
   }
   const current = registry.getCurrent();
@@ -380,31 +380,16 @@ async function handleStatus(_args: string[], context: PolicyCommandContext): Pro
   const history = registry.getHistory();
   const bundleFailure = policyState.getConfiguredBundleFailure();
   if (bundleFailure !== null) {
-    context.print(`[policy] The configured policy bundle did not load: ${bundleFailure}. Fix the bundle file and restart or run \`/policy load\`; until then it is not enforced.`);
+    context.print(`[policy] The configured policy bundle did not load: ${bundleFailure}. Fix the bundle file and restart or run \`/security load-policy\`; until then it is not enforced.`);
   }
   if (!current && !candidate) {
-    context.print('[policy] No policy bundles loaded. Use `/policy load` to begin.');
+    context.print('[policy] No policy bundles loaded. Use `/security load-policy` to begin.');
     return;
   }
   if (current) context.print(bundleSummary('[policy] Current (enforced)', current));
   if (candidate) context.print(bundleSummary('[policy] Candidate', candidate));
   context.print(`[policy] History: ${history.length} previous bundle(s).`);
   if (candidate?.impact) printImpact(context, candidate.impact);
-}
-
-export function renderPolicyUsage(): string {
-  return [
-    'Usage: /policy <subcommand>',
-    '  /policy                        — open the policy/governance modal',
-    '  load <bundle-file>            — Load a candidate bundle from a JSON file',
-    '  simulate                      — Show what the candidate changes: rule diff and recorded calls decided differently',
-    '  diff                          — Show rule diff (current vs candidate)',
-    '  lint                          — Lint active and candidate bundles',
-    '  preflight                     — Review proactive policy and MCP risk state',
-    '  promote --yes                 — Enforce the candidate, confirming the changes simulate showed',
-    '  rollback                      — Restore the previous active bundle',
-    '  status                        — Show current policy state',
-  ].join('\n');
 }
 
 export async function dispatchPolicyCommand(args: readonly string[], context: PolicyCommandContext): Promise<void> {
@@ -439,7 +424,11 @@ export async function dispatchPolicyCommand(args: readonly string[], context: Po
       await handleStatus(rest, context);
       break;
     default:
-      context.print(renderPolicyUsage());
-      break;
+      throw new RefusalError(refusal({
+        code: 'USAGE',
+        state: 'nothing was changed',
+        reason: `The policy workflow has no step "${sub ?? ''}".`,
+        next: ['/security lists the policy actions.'],
+      }));
   }
 }

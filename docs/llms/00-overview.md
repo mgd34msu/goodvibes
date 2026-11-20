@@ -268,8 +268,8 @@ When the terminal app or Agent writes a daemon-owned key while a daemon runs, th
 
 Inside the terminal app:
 
-- `/settings` opens the settings screen; `/settings <category|key>` opens it at a category or a key.
-- `/config set <key> <value>` sets a key directly. `/config` alone opens the same screen as `/settings`.
+- `/settings` lists what it does; `/settings open [topic|key|words]` opens the settings screen there, and `/settings list`, `get <key>`, `set <key> <value>` and `reset <key>` read and change settings without the screen, as in the Agent.
+- `/config set <key> <value>` sets a key directly.
 
 Inside Agent:
 

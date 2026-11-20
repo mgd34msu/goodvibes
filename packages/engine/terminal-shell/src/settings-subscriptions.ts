@@ -20,8 +20,8 @@ export interface SubscriptionEntryHints {
     readonly finish: (provider: string) => string;
 }
 const DEFAULT_HINTS: SubscriptionEntryHints = {
-    login: provider => `Use /subscription login ${provider} start to begin browser sign-in.`,
-    finish: provider => `Finish /subscription login ${provider} finish <code> to activate this session.`,
+    login: provider => `Use /provider sign-in ${provider} to begin browser sign-in.`,
+    finish: provider => `Finish with /provider finish ${provider} <code> to activate this session.`,
 };
 export function buildSubscriptionEntries(manager: SubscriptionManager | null, serviceRegistry: Pick<ServiceInspectionQuery, 'getAll'> | null, hints: SubscriptionEntryHints = DEFAULT_HINTS): SubscriptionEntry[] {
     if (!manager)

@@ -95,11 +95,11 @@ function receiptSpec(kind: AgentWorkspaceOperationsCommandEditorKind): AgentWork
 const OPERATIONS_COMMAND_EDITOR_SPECS: Readonly<Record<AgentWorkspaceOperationsCommandEditorKind, AgentWorkspaceEditorSpecEntry<AgentWorkspaceOperationsCommandEditorKind>>> = {
   'health-repair': {
     mode: 'create',
-    title: 'Show Health Repair Guidance',
+    title: 'Check One Health Area',
     selectedFieldIndex: 0,
-    message: 'Show health repair guidance for one domain. Agent does not manage connected-host hosting or mutate connected-host lifecycle.',
+    message: 'Check one health area in detail. Agent does not manage connected-host hosting or mutate connected-host lifecycle.',
     fields: [
-      { id: 'domain', label: 'Domain', value: 'settings', required: true, multiline: false, hint: 'settings, auth, accounts, host, remote, mcp, continuity, or maintenance.' },
+      { id: 'domain', label: 'Area', value: 'settings', required: true, multiline: false, hint: 'setup, services, provider, accounts, auth, settings, remote, mcp, memory, continuity, maintenance or approvals.' },
     ],
   },
   'approval-review': {

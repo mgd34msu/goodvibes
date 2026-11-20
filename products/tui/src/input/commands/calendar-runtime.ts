@@ -1,33 +1,25 @@
 /**
- * calendar-runtime.ts, `/calendar`, the terminal surface over the daemon's
+ * calendar-runtime.ts: this app's host for `/calendar` (one description shared
+ * with the Agent, terminal-shell/calendar-command.ts), over the daemon's
  * calendar capability.
  *
- * As with `/mail`, no calendar logic lives here. CalDAV, ICS parsing, settings
- * resolution and the confirmation gate are all in
- * `src/daemon/handlers/calendar/`; this file parses arguments, renders results,
- * and refuses honestly when the capability is not set up.
+ * No calendar logic lives here. CalDAV, ICS parsing, settings resolution and
+ * the confirmation gate are the daemon's calendar handlers; this file reads
+ * the times typed, renders results, and refuses honestly when the capability
+ * is not set up. Adding, changing and removing an event reach the calendar's
+ * guests: changing and removing ask first, and the daemon gates each call on
+ * `body.confirm` and an explicit user request.
  *
- * ## What is exposed, and what is not
- *
- * `list` (the agenda) and `get` are exposed: knowing what is next without
- * leaving the terminal is the whole value of a calendar on this surface.
- * `create`, `update` and `delete` each ask once before they run (the command
- * registry's one confirmation, showing the event or the change with its times
- * in this machine's zone), because each reaches the calendar's guests, and the
- * daemon gates the call on both `body.confirm` and an explicit user request.
- *
- * `calendar.ics.import` and `calendar.ics.export` are deliberately NOT given a
- * command. They are bulk file-level transfers of a whole calendar, an
- * operation whose natural home is a file path and a scheduled job, not a line
- * typed into a coding session. They stay available to any surface through the
- * same catalog; this product simply does not claim to be the right place for
- * them. That is a scoping decision, recorded here so it reads as a choice
- * rather than an omission.
+ * `calendar.ics.import` and `calendar.ics.export` are bulk transfers of a
+ * whole calendar whose natural home is a file path and a scheduled job; here
+ * "Import events from a file" and "Export events to a file" are the Agent's,
+ * on its own events, and this app says so.
  */
 
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { splitLeadingFlags } from './mail-runtime.ts';
-import { rawRestAfterLeadingFlags } from '@goodvibes-jev/engine/terminal-shell/slash-command-parser';
+import { registerCalendarCommand, type CalendarEventChange, type CalendarNewEvent } from '@goodvibes-jev/engine/terminal-shell/calendar-command';
+import type { ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import {
   EXPLICIT_WRITE_INVOCATION_CONTEXT,
   claimIrreversibleWrite,
@@ -48,7 +40,6 @@ interface CalendarEvent {
   readonly attendees?: readonly string[];
 }
 
-const DEFAULT_LIST_LIMIT = 20;
 const MAX_LIST_LIMIT = 200;
 
 /** `+HH:MM` / `-HH:MM` for a `Date.getTimezoneOffset()` value (minutes west of UTC). */
@@ -107,7 +98,7 @@ export function renderAgenda(events: readonly CalendarEvent[]): string {
     const where = event.location ? `  @ ${truncate(event.location, 24)}` : '';
     lines.push(`  ${formatWhen(event.start)}  ${truncate(event.title, 44).padEnd(44)}${where}`);
   }
-  lines.push('', '  /calendar get <id>: open one event   /calendar update <id> …   /calendar delete <id>');
+  lines.push('', '  /calendar get <event> opens one; /calendar change and /calendar delete act on one.');
   return lines.join('\n');
 }
 
@@ -126,340 +117,106 @@ export function renderEvent(event: CalendarEvent): string {
   return lines.join('\n');
 }
 
-/**
- * Read `title | start | end`: the start and end are the last two fields (a
- * time holds no pipe) and the title is everything before them, pipes included.
- * Same separator as `/mail`, for the same reason: titles contain spaces.
- */
-export function parseEventArgs(raw: string): { title: string; start: string; end: string } | null {
-  const last = raw.lastIndexOf('|');
-  const middle = last < 0 ? -1 : raw.lastIndexOf('|', last - 1);
-  if (middle < 0) return null;
-  const title = raw.slice(0, middle).trim();
-  const start = raw.slice(middle + 1, last).trim();
-  const end = raw.slice(last + 1).trim();
-  if (!title || !start || !end) return null;
-  return { title, start, end };
-}
-
-/**
- * Read the fields of `/calendar update <id> <title | start | end>`. Any field
- * may be left empty to keep it; the start and end are the last two fields and
- * the title is everything before them. Null when the line is not three fields
- * or changes nothing.
- */
-export function parseEventUpdateArgs(raw: string): { title?: string; start?: string; end?: string } | null {
-  const last = raw.lastIndexOf('|');
-  const middle = last < 0 ? -1 : raw.lastIndexOf('|', last - 1);
-  if (middle < 0) return null;
-  const title = raw.slice(0, middle).trim();
-  const start = raw.slice(middle + 1, last).trim();
-  const end = raw.slice(last + 1).trim();
-  if (!title && !start && !end) return null;
-  return { ...(title ? { title } : {}), ...(start ? { start } : {}), ...(end ? { end } : {}) };
-}
-
 const BARE_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-/** `--again` creates an event identical to one already created; `--confirm` was the old second step and has no effect. */
-const CREATE_FLAGS: ReadonlySet<string> = new Set(['--again', '--confirm']);
-
-function parseLimit(raw: string | undefined): number {
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_LIST_LIMIT;
-  return Math.min(MAX_LIST_LIMIT, Math.floor(parsed));
-}
-
-const createRawRest = rawRestAfterLeadingFlags(['create'], new Set(['--yes', ...CREATE_FLAGS]));
-
-const USAGE = [
-  'Usage:',
-  '  /calendar                   connection status and the agenda ahead',
-  '  /calendar status            connection status only',
-  '  /calendar list [n]          the next n events (default 20)',
-  '  /calendar get <id>          open one event',
-  '  /calendar create [--yes] [--again] <title | start | end>   shows the event and asks once, then creates it',
-  '  /calendar update [--yes] <id> <title | start | end>       shows the change and asks once; leave a field empty to keep it',
-  '  /calendar delete [--yes] <id>                             asks once, then removes the event',
-  '',
-  '  --yes and --again go before the title or id; the same words inside the title are text.',
-  '  Guests are told of a change or a removal by the calendar.',
-  '  Times are ISO-8601, e.g. 2026-08-01T14:00:00Z or 2026-08-01T09:00:00-05:00;',
-  '  a time without a zone is read in this machine\'s zone, which the question names.',
-].join('\n');
-
-export function registerCalendarRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
-    name: 'calendar',
-    aliases: ['cal'],
-    description: 'Calendar over the daemon: connection status, agenda, event detail, create, update, delete',
-    usage: '[status|list|get|create|update|delete] …',
-    argsHint: '[status|list <n>|get <id>|create|update <id>|delete <id>]',
-    subcommands: {
-      status: '', list: '[n]', get: '<id>', create: '[--yes] [--again] <title | start | end>',
-      update: '[--yes] <id> <title | start | end>', delete: '[--yes] <id>',
-    },
-    // --yes counts only before the title: the same word inside the title is text.
-    leadingFlagsOnly: true,
-    // From the title on the line is taken as typed: the title keeps its spacing and quotes.
-    rawRest: (args, upcoming) => {
-      if ((args[0] ?? '').toLowerCase() !== 'update') return createRawRest(args, upcoming);
-      // `update [--yes] <id>`, then the fields are taken as typed.
-      const words = args.slice(1);
-      const id = words.findIndex((word) => word !== '--yes');
-      return id >= 0 && id === words.length - 1 ? args.length : undefined;
-    },
-    confirm(args) {
-      const verb = (args[0] ?? '').toLowerCase();
-      if (verb === 'update') {
-        const plan = planEventUpdate(args.slice(1));
-        if (!plan.ok) return undefined;
-        return { title: `Change calendar event ${plan.eventId}?`, detail: plan.lines.join('\n'), confirmLabel: 'Change' };
-      }
-      if (verb === 'delete') {
-        const eventId = args[1];
-        if (!eventId) return undefined;
-        return {
-          title: `Delete calendar event ${eventId}?`,
-          detail: [
-            `Event id: ${eventId} (open it first with /calendar get ${eventId} to see which event this is).`,
-            'It is removed from the calendar and its guests are told; this app cannot restore it.',
-          ].join('\n'),
-          confirmLabel: 'Delete',
-        };
-      }
-      if (verb !== 'create') return undefined;
-      const plan = planEventCreate(args.slice(1));
-      if (!plan.ok) return undefined; // The handler prints the usage or the refusal; nothing is created.
-      return {
-        title: `Create calendar event "${plan.title}"?`,
-        detail: plan.lines.join('\n'),
-        confirmLabel: 'Create',
-      };
-    },
-    async handler(args, ctx) {
-      const gateway = ctx.workspace.gatewayMethods;
-      const sub = (args[0] ?? '').toLowerCase();
-
-      if (sub === 'status') {
-        ctx.print(renderConnectionStatus(await probeConnection(gateway, 'calendar')));
-        return;
-      }
-
-      if (!gateway) {
-        ctx.print(renderConnectionStatus(await probeConnection(undefined, 'calendar')));
-        return;
-      }
-
-      if (sub === '' || sub === 'list') {
-        await listEvents(ctx, gateway, parseLimit(args[1]), sub === '');
-        return;
-      }
-      if (sub === 'get') {
-        await getEvent(ctx, gateway, args[1]);
-        return;
-      }
-      if (sub === 'create') {
-        await createEvent(ctx, gateway, args.slice(1));
-        return;
-      }
-      if (sub === 'update') {
-        await updateEvent(ctx, gateway, args.slice(1));
-        return;
-      }
-      if (sub === 'delete') {
-        await deleteEvent(ctx, gateway, args[1]);
-        return;
-      }
-      ctx.print(USAGE);
-    },
-  });
-}
 
 type Gateway = NonNullable<CommandContext['workspace']['gatewayMethods']>;
 
-async function withStatusOnFailure(
-  ctx: CommandContext,
-  gateway: Gateway,
-  label: string,
-  run: () => Promise<void>,
-): Promise<void> {
+/** Every failure says why and, since "not set up" is the usual cause, carries the connection status with its next step. */
+async function withStatusOnFailure<T>(gateway: Gateway, label: string, run: () => Promise<T>): Promise<T> {
   try {
-    await run();
+    return await run();
   } catch (error) {
-    ctx.print(`[calendar ${label}] ${errorText(error)}`);
-    ctx.print(renderConnectionStatus(await probeConnection(gateway, 'calendar')));
+    if (error instanceof Error && 'refusal' in error) throw error;
+    throw commandRefusal(`${label}: ${errorText(error)}\n${renderConnectionStatus(await probeConnection(gateway, 'calendar'))}`);
   }
 }
 
-async function listEvents(ctx: CommandContext, gateway: Gateway, limit: number, withStatus: boolean): Promise<void> {
-  await withStatusOnFailure(ctx, gateway, 'list', async () => {
-    const result = await gateway.invoke('calendar.events.list', {
-      ...READ_INVOCATION_CONTEXT,
-      body: { limit, from: new Date().toISOString() },
-    }) as { readonly events?: readonly CalendarEvent[]; readonly more?: boolean };
-    if (withStatus) {
-      ctx.print(renderConnectionStatus({
-        surface: 'calendar',
-        state: 'ready',
-        detail: 'Calendar is connected: the daemon reached the server and returned a result.',
-        nextActions: [],
-      }));
-    }
-    ctx.print(renderAgenda(result.events ?? []));
-    if (result.more === true) {
-      ctx.print(limit < MAX_LIST_LIMIT
-        ? `  More events follow than the ${String(limit)} shown; /calendar list ${String(Math.min(MAX_LIST_LIMIT, limit * 2))} shows more.`
-        : `  More events follow than the ${String(MAX_LIST_LIMIT)} shown.`);
-    }
-  });
+function gatewayOf(ctx: CommandContext): Gateway {
+  const gateway = ctx.workspace.gatewayMethods;
+  if (!gateway) throw commandRefusal('The calendar is the daemon\'s, and this terminal is not connected to it.', '/calendar status says what to do');
+  return gateway;
 }
 
-async function getEvent(ctx: CommandContext, gateway: Gateway, eventId: string | undefined): Promise<void> {
-  if (!eventId) {
-    ctx.print('Usage: /calendar get <id>; the id from /calendar list.');
-    return;
-  }
-  await withStatusOnFailure(ctx, gateway, 'get', async () => {
-    const event = await gateway.invoke('calendar.events.get', {
-      ...READ_INVOCATION_CONTEXT,
-      body: { eventId },
-    }) as CalendarEvent;
-    ctx.print(renderEvent(event));
-  });
+async function eventsAhead(gateway: Gateway, days: number, limit: number): Promise<{ readonly events?: readonly CalendarEvent[]; readonly more?: boolean }> {
+  const from = new Date();
+  return await gateway.invoke('calendar.events.list', {
+    ...READ_INVOCATION_CONTEXT,
+    body: { limit, from: from.toISOString(), to: new Date(from.getTime() + days * 86_400_000).toISOString() },
+  }) as { readonly events?: readonly CalendarEvent[]; readonly more?: boolean };
 }
 
-/** A `/calendar create` line read into the event it creates, or why it creates nothing. */
-type EventCreatePlan =
-  | { readonly ok: true; readonly title: string; readonly start: string; readonly end: string; readonly again: boolean; readonly lines: readonly string[] }
-  | { readonly ok: false; readonly problem: string };
-
-function planEventCreate(rest: readonly string[]): EventCreatePlan {
-  // Flags are read only before the title, so the same word inside the title is text.
-  const line = splitLeadingFlags(rest, CREATE_FLAGS);
-  const parsed = parseEventArgs(line.text);
-  if (parsed === null) {
-    return {
-      ok: false,
-      problem: [
-        'Usage: /calendar create [--again] <title | start | end>',
-        '  Three fields separated by |; start and end are the last two. For example:',
-        '  /calendar create Design review | 2026-08-01T14:00:00Z | 2026-08-01T15:00:00Z',
-      ].join('\n'),
-    };
-  }
-  const start = normaliseEventTime(parsed.start);
-  const end = normaliseEventTime(parsed.end);
-  if (!start || !end) {
-    return { ok: false, problem: `Not created: ${!start ? `start "${parsed.start}"` : `end "${parsed.end}"`} is not a time. Use ISO-8601, for example 2026-08-01T14:00:00Z.` };
-  }
-  const lines = [
-    `Title: ${parsed.title}`,
-    `Start: ${formatWhen(start.instant)}`,
-    `End:   ${formatWhen(end.instant)}`,
-    ...(start.zoneStated || end.zoneStated
-      ? [`A time typed without a zone is read in this machine's zone, UTC${offsetLabel(new Date(start.instant).getTimezoneOffset())}.`]
-      : []),
-    'Change it later with /calendar update <id>, or remove it with /calendar delete <id>.',
-  ];
-  return { ok: true, title: parsed.title, start: start.instant, end: end.instant, again: line.flags.has('--again'), lines };
+/** A time typed for an event, as the instant sent, or a refusal naming the blank. */
+function eventTime(label: string, raw: string): { readonly instant: string; readonly zoneStated: boolean } {
+  const time = normaliseEventTime(raw);
+  if (!time) throw commandRefusal(`${label}: "${raw}" is not a time. Use ISO-8601, for example 2026-08-01T14:00:00Z. Nothing was changed.`);
+  return time;
 }
 
-async function createEvent(ctx: CommandContext, gateway: Gateway, rest: readonly string[]): Promise<void> {
-  const plan = planEventCreate(rest);
-  if (!plan.ok) {
-    ctx.print(plan.problem);
-    return;
+async function addEvent(ctx: CommandContext, event: CalendarNewEvent, again: boolean): Promise<string> {
+  const gateway = gatewayOf(ctx);
+  if (!event.end) throw commandRefusal('The daemon\'s calendar needs an end time: give Ends (--end). Nothing was added.');
+  const start = eventTime('Starts', event.start);
+  const end = eventTime('Ends', event.end);
+  if (!claimIrreversibleWrite(gateway, `calendar.create\0${event.title}\0${start.instant}\0${end.instant}`, again)) {
+    throw commandRefusal('This exact event was already added (or an add was attempted and its outcome is unknown) from this session, so it was not added again.',
+      'Check the calendar first; to add it anyway choose "Add it again" (/calendar add ... --again)');
   }
-  // The registry has asked the owner by now (or the owner typed --yes), so this is the user's own explicit request.
-  if (!claimIrreversibleWrite(gateway, `calendar.create\0${plan.title}\0${plan.start}\0${plan.end}`, plan.again)) {
-    ctx.print('This exact event was already created (or a create was attempted and its outcome is unknown) from this session, so it was not created again. Check the calendar first; to create it anyway put --again before the title: /calendar create --again <title | start | end>.');
-    return;
-  }
-
-  await withStatusOnFailure(ctx, gateway, 'create', async () => {
+  return await withStatusOnFailure(gateway, 'The event was not added', async () => {
     const result = await gateway.invoke('calendar.events.create', {
       ...EXPLICIT_WRITE_INVOCATION_CONTEXT,
-      body: { title: plan.title, start: plan.start, end: plan.end, confirm: true },
+      body: {
+        title: event.title, start: start.instant, end: end.instant, confirm: true,
+        ...(event.location ? { location: event.location } : {}), ...(event.notes ? { description: event.notes } : {}),
+      },
     }) as { readonly eventId: string; readonly createdAt: string };
-    ctx.print(`Created "${plan.title}", ${formatWhen(plan.start)} to ${formatWhen(plan.end)} (event id ${result.eventId}).`);
+    const zone = start.zoneStated || end.zoneStated ? ` A time typed without a zone was read in this machine's zone, UTC${offsetLabel(new Date(start.instant).getTimezoneOffset())}.` : '';
+    return `Added "${event.title}", ${formatWhen(start.instant)} to ${formatWhen(end.instant)} (event ${result.eventId}).${zone}`;
   });
 }
 
-/** A `/calendar update` line read into the change it makes, or why it makes none. */
-type EventUpdatePlan =
-  | { readonly ok: true; readonly eventId: string; readonly fields: { readonly title?: string; readonly start?: string; readonly end?: string }; readonly lines: readonly string[] }
-  | { readonly ok: false; readonly problem: string };
-
-function planEventUpdate(rest: readonly string[]): EventUpdatePlan {
-  const usage = [
-    'Usage: /calendar update <id> <title | start | end>',
-    '  Leave a field empty to keep it. For example, to move an event and keep its title:',
-    '  /calendar update <id> | 2026-08-01T15:00:00Z | 2026-08-01T16:00:00Z',
-  ].join('\n');
-  const eventId = rest[0];
-  const parsed = parseEventUpdateArgs(rest.slice(1).join(' '));
-  if (!eventId || parsed === null) return { ok: false, problem: usage };
-  // A bare date on both ends keeps or makes the event all-day; any other time is read as an instant.
-  const allDay = (parsed.start === undefined || BARE_DATE.test(parsed.start)) && (parsed.end === undefined || BARE_DATE.test(parsed.end))
-    && (parsed.start !== undefined || parsed.end !== undefined);
-  const timeOf = (raw: string | undefined): { readonly instant: string; readonly zoneStated: boolean } | null | undefined => {
-    if (raw === undefined) return undefined;
-    if (allDay) return { instant: raw, zoneStated: false };
-    return normaliseEventTime(raw);
-  };
-  const start = timeOf(parsed.start);
-  const end = timeOf(parsed.end);
-  if (start === null || end === null) {
-    return { ok: false, problem: `Not changed: ${start === null ? `start "${parsed.start ?? ''}"` : `end "${parsed.end ?? ''}"`} is not a time. Use ISO-8601, for example 2026-08-01T14:00:00Z, or a date for an all-day event.` };
-  }
-  const shown = (time: { readonly instant: string }): string => (allDay ? `${time.instant} (all day)` : formatWhen(time.instant));
-  const fields = {
-    ...(parsed.title === undefined ? {} : { title: parsed.title }),
-    ...(start === undefined ? {} : { start: start.instant }),
-    ...(end === undefined ? {} : { end: end.instant }),
-  };
-  const lines = [
-    `Event id: ${eventId}`,
-    ...(parsed.title === undefined ? [] : [`Title: ${parsed.title}`]),
-    ...(start === undefined ? [] : [`Start: ${shown(start)}`]),
-    ...(end === undefined ? [] : [`End:   ${shown(end)}`]),
-    'Fields left empty keep their value. Guests are told of the change.',
-    ...(start?.zoneStated || end?.zoneStated
-      ? [`A time typed without a zone is read in this machine's zone, UTC${offsetLabel(new Date().getTimezoneOffset())}.`]
-      : []),
-  ];
-  return { ok: true, eventId, fields, lines };
-}
-
-async function updateEvent(ctx: CommandContext, gateway: Gateway, rest: readonly string[]): Promise<void> {
-  const plan = planEventUpdate(rest);
-  if (!plan.ok) {
-    ctx.print(plan.problem);
-    return;
-  }
-  // The registry has asked the owner by now (or the owner typed --yes), so this is the user's own explicit request.
-  await withStatusOnFailure(ctx, gateway, 'update', async () => {
+async function changeEvent(ctx: CommandContext, eventId: string, change: CalendarEventChange): Promise<string> {
+  const gateway = gatewayOf(ctx);
+  const allDay = (change.start === undefined || BARE_DATE.test(change.start)) && (change.end === undefined || BARE_DATE.test(change.end))
+    && (change.start !== undefined || change.end !== undefined);
+  const timeOf = (label: string, raw: string | undefined): string | undefined => raw === undefined ? undefined : allDay ? raw : eventTime(label, raw).instant;
+  const start = timeOf('Starts', change.start);
+  const end = timeOf('Ends', change.end);
+  return await withStatusOnFailure(gateway, 'The event was not changed', async () => {
     const result = await gateway.invoke('calendar.events.update', {
       ...EXPLICIT_WRITE_INVOCATION_CONTEXT,
-      body: { eventId: plan.eventId, ...plan.fields, confirm: true },
+      body: { eventId, ...(change.title ? { title: change.title } : {}), ...(start ? { start } : {}), ...(end ? { end } : {}), confirm: true },
     }) as { readonly eventId: string; readonly updatedAt: string };
-    ctx.print(`Changed event ${result.eventId}. /calendar get ${result.eventId} shows it now.`);
+    return `Changed event ${result.eventId}. /calendar get ${result.eventId} shows it now.`;
   });
 }
 
-async function deleteEvent(ctx: CommandContext, gateway: Gateway, eventId: string | undefined): Promise<void> {
-  if (!eventId) {
-    ctx.print('Usage: /calendar delete <id>; the id from /calendar list.');
-    return;
-  }
-  await withStatusOnFailure(ctx, gateway, 'delete', async () => {
-    const result = await gateway.invoke('calendar.events.delete', {
-      ...EXPLICIT_WRITE_INVOCATION_CONTEXT,
-      body: { eventId, confirm: true },
-    }) as { readonly eventId: string; readonly deleted: boolean };
-    ctx.print(result.deleted
-      ? `Deleted event ${result.eventId}.`
-      : `Event ${result.eventId} was not on the calendar any more, so nothing was deleted.`);
+export function registerCalendarRuntimeCommands(registry: CommandRegistry): void {
+  registerCalendarCommand<CommandContext>(registry, {
+    status: async (ctx) => renderConnectionStatus(await probeConnection(ctx.workspace.gatewayMethods, 'calendar')),
+    async upcoming(ctx, days) {
+      const gateway = gatewayOf(ctx);
+      return await withStatusOnFailure(gateway, 'The calendar could not be read', async () => {
+        const result = await eventsAhead(gateway, days, MAX_LIST_LIMIT);
+        return [renderAgenda(result.events ?? []), ...(result.more === true ? [`  More events follow than the ${MAX_LIST_LIMIT} shown; ask for fewer days.`] : [])].join('\n');
+      });
+    },
+    async events(ctx) {
+      const result = await eventsAhead(gatewayOf(ctx), 30, 50);
+      return (result.events ?? []).map((event): ListRow => ({ value: event.id, label: truncate(event.title, 50), detail: formatWhen(event.start) }));
+    },
+    async get(ctx, eventId) {
+      const gateway = gatewayOf(ctx);
+      return await withStatusOnFailure(gateway, 'The event could not be read', async () =>
+        renderEvent(await gateway.invoke('calendar.events.get', { ...READ_INVOCATION_CONTEXT, body: { eventId } }) as CalendarEvent));
+    },
+    add: addEvent,
+    change: changeEvent,
+    async remove(ctx, eventId) {
+      const gateway = gatewayOf(ctx);
+      return await withStatusOnFailure(gateway, 'The event was not removed', async () => {
+        const result = await gateway.invoke('calendar.events.delete', { ...EXPLICIT_WRITE_INVOCATION_CONTEXT, body: { eventId, confirm: true } }) as { readonly eventId: string; readonly deleted: boolean };
+        return result.deleted ? `Removed event ${result.eventId}.` : `Event ${result.eventId} was not on the calendar any more, so nothing was removed.`;
+      });
+    },
   });
 }

@@ -1798,11 +1798,6 @@
       "types": "./terminal-shell/dist/process-output-log.d.ts",
       "import": "./terminal-shell/dist/process-output-log.js"
     },
-    "./terminal-shell/overlay-filter": {
-      "bun": "./terminal-shell/src/overlay-filter.ts",
-      "types": "./terminal-shell/dist/overlay-filter.d.ts",
-      "import": "./terminal-shell/dist/overlay-filter.js"
-    },
     "./terminal-shell/format": {
       "bun": "./terminal-shell/src/format.ts",
       "types": "./terminal-shell/dist/format.d.ts",
@@ -2403,11 +2398,6 @@
       "types": "./terminal-shell/dist/shell-completion.d.ts",
       "import": "./terminal-shell/dist/shell-completion.js"
     },
-    "./terminal-shell/shortcuts-overlay": {
-      "bun": "./terminal-shell/src/renderer/shortcuts-overlay.ts",
-      "types": "./terminal-shell/dist/renderer/shortcuts-overlay.d.ts",
-      "import": "./terminal-shell/dist/renderer/shortcuts-overlay.js"
-    },
     "./terminal-shell/splash-lines": {
       "bun": "./terminal-shell/src/splash-lines.ts",
       "types": "./terminal-shell/dist/splash-lines.d.ts",
@@ -2908,11 +2898,6 @@
       "types": "./terminal-shell/dist/voice-settings-review.d.ts",
       "import": "./terminal-shell/dist/voice-settings-review.js"
     },
-    "./terminal-shell/renderer/help-groups": {
-      "bun": "./terminal-shell/src/renderer/help-groups.ts",
-      "types": "./terminal-shell/dist/renderer/help-groups.d.ts",
-      "import": "./terminal-shell/dist/renderer/help-groups.js"
-    },
     "./terminal-shell/question-card": {
       "bun": "./terminal-shell/src/question-card.ts",
       "types": "./terminal-shell/dist/question-card.d.ts",
@@ -2993,6 +2978,16 @@
       "types": "./terminal-shell/dist/channels-command.d.ts",
       "import": "./terminal-shell/dist/channels-command.js"
     },
+    "./terminal-shell/mail-command": {
+      "bun": "./terminal-shell/src/mail-command.ts",
+      "types": "./terminal-shell/dist/mail-command.d.ts",
+      "import": "./terminal-shell/dist/mail-command.js"
+    },
+    "./terminal-shell/calendar-command": {
+      "bun": "./terminal-shell/src/calendar-command.ts",
+      "types": "./terminal-shell/dist/calendar-command.d.ts",
+      "import": "./terminal-shell/dist/calendar-command.js"
+    },
     "./terminal-shell/agents-command": {
       "bun": "./terminal-shell/src/agents-command.ts",
       "types": "./terminal-shell/dist/agents-command.d.ts",
@@ -3053,6 +3048,16 @@
       "types": "./terminal-shell/dist/command-palette.d.ts",
       "import": "./terminal-shell/dist/command-palette.js"
     },
+    "./terminal-shell/help-command": {
+      "bun": "./terminal-shell/src/help-command.ts",
+      "types": "./terminal-shell/dist/help-command.d.ts",
+      "import": "./terminal-shell/dist/help-command.js"
+    },
+    "./terminal-shell/settings-command": {
+      "bun": "./terminal-shell/src/settings-command.ts",
+      "types": "./terminal-shell/dist/settings-command.d.ts",
+      "import": "./terminal-shell/dist/settings-command.js"
+    },
     "./terminal-shell/setup-command": {
       "bun": "./terminal-shell/src/setup-command.ts",
       "types": "./terminal-shell/dist/setup-command.d.ts",
@@ -3083,10 +3088,20 @@
       "types": "./terminal-shell/dist/renderer/confirm-dialog.d.ts",
       "import": "./terminal-shell/dist/renderer/confirm-dialog.js"
     },
-    "./terminal-shell/subscription-runtime-commands": {
-      "bun": "./terminal-shell/src/subscription-runtime-commands.ts",
-      "types": "./terminal-shell/dist/subscription-runtime-commands.d.ts",
-      "import": "./terminal-shell/dist/subscription-runtime-commands.js"
+    "./terminal-shell/provider-command": {
+      "bun": "./terminal-shell/src/provider-command.ts",
+      "types": "./terminal-shell/dist/provider-command.d.ts",
+      "import": "./terminal-shell/dist/provider-command.js"
+    },
+    "./terminal-shell/model-command": {
+      "bun": "./terminal-shell/src/model-command.ts",
+      "types": "./terminal-shell/dist/model-command.d.ts",
+      "import": "./terminal-shell/dist/model-command.js"
+    },
+    "./terminal-shell/services-command": {
+      "bun": "./terminal-shell/src/services-command.ts",
+      "types": "./terminal-shell/dist/services-command.d.ts",
+      "import": "./terminal-shell/dist/services-command.js"
     },
     "./terminal-shell/onboarding-snapshot-reads": {
       "bun": "./terminal-shell/src/onboarding-snapshot-reads.ts",

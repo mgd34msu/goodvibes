@@ -21,7 +21,6 @@ import { renderMcpWorkspace } from './mcp-workspace.ts';
 import { renderSessionPickerModal } from './session-picker-modal.ts';
 import { renderProfilePickerModal } from './profile-picker-modal.ts';
 import { renderBookmarkModal } from './bookmark-modal.ts';
-import { renderShortcutsOverlay } from './shortcuts-overlay.ts';
 import { renderBlockActionsMenu } from './block-actions-overlay.ts';
 import { renderAutocompleteOverlay } from './autocomplete-overlay.ts';
 import { renderOnboardingWizard } from './onboarding/onboarding-wizard.ts';
@@ -30,6 +29,7 @@ import type { SurfaceLayer } from './surface-kit.ts';
 import { layerToLines } from './surface-kit-extra.ts';
 import './surface-kit-parts.ts';
 import { getSharedToastCenter } from './toast-center.ts';
+import { firstRunOwnsScreen } from '@goodvibes-jev/engine/terminal-shell/first-run';
 
 export interface ConversationOverlayContext {
   readonly input: InputHandler;
@@ -127,11 +127,6 @@ export function buildConversationLayers(context: ConversationLayerContext): Surf
       () => renderContextInspector(context.conversation, w, h, context.contextWindow, input.contextInspectorModal, context.providerInputTokens ?? 0),
     ],
     ['selection', input.selectionModal.active, () => renderSelectionModalOverlay(input.selectionModal, w, h)],
-    [
-      'shortcuts',
-      input.shortcutsOverlayActive,
-      () => renderShortcutsOverlay(w, h, context.keybindingsManager, input.shortcutsScrollOffset, input.overlayFilters.shortcuts),
-    ],
   ];
   return composeConversationLayers({
     entries,
@@ -142,6 +137,7 @@ export function buildConversationLayers(context: ConversationLayerContext): Surf
     headerRows: context.headerRows,
     footerRows: context.footerRows,
     toasts: getSharedToastCenter(),
-    screenOwned: onboarding,
+    // The onboarding wizard and first run's screens own the screen: notices wait.
+    screenOwned: onboarding || firstRunOwnsScreen(),
   });
 }

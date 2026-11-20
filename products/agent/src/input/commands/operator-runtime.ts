@@ -3,8 +3,8 @@ import {
 } from '@goodvibes-jev/engine/terminal-shell/context-inspection-command';
 import { registerInteractionModeCommand } from '@goodvibes-jev/engine/terminal-shell/interaction-mode-command';
 import { settingsTargetNotFoundMessage } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
-import { settingSetSecretPositions } from '@goodvibes-jev/engine/terminal-shell/entry-workspace-commands';
-import { secretArg } from '@goodvibes-jev/engine/terminal-shell/command-registry';
+import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { settingsCommandDescription } from '@goodvibes-jev/engine/terminal-shell/settings-command';
 import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn/protected-research-report';
 import { captureTranscriptSource } from './transcript-reading.ts';
 import type { CommandContext, CommandRegistry, SlashCommand } from '../command-registry.ts';
@@ -105,120 +105,63 @@ export function nativeSettingsCommandMutation(
 }
 
 export function registerOperatorRuntimeCommands(registry: CommandRegistry): void {
-  const settingsCommand: SlashCommand = {
-    name: 'settings',
-    effect: 'mixed',
-    aliases: ['cfg-ui'],
-    description: 'Open, inspect, or update Agent settings',
-    usage: '[category|key|list|get <key>|set <key> <value>|reset <key>]',
-    argsHint: '[list|get|set|reset]',
-    // `set <key> <value>` for a credential key: the value is masked in the input
-    // history and read with `secretArg`, so it reaches the secret store without
-    // ever being kept as typed. `--yes` is not a word of the line.
-    secretArgs: { select: (args) => settingSetSecretPositions(args, (token) => token === '--yes') },
-    async handler(args, ctx) {
-      const parsed = stripYesFlag(args);
-      const commandArgs = [...parsed.rest];
-      const sub = commandArgs[0];
-
-      if (!sub) {
-        if (ctx.openSettingsModal) ctx.openSettingsModal();
-        else ctx.print('Configuration workspace is not available in this runtime.');
-        return;
-      }
-
-      if (sub === 'list' || sub === 'schema') {
-        // `total` is what matched, not what fits on the page, the formatter
-        // needs both so a short page can name itself as short.
-        const listFilters = parseSettingListArgs(commandArgs.slice(1));
-        const config = ctx.platform.configManager;
-        const owner = agentResearchSourceOwner(ctx.extensions.toolRegistry);
-        const source = listFilters.query ? captureTranscriptSource(ctx) : undefined;
-        const guards: (() => void)[] = [];
-        const assertCurrent = () => {
-          source?.assertPublishable();
-          if (ctx.platform.configManager !== config || agentResearchSourceOwner(ctx.extensions.toolRegistry) !== owner)
-            throw new Error('Settings source changed.');
-        };
-        const page = await listEffectiveHarnessSettingsPage(config, listFilters, {
-          sourceOwner: owner,
-          assertCurrent,
-          retainCurrent: (guard) => {
-            guards.push(guard);
-          },
-        });
-        assertCurrent();
-        for (const guard of guards) guard();
-        ctx.print(formatHarnessSettingList(page.settings, page.matched));
-        return;
-      }
-
-      if (sub === 'get' || sub === 'show') {
-        const key = commandArgs[1];
-        if (!key) {
-          throw commandRefusal('Usage: /settings get <key>');
-        }
-        ctx.print(formatHarnessSetting(await getEffectiveHarnessSetting(ctx.platform.configManager, key)));
-        return;
-      }
-
-      // Owner-typed: the owner's own write; the line prints the previous value, so
-      // it can be put back. A model-run /settings line goes through the settings
-      // tool's admission instead (nativeSettingsCommandMutation), where a
-      // security-bearing key is put to the owner.
-      if (sub === 'set') {
-        const key = commandArgs[1];
-        const secretPositions = settingSetSecretPositions(args, (token) => token === '--yes');
-        const rawValue = secretPositions.length > 0
-          ? secretPositions.map((position) => secretArg(position).reveal('store-write')).join(' ')
-          : commandArgs.slice(2).join(' ');
-        if (!key || rawValue.length === 0) {
-          throw commandRefusal('Usage: /settings set <key> <value>');
-        }
-        try {
-          // Text commands supply tokens; only the exact host boolean literals
-          // become booleans. JSON-string values and friendly aliases are not
-          // permission to include private notification details or screen raw research.
-          const value = isAgentHostSettingKey(key) && (rawValue === 'true' || rawValue === 'false') ? rawValue === 'true' : rawValue;
-          const result = await setHarnessSetting(ctx.platform.configManager, ctx.platform.secretsManager, key, value);
-          ctx.print(formatHarnessMutation(result));
-          ctx.renderRequest();
-        } catch (error) {
-          if (readRefusal(error)) throw error;
-          throw commandRefusal(formatHarnessError(error));
-        }
-        return;
-      }
-
-      if (sub === 'reset') {
-        const key = commandArgs[1];
-        if (!key) {
-          throw commandRefusal('Usage: /settings reset <key>');
-        }
-        try {
-          const result = await resetHarnessSetting(ctx.platform.configManager, ctx.platform.secretsManager, key);
-          ctx.print(formatHarnessMutation(result));
-          ctx.renderRequest();
-        } catch (error) {
-          if (readRefusal(error)) throw error;
-          throw commandRefusal(formatHarnessError(error));
-        }
-        return;
-      }
-
-      if (sub.includes('.')) {
-        ctx.print(formatHarnessSetting(await getEffectiveHarnessSetting(ctx.platform.configManager, sub)));
-        return;
-      }
-
-      if (!ctx.openSettingsModal) {
-        ctx.print('Configuration workspace is not available in this runtime.');
-        return;
-      }
-      const landed: unknown = ctx.openSettingsModal(sub);
-      if (landed === 'not-found') ctx.print(settingsTargetNotFoundMessage(sub));
+  const settingsCommand: SlashCommand = defineCommand<CommandContext>(settingsCommandDescription<CommandContext>({
+    async open(where, ctx) {
+      if (!ctx.openSettingsModal) throw commandRefusal('The settings screen cannot be shown here.', 'See them as text: /settings list.');
+      const landed: unknown = ctx.openSettingsModal(where || undefined);
+      if (where && landed === 'not-found') return settingsTargetNotFoundMessage(where);
     },
-  };
+    async list(words, ctx) {
+      // `total` is what matched, not what fits on the page: the formatter needs both.
+      const listFilters = parseSettingListArgs(words.split(/\s+/).filter(Boolean));
+      const config = ctx.platform.configManager;
+      const owner = agentResearchSourceOwner(ctx.extensions.toolRegistry);
+      const source = listFilters.query ? captureTranscriptSource(ctx) : undefined;
+      const guards: (() => void)[] = [];
+      const assertCurrent = () => {
+        source?.assertPublishable();
+        if (ctx.platform.configManager !== config || agentResearchSourceOwner(ctx.extensions.toolRegistry) !== owner)
+          throw new Error('Settings source changed.');
+      };
+      const page = await listEffectiveHarnessSettingsPage(config, listFilters, {
+        sourceOwner: owner,
+        assertCurrent,
+        retainCurrent: (guard) => { guards.push(guard); },
+      });
+      assertCurrent();
+      for (const guard of guards) guard();
+      return formatHarnessSettingList(page.settings, page.matched);
+    },
+    async get(key, ctx) {
+      return formatHarnessSetting(await getEffectiveHarnessSetting(ctx.platform.configManager, key));
+    },
+    // Owner-typed: the owner's own write; the line prints the previous value, so it
+    // can be put back. A model-run /settings line goes through the settings tool's
+    // admission instead (nativeSettingsCommandMutation), where a security-bearing key
+    // is put to the owner.
+    async set(key, rawValue, ctx) {
+      try {
+        // Only the exact host boolean literals become booleans.
+        const value = isAgentHostSettingKey(key) && (rawValue === 'true' || rawValue === 'false') ? rawValue === 'true' : rawValue;
+        const result = await setHarnessSetting(ctx.platform.configManager, ctx.platform.secretsManager, key, value);
+        ctx.renderRequest();
+        return formatHarnessMutation(result);
+      } catch (error) {
+        if (readRefusal(error)) throw error;
+        throw commandRefusal(formatHarnessError(error));
+      }
+    },
+    async reset(key, ctx) {
+      try {
+        const result = await resetHarnessSetting(ctx.platform.configManager, ctx.platform.secretsManager, key);
+        ctx.renderRequest();
+        return formatHarnessMutation(result);
+      } catch (error) {
+        if (readRefusal(error)) throw error;
+        throw commandRefusal(formatHarnessError(error));
+      }
+    },
+  }));
   nativeSettingsCommands.set(settingsCommand, settingsCommand.handler);
   registry.register(settingsCommand);
 

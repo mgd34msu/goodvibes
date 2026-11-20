@@ -26,6 +26,14 @@ function captureNumericMap(value: unknown): Record<string, number> | undefined |
   return captured;
 }
 
+/** Model sizes as the server wrote them; anything else reads as "not reported". */
+function captureSizeMap(value: unknown): Record<string, string> | undefined {
+  if (!isRecord(value)) return undefined;
+  const captured: Record<string, string> = Object.create(null);
+  for (const [key, size] of Object.entries(value)) if (typeof size === 'string' && size !== '') captured[key] = size;
+  return Object.keys(captured).length > 0 ? captured : undefined;
+}
+
 /** One cache entry, validated with the same rules the loader applies. */
 export function capturePersistedServer(value: unknown): DiscoveredServer | null {
   if (!isRecord(value)
@@ -39,6 +47,7 @@ export function capturePersistedServer(value: unknown): DiscoveredServer | null 
   const modelContextWindows = captureNumericMap(value.modelContextWindows);
   const modelOutputLimits = captureNumericMap(value.modelOutputLimits);
   if (modelContextWindows === null || modelOutputLimits === null) return null;
+  const modelSizes = captureSizeMap(value.modelSizes);
   return {
     name: value.name,
     host: value.host,
@@ -50,6 +59,7 @@ export function capturePersistedServer(value: unknown): DiscoveredServer | null 
     serverType: value.serverType,
     ...(modelContextWindows === undefined ? {} : { modelContextWindows }),
     ...(modelOutputLimits === undefined ? {} : { modelOutputLimits }),
+    ...(modelSizes === undefined ? {} : { modelSizes }),
   };
 }
 

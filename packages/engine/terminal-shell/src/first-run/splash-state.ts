@@ -97,6 +97,17 @@ export function requestSplashRender(): void {
   if (render) queueMicrotask(render);
 }
 
+/**
+ * First run owns the screen: its steps are open, or the conversation still
+ * shows its step-3 lines under the splash. Notices wait while it does
+ * (composeConversationLayers' screenOwned), as they do over a modal.
+ */
+export function firstRunOwnsScreen(): boolean {
+  const kind = state?.firstRun?.kind;
+  if (kind === 'pending') return true;
+  return (kind === 'set' || kind === 'not-ready') && state!.splashShowing();
+}
+
 /** First run is open (step 1 or 2): a model chosen meanwhile is said by first run, not by a line in the conversation. */
 export function firstRunOpen(): boolean {
   return state?.firstRun?.kind === 'pending';

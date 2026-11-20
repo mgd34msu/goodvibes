@@ -1,8 +1,7 @@
-import { createSecurityCommand } from '@goodvibes-jev/engine/terminal-shell/security-command';
 import type { CommandRegistry, CommandContext } from '../command-registry.ts';
 import '@/runtime/index.ts';
 import '@goodvibes-jev/engine/platform/platform/config';
-import { requireReadModels, requireSubscriptionManager, requireTokenAuditor } from './runtime-services.ts';
+import { requireReadModels } from './runtime-services.ts';
 import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import type { AgentsHost } from '@goodvibes-jev/engine/terminal-shell/agents-command';
 
@@ -54,19 +53,6 @@ export function contractsHost(): Exclude<AgentsHost<CommandContext>['contracts']
 
 export function registerControlRoomRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
-    name: 'cockpit',
-    aliases: [],
-    description: 'Open Agents (the old operator cockpit)',
-    handler(_args, ctx) {
-      if (ctx.openCockpitView) {
-        ctx.openCockpitView();
-        return;
-      }
-      ctx.print('The Agents view is not available in this runtime.');
-    },
-  });
-
-  registry.register({
     name: 'communication',
     aliases: ['comms'],
     description: 'Inspect structured agent communication routes and recent activity',
@@ -78,29 +64,4 @@ export function registerControlRoomRuntimeCommands(registry: CommandRegistry): v
       ctx.print('The Agents view is not available in this runtime.');
     },
   });
-
-  registry.register(
-    createSecurityCommand<CommandContext>(
-      {
-        tokens: requireTokenAuditor,
-        security: (ctx) => requireReadModels(ctx).security.getSnapshot(),
-        policy: (ctx) => ctx.extensions.policyRuntimeState?.getSnapshot(),
-        plugins: (ctx) => ctx.extensions.pluginManager?.list() ?? [],
-        subscriptions: requireSubscriptionManager,
-      },
-      {
-        hidden: false,
-        separator: '=',
-        tokenTitle: 'Token Audit',
-        policyUnavailable: 'Policy runtime state is not available in this runtime.',
-        beforeRead(args, ctx) {
-          if (args.length > 0) return false;
-          if (ctx.openSecurityView) ctx.openSecurityView();
-          else ctx.print('The Security view is not available in this runtime.');
-          return true;
-        },
-      },
-    ),
-  );
-
 }

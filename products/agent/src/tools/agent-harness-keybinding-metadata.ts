@@ -27,8 +27,7 @@ const FIXED_KEYS: readonly { readonly key: string; readonly description: string;
   { key: 'Esc', description: 'Close overlays, pickers, and transient input modes', chords: [{ key: 'escape' }] },
   { key: '?', description: 'Open help: every command and keyboard shortcut in one list', chords: [{ key: '?' }] },
   { key: 'F2', description: 'Open runtime activity monitor', chords: [{ key: 'f2' }] },
-  { key: '/shortcuts', description: 'Open keyboard shortcut reference', chords: [] },
-  { key: '/keybindings', description: 'List configurable keybindings and config path', chords: [] },
+  { key: '/help keys', description: 'List every key and the file that changes them', chords: [] },
 ];
 const FIXED_SHORTCUTS: readonly { readonly key: string; readonly description: string }[] = FIXED_KEYS.map(({ key, description }) => ({ key, description }));
 
@@ -504,6 +503,19 @@ function keybindingOperationRoute(action: KeyAction): KeybindingOperationRoute {
         confirmation: 'No model operation is exposed.',
         note: 'This shortcut mutates live prompt-buffer cursor/edit state that is not part of the model tool contract.',
       };
+    case 'cycle-permission-mode':
+    case 'open-notifications':
+    case 'failure-other-model':
+    case 'failure-details':
+    case 'failure-retry':
+    case 'failure-sign-in':
+      return {
+        supported: false,
+        effect: 'visible-ui-navigation',
+        preferredMode: 'direct-user-interaction',
+        confirmation: 'Direct user interaction only.',
+        note: 'Acts on what the person sees: the session permission mode, the notices, or the newest failed turn\'s row (send it again, another model, details, sign in).',
+      };
     case 'focus-work-tree':
       return {
         supported: false,
@@ -525,8 +537,7 @@ export function totalHarnessShortcuts(context: KeybindingContext): number {
 
 function fixedShortcutModelRoute(shortcut: Record<string, string>): string {
   switch (shortcut.key) {
-    case '/shortcuts': return 'workspace action:"shortcuts"';
-    case '/keybindings': return 'workspace action:"keybindings"';
+    case '/help keys': return 'workspace action:"keybindings"';
     case '?': return 'workspace action:"open" surfaceId:"help-overlay"';
     case 'F2': return 'workspace action:"open" surfaceId:"process-monitor"';
     case 'Tab': return 'workspace action:"commands"';

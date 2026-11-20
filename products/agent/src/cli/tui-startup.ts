@@ -177,7 +177,7 @@ export function applyInitialTuiCliState(options: {
   // provider, sign in, and land in the conversation (first-run-flow.ts). The
   // workspace's setup screens stay one key away (and /onboarding).
   const runFirstRun = (): void => {
-    void startFirstRun(firstRunDeps(commandContext, shellPaths, render, onboardingDone)).catch((error: unknown) => {
+    void startFirstRun(firstRunDeps(commandContext, shellPaths, render, onboardingDone, () => { input.conversationManager?.invalidateRenderedLines(); })).catch((error: unknown) => {
       logger.warn('First run could not start', { error: summarizeError(error) });
     });
   };
@@ -239,6 +239,7 @@ function firstRunDeps(
   shellPaths: Parameters<typeof writeOnboardingCheckMarker>[0],
   render: () => void,
   markedDone: boolean,
+  redraw: () => void,
 ): FirstRunDeps {
   return {
     providerRegistry: commandContext.provider.providerRegistry,
@@ -251,6 +252,7 @@ function firstRunDeps(
     completeModelSelection: commandContext.completeModelSelection,
     openProviderPicker: commandContext.openProviderPicker,
     scanThisComputer: () => { scanThisComputerNow(); },
+    redrawConversation: redraw,
     markDone: () => { writeOnboardingCheckMarker(shellPaths, { source: 'command' }); },
     isMarkedDone: () => markedDone,
   };

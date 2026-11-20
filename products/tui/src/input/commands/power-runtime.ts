@@ -1,5 +1,8 @@
 import { KEEP_AWAKE_NOT_HELD } from '@goodvibes-jev/engine/platform/platform/power';
-import type { CommandRegistry } from '../command-registry.ts';
+import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import { defineCommand, type ActionDescription } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { readAction } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import { powerStatusLines, type PowerSurfaceState } from '../../core/power-status.ts';
 
 /** The surface state carries the platform's refused note when keep-awake is on but the OS granted nothing. */
@@ -8,59 +11,63 @@ function keepAwakeRefused(state: PowerSurfaceState): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// /power, host sleep ownership (the ops/status idiom surface for power.*).
+// /power, host sleep ownership, described once (command-actions/).
 //
 // Shows the honest account of sleep ownership, the "sleep disabled" chip
 // meaning, each "held because X" work-inhibition reason, and the lid-split note
 // rendered VERBATIM when the OS could block idle-sleep but not lid-close
-// suspend, and toggles the daemon-held keep-awake switch. Owner ruling: the
-// always-visible chip IS the safety mechanism, so there is no timer and no
-// AC-only option, keep-awake is exactly one on/off toggle.
+// suspend, and turns the daemon-held keep-awake switch on or off. Owner ruling:
+// the always-visible chip IS the safety mechanism, so there is no timer and no
+// AC-only option.
 // ---------------------------------------------------------------------------
 
-export function registerPowerRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
-    name: 'power',
-    description: 'Host sleep ownership: show status and toggle keep-awake',
-    usage: '[status | on | off | toggle]',
-    argsHint: '[status|on|off|toggle]',
-    async handler(args, ctx) {
-      const sub = (args[0] ?? 'status').toLowerCase();
-
-      if (sub === 'status' || args.length === 0) {
-        const state = ctx.getPowerState?.();
-        if (!state) {
-          ctx.print('Power status is unavailable in this session.');
-          return;
-        }
-        const lines = ['Host sleep ownership:', ...powerStatusLines(state).map((l) => `  ${l}`)];
-        lines.push(keepAwakeRefused(state)
-          ? 'Keep-awake is ON but NOT holding: the OS refused it, so this host can still sleep. Retry with /power on, or turn it off with /power off.'
-          : state.keepAwake
-            ? 'Keep-awake is ON. Turn it off with /power off.'
-            : 'Keep-awake is OFF. Turn it on with /power on.');
-        ctx.print(lines.join('\n'));
-        return;
-      }
-
-      if (sub === 'on' || sub === 'off' || sub === 'toggle') {
-        if (!ctx.setKeepAwake || !ctx.getPowerState) {
-          ctx.print('Keep-awake cannot be changed in this session.');
-          return;
-        }
-        const current = ctx.getPowerState().keepAwake;
-        const next = sub === 'on' ? true : sub === 'off' ? false : !current;
-        const state = await ctx.setKeepAwake(next);
-        const lines = [keepAwakeRefused(state)
-          ? 'Keep-awake ON, but the OS refused the sleep inhibitor: this host can still sleep.'
-          : state.keepAwake ? 'Keep-awake ON: this host will not idle-sleep.' : 'Keep-awake OFF.'];
-        // Surface the honest lid-split note verbatim if the platform served one.
-        if (state.note) lines.push(`  ${state.note}`);
-        ctx.print(lines.join('\n'));
-        return;
-      }
-
-      ctx.print('Usage: /power [status | on | off | toggle]');
+function setKeepAwake(on: boolean): ActionDescription<CommandContext> {
+  return {
+    id: on ? 'on' : 'off', label: on ? 'Keep this computer awake' : 'Let this computer sleep again', word: on ? 'on' : 'off', inputs: [],
+    sentence: on
+      ? 'This computer will not sleep when idle, until you change it; the status bar shows it while it holds.'
+      : 'This computer may sleep when idle again, until you change it; work that holds it awake still does.',
+    done: '', touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: on ? 'off' : 'on',
+    operator: { terminalOnly: 'The web UI turns keep-awake on and off from its own power switch.' }, example: {},
+    async run(_values, ctx) {
+      if (!ctx.setKeepAwake || !ctx.getPowerState) throw commandRefusal('Keep-awake cannot be changed in this session.');
+      const state = await ctx.setKeepAwake(on);
+      return [
+        keepAwakeRefused(state)
+          ? 'Keep-awake is on, but the OS refused the sleep inhibitor: this computer can still sleep.'
+          : state.keepAwake ? 'Keep-awake is on: this computer will not idle-sleep.' : 'Keep-awake is off.',
+        // The honest lid-split note, verbatim, when the platform served one.
+        ...(state.note ? [`  ${state.note}`] : []),
+      ].join('\n');
     },
-  });
+  };
+}
+
+export function registerPowerRuntimeCommands(registry: CommandRegistry): void {
+  registry.register(defineCommand<CommandContext>({
+    name: 'power',
+    title: 'Sleep',
+    summary: 'See whether this computer may sleep, and keep it awake',
+    group: 'Shell',
+    report: 'status',
+    actions: [
+      readAction<CommandContext>({
+        id: 'status', label: 'See whether this computer may sleep', word: 'status',
+        sentence: 'Shows who holds this computer awake and why, and whether keep-awake is on.',
+        async run(_values, ctx) {
+          const state = ctx.getPowerState?.();
+          if (!state) throw commandRefusal('Power status is not available in this session.');
+          return [
+            'Sleep',
+            ...powerStatusLines(state).map((line) => `  ${line}`),
+            keepAwakeRefused(state)
+              ? 'Keep-awake is on but not holding: the OS refused it, so this computer can still sleep. Try again: /power on'
+              : state.keepAwake ? 'Keep-awake is on. Let it sleep: /power off' : 'Keep-awake is off. Keep it awake: /power on',
+          ].join('\n');
+        },
+      }),
+      setKeepAwake(true),
+      setKeepAwake(false),
+    ],
+  }));
 }

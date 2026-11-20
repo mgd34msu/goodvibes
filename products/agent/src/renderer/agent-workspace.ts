@@ -248,8 +248,8 @@ function editorPurposeLabel(editorKind: AgentWorkspaceEditorKind): string {
     case 'auth-repair': return 'Repair auth';
     case 'auth-bundle-export': return 'Export auth bundle';
     case 'auth-bundle-inspect': return 'Inspect auth bundle';
-    case 'trust-bundle-export': return 'Export trust bundle';
-    case 'trust-bundle-inspect': return 'Inspect trust bundle';
+    case 'trust-bundle-export': return 'Save the trust summary to a file';
+    case 'trust-bundle-inspect': return 'Read a saved trust summary';
     case 'support-bundle-export': return 'Export support bundle';
     case 'support-bundle-inspect': return 'Inspect support bundle';
     case 'support-bundle-import': return 'Import support bundle';
@@ -297,7 +297,7 @@ function editorPurposeLabel(editorKind: AgentWorkspaceEditorKind): string {
     case 'task-list-filter': return 'Filter task list';
     case 'task-show': return 'Show task';
     case 'task-output': return 'View task output';
-    case 'health-repair': return 'Repair health issue';
+    case 'health-repair': return 'Check one health area';
     case 'approval-review': return 'Review approval';
     case 'approval-approve': return 'Approve request';
     case 'approval-deny': return 'Deny request';

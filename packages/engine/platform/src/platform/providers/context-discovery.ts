@@ -111,6 +111,7 @@ async function parseJSON<T>(response: Response, url: string): Promise<T | null> 
 interface LMStudioModel {
   key: string;
   max_context_length?: number | undefined;
+  params_string?: string | undefined;
   [k: string]: unknown;
 }
 
@@ -126,6 +127,7 @@ async function probeLMStudio(
   origin: string,
   apiKey?: string | undefined,
   signal?: AbortSignal,
+  sizes?: Map<string, string>,
 ): Promise<Map<string, number> | null> {
   const url = `${origin}/api/v1/models`;
   const response = await probe(url, { apiKey, signal });
@@ -137,6 +139,8 @@ async function probeLMStudio(
   const result = new Map<string, number>();
   for (const model of json.models) {
     if (typeof model.key !== 'string') continue;
+    // The listing also says each model's size (its parameter count, as LM Studio writes it).
+    if (sizes && typeof model.params_string === 'string' && model.params_string.trim() !== '') sizes.set(model.key, model.params_string.trim());
     if (typeof model.max_context_length === 'number' && model.max_context_length > 0) {
       result.set(model.key, model.max_context_length);
     }
@@ -424,6 +428,8 @@ export async function discoverContextWindows(
   baseURL: string,
   apiKey?: string | undefined,
   signal?: AbortSignal,
+  /** Filled with each model's size where the listing read anyway reports one (LM Studio). */
+  sizes?: Map<string, string>,
 ): Promise<Map<string, number>> {
   signal?.throwIfAborted();
   const origin = extractOrigin(baseURL);
@@ -447,7 +453,7 @@ export async function discoverContextWindows(
   // model IDs already present. Parallel probing would lose this precedence guarantee.
 
   // Probe 1: LM Studio (richest, has max_context_length per model)
-  merge(await probeLMStudio(origin, apiKey, signal));
+  merge(await probeLMStudio(origin, apiKey, signal, sizes));
 
   // Probe 2: Ollama (per-model show with context_length / num_ctx)
   merge(await probeOllama(origin, apiKey, signal));

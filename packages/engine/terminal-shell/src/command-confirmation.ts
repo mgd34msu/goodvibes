@@ -238,8 +238,8 @@ type SharedConfirm = (args: readonly string[], context: SharedConfirmationContex
 
 /**
  * The irreversible lines of the commands both terminal apps build from shared
- * shell code (`/notify`, `/provider`), by command name. (`/mcp` is described:
- * its questions come from its description, command-actions/.) Each app's
+ * shell code (`/notify`), by command name. (`/mcp`, `/provider` and the other
+ * described commands ask from their descriptions, command-actions/.) Each app's
  * registry applies them through {@link withOwnerConfirmation}, so the two apps
  * answer the same line the same way; reversible lines are not listed and run
  * at once. (`/secrets` declares its own.)
@@ -254,14 +254,6 @@ export const SHARED_COMMAND_CONFIRMATIONS: Readonly<Partial<Record<string, Share
       title: `Remove all ${count} webhook URL${count === 1 ? '' : 's'}?`,
       detail: 'Every webhook notification URL is removed. They are shown masked, so note any you need before clearing; /notify add <url> adds one back.',
       confirmLabel: 'Clear',
-    };
-  },
-  provider(args) {
-    if ((args[0] !== 'remove' && args[0] !== 'rm') || !args[1]) return undefined;
-    return {
-      title: `Remove custom provider ${args[1]}?`,
-      detail: `The provider file for ${args[1]} (its base URL and model list) is deleted and its models leave the picker. /provider add creates it again.`,
-      confirmLabel: 'Remove',
     };
   },
 };

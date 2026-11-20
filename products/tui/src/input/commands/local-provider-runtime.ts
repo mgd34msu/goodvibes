@@ -1,16 +1,20 @@
-import { createLocalProviderCommands } from '@goodvibes-jev/engine/terminal-shell/local-provider-commands';
-import type { CommandContext } from '../command-registry.ts';
-import { requireProviderApi, requireShellPaths, requireSecretsManager } from './runtime-services.ts';
+import { registerProviderCommand } from '@goodvibes-jev/engine/terminal-shell/provider-command';
+import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import { requireProviderApi, requireSecretsManager, requireServiceRegistry, requireShellPaths, requireSubscriptionManager } from './runtime-services.ts';
 import { ensureProviderKeyThenSelect } from '../provider-key-intake.ts';
-export const { registerLocalProviderRuntimeCommands } = createLocalProviderCommands<CommandContext>(
-  { requireProviderApi, requireShellPaths, requireSecretsManager },
-  {
-    surfaceRoot: 'tui',
-    hidden: false,
-    allowInlineKey: false,
-    captureMissingKey: true,
-    explicitModelSelection: false,
-    codeEditing: true,
+
+/** `/provider` is one description shared with the other terminal app (terminal-shell/provider-command.ts); here a sign-in may wait for the browser, and a missing key is asked for before a switch lands. */
+export function registerLocalProviderRuntimeCommands(registry: CommandRegistry): void {
+  registerProviderCommand<CommandContext>(registry, {
+    requireProviderApi,
+    requireShellPaths,
+    requireSecretsManager,
+    requireSubscriptionManager,
+    requireServiceRegistry,
     beforeSelection: ensureProviderKeyThenSelect,
-  },
-);
+    surfaceRoot: 'tui',
+    signInListens: true,
+    codeEditing: true,
+    formatSource: (source) => source,
+  });
+}

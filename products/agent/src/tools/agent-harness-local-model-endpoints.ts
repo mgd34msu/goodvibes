@@ -16,7 +16,7 @@ export function localProviderNameFor(providerId: string | null, stack: string | 
 
 export function localProviderAddRoute(providerId: string | null, stack: string | null, baseUrl: string): string {
   const name = localProviderNameFor(providerId, stack, 'local-openai');
-  return `agent_harness mode:"run_command" command:"/provider add ${name} ${baseUrl} local --yes" explicitUserRequest:"<the user request, in their own words>"`;
+  return `agent_harness mode:"run_command" command:"/provider add ${name} ${baseUrl}" explicitUserRequest:"<the user request, in their own words>"`;
 }
 
 export function localEndpointId(baseUrl: string): string {
@@ -276,7 +276,7 @@ export function describeLocalServerEndpoint(
     modelRoutes: [...endpoint.modelRoutes].sort((a, b) => a.localeCompare(b)),
     smokeCommand: `curl -fsS ${modelsUrl}`,
     smokeRoute: localEndpointSmokeRoute(id),
-    refreshRoute: 'agent_harness mode:"run_command" command:"/refresh-models" explicitUserRequest:"<the user request, in their own words>"',
+    refreshRoute: 'agent_harness mode:"run_command" command:"/model refresh" explicitUserRequest:"<the user request, in their own words>"',
     addProviderRoute: providerExists ? null : localProviderAddRoute(endpoint.providerId, endpoint.stack, endpoint.baseUrl),
     notes: [...notes],
     ...(lastSmoke ? { lastSmoke } : {}),

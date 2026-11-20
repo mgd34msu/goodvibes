@@ -24,7 +24,6 @@ import type { InputHistory, HistorySearch } from './input-history.ts';
 import type { ConversationManager } from '../core/conversation';
 import { BlockActionsMenu } from '../renderer/block-actions.ts';
 import { ContextInspectorModal } from '../renderer/context-inspector.ts';
-import type { OverlayFilters } from './overlay-filter.ts';
 import { BookmarkModal } from './bookmark-modal.ts';
 import { SettingsModal } from './settings-modal.ts';
 import type { McpWorkspace } from './mcp-workspace.ts';
@@ -57,7 +56,6 @@ import type { FocusTracker } from '@goodvibes-jev/engine/platform/platform/runti
  * edit is seen by every route at once):
  *   - `prompt`, `cursorPos`, current text buffer state
  *   - `commandMode`, `indicatorFocused`, focus-mode flags
- *   - `shortcutsOverlayActive`, `shortcutsScrollOffset`, shortcuts overlay state
  *   - `nextPasteId`, `nextImageId`, monotonically increasing ID counters
  *   - `mouseDownRow`, `mouseDownCol`, drag-tracking coordinates
  *   - `contentWidth`, reflow width (semi-stable; synced at feed() entry only)
@@ -91,8 +89,6 @@ export interface InputFeedContext {
   inputScrollTop: number;
   commandMode: boolean;
   indicatorFocused: boolean;
-  shortcutsOverlayActive: boolean;
-  shortcutsScrollOffset: number;
   nextPasteId: number;
   nextImageId: number;
   mouseDownRow: number;
@@ -118,7 +114,6 @@ export interface InputFeedContext {
   readonly modelPicker: ModelPickerModal;
   readonly onboardingWizard: OnboardingWizardController;
   readonly contextInspectorModal: ContextInspectorModal;
-  readonly overlayFilters: OverlayFilters;
   readonly blockActionsMenu: BlockActionsMenu;
   /** The modal stack: a kit modal on top (command palette, confirm dialog, ...) takes every key itself. */
   readonly surfaceModals?: SurfaceModalHost;

@@ -580,6 +580,37 @@ export function setupWizardSmokeHistory(listed: SetupSmokeEvidenceList): AgentSe
   };
 }
 
+export function setupCompletionMarkerExists(context: CommandContext): boolean {
+  try {
+    return isOnboardingComplete(requireShellPaths(context));
+  } catch {
+    return false;
+  }
+}
+
+export const SETUP_WIZARD_PLAN_BLOCKER_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  'agent-binary': ['install-smoke', 'connected-host-readiness'],
+  'connected-host-status': ['connected-host-readiness'],
+  'connected-host-auth': ['connected-host-auth'],
+  'provider-model': ['provider-access'],
+  'setup-posture': ['install-smoke'],
+  'first-assistant-turn': ['install-smoke'],
+};
+
+export function setupPlanItemToWizardSource(item: SetupPlanItem): AgentSetupWizardSourceItem {
+  const primaryHandoff = setupHandoffsForItem(item)[0];
+  return {
+    id: item.id,
+    label: item.label,
+    status: item.status,
+    detail: item.nextAction || item.reason,
+    userRoute: primaryHandoff?.userRoute ?? item.userRoute,
+    modelRoute: primaryHandoff?.modelRoute ?? item.modelRoute,
+    actionId: primaryHandoff?.id ?? item.id,
+  };
+}
+
+
 export function buildSetupWizard(plan: readonly SetupPlanItem[], context: CommandContext, smoke: SetupSmokeEvidenceList): AgentSetupWizard {
   const markerItem = plan.find((item) => item.id === 'finish-onboarding');
   return buildAgentSetupWizard({

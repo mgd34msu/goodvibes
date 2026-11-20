@@ -7,13 +7,14 @@ import {
 } from '../../agent/calendar-subscription-registry.ts';
 import type { FeedFetcher } from '@goodvibes-jev/engine/platform/platform/calendar';
 import type { CommandContext } from '../command-registry.ts';
-import { parseAgentLocalLibraryArgs } from './agent-local-library-args.ts';
+import type { CalendarSubscription } from '@goodvibes-jev/engine/terminal-shell/calendar-command';
+import type { ListRow } from '@goodvibes-jev/engine/terminal-shell/command-actions';
 import { requireShellPaths } from './runtime-services.ts';
 import { getSessionUntrustedContentLedger } from '../../trust/untrusted-content.ts';
 import { commandRefusal } from './confirmation.ts';
 
 /**
- * External-calendar SUBSCRIPTION verbs for /calendar, the no-OAuth read path.
+ * The calendar-feed actions of /calendar (terminal-shell/calendar-command.ts), the no-OAuth read path.
  * Subscriptions are iCalendar feeds (Google secret address, Outlook
  * published .ics, or any .ics URL). The parse/RRULE/fetch-status engine is the
  * platform's platform/calendar; this file is the /calendar command surface over the
@@ -24,8 +25,6 @@ import { commandRefusal } from './confirmation.ts';
  * subscribe verb refuses to run without a secret manager present.
  */
 
-const SUBSCRIPTION_VALUE_FLAGS = ['name', 'every'] as const;
-export const CALENDAR_SUBSCRIPTION_VERBS = new Set(['subscribe', 'unsubscribe', 'subscriptions', 'subs', 'refresh']);
 
 /** A no-op secret store for the read-only merged view, where no secret is ever read. */
 const READ_ONLY_SECRET_STUB: SubscriptionSecretStore = {
@@ -78,10 +77,6 @@ export function subscriptionRegistryForRead(ctx: CommandContext): CalendarSubscr
   );
 }
 
-function parseArgs(args: readonly string[]) {
-  return parseAgentLocalLibraryArgs(args, { valueFlags: SUBSCRIPTION_VALUE_FLAGS });
-}
-
 function formatHealth(s: SubscriptionStatus): string {
   const base = `${s.health}`;
   return s.detail ? `${base}, ${s.detail}` : base;
@@ -102,38 +97,6 @@ export function renderSubscribedSection(occurrences: readonly SubscribedOccurren
   return [`Subscribed calendar events (${occurrences.length})`, ...lines].join('\n');
 }
 
-/**
- * Handle a subscription verb. Returns true if it handled the sub-command (so the
- * caller's local-store path is skipped).
- */
-export async function runCalendarSubscriptionCommand(
-  sub: string,
-  args: readonly string[],
-  ctx: CommandContext,
-  /** Injectable for tests, production callers pass undefined and get the real HTTP fetcher. */
-  fetcher?: FeedFetcher,
-): Promise<boolean> {
-  if (!CALENDAR_SUBSCRIPTION_VERBS.has(sub)) return false;
-
-  if (sub === 'subscribe') {
-    await handleSubscribe(args, ctx, fetcher);
-    return true;
-  }
-  if (sub === 'unsubscribe') {
-    await handleUnsubscribe(args, ctx, fetcher);
-    return true;
-  }
-  if (sub === 'subscriptions' || sub === 'subs') {
-    await handleList(ctx, fetcher);
-    return true;
-  }
-  if (sub === 'refresh') {
-    await handleRefresh(args, ctx, fetcher);
-    return true;
-  }
-  return false;
-}
-
 function requireRegistry(ctx: CommandContext, fetcher: FeedFetcher | undefined, action: string): CalendarSubscriptionRegistry | null {
   const registry = subscriptionRegistryForWrite(ctx, fetcher);
   if (!registry) {
@@ -142,92 +105,46 @@ function requireRegistry(ctx: CommandContext, fetcher: FeedFetcher | undefined, 
   return registry;
 }
 
-async function handleSubscribe(args: readonly string[], ctx: CommandContext, fetcher?: FeedFetcher): Promise<void> {
-  const parsed = parseArgs(args);
-  const url = parsed.rest[0] ?? parsed.flags.get('url');
-  if (!url) {
-    throw commandRefusal('Usage: /calendar subscribe <ics-url> [--name <name>] [--every <minutes>] [--allow-private-host] [--yes]');
-  }
-  const requestedName = parsed.flags.get('name')?.trim() || undefined;
-  const everyMin = parsed.flags.has('every') ? Math.max(15, parseInt(parsed.flags.get('every') ?? '', 10) || 60) : undefined;
-  const refreshIntervalMs = everyMin !== undefined ? everyMin * 60_000 : undefined;
-
+/** Subscribe to a feed: it is read once to check it, then kept and read on each refresh. */
+export async function subscribeCalendarFeed(ctx: CommandContext, subscription: CalendarSubscription, fetcher?: FeedFetcher): Promise<string> {
+  const refreshIntervalMs = subscription.everyMinutes !== undefined ? subscription.everyMinutes * 60_000 : undefined;
   // Feeds are fetched from public hosts only; a calendar server on the owner's own network needs this opt-in, per feed.
-  const allowPrivateHost = parsed.flags.has('allow-private-host') || undefined;
-  const hostOptions = allowPrivateHost ? { allowPrivateHost } : {};
-
+  const hostOptions = subscription.privateNetwork ? { allowPrivateHost: true } : {};
   const registry = requireRegistry(ctx, fetcher, 'subscribe');
-  if (!registry) return;
-
-  // Consent-at-add preview: validate by fetching and state exactly what will be
-  // fetched and how often, before anything is saved.
-  if (!parsed.yes) {
-    const check = await registry.validate(url, requestedName, hostOptions);
-    if (!check.ok) {
-      throw commandRefusal([`Subscription preview failed at the ${check.stage} stage.`, `  ${check.detail}`].join('\n'));
-    }
-    const intervalMin = Math.round((refreshIntervalMs ?? 60 * 60_000) / 60_000);
-    ctx.print([
-      'Calendar subscription preview',
-      `  calendar ${check.calendarName ?? '(unnamed feed)'}`,
-      `  name     ${check.derivedName}`,
-      `  events   ${check.eventCount} found`,
-      `  refresh  every ${intervalMin} min (read-only; the feed URL is stored as a secret)`,
-      '  This will fetch the calendar from the URL you provided, now and on each refresh.',
-      ...(allowPrivateHost ? ['  Private-network addresses are allowed for this feed (--allow-private-host).'] : []),
-      '  rerun with --yes to subscribe',
-    ].join('\n'));
-    return;
-  }
-
-  const result = await registry.subscribe(url, requestedName, refreshIntervalMs, hostOptions);
+  if (!registry) throw commandRefusal('Nothing was subscribed.');
+  const result = await registry.subscribe(subscription.url, subscription.name, refreshIntervalMs, hostOptions);
   if (!result.ok) {
     throw commandRefusal([`Could not subscribe (${result.stage}); nothing was stored.`, `  ${result.detail}`].join('\n'), undefined, 'COMMAND_FAILED');
   }
-  const intervalMin = Math.round(result.refreshIntervalMs / 60_000);
-  ctx.print([
+  return [
     `Subscribed to '${result.name}'.`,
     `  events   ${result.eventCount} loaded`,
-    `  refresh  every ${intervalMin} min, run /calendar refresh to update now`,
-    '  These events are read-only and appear source-labeled in /calendar list.',
-  ].join('\n'));
+    `  refresh  every ${Math.round(result.refreshIntervalMs / 60_000)} min, /calendar refresh reads it now`,
+    ...(subscription.privateNetwork ? ['  Private-network addresses are allowed for this feed.'] : []),
+    '  These events are read-only and appear source-labeled in /calendar all and /calendar upcoming.',
+  ].join('\n');
 }
 
-async function handleUnsubscribe(args: readonly string[], ctx: CommandContext, fetcher?: FeedFetcher): Promise<void> {
-  const parsed = parseArgs(args);
-  const name = parsed.rest.join(' ').trim() || parsed.flags.get('name')?.trim();
-  if (!name) {
-    throw commandRefusal('Usage: /calendar unsubscribe <name> [--yes]');
-  }
+export async function unsubscribeCalendarFeed(ctx: CommandContext, name: string, fetcher?: FeedFetcher): Promise<string> {
   const registry = requireRegistry(ctx, fetcher, 'unsubscribe');
-  if (!registry) return;
-  if (!parsed.yes) {
-    ctx.print([`Unsubscribe preview`, `  name ${name}`, '  This removes the subscription, its cached events, and its stored feed URL.', '  rerun with --yes to unsubscribe'].join('\n'));
-    return;
-  }
+  if (!registry) throw commandRefusal('Nothing was removed.');
   const report = await registry.unsubscribeWithReport(name);
-  if (!report.removed) {
-    throw commandRefusal(`No subscription named '${name}'.`);
-  }
+  if (!report.removed) throw commandRefusal(`No subscription named '${name}'.`, '/calendar subscriptions lists them');
   // The feed URL is a read capability for the whole calendar, so a copy the secret store would not delete is named, not hidden.
   if (report.secret === 'failed') {
-    ctx.print([
+    return [
       `Unsubscribed from '${name}', but its stored feed URL could not be deleted: ${report.secretError ?? 'the secret store refused'}.`,
       `  The feed URL is still in the secret store under ${report.secretKey}; remove that key by hand.`,
-    ].join('\n'));
-    return;
+    ].join('\n');
   }
-  ctx.print(`Unsubscribed from '${name}'.`);
+  return `Unsubscribed from '${name}'.`;
 }
 
-async function handleList(ctx: CommandContext, fetcher?: FeedFetcher): Promise<void> {
+export async function calendarFeeds(ctx: CommandContext, fetcher?: FeedFetcher): Promise<string> {
   const registry = subscriptionRegistryForWrite(ctx, fetcher) ?? subscriptionRegistryForRead(ctx);
   const statuses = await registry.statuses();
-  if (statuses.length === 0) {
-    ctx.print(['Calendar subscriptions', '  None. Add one with /calendar subscribe <ics-url> --yes'].join('\n'));
-    return;
-  }
-  ctx.print([
+  if (statuses.length === 0) return ['Calendar subscriptions', '  None. Add one with /calendar subscribe.'].join('\n');
+  return [
     `Calendar subscriptions (${statuses.length})`,
     ...statuses.map((s) => [
       `  ${s.name}`,
@@ -236,29 +153,27 @@ async function handleList(ctx: CommandContext, fetcher?: FeedFetcher): Promise<v
       `    events  ${s.eventCount}`,
       `    refresh every ${Math.round(s.refreshIntervalMs / 60_000)} min${s.allowPrivateHost ? ' (private-network address allowed)' : ''}`,
     ].join('\n')),
-  ].join('\n'));
+  ].join('\n');
 }
 
-async function handleRefresh(args: readonly string[], ctx: CommandContext, fetcher?: FeedFetcher): Promise<void> {
-  const parsed = parseArgs(args);
-  const name = parsed.rest.join(' ').trim() || undefined;
+/** The feeds as rows for a choice (value: the feed's name). */
+export async function calendarFeedRows(ctx: CommandContext): Promise<readonly ListRow[]> {
+  const statuses = await (subscriptionRegistryForWrite(ctx) ?? subscriptionRegistryForRead(ctx)).statuses();
+  return statuses.map((s) => ({ value: s.name, label: s.name, detail: s.maskedUrl, state: s.health }));
+}
+
+export async function refreshCalendarFeeds(ctx: CommandContext, name: string, fetcher?: FeedFetcher): Promise<string> {
   const registry = requireRegistry(ctx, fetcher, 'refresh subscriptions');
-  if (!registry) return;
-  if (!registry.hasAny()) {
-    ctx.print('No calendar subscriptions to refresh. Add one with /calendar subscribe <ics-url> --yes');
-    return;
-  }
-  const outcomes = await registry.refresh(name, { force: true });
-  if (outcomes.length === 0) {
-    ctx.print(name ? `No subscription named '${name}'.` : 'No calendar subscriptions to refresh.');
-    return;
-  }
-  ctx.print([
+  if (!registry) throw commandRefusal('Nothing was read.');
+  if (!registry.hasAny()) return 'No calendar subscriptions to refresh. Add one with /calendar subscribe.';
+  const outcomes = await registry.refresh(name || undefined, { force: true });
+  if (outcomes.length === 0) return name ? `No subscription named '${name}'.` : 'No calendar subscriptions to refresh.';
+  return [
     `Refreshed ${outcomes.length} subscription${outcomes.length === 1 ? '' : 's'}`,
     ...outcomes.map((o) => {
       const detail = o.detail ? `, ${o.detail}` : '';
       const count = o.eventCount !== undefined ? ` (${o.eventCount} events)` : '';
       return `  ${o.name}: ${o.outcome}${count}${detail}`;
     }),
-  ].join('\n'));
+  ].join('\n');
 }

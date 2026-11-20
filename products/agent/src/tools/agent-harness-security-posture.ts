@@ -54,8 +54,8 @@ const SUPPORT_BUNDLE_ROUTES: readonly SupportBundleRoute[] = [
     bundleType: 'support',
     defaultPath: 'goodvibes-agent-bundle.json',
     inspectCommand: '/bundle inspect <path>',
-    exportCommand: '/bundle export [path] --yes',
-    importCommand: '/bundle import <path> --yes',
+    exportCommand: '/bundle export [path]',
+    importCommand: '/bundle import <path>',
     workspaceActionIds: ['support-bundle-export', 'support-bundle-inspect', 'support-bundle-import'],
   },
   {
@@ -75,8 +75,8 @@ const SUPPORT_BUNDLE_ROUTES: readonly SupportBundleRoute[] = [
   {
     bundleType: 'subscription',
     defaultPath: 'subscription-bundle.json',
-    inspectCommand: '/subscription bundle inspect <path>',
-    exportCommand: '/subscription bundle export <path> --yes',
+    inspectCommand: '/provider inspect <path>',
+    exportCommand: '/provider export <path>',
     workspaceActionIds: ['subscription-bundle-export', 'subscription-bundle-inspect'],
   },
   {

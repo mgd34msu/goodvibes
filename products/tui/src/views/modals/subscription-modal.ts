@@ -43,7 +43,7 @@ function statusTone(status: Status): Tone {
  * externally-completed browser OAuth handshake visible without a keypress, the
  * same cadence the earlier view used. Enter signs out (surface-managed confirm,
  * matching the earlier view's ConfirmState) on an active row, or starts login via the
- * existing `/subscription login <p> start` command on an available, expired or
+ * existing `/provider sign-in <p>` command on an available, expired or
  * revoked row.
  */
 class SubscriptionModalSurface implements ConfigModalSurface {
@@ -130,7 +130,7 @@ class SubscriptionModalSurface implements ConfigModalSurface {
             style: toneStyle(statusTone(status)),
           };
         }),
-        emptyText: 'No provider subscriptions yet. Try /subscription login openai start.',
+        emptyText: 'No provider subscriptions yet. Try /provider sign-in openai.',
         hints: ['Enter sign in/out', 'r refresh'],
       }],
     };
@@ -161,9 +161,9 @@ class SubscriptionModalSurface implements ConfigModalSurface {
       }
     } else if (status === 'available' || needsSignIn(status)) {
       this.pendingLogout = null;
-      runModalCommand(ctx, 'subscription', ['login', provider, 'start'], `/subscription login ${provider} start`, { pending: `Starting login for ${provider}…` });
+      runModalCommand(ctx, 'provider', ['sign-in', provider], `/provider sign-in ${provider}`, { pending: `Starting the sign-in to ${provider}…` });
     } else if (status === 'pending' && row.pending) {
-      ctx.setStatus(`Login pending (${formatElapsed(Date.now() - row.pending.createdAt)} ago). Finish with /subscription login ${provider} finish <code>.`);
+      ctx.setStatus(`Login pending (${formatElapsed(Date.now() - row.pending.createdAt)} ago). Finish with /provider finish ${provider} <code>.`);
     } else {
       ctx.setStatus(`${provider} has no OAuth config. Add one or enable a built-in subscription provider.`);
     }

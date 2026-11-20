@@ -8,7 +8,6 @@ type ModalRoute =
   | 'handleMcpWorkspaceToken'
   | 'handleSessionPickerToken'
   | 'handleProfilePickerToken'
-  | 'handleOverlayToken'
   | 'handleModelPickerToken'
   | 'handleEscapeOnlyModalToken'
   | 'handleFilePickerToken'
@@ -20,7 +19,6 @@ type ModalRoute =
   | 'process';
 /** The key route of each tracked modal, by its name. Command mode has none: the composer routes it. */
 const MODAL_ROUTES: Readonly<Partial<Record<string, ModalRoute>>> = {
-  shortcuts: 'handleOverlayToken',
   bookmark: 'handleBookmarkModalToken',
   liveTail: 'live-tail',
   settings: 'handleSettingsModalToken',
@@ -60,7 +58,6 @@ export type CommonModalRoutingState = ModalTokenSnapshot &
         | 'mcpWorkspace'
         | 'sessionPickerModal'
         | 'profilePickerModal'
-        | 'overlayFilters'
         | 'historySearch'
         | 'modelPicker'
         | 'onModelPickerCommit'
@@ -151,16 +148,6 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
       value: {
         profilePickerModal: State['profilePickerModal'];
         commandContext: State['commandContext'];
-        requestRender: State['requestRender'];
-        handleEscape: State['handleEscape'];
-      },
-      arg1: InputToken,
-    ) => boolean;
-    handleOverlayToken: (
-      value: {
-        shortcutsOverlayActive: State['shortcutsOverlayActive'];
-        shortcutsScrollOffset: State['shortcutsScrollOffset'];
-        overlayFilters: State['overlayFilters'];
         requestRender: State['requestRender'];
         handleEscape: State['handleEscape'];
       },
@@ -334,18 +321,6 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
       return withState(state, true);
     }
   }
-  function handleOverlayToken(state: State, token: InputToken): ModalTokenResult | undefined {
-    const overlayState = {
-      shortcutsOverlayActive: state.shortcutsOverlayActive,
-      shortcutsScrollOffset: state.shortcutsScrollOffset,
-      overlayFilters: state.overlayFilters,
-      requestRender: state.requestRender,
-      handleEscape: state.handleEscape,
-    };
-    if (bindings.handleOverlayToken(overlayState, token)) {
-      return withState(state, true, overlayState);
-    }
-  }
   function handleHistorySearchToken(state: State, token: InputToken): ModalTokenResult | undefined {
     const historyState = {
       historySearch: state.historySearch,
@@ -434,7 +409,6 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
     handleMcpWorkspaceToken,
     handleSessionPickerToken,
     handleProfilePickerToken,
-    handleOverlayToken,
     handleModelPickerToken,
     handleEscapeOnlyModalToken,
     handleFilePickerToken,

@@ -4,7 +4,7 @@
  * Manages versioned policy bundles with promote/rollback semantics.
  * Enforces the rule that no bundle moves to enforcement before the operator
  * has seen what it changes: the rule diff and the recorded calls it decides
- * differently (`/policy simulate`), confirmed by promoting.
+ * differently (`/security simulate-policy`), confirmed by promoting.
  *
  * Bundle lifecycle (declared once in `policyBundleLifecycle` below):
  *   loaded → simulating → promoting (impact shown) → active (enforced)
@@ -79,7 +79,7 @@ export interface PolicyBundleVersion {
   activatedAt?: string | undefined;
   /** ISO 8601 timestamp when this version was rolled back, if applicable. */
   rolledBackAt?: string | undefined;
-  /** What the candidate would decide differently on this installation's recorded calls, from `/policy simulate`. */
+  /** What the candidate would decide differently on this installation's recorded calls, from `/security simulate-policy`. */
   impact?: PolicyImpact | undefined;
   /** The absolute path the bundle was read from, when it came from a file: the activation record names it. */
   sourcePath?: string | undefined;
@@ -254,7 +254,7 @@ export class PolicyRegistry {
   /**
    * markSimulating, Transition candidate to `simulating` state.
    *
-   * Called by the `/policy simulate` command when a simulation pipeline
+   * Called by the `/security simulate-policy` command when a simulation pipeline
    * is started. A `loaded` candidate starts its first simulation; a
    * `promoting` candidate is simulated again and its earlier evidence is
    * dropped, so promotion always reads the newest run.
@@ -315,7 +315,7 @@ export class PolicyRegistry {
   /**
    * promote, Promote the candidate bundle to active enforcement.
    *
-   * Requires a candidate in `promoting` state: `/policy simulate` showed the
+   * Requires a candidate in `promoting` state: `/security simulate-policy` showed the
    * operator the rule diff and the recorded calls it decides differently, and
    * the operator confirms that list by promoting. There is no threshold: a
    * bundle exists to decide differently.
@@ -331,7 +331,7 @@ export class PolicyRegistry {
       return {
         ok: false,
         error:
-          'Candidate has not been reviewed. Run `/policy simulate` first to see which recorded calls it would decide differently.',
+          'Candidate has not been reviewed. Run `/security simulate-policy` first to see which recorded calls it would decide differently.',
       };
     }
 
@@ -339,7 +339,7 @@ export class PolicyRegistry {
       return {
         ok: false,
         error:
-          'Simulation is in progress. Wait for `/policy simulate` to finish, then promote.',
+          'Simulation is in progress. Wait for `/security simulate-policy` to finish, then promote.',
       };
     }
 
@@ -397,14 +397,14 @@ export class PolicyRegistry {
     if (!path || !candidate || this._current) return { restored: false };
     const record = this.readActivationRecord();
     if (record === 'unreadable') {
-      return { restored: false, reason: `the record of which policy bundle was active (${path}) could not be read, so "${candidate.bundle.bundleId}" is loaded as a candidate only. Run /policy simulate, then /policy promote, to enforce it.` };
+      return { restored: false, reason: `the record of which policy bundle was active (${path}) could not be read, so "${candidate.bundle.bundleId}" is loaded as a candidate only. Run /security simulate-policy, then /security enforce-policy, to enforce it.` };
     }
     if (!record) return { restored: false };
     if (record.bundleId !== candidate.bundle.bundleId) {
       return { restored: false, reason: `policy bundle "${record.bundleId}" was the active one${record.bundlePath ? ` (${record.bundlePath})` : ''}, but "${candidate.bundle.bundleId}" was loaded at start; it is a candidate only and "${record.bundleId}" is not enforced. Load and promote the bundle you want enforced.` };
     }
     if (record.payloadHash !== payloadHash(candidate.bundle)) {
-      return { restored: false, reason: `policy bundle "${record.bundleId}" was promoted, but its rules changed on disk since; it is loaded as a candidate only. Run /policy simulate, then /policy promote, to enforce it again.` };
+      return { restored: false, reason: `policy bundle "${record.bundleId}" was promoted, but its rules changed on disk since; it is loaded as a candidate only. Run /security simulate-policy, then /security enforce-policy, to enforce it again.` };
     }
     this._current = { ...candidate, state: 'active', activatedAt: typeof record.activatedAt === 'string' ? record.activatedAt : new Date().toISOString() };
     this._candidate = null;

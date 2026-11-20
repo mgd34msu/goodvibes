@@ -510,7 +510,7 @@ export class OpenAISubscriptionRoute {
     // silently here, so the ordinary expiry case never surfaces anything.
     const resolved = await resolveFreshOpenAIAccessToken(this.subscriptionManager);
     if (resolved.kind === 'unconfigured') {
-      throw new ProviderError('No active OpenAI subscription sign-in. Run /subscription login openai start.', {
+      throw new ProviderError('No active OpenAI subscription sign-in. Run /provider sign-in openai.', {
         statusCode: 401,
         provider: OPENAI_CODEX_PROVIDER_NAME,
         operation: 'chat',
@@ -547,7 +547,7 @@ export class OpenAISubscriptionRoute {
 
   private subscriptionEndedError(): ProviderError {
     return new ProviderError(
-      'Your OpenAI subscription sign-in has ended and could not be refreshed. Sign in to OpenAI again (/subscription login openai start) to keep using the subscription.',
+      'Your OpenAI subscription sign-in has ended and could not be refreshed. Sign in to OpenAI again (/provider sign-in openai) to keep using the subscription.',
       {
         statusCode: 401,
         provider: OPENAI_CODEX_PROVIDER_NAME,

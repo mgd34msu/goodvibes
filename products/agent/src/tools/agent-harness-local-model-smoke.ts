@@ -38,7 +38,7 @@ function localModelSmokeTargetFromDefault(endpoint: LocalModelServerDefaultEndpo
     modelsUrl: endpoint.modelsUrl,
     smokeCommand: endpoint.smokeCommand,
     smokeRoute: localEndpointSmokeRoute(endpoint.id),
-    refreshRoute: 'agent_harness mode:"run_command" command:"/refresh-models" explicitUserRequest:"<the user request, in their own words>"',
+    refreshRoute: 'agent_harness mode:"run_command" command:"/model refresh" explicitUserRequest:"<the user request, in their own words>"',
     addProviderRoute: endpoint.addProviderRoute,
     source: 'suggested-default',
     notes: [endpoint.startHint],

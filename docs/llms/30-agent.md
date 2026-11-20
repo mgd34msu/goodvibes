@@ -282,7 +282,7 @@ On top of the files under "Project instructions", the Agent applies:
 | `tasks` | `tasks list` and `tasks show <taskId>` read the connected host's tasks; submission is refused. |
 | `bundle` | `bundle export [path]`, `bundle inspect <path>`, `bundle import <path> [--yes]`. Import checks every value before changing any and without `--yes` lists what it would set and exits `2`. A host on another machine (`controlPlane.host`) gets its settings with its own pairing or `GOODVIBES_CONNECTED_HOST_TOKEN`, never this machine's daemon token; with neither the import is refused and nothing is sent. |
 | `/model`, `/provider` | `/provider add <name> <baseURL> [apiKey]` also takes an API key. |
-| `/settings` | `/settings [category|key|list|get <key>|set <key> <value>|reset <key>]` reads and writes settings directly; `/config` is hidden. |
+| `/settings` | A guided command, the same in both programs: `open [where]` (the report: the settings screen at a topic, setting or search), `list [words]`, `get <setting>`, `set <setting> <value>` and `reset <setting>`; a setting is chosen by its name. A model changes a setting through the settings tool, which asks the owner for a loosening change. |
 | `/agents` | Opens Your agents only; it takes no `list`, `host` or `--target`. `n` in the panel hosts a coding agent instead of `/agents host`. |
 | `/memory` | The same command as the terminal app's `/memory` (see "Memory and knowledge" in the terminal app's part): bare, it opens the list of actions, "See your memory" first; `open` opens the workspace's Memory page; `injections` refuses, because the Agent records no per-turn memory. |
 | `/session` | The same command as the terminal app's `/session`. It reads the cross-session task graph (`graph`) and refuses `link-task`, `hand-off`, `accept`, `withdraw` and `cancel` (hand work over with `/delegate <task>`); `save-file` writes Markdown or text only; `save-saved` prints the redacted transcript here and writes no file (`goodvibes-agent sessions export <id> <path>` writes JSON); `upload` and the branch actions are refused. |
@@ -290,7 +290,7 @@ On top of the files under "Project instructions", the Agent applies:
 | `/plugin-trust` | The terminal app's plugin actions without `dirs`, `inspect`, `review`, publishing or the plugins screen: `list`, `enable`, `disable`, `reload`, `quarantine`, `lift`, `trust <plugin> <untrusted|limited|trusted> [note]`, `trust-key`, `verify`, `capabilities`. |
 | `/notify` | Every change needs `--yes`: `add <url> --yes`, `remove <n|url> --yes`, `list [--show --yes]`, `clear --yes`, `test --yes`; `send <message> --yes` sends a notification. |
 | `/schedule` | `list`, `edit <id> --cron <expr> --yes`, `remind --at <iso> --message <text> --yes`, `receipts`, `reconcile`, `receipt <id>`, `promote-routine <routine-id> --cron <expr> --yes` (see "Automation and host actions" below). |
-| `/calendar` | Agent-local events, calendar subscriptions and connected calendar accounts (see "Personal operations" below). |
+| `/calendar` | The same command as the terminal app's, on the Agent's own events, its calendar feeds and its calendar accounts; `change` and `status` (the daemon's calendar) are the terminal app's (see "Personal operations" below). |
 | `/payments` | Adds `address <billing|shipping>`. |
 | `/devices` | `nodes`, `grants`, `revoke-grant <grant-id>`, `captures`, `delete-capture <capture-id>` only; tokens are managed in the daemon. |
 | `/qrcode` | `[--name <device name>]` mints a named device token and shows its link and QR. |
@@ -305,16 +305,15 @@ On top of the files under "Project instructions", the Agent applies:
 | `/workstream` | `start` is refused: work is started by planning it (`/workstream plan`, `approve`, `launch`), by asking for it in a message, or with `/work submit-file`. |
 | `/welcome` | Opens the Agent workspace. |
 | `/setup` | A guided command with the same topics as the terminal app's `/setup`. `Choose a model`, `Sign in or out of a provider`, `Store a password or key`, `History and privacy` and `Bring over settings from the terminal app` open the workspace with only that topic's rows; `Add a provider of your own` runs `/provider add <name> <address>`; `Connect chat apps and services`, `How GoodVibes works with you`, `Safety and sandboxing`, `Memory and context`, `Paired devices and voice` and `Scheduled routines, watchers and triggers` open the matching workspace area; the topics marked `on the daemon` say to run `goodvibes setup` where the daemon runs. `Pair the Agent with a GoodVibes host` (`/setup pair [--name <name>] [--apply]`) and `Unpair the Agent from the GoodVibes host` (`/setup unpair`) (applying a pairing and unpairing only when the owner types it); `Run first-run again` opens the three steps. |
-| `/channel-profiles` | Accepts `plan` as a permission mode, as well as `ask-me`, `jev-decides`, `just-vibes` and `yolo`. |
 | `/auth` | `review`, `show <provider>`, `repair <provider>`, `bundle export <path>`, `bundle inspect <path>` only; no daemon sign-in or local users. |
 | `/update` | `check`, `apply`, `rollback`, `daemon [check]` only. |
 | `/save` | Saves to `<project>/.goodvibes/agent/sessions/`. |
 | `/quit` | Aliases `/:q` and `/:wq` only. |
-| `/help`, `/commands`, `?` | Open help: every command as a plain title with its slash name, grouped by task, and the keyboard shortcuts as the last group; the same list as `Ctrl+P`. `/help <command>` prints one command's actions and lines. |
+| `/help`, `?` | Open help: every command as a plain title with its slash name, grouped by task, and the keyboard shortcuts as the last group; the same list as `Ctrl+P`. `/help <command>` prints one command's actions and lines. |
 
-Some shared commands are not on the Agent's first screen (the bare `/` list leaves them out; they are found as soon as their name is typed, run when typed, and `/help` lists them): `/shortcuts`, `/keybindings`, `/effort`, `/config`, `/context`, `/next-error`, `/prev-error`, `/trust`, `/auth`, `/subscription`, `/security`, `/approval`, `/tasks`, `/provider`, `/health`, `/accounts`, `/conversation`, `/qrcode`, `/tts`, `/services`, `/expand`, `/collapse`, `/bookmarks`, `/secrets`, `/image`, `/refresh-models`, `/pin`, `/unpin`, `/knowledge`, and the Agent-only `/bundle`, `/compat`, `/automation`, `/ci`, `/principals`, `/channel-profiles`, `/agent-profile`, `/vibe`, `/personas`, `/routines`, `/channels`, `/delegate`, `/media`.
+Some shared commands are not on the Agent's first screen (the bare `/` list leaves them out; they are found as soon as their name is typed, run when typed, and `/help` lists them): `/effort`, `/config`, `/context`, `/next-error`, `/prev-error`, `/trust`, `/auth`, `/subscription`, `/security`, `/approval`, `/tasks`, `/provider`, `/health`, `/accounts`, `/conversation`, `/qrcode`, `/tts`, `/services`, `/expand`, `/collapse`, `/bookmarks`, `/secrets`, `/image`, `/refresh-models`, `/pin`, `/unpin`, `/knowledge`, and the Agent-only `/bundle`, `/compat`, `/automation`, `/ci`, `/principals`, `/channel-profiles`, `/agent-profile`, `/vibe`, `/personas`, `/routines`, `/channels`, `/delegate`, `/media`.
 
-Terminal-app slash commands the Agent does not have (an alias the Agent gives another command, such as `/channel` for `/channels`, is not listed): `/changes`, `/checkin`, `/checkpoint`, `/cluster`, `/cockpit`, `/codebase`, `/commit-all`, `/communication`, `/compact-history`, `/cost`, `/debug`, `/deeplink`, `/diff`, `/editor`, `/eval`, `/find`, `/forensics`, `/git`, `/graph`, `/guidance`, `/helpers`, `/hooks`, `/host`, `/hosted`, `/imagine`, `/incident`, `/incident-review`, `/install`, `/keep`, `/local-auth`, `/mail`, `/managed`, `/marketplace`, `/note`, `/ops`, `/orchestration`, `/palette`, `/panel`, `/pastes`, `/plan`, `/policy`, `/power`, `/profile`, `/profiles`, `/profile-sync`, `/project-plan`, `/provider-opt`, `/queue`, `/relay`, `/release`, `/remote`, `/replay`, `/review`, `/rewind`, `/sandbox`, `/scan`, `/search`, `/settings-sync`, `/teamwork`, `/template`, `/test`, `/tool`, `/tools`, `/usage`, `/worktree`. Their nearest Agent equivalents: `/media` for `/imagine`, `/email` and `/google` for `/mail`, `/owner-profile` for `/profile`, `/network-scan` for `/scan`, `/work` for `/project-plan`, `goodvibes-agent relay` for `/relay`.
+Terminal-app slash commands the Agent does not have: `/changes`, `/checkin`, `/checkpoint`, `/cluster`, `/cockpit`, `/codebase`, `/commit-all`, `/communication`, `/compact-history`, `/cost`, `/debug`, `/deeplink`, `/diff`, `/editor`, `/eval`, `/find`, `/forensics`, `/git`, `/graph`, `/guidance`, `/helpers`, `/hooks`, `/host`, `/hosted`, `/imagine`, `/incident`, `/incident-review`, `/install`, `/keep`, `/local-auth`, `/mail`, `/managed`, `/marketplace`, `/note`, `/ops`, `/orchestration`, `/panel`, `/pastes`, `/plan`, `/policy`, `/power`, `/profile`, `/profiles`, `/profile-sync`, `/project-plan`, `/provider-opt`, `/queue`, `/relay`, `/release`, `/remote`, `/replay`, `/review`, `/rewind`, `/sandbox`, `/scan`, `/search`, `/settings-sync`, `/teamwork`, `/template`, `/test`, `/tool`, `/tools`, `/usage`, `/worktree`. Their nearest Agent equivalents: `/media` for `/imagine`, `/email` and `/google` for `/mail`, `/owner-profile` for `/profile`, `/network-scan` for `/scan`, `/work` for `/project-plan`, `goodvibes-agent relay` for `/relay`.
 
 ## The Agent's command line
 
@@ -681,9 +680,7 @@ Changes are the owner's own: a model running a `/todo` change is refused. Items 
 
 ### Personal operations
 
-`/email status | config | set <key> <value> [--yes] | check [n] | send --yes <to> <subject...> [-- <body...>]` uses a mailbox directly over IMAP and SMTP.
-`/email config` shows the mailbox fields; `/email set password --yes` asks for the password with masked input; `/email check 10` lists the newest unread messages; `/email send --yes ada@example.com Lunch on Friday -- Are you free at noon?` sends one message (`Email sent to ada@example.com with subject "Lunch on Friday"`).
-`/email send` without `--yes` before the recipient is refused with its usage.
+`/mail` is the terminal app's command with the Agent's mail service behind it (see "Mail" in the automation guide): `status`, `list [n]` (the unread messages), `read <message>`, `draft <to> --subject <subject> <message>`, `send <to> --subject <subject> <message>` (asks first), and the mailbox settings `settings`, `set <setting> <value>` and `password` (asked for masked). For example `/mail send ada@example.com --subject "Lunch on Friday" Are you free at noon?` answers `Email sent to ada@example.com with subject "Lunch on Friday".`
 
 `/google` (alias `/gmail`) connects Gmail and Google Calendar:
 
@@ -701,47 +698,36 @@ Changes are the owner's own: a model running a `/todo` change is refused. Items 
 | `runbook` | Print the written instructions. |
 | `approve [<n>] [--yes|--drop]` | Show sends that were refused; `--yes` sends the one shown, exactly as shown, good once and for five minutes; `--drop` drops it. It is ignored when the model runs it. |
 
-`/calendar` manages calendars:
+`/calendar` is the terminal app's command; here it works on the Agent's own events, its feeds and its accounts:
 
-| Form | Effect |
+| Line | Effect |
 | --- | --- |
-| `list`, `upcoming [--days N]` | Events. |
-| `connect <google|outlook> [--device | --code <address>]`, `disconnect <google|outlook>`, `accounts` | Connected calendar accounts. |
-| `subscribe <ics-url> [--name N] [--every MIN] [--yes]`, `unsubscribe <name> --yes`, `subscriptions`, `refresh [name]` | iCal subscriptions. |
-| `add --title <title> --start <ISO> [--end <ISO>] [--location <loc>] [--notes <notes>]`, `delete <id> --yes`, `import <path>`, `export [--dest <path>]` | Local events. |
+| `upcoming [--days N]`, `all`, `get <event>` | Events: the days ahead (with the feeds and the connected accounts), every event, one event. |
+| `connect <google|outlook> [--with browser|device|code]`, `disconnect <google|outlook>`, `accounts` | Connected calendar accounts; `connect --with code` asks for the address the browser landed on, masked. |
+| `subscribe <ics-url> [--name N] [--every MIN] [--allow-private-host]`, `unsubscribe <feed>`, `subscriptions`, `refresh [<feed>]` | iCal feeds; the address is kept as a secret. |
+| `add --title <title> --start <ISO> [--end <ISO>] [--location <loc>] [--notes <notes>]`, `delete <event>`, `import <path>`, `export [<path>]` | Local events; `delete` asks first. |
 
-`/calendar add --title "Dentist" --start 2026-12-03T15:00` adds a local event; `/calendar delete <id>` without `--yes` prints `Usage: /calendar delete <id> --yes`.
+`/calendar add --title "Dentist" --start 2026-12-03T15:00` adds a local event.
 
 `/owner-profile` reads and corrects the owner profile (see `goodvibes-agent owner-profile`).
 `/payments address` writes the address to the connected host's settings; the actions of `/payments` are the same as the terminal app's.
 
 ### Channels and delivery
 
-`/channels [list|readiness|ready|attention|triage [limit]|guide [id]|show <id>|deliveries [limit]|send --channel <id> --message <text> --yes|accounts|policies|status|doctor <id>|setup <id>|telegram-cursor]` (alias `/channel`) inspects channel readiness, shows the ordered setup guide, triages problems, lists delivery receipts and sends one confirmed message.
-`/channels send` sends one message through one delivery target:
+`/channels` is the terminal app's command (one description for both; see "Channels" in the terminal-app guide). Here the daemon's channel methods go to the connected host, and the Agent adds what it keeps itself: `readiness [--show all|ready|attention]` (the channels it can send to and what each lacks), `configured <channel>`, `guide [<channel>]`, `triage [--limit n]`, `send`, and `deliveries [--limit n]` (the stored receipts). Channel profiles, which `/channel-profiles` used to hold, are `/channels profiles`, `profile`, `set-profile` and `remove-profile`.
+
+`/channels send` sends one message through one delivery target and asks first:
 
 ```text
-/channels send (--channel <surface[:route][ | label]> | --route <route[ | label]> | --webhook <http(s)-url> | --link <name>) --message <text> [--title <title>] [--yes]
+/channels send [--channel <surface[:route][ | label]> | --route <route[ | label]> | --webhook <http(s)-url> | --link <name>] [--title <title>] <message>
 ```
 
-- Exactly one target is required: `--channel` (a channel surface such as `slack`, optionally with a route and a label), `--route` (a bound route), `--webhook` (an `http` or `https` address) or `--link`. None, or more than one, is refused: `No delivery target was given, so nothing was sent. Give exactly one of channel, route, webhook or link.` or `2 delivery targets were given, so the recipient is unclear and nothing was sent.`
-- The message is the `--message` value(s) plus any words that are not options; an empty message is refused (`Channel send message is required.`). An unknown option is refused (`Unknown channel send flag --x`). `--title` defaults to `GoodVibes Agent message`.
-- Without `--yes` nothing is sent. It prints the preview, then refuses:
+- Exactly one target is required: `--channel` (a channel surface such as `slack`, optionally with a route and a label), `--route` (a bound route), `--webhook` (an `http` or `https` address, asked for masked in the guided path and never shown) or `--link`. None, or more than one, is refused: `No delivery target was given, so nothing was sent. Give exactly one of channel, route, webhook or link.` or `2 delivery targets were given, so the recipient is unclear and nothing was sent.`
+- The message is the words after the options; `--title` defaults to `GoodVibes Agent message`.
+- The message is checked for payment-card details (a message carrying them is refused before it reaches any provider), then delivered, and a receipt is stored:
 
 ```text
-Agent channel delivery preview
-  title GoodVibes Agent message
-  target slack
-  strategies 3
-  message Deploy finished
-  policy external delivery requires current authority and destination checks
-Refusing to send a channel delivery message without --yes. Usage: /channels send --channel "<surface[:route][ | label]>" --message <text> --yes
-```
-
-- With `--yes` the message is checked for payment-card details (a message carrying them is refused before it reaches any provider), then delivered, and a receipt is stored:
-
-```text
-/channels send --channel slack --message "Deploy finished" --yes
+/channels send --channel slack Deploy finished
 Agent channel delivery sent
   title GoodVibes Agent message
   target slack
@@ -750,9 +736,9 @@ Agent channel delivery sent
   receipt <receipt id>
 ```
 
-- A delivery that fails prints `[channels] Send failed <reason>`. `/channels deliveries [limit]` lists the stored receipts.
-- When the model runs `/channels send --yes`, the call still needs the owner's explicit request and a recorded admission from the permission gate.
-`/channel-profiles` is the slash form of the matching `goodvibes-agent` command; `/principals` and `/ci` are the terminal app's commands, the same description in both apps, their methods called on the connected host.
+- A delivery that fails is refused with `Send failed: <reason>`. `/channels deliveries` lists the stored receipts.
+- When the model runs `/channels send`, the call still needs the owner's explicit request and a recorded admission from the permission gate.
+`/principals` and `/ci` are the terminal app's commands, the same description in both apps, their methods called on the connected host.
 
 ### Automation and host actions
 
@@ -783,7 +769,7 @@ The 56 Agent tools:
 | `accounts` | The register of accounts created for the owner: list, alias, record, forget, sweep. |
 | `agent_artifacts` | Browse, preview, export, package and archive saved Agent artifacts. |
 | `agent_autonomy_schedule` | Schedule one visible autonomous Agent task. |
-| `agent_channel_send` | Preview or deliver one message through one configured target (the `/channels send` rules). |
+| `agent_channel_send` | Preview or deliver one message through one configured target (the rules of `/channels send`). |
 | `agent_documents` | Create document drafts, review suggestions, attach artifacts, export. |
 | `agent_harness` | Inspect or operate Agent harness surfaces; `mode:"modes"` lists every mode, `mode:"summary"` is the map. |
 | `agent_knowledge` | Read Agent Knowledge: status, ask, search, sources, nodes, issues, item, map, connectors. |

@@ -68,7 +68,7 @@ export const featureControlSettings: ConfigSettingRow[] = [
     appliesWhen: 'now',
     type: 'boolean',
     description:
-      'Reserved for choosing an execution strategy (single/cohort/background/remote) on every conversation turn. No turn reads a strategy yet, so this setting changes nothing today. The planner that /project-plan mode, override, explain and status work with is consulted when /workstream drafts a plan, whatever this setting says.',
+      'Reserved for choosing an execution strategy (single/cohort/background/remote) on every conversation turn. No turn reads a strategy yet, so this setting changes nothing today. The planner that /work planner, planner-mode, planner-override and planner-explain work with is consulted when /workstream drafts a plan, whatever this setting says.',
   },
   {
     key: 'tools.outputSchemaFingerprints',

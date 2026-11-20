@@ -7,8 +7,6 @@ export interface FeedContextMutableInit {
   inputScrollTop: number;
   commandMode: boolean;
   indicatorFocused: boolean;
-  shortcutsOverlayActive: boolean;
-  shortcutsScrollOffset: number;
   nextPasteId: number;
   nextImageId: number;
   mouseDownRow: number;
@@ -34,7 +32,6 @@ export type FeedContextStableKeys =
   | 'filePicker'
   | 'modelPicker'
   | 'contextInspectorModal'
-  | 'overlayFilters'
   | 'blockActionsMenu'
   | 'surfaceModals'
   | 'searchManager'
@@ -80,8 +77,6 @@ const MUTABLE_KEYS = [
   'inputScrollTop',
   'commandMode',
   'indicatorFocused',
-  'shortcutsOverlayActive',
-  'shortcutsScrollOffset',
   'nextPasteId',
   'nextImageId',
   'mouseDownRow',
@@ -132,7 +127,6 @@ const STABLE_HOST_KEYS = [
   'filePicker',
   'modelPicker',
   'contextInspectorModal',
-  'overlayFilters',
   'blockActionsMenu',
   'surfaceModals',
   'searchManager',

@@ -206,8 +206,8 @@ export async function buildStandardProviderAuthRoutes(
             : 'A built-in subscription OAuth adapter is available, but no session is stored yet.',
       providerId: subscriptionProviderId,
       repairHints: subscription?.revokedAt !== undefined
-        ? [`Sign in again with /subscription login ${subscriptionProviderId} start; the stored session was ended by the provider.`]
-        : [`Use /subscription login ${subscriptionProviderId} start or refresh the stored subscription session.`],
+        ? [`Sign in again with /provider sign-in ${subscriptionProviderId}; the stored session was ended by the provider.`]
+        : [`Use /provider sign-in ${subscriptionProviderId} or refresh the stored subscription session.`],
     });
   }
 

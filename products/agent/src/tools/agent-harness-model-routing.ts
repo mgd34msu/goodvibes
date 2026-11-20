@@ -108,7 +108,7 @@ function routeCandidates(context: CommandContext): readonly RouteCandidate[] {
       detail: 'Provider catalog, benchmark, and token-limit refresh route.',
       currentValue: 'available',
       settingKeys: [],
-      commands: ['/refresh-models'],
+      commands: ['/model refresh'],
       uiSurfaces: ['model-picker'],
     },
     {
@@ -122,7 +122,7 @@ function routeCandidates(context: CommandContext): readonly RouteCandidate[] {
         localServerHealth: localModelServerFacts(context, false),
       },
       settingKeys: [],
-      commands: ['/provider add <name> <baseURL> [apiKey] --yes', '/refresh-models', '/model'],
+      commands: ['/provider add <name> <address> [--key <key>]', '/model refresh', '/model use <model>'],
       uiSurfaces: ['provider-picker', 'model-picker', 'settings'],
     },
     {
@@ -142,7 +142,7 @@ function routeCandidates(context: CommandContext): readonly RouteCandidate[] {
       detail: 'Agent-local OpenAI-compatible provider add/remove route.',
       currentValue: 'workspace controlled',
       settingKeys: [],
-      commands: ['/provider add <name> <baseURL> [apiKey] --yes', '/provider remove <name> --yes'],
+      commands: ['/provider add <name> <address> [--key <key>]', '/provider remove <name>'],
       uiSurfaces: ['settings', 'provider-picker'],
     },
   ];
@@ -273,8 +273,8 @@ async function describeModel(model: ModelCandidate, options: { readonly context:
         mutation: 'Selecting this model stays a visible picker, settings, workspace, or slash-command flow with explicit user request.',
       },
       modelAccess: {
-        selectModelCommand: `/model ${model.registryKey}`,
-        selectProviderCommand: `/provider ${model.providerId}`,
+        selectModelCommand: `/model use ${model.registryKey}`,
+        selectProviderCommand: `/provider use ${model.providerId}`,
         pinCommand: `/pin ${model.registryKey}`,
         unpinCommand: `/unpin ${model.registryKey}`,
         setMainModel: `settings action:"set" key:"provider.model" value:"${model.registryKey}" explicitUserRequest:"..."`,

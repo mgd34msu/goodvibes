@@ -13,14 +13,19 @@
  * network, port, or browser.
  */
 import type { CalendarProviderId, DeviceCodeFlowStart, EventWindow, MergedCalendarEvent } from '@goodvibes-jev/engine/platform/platform/calendar';
+import type { CalendarProvider } from '@goodvibes-jev/engine/terminal-shell/calendar-command';
 import type { CommandContext } from '../command-registry.ts';
 import { requireSecretsManager } from './runtime-services.ts';
 import { CalendarOAuthService, type CalendarConfigReader, type CalendarSecretSlice, type ConnectResult } from '../../agent/calendar/calendar-oauth-service.ts';
 import { commandRefusal } from './confirmation.ts';
-import { secretArg } from '@goodvibes-jev/engine/terminal-shell/command-registry';
 
 /** Factory seam: production builds the real service from context; tests inject a fake. */
 export type CalendarServiceFactory = (ctx: CommandContext) => CalendarOAuthService;
+
+/** The account choice of /calendar ('outlook' is Microsoft's). */
+function providerOf(account: CalendarProvider): CalendarProviderId {
+  return account === 'outlook' ? 'microsoft' : 'google';
+}
 
 const PROVIDER_LABEL: Record<CalendarProviderId, string> = { google: 'Google Calendar', microsoft: 'Microsoft Outlook' };
 
@@ -30,14 +35,6 @@ const CONNECTION_STATE_NOTE: Record<string, string> = {
   'reconnect-needed': 'reconnect needed, run the connect command again',
   disconnected: 'disconnected',
 };
-
-/** Map the user's provider word to a provider id ('outlook' and 'microsoft' both ok). */
-export function normalizeProvider(word: string | undefined): CalendarProviderId | null {
-  const w = (word ?? '').trim().toLowerCase();
-  if (w === 'google' || w === 'gcal') return 'google';
-  if (w === 'outlook' || w === 'microsoft' || w === 'ms' || w === 'msft') return 'microsoft';
-  return null;
-}
 
 function defaultServiceFactory(ctx: CommandContext): CalendarOAuthService {
   const config = ctx.platform.configManager as unknown as CalendarConfigReader;
@@ -60,7 +57,7 @@ function pastedCodeMessage(label: string, word: string, url: string): string {
     `Authorize ${label} from any device:`,
     `  1. Open ${url}`,
     '  2. Approve. The browser then lands on a 127.0.0.1 address that does not load; that is expected.',
-    `  3. Copy that whole address and run: /calendar connect ${word} --code <address>`,
+    `  3. Copy that whole address and run: /calendar connect ${word} --with code (it asks for the address, masked)`,
     '  The link stays valid for ten minutes in this session.',
   ].join('\n');
 }
@@ -71,36 +68,6 @@ function authUrlMessage(label: string, url: string): string {
     `  ${url}`,
     '  (Attempting to open it automatically. Waiting for the redirect...)',
   ].join('\n');
-}
-
-/**
- * The real guide for a bare `/calendar connect` (F1a): what connecting does, the
- * two providers, and, since this build ships only the platform's placeholder client
- * ids until someone registers a project app, the honest situation and the exact
- * next step, instead of a bare usage line that dead-ends with no explanation.
- */
-function connectGuideMessage(): string {
-  return [
-    'Connect a calendar account over OAuth so its events show up alongside your local ones in /calendar upcoming.',
-    '  Providers: google (Google Calendar), outlook (Microsoft Outlook)',
-    '    /calendar connect google',
-    '    /calendar connect outlook',
-    '    (add --device when this machine has no browser: Outlook shows a device code; Google prints a link to open',
-    '     on any device, then run /calendar connect google --code <address the browser landed on>)',
-    '',
-    'This build has no built-in Google/Microsoft sign-in configured yet, there is no project ' +
-      'client id shipped, so a bare connect will stop at the config step and tell you so. To ' +
-      'connect, you need a client id:',
-    '  1. Register a free OAuth app with the provider (Google Cloud Console, or the Azure portal for Microsoft).',
-    '  2. Copy the client id it gives you, a desktop/public-client app needs no secret.',
-    '  3. Open /agent personal-ops -> "Connect Google Calendar" or "Connect Microsoft Outlook" and paste it in.',
-    '  4. Run /calendar connect google (or outlook) again to authorize.',
-  ].join('\n');
-}
-
-/** An unrecognized provider word (not a missing one) keeps the short usage form. */
-function unknownProviderMessage(word: string): string {
-  return `Unknown calendar provider '${word}'. Usage: /calendar connect <google|outlook> [--device | --code <address>]`;
 }
 
 /** Best-effort browser open; never throws, never blocks the flow. */
@@ -119,35 +86,27 @@ function bestEffortOpenBrowser(url: string): void {
   })();
 }
 
-export async function runCalendarConnect(
-  args: readonly string[],
+/** Sign a calendar account in: a browser here, a device code for another device, or the address the browser landed on. */
+export async function connectCalendar(
   ctx: CommandContext,
+  account: CalendarProvider,
+  how: 'browser' | 'device' | 'code',
+  pasted: string,
   factory: CalendarServiceFactory = defaultServiceFactory,
 ): Promise<void> {
-  const provider = normalizeProvider(args[1]);
-  if (!provider) {
-    ctx.print(args[1] ? unknownProviderMessage(args[1]) : connectGuideMessage());
-    return;
-  }
+  const provider = providerOf(account);
   const label = PROVIDER_LABEL[provider];
-  const device = args.includes('--device');
-  const codeIndex = args.indexOf('--code');
   const service = factory(ctx);
-  const word = provider === 'google' ? 'google' : 'outlook';
+  const word = account;
 
-  if (codeIndex >= 0) {
-    // Read through the declared secret positions (calendarConnectCodePositions), which the input history masked.
-    const pasted = args.slice(codeIndex + 1).map((_, offset) => secretArg(codeIndex + 1 + offset).reveal('dispatch')).join(' ').trim();
-    if (!pasted) {
-      throw commandRefusal(`Usage: /calendar connect ${word} --code <address the browser landed on, or the code>`);
-    }
-    const completed = await service.completePastedCode(provider, pasted);
-    printConnectResult(ctx, label, completed);
+  if (how === 'code') {
+    if (!pasted.trim()) throw commandRefusal(`Give the address the browser landed on, or the code: /calendar connect ${word} --with code --code <address>`);
+    printConnectResult(ctx, label, await service.completePastedCode(provider, pasted.trim()));
     return;
   }
 
   ctx.print(`Connecting ${label}...`);
-  const result = device
+  const result = how === 'device'
     ? await service.connectDeviceCode(provider, { onDeviceCode: (s) => ctx.print(deviceCodeMessage(label, s)) })
     : await service.connectAuto(provider, {
         openUrl: (url) => {
@@ -180,45 +139,41 @@ function printConnectResult(ctx: CommandContext, label: string, result: ConnectR
   ].join('\n'));
 }
 
-export async function runCalendarDisconnect(
-  args: readonly string[],
+export async function disconnectCalendar(
   ctx: CommandContext,
+  account: CalendarProvider,
   factory: CalendarServiceFactory = defaultServiceFactory,
-): Promise<void> {
-  const provider = normalizeProvider(args[1]);
-  if (!provider) {
-    throw commandRefusal('Usage: /calendar disconnect <google|outlook>');
-  }
+): Promise<string> {
+  const provider = providerOf(account);
   const label = PROVIDER_LABEL[provider];
   const service = factory(ctx);
   const { revokedRemotely } = await service.disconnect(provider);
-  ctx.print([
+  return [
     `Disconnected ${label}.`,
     revokedRemotely
       ? '  The access was revoked at the provider and local tokens were cleared.'
       : '  Local tokens were cleared. This provider offers no token-revocation endpoint, so revoke access in your account settings if desired.',
-  ].join('\n'));
+  ].join('\n');
 }
 
-export async function runCalendarAccounts(
+export async function calendarAccounts(
   ctx: CommandContext,
   factory: CalendarServiceFactory = defaultServiceFactory,
-): Promise<void> {
+): Promise<string> {
   const service = factory(ctx);
   const accounts = await service.listAccounts();
   if (accounts.length === 0) {
-    ctx.print([
+    return [
       'Connected calendar accounts',
       '  None. Connect one with /calendar connect google  or  /calendar connect outlook',
-    ].join('\n'));
-    return;
+    ].join('\n');
   }
-  ctx.print([
+  return [
     `Connected calendar accounts (${accounts.length})`,
     ...accounts.map(({ account, state }) =>
       `  ${PROVIDER_LABEL[account.provider]}  ${account.label}  [${CONNECTION_STATE_NOTE[state] ?? state}]`,
     ),
-  ].join('\n'));
+  ].join('\n');
 }
 
 /**

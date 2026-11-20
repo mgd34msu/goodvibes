@@ -178,22 +178,22 @@ function describeGoogleRoute(inputs: CapabilityStatusInputs): string[] {
   return lines;
 }
 
-/** The separate direct-mailbox verdict, read from the same config `/email status` reads. */
+/** The separate direct-mailbox verdict, read from the same config `/mail status` reads. */
 export function readMailboxVerdict(configGet: (key: string) => unknown): MailboxVerdict {
   try {
     const status = readMailboxStatus(configGet);
     if (status.ready) {
-      return { configured: true, detail: 'A direct mailbox is configured and ready. Manage it with: /email status' };
+      return { configured: true, detail: 'A direct mailbox is configured and ready. Manage it with: /mail status' };
     }
     const started = status.settings.imapHost !== undefined || status.settings.username !== undefined || status.passwordStored;
     return {
       configured: false,
       detail: started
-        ? `A direct mailbox is partly set up (${status.problems.length} setting(s) outstanding). See: /email status`
-        : 'No direct mailbox is configured. That is a separate feature from Google; set one up with /email set only if the account is not a Google account.',
+        ? `A direct mailbox is partly set up (${status.problems.length} setting(s) outstanding). See: /mail status`
+        : 'No direct mailbox is configured. That is a separate feature from Google; set one up with /mail set only if the account is not a Google account.',
     };
   } catch {
-    return { configured: false, detail: 'The direct-mailbox settings could not be read. See: /email status' };
+    return { configured: false, detail: 'The direct-mailbox settings could not be read. See: /mail status' };
   }
 }
 

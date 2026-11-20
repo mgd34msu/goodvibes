@@ -1,17 +1,13 @@
-import { createTrustReviewTools, createTrustCommandFlow, trustBundleExportConfirmation } from '@goodvibes-jev/engine/terminal-shell/trust-review';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { listInstalledEcosystemEntries, loadEcosystemCatalog } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
 import { discoverTasks } from '@/runtime/index.ts';
 import { DEFAULT_TASK_SUITE_DIR } from './eval.ts';
-import {
-  requireEcosystemCatalogPaths,
-  requireReadModels,
-  requireSecretsManager,
-  requireServiceRegistry,
-  requireShellPaths,
-} from './runtime-services.ts';
+import { requireEcosystemCatalogPaths, requireShellPaths } from './runtime-services.ts';
+import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { choiceInput, readAction, textInput } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 
 interface ReleaseBundle {
   readonly version: 1;
@@ -48,9 +44,7 @@ function projectEvalTasks(projectRoot: string): string[] {
   }
 }
 
-function buildReleaseBundle(
-  ctx: Parameters<NonNullable<CommandRegistry['register']>>[0]['handler'] extends (args: string[], context: infer C) => unknown ? C : never,
-): ReleaseBundle {
+function buildReleaseBundle(ctx: CommandContext): ReleaseBundle {
   const remoteRuntime = ctx.ops.remoteRuntime;
   const incidents = ctx.extensions.forensicsRegistry?.getAll() ?? [];
   const ecosystemPaths = requireEcosystemCatalogPaths(ctx);
@@ -90,139 +84,84 @@ function inspectReleaseBundle(path: string): string {
   ].join('\n');
 }
 
-const { buildTrustReviewBundle, formatTrustReview, inspectTrustBundle } = createTrustReviewTools<CommandContext>({
-  listSecrets: (ctx) => requireSecretsManager(ctx).list(),
-  serviceNames: (ctx) => Object.keys(requireServiceRegistry(ctx).getAll()),
-  security: (ctx) => requireReadModels(ctx).security.getSnapshot(),
-  permissionMode: (ctx) => ctx.platform.configManager.get('permissions.mode'),
-  serviceLabel: 'services',
-});
+function formatReleaseBundle(title: string, bundle: ReleaseBundle): string {
+  return [
+    title,
+    `  provider/model: ${bundle.runtime.provider || '(unset)'}/${bundle.runtime.model || '(unset)'}`,
+    `  eval tasks: ${bundle.evalSuites.length}`,
+    `  failure reports: ${bundle.incidentCount}`,
+    `  remote pools/contracts/artifacts: ${bundle.remote.pools}/${bundle.remote.contracts}/${bundle.remote.artifacts}`,
+    `  ecosystem catalog plugins/skills: ${bundle.ecosystem.pluginCatalog}/${bundle.ecosystem.skillCatalog}`,
+    `  installed plugins/skills: ${bundle.ecosystem.installedPlugins}/${bundle.ecosystem.installedSkills}`,
+  ].join('\n');
+}
 
-const runTrustCommand = createTrustCommandFlow<CommandContext, Awaited<ReturnType<typeof buildTrustReviewBundle>>>({
-  buildTrustReviewBundle,
-  formatTrustReview,
-  inspectTrustBundle,
-});
+const TERMINAL = { terminalOnly: 'The evidence is read from the terminal app\'s own session.' } as const;
 
+/** `/release`, described once (command-actions/): whether this project is ready to release, and the evidence as a file. */
 export function registerProductRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
-    name: 'trust',
-    description: "Review trust posture, set this workspace's trust level, or export trust bundles",
-    usage: '[review|workspace [trusted|restricted]|bundle export <path>|bundle inspect <path>]',
-    confirm: (args, ctx) => trustBundleExportConfirmation(args, (path) => requireShellPaths(ctx).resolveWorkspacePath(path)),
-    async handler(args, ctx) {
-      const sub = args[0] ?? 'review';
-      if (sub === 'workspace') {
-        const manager = ctx.workspace.workspaceTrustManager;
-        if (!manager) {
-          ctx.print('Workspace trust is unavailable in this context.');
-          return;
-        }
-        const choice = (args[1] ?? '').toLowerCase();
-        if (choice === 'trusted' || choice === 'trust' || choice === 'full' || choice === 'yes') {
-          const saved = await manager.setLevel('trusted');
-          ctx.print('This workspace is now TRUSTED; all tools may run, subject to your permission settings.');
-          if (!saved.saved) ctx.print(`This applies to this session only: ${saved.fault ?? 'the decision could not be saved'}. It will be asked again next time.`);
-          ctx.renderRequest();
-          return;
-        }
-        if (choice === 'restricted' || choice === 'restrict' || choice === 'readonly' || choice === 'read-only' || choice === 'no') {
-          const saved = await manager.setLevel('restricted');
-          ctx.print(
-            'This workspace is now RESTRICTED; read-only exploration; write/execute/delegate tools are denied until you run `/trust workspace trusted`.',
-          );
-          if (!saved.saved) ctx.print(`This applies to this session only: ${saved.fault ?? 'the decision could not be saved'}. It will be asked again next time.`);
-          ctx.renderRequest();
-          return;
-        }
-        if (choice && choice !== 'status' && choice !== 'show') {
-          ctx.print(`Unknown workspace trust option "${args[1]}". Usage: /trust workspace [trusted|restricted]`);
-          return;
-        }
-        const level = manager.getLevel();
-        const lines = [
-          `Workspace trust: ${level.toUpperCase()}`,
-          level === 'trusted'
-            ? 'All tools may run, subject to your normal permission settings.'
-            : 'Read-only exploration: write, execute, and delegate tools are denied until you trust this workspace.',
-        ];
-        if (!manager.isDecided()) lines.push('Not yet decided: run `/trust workspace trusted` to enable full capability.');
-        if (manager.hasIgnoredLegacyDecision()) lines.push('A trust.json inside this workspace was found and is not honored: a project cannot decide its own trust. Decisions are kept in your own GoodVibes state.');
-        const registrationManager = ctx.workspace.workspaceRegistrationManager;
-        if (registrationManager) {
-          lines.push(`Registration: ${await registrationManager.describe()}`);
-        }
-        lines.push('Change with:  /trust workspace trusted   |   /trust workspace restricted');
-        ctx.print(lines.join('\n'));
-        return;
-      }
-      const shellPaths = requireShellPaths(ctx);
-      if (
-        await runTrustCommand(ctx, args, {
-          resolvePath: (path) => shellPaths.resolveWorkspacePath(path),
-        })
-      )
-        return;
-      ctx.print('Usage: /trust [review|bundle export <path>|bundle inspect <path>]');
-    },
-  });
-  registry.register({
+  registry.register(defineCommand<CommandContext>({
     name: 'release',
-    description: 'Package certification and release-readiness operations',
-    usage: '[review|checklist|bundle export <path>|bundle inspect <path>]',
-    handler(args, ctx) {
-      const shellPaths = requireShellPaths(ctx);
-      const sub = args[0] ?? 'review';
-      if (sub === 'review') {
-        const bundle = buildReleaseBundle(ctx);
-        ctx.print(
-          [
-            'Release Review',
-            `  provider/model: ${bundle.runtime.provider || '(unset)'}/${bundle.runtime.model || '(unset)'}`,
-            `  eval tasks: ${bundle.evalSuites.length}`,
-            `  incidents: ${bundle.incidentCount}`,
-            `  remote pools/contracts/artifacts: ${bundle.remote.pools}/${bundle.remote.contracts}/${bundle.remote.artifacts}`,
-            `  ecosystem catalog plugins/skills: ${bundle.ecosystem.pluginCatalog}/${bundle.ecosystem.skillCatalog}`,
-            `  installed plugins/skills: ${bundle.ecosystem.installedPlugins}/${bundle.ecosystem.installedSkills}`,
-          ].join('\n'),
-        );
-        return;
-      }
-      if (sub === 'checklist') {
-        ctx.print(
-          [
-            'Release Checklist',
-            '  1. Run /setup review and /setup doctor',
-            '  2. Run /security review and /trust review',
-            '  3. Run /policy preflight and /policy simulate',
-            '  4. Run /eval gate [suite-dir] over the project\'s eval tasks',
-            '  5. Review /incident latest and /remote list',
-            '  6. Export /release bundle export <path> for release evidence',
-          ].join('\n'),
-        );
-        return;
-      }
-      if (sub === 'bundle') {
-        const mode = args[1];
-        const pathArg = args[2];
-        if ((mode !== 'export' && mode !== 'inspect') || !pathArg) {
-          ctx.print(`Usage: /release bundle ${mode === 'export' || mode === 'inspect' ? mode : 'export|inspect'} <path>`);
-          return;
-        }
-        if (mode === 'export') {
-          const bundle = buildReleaseBundle(ctx);
-          const targetPath = shellPaths.resolveWorkspacePath(pathArg);
+    title: 'Release readiness',
+    summary: 'See whether this project is ready to release, and keep the evidence as a file',
+    group: 'Product',
+    report: 'review',
+    actions: [
+      readAction<CommandContext>({
+        id: 'review', label: 'See release readiness', word: 'review',
+        sentence: 'Shows the model in use, the project\'s eval tasks, this session\'s failure reports, remote work and the plugins and skills installed.',
+        operator: TERMINAL,
+        async run(_values, ctx) { return formatReleaseBundle('Release readiness', buildReleaseBundle(ctx)); },
+      }),
+      readAction<CommandContext>({
+        id: 'checklist', label: 'See the release checklist', word: 'checklist',
+        sentence: 'Lists the checks to run before a release, each with its line.',
+        async run() {
+          return [
+            'Release checklist',
+            '  1. /setup and /health: everything is set up and working',
+            '  2. /security and /security trust: nothing needs attention, and you know what is trusted',
+            '  3. /security preflight and /security simulate-policy: the policy is what you mean to enforce',
+            '  4. /eval gate over the project\'s eval tasks',
+            '  5. /health failure and /remote: no failure or remote work is left unexplained',
+            '  6. /release save <file>: keep the evidence',
+          ].join('\n');
+        },
+      }),
+      {
+        id: 'save', label: 'Save the release evidence to a file', word: 'save',
+        inputs: [
+          textInput({ id: 'path', label: 'File', help: 'Where to write it', why: 'a file path', kind: 'path', typed: { position: 1 } }),
+          choiceInput({
+            id: 'replace', label: 'If the file exists', help: 'Keep it, or write over it', typed: { flag: '--replace', switchOn: 'yes' },
+            choices: [{ value: 'no', label: 'Keep it and stop' }, { value: 'yes', label: 'Write over it', risk: 'cannot-be-undone' }],
+            optional: { default: 'no', means: 'keep it and stop' },
+          }),
+        ],
+        sentence: 'The release evidence (what "See release readiness" shows) will be written to {path}, until you change it.',
+        done: '', touches: 'this-machine', lasts: 'kept', risk: 'none',
+        operator: TERMINAL, example: { path: 'release-evidence.json' },
+        async run(values, ctx) {
+          const targetPath = requireShellPaths(ctx).resolveWorkspacePath(values.path!);
+          if (existsSync(targetPath) && values.replace !== 'yes') throw commandRefusal(`${targetPath} already exists; nothing was written.`, `Write over it: /release save ${values.path} --replace`);
           mkdirSync(dirname(targetPath), { recursive: true });
-          writeFileSync(targetPath, JSON.stringify(bundle, null, 2) + '\n', 'utf-8');
-          ctx.print(`Release bundle exported to ${targetPath}`);
-          return;
-        }
-        if (mode === 'inspect') {
-          ctx.print(inspectReleaseBundle(shellPaths.resolveWorkspacePath(pathArg)));
-          return;
-        }
-      }
-      ctx.print('Usage: /release [review|checklist|bundle export <path>|bundle inspect <path>]');
-    },
-  });
+          writeFileSync(targetPath, JSON.stringify(buildReleaseBundle(ctx), null, 2) + '\n', 'utf-8');
+          return `Saved the release evidence to ${targetPath}.`;
+        },
+      },
+      readAction<CommandContext>({
+        id: 'read', label: 'Read saved release evidence', word: 'read',
+        inputs: [textInput({ id: 'path', label: 'File', help: 'Release evidence saved earlier', why: 'a file path', kind: 'path', typed: { position: 1 } })],
+        sentence: 'Reads the release evidence saved in {path} and shows what it recorded.',
+        example: { path: 'release-evidence.json' },
+        async run(values, ctx) {
+          try {
+            return inspectReleaseBundle(requireShellPaths(ctx).resolveWorkspacePath(values.path!));
+          } catch (error) {
+            throw commandRefusal(`Could not read ${values.path}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        },
+      }),
+    ],
+  }));
 }

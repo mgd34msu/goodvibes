@@ -31,15 +31,20 @@ export function originNotAllowedResponse(origin: string | null, action: string):
 }
 
 /**
- * A state-changing request that authenticated with the sign-in cookie (no
- * bearer credential, which a browser never adds by itself) is served only for
- * a page whose origin may use it; a request without an Origin header is not
- * taken on the cookie, as the socket does not take one. Null: let it through.
+ * A request that authenticated with the sign-in cookie (no bearer credential,
+ * which a browser never adds by itself) is served only for a page whose origin
+ * may use it. A state-changing one must name its origin: a request without an
+ * Origin header is not taken on the cookie, as the socket does not take one.
+ * A read (an event stream included) is refused when it names another origin;
+ * a browser sends none on a same-origin read. Null: let it through.
  */
 export function refuseCookieWriteFromOtherOrigin(req: Request, allowed: () => readonly string[]): Response | null {
-  if (READ_METHODS.has(req.method.toUpperCase())) return null;
   if (/^Bearer\s+\S+/i.test(req.headers.get('authorization') ?? '')) return null;
   const origin = req.headers.get('origin');
+  if (READ_METHODS.has(req.method.toUpperCase())) {
+    if (origin === null || browserOriginAllowed(req, origin, allowed())) return null;
+    return originNotAllowedResponse(origin, 'read with the sign-in cookie');
+  }
   if (origin !== null && browserOriginAllowed(req, origin, allowed())) return null;
   return originNotAllowedResponse(origin, 'change anything with the sign-in cookie');
 }

@@ -16,7 +16,7 @@
  * values held in memory; only a validated (and, where possible, verified)
  * set is written: the password first, then the plain values. A refused or
  * failed save leaves the stored configuration as it was. Validation and
- * persistence reuse the helpers the /email set command uses (email-settings.ts),
+ * persistence reuse the helpers the /mail set command uses (email-settings.ts),
  * one storage path, not a fork, and the keys are `surfaces.email.*`, the
  * mailbox the daemon reads.
  */
@@ -85,7 +85,7 @@ export function readAgentWorkspaceEmailConnectPrefill(context: CommandContext | 
 /**
  * With a connected host, the inbox settings are the host's (`surfaces.email.*`
  * is daemon-owned): one effective-config snapshot answers the prefill and
- * whether a password is stored, the same view `/email` reads. Null when no host
+ * whether a password is stored, the same view `/mail` reads. Null when no host
  * client is installed, so the caller reads this process's config at once.
  */
 export function loadHostEmailConnectPrefill(context: CommandContext | null): Promise<AgentWorkspaceEmailConnectPrefill | null> | null {
@@ -271,7 +271,7 @@ export async function submitAgentWorkspaceEmailConnectWizardEditor(
       host.lastActionResult = {
         kind: 'refreshed',
         title: 'Inbox settings saved',
-        detail: `The mailbox settings for ${readField('username')} were saved on the connected host. The IMAP/SMTP connection was not verified from this terminal: the password is stored on the host. Run /email status to see the inbox state.`,
+        detail: `The mailbox settings for ${readField('username')} were saved on the connected host. The IMAP/SMTP connection was not verified from this terminal: the password is stored on the host. Run /mail status to see the inbox state.`,
         safety: 'safe',
       };
       return;

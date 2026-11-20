@@ -9,12 +9,10 @@ import { readDaemonSessionToken, writeDaemonSessionToken } from '@goodvibes-jev/
 import { daemonTokenOverride, resolveControlPlaneBaseUrl } from '../../runtime/client/operator-endpoint.ts';
 import { parseDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { VERSION } from '../../version.ts';
 import '@goodvibes-jev/engine/platform/platform/config';
 import { registerUpdateCommand } from './update-runtime.ts';
 import '@/runtime/index.ts';
 import {
-  requireProfileManager,
   requireSecretsManager,
   requireShellPaths,
 } from './runtime-services.ts';
@@ -294,29 +292,6 @@ const authCommand = createAuthCommand<CommandContext, AuthReviewBundle>({
 });
 
 export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
-    name: 'install',
-    description: 'Review install posture (the support bundle carries the install facts)',
-    usage: '[review]',
-    async handler(args, ctx) {
-      const sub = args[0] ?? 'review';
-      if (sub === 'review') {
-        const profiles = requireProfileManager(ctx).list();
-        const secretKeys = await requireSecretsManager(ctx).list();
-        ctx.print(
-          [
-            'Install Review',
-            `  version: ${VERSION}`,
-            `  profiles: ${profiles.length}`,
-            `  secret keys: ${secretKeys.length}`,
-          ].join('\n'),
-        );
-        return;
-      }
-      ctx.print('Usage: /install [review]\n  The install facts for a support thread are in /setup support-bundle <dir> (platform-review.json).');
-    },
-  });
-
   registerUpdateCommand(registry);
 
   registry.register(authCommand);

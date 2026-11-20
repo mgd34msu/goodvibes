@@ -140,7 +140,7 @@ export function applyInitialTuiCliState(options: {
   // Trust stays undecided here on purpose: the first non-read tool request is
   // what raises the trust question (main.ts's trustPromptRef).
   const runFirstRunSteps = (): void => {
-    void startFirstRun(firstRunDeps(commandContext, shellPaths, render, globalOnboardingMarker.payload !== null)).catch((error: unknown) => {
+    void startFirstRun(firstRunDeps(commandContext, shellPaths, render, globalOnboardingMarker.payload !== null, () => { input.conversationManager?.invalidateRenderedLines(); })).catch((error: unknown) => {
       logger.warn('First run could not start', { error: summarizeError(error) });
     });
   };
@@ -212,7 +212,7 @@ export function applyInitialTuiCliState(options: {
 }
 
 /** What first run needs from the terminal app. */
-function firstRunDeps(commandContext: CommandContext, shellPaths: TuiStartupShellPaths, render: () => void, markedDone: boolean): FirstRunDeps {
+function firstRunDeps(commandContext: CommandContext, shellPaths: TuiStartupShellPaths, render: () => void, markedDone: boolean, redraw: () => void): FirstRunDeps {
   return {
     providerRegistry: commandContext.provider.providerRegistry,
     configManager: commandContext.platform.configManager,
@@ -224,6 +224,7 @@ function firstRunDeps(commandContext: CommandContext, shellPaths: TuiStartupShel
     completeModelSelection: commandContext.completeModelSelection,
     openProviderPicker: commandContext.openProviderPicker,
     scanThisComputer: () => { scanThisComputerNow(); },
+    redrawConversation: redraw,
     markDone: () => { writeOnboardingCheckMarker(shellPaths, { source: 'command' }); },
     isMarkedDone: () => markedDone,
   };

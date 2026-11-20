@@ -380,21 +380,24 @@ Mail is read and sent by the daemon over IMAP and SMTP (or Gmail through Google,
 3. Check the connection: `/mail status`. It prints `Mail: ready` with what is true, or `Mail: needs-setup` with the next steps.
 4. First use: `/mail list`.
 
-### `/mail` (terminal app; alias `/email`)
+### `/mail` (both apps)
+
+`/mail` is one command in both apps; `/mail` alone lists its actions ("See whether mail is connected" first), and a model or script running it bare gets the status. A message is three blanks: To, Subject, Message.
 
 ```text
-/mail                          connection status and the latest messages
-/mail status
-/mail list [n]                 the n most recent messages (default 15)
-/mail read <uid>               open one message (uid from /mail list)
-/mail draft you@example.com | Status update | The build is green.
-/mail send [--yes] [--again] you@example.com | Status update | The build is green.
+/mail status                                   whether mail is connected, and the next step if not
+/mail list [n]                                 the n newest messages (default 15)
+/mail read <message>                           open one message (its uid; /mail read alone lists the inbox to choose from)
+/mail draft you@example.com --subject "Status update" The build is green.
+/mail send you@example.com --subject "Status update" The build is green.
+/mail send you@example.com --subject "Status update" --again The build is green.
 ```
 
-- The line after the command is `to | subject | body`; the body is everything after the second `|`, pipes included.
-- `send` shows the whole message and asks once ("Send this message to <to>?"). `--yes` before the recipient skips the question; the same word inside the subject or body is text.
-- The same exact message is not sent twice from one session. `--again` before the recipient sends it anyway (for a retry after a timeout); check the Sent folder first.
-- Message bodies are printed as transcript output only. They never enter the model's history from `/mail read`.
+- The message is the words after the options; `--subject` takes one quoted value.
+- `send` shows the recipient, subject and message and asks once, because a sent message cannot be recalled. `--yes` typed by the owner answers in advance.
+- The same exact message is not sent twice from one session. `--again` ("Send it again") sends it anyway (for a retry after a timeout); check the Sent folder first.
+- The terminal app reads and sends through the daemon; the Agent uses its own mail service on the same `surfaces.email.*` settings and records each message it reads as untrusted content.
+- In the terminal app message bodies are printed as transcript output only; they never enter the model's history from `/mail read`.
 
 Status failures and fixes:
 
@@ -404,24 +407,21 @@ Status failures and fixes:
 | `EMAIL_CREDENTIALS_MISSING` | Password secret missing. | `/secrets set GOODVIBES_SURFACES_EMAIL_PASSWORD <password>` |
 | unreachable | The daemon cannot be reached. | Check the daemon with `/doctor` and `goodvibes status`. |
 
-### The Agent: `/email`
+### Mailbox settings in the Agent: `/mail settings`, `/mail set`, `/mail password`
 
 ```text
-/email status
-/email config
-/email set <field> <value> [--yes]
-/email check [n]
-/email send --yes you@example.com Status update -- The build is green.
+/mail settings                     every mailbox setting, the password shown only as stored or not
+/mail set <setting> <value>        change one
+/mail password                     store the password (asked for with masked input)
 ```
 
-- `status` shows the IMAP and SMTP host and port, the user, whether the password is stored (`[stored]` or `[missing]`), the from address, `ready: yes|no`, and the problems found. These are the same `surfaces.email.*` settings the daemon uses.
-- `config` shows the current mailbox settings with the password redacted.
-- `check [n]` lists up to `n` unread inbox summaries (default 10, at most 100) and a two-line preview of the newest message. Mail is opened read-only (IMAP EXAMINE); nothing is marked read.
-- `send --yes <to> <subject words> -- <body words>` sends a plain-text message. Without `--yes` it shows a preview and sends nothing. `--yes` counts only before the recipient.
+- `/mail status` in the Agent shows the IMAP and SMTP host and port, the user, whether the password is stored (`[stored]` or `[missing]`), the from address, `ready: yes|no`, and the problems found. These are the same `surfaces.email.*` settings the daemon uses.
+- `/mail list [n]` in the Agent lists up to `n` unread messages (at most 100) and a two-line preview of the newest. Mail is opened read-only (IMAP EXAMINE); nothing is marked read.
+- The terminal app changes these settings in `/settings` and refuses these three actions saying so.
 
-`/email set` fields. A field may also be written as its full setting key (`surfaces.email.imap.host`) or with an `email.` prefix; the older names `imapHost`, `imapPort`, `smtpHost`, `smtpPort`, `username`, `fromAddress`, `passwordRef` and `mailbox` are accepted.
+`/mail set` settings:
 
-| Field | Setting | Value |
+| Setting | Key | Value |
 | --- | --- | --- |
 | `host` | `surfaces.email.host` | Mail server host used for IMAP and SMTP unless they are set separately. |
 | `imap.host` | `surfaces.email.imap.host` | IMAP host. |
@@ -433,23 +433,24 @@ Status failures and fixes:
 | `smtp.secure` | `surfaces.email.smtp.secure` | `true`, `yes` or `tls` (implicit TLS, port 465); `false`, `no` or `starttls` (STARTTLS, port 587). |
 | `user` | `surfaces.email.user` | Login name. |
 | `from` | `surfaces.email.from` | From address. |
-| `password` | `surfaces.email.password` | Needs `--yes`. Stored in the daemon's secret store; the setting keeps only a reference. With no value, the Agent asks for it with masked input. |
+
+The settings that decide where and as whom the password is presented (the hosts, ports, TLS switches and user) loosen a protection when changed: `/mail set` asks first for them, and only the owner's own typing counts. `/mail password` is the owner's only.
 
 Worked example (Fastmail):
 
 ```text
-/email set imap.host imap.fastmail.com
-/email set imap.port 993
-/email set smtp.host smtp.fastmail.com
-/email set smtp.port 465
-/email set smtp.secure true
-/email set user you@fastmail.com
-/email set from you@fastmail.com
-/email set password --yes
-/email status
+/mail set imap.host imap.fastmail.com
+/mail set imap.port 993
+/mail set smtp.host smtp.fastmail.com
+/mail set smtp.port 465
+/mail set smtp.secure true
+/mail set user you@fastmail.com
+/mail set from you@fastmail.com
+/mail password
+/mail status
 ```
 
-The last `set` prompts for the password with masked input and answers `Email config updated` with `key: surfaces.email.password` and `value: [stored as secret; reference: goodvibes://secrets/...]`. An unknown field is refused with the list of fields; a bad port answers `Invalid port number: <value>. Must be an integer between 1 and 65535.` The settings are daemon-owned, so a write fails when no daemon answers.
+`/mail password` asks for the password with masked input and answers `The mailbox password is stored as a secret (reference goodvibes://secrets/...); settings hold only the reference.` A setting not in the table is refused with the list; a bad port answers `Invalid port number: <value>. Must be an integer between 1 and 65535.` The settings are daemon-owned, so a write fails when no daemon answers.
 
 ### Inbound mail and notices
 
@@ -493,19 +494,20 @@ Prerequisites: a CalDAV server URL, user and password (or an app password).
 
    Optional: `surfaces.calendar.defaultCalendarId` and `surfaces.calendar.calendars`.
 2. Check: `/calendar status`.
-3. First use: `/calendar list`.
+3. First use: `/calendar upcoming`.
+
+`/calendar` is one command in both apps; `/calendar` alone lists its actions ("See what is coming up" first), and a model or script running it bare gets the days ahead. In the terminal app it works on the daemon's calendar:
 
 ```text
-/calendar                       connection status and the agenda ahead
+/calendar upcoming [--days 7]
+/calendar get <event>
+/calendar add --title "Design review" --start 2026-12-01T14:00:00Z --end 2026-12-01T15:00:00Z [--location "Room 4"] [--notes "..."] [--again]
+/calendar change <event> [--title ...] [--start ...] [--end ...]
+/calendar delete <event>
 /calendar status
-/calendar list [n]              the next n events (default 20)
-/calendar get <id>
-/calendar create [--yes] [--again] Design review | 2026-12-01T14:00:00Z | 2026-12-01T15:00:00Z
-/calendar update [--yes] <id> | 2026-12-01T15:00:00Z | 2026-12-01T16:00:00Z
-/calendar delete [--yes] <id>
 ```
 
-`/cal` is an alias. Fields are `title | start | end`; in `update`, an empty field keeps its value. `create`, `update` and `delete` show the change and ask once. A daemon answer of `CALENDAR_NOT_CONFIGURED` means the URL or user is missing.
+A blank left out keeps its value in `change`. `change` and `delete` reach the guests and ask once; the daemon's calendar needs an end time for `add`, and an identical `add` from the same session is refused unless `--again` ("Add it again"). A time without a zone is read in this machine's zone. A daemon answer of `CALENDAR_NOT_CONFIGURED` means the URL or user is missing. The Agent's own actions (`all`, `import`, `export`, `accounts`, `connect`, `disconnect`, `subscriptions`, `subscribe`, `refresh`, `unsubscribe`) are refused here saying so.
 
 Google Calendar cannot be reached over CalDAV with a password: Google refuses Basic authentication on its CalDAV endpoint. Use the Google route below.
 
@@ -514,28 +516,31 @@ Google Calendar cannot be reached over CalDAV with a password: Google refuses Ba
 The Agent keeps local events, subscribes to ICS feeds, and connects Google or Microsoft calendars over OAuth.
 
 ```text
-/calendar list
 /calendar upcoming --days 7
+/calendar all
+/calendar get <event>
 /calendar add --title "Dentist" --start 2026-12-03T15:00:00 --end 2026-12-03T16:00:00 --location "Main St"
-/calendar delete <id> --yes
+/calendar delete <event>                          asks first
 /calendar import <path.ics>
-/calendar export --dest <path.ics>
-/calendar subscribe <ics-url> --name work --every 30 --yes
+/calendar export [<path.ics>]
+/calendar subscribe <ics-url> --name work --every 30 [--allow-private-host]
 /calendar subscriptions
-/calendar refresh [name]
-/calendar unsubscribe <name> --yes
+/calendar refresh [<feed>]
+/calendar unsubscribe <feed>                      asks first
 /calendar connect google
-/calendar connect outlook --device
-/calendar connect google --code <address the browser landed on>
+/calendar connect outlook --with device
+/calendar connect google --with code              asks for the address the browser landed on, masked
 /calendar accounts
-/calendar disconnect <google|outlook>
+/calendar disconnect <google|outlook>             asks first
 ```
+
+`/calendar change` and `/calendar status` are the terminal app's (the daemon's calendar) and are refused here saying so.
 
 Connecting a calendar account over OAuth needs your own OAuth client id: no client id ships with the product. Steps:
 
 1. Register a free OAuth app (Google Cloud Console for Google, the Azure portal for Microsoft) and copy its client id. A desktop or public-client app needs no secret.
 2. Put the client id in `calendar.google.clientId` or `calendar.microsoft.clientId` (the Agent workspace card "Connect Google Calendar" / "Connect Microsoft Outlook" under `/agent personal-ops` does this). A client secret, if any, goes in the secret store and is referenced by `calendar.google.clientSecretRef` / `calendar.microsoft.clientSecretRef`.
-3. Run `/calendar connect google` (or `outlook`). A browser opens; approve. On a machine with no browser, add `--device`: Outlook shows a device code to enter on another device; Google prints a link to open anywhere, and after approving you run `/calendar connect google --code <the 127.0.0.1 address the browser landed on>` within ten minutes.
+3. Run `/calendar connect google` (or `outlook`). A browser opens; approve. On a machine with no browser, add `--with device`: Outlook shows a device code to enter on another device; Google prints a link to open anywhere, and after approving you run `/calendar connect google --with code` within ten minutes and give the 127.0.0.1 address the browser landed on (asked for masked).
 4. The answer lists the account, the transport and the scopes. `/calendar upcoming` then merges that account's events.
 
 `disconnect` revokes the access at the provider when it offers revocation, and clears local tokens.
@@ -626,12 +631,12 @@ A channel is a chat surface the daemon sits behind: Slack, Discord, Telegram, nt
 ### General setup procedure
 
 1. Get the credentials from the provider (each surface below says which).
-2. In the terminal app, run `/channel pair <surface>`. It lists the surface's declared fields, asks for every missing required value (and offers the optional ones), stores secret values in the daemon's secret store with a reference in the setting, and switches the surface on once every required field is set. `/channel pair` alone lists every surface and how many required values are set. A surface whose schema marks no field required (Slack, ntfy, the generic webhook, Google Chat) is switched on even when you skip every value, so enter its tokens before you finish, or set them with `/config set` as below.
+2. In the terminal app, run `/devices pair channel <surface>`. It lists the surface's declared fields, asks for every missing required value (and offers the optional ones), stores secret values in the daemon's secret store with a reference in the setting, and switches the surface on once every required field is set. `/channel pair` alone lists every surface and how many required values are set. A surface whose schema marks no field required (Slack, ntfy, the generic webhook, Google Chat) is switched on even when you skip every value, so enter its tokens before you finish, or set them with `/config set` as below.
    - Alternatively set each key with `/config set surfaces.<surface>.<field> <value>` and switch it on with `/config set surfaces.<surface>.enabled true` or `goodvibes surfaces enable <surface>`.
    - In the Agent: `/channels setup <id>`, `/channels doctor <id>`, `/channels guide <id>`.
-3. Prove it end to end: `/channel pair <surface> verify` sends a real test message through the daemon and reports the delivered or error outcome.
+3. Prove it end to end: `/channels test <surface>` sends a real test message through the daemon and reports the delivered or error outcome.
 4. Send a first message from your own account. On a surface whose allowlists are empty it is not answered: it raises an owner claim (see "Who may talk to the assistant"). Accept it with `/questions`, then `/questions answer <id> accept` (or in the web UI inbox). You are then the surface's owner; send your message again and it is answered.
-5. Check: `goodvibes surfaces check <surface>`, `/channel status`, `/channel policy <surface>`.
+5. Check: `goodvibes surfaces check <surface>`, `/channels status`, `/channels rules <surface>`.
 
 A surface switched on, or given a credential, while the daemon runs is picked up without a restart. A surface switched off answers inbound requests with HTTP 503 `SURFACE_DISABLED`.
 
@@ -676,14 +681,14 @@ Each surface has an ingress policy.
   Authority belongs to the person, not the surface. The owner's own messages keep the surface's authority: on Telegram (a command-authority surface) his turn runs as if typed in the terminal app, in his permission mode; on every other chat surface a change his turn asks for becomes an approval for him each time (`channel-request`); on email, webhook and ntfy it is refused. A guest's turn runs under the guest form of the surface (`guest:<surface>`), which carries no authority on any surface, Telegram included. A guest's message is also never handed to an agent already running in that conversation; it starts a guest's turn of its own. A surface with no owner (`open`, below) has only guests.
 
 ```text
-/channel policy                             every surface's rules
-/channel policy slack
-/channel policy set slack --require-mention on --allow-dms on --allow-users U0123,U0456
-/channel policy set discord --allowed-commands status,help --commands-without-mention on
-/channel policy set matrix --allow-users none
+/channels rules                             every surface's rules
+/channels rules slack
+/channels set-rules slack --require-mention on --allow-dms on --allow-users U0123,U0456
+/channels set-rules discord --allowed-commands status,help --commands-without-mention on
+/channels set-rules matrix --allow-users none
 ```
 
-`/channel policy set` options: `--enabled`, `--require-mention`, `--allow-dms`, `--allow-groups`, `--allow-threads`, `--commands-without-mention` take `on` or `off`; `--dm-policy` and `--group-policy` take `allow`, `deny` or `inherit`; `--allow-users`, `--allow-channels`, `--allow-group-ids`, `--allowed-commands` take a comma list or `none`. A list replaces the whole stored list on every surface, so to remove one admitted sender set the list again without him (for example `/channel policy set telegram --allow-users <your-id>`); include yourself, or you lock yourself out. `--open on` makes a shared channel: while every list is empty, every sender is admitted and no owner claim is raised (off by default); everyone on it talks as a guest. The operator method `channels.policies.update` takes the same field as `open`, and `channels.policies.list` reports it.
+`/channels set-rules` options: `--enabled`, `--require-mention`, `--allow-dms`, `--allow-groups`, `--allow-threads`, `--commands-without-mention` take `on` or `off`; `--dm-policy` and `--group-policy` take `allow`, `deny` or `inherit`; `--allow-users`, `--allow-channels`, `--allow-group-ids`, `--allowed-commands` take a comma list or `none`. A list replaces the whole stored list on every surface, so to remove one admitted sender set the list again without him (for example `/channels set-rules telegram --allow-users <your-id>`); include yourself, or you lock yourself out. `--open on` makes a shared channel: while every list is empty, every sender is admitted and no owner claim is raised (off by default); everyone on it talks as a guest. The operator method `channels.policies.update` takes the same field as `open`, and `channels.policies.list` reports it.
 
 A message names a command only when its first word is written as one (`/status`, `!status`, `/status@yourbot`); `allowedCommands` limits those.
 
@@ -697,18 +702,23 @@ Every chat surface lets the owner ask about, cancel or retry a run, agent or ses
 
 Only the channel's owner controls runs: a guest (anyone else the channel admits) who sends one of these, or presses a run's Cancel or Retry button on Slack or Discord, is refused (`Not done: cancel <id> was refused. Status, cancel and retry act on the owner's runs and agents, so only the owner of this channel may send them.`). The typed command and the button are the same control: a button cancels a run or an agent, as `/cancel` does.
 
-### Other `/channel` subcommands (terminal app)
+### Other `/channels` actions (both apps)
 
 ```text
-/channel                  open the channel panel
-/channel status
-/channel routes           where replies go (route bindings)
-/channel delivery         delivery strategies
-/channel profiles [list|get|set|delete]   per-channel model, provider and permission mode
-/channel telegram-cursor  recover the Telegram update cursor
+/channels                 the list of actions; a model or script gets "See your channels"
+/channels status          each channel, on or off, ready or not
+/channels setup <channel> what a channel needs (no value shown)
+/channels doctor <channel>  the daemon's checks and the repairs it offers
+/channels test <channel>  a real test message through the daemon (asks first)
+/channels accounts        the channel accounts, configured, linked and signed in
+/channels profiles        the model, provider and permission mode each channel's sessions get
+/channels profile <channel> [<conversation>]
+/channels set-profile <channel> [<conversation>] [--model ...] [--provider ...] [--permission-mode ...]
+/channels remove-profile <channel> [<conversation>]
+/channels telegram-cursor recover the Telegram update cursor
 ```
 
-Each takes `--json`. The Agent's equivalent is `/channels` (alias `/channel`): `list`, `readiness`, `attention`, `triage [limit]`, `guide [id]`, `show <id>`, `deliveries [limit]`, `send --channel <id> --message <text> --yes`, `accounts`, `policies`, `status`, `doctor <id>`, `setup <id>`, `telegram-cursor`.
+The terminal app adds `overview`, `routes` (where replies go), `delivery` (delivery strategies) and `open` (the routes view); the Agent adds `readiness [--show all|ready|attention]`, `configured <channel>`, `guide [<channel>]`, `triage`, `send` and `deliveries`. Each app refuses the other's, saying where it is done. Pairing a channel is "Pair something" under `/devices`: `/devices pair channel <channel>`.
 
 ### Slack
 
@@ -746,7 +756,7 @@ From nothing to the first answered message (Socket Mode, no public address neede
 5. Interactivity & Shortcuts: turn on (approval and purchase buttons). App Home: allow users to send messages from the Messages tab (Slack's own requirement for direct messages to a bot).
 6. Optional, Slash Commands: create one, for example `/goodvibes`.
 7. Install to Workspace. Copy the Bot User OAuth Token (`xoxb-...`).
-8. In the terminal app (set both tokens before switching the surface on; `/channel pair slack` would switch it on with nothing entered):
+8. In the terminal app (set both tokens before switching the surface on; `/devices pair channel slack` would switch it on with nothing entered):
 
    ```text
    /config set surfaces.slack.botToken <your-bot-token>
@@ -757,8 +767,8 @@ From nothing to the first answered message (Socket Mode, no public address neede
 
 9. In Slack, open a direct message with the bot and send anything. It is not answered; an owner claim appears. In the terminal app: `/questions`, then `/questions answer <id> accept`.
 10. Send the message again: it is answered. A request for work is proposed back; reply `yes` to start it.
-11. To use it in a channel: `/invite @<bot name>` in that channel, and turn on mentions so the bot answers only when addressed: `/channel policy set slack --require-mention on`. With mentions off (the default), every message in a channel the bot is in is handled.
-12. To allow a second person, accept their claim, or `/channel policy set slack --allow-users <your-U-id>,<their-U-id>` (listing replaces the list, so include yourself).
+11. To use it in a channel: `/invite @<bot name>` in that channel, and turn on mentions so the bot answers only when addressed: `/channels set-rules slack --require-mention on`. With mentions off (the default), every message in a channel the bot is in is handled.
+12. To allow a second person, accept their claim, or `/channels set-rules slack --allow-users <your-U-id>,<their-U-id>` (listing replaces the list, so include yourself).
 
 Slack delivers every message as a channel or thread conversation, direct messages included, so `--allow-dms` and `--dm-policy` do not separate Slack direct messages from channels; use the user list. A Slack start is reported running only once its socket opens; a socket that does not open within 30 seconds is a failed start. Without Socket Mode, set the request URLs and `surfaces.slack.signingSecret` as above. A change the assistant is asked for from Slack is approved by the owner each time (`channel-request`), even in `yolo`.
 
@@ -772,7 +782,7 @@ Slack delivers every message as a channel or thread conversation, direct message
 | `surfaces.discord.defaultChannelId` | for notifications | |
 | `DISCORD_WEBHOOK_URL` (env) | optional | Notifications into one channel without a bot token. |
 
-Steps: create a Discord application and bot, install it into your server, `/channel pair discord`, optionally register slash commands through the surface's provider actions, verify, then mention the bot. A reply after Discord's fifteen-minute interaction window is posted to the command's channel.
+Steps: create a Discord application and bot, install it into your server, `/devices pair channel discord`, optionally register slash commands through the surface's provider actions, verify, then mention the bot. A reply after Discord's fifteen-minute interaction window is posted to the command's channel.
 
 ### Telegram
 
@@ -796,7 +806,7 @@ From nothing to the first answered message:
 4. In Telegram, open a chat with your bot and send any message (tapping Start sends `/start`). It is not answered and binds nothing: it raises an owner claim, `Make <your-numeric-id> (<your-username>) the owner of telegram?`.
 5. In the terminal app: `/questions`, then `/questions answer <id> accept`. You are the owner, and only you are on the user list: the bot answers nobody else until you admit them.
 6. Send `/start` again: the bot replies with how to use it. Then send a request. A conversation gets a reply; a request for work is proposed back, and `yes` (or `go ahead`) starts it.
-7. Optional, for deliveries (routines, notices) with no conversation to answer: `/config set surfaces.telegram.defaultChatId <chat-id>`. A private chat's id is your numeric user id from the claim. `/channel pair telegram verify` sends its test message to this chat; without it the test reports `delivered:false`.
+7. Optional, for deliveries (routines, notices) with no conversation to answer: `/config set surfaces.telegram.defaultChatId <chat-id>`. A private chat's id is your numeric user id from the claim. `/devices pair channel telegram verify` sends its test message to this chat; without it the test reports `delivered:false`.
 
 The bot's own commands (answered by the adapter, never sent to an agent): `/start` and `/help` reply with usage; `/stop` explains that it does not cancel work (its reply says to send `cancel <id>`; with no decision model in use send `/cancel <id>`) and that the surface is switched off with `surfaces.telegram.enabled false`. In a group, the bot acts only on `/goodvibes <message>` or `@<your_bot> <message>` and ignores other text; the group's other members are answered only if they are admitted (each raises a "reach you" claim). While work runs, the owner can send `status <id>`, `cancel <id>`, `retry <id>` (`/status <id>` and so on without a decision model; see "Run control"). A message with only a photo, voice note or file is answered "I cannot read <kind>s yet. Send the request as text." Edits of a message already sent are not read.
 
@@ -840,7 +850,7 @@ Settings:
 Setup from nothing:
 
 1. In Home Assistant, create a long-lived access token.
-2. In a terminal app: `/channel pair homeassistant` and enter the instance URL, the access token and a webhook secret you choose (or use `/config set` for each key), then switch the surface on.
+2. In a terminal app: `/devices pair channel homeassistant` and enter the instance URL, the access token and a webhook secret you choose (or use `/config set` for each key), then switch the surface on.
 3. Make the daemon reachable from Home Assistant: Home Assistant calls the daemon's control plane, which listens on `127.0.0.1:3421` by default, so a Home Assistant on another machine needs the daemon exposed on the network (see "Network exposure" in "The daemon, the web UI and networking").
 4. Send a prompt. Two routes:
    - Webhook, authenticated by the webhook secret: `POST http://<daemon>:3421/webhook/homeassistant` with header `x-goodvibes-homeassistant-secret: <secret>` (or `x-goodvibes-webhook-secret: <secret>`, or `Authorization: Bearer <secret>`) and a JSON body such as `{"type":"prompt","message":"turn on the kitchen lights","conversationId":"home","messageId":"ha-msg-1"}`. The prompt text may be in `message`, `prompt`, `text` or `task`; optional `areaId`, `entityId`, `userId`, `displayName`, `providerId`, `modelId`. The request is held until the turn ends (at most 120 seconds) and answers with `delivered`, `sessionId` and `assistantMessageId`; the reply text arrives as the event below. A body with a `tools` list is refused with 400. A body whose text is a run-control command (see "Run control" under "Who may talk to the assistant") controls a run started from the same conversation.

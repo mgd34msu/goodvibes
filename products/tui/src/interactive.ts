@@ -611,7 +611,7 @@ async function main(prepared: PreparedShellCliRuntime) {
   const { submitInput, submitTurn } = submission;
 
   /**
-   * `@model:<id> prompt`: switch through `/model <id>` (the one switch path), then
+   * `@model:<id> prompt`: switch through `/model use <id>` (the one switch path), then
    * send the rest. A switch that did not land (an unknown id, or a provider key
    * still being entered) holds the prompt in the composer instead of sending it
    * to a model the owner did not ask for.
@@ -620,7 +620,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     for (const model of models) {
       const before = runtime.model;
       try {
-        await commandRegistry.execute('model', [model], commandContext);
+        await commandRegistry.execute('model', ['use', model], commandContext);
       } catch (error) {
         systemMessageRouter.high(`[Model] Could not switch to ${model}: ${summarizeError(error)}`, 'error');
       }
@@ -909,8 +909,9 @@ async function main(prepared: PreparedShellCliRuntime) {
   const toolCount = toolRegistry.list().length;
   conversation.splashOptions = {
     workingDir,
-    model: runtime.model,
-    provider: runtime.provider,
+    // Read when the splash is drawn, so the line names the model in use now (first run may have chosen it).
+    get model() { return runtime.model; },
+    get provider() { return runtime.provider; },
     toolCount,
     lastSessionId: readLastSessionPointer({ surface: ctx.services.surface }) ?? undefined,
     // The palette key as bound (the person's keybindings.json included), for the splash hint.

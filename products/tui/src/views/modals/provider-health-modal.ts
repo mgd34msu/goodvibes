@@ -150,7 +150,7 @@ class ProviderHealthModalSurface implements ConfigModalSurface {
       : activeTabId === 'domains' ? (this.domainRows ??= this.buildDomainRows(this.domainInputs))
         : (this.domainRows ?? []);
     const emptyText = ids.length === 0
-      ? (this.loaded ? 'No providers registered. Try /provider or /subscription.' : 'Inspecting providers…')
+      ? (this.loaded ? 'No providers registered. Try /provider.' : 'Inspecting providers…')
       : undefined;
 
     return {

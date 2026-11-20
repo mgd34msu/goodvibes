@@ -12,13 +12,12 @@ import type { ModelPickerModal } from './model-picker.ts';
 import { handleMcpWorkspaceToken, type McpWorkspace } from './mcp-workspace.ts';
 import type { CommandContext } from './command-registry.ts';
 import type { ContextInspectorModal } from '../renderer/context-inspector.ts';
-import type { OverlayFilters } from './overlay-filter.ts';
 import type { FilePickerModal } from './file-picker.ts';
 import type { BlockActionsMenu, BlockActionId } from '../renderer/block-actions.ts';
 import type { SearchManager } from './search.ts';
 import type { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import type { OnboardingWizardAction, OnboardingWizardController } from './onboarding/onboarding-wizard.ts';
-import { handleHistorySearchToken, handleOverlayToken, handleSearchModeToken } from './handler-ui-state.ts';
+import { handleHistorySearchToken, handleSearchModeToken } from './handler-ui-state.ts';
 import { handleOnboardingWizardToken } from './onboarding/handler-onboarding-routes.ts';
 import {
   handleBookmarkModalToken,
@@ -52,8 +51,6 @@ export type ModalTokenRouteState = {
   profilePickerModal: ProfilePickerModal;
   configModal: ConfigModal;
   onboardingWizard: OnboardingWizardController;
-  shortcutsOverlayActive: boolean;
-  shortcutsScrollOffset: number;
   historySearch: HistorySearch;
   prompt: string;
   cursorPos: number;
@@ -65,7 +62,6 @@ export type ModalTokenRouteState = {
   requestRender: () => void;
   handleEscape: () => void;
   contextInspectorModal: ContextInspectorModal;
-  overlayFilters?: OverlayFilters;
   filePicker: FilePickerModal;
   imageRegistry: Map<string, { data: string; mediaType: string }>;
   nextImageId: number;
@@ -100,7 +96,6 @@ export const handleModalTokenRoutes = createModalTokenPipeline<ModalTokenRouteSt
     handleMcpWorkspaceToken,
     handleSessionPickerToken,
     handleProfilePickerToken,
-    handleOverlayToken,
     handleHistorySearchToken,
     handleModelPickerToken,
     handleEscapeOnlyModalToken,

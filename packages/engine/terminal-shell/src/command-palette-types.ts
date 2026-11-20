@@ -27,6 +27,8 @@ export interface PaletteEntry {
   readonly needsArgs: boolean;
   /** Right column: the slash command, or a shortcut's key. */
   readonly right: string;
+  /** A row that runs a command with words already given (`/settings open permissions.mode`). */
+  readonly line?: { readonly command: string; readonly args: readonly string[] } | undefined;
 }
 
 export type PaletteRunMode = 'run' | 'fill';
@@ -46,3 +48,6 @@ export interface PaletteView {
   getSelected(): PaletteEntry | null;
   describe(id: string): string | undefined;
 }
+
+/** A titled group of keys, as an app's key table and fixed keys give them (key, what it does). */
+export interface ShortcutGroup { readonly title: string; readonly items: ReadonlyArray<readonly [key: string, action: string]> }

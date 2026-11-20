@@ -151,26 +151,76 @@ const IMPERATIVES: Readonly<Record<string, string>> = {
   Delegating: 'Delegate', Composing: 'Compose', Browsing: 'Browse', Starting: 'Start', Handing: 'Hand',
 };
 
-/** The imperative of a running verb: "Searching" → "Search", "Running" → "Run", "Writing" → "Write". */
+/** The imperative of a running verb: "Searching" → "Search", "Running" → "Run", "Working on" → "Work on". */
 function imperativeOf(doing: string): string {
-  const known = IMPERATIVES[doing];
-  if (known) return known;
-  if (!doing.endsWith('ing') || doing.length < 5) return doing;
-  const base = doing.slice(0, -3);
+  const [first, ...rest] = doing.split(' ');
+  const tail = rest.length > 0 ? ` ${rest.join(' ')}` : '';
+  const word = first!;
+  const known = IMPERATIVES[word];
+  if (known) return `${known}${tail}`;
+  if (!word.endsWith('ing') || word.length < 5) return doing;
+  const base = word.slice(0, -3);
   // A doubled last consonant (Running, Stopping) is one in the imperative; ll and ss stay.
-  if (/([bdfgmnprt])\1$/.test(base)) return base.slice(0, -1);
+  if (/([bdfgmnprt])\1$/.test(base)) return `${base.slice(0, -1)}${tail}`;
   // A silent e dropped before -ing (Writing, Sharing): consonant, vowel, consonant other than w, x, y.
-  if (/[^aeiou][aeiou][bcdgkmnprstvz]$/i.test(base) && !/(en|er|on|it|et|ol)$/.test(base)) return `${base}e`;
-  return base;
+  if (/[^aeiou][aeiou][bcdgkmnprstvz]$/i.test(base) && !/(en|er|on|it|et|ol)$/.test(base)) return `${base}e${tail}`;
+  return `${base}${tail}`;
 }
 
-/** What a tool does, in a sentence's words: its description's first sentence, without the tool's name. */
+/** The call's action (else mode) word, when it has one. */
+function actionWord(args: Record<string, unknown>): string | undefined {
+  return typeof args['action'] === 'string' ? args['action'] : typeof args['mode'] === 'string' ? args['mode'] : undefined;
+}
+
+/**
+ * The question for tools whose display words do not make one (they declare
+ * none, or only a verb), written from what each tool's description says it
+ * does. Keyed by the registered name; the call's action picks the sentence.
+ */
+const TOOL_QUESTIONS: Readonly<Record<string, (args: Record<string, unknown>) => string>> = {
+  workflow: () => 'Change an automation (a hook, schedule or trigger)?',
+  mcp: (args) => {
+    switch (actionWord(args)) {
+      case 'set-trust': return `Change how far ${textArg(args, 'serverName') ?? 'a tool server'} is trusted?`;
+      case 'set-role': return `Change what ${textArg(args, 'serverName') ?? 'a tool server'} is used for?`;
+      case 'approve-quarantine': return `Let ${textArg(args, 'serverName') ?? 'a held tool server'} start working again?`;
+      case 'call': return 'Use a tool from a tool server?';
+      default: return 'Use a tool server?';
+    }
+  },
+  repl: () => 'Run a snippet of code in the sandbox?',
+  control: () => 'Use one of GoodVibes\'s own controls?',
+  channel: (args) => /run/.test(actionWord(args) ?? '') ? 'Run an action on a chat app?' : 'Act on a chat app?',
+  profile: (args) => ['set', 'record', 'update', 'add', 'forget', 'remove', 'delete'].includes(actionWord(args) ?? '') ? 'Record something about you?' : 'Read what GoodVibes knows about you?',
+  occasions: () => 'Change an occasion or trip?',
+  agent_notify: () => 'Send a notification?',
+  agent_model_compare_candidate: () => 'Run one model for a comparison?',
+  agent_research_runs: () => 'Start or update a research run?',
+  accounts: () => 'Change the list of your accounts?',
+  connected_calendar: (args) => {
+    switch (actionWord(args)) {
+      case 'create': return 'Add an event to your calendar?';
+      case 'update': return 'Change a calendar event?';
+      case 'delete': case 'cancel': return 'Delete a calendar event?';
+      default: return 'Use your calendar?';
+    }
+  },
+};
+
+/** What a tool does, in a sentence: its description's first sentence, when it opens with a verb. */
 function descriptionQuestion(tool: string): string | undefined {
   const description = toolDescriptionOf(tool);
   if (!description) return undefined;
   const first = description.replace(/\s+/g, ' ').trim().split(/(?<=[.!?:;])\s|\s\(|,\s/)[0]!.replace(/[.!?:;]+$/, '').trim();
-  if (first === '' || first.toLowerCase().includes(tool.toLowerCase())) return undefined;
-  return `${capitalize(clipLine(first, 70))}?`;
+  // A noun phrase ("The calendars…", "Register of…") is not a question a person can answer.
+  if (first === '' || /^(the|a|an|this|these|register|list of)\b/i.test(first) || first.split(' ').length < 2) return undefined;
+  const words = first.split(' ');
+  let sentence = '';
+  for (const word of words) {
+    if (`${sentence} ${word}`.trim().length > 60) break;
+    sentence = `${sentence} ${word}`.trim();
+  }
+  return `${capitalize(sentence.replace(/\b(and|or|with|using|through|to|of|the|a|an)$/i, '').trim())}?`;
 }
 
 /** "a, b and 2 more" for a list a sentence names. */
@@ -189,14 +239,16 @@ function nameWords(name: string): string {
  * its description; never the tool's name as if it were words.
  */
 function toolQuestion(tool: string, args: Record<string, unknown>): string {
+  const written = TOOL_QUESTIONS[tool];
+  if (written) return written(args);
   const words = toolCallActivity(toolActivityOf(tool), args);
-  if (words) return `${imperativeOf(words.doing)}${words.object ? ` ${words.object}` : ''}?`;
+  if (words?.object) return `${imperativeOf(words.doing)} ${words.object}?`;
   if (tool.includes('__')) {
     // A plugin or MCP tool registered as <source>__<tool>: its title and where it comes from.
     const parts = tool.split('__');
     return `Use ${nameWords(parts[parts.length - 1]!)} from ${parts.slice(tool.startsWith('mcp__') ? 1 : 0, -1).join(' ') || 'a tool server'}?`;
   }
-  return descriptionQuestion(tool) ?? 'Allow this action?';
+  return descriptionQuestion(tool) ?? (words ? `${imperativeOf(words.doing)}?` : 'Allow this action?');
 }
 
 function textArg(args: Record<string, unknown>, ...names: string[]): string | undefined {

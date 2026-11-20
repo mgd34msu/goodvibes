@@ -13,8 +13,6 @@ export interface HandlerModalOwner {
     prompt: string;
     cursorPos: number;
     commandMode: boolean;
-    shortcutsOverlayActive: boolean;
-    shortcutsScrollOffset: number;
     selectionCallback: ((result: SelectionResult | null) => void) | null;
     readonly autocomplete: {
         reset(): void;
@@ -96,18 +94,6 @@ export function createHandlerModals(owner: HandlerModalOwner, options: {
         profilePicker: ownModal('profilePicker', () => owner.profilePickerModal),
         bookmark: ownModal('bookmark', () => owner.bookmarkModal, () => owner.bookmarkModal.open()),
         contextInspector: ownModal('contextInspector', () => owner.contextInspectorModal, () => owner.contextInspectorModal.open()),
-        shortcuts: {
-            ownsOpenFlag: true,
-            name: 'shortcuts',
-            isOpen: () => owner.shortcutsOverlayActive,
-            close: () => {
-                owner.shortcutsOverlayActive = false;
-                owner.shortcutsScrollOffset = 0;
-            },
-            reopen: () => {
-                owner.shortcutsOverlayActive = true;
-            },
-        },
         modelPicker: {
             ...ownModal('modelPicker', () => owner.modelPicker),
             close: () => {

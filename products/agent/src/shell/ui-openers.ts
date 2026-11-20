@@ -1,5 +1,5 @@
 import { createModelPickerCommandOpeners } from '@goodvibes-jev/engine/terminal-shell/model-picker-open';
-import { shortcutGroups } from '../renderer/shortcuts-overlay.ts';
+import { shortcutGroups } from '../renderer/shortcut-groups.ts';
 import { openCommandPaletteOn, type PaletteShortcut } from '@goodvibes-jev/engine/terminal-shell/command-palette';
 import type { KeybindingsManager } from '../input/keybindings.ts';
 import { runPickedCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
@@ -316,7 +316,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     categories: () => new Map((input.commandRegistry?.getAll() ?? []).flatMap((command) => command.described ? [[command.name, command.described.group] as const] : [])),
     // The keyboard shortcuts, the list's last group, from the live key table.
     shortcuts: () => paletteShortcuts(commandContext.workspace?.keybindingsManager),
-    run: (name) => runPickedCommand(commandContext.executeCommand, name, [], (message) => commandContext.print(message)),
+    run: (name, args) => runPickedCommand(commandContext.executeCommand, name, [...args], (message) => commandContext.print(message)),
     fill: (name) => {
       input.prompt = `/${name} `;
       input.cursorPos = input.prompt.length;
@@ -388,5 +388,8 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
 /** Every row of the shortcut groups, as the help palette lists them. */
 function paletteShortcuts(keybindingsManager: KeybindingsManager | undefined): readonly PaletteShortcut[] {
   if (!keybindingsManager) return [];
-  return shortcutGroups(keybindingsManager).flatMap((group) => group.items.map(([key, description]) => ({ key, description })));
+  return [
+    ...shortcutGroups(keybindingsManager).flatMap((group) => group.items.map(([key, description]) => ({ key, description }))),
+    { key: 'keybindings.json', description: `Change any key: edit ${keybindingsManager.getConfigPath()}` },
+  ];
 }

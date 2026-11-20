@@ -61,8 +61,8 @@ export function renderCommandReferenceMarkdown(entries: readonly CategorizedComm
   lines.push(
     `GoodVibes ships **${total}** built-in slash commands across **${categories.length}** categories. ` +
       'Every command below is generated directly from the command registry, so this list is always ' +
-      'complete and current. Type a command in the composer prefixed with `/`, or press `Ctrl+K` (or ' +
-      'run `/palette`) to search them all in the command palette.',
+      'complete and current. Type a command in the composer prefixed with `/`, or press `Ctrl+P` (or ' +
+      '`?`, or run `/help`) to search them all in the command palette.',
   );
   lines.push('');
   lines.push('## Categories');

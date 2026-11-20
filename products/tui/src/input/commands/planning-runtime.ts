@@ -1,161 +1,70 @@
-import { directOwnerPlanningInput, type CommandRegistry } from '../command-registry.ts';
+import { directOwnerPlanningInput, isDirectOwnerCommandContext, type CommandContext, type CommandRegistry } from '../command-registry.ts';
 import { routeNativeConversationInput } from '../../runtime/native-conversation-ingress.ts';
 import { captureNativeConversationInput } from '@goodvibes-jev/engine/terminal-shell/native';
+import type { WorkHost } from '@goodvibes-jev/engine/terminal-shell/native/work-command';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { readAction } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
 import { openModalCommand, requirePlanManager } from './runtime-services.ts';
 import { isPlanMode, togglePlanMode, permissionModeLabel } from '@goodvibes-jev/engine/platform/platform/gate/presets';
 import type { PermissionModeValue } from '../../core/permission-mode.ts';
 
 /**
- * The closed set of /project-plan subcommands and how many words each takes
- * after its name. Anything else is a goal; `--` makes the rest a goal even when
- * it starts with one of these words.
+ * Work requests in your own words, the planner and past planning records:
+ * the terminal app's part of `/work` (terminal-shell/native/work-command.ts).
  */
-const PLANNING_SUBCOMMANDS: ReadonlyMap<string, { readonly min: number; readonly max: number; readonly usage: string }> = new Map([
-  ['panel', { min: 0, max: 0, usage: 'panel' }],
-  ['history', { min: 0, max: 0, usage: 'history' }],
-  ['list', { min: 0, max: 0, usage: 'list' }],
-  ['show', { min: 1, max: 1, usage: 'show <plan-id>' }],
-  ['dismiss', { min: 0, max: 0, usage: 'dismiss' }],
-  ['mode', { min: 0, max: 1, usage: 'mode [strategy]' }],
-  ['explain', { min: 0, max: 0, usage: 'explain' }],
-  ['override', { min: 1, max: 1, usage: 'override <strategy>' }],
-  ['status', { min: 0, max: 0, usage: 'status' }],
-  ['clear', { min: 0, max: 0, usage: 'clear' }],
-]);
-const PLANNER_RUNTIME_SUBCOMMANDS = new Set(['mode', 'explain', 'override', 'status', 'clear']);
-/** Retired with the planning interview: saved planning records are read-only history. */
-const RETIRED_SUBCOMMANDS = new Set(['approve', 'answer']);
-
-export function registerPlanningRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
-    name: 'project-plan',
-    aliases: ['planning'],
-    description: 'Submit a native work request, inspect recovery, or review historical planning',
-    usage: '[panel | history | dismiss | list | show <id> | mode | explain | override <strategy> | status | clear | <planning goal> | -- <goal that starts with one of these words>]',
-    argsHint: '[panel|history|<goal>|-- <goal>]',
-    async handler(rawArgs, ctx) {
-      const first = rawArgs[0]?.toLowerCase();
-      const explicitGoal = first === '--';
-      const subcommand = !explicitGoal && first !== undefined ? PLANNING_SUBCOMMANDS.get(first) : undefined;
-      if (!explicitGoal && first !== undefined && RETIRED_SUBCOMMANDS.has(first)) {
-        ctx.print([
-          `"/project-plan ${first}" is retired: saved planning records are read-only and nothing was changed.`,
-          '  Track work in the to-do list (/todo) and run it with /workstream.',
-          `  To submit this text as a goal: /project-plan -- ${rawArgs.join(' ')}`,
-        ].join('\n'));
-        return;
-      }
-      if (subcommand) {
-        const extra = rawArgs.length - 1;
-        if (extra < subcommand.min || extra > subcommand.max) {
-          const words = rawArgs.join(' ');
-          ctx.print([
-            `"/project-plan ${first}" takes ${subcommand.max === 0 ? 'no further words' : `the form /project-plan ${subcommand.usage}`}, so nothing was run.`,
-            `  To run the subcommand: /project-plan ${subcommand.usage}`,
-            `  To submit this text as a goal: /project-plan -- ${words}`,
-          ].join('\n'));
-          return;
-        }
-      }
-      const args = subcommand ? [first!, ...rawArgs.slice(1)] : rawArgs;
-      if (subcommand && PLANNER_RUNTIME_SUBCOMMANDS.has(first!)) {
-        const result = ctx.ops.planRuntime
-          ? ctx.ops.planRuntime(first!, args.slice(1))
-          : { ok: false, output: 'Plan runtime bridge is not available in this runtime.' };
-        ctx.print(result.output);
-        return;
-      }
-
-      const openProjectPlanningModal = () => openModalCommand(ctx, 'planning-modal');
-
-      if (args.length === 0 || (subcommand && args[0] === 'panel')) {
-        openModalCommand(ctx, 'native-work-ledger-modal');
-        ctx.print('Opened native work and recovery. Saved historical planning is available with /project-plan history.');
-        return;
-      }
-
-      if (subcommand && args[0] === 'history') {
-        openProjectPlanningModal();
-        ctx.print('Opened saved historical project planning (read-only). The work plan and /workstream are the live plan.');
-        return;
-      }
-
-      if (subcommand && args[0] === 'list') {
-        const planManager = requirePlanManager(ctx);
-        const plans = planManager.list();
-        if (plans.length === 0) {
-          ctx.print('The work plan has no items. Add one with /todo add <title>.');
-          return;
-        }
-        ctx.print(`Plans (${plans.length}; the project work plan is the plan, changed with /todo):\n${plans.map((plan) => {
-          const marker = plan.status === 'active' ? '▶' : ' ';
-          return `  ${marker} ${plan.id.slice(0, 8)}  [${plan.status.padEnd(8)}]  ${plan.title} (${plan.items.length} item${plan.items.length === 1 ? '' : 's'})`;
-        }).join('\n')}`);
-        return;
-      }
-
-      if (subcommand && args[0] === 'show') {
-        const planManager = requirePlanManager(ctx);
-        const id = args[1];
-        if (!id) {
-          ctx.print('Usage: /project-plan show <plan-id>');
-          return;
-        }
-        const plans = planManager.list();
-        const plan = plans.find((entry) => entry.id === id || entry.id.startsWith(id));
-        if (!plan) {
-          ctx.print(`Plan not found: ${id}`);
-          return;
-        }
-        ctx.print(planManager.toMarkdown(plan));
-        return;
-      }
-
-      // The active plan is the project work plan; there is no separate record
-      // to archive, so the command changes nothing and names what does.
-      if (subcommand && args[0] === 'dismiss') {
-        ctx.print([
-          'Nothing was dismissed: the active plan is the project work plan, which has no separate record to archive.',
-          '  Clear finished items: /todo clear-done',
-          '  Drop one item: /todo mark <item> cancelled or /todo remove <item>',
-        ].join('\n'));
-        return;
-      }
-
-      // Everything that is not a subcommand is the goal, taken as typed. The owner
-      // typing the command is the fact that it is a goal: no model is asked.
-      const typed = directOwnerPlanningInput(ctx);
-      if (!typed) {
-        ctx.print('Submit a new request from the terminal with /project-plan <goal> or /planning <goal>. Original owner input is required.');
-        return;
-      }
-      const source = explicitGoal ? captureNativeConversationInput(typed.text.replace(/^\s*--(?:\r\n|\s|$)/, '')) : typed;
-      if (!source.text.trim()) { ctx.print('Usage: /project-plan <goal>  (or /project-plan -- <goal> for a goal that starts with a subcommand word)'); return; }
-      if (!ctx.dispatchNativeIntakeTurn) {
-        ctx.print('Native conversation intake is unavailable. No ordinary turn or historical planning state was started.');
-        return;
-      }
+export function workRequestsHost(): Exclude<WorkHost<CommandContext>['requests'], { readonly unavailable: string }> {
+  return {
+    async submit(ctx, goal) {
+      // The owner typing the line is the fact that it is a request: no model is asked.
+      const source = directOwnerPlanningInput(ctx)
+        ?? (isDirectOwnerCommandContext(ctx, 'work') ? captureNativeConversationInput(goal) : undefined);
+      if (!source) throw commandRefusal('A work request is your own words typed in the terminal; nothing was sent.', 'Type /work request <what you want done>.');
+      if (!source.text.trim()) throw commandRefusal('Say what you want done; nothing was sent.');
+      if (!ctx.dispatchNativeIntakeTurn) throw commandRefusal('Admitting input is not available here; nothing was started.');
       try {
         // The durable native intake owns admission, cancellation, retries and recovery.
         const state = await routeNativeConversationInput({ intake: ctx.nativeConversationIntake, source,
-          notify: line => ctx.print(line), dispatch: ctx.dispatchNativeIntakeTurn });
+          notify: (line) => ctx.print(line), dispatch: ctx.dispatchNativeIntakeTurn });
         // Refused because another input is still being admitted: nothing was sent.
-        if (state?.status === 'pending') ctx.restoreDraft?.(`/project-plan ${typed.text}`);
+        if (state?.status === 'pending') ctx.restoreDraft?.(`/work request ${goal}`);
         ctx.renderRequest();
       } catch {
-        ctx.print('Planning submission requires inspection. Use /work intake-status to inspect any durable native input.');
+        throw commandRefusal('The request needs a look before anything else happens.', '/work intake shows where the input stands.');
       }
     },
-  });
+    openHistory(ctx) {
+      openModalCommand(ctx, 'planning-modal');
+    },
+    plans(ctx) {
+      const plans = requirePlanManager(ctx).list();
+      if (plans.length === 0) return 'No past plans. The live plan is the to-do list: /todo.';
+      return [
+        `Past plans (${plans.length}; the live plan is the to-do list, /todo):`,
+        ...plans.map((plan) => `  ${plan.status === 'active' ? '▶' : ' '} ${plan.id.slice(0, 8)}  [${plan.status.padEnd(8)}]  ${plan.title} (${plan.items.length} item${plan.items.length === 1 ? '' : 's'})`),
+      ].join('\n');
+    },
+    plan(ctx, id) {
+      const manager = requirePlanManager(ctx);
+      const plan = manager.list().find((entry) => entry.id === id || entry.id.startsWith(id));
+      if (!plan) throw commandRefusal(`No past plan ${id}.`, '/work plans lists them.');
+      return manager.toMarkdown(plan);
+    },
+    planner(ctx, act, value) {
+      if (!ctx.ops.planRuntime) throw commandRefusal('The planner is not available in this session.');
+      const result = ctx.ops.planRuntime(act, value ? [value] : []);
+      if (!result.ok) throw commandRefusal(result.output);
+      return result.output;
+    },
+  };
+}
 
-  // /plan now enters/toggles the SESSION PERMISSION plan mode (read-only
-  // planning posture), distinct from the project-planning manager above, which
-  // moved to /project-plan (alias /planning). The change goes through the platform
-  // config surface (permissions.mode), the same value the PermissionManager
-  // reads and Shift+Tab cycles, so plan mode is one concept across surfaces.
-  // The mode the session was in when /plan turned plan mode on, so leaving
-  // plan mode puts the user's chosen permission posture back. Plan mode entered
-  // elsewhere (Shift+Tab) has no remembered mode and exits to ask-me.
+export function registerPlanningRuntimeCommands(registry: CommandRegistry): void {
+  // /plan enters and leaves the session's plan mode (a read-only posture),
+  // through the platform config surface (permissions.mode), the same value the
+  // permission manager reads and Shift+Tab cycles. The mode the session was in
+  // when /plan turned plan mode on is put back when it is turned off; plan mode
+  // entered elsewhere (Shift+Tab) has no remembered mode and leaves to ask-me.
   let modeBeforePlan: PermissionModeValue | undefined;
   let stopWatchingMode: (() => void) | undefined;
   const forgetModeBeforePlan = (): void => {
@@ -163,43 +72,61 @@ export function registerPlanningRuntimeCommands(registry: CommandRegistry): void
     stopWatchingMode?.();
     stopWatchingMode = undefined;
   };
-  registry.register({
+  const currentMode = (ctx: CommandContext) => ctx.platform.configManager.get('permissions.mode') as PermissionModeValue | undefined;
+  registry.register(defineCommand<CommandContext>({
     name: 'plan',
-    description: 'Enter or exit plan mode for this session, a read-only planning posture where writes, commands, and network calls are blocked (the saved default is unchanged)',
-    usage: '[on | off | toggle]',
-    argsHint: '[on|off|toggle]',
-    handler(args, ctx) {
-      const configManager = ctx.platform.configManager;
-      const current = configManager.get('permissions.mode') as PermissionModeValue | undefined;
-      const sub = (args[0] ?? 'toggle').toLowerCase();
-      const inPlan = isPlanMode(current);
-      const wantsOn = sub === 'on' || sub === 'enter' || (sub !== 'off' && sub !== 'exit' && !inPlan);
-      if (wantsOn) {
-        if (inPlan) {
-          ctx.print('[Permissions] Plan mode is already ON; nothing changed.');
-          return;
-        }
-        stopWatchingMode?.();
-        modeBeforePlan = current;
-        // A session posture, like Shift+Tab: the saved default in the settings
-        // file is not changed, and plan mode ends with the session.
-        configManager.setRuntimeOverride('permissions.mode', 'plan');
-        // Leaving plan mode any other way (Shift+Tab) ends the remembered posture, so a later
-        // re-entry by another route cannot restore a stale, possibly more permissive mode.
-        stopWatchingMode = configManager.subscribe('permissions.mode', (next) => {
-          if (!isPlanMode(next as PermissionModeValue)) forgetModeBeforePlan();
-        });
-        ctx.print('[Permissions] Plan mode ON; read-only: writes, commands, and network calls are blocked until you exit (/plan off or Shift+Tab).');
-        return;
-      }
-      if (!inPlan) {
-        ctx.print(`[Permissions] Plan mode is not on; mode stays ${permissionModeLabel(current ?? 'ask-me')}. Use /plan on to enter it.`);
-        return;
-      }
-      const restored = modeBeforePlan !== undefined && !isPlanMode(modeBeforePlan) ? modeBeforePlan : togglePlanMode(current);
-      forgetModeBeforePlan();
-      configManager.setRuntimeOverride('permissions.mode', restored);
-      ctx.print(`[Permissions] Plan mode OFF; mode: ${permissionModeLabel(restored)}.`);
-    },
-  });
+    title: 'Plan mode (nothing is changed)',
+    summary: 'Plan without changing anything: writes, commands and network calls are blocked for this session',
+    group: 'Permissions',
+    report: 'status',
+    actions: [
+      readAction<CommandContext>({
+        id: 'status', label: 'See whether plan mode is on', word: 'status',
+        sentence: 'Says whether plan mode is on, and the mode in force.',
+        operator: { terminalOnly: 'Plan mode belongs to the terminal app\'s session.' },
+        async rowValue(ctx) { return isPlanMode(currentMode(ctx)) ? 'on' : 'off'; },
+        async run(_values, ctx) {
+          const current = currentMode(ctx);
+          return isPlanMode(current)
+            ? 'Plan mode is on: writes, commands and network calls are blocked. /plan off leaves it.'
+            : `Plan mode is off; the mode is ${permissionModeLabel(current ?? 'ask-me')}. /plan on enters it.`;
+        },
+      }),
+      {
+        id: 'on', label: 'Turn plan mode on', word: 'on', inputs: [],
+        sentence: 'Writes, commands and network calls are blocked for this session only; your saved mode is not changed.', done: '',
+        touches: 'this-machine', lasts: 'session', risk: 'none', undoneBy: 'off',
+        operator: { terminalOnly: 'Plan mode belongs to the terminal app\'s session.' }, example: {},
+        async run(_values, ctx) {
+          const configManager = ctx.platform.configManager;
+          const current = currentMode(ctx);
+          if (isPlanMode(current)) return 'Plan mode is already on; nothing changed.';
+          stopWatchingMode?.();
+          modeBeforePlan = current;
+          configManager.setRuntimeOverride('permissions.mode', 'plan');
+          // Leaving plan mode any other way (Shift+Tab) ends the remembered mode, so a later
+          // re-entry by another route cannot put back a stale, possibly looser mode.
+          stopWatchingMode = configManager.subscribe('permissions.mode', (next) => {
+            if (!isPlanMode(next as PermissionModeValue)) forgetModeBeforePlan();
+          });
+          return 'Plan mode is on: writes, commands and network calls are blocked until /plan off or Shift+Tab.';
+        },
+      },
+      {
+        id: 'off', label: 'Turn plan mode off', word: 'off', inputs: [],
+        sentence: 'Writes, commands and network calls are allowed again under the mode you had before, for this session only.', done: '',
+        touches: 'this-machine', lasts: 'session', risk: 'loosens-a-protection', undoneBy: 'on',
+        ownerOnly: { reason: 'leaving plan mode lets the session change things again', instead: 'Ask the owner to turn plan mode off with /plan off or Shift+Tab.' },
+        operator: { terminalOnly: 'Plan mode belongs to the terminal app\'s session.' }, example: {},
+        async run(_values, ctx) {
+          const current = currentMode(ctx);
+          if (!isPlanMode(current)) return `Plan mode is not on; the mode stays ${permissionModeLabel(current ?? 'ask-me')}.`;
+          const restored = modeBeforePlan !== undefined && !isPlanMode(modeBeforePlan) ? modeBeforePlan : togglePlanMode(current);
+          forgetModeBeforePlan();
+          ctx.platform.configManager.setRuntimeOverride('permissions.mode', restored);
+          return `Plan mode is off; the mode is ${permissionModeLabel(restored)}.`;
+        },
+      },
+    ],
+  }));
 }

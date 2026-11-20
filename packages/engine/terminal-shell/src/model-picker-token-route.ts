@@ -197,7 +197,7 @@ export function createModelPickerTokenHandler<Context extends ModelPickerCommand
         else if (token.logicalName === 'a') picker.toggleAvailableOnly();
         else if (token.logicalName === 'b') picker.cycleBenchmarkSort();
         else if (token.logicalName === 'g') picker.cycleGroupBy();
-        // Pin and refresh work in both apps: Ctrl+R reads every provider's model list again (as /refresh-models does).
+        // Pin and refresh work in both apps: Ctrl+R reads every provider's model list again (as /model refresh does).
         else if (token.logicalName === 'f') togglePin(state);
         else if (token.logicalName === 'r') {
           const context = state.commandContext;

@@ -43,6 +43,8 @@ export interface FirstRunDeps {
   readonly openProviderPicker?: (() => void) | undefined;
   /** Look for model servers on this computer now, the app's own scan (one at a time). */
   readonly scanThisComputer?: (() => void) | undefined;
+  /** Draw the conversation again (the splash's model line names the model now in use). */
+  readonly redrawConversation?: (() => void) | undefined;
   /** Record that first run finished (the check marker). */
   readonly markDone: () => void;
   /** Whether first run already finished once (the check marker exists). */
@@ -183,6 +185,7 @@ export class FirstRunModal implements SurfaceModal {
     this.deps.completeModelSelection?.({ model, effort: typeof effort === 'string' ? effort : '', quiet: true });
     this.deps.markDone();
     setFirstRunScreen({ kind: 'set', model: model.displayName || model.id, signIn });
+    this.deps.redrawConversation?.();
     this.stopSpinner();
     this.host?.close(this, 'done');
     this.deps.renderRequest();
@@ -393,7 +396,8 @@ export class FirstRunModal implements SurfaceModal {
       return {
         model: { id: modelId, provider: server.name, displayName: modelId, registryKey: `${server.name}:${modelId}` },
         label: modelId,
-        detail: [server.name, window ? `${Math.round(window / 1000)}k context` : ''].filter(Boolean).join(' · '),
+        // Size only where the server reported one in the listing the scan read.
+        detail: [server.name, server.modelSizes?.[modelId] ?? '', window ? `${Math.round(window / 1000)}k context` : ''].filter(Boolean).join(' · '),
       };
     }));
   }

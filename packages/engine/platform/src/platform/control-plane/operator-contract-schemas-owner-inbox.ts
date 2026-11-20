@@ -54,7 +54,7 @@ const LABELLED_TEXT_SCHEMA = objectSchema({ label: STRING_SCHEMA, value: STRING_
  */
 export const ASK_PRESENTATION_SCHEMA = objectSchema({
   kind: enumSchema(['run-command', 'answer-command-prompt', 'change-files', 'fetch', 'start-agent', 'hand-off-work', 'change-setting',
-    'mcp-tool', 'other-tool', 'purchase', 'question', 'decision', 'claim', 'queued-action', 'report']),
+    'mcp-tool', 'other-tool', 'purchase', 'send-message', 'question', 'decision', 'claim', 'queued-action', 'report']),
   mark: enumSchema(['ask', 'cannot-undo', 'question']),
   question: STRING_SCHEMA,
   place: objectSchema({ short: STRING_SCHEMA, full: STRING_SCHEMA }, ['short', 'full']),

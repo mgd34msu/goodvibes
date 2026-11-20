@@ -99,14 +99,14 @@ function approvalHealthShow(editor: AgentWorkspaceLocalEditor, readField: AgentW
   const approval = editor.kind === 'approval-review';
   const command = approval
     ? `/approval review ${quoteSlashCommandArg(readField('kind'))}`
-    : `/health repair ${quoteSlashCommandArg(readField('domain'))}`;
-  const title = approval ? 'Opening approval review' : 'Opening health repair guidance';
+    : `/health check ${quoteSlashCommandArg(readField('domain'))}`;
+  const title = approval ? 'Opening approval review' : 'Checking one health area';
   return dispatchCommandEditorSubmission(
     command,
     title,
     approval
       ? 'The workspace handed read-only approval class review to the shell-owned command router.'
-      : 'The workspace handed read-only health repair guidance to the shell-owned command router.',
+      : 'The workspace handed a read-only health area check to the shell-owned command router.',
     'read-only',
   );
 }

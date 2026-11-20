@@ -1,20 +1,11 @@
 /**
- * renderShortcutsOverlay, the keyboard shortcuts modal (/shortcuts), drawn
- * like the concept's "keys" screen: columns of key / action pairs, keys bold,
- * actions muted, grouped under ✦ headers, with the always-live search row
- * filtering by key or action. Reflects the live keybindings table (user
- * overrides included).
- *
- * Two columns below a 170-column screen, three from 170 up (one on a narrow
- * modal). The modal takes 86% of the screen without the usual 124-column cap,
- * so each description gets room to stay on one line; the key column is as wide
- * as the longest key (up to 18). Keys and actions that still do not fit wrap
- * inside their column; the grid scrolls when it is taller than the modal.
+ * The keyboard shortcuts, grouped, from the live key table (user overrides
+ * included) and the keys that are not key-table actions. The help palette
+ * lists them as its last group and `/help keys` prints them.
  */
 
 import type { KeybindingsManager } from '../input/keybindings.ts';
-import type { OverlayFilter } from '../input/overlay-filter.ts';
-import { renderShortcutsOverlay as render, type ShortcutGroup } from '@goodvibes-jev/engine/terminal-shell/shortcuts-overlay';
+import type { ShortcutGroup } from '@goodvibes-jev/engine/terminal-shell/command-palette';
 /** Keys that are real but are not KeyAction entries (context chords, literal characters). */
 const HARDCODED_ROWS: ReadonlyArray<readonly [string, string]> = [
   ['Up / Down', 'Recall input history; Down at bottom focuses the process indicator'],
@@ -29,7 +20,7 @@ const HARDCODED_ROWS: ReadonlyArray<readonly [string, string]> = [
   ['Esc', 'Close overlay / clear prompt / leave an agent or process view / interrupt main'],
   ['Shift+Tab', 'Cycle permission mode; with session chips showing and an empty composer, the previous session'],
   ['F2', 'Open Agents'],
-  ['?  or  /help', 'Help: every command and keyboard shortcut'],
+  ['?  or  /help', 'Help: every command and key']
   // Precedence: a partial path under the cursor claims Tab for completion,
   // otherwise it collapses or expands the nearest block.
   ['Tab', 'Path-complete, else collapse/expand block; with session chips showing and an empty composer, the next session'],
@@ -55,8 +46,4 @@ export function shortcutGroups(keybindingsManager: KeybindingsManager): Shortcut
     { title: 'Actions', items: all.map((e) => [combos(e), e.description] as const) },
     { title: 'Views', items: VIEW_ROWS },
   ];
-}
-
-export function renderShortcutsOverlay(screenWidth: number, screenHeight: number, keybindingsManager: KeybindingsManager, scrollOffset = 0, filter?: OverlayFilter) {
-  return render(screenWidth, screenHeight, shortcutGroups(keybindingsManager), scrollOffset, filter);
 }

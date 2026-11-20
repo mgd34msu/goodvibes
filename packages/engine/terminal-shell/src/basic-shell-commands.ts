@@ -1,4 +1,3 @@
-import type { TerminalSlashCommand } from './command-registry.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
 import type { CommandActionContext } from './command-actions/types.js';
 import { doAction, listInput, readAction } from './described-command-kit.js';
@@ -63,36 +62,18 @@ export function createBasicShellCommands<Context extends BasicShellCommandContex
 }
 
 /**
- * `/shortcuts` and `/quit`. `/quit` is described once (command-actions/): one
- * action, the same in both terminal apps. A bare `:q` or `:wq` typed in the
- * composer still closes the program (feed-token-routes.ts); those are keys,
- * not names of this command. The command palette is `/help` (and `?`, Ctrl+P).
+ * `/quit`, described once (command-actions/): one action, the same in both
+ * terminal apps. A bare `:q` or `:wq` typed in the composer still closes the
+ * program (feed-token-routes.ts); those are keys, not names of this command.
+ * Help, every command and every key, is `/help` (and `?`, Ctrl+P).
  */
 export function createShellNavigationCommands<
   Context extends CommandActionContext & {
     print(text: string): void;
     exit(): void;
-    readonly openShortcutsOverlay?: (() => void) | undefined;
   },
->(policy: {
-  readonly shortcutsHidden: boolean;
-  readonly shortcutsFallback: string;
-}): { shortcuts: TerminalSlashCommand<Context>; quit: DescribedCommand<Context> } {
+>(): { quit: DescribedCommand<Context> } {
   return {
-    shortcuts: {
-      name: 'shortcuts',
-      effect: 'ui-navigation',
-      aliases: ['keys', 'keybinds'],
-      description: 'Show keyboard shortcuts reference',
-      firstScreen: !policy.shortcutsHidden,
-      handler(_args, context) {
-        if (context.openShortcutsOverlay) {
-          context.openShortcutsOverlay();
-          return;
-        }
-        context.print(policy.shortcutsFallback);
-      },
-    },
     quit: defineCommand<Context>({
       name: 'quit',
       title: 'Quit',

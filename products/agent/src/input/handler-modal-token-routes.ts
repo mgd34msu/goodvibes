@@ -14,12 +14,11 @@ import type { CommandContext } from './command-registry.ts';
 import type { LiveTailModal } from '../renderer/live-tail-modal.ts';
 import type { ProcessModal } from '../renderer/process-modal.ts';
 import type { ContextInspectorModal } from '../renderer/context-inspector.ts';
-import type { OverlayFilters } from './overlay-filter.ts';
 import type { FilePickerModal } from './file-picker.ts';
 import type { BlockActionsMenu, BlockActionId } from '../renderer/block-actions.ts';
 import type { SearchManager } from './search.ts';
 import type { SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
-import { handleHistorySearchToken, handleOverlayToken, handleSearchModeToken } from './handler-ui-state.ts';
+import { handleHistorySearchToken, handleSearchModeToken } from './handler-ui-state.ts';
 import {
   handleBookmarkModalToken,
   handleProfilePickerToken,
@@ -49,8 +48,6 @@ export type ModalTokenRouteState = {
   agentWorkspace: AgentWorkspace;
   sessionPickerModal: SessionPickerModal;
   profilePickerModal: ProfilePickerModal;
-  shortcutsOverlayActive: boolean;
-  shortcutsScrollOffset: number;
   historySearch: HistorySearch;
   prompt: string;
   cursorPos: number;
@@ -64,7 +61,6 @@ export type ModalTokenRouteState = {
   liveTailModal: LiveTailModal;
   processModal: ProcessModal;
   contextInspectorModal: ContextInspectorModal;
-  overlayFilters?: OverlayFilters;
   filePicker: FilePickerModal;
   imageRegistry: Map<string, { data: string; mediaType: string }>;
   nextImageId: number;
@@ -97,7 +93,6 @@ export const handleModalTokenRoutes = createModalTokenPipeline<ModalTokenRouteSt
     handleMcpWorkspaceToken,
     handleSessionPickerToken,
     handleProfilePickerToken,
-    handleOverlayToken,
     handleHistorySearchToken,
     handleModelPickerToken,
     handleEscapeOnlyModalToken,

@@ -16,7 +16,7 @@ import { summarizeError } from '../../utils/error-display.js';
 import { createCredentialStatusProvider } from '../../config/credential-status.js';
 import { buildAutomationEmptyState } from '../../runtime/feature-announcements.js';
 import type { UserAuthManager } from '../../security/user-auth.js';
-import { OPERATOR_SESSION_COOKIE_NAME, buildOperatorSessionCookie, extractOperatorAuthToken, type CredentialRefusal } from '../../security/http-auth.js';
+import { OPERATOR_SESSION_COOKIE_NAME, buildIdentityMarkerCookie, buildOperatorSessionCookie, extractOperatorAuthToken, readIdentityMarker, type CredentialRefusal } from '../../security/http-auth.js';
 import { webAppLink } from '../web-app-link.js';
 import type { AgentManager } from '../../tools/agent/index.js';
 import {
@@ -101,6 +101,7 @@ import { assertDaemonRouteManifest } from './route-manifest.js';
 import { IdempotentReplayStore, replayKeyedRequest, takesIdempotencyKey } from '../../control-plane/idempotent-replay.js';
 import { deriveRequestWithBody } from '../derived-request.js';
 import { configuredBrowserOrigins, refuseCookieWriteFromOtherOrigin } from './browser-origin.js';
+import { handleBrowserSession } from './browser-session.js';
 import { isSurfaceIngressEnabled } from '../surface-policy.js';
 import { dispatchCloudflareRoutes } from './cloudflare-routes.js';
 import { dispatchMcpRoutes } from './mcp-routes.js';
@@ -510,6 +511,24 @@ export class DaemonHttpRouter {
         userAuth: this.context.userAuth,
         source: 'control-plane-router',
         trustProxy: Boolean(this.context.configManager.get('controlPlane.trustProxy')),
+        allowedBrowserOrigins: () => configuredBrowserOrigins(this.context.configManager),
+      });
+    }
+    // The web UI's direct-route sign-in: the credential goes into an HttpOnly cookie, never back to the page.
+    if (url.pathname === '/api/browser-session' && req.method === 'POST') {
+      return handleBrowserSession(req, {
+        authenticate: (request) => this.context.authenticateRequest(request),
+        passwordSignIn: (signIn, original) => handleOperatorLogin(signIn, this.clientIpOf(original), {
+          userAuth: this.context.userAuth,
+          limiter: this.signInLimiter,
+          runtimeBus: this.context.runtimeBus,
+          source: 'control-plane-router',
+          trustProxy: Boolean(this.context.configManager.get('controlPlane.trustProxy')),
+        }),
+        describeCredentialRefusal: this.context.describeCredentialRefusal,
+        recordRefused: (request) => this.authFailures.record(this.clientIpOf(request), 'control-plane-router'),
+        allowedBrowserOrigins: () => configuredBrowserOrigins(this.context.configManager),
+        trustProxy: Boolean(this.context.configManager.get('controlPlane.trustProxy')),
       });
     }
 
@@ -622,11 +641,11 @@ export class DaemonHttpRouter {
     const token = extractOperatorAuthToken(req);
     const principal = token ? this.context.authenticateRequest(req)?.principal : undefined;
     if (!principal || principal.credentialKind !== 'user-session' || principal.expiresAt === undefined) return response;
-    response.headers.append('Set-Cookie', buildOperatorSessionCookie(token, {
-      req,
-      expiresAt: principal.expiresAt,
-      trustProxy: Boolean(this.context.configManager.get('controlPlane.trustProxy')),
-    }));
+    const cookie = { req, expiresAt: principal.expiresAt, trustProxy: Boolean(this.context.configManager.get('controlPlane.trustProxy')) };
+    response.headers.append('Set-Cookie', buildOperatorSessionCookie(token, cookie));
+    // The identity marker keeps its generation and moves its end with the credential's.
+    const marker = readIdentityMarker(req);
+    if (marker) response.headers.append('Set-Cookie', buildIdentityMarkerCookie(marker, cookie));
     return response;
   }
 

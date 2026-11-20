@@ -82,13 +82,13 @@ export function settingValueWords(setting: SettingWordsFacts, value: unknown): s
 
 export function createSettingsValueHelpers<Entry extends SettingsValueEntry>(policy: {
   readonly isSecretKey: (key: string) => boolean;
-  readonly isSecretReference: (value: string) => boolean;
+  /** True when the daemon keeps this credential (it is daemon-owned), false when this computer does. */
+  readonly isDaemonKept: (key: string) => boolean;
 }) {
-  function maskSecretValue(value: string): string {
-    if (!value.length) return 'Not set';
-    if (policy.isSecretReference(value)) return 'Kept in the secret store';
-    if (value.length <= 4) return '••••';
-    return '•'.repeat(Math.min(12, Math.max(4, value.length - 4))) + value.slice(-4);
+  /** Whether a credential is held and where; never any part of the value. */
+  function heldWords(key: string, value: string): string {
+    if (!value.trim().length) return 'Not set';
+    return policy.isDaemonKept(key) ? 'Set · kept by the daemon' : 'Set · kept on this computer';
   }
   /** The value a row shows, in words. */
   function formatValue(entry: Entry): string {
@@ -105,7 +105,7 @@ export function createSettingsValueHelpers<Entry extends SettingsValueEntry>(pol
     if (value === undefined && entry.effectiveSource === 'unavailable') {
       return entry.sourceLabel?.startsWith('reading') ? 'Asking the daemon…' : 'Unknown';
     }
-    if (typeof value === 'string' && policy.isSecretKey(entry.setting.key)) return maskSecretValue(value);
+    if (policy.isSecretKey(entry.setting.key)) return typeof value === 'string' ? heldWords(entry.setting.key, value) : 'Not set';
     return settingValueWords(entry.setting, value);
   }
   /** The default a row returns to, in words. */

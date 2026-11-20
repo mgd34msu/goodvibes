@@ -4,6 +4,7 @@
 import { dirname, join } from 'node:path';
 import { assertNativeReaderCompatible, NATIVE_READER_REQUIREMENT_FILE, NativeDataCompatibilityError } from './native-reader-compatibility.js';
 import { assertClientReaderPayload, clientReaderMemberPath, clientReaderMemberAsset, clientReaderAsset, parseClientReaderArtifact, type ClientReaderArtifact } from './client-reader-artifact.js';
+import { AGENT_RELEASE_EVIDENCE_ID, TUI_RELEASE_EVIDENCE_ID } from './native-cohort-table.js';
 import { verifiedUpdateStageMembers, type VerifiedUpdateStage } from './verified-update-stage.js';
 import type { UpdateFileIo } from './update-file-io.js';
 
@@ -28,7 +29,7 @@ export function assertStagedClientReaderCompatible(execPath: string, candidatePa
   const asset = clientReaderAsset(artifact.packageName, artifact.target);
   if (expectedAsset !== undefined && asset !== expectedAsset) throw new NativeDataCompatibilityError('unconfirmed-reader');
   const basename = execPath.slice(execPath.lastIndexOf('/') + 1);
-  const product = artifact.packageName === '@goodvibes/tui' ? 'goodvibes' : artifact.packageName === '@goodvibes/agent' ? 'goodvibes-agent' : 'goodvibes-daemon';
+  const product = artifact.packageName === TUI_RELEASE_EVIDENCE_ID ? 'goodvibes' : artifact.packageName === AGENT_RELEASE_EVIDENCE_ID ? 'goodvibes-agent' : 'goodvibes-daemon';
   if (basename !== product && basename !== asset) throw new NativeDataCompatibilityError('unconfirmed-reader');
   const alreadyVerified = suffix === '.update-download' && verifiedStage
     ? verifiedUpdateStageMembers(verifiedStage) : undefined;

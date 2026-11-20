@@ -81,7 +81,21 @@ const requirements: Readonly<Record<NativeDataFormat, string>> = {
   'inbox-triage-failed-bindings-v3': '3.1.2',
   'inbox-triage-account-bindings-v1': '3.1.2',
 };
-/** Every format this build can write, published together at a process's first data write. */
+/**
+ * A format this build reads but publishes under the name the previous release
+ * knows. The requirement file is read by every installed program and by the
+ * rollback check: a name the previous release does not know makes its data
+ * writes refuse ('mixed-readers') and refuses a rollback to it, although the
+ * data itself is readable by it. So a new name is listed in this build's reader
+ * capabilities first and published one release later, when this entry goes.
+ * The floor published is still the format's own.
+ */
+const PUBLISHED_AS: Readonly<Partial<Record<NativeDataFormat, NativeDataFormat>>> = {
+  // Knowledge schema 18 is what 3.3.0 and 3.3.1 write, and they declare it as v17.
+  'knowledge-schema-v18': 'knowledge-schema-v17',
+};
+const publishedName = (format: NativeDataFormat): NativeDataFormat => PUBLISHED_AS[format] ?? format;
+/** Every format this build can write, published together (each under its published name) at a process's first data write. */
 const WRITABLE_FORMATS: readonly NativeDataFormat[] = Object.freeze(Object.keys(requirements) as NativeDataFormat[]);
 export interface NativeReaderCapabilities {
   readonly schema: 1;
@@ -243,6 +257,8 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
     let release: (() => void) | null = null;
     try {
       if (formats.length === 0 || formats.some(format => !Object.hasOwn(requirements, format))) throw new Error();
+      // The names the file lists; the floors below are the formats' own.
+      const names = formats.map(publishedName).filter((value, index, all) => all.indexOf(value) === index);
       physicalCurrent();
       // Another process starting at the same moment holds this for one short
       // write; wait for it rather than refusing to start.
@@ -272,9 +288,9 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
       }
       if (compareSemanticVersions(version(runningVersion), version(minimumReader)) < 0) throw new NativeDataCompatibilityError('incompatible', minimumReader);
       const listed = previous.value?.formats ?? [];
-      if (formats.some(format => !listed.includes(format)) || previous.value?.minimumReader !== minimumReader) {
+      if (names.some(name => !listed.includes(name)) || previous.value?.minimumReader !== minimumReader) {
         current();
-        const next: Omit<ReaderRequirements, 'unknown'> = { schema: 1, minimumReader, formats: [...listed, ...formats].filter((value, index, all) => all.indexOf(value) === index) };
+        const next: Omit<ReaderRequirements, 'unknown'> = { schema: 1, minimumReader, formats: [...listed, ...names].filter((value, index, all) => all.indexOf(value) === index) };
         const contents = `${JSON.stringify(next)}\n`;
         const cohort: unknown = captureCohort?.call(publisher, Object.freeze([...next.formats]));
         if (cohort !== undefined && typeof cohort !== 'function') { drainOwned(cohort); throw new NativeDataCompatibilityError('unconfirmed-reader'); }

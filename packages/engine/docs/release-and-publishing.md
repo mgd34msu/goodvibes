@@ -64,6 +64,31 @@ The tag push runs the Release workflow (`.github/workflows/release.yml`):
    release. The installer and every daemon's update check follow that mark, so
    installed daemons start updating to the new version once it is set.
 
+## What an installed copy reads from a release
+
+An installed copy updates itself, repairs itself at start-up and rolls back to
+its kept `.previous` image by reading files a different release wrote. Their
+names and values are a contract with every installed copy, not internal names:
+
+- `packageName` in each `<program>-<os>-<arch>.reader-ci-artifact.json`, in the
+  daemon's `daemon-installation.json` (written by the updater and by
+  `install.sh`) and in the macOS SQLite provenance `sqlite-<target>.dylib.json`:
+  `@goodvibes-jev/tui`, `@goodvibes-jev/agent`, `@goodvibes-jev/daemon`. They are
+  not the workspace package names (`@goodvibes/*`). The one statement of them
+  is the `packages` row of the cohort table
+  (`packages/engine/platform/src/platform/runtime/native-cohort-table.ts`); the
+  packaging script, `release_asset_pins.py` and the readers take them from
+  there, and `install.sh` names them once at its top.
+- The release asset names and installed member paths in that table,
+  `SHA256SUMS.txt`, the evidence `schema` numbers, and the data format names in
+  `.goodvibes-reader-requirements.json` and in each reader profile's `formats`.
+
+Such a value changes only in two steps: a release that still writes the old
+value and also reads the new one, then, one release later, a release that
+writes the new one. A data format name new to a release is listed in its reader
+capabilities and published under the old name until then (`PUBLISHED_AS` in
+`runtime/native-reader-compatibility.ts`).
+
 ## Trying it without releasing
 
 Run the Release workflow by hand: `dry-run` (the default) builds and packs the

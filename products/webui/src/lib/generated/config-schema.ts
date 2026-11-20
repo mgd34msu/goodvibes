@@ -51,7 +51,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "next-answer",
     "type": "boolean",
     "default": true,
-    "description": "Stream LLM tokens as they arrive"
+    "description": "Shows the answer as the model writes it, instead of all at once at the end"
   },
   {
     "key": "display.lineNumbers",
@@ -59,7 +59,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "now",
     "type": "enum",
     "default": "off",
-    "description": "Show line numbers for all assistant output, code blocks only, or not at all",
+    "description": "Shows line numbers in answers: on every line, in code blocks only, or not at all",
     "enumValues": [
       "all",
       "code",
@@ -72,7 +72,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "now",
     "type": "number",
     "default": 30,
-    "description": "Line count threshold for collapsing tool output",
+    "description": "Tool output longer than this many lines is folded; open it to see the rest",
     "validationHint": "number in [1, 1000]"
   },
   {
@@ -81,7 +81,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "now",
     "type": "enum",
     "default": "goodvibes",
-    "description": "Color theme name, the color palette (e.g. goodvibes-neon). Independent of display.themeMode, which controls light/dark appearance.",
+    "description": "The colour palette, by name (for example goodvibes-neon). Independent of display.themeMode, which controls light/dark appearance.",
     "enumValues": [
       "goodvibes",
       "goodvibes-neon",
@@ -102,7 +102,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Light or dark appearance",
     "type": "enum",
     "default": "auto",
-    "description": "Light/dark appearance: auto probes the terminal background colour (OSC 11) once at startup and picks light or dark; dark/light force a fixed appearance regardless of terminal background. Independent of display.theme, which picks the color palette.",
+    "description": "Light or dark appearance: auto asks the terminal for its background colour once at start and picks light or dark; dark and light always use that one, whatever the terminal's background. Independent of display.theme, which picks the color palette.",
     "enumValues": [
       "auto",
       "dark",
@@ -115,7 +115,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "now",
     "type": "enum",
     "default": "rounded",
-    "description": "Work tree connector style: rounded, square or ASCII. Terminals without Unicode support always use ASCII.",
+    "description": "The lines drawn between items in the work tree: rounded, square or plain ASCII. Terminals without Unicode support always use ASCII.",
     "enumValues": [
       "rounded",
       "square",
@@ -144,7 +144,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "now",
     "type": "boolean",
     "default": false,
-    "description": "Show streaming tokens/sec counter during generation"
+    "description": "Shows how fast the answer is arriving while the model writes it"
   },
   {
     "key": "display.showToolPreview",
@@ -214,7 +214,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
       "initialContextChars": 3000,
       "expandedContextChars": 10000
     },
-    "description": "Decision Router category descriptions and answer provider/model/effort targets. Used only when decision-router:auto is selected. Empty categories use the required General target. Contains no credentials."
+    "description": "Which model answers which kind of decision, and how hard it thinks. Used only when decision-router:auto is selected. Empty categories use the required General target. Contains no credentials."
   },
   {
     "key": "provider.reasoningEffort",
@@ -222,7 +222,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "next-answer",
     "type": "string",
     "default": "medium",
-    "description": "Reasoning effort level for models that support it",
+    "description": "How much the model reasons before it answers, for models that can be told",
     "validationHint": "a known reasoning effort level, run /effort for the current model choices"
   },
   {
@@ -230,14 +230,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Model for new conversations",
     "type": "string",
     "default": "openrouter:openrouter/free",
-    "description": "Default provider-qualified LLM model registry key"
+    "description": "The model new conversations use, written as provider:model"
   },
   {
     "key": "provider.embeddingProvider",
     "label": "Service that indexes memory for search",
     "type": "string",
     "default": "hashed-local",
-    "description": "Default memory embedding provider"
+    "description": "The provider that turns memories into a form GoodVibes can search"
   },
   {
     "key": "provider.systemPromptFile",
@@ -245,7 +245,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "next-session",
     "type": "string",
     "default": "",
-    "description": "Path to a file containing the system prompt (empty = none)"
+    "description": "A file of standing instructions the model gets at the start of every conversation; empty for none"
   },
   {
     "key": "provider.optimizerMode",
@@ -253,7 +253,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "now",
     "type": "enum",
     "default": "off",
-    "description": "Provider routing optimizer: off (optimizer inactive, default), manual (optimizer active but never auto-routes), auto (selects the best capable provider per request via capability contracts), or pinned (force one model, see provider.optimizerPinnedModel). Applies at once from any settings path; /provider-opt commands write this setting.",
+    "description": "How GoodVibes picks a provider for each request: off (the default), manual (it compares but never switches), auto (it picks the best provider that can do the request), or pinned (always the one model named in the next setting). Applies at once from any settings path; /provider-opt commands write this setting.",
     "enumValues": [
       "off",
       "manual",
@@ -267,7 +267,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "now",
     "type": "string",
     "default": "",
-    "description": "Provider-qualified model id (e.g. anthropic:claude-sonnet-4) the provider optimizer routes to while provider.optimizerMode is \"pinned\"; a change applies at once. Empty leaves the optimizer unpinned (falls back to manual)."
+    "description": "The one model used while provider choice is pinned, written as provider:model (for example anthropic:claude-sonnet-4); a change applies at once. Empty leaves the optimizer unpinned (falls back to manual)."
   },
   {
     "key": "provider.visionFallbackModel",
@@ -442,7 +442,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Most disagreement allowed before strict rules take over",
     "type": "number",
     "default": 0.05,
-    "description": "Maximum permission-evaluator divergence rate (0.0–1.0) the permission-divergence-dashboard enforce gate tolerates before blocking a transition from simulation to enforce mode. Default 0.05 = 5%. A per-simulator divergenceThreshold override still wins.",
+    "description": "While new permission rules are tried out beside the rules in force, how often they may disagree (0 to 1) before switching to them is refused. Default 0.05 = 5%. A per-simulator divergenceThreshold override still wins.",
     "validationHint": "number in [0, 1]"
   },
   {
@@ -450,7 +450,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Disagreements kept for the comparison report",
     "type": "number",
     "default": 500,
-    "description": "Maximum divergence records the permissions simulator retains for the divergence dashboard/trend history. A per-simulator maxDivergenceRecords override still wins.",
+    "description": "How many of those disagreements are kept for the comparison report. A per-simulator maxDivergenceRecords override still wins.",
     "validationHint": "integer in [1, 1000000]"
   },
   {
@@ -469,7 +469,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Permission to read files",
     "type": "enum",
     "default": "allow",
-    "description": "Permission for the read tool only; find and analyze have their own settings below. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
+    "description": "Whether GoodVibes may read files; finding and analysing files have their own settings below. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.",
     "enumValues": [
       "allow",
       "prompt",
@@ -481,7 +481,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Permission to write files and change settings",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for file write operations, and for changing settings through the goodvibes_settings tool. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
+    "description": "Whether GoodVibes may write files, and change settings for you. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.",
     "enumValues": [
       "allow",
       "prompt",
@@ -493,7 +493,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Permission to edit files",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for file edit/patch operations. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
+    "description": "Whether GoodVibes may edit files. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.",
     "enumValues": [
       "allow",
       "prompt",
@@ -505,7 +505,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Permission to run commands",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for shell command execution. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
+    "description": "Whether GoodVibes may run commands. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.",
     "enumValues": [
       "allow",
       "prompt",
@@ -517,7 +517,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Permission to search for files",
     "type": "enum",
     "default": "allow",
-    "description": "Permission for file/directory search operations. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
+    "description": "Whether GoodVibes may search for files and folders. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.",
     "enumValues": [
       "allow",
       "prompt",
@@ -529,7 +529,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Permission to fetch from the internet",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for outbound network fetch requests. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
+    "description": "Whether GoodVibes may fetch things from the network. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.",
     "enumValues": [
       "allow",
       "prompt",
@@ -541,7 +541,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Permission to analyse code",
     "type": "enum",
     "default": "allow",
-    "description": "Permission for code/project analysis operations. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
+    "description": "Permission for code/project analysis operations. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.",
     "enumValues": [
       "allow",
       "prompt",
@@ -553,7 +553,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Permission to inspect what is running",
     "type": "enum",
     "default": "allow",
-    "description": "Permission for inspecting runtime state and objects. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
+    "description": "Permission for inspecting runtime state and objects. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.",
     "enumValues": [
       "allow",
       "prompt",
@@ -565,7 +565,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Permission to start helper agents",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for spawning subagents or delegating tasks. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
+    "description": "Permission for spawning subagents or delegating tasks. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.",
     "enumValues": [
       "allow",
       "prompt",
@@ -577,7 +577,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Permission to read session state",
     "type": "enum",
     "default": "allow",
-    "description": "Permission for reading runtime/session state. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
+    "description": "Permission for reading runtime/session state. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.",
     "enumValues": [
       "allow",
       "prompt",
@@ -589,7 +589,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Permission to run workflows",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for executing multi-step workflow automation. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
+    "description": "Permission for executing multi-step workflow automation. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.",
     "enumValues": [
       "allow",
       "prompt",
@@ -601,7 +601,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Permission to look up tools and skills",
     "type": "enum",
     "default": "allow",
-    "description": "Permission for querying the tool/skill registry. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
+    "description": "Permission for querying the tool/skill registry. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.",
     "enumValues": [
       "allow",
       "prompt",
@@ -613,7 +613,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Permission to use tools from MCP servers",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for MCP tool calls (external server tools). deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
+    "description": "Permission for MCP tool calls (external server tools). Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.",
     "enumValues": [
       "allow",
       "prompt",
@@ -625,7 +625,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Permission to use tools GoodVibes doesn't know",
     "type": "enum",
     "default": "prompt",
-    "description": "Permission for unknown or unregistered tools (safe default: prompt). deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.",
+    "description": "Permission for unknown or unregistered tools (safe default: prompt). Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.",
     "enumValues": [
       "allow",
       "prompt",
@@ -751,14 +751,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Provider for spoken conversations",
     "type": "string",
     "default": "",
-    "description": "Optional LLM provider override for spoken-output turns; empty means use the active chat provider"
+    "description": "The provider that writes answers meant to be spoken; empty uses the conversation's provider"
   },
   {
     "key": "tts.llmModel",
     "label": "Model for spoken conversations",
     "type": "string",
     "default": "",
-    "description": "Optional LLM model override for spoken-output turns; empty means use the active chat model"
+    "description": "The model that writes answers meant to be spoken; empty uses the conversation's model"
   },
   {
     "key": "tts.speed",
@@ -1505,14 +1505,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Tidy memory while idle",
     "type": "boolean",
     "default": true,
-    "description": "Master switch for the idle-time memory consolidation pass (dedupe merges, confidence decay of never-referenced records, and review proposals). On by default, the daemon runs it at idle and on a slow schedule; every outcome is reversible or proposal-gated, and false turns the pass off."
+    "description": "While nothing else is happening, tidies what GoodVibes remembers: merges duplicates, trusts memories never used a little less, and proposes what to review. On by default, the daemon runs it at idle and on a slow schedule; every outcome is reversible or proposal-gated, and false turns the pass off."
   },
   {
     "key": "learning.consolidation.intervalMs",
     "label": "How often memory is tidied (ms)",
     "type": "number",
     "default": 21600000,
-    "description": "Minimum time between consolidation runs, in milliseconds. Doubles as the schedule cadence (default: 6 hours).",
+    "description": "The least time between two tidy-ups. Doubles as the schedule cadence (default: 6 hours).",
     "validationHint": "integer in [1, 2592000000]"
   },
   {
@@ -1605,7 +1605,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Memory GoodVibes aims to stay under (MB, 0 for automatic)",
     "type": "number",
     "default": 0,
-    "description": "MemoryGovernor budget in MB. The governor sheds caches and pauses background jobs as RSS approaches this budget. 0 means auto: min(25% of system RAM, 4096 MB), resolved at daemon start. Applies after the daemon restarts.",
+    "description": "How much memory the daemon plans to use, in MB. The governor sheds caches and pauses background jobs as RSS approaches this budget. 0 means auto: min(25% of system RAM, 4096 MB), resolved at daemon start. Applies after the daemon restarts.",
     "validationHint": "integer in [0, 1048576]"
   },
   {
@@ -1613,7 +1613,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Trim caches at this share of the memory budget (%)",
     "type": "number",
     "default": 60,
-    "description": "Elevated tier threshold, as a percent of the budget: at/above this the governor trims registered caches to their floor and runs a gc. Applies after the daemon restarts.",
+    "description": "At this share of the memory budget, the daemon trims what it keeps in memory. Applies after the daemon restarts.",
     "validationHint": "integer in [1, 100]"
   },
   {
@@ -1621,7 +1621,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Pause background work at this share of the memory budget (%)",
     "type": "number",
     "default": 80,
-    "description": "High tier threshold, as a percent of the budget: at/above this the governor flushes all registered caches and pauses deferrable background jobs. Applies after the daemon restarts.",
+    "description": "At this share of the memory budget, the daemon empties what it keeps in memory and pauses background work that can wait. Applies after the daemon restarts.",
     "validationHint": "integer in [1, 100]"
   },
   {
@@ -1629,7 +1629,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Refuse new heavy work at this share of the memory budget (%)",
     "type": "number",
     "default": 95,
-    "description": "Critical tier threshold, as a percent of the budget: at/above this the governor refuses new expensive work with an honest structured outcome and emits an ops attention event. Applies after the daemon restarts.",
+    "description": "At this share of the memory budget, the daemon refuses new heavy work and says why. Applies after the daemon restarts.",
     "validationHint": "integer in [1, 100]"
   },
   {
@@ -1637,7 +1637,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Memory growth that suggests a leak (MB per second)",
     "type": "number",
     "default": 25,
-    "description": "Leak tripwire rate in MB/s: if RSS keeps growing faster than this AFTER a full cache flush, the flush did not help and a leak is suspected. Applies after the daemon restarts.",
+    "description": "If memory use keeps growing faster than this, in MB per second, after the daemon has emptied what it keeps, it suspects a leak. Applies after the daemon restarts.",
     "validationHint": "number in [1, 100000]"
   },
   {
@@ -1645,7 +1645,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "How long growth must last to count as a leak (seconds)",
     "type": "number",
     "default": 60,
-    "description": "Leak tripwire sustain window in seconds: the post-flush growth rate must exceed memory.tripwire.rateMbPerSec continuously for this long before the governor writes a receipt and exits for a clean supervisor restart. Applies after the daemon restarts.",
+    "description": "How long, in seconds, that growth must last before the daemon records why and restarts itself cleanly. Applies after the daemon restarts.",
     "validationHint": "integer in [1, 86400]"
   },
   {
@@ -1653,7 +1653,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Restart before memory reaches this share of the limit (%)",
     "type": "number",
     "default": 90,
-    "description": "Absolute-memory backstop as a percent of the EFFECTIVE KILL CEILING, the daemon's own cgroup memory limit where one applies, else physical RAM. If RSS holds at/above this percent of that ceiling for memory.tripwire.sustainSec, the governor writes a hard-limit receipt and exits so a supervisor restarts clean, catching a leak too slow for memory.tripwire.rateMbPerSec just before the kernel/cgroup OOM killer would strike. Default 90: fire at 90% of the real kill line, leaving a safety margin for the exit itself. Deliberately anchored to the kill ceiling and NOT to memory.budgetMb: the budget caps small by design (25% of RAM, max 4096 MB), and a large-but-stable working set above the budget on a big-RAM host is handled by the critical tier (refuse new expensive work, stay alive), anchoring the exit to the budget would put such a healthy daemon in a permanent restart loop. Applies after the daemon restarts.",
+    "description": "The daemon restarts before its memory reaches this share of the most it may use: its own memory limit where it has one, else the computer's memory. If RSS holds at/above this percent of that ceiling for memory.tripwire.sustainSec, the governor writes a hard-limit receipt and exits so a supervisor restarts clean, catching a leak too slow for memory.tripwire.rateMbPerSec just before the kernel/cgroup OOM killer would strike. Default 90: fire at 90% of the real kill line, leaving a safety margin for the exit itself. Deliberately anchored to the kill ceiling and NOT to memory.budgetMb: the budget caps small by design (25% of RAM, max 4096 MB), and a large-but-stable working set above the budget on a big-RAM host is handled by the critical tier (refuse new expensive work, stay alive), anchoring the exit to the budget would put such a healthy daemon in a permanent restart loop. Applies after the daemon restarts.",
     "validationHint": "integer in [1, 100]"
   },
   {
@@ -1661,14 +1661,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Keep a profile about you",
     "type": "boolean",
     "default": true,
-    "description": "Load and serve the owner profile. On by default because the owner asked for it built, and a feature that ships off ships dark. Turning it off means the file is never opened and every profile verb answers \"your profile is turned off\", a stated state, not an empty profile that would read as \"I know nothing about you\". Applies when the daemon starts."
+    "description": "Keeps a profile about you: what you have told GoodVibes about yourself, in one file you can read and edit. On by default because the owner asked for it built, and a feature that ships off ships dark. Turning it off means the file is never opened and every profile verb answers \"your profile is turned off\", a stated state, not an empty profile that would read as \"I know nothing about you\". Applies when the daemon starts."
   },
   {
     "key": "profile.autonomousWrites",
     "label": "Save what you tell GoodVibes about yourself without asking",
     "type": "boolean",
     "default": true,
-    "description": "Let the runtime record facts it learns from things you say directly to it, without asking each time. On by default because that was the owner's explicit choice over propose-first. Off leaves reads and your own hand edits working exactly as before, the honest \"I will curate this myself\" mode, not a disabled feature. Untrusted sources are barred either way."
+    "description": "Lets GoodVibes save facts it learns from what you tell it about yourself, without asking each time. On by default because that was the owner's explicit choice over propose-first. Off leaves reads and your own hand edits working exactly as before, the honest \"I will curate this myself\" mode, not a disabled feature. Untrusted sources are barred either way."
   },
   {
     "key": "profile.discloseWrites",
@@ -1682,28 +1682,28 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Tell the model how you like to be addressed",
     "type": "boolean",
     "default": true,
-    "description": "Put the open tier, how you like to be addressed, your pronouns, your city, your timezone, your unit/date/locale preferences and your style notes, into system context as a short block each turn. On by default because otherwise the agent still guesses a metro area for a weather answer, which is the failure that started this. Closed-tier content (addresses, contact details, people, notes) is never bulk-injected regardless of this setting."
+    "description": "Tells the model, each turn, what about you is not private: how you like to be addressed, your pronouns, city and timezone, your units and date format, and your style notes. On by default because otherwise the agent still guesses a metro area for a weather answer, which is the failure that started this. Closed-tier content (addresses, contact details, people, notes) is never bulk-injected regardless of this setting."
   },
   {
     "key": "profile.discloseClosedTierReads",
     "label": "Say when private profile details are used",
     "type": "boolean",
     "default": true,
-    "description": "Announce it in the reply when a closed-tier value is used, e.g. \"Used your shipping address from your profile.\" On by default because using your address on an order should be visible to you at the moment it happens rather than discoverable afterwards in a log."
+    "description": "Says so in the reply when a private detail from your profile is used, for example \"Used your shipping address from your profile.\" On by default because using your address on an order should be visible to you at the moment it happens rather than discoverable afterwards in a log."
   },
   {
     "key": "profile.consumerFallback",
     "label": "Fill unset settings from your profile",
     "type": "boolean",
     "default": true,
-    "description": "Let an UNSET consumer setting read its value from the matching profile field, quiet hours, delivery channel, and the commerce fields as their keys arrive. On because a profile nothing reads is a diary. A value you configured explicitly always wins; the profile only fills a gap, and only for a single keyed read, never in a settings listing or export."
+    "description": "Lets a setting you have not set take its value from your profile: quiet hours, where notifications go, and your shopping details. On because a profile nothing reads is a diary. A value you configured explicitly always wins; the profile only fills a gap, and only for a single keyed read, never in a settings listing or export."
   },
   {
     "key": "profile.reloadThrottleMs",
     "label": "How often to check for edits to your profile (ms)",
     "type": "number",
     "default": 2000,
-    "description": "How often, in milliseconds, to check the profile file for a hand edit on hosts where filesystem watching is unavailable. Used only on that fallback path and never on a read, so it costs nothing in the common case. 2000 sits under human edit-then-check latency: you save the file, look at the assistant, and it already knows. Applies when the daemon starts.",
+    "description": "How often to look for your own edits to the profile file, on a computer that cannot report file changes. Used only on that fallback path and never on a read, so it costs nothing in the common case. 2000 sits under human edit-then-check latency: you save the file, look at the assistant, and it already knows. Applies when the daemon starts.",
     "validationHint": "integer in [50, 3600000]"
   },
   {
@@ -1711,7 +1711,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Profile file",
     "type": "string",
     "default": "",
-    "description": "Absolute path to the profile Markdown file. Empty means the default, owner-profile.md under the daemon home, which already honours GOODVIBES_DAEMON_HOME, so this override is only for keeping the file somewhere else entirely. Applies when the daemon starts."
+    "description": "Where the profile file is kept (a full path). Empty means the default, owner-profile.md under the daemon home, which already honours GOODVIBES_DAEMON_HOME, so this override is only for keeping the file somewhere else entirely. Applies when the daemon starts."
   },
   {
     "key": "profile.conversationalCapture",
@@ -1814,7 +1814,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Speech recognition on this computer",
     "type": "enum",
     "default": "",
-    "description": "Local speech-to-text engine: whisper-cpp (blessed default, CPU-first, realtime-capable) or faster-whisper (NVIDIA-GPU alternative via a wrapper script). Empty means not configured, and the machine says so honestly rather than erroring. Managed setup installs whisper-cpp and fills this in.",
+    "description": "The program that turns your speech into text on this computer: whisper-cpp (the default; runs on the processor, fast enough for live speech) or faster-whisper (for NVIDIA graphics cards, through a wrapper script). Empty means not configured, and the machine says so honestly rather than erroring. Managed setup installs whisper-cpp and fills this in.",
     "enumValues": [
       "",
       "whisper-cpp",
@@ -1826,21 +1826,21 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Speech recognition program",
     "type": "string",
     "default": "",
-    "description": "Absolute path to the local STT engine binary (e.g. whisper.cpp's whisper-cli). Managed setup installs the engine and sets this."
+    "description": "Where the speech-to-text program is (a full path, for example whisper.cpp's whisper-cli). Managed setup installs the engine and sets this."
   },
   {
     "key": "voice.local.sttModelPath",
     "label": "Speech recognition model file",
     "type": "string",
     "default": "",
-    "description": "Absolute path to the local STT model file (e.g. ggml-tiny.en.bin). Managed setup downloads the model, checksum-verifies it and sets this path; a path you set yourself is kept unless it names an install the managed runtime replaces, which is reported when it happens."
+    "description": "Where the speech-to-text model file is (a full path, for example ggml-tiny.en.bin). Managed setup downloads the model, checksum-verifies it and sets this path; a path you set yourself is kept unless it names an install the managed runtime replaces, which is reported when it happens."
   },
   {
     "key": "voice.local.ttsEngine",
     "label": "Speech on this computer",
     "type": "enum",
     "default": "",
-    "description": "Local text-to-speech engine: piper (blessed default, sub-50ms first-audio class, MIT) or kokoro (quality alternative, Apache 2.0, via a wrapper script). Empty means not configured. Managed setup installs piper and fills this in.",
+    "description": "The program that reads answers aloud on this computer: piper (the default; starts speaking almost at once) or kokoro (a better-sounding voice, through a wrapper script). Empty means not configured. Managed setup installs piper and fills this in.",
     "enumValues": [
       "",
       "piper",
@@ -1852,14 +1852,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Speech program",
     "type": "string",
     "default": "",
-    "description": "Absolute path to the local TTS engine binary (e.g. piper). Managed setup installs the engine and sets this."
+    "description": "Where the text-to-speech program is (a full path, for example piper). Managed setup installs the engine and sets this."
   },
   {
     "key": "voice.local.ttsModelPath",
     "label": "Voice model file",
     "type": "string",
     "default": "",
-    "description": "Absolute path to the local TTS voice model (e.g. en_US-lessac-low.onnx with its .json beside it). Managed setup downloads the voice, checksum-verifies it and sets this path; a path you set yourself is kept unless it names an install the managed runtime replaces, which is reported when it happens."
+    "description": "Where the voice model file is (a full path, for example en_US-lessac-low.onnx, with its .json file beside it). Managed setup downloads the voice, checksum-verifies it and sets this path; a path you set yourself is kept unless it names an install the managed runtime replaces, which is reported when it happens."
   },
   {
     "key": "voice.wake.enabled",
@@ -1867,14 +1867,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "now",
     "type": "boolean",
     "default": false,
-    "description": "Run the wake-word detector, listening continuously for the wake phrase on the configured input device. Turning it on starts a supervised capture process and a persistent listening indicator; turning it off stops it and releases the device immediately. WHERE IT LISTENS depends on the voice.wake.surfaces.* rows: the terminal captures through a recorder subprocess and is on by default, the agent captures the same way and is opted in per surface, and a browser tab captures through getUserMedia and is opted in per origin. Off by default because an always-on microphone must be an explicit act, not something a user discovers after the fact. THE MODEL IS ALREADY THERE: installing goodvibes downloads and checksum-verifies the pinned classifier, and a daemon retries at boot if the install could not reach the network, so turning this on normally needs no setup step at all. Turning it on in the terminal app or Agent (settings, /settings, a model's settings call) runs the same setup as /voice wake-setup: it turns the wake rows on, fetches any missing wake-word model files and shows the plan; installing a speech-to-text engine is only proposed."
+    "description": "Listens all the time for the wake phrase on the chosen microphone. Turning it on starts a supervised capture process and a persistent listening indicator; turning it off stops it and releases the device immediately. WHERE IT LISTENS depends on the voice.wake.surfaces.* rows: the terminal captures through a recorder subprocess and is on by default, the agent captures the same way and is opted in per surface, and a browser tab captures through getUserMedia and is opted in per origin. Off by default because an always-on microphone must be an explicit act, not something a user discovers after the fact. THE MODEL IS ALREADY THERE: installing goodvibes downloads and checksum-verifies the pinned classifier, and a daemon retries at boot if the install could not reach the network, so turning this on normally needs no setup step at all. Turning it on in the terminal app or Agent (settings, /settings, a model's settings call) runs the same setup as /voice wake-setup: it turns the wake rows on, fetches any missing wake-word model files and shows the plan; installing a speech-to-text engine is only proposed."
   },
   {
     "key": "voice.wake.models",
     "label": "Wake words to listen for",
     "type": "string",
     "default": "hey_goodvibes",
-    "description": "Comma-separated wake-word models to run concurrently, by id. Default \"hey_goodvibes\" is the model the platform pins, hosts, and verifies by checksum. Additional ids resolve against voice.wake.customModelDir. Each model costs one classifier inference per 80 ms frame, the shared melspectrogram and speech-embedding front end is computed once regardless of how many models are listed, so a second model is far cheaper than a second detector. An empty list disables detection without stopping the service. Ids are letters, digits, dot, underscore and hyphen only, since each becomes a file name.",
+    "description": "The wake-word models to listen with, by name, separated by commas. Default \"hey_goodvibes\" is the model the platform pins, hosts, and verifies by checksum. Additional ids resolve against voice.wake.customModelDir. Each model costs one classifier inference per 80 ms frame, the shared melspectrogram and speech-embedding front end is computed once regardless of how many models are listed, so a second model is far cheaper than a second detector. An empty list disables detection without stopping the service. Ids are letters, digits, dot, underscore and hyphen only, since each becomes a file name.",
     "validationHint": "comma-separated ids made of letters, digits, dot, underscore and hyphen (no path separators)"
   },
   {
@@ -1882,7 +1882,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "How sure it must be that it heard the wake word (0 to 1)",
     "type": "number",
     "default": 0.9,
-    "description": "Score, 0 to 1, a frame must reach for the wake phrase to count as heard. DELIBERATELY 0.9, NOT openWakeWord's upstream default of 0.5 and not the 0.5 originally accepted for this row: measurement on the shipped hey_goodvibes model showed 0.5 fires on 34.5% of never-trained minimal-pair phrases (\"hey good vibe check\", \"hey goodbye vibes\", ordinary English a user will actually say) at 99.2% recall, while 0.9 cuts that to 24.7% for 96.8% recall. Trading 2.4 points of recall to remove roughly a third of the wrong wakes is the better default for a microphone that is always on. Lower it toward 0.5 if the detector misses you; raise it above 0.9 if it fires when you did not speak to it. Recall figures here are synthetic-only, no human has recorded the phrase.",
+    "description": "How sure, from 0 to 1, the listener must be before the wake phrase counts as heard. DELIBERATELY 0.9, NOT openWakeWord's upstream default of 0.5 and not the 0.5 originally accepted for this row: measurement on the shipped hey_goodvibes model showed 0.5 fires on 34.5% of never-trained minimal-pair phrases (\"hey good vibe check\", \"hey goodbye vibes\", ordinary English a user will actually say) at 99.2% recall, while 0.9 cuts that to 24.7% for 96.8% recall. Trading 2.4 points of recall to remove roughly a third of the wrong wakes is the better default for a microphone that is always on. Lower it toward 0.5 if the detector misses you; raise it above 0.9 if it fires when you did not speak to it. Recall figures here are synthetic-only, no human has recorded the phrase.",
     "validationHint": "number in [0, 1]"
   },
   {
@@ -4417,21 +4417,21 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Use a separate model for tool work",
     "type": "boolean",
     "default": false,
-    "description": "Enable dedicated tool LLM for internal operations (off = tools use the main conversation model only when needed)"
+    "description": "Uses a separate model for GoodVibes's own background work; off, that work uses the conversation's model when it needs one"
   },
   {
     "key": "tools.llmProvider",
     "label": "Provider for tool work",
     "type": "string",
     "default": "",
-    "description": "Provider for tool LLM calls (empty = use currently selected provider)"
+    "description": "The provider of that separate model; empty uses the conversation's provider"
   },
   {
     "key": "tools.llmModel",
     "label": "Model for tool work",
     "type": "string",
     "default": "",
-    "description": "Model for tool LLM calls (empty = fastest available for the provider)"
+    "description": "That separate model; empty uses the provider's fastest"
   },
   {
     "key": "tools.autoHeal",
@@ -4772,7 +4772,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Where the decision model key comes from",
     "type": "enum",
     "default": "env",
-    "description": "Select where to resolve judgment.keyName: the literal enum env reads a process environment variable, secret reads a secret-store entry, and none disables authentication. This setting stores only one of those three words, never a credential or a credential reference",
+    "description": "Where the decision model's key comes from: env reads an environment variable, secret reads the secret store, and none sends no key. This setting stores only one of those three words, never a credential or a credential reference",
     "enumValues": [
       "env",
       "secret",
@@ -5118,7 +5118,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "now",
     "type": "boolean",
     "default": true,
-    "description": "Ingest max_context_length from local/custom provider /v1/models endpoints so local models use the provider-reported context window for token budgeting and compaction thresholds. Turn off to use only explicitly configured or static limits."
+    "description": "Uses the context size a local model's server reports, so the conversation is shortened at the right point for that model. Turn off to use only explicitly configured or static limits."
   },
   {
     "key": "planner.adaptive",
@@ -5210,14 +5210,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "now",
     "type": "boolean",
     "default": true,
-    "description": "Adaptive notification suppression: past notifications.burstThreshold notifications of one kind (same domain, level and title) in one collapse window, the rest are counted into that kind's notification-history entry instead of each adding one. Critical, milestone, and alert notifications are always exempt. Turn off to record every one as its own entry. Read when the app starts."
+    "description": "When many notifications of one kind arrive close together, lists the first few and counts the rest in one entry instead of listing each. Critical, milestone, and alert notifications are always exempt. Turn off to record every one as its own entry. Read when the app starts."
   },
   {
     "key": "notifications.burstThreshold",
     "label": "Repeats shown before notifications go quiet",
     "type": "number",
     "default": 3,
-    "description": "How many notifications with the same domain, level and title are recorded as their own entries within one collapse window while notifications.adaptiveSuppression is on; later ones in that window are counted into the same notification-history entry. The window follows the print level (behavior.hitlMode: 5 s quiet, 2 s balanced, 0.5 s operator) and runs from the first notification, so a steady trickle cannot keep one open. Critical, milestone and alert notifications never collapse. Read when the app starts.",
+    "description": "How many notifications of one kind are listed one by one in a short time before the rest are counted together. The window follows the print level (behavior.hitlMode: 5 s quiet, 2 s balanced, 0.5 s operator) and runs from the first notification, so a steady trickle cannot keep one open. Critical, milestone and alert notifications never collapse. Read when the app starts.",
     "validationHint": "integer in [1, 10000]"
   },
   {
@@ -5225,28 +5225,28 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Notify your devices when something needs approval",
     "type": "boolean",
     "default": true,
-    "description": "Device-push fan-out for the approval class: a pending approval pushes to every paired push target. On by default, the toggle exists to silence the class, never as a prerequisite for it to work. Read live per event."
+    "description": "Sends a push to your paired devices when something is waiting for your approval. On by default, the toggle exists to silence the class, never as a prerequisite for it to work. Read live per event."
   },
   {
     "key": "notifications.pushNeedsInput",
     "label": "Notify your devices when an agent needs you",
     "type": "boolean",
     "default": true,
-    "description": "Device-push fan-out for the needs-input class: a fleet node blocked on the operator pushes to every paired push target (presence-suppressed when a surface is attached). On by default; the toggle only silences. Read live per event."
+    "description": "Sends a push to your paired devices when an agent is waiting for you, unless you are already looking. On by default; the toggle only silences. Read live per event."
   },
   {
     "key": "notifications.pushCompletion",
     "label": "Notify your devices when work finishes",
     "type": "boolean",
     "default": true,
-    "description": "Device-push fan-out for the completion class: a tracked run reaching a terminal state (done/failed/killed) pushes to every paired push target. On by default with zero setup; the toggle only silences. Read live per event."
+    "description": "Sends a push to your paired devices when a run you follow finishes, fails or is stopped. On by default with zero setup; the toggle only silences. Read live per event."
   },
   {
     "key": "notifications.blockedEscalationGraceMs",
     "label": "Notify your devices when an agent has waited this long (ms)",
     "type": "number",
     "default": 300000,
-    "description": "How long a fleet node blocked on the operator may wait for a HUMAN response before a device push is sent REGARDLESS of an attached surface. Presence (an open TUI, a heartbeat) suppresses only the immediate push, never this escalation, a process being attended is not a human answer. A real interaction that clears the block cancels the escalation. Read live when a block is first tracked.",
+    "description": "How long an agent waiting for you may wait before your devices get a push, even while a screen is open. Presence (an open TUI, a heartbeat) suppresses only the immediate push, never this escalation, a process being attended is not a human answer. A real interaction that clears the block cancels the escalation. Read live when a block is first tracked.",
     "validationHint": "integer in [0, 86400000]"
   },
   {
@@ -5254,7 +5254,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Remind again every (ms)",
     "type": "number",
     "default": 300000,
-    "description": "Interval between the bounded follow-up reminders that fire after the first blocked-too-long escalation, while the block remains unanswered. Read live per reminder.",
+    "description": "Time between reminders after that first push, while the agent is still waiting for you. Read live per reminder.",
     "validationHint": "integer in [0, 86400000]"
   },
   {
@@ -5262,7 +5262,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Most reminders (0 for none)",
     "type": "number",
     "default": 2,
-    "description": "Upper bound on follow-up reminders after the first blocked-too-long escalation (0 = escalate exactly once, no reminders). Keeps a long-unanswered block from becoming an unbounded stream of pushes.",
+    "description": "Most reminders after that first push (0 sends the one push and no reminders). Keeps a long-unanswered block from becoming an unbounded stream of pushes.",
     "validationHint": "integer in [0, 100]"
   },
   {

@@ -9,6 +9,9 @@ export type { SuiteUpdatePlan, SuiteProgram } from './suite-update-plan.js';
 export { createInstalledReaderCohort } from './native-reader-cohort.js';
 export { isCompiledBunModuleUrl } from '../utils/bun-module.js';
 export { parseClientReaderArtifact, clientReaderAsset, clientReaderPayloadPaths, clientReaderMemberPath, clientReaderMemberAsset, assertClientReaderPayload } from './client-reader-artifact.js';
+export { RELEASE_EVIDENCE_PRODUCT_IDS, TUI_RELEASE_EVIDENCE_ID, AGENT_RELEASE_EVIDENCE_ID, DAEMON_RELEASE_EVIDENCE_ID } from './native-cohort-table.js';
+export type { ReleaseEvidenceProductId } from './native-cohort-table.js';
+import { DAEMON_RELEASE_EVIDENCE_ID } from './native-cohort-table.js';
 export { resolveDarwinDaemonTargets, inspectDarwinDaemonInstallation } from './darwin-daemon-installation.js';
 export type { DarwinDaemonInstallation, DarwinDaemonSqliteOwner } from './darwin-daemon-installation.js';
 export { resolveDaemonUpdateTargets, inspectDaemonUpdateInstallation } from './daemon-update-installation.js';
@@ -795,7 +798,7 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
       // stage-byte checks as every native member. It was never downloaded and
       // has no independently expected checksum to compute or verify.
       verified.push({ target, buffer: Buffer.from(JSON.stringify({ schema: 1,
-        packageName: '@goodvibes/daemon', version, artifact }, null, 2) + '\n') });
+        packageName: DAEMON_RELEASE_EVIDENCE_ID, version, artifact }, null, 2) + '\n') });
     }
     if (native) {
       const descriptorIndex = verified.findIndex(member => member.target.path === daemonTargets[daemonTargets.length - 1]?.path);
@@ -832,7 +835,7 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
       // source artifact's bytes. Do not expose its former release pin as proof.
       verifiedMembers.delete(descriptor.target.path);
       verified[descriptorIndex] = { target: descriptor.target, buffer: Buffer.from(JSON.stringify({ schema: 1,
-        packageName: '@goodvibes/daemon', version: normalizeVersion(native.version), artifact,
+        packageName: DAEMON_RELEASE_EVIDENCE_ID, version: normalizeVersion(native.version), artifact,
         ...(previousReader === undefined ? {} : { previousReader }) }, null, 2) + '\n') };
     }
     signal.throwIfAborted();

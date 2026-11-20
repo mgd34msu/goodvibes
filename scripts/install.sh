@@ -72,6 +72,15 @@ INSTALL_DAEMON_CLAIM_ID=""
 INSTALL_TUI_CLAIM_ID=""
 INSTALL_AGENT_CLAIM_ID=""
 
+# The product identifiers in release evidence (packageName in each
+# <asset>.reader-ci-artifact.json and in daemon-installation.json). They are a
+# contract with installed updaters and are not the workspace package names; the
+# one statement of them is the cohort table
+# (packages/engine/platform/src/platform/runtime/native-cohort-table.ts).
+EVIDENCE_ID_TUI='@goodvibes-jev/tui'
+EVIDENCE_ID_AGENT='@goodvibes-jev/agent'
+EVIDENCE_ID_DAEMON='@goodvibes-jev/daemon'
+
 # The marker string the installer writes above the PATH line it adds to a shell
 # rc file; uninstall keys on it.
 INSTALLER_MARKER="managed by goodvibes install.sh"
@@ -513,7 +522,7 @@ prepare_daemon_receipt() {
   # precisely the same source and payloads and match the actual staged reader.
   "$WORKDIR/$_receipt_asset.bun" -e '
     try {
-      const [primaryFile, readerFile, compiledJson, version, output] = process.argv.slice(1);
+      const [primaryFile, readerFile, compiledJson, version, output, packageName] = process.argv.slice(1);
       const primary = JSON.parse(await Bun.file(primaryFile).text());
       const binary = primaryFile.slice(primaryFile.lastIndexOf("/")+1).replace(/\.ci-artifact\.json$/,""), target = binary.slice("goodvibes-daemon-".length);
       const exact = (a, keys) => a && typeof a === "object" && !Array.isArray(a) && Object.keys(a).length === keys.length && keys.every(k => Object.hasOwn(a,k));
@@ -544,9 +553,9 @@ prepare_daemon_receipt() {
           || JSON.stringify(profile(candidate.readers)) !== JSON.stringify(profile(compiled))) throw new Error();
         artifact = candidate;
       }
-      await Bun.write(output, JSON.stringify({schema:1,packageName:"@goodvibes/daemon",version,artifact},null,2)+"\n");
+      await Bun.write(output, JSON.stringify({schema:1,packageName,version,artifact},null,2)+"\n");
     } catch { process.exitCode = 1; }
-  ' "$WORKDIR/$_receipt_asset.ci-artifact.json" "$_reader_source" "$_compiled_readers" "${VERSION#v}" "$WORKDIR/daemon-installation.json" || fail INSTALL_E017 'The verified daemon release metadata could not be confirmed. No installed program was replaced.'
+  ' "$WORKDIR/$_receipt_asset.ci-artifact.json" "$_reader_source" "$_compiled_readers" "${VERSION#v}" "$WORKDIR/daemon-installation.json" "$EVIDENCE_ID_DAEMON" || fail INSTALL_E017 'The verified daemon release metadata could not be confirmed. No installed program was replaced.'
 }
 
 # A claim's payload is diagnostic, never an authority key. Retain its actual
@@ -1105,7 +1114,7 @@ require_client_reader_evidence() {
   _evidence_asset="$_evidence_product-$PLATFORM_SUFFIX"
   _evidence_file="$WORKDIR/$_evidence_asset.reader-ci-artifact.json"
   [ -f "$_evidence_file" ] && [ ! -L "$_evidence_file" ] || fail INSTALL_E051 "The selected $_evidence_product release has no reader evidence. The installed programs were kept."
-  case "$_evidence_product" in goodvibes) _evidence_package='@goodvibes/tui' ;; goodvibes-agent) _evidence_package='@goodvibes/agent' ;; goodvibes-daemon) _evidence_package='@goodvibes/daemon' ;; *) fail INSTALL_E052 'Unsupported native reader evidence.' ;; esac
+  case "$_evidence_product" in goodvibes) _evidence_package=$EVIDENCE_ID_TUI ;; goodvibes-agent) _evidence_package=$EVIDENCE_ID_AGENT ;; goodvibes-daemon) _evidence_package=$EVIDENCE_ID_DAEMON ;; *) fail INSTALL_E052 'Unsupported native reader evidence.' ;; esac
   _evidence_target="$VEC_OS-$arch_tag"
   awk -v package="$_evidence_package" -v version="${VERSION#v}" -v target="$_evidence_target" '
     /^  "schema": 1,$/ { schema++ }

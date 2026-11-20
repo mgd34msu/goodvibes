@@ -3,7 +3,6 @@ import { lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, parse, resolve, sep } from 'node:path';
 import { assertDaemonNativePayloadBytes, compareVersions, parseDaemonCiArtifact, parseDaemonInstallationReceipt, UPDATE_TRANSACTION_SUFFIXES, type DaemonInstallationReceipt } from '@goodvibes/engine/platform/platform/runtime/self-update';
 import { daemonCiPayloads, daemonCiPayloadSpecs, daemonNativeHost, DAEMON_NATIVE_TARGETS, type DaemonNativeTarget, type DaemonArtifactSource, type DaemonCiArtifact } from './native-artifact.ts';
-const PACKAGE = '@goodvibes/daemon';
 const RECEIPT = 'daemon-installation.json';
 export interface DaemonInstallOwner extends DaemonArtifactSource { readonly version: string; readonly target: DaemonNativeTarget; }
 export type InstallationReceipt = DaemonInstallationReceipt;

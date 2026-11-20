@@ -604,7 +604,7 @@
         "watcherRegistry",
         "workflow"
       ],
-      "text": "export interface ProcessRegistryDeps { readonly agentManager: Pick<AgentManager, 'list' | 'cancel'> & Partial<Pick<AgentManager, 'wakeWithSteer'>>; readonly contractRunner: Pick<ContractRunner, 'list' | 'cancel'> & { readonly fleetControls?: ContractRunner['fleetControls'] | undefined; }; readonly processManager: Pick<ProcessManager, 'list' | 'stop' | 'getStatus'>; readonly watcherRegistry: Pick<WatcherRegistry, 'list' | 'stopWatcher'>; readonly workflow: { readonly workflowManager: Pick<WorkflowManager, 'list' | 'cancel'>; readonly hookActions: Pick<HookActionManager, 'list' | 'remove' | 'disable' | 'enable'>; readonly scheduleManager: Pick<ScheduleManager, 'list' | 'remove' | 'disable' | 'enable'>; }; readonly triggerSupervisor?: Pick<WatcherTriggerManager, 'list' | 'cancel' | 'reset'> | undefined; readonly approvalBroker?: Pick<ApprovalBroker, 'listApprovals'> | undefined; readonly sessionBroker?: Pick<SharedSessionBroker, 'listSessions'> | undefined; readonly codeIndexService?: CodeIndexProcessSource | undefined; readonly acpHost?: Pick<AcpHostService, 'list' | 'prompt' | 'stop'> | undefined; readonly observedAgents?: (Pick<ObservedAgentSource, 'list' | 'steer'> & Partial<Pick<ObservedAgentSource, 'onRefresh'>>) | undefined; readonly automationManager?: Pick<AutomationManager, 'listJobs' | 'setEnabled' | 'removeJob'> | undefined; readonly messageBus?: Pick<AgentMessageBus, 'send'> | undefined; readonly runtimeBus?: RuntimeEventBus | undefined; readonly priceUsage?: ((model: string | undefined, usage: ProcessUsage, provider?: string | undefined) => number | null) | undefined; readonly priceProvenance?: ((model: string | undefined, provider?: string | undefined) => { readonly source: 'user' | 'provider' | 'catalog'; readonly asOf?: string | undefined; } | null) | undefined; readonly now?: (() => number) | undefined; readonly stalledThresholdMs?: number | undefined; readonly stallTellMs?: number | undefined; readonly tickIntervalMs?: number | undefined; readonly slowRefreshMs?: number | undefined; readonly timers?: RegistryTimers | undefined; } ;; via CodeIndexProcessSource = export interface CodeIndexProcessSource { isBuilding(): boolean; buildProgress(): CodeIndexBuildProgress | null; buildStartedAt(): number | null; stats(): CodeIndexStats; } ;; ContractRunner = export interface ContractRunner { readonly nativeMode?: boolean; startDurable(request: DurableContractRequest): Promise<DurableStartedContract>; resumeDurable(key: DurableContractKey): Promise<DurableStartedContract>; inspectDurable?(key: DurableContractKey): DurableStartedContract | null; joinDurable?(key: DurableContractKey): Promise<void>; start(input: StartContractInput, options?: ContractStartOptions): Promise<StartedContract>; startIdempotent?(input: StartContractInput, request: IdempotentStartRequest, options?: ContractStartOptions): Promise<IdempotentStartedContract>; startFromPlanIdempotent?(input: StartFromPlanInput, request: IdempotentStartRequest, options?: ContractStartOptions): Promise<IdempotentStartedContract>; startFromPlan(input: StartFromPlanInput, options?: ContractStartOptions): Promise<StartedContract>; startForOwner(ownerRecord: AgentRecord, options?: ContractStartOptions): Promise<StartedContract>; assertOwnedExecution(): void; startOwnedForOwner(ownerRecord: AgentRecord, options?: ContractStartOptions): Promise<OwnedStartedContract>; join(contractId: string): Promise<void>; get(contractId: string): ContractView | null; inspectIntegration?(contractId: string): ContractIntegrationInspection; list(filter?: { readonly sessionId?: string | undefined; readonly includeTerminal?: boolean | undefined; readonly includeInputSnapshot?: boolean | undefined; readonly admit?: ((owner: ContractOwnership) => boolean) | undefined; }): ContractView[]; cancel(contractId: string, reason: string): boolean; remove?(contractId: string): ContractRemoval; retryUnit?(contractId: string, unitId: string): Promise<UnitRetryOutcome>; raiseBudget?(contractId: string, ceiling: BudgetCeiling): boolean; flushWorkPlan?(): Promise<void>; reply(contractId: string, escalationId: string, text: string): Promise<OwnerReplyOutcome>; pauseForOwnerRetry(contractId: string, failure: FailurePauseInput): { readonly escalationId: string; }; resumeAll(): Promise<ResumeReport>; importContract(snapshotJson: string, force?: boolean): boolean; serializeContract(contractId: string): string | null; hooks(): ContractSessionHooks; fleetControls(): ContractFleetControls; on(listener: (event: ContractEvent) => void): () => void; held?(contractId: string): ContractHold | null; dispose(): void; closed?(): Promise<CloseReport>; } ;; Partial = type Partial<T> = { [P in keyof T]?: T[P]; }; ;; Pick = type Pick<T, K extends keyof T> = { [P in K]: T[P]; }; ;; ProcessUsage = export interface ProcessUsage { readonly inputTokens: number; readonly outputTokens: number; readonly cacheReadTokens: number; readonly cacheWriteTokens: number; readonly reasoningTokens?: number | undefined; readonly llmCallCount: number; readonly turnCount: number; readonly toolCallCount: number; } ;; RegistryTimers = export interface RegistryTimers { setInterval(callback: () => void, intervalMs: number): unknown; clearInterval(handle: unknown): void; }"
+      "text": "export interface ProcessRegistryDeps { readonly agentManager: Pick<AgentManager, 'list' | 'cancel'> & Partial<Pick<AgentManager, 'wakeWithSteer'>>; readonly contractRunner: Pick<ContractRunner, 'list' | 'cancel'> & { readonly fleetControls?: ContractRunner['fleetControls'] | undefined; }; readonly processManager: Pick<ProcessManager, 'list' | 'stop' | 'getStatus'>; readonly watcherRegistry: Pick<WatcherRegistry, 'list' | 'stopWatcher'> & Partial<Pick<WatcherRegistry, 'awaitingOwner'>>; readonly workflow: { readonly workflowManager: Pick<WorkflowManager, 'list' | 'cancel'>; readonly hookActions: Pick<HookActionManager, 'list' | 'remove' | 'disable' | 'enable'>; readonly scheduleManager: Pick<ScheduleManager, 'list' | 'remove' | 'disable' | 'enable'>; }; readonly triggerSupervisor?: Pick<WatcherTriggerManager, 'list' | 'cancel' | 'reset'> | undefined; readonly approvalBroker?: Pick<ApprovalBroker, 'listApprovals'> | undefined; readonly sessionBroker?: Pick<SharedSessionBroker, 'listSessions'> | undefined; readonly codeIndexService?: CodeIndexProcessSource | undefined; readonly acpHost?: Pick<AcpHostService, 'list' | 'prompt' | 'stop'> | undefined; readonly observedAgents?: (Pick<ObservedAgentSource, 'list' | 'steer'> & Partial<Pick<ObservedAgentSource, 'onRefresh'>>) | undefined; readonly automationManager?: Pick<AutomationManager, 'listJobs' | 'setEnabled' | 'removeJob'> | undefined; readonly messageBus?: Pick<AgentMessageBus, 'send'> | undefined; readonly runtimeBus?: RuntimeEventBus | undefined; readonly priceUsage?: ((model: string | undefined, usage: ProcessUsage, provider?: string | undefined) => number | null) | undefined; readonly priceProvenance?: ((model: string | undefined, provider?: string | undefined) => { readonly source: 'user' | 'provider' | 'catalog'; readonly asOf?: string | undefined; } | null) | undefined; readonly now?: (() => number) | undefined; readonly stalledThresholdMs?: number | undefined; readonly stallTellMs?: number | undefined; readonly tickIntervalMs?: number | undefined; readonly slowRefreshMs?: number | undefined; readonly timers?: RegistryTimers | undefined; } ;; via CodeIndexProcessSource = export interface CodeIndexProcessSource { isBuilding(): boolean; buildProgress(): CodeIndexBuildProgress | null; buildStartedAt(): number | null; stats(): CodeIndexStats; } ;; ContractRunner = export interface ContractRunner { readonly nativeMode?: boolean; startDurable(request: DurableContractRequest): Promise<DurableStartedContract>; resumeDurable(key: DurableContractKey): Promise<DurableStartedContract>; inspectDurable?(key: DurableContractKey): DurableStartedContract | null; joinDurable?(key: DurableContractKey): Promise<void>; start(input: StartContractInput, options?: ContractStartOptions): Promise<StartedContract>; startIdempotent?(input: StartContractInput, request: IdempotentStartRequest, options?: ContractStartOptions): Promise<IdempotentStartedContract>; startFromPlanIdempotent?(input: StartFromPlanInput, request: IdempotentStartRequest, options?: ContractStartOptions): Promise<IdempotentStartedContract>; startFromPlan(input: StartFromPlanInput, options?: ContractStartOptions): Promise<StartedContract>; startForOwner(ownerRecord: AgentRecord, options?: ContractStartOptions): Promise<StartedContract>; assertOwnedExecution(): void; startOwnedForOwner(ownerRecord: AgentRecord, options?: ContractStartOptions): Promise<OwnedStartedContract>; join(contractId: string): Promise<void>; get(contractId: string): ContractView | null; inspectIntegration?(contractId: string): ContractIntegrationInspection; list(filter?: { readonly sessionId?: string | undefined; readonly includeTerminal?: boolean | undefined; readonly includeInputSnapshot?: boolean | undefined; readonly admit?: ((owner: ContractOwnership) => boolean) | undefined; }): ContractView[]; cancel(contractId: string, reason: string): boolean; remove?(contractId: string): ContractRemoval; retryUnit?(contractId: string, unitId: string): Promise<UnitRetryOutcome>; raiseBudget?(contractId: string, ceiling: BudgetCeiling): boolean; flushWorkPlan?(): Promise<void>; reply(contractId: string, escalationId: string, text: string): Promise<OwnerReplyOutcome>; pauseForOwnerRetry(contractId: string, failure: FailurePauseInput): { readonly escalationId: string; }; resumeAll(): Promise<ResumeReport>; importContract(snapshotJson: string, force?: boolean): boolean; serializeContract(contractId: string): string | null; hooks(): ContractSessionHooks; fleetControls(): ContractFleetControls; on(listener: (event: ContractEvent) => void): () => void; held?(contractId: string): ContractHold | null; dispose(): void; closed?(): Promise<CloseReport>; } ;; Partial = type Partial<T> = { [P in keyof T]?: T[P]; }; ;; Pick = type Pick<T, K extends keyof T> = { [P in K]: T[P]; }; ;; ProcessUsage = export interface ProcessUsage { readonly inputTokens: number; readonly outputTokens: number; readonly cacheReadTokens: number; readonly cacheWriteTokens: number; readonly reasoningTokens?: number | undefined; readonly llmCallCount: number; readonly turnCount: number; readonly toolCallCount: number; } ;; RegistryTimers = export interface RegistryTimers { setInterval(callback: () => void, intervalMs: number): unknown; clearInterval(handle: unknown): void; }"
     },
     {
       "name": "REDACTED_VALUE",
@@ -25113,7 +25113,7 @@
     {
       "name": "modelWorkspaceProviderRows",
       "kind": "function",
-      "text": "export declare function modelWorkspaceProviderRows(picker: { readonly models: readonly { readonly provider: string; }[]; readonly configuredProviders: ReadonlySet<string>; readonly configuredViaMap: ReadonlyMap<string, string | undefined>; readonly selectedIndex: number; getFilteredProviders(): string[]; }, policy: { readonly unconfiguredColor: string; readonly groupedItems?: readonly { readonly id: string; readonly label: string; readonly isGroupHeader?: boolean | undefined; }[] | undefined; }): KitRow[]; ;; via KitRow = export interface KitRow { readonly selectable?: (boolean) | undefined; readonly onClick?: (() => void) | undefined; readonly header?: (string) | undefined; readonly headerRight?: (string) | undefined; readonly label?: (string) | undefined; readonly spans?: (readonly KitSpan[]) | undefined; readonly desc?: (string) | undefined; readonly detail?: string | undefined; readonly right?: (string) | undefined; readonly rightFg?: (string) | undefined; readonly mark?: (string) | undefined; readonly markFg?: (string) | undefined; readonly selected?: (boolean) | undefined; readonly current?: (boolean) | undefined; readonly danger?: (boolean) | undefined; readonly labelFg?: (string) | undefined; readonly bold?: (boolean) | undefined; readonly muted?: (boolean) | undefined; } ;; ReadonlyMap = interface ReadonlyMap<K, V> { forEach(callbackfn: (value: V, key: K, map: ReadonlyMap<K, V>) => void, thisArg?: any): void; get(key: K): V | undefined; has(key: K): boolean; readonly size: number; } ;; ReadonlySet = interface ReadonlySet<T> { forEach(callbackfn: (value: T, value2: T, set: ReadonlySet<T>) => void, thisArg?: any): void; has(value: T): boolean; readonly size: number; }"
+      "text": "export declare function modelWorkspaceProviderRows(picker: { readonly models: readonly { readonly provider: string; }[]; readonly configuredProviders: ReadonlySet<string>; readonly configuredViaMap: ReadonlyMap<string, string | undefined>; readonly selectedIndex: number; getFilteredProviders(): string[]; }, policy: { readonly unconfiguredColor: string; readonly groupedItems?: readonly { readonly id: string; readonly label: string; readonly isGroupHeader?: boolean | undefined; }[] | undefined; }): KitRow[]; ;; via KitRow = export interface KitRow { readonly selectable?: (boolean) | undefined; readonly onClick?: (() => void) | undefined; readonly header?: (string) | undefined; readonly headerRight?: (string) | undefined; readonly label?: (string) | undefined; readonly spans?: (readonly KitSpan[]) | undefined; readonly desc?: (string) | undefined; readonly sub?: (string) | undefined; readonly detail?: string | undefined; readonly right?: (string) | undefined; readonly rightFg?: (string) | undefined; readonly mark?: (string) | undefined; readonly markFg?: (string) | undefined; readonly selected?: (boolean) | undefined; readonly current?: (boolean) | undefined; readonly danger?: (boolean) | undefined; readonly labelFg?: (string) | undefined; readonly bold?: (boolean) | undefined; readonly muted?: (boolean) | undefined; } ;; ReadonlyMap = interface ReadonlyMap<K, V> { forEach(callbackfn: (value: V, key: K, map: ReadonlyMap<K, V>) => void, thisArg?: any): void; get(key: K): V | undefined; has(key: K): boolean; readonly size: number; } ;; ReadonlySet = interface ReadonlySet<T> { forEach(callbackfn: (value: T, value2: T, set: ReadonlySet<T>) => void, thisArg?: any): void; has(value: T): boolean; readonly size: number; }"
     },
     {
       "name": "modelWorkspaceRoute",
@@ -27364,7 +27364,7 @@
     {
       "name": "terminalAskFacts",
       "kind": "function",
-      "text": "export declare function terminalAskFacts(context: TerminalAskContext, request?: PermissionPromptRequest | undefined): AskFacts; ;; via AskFacts = export interface AskFacts { readonly workingDirectory?: string | undefined; readonly homeDirectory?: string | undefined; readonly sandbox?: SandboxFact | undefined; readonly checkpointCovers?: ((path: string) => boolean) | undefined; readonly settingLabel?: ((key: string) => string | undefined) | undefined; readonly sessionTitle?: ((sessionId: string) => string | undefined) | undefined; readonly sessionId?: string | undefined; readonly currentSessionId?: string | undefined; readonly modeInForce: ModeInForceWords; readonly purchase?: ((purchaseId: string) => PurchaseAskFacts | undefined) | undefined; } ;; PermissionPromptRequest = export interface PermissionPromptRequest { callId: string; tool: string; args: Record<string, unknown>; category: PermissionCategory; analysis: PermissionRequestAnalysis; workingDirectory?: string | undefined; attribution?: PermissionAttribution | undefined; rememberOptions?: readonly RememberTierOption[] | undefined; ownerOnly?: OwnerOnlyKind | undefined; containable?: true | undefined; }"
+      "text": "export declare function terminalAskFacts(context: TerminalAskContext, request?: PermissionPromptRequest | undefined): AskFacts; ;; via AskFacts = export interface AskFacts { readonly workingDirectory?: string | undefined; readonly homeDirectory?: string | undefined; readonly sandbox?: SandboxFact | undefined; readonly checkpointCovers?: ((path: string) => boolean) | undefined; readonly settingLabel?: ((key: string) => string | undefined) | undefined; readonly sessionTitle?: ((sessionId: string) => string | undefined) | undefined; readonly sessionId?: string | undefined; readonly currentSessionId?: string | undefined; readonly modeInForce: ModeInForceWords; readonly purchase?: ((purchaseId: string) => PurchaseAskFacts | undefined) | undefined; readonly scheduleOfSession?: ((sessionId: string) => string | undefined) | undefined; } ;; PermissionPromptRequest = export interface PermissionPromptRequest { callId: string; tool: string; args: Record<string, unknown>; category: PermissionCategory; analysis: PermissionRequestAnalysis; workingDirectory?: string | undefined; attribution?: PermissionAttribution | undefined; rememberOptions?: readonly RememberTierOption[] | undefined; ownerOnly?: OwnerOnlyKind | undefined; containable?: true | undefined; }"
     }
   ],
   "./permissions-command": [
@@ -27892,7 +27892,7 @@
         "render",
         "sessionId"
       ],
-      "text": "export interface QuestionCardDeps { readonly inbox: QuestionCardInbox; readonly sessionId: () => string | undefined; readonly facts: () => AskFacts; readonly render: () => void; readonly notify: (message: string) => void; } ;; via AskFacts = export interface AskFacts { readonly workingDirectory?: string | undefined; readonly homeDirectory?: string | undefined; readonly sandbox?: SandboxFact | undefined; readonly checkpointCovers?: ((path: string) => boolean) | undefined; readonly settingLabel?: ((key: string) => string | undefined) | undefined; readonly sessionTitle?: ((sessionId: string) => string | undefined) | undefined; readonly sessionId?: string | undefined; readonly currentSessionId?: string | undefined; readonly modeInForce: ModeInForceWords; readonly purchase?: ((purchaseId: string) => PurchaseAskFacts | undefined) | undefined; }"
+      "text": "export interface QuestionCardDeps { readonly inbox: QuestionCardInbox; readonly sessionId: () => string | undefined; readonly facts: () => AskFacts; readonly render: () => void; readonly notify: (message: string) => void; } ;; via AskFacts = export interface AskFacts { readonly workingDirectory?: string | undefined; readonly homeDirectory?: string | undefined; readonly sandbox?: SandboxFact | undefined; readonly checkpointCovers?: ((path: string) => boolean) | undefined; readonly settingLabel?: ((key: string) => string | undefined) | undefined; readonly sessionTitle?: ((sessionId: string) => string | undefined) | undefined; readonly sessionId?: string | undefined; readonly currentSessionId?: string | undefined; readonly modeInForce: ModeInForceWords; readonly purchase?: ((purchaseId: string) => PurchaseAskFacts | undefined) | undefined; readonly scheduleOfSession?: ((sessionId: string) => string | undefined) | undefined; }"
     },
     {
       "name": "QuestionCardInbox",
@@ -28246,7 +28246,7 @@
     {
       "name": "composeConversationLayers",
       "kind": "function",
-      "text": "export declare function composeConversationLayers(options: { readonly entries: readonly ModalEntry[]; readonly modals: readonly StackedModal[]; readonly width: number; readonly height: number; readonly permission?: SurfaceLayer | null | undefined; readonly headerRows?: number | undefined; readonly footerRows?: number | undefined; readonly toasts: { hold(held: boolean, drop?: boolean): void; visible(): readonly ToastSpec[]; }; readonly screenOwned?: boolean | undefined; }): SurfaceLayer[]; ;; via StackedModal = export type StackedModal = SurfaceModal | TrackedModal; ;; SurfaceLayer = export interface SurfaceLayer { readonly hitTargets?: (readonly SurfaceHitTarget[]) | undefined; readonly x: number; readonly y: number; readonly lines: Line[]; readonly dim: boolean; readonly clearBlank?: (boolean) | undefined; } ;; ToastSpec = export interface ToastSpec { readonly title: string; readonly body?: (string) | undefined; readonly tone: ToastTone; }"
+      "text": "export declare function composeConversationLayers(options: { readonly entries: readonly ModalEntry[]; readonly modals: readonly StackedModal[]; readonly width: number; readonly height: number; readonly permission?: SurfaceLayer | null | undefined; }): SurfaceLayer[]; ;; via StackedModal = export type StackedModal = SurfaceModal | TrackedModal; ;; SurfaceLayer = export interface SurfaceLayer { readonly hitTargets?: (readonly SurfaceHitTarget[]) | undefined; readonly x: number; readonly y: number; readonly lines: Line[]; readonly dim: boolean; readonly clearBlank?: (boolean) | undefined; }"
     },
     {
       "name": "isCommonConversationModalOpen",
@@ -28317,7 +28317,7 @@
     {
       "name": "formRows",
       "kind": "function",
-      "text": "export declare function formRows(workspace: { readonly formIndex: number; readonly formFields: readonly McpWorkspaceFormField<string>[]; }): KitRow[]; ;; via KitRow = export interface KitRow { readonly selectable?: (boolean) | undefined; readonly onClick?: (() => void) | undefined; readonly header?: (string) | undefined; readonly headerRight?: (string) | undefined; readonly label?: (string) | undefined; readonly spans?: (readonly KitSpan[]) | undefined; readonly desc?: (string) | undefined; readonly detail?: string | undefined; readonly right?: (string) | undefined; readonly rightFg?: (string) | undefined; readonly mark?: (string) | undefined; readonly markFg?: (string) | undefined; readonly selected?: (boolean) | undefined; readonly current?: (boolean) | undefined; readonly danger?: (boolean) | undefined; readonly labelFg?: (string) | undefined; readonly bold?: (boolean) | undefined; readonly muted?: (boolean) | undefined; } ;; McpWorkspaceFormField = export interface McpWorkspaceFormField<Extra extends string = never> { readonly id: keyof McpWorkspaceFormBase | 'save' | 'cancel' | Extra; readonly label: string; readonly value: string; readonly help: string; readonly editable: boolean; }"
+      "text": "export declare function formRows(workspace: { readonly formIndex: number; readonly formFields: readonly McpWorkspaceFormField<string>[]; }): KitRow[]; ;; via KitRow = export interface KitRow { readonly selectable?: (boolean) | undefined; readonly onClick?: (() => void) | undefined; readonly header?: (string) | undefined; readonly headerRight?: (string) | undefined; readonly label?: (string) | undefined; readonly spans?: (readonly KitSpan[]) | undefined; readonly desc?: (string) | undefined; readonly sub?: (string) | undefined; readonly detail?: string | undefined; readonly right?: (string) | undefined; readonly rightFg?: (string) | undefined; readonly mark?: (string) | undefined; readonly markFg?: (string) | undefined; readonly selected?: (boolean) | undefined; readonly current?: (boolean) | undefined; readonly danger?: (boolean) | undefined; readonly labelFg?: (string) | undefined; readonly bold?: (boolean) | undefined; readonly muted?: (boolean) | undefined; } ;; McpWorkspaceFormField = export interface McpWorkspaceFormField<Extra extends string = never> { readonly id: keyof McpWorkspaceFormBase | 'save' | 'cancel' | Extra; readonly label: string; readonly value: string; readonly help: string; readonly editable: boolean; }"
     },
     {
       "name": "maskEnvText",
@@ -28332,7 +28332,7 @@
     {
       "name": "mcpTrustRows",
       "kind": "function",
-      "text": "export declare function mcpTrustRows(items: readonly McpTrustRowEntry[], selected: number, focused: boolean, editing: boolean, buffer: string): KitRow[]; ;; via KitRow = export interface KitRow { readonly selectable?: (boolean) | undefined; readonly onClick?: (() => void) | undefined; readonly header?: (string) | undefined; readonly headerRight?: (string) | undefined; readonly label?: (string) | undefined; readonly spans?: (readonly KitSpan[]) | undefined; readonly desc?: (string) | undefined; readonly detail?: string | undefined; readonly right?: (string) | undefined; readonly rightFg?: (string) | undefined; readonly mark?: (string) | undefined; readonly markFg?: (string) | undefined; readonly selected?: (boolean) | undefined; readonly current?: (boolean) | undefined; readonly danger?: (boolean) | undefined; readonly labelFg?: (string) | undefined; readonly bold?: (boolean) | undefined; readonly muted?: (boolean) | undefined; }"
+      "text": "export declare function mcpTrustRows(items: readonly McpTrustRowEntry[], selected: number, focused: boolean, editing: boolean, buffer: string): KitRow[]; ;; via KitRow = export interface KitRow { readonly selectable?: (boolean) | undefined; readonly onClick?: (() => void) | undefined; readonly header?: (string) | undefined; readonly headerRight?: (string) | undefined; readonly label?: (string) | undefined; readonly spans?: (readonly KitSpan[]) | undefined; readonly desc?: (string) | undefined; readonly sub?: (string) | undefined; readonly detail?: string | undefined; readonly right?: (string) | undefined; readonly rightFg?: (string) | undefined; readonly mark?: (string) | undefined; readonly markFg?: (string) | undefined; readonly selected?: (boolean) | undefined; readonly current?: (boolean) | undefined; readonly danger?: (boolean) | undefined; readonly labelFg?: (string) | undefined; readonly bold?: (boolean) | undefined; readonly muted?: (boolean) | undefined; }"
     }
   ],
   "./renderer/mcp-trust-context": [
@@ -28688,14 +28688,19 @@
     {
       "name": "createSessionPickerRenderer",
       "kind": "function",
-      "text": "export declare function createSessionPickerRenderer<Modal extends SessionPickerRenderState>(policy: { readonly allowDelete: boolean; readonly mouseNavigation: boolean; readonly openLabel: string; readonly deleteLabel: string; readonly saveHint: string; readonly pinned?: ((modal: Modal) => KitRow[]) | undefined; }): { renderSessionPickerModal: (modal: Modal, screenWidth: number, screenHeight?: number, now?: number) => SurfaceLayer; }; ;; via KitRow = export interface KitRow { readonly selectable?: (boolean) | undefined; readonly onClick?: (() => void) | undefined; readonly header?: (string) | undefined; readonly headerRight?: (string) | undefined; readonly label?: (string) | undefined; readonly spans?: (readonly KitSpan[]) | undefined; readonly desc?: (string) | undefined; readonly detail?: string | undefined; readonly right?: (string) | undefined; readonly rightFg?: (string) | undefined; readonly mark?: (string) | undefined; readonly markFg?: (string) | undefined; readonly selected?: (boolean) | undefined; readonly current?: (boolean) | undefined; readonly danger?: (boolean) | undefined; readonly labelFg?: (string) | undefined; readonly bold?: (boolean) | undefined; readonly muted?: (boolean) | undefined; } ;; SessionPickerRenderState = interface SessionPickerRenderState { readonly query: string; readonly selectedIndex: number; readonly deleteConfirmationTarget: string | null; readonly statusMessage: string; readonly sessions: readonly unknown[]; visibleSessions(): readonly { readonly name: string; readonly title?: string | undefined; readonly timestamp: number; readonly messageCount: number; }[]; setVisibleRows(count: number): void; } ;; SurfaceLayer = export interface SurfaceLayer { readonly hitTargets?: (readonly SurfaceHitTarget[]) | undefined; readonly x: number; readonly y: number; readonly lines: Line[]; readonly dim: boolean; readonly clearBlank?: (boolean) | undefined; }"
+      "text": "export declare function createSessionPickerRenderer<Modal extends SessionPickerRenderState>(policy: { readonly allowDelete: boolean; readonly mouseNavigation: boolean; readonly openLabel: string; readonly deleteLabel: string; readonly saveHint: string; readonly pinned?: ((modal: Modal) => KitRow[]) | undefined; }): { renderSessionPickerModal: (modal: Modal, screenWidth: number, screenHeight?: number, now?: number) => SurfaceLayer; }; ;; via KitRow = export interface KitRow { readonly selectable?: (boolean) | undefined; readonly onClick?: (() => void) | undefined; readonly header?: (string) | undefined; readonly headerRight?: (string) | undefined; readonly label?: (string) | undefined; readonly spans?: (readonly KitSpan[]) | undefined; readonly desc?: (string) | undefined; readonly sub?: (string) | undefined; readonly detail?: string | undefined; readonly right?: (string) | undefined; readonly rightFg?: (string) | undefined; readonly mark?: (string) | undefined; readonly markFg?: (string) | undefined; readonly selected?: (boolean) | undefined; readonly current?: (boolean) | undefined; readonly danger?: (boolean) | undefined; readonly labelFg?: (string) | undefined; readonly bold?: (boolean) | undefined; readonly muted?: (boolean) | undefined; } ;; SessionPickerRenderState = interface SessionPickerRenderState { readonly query: string; readonly selectedIndex: number; readonly deleteConfirmationTarget: string | null; readonly statusMessage: string; readonly sessions: readonly unknown[]; visibleSessions(): readonly { readonly name: string; readonly title?: string | undefined; readonly timestamp: number; readonly messageCount: number; }[]; setVisibleRows(count: number): void; } ;; SurfaceLayer = export interface SurfaceLayer { readonly hitTargets?: (readonly SurfaceHitTarget[]) | undefined; readonly x: number; readonly y: number; readonly lines: Line[]; readonly dim: boolean; readonly clearBlank?: (boolean) | undefined; }"
     }
   ],
   "./renderer/settings-context": [
     {
+      "name": "asSentence",
+      "kind": "function",
+      "text": "export declare function asSentence(text: string): string;"
+    },
+    {
       "name": "createSettingContext",
       "kind": "function",
-      "text": "export declare function createSettingContext<Modal extends SettingContextModal, Entry extends SettingContextEntry>(policy: { readonly isSecretKey: (key: string) => boolean; readonly cursor: string; readonly formatValue: (entry: Entry) => string; readonly label: (entry: Entry) => string; readonly source: (entry: Entry) => string; readonly detail: (entry: Entry) => readonly HelpLine[]; readonly enumDescriptions: Readonly<Partial<Record<string, Readonly<Partial<Record<string, string>>>>>>; readonly routingKeys: readonly string[]; readonly describeUiRouting: (value: string) => string; readonly customEditing?: ((entry: Entry) => string | undefined) | undefined; }): { currentSettingValue: (modal: Modal, entry: Entry, selected: boolean) => string; buildSettingHelp: (modal: Modal, entry: Entry) => HelpLine[]; }; ;; via HelpLine = export interface HelpLine { readonly kind: 'fact' | 'warning' | 'heading' | 'text'; readonly text: string; readonly folded?: string | undefined; readonly onRow?: boolean | undefined; } ;; Partial = type Partial<T> = { [P in keyof T]?: T[P]; }; ;; Readonly = type Readonly<T> = { readonly [P in keyof T]: T[P]; }; ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; }; ;; SettingContextEntry = interface SettingContextEntry { readonly setting: { readonly key: string; readonly default: unknown; readonly type: string; readonly description?: string | undefined; readonly enumValues?: readonly string[] | undefined; }; readonly currentValue: unknown; readonly effectiveSource?: string | undefined; readonly sourceLabel?: string | undefined; } ;; SettingContextModal = interface SettingContextModal { readonly editingMode: boolean; readonly editBuffer: string; }"
+      "text": "export declare function createSettingContext<Modal extends SettingContextModal, Entry extends SettingContextEntry>(policy: { readonly isSecretKey: (key: string) => boolean; readonly cursor: string; readonly formatValue: (entry: Entry) => string; readonly formatDefault: (entry: Entry) => string; readonly label: (entry: Entry) => string; readonly source: (modal: Modal, entry: Entry) => string | undefined; readonly detail: (entry: Entry) => readonly HelpLine[]; readonly enumDescriptions: Readonly<Partial<Record<string, Readonly<Partial<Record<string, string>>>>>>; readonly customEditing?: ((entry: Entry) => string | undefined) | undefined; }): { currentSettingValue: (modal: Modal, entry: Entry, selected: boolean) => string; buildSettingHelp: (modal: Modal, entry: Entry) => HelpLine[]; }; ;; via HelpLine = export interface HelpLine { readonly kind: 'fact' | 'warning' | 'heading' | 'text'; readonly text: string; readonly folded?: string | undefined; readonly onRow?: boolean | undefined; } ;; Partial = type Partial<T> = { [P in keyof T]?: T[P]; }; ;; Readonly = type Readonly<T> = { readonly [P in keyof T]: T[P]; }; ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; }; ;; SettingContextEntry = interface SettingContextEntry { readonly setting: { readonly key: string; readonly default: unknown; readonly type: string; readonly description?: string | undefined; readonly enumValues?: readonly string[] | undefined; readonly appliesWhen?: string | undefined; }; readonly currentValue: unknown; readonly isDefault: boolean; readonly effectiveSource?: string | undefined; readonly sourceLabel?: string | undefined; } ;; SettingContextModal = interface SettingContextModal { readonly editingMode: boolean; readonly editBuffer: string; }"
     },
     {
       "name": "createSubscriptionContext",
@@ -28703,9 +28708,19 @@
       "text": "export declare function createSubscriptionContext<Modal extends { readonly subscriptionLogoutConfirmationTarget: string | null; }>(policy: { readonly confirmLogout: (provider: string) => string; readonly beginLogout: string; readonly login: (provider: string) => string; readonly route: (value: SubscriptionEntry['activeRoute'] | SubscriptionEntry['preferredRoute']) => string; }): (modal: Modal, entry: SubscriptionEntry | null) => HelpLine[]; ;; via HelpLine = export interface HelpLine { readonly kind: 'fact' | 'warning' | 'heading' | 'text'; readonly text: string; readonly folded?: string | undefined; readonly onRow?: boolean | undefined; } ;; SubscriptionEntry = export interface SubscriptionEntry { provider: string; state: 'active' | 'pending' | 'available'; tokenType?: string | undefined; expiresAt?: number | undefined; oauthConfigured: boolean; activeRoute?: ProviderAuthRoute | undefined; preferredRoute?: ProviderAuthRoute | undefined; authFreshness?: ProviderAuthFreshness | undefined; routeReason?: string | undefined; issues?: string[] | undefined; nextActions?: string[] | undefined; }"
     },
     {
-      "name": "formatDefaultValue",
+      "name": "firstSentence",
       "kind": "function",
-      "text": "export declare function formatDefaultValue(value: unknown): string;"
+      "text": "export declare function firstSentence(text: string): { readonly first: string; readonly rest: string; };"
+    },
+    {
+      "name": "settingSourceWords",
+      "kind": "function",
+      "text": "export declare function settingSourceWords(input: { readonly effectiveSource?: string | undefined; readonly tier?: 'daemon' | 'shared' | 'project' | 'global' | 'default' | undefined; readonly runtime?: boolean | undefined; readonly program: string; }): string | undefined;"
+    },
+    {
+      "name": "settingStateWarnings",
+      "kind": "function",
+      "text": "export declare function settingStateWarnings(entry: { readonly setting: { readonly key: string; }; readonly metadataUnavailable?: string | undefined; readonly locked?: boolean | undefined; readonly lockReason?: string | undefined; readonly conflict?: boolean | undefined; }): HelpLine[]; ;; via HelpLine = export interface HelpLine { readonly kind: 'fact' | 'warning' | 'heading' | 'text'; readonly text: string; readonly folded?: string | undefined; readonly onRow?: boolean | undefined; }"
     }
   ],
   "./renderer/settings-documentation": [
@@ -28770,63 +28785,53 @@
       "required": [
         "currentCategory",
         "editingMode",
+        "openList",
         "searchFocused",
         "searchQuery",
-        "searchResults"
+        "searchResults",
+        "topicIndex"
       ],
-      "text": "export interface SettingsLayoutModal { readonly editingMode: boolean; readonly searchFocused: boolean; readonly searchQuery: string; readonly searchResults: readonly unknown[]; readonly currentCategory: string; }"
+      "text": "export interface SettingsLayoutModal { readonly editingMode: boolean; readonly searchFocused: boolean; readonly searchQuery: string; readonly searchResults: readonly unknown[]; readonly currentCategory: string; readonly topicIndex: number; readonly openList: string | null; }"
     },
     {
       "name": "createSettingsLayout",
       "kind": "function",
-      "text": "export declare function createSettingsLayout<Modal extends SettingsLayoutModal>(policy: { readonly listRows: (modal: Modal, width: number) => { rows: KitRow[]; selected: number; }; readonly categoryRows: (modal: Modal) => KitRow[]; readonly categoryLabel: (modal: Modal) => string; readonly breadcrumbs: (modal: Modal) => string[]; readonly hints: (modal: Modal) => KitHint[]; readonly notices: (modal: Modal) => string[]; readonly selectRow?: ((modal: Modal, index: number) => void) | undefined; readonly docLines: (modal: Modal, selected: boolean, width: number) => DocLine[]; readonly windowDoc: (modal: Modal, lines: DocLine[], capacity: number) => DocLine[]; }): { renderSettingsModal: (modal: Modal, screenWidth: number, screenHeight?: number) => SurfaceLayer; }; ;; via DocLine = export interface DocLine { readonly text: string; readonly fg: string; readonly bold?: boolean | undefined; } ;; KitHint = export type KitHint = readonly [key: string, action: string]; ;; KitRow = export interface KitRow { readonly selectable?: (boolean) | undefined; readonly onClick?: (() => void) | undefined; readonly header?: (string) | undefined; readonly headerRight?: (string) | undefined; readonly label?: (string) | undefined; readonly spans?: (readonly KitSpan[]) | undefined; readonly desc?: (string) | undefined; readonly detail?: string | undefined; readonly right?: (string) | undefined; readonly rightFg?: (string) | undefined; readonly mark?: (string) | undefined; readonly markFg?: (string) | undefined; readonly selected?: (boolean) | undefined; readonly current?: (boolean) | undefined; readonly danger?: (boolean) | undefined; readonly labelFg?: (string) | undefined; readonly bold?: (boolean) | undefined; readonly muted?: (boolean) | undefined; } ;; SurfaceLayer = export interface SurfaceLayer { readonly hitTargets?: (readonly SurfaceHitTarget[]) | undefined; readonly x: number; readonly y: number; readonly lines: Line[]; readonly dim: boolean; readonly clearBlank?: (boolean) | undefined; }"
+      "text": "export declare function createSettingsLayout<Modal extends SettingsLayoutModal>(policy: { readonly listRows: (modal: Modal, width: number) => { rows: KitRow[]; selected: number; }; readonly topicRows: (modal: Modal) => KitRow[]; readonly breadcrumbs: (modal: Modal) => string[]; readonly hints: (modal: Modal) => KitHint[]; readonly notices: (modal: Modal) => string[]; readonly selectRow?: ((modal: Modal, index: number) => void) | undefined; readonly docLines: (modal: Modal, selected: boolean, width: number) => DocLine[]; readonly windowDoc: (modal: Modal, lines: DocLine[], capacity: number) => DocLine[]; }): { renderSettingsModal: (modal: Modal, screenWidth: number, screenHeight?: number) => SurfaceLayer; }; ;; via DocLine = export interface DocLine { readonly text: string; readonly fg: string; readonly bold?: boolean | undefined; } ;; KitHint = export type KitHint = readonly [key: string, action: string]; ;; KitRow = export interface KitRow { readonly selectable?: (boolean) | undefined; readonly onClick?: (() => void) | undefined; readonly header?: (string) | undefined; readonly headerRight?: (string) | undefined; readonly label?: (string) | undefined; readonly spans?: (readonly KitSpan[]) | undefined; readonly desc?: (string) | undefined; readonly sub?: (string) | undefined; readonly detail?: string | undefined; readonly right?: (string) | undefined; readonly rightFg?: (string) | undefined; readonly mark?: (string) | undefined; readonly markFg?: (string) | undefined; readonly selected?: (boolean) | undefined; readonly current?: (boolean) | undefined; readonly danger?: (boolean) | undefined; readonly labelFg?: (string) | undefined; readonly bold?: (boolean) | undefined; readonly muted?: (boolean) | undefined; } ;; SurfaceLayer = export interface SurfaceLayer { readonly hitTargets?: (readonly SurfaceHitTarget[]) | undefined; readonly x: number; readonly y: number; readonly lines: Line[]; readonly dim: boolean; readonly clearBlank?: (boolean) | undefined; }"
     },
     {
-      "name": "settingsCategoryRows",
+      "name": "settingsTopicRailRows",
       "kind": "function",
-      "text": "export declare function settingsCategoryRows<Category extends string>(options: { readonly groups: readonly { readonly label: string; readonly categories: readonly Category[]; }[]; readonly categories: readonly Category[]; readonly categoryIndex: number; readonly searching: boolean; readonly focused: boolean; readonly label: (category: Category) => string; readonly count: (category: Category) => number; readonly onSelect?: ((category: Category) => void) | undefined; }): KitRow[]; ;; via KitRow = export interface KitRow { readonly selectable?: (boolean) | undefined; readonly onClick?: (() => void) | undefined; readonly header?: (string) | undefined; readonly headerRight?: (string) | undefined; readonly label?: (string) | undefined; readonly spans?: (readonly KitSpan[]) | undefined; readonly desc?: (string) | undefined; readonly detail?: string | undefined; readonly right?: (string) | undefined; readonly rightFg?: (string) | undefined; readonly mark?: (string) | undefined; readonly markFg?: (string) | undefined; readonly selected?: (boolean) | undefined; readonly current?: (boolean) | undefined; readonly danger?: (boolean) | undefined; readonly labelFg?: (string) | undefined; readonly bold?: (boolean) | undefined; readonly muted?: (boolean) | undefined; }"
+      "text": "export declare function settingsTopicRailRows(options: { readonly topics: readonly { readonly label: string; }[]; readonly topicIndex: number; readonly searching: boolean; readonly focused: boolean; readonly onSelect?: ((index: number) => void) | undefined; }): KitRow[]; ;; via KitRow = export interface KitRow { readonly selectable?: (boolean) | undefined; readonly onClick?: (() => void) | undefined; readonly header?: (string) | undefined; readonly headerRight?: (string) | undefined; readonly label?: (string) | undefined; readonly spans?: (readonly KitSpan[]) | undefined; readonly desc?: (string) | undefined; readonly sub?: (string) | undefined; readonly detail?: string | undefined; readonly right?: (string) | undefined; readonly rightFg?: (string) | undefined; readonly mark?: (string) | undefined; readonly markFg?: (string) | undefined; readonly selected?: (boolean) | undefined; readonly current?: (boolean) | undefined; readonly danger?: (boolean) | undefined; readonly labelFg?: (string) | undefined; readonly bold?: (boolean) | undefined; readonly muted?: (boolean) | undefined; }"
     }
   ],
   "./renderer/settings-metadata": [
     {
-      "name": "SHARED_CATEGORY_INFO",
-      "kind": "const",
-      "text": "SHARED_CATEGORY_INFO: { readonly display: \"Presentation settings for the terminal transcript: streaming, line numbers, thinking visibility, reasoning summaries, token speed, and tool previews.\"; readonly provider: \"Default model routing for normal chat turns, embeddings, reasoning effort, and persistent system prompt file.\"; readonly subscriptions: \"Provider subscription login state and routing posture. Active sessions can be reviewed or signed out here; API keys remain managed through secrets.\"; readonly behavior: \"Day-to-day shell behavior: approval posture, compaction, history, guidance, notifications, stale-context warnings, return context, and Human-in-the-Loop mode.\"; readonly permissions: \"Permission mode and tool-class policy. These settings decide whether the shell prompts before read/write/exec/network/agent actions.\"; readonly helper: \"Helper model defaults used by helper subsystems when they do not use the main chat route.\"; readonly tts: \"Text-to-speech provider, voice, and optional spoken-turn LLM overrides.\"; readonly automation: \"Scheduled and automated run settings, concurrency, timeout, catch-up, cooldown, and retention behavior.\"; readonly telemetry: \"Telemetry payload policy.\"; readonly cache: \"Provider and model cache behavior, TTL, and hit-rate monitoring.\"; readonly mcp: \"MCP server trust and scope review. Trust changes can expose local files, tools, databases, browsers, or remote automation depending on the server.\"; readonly tools: \"Tool LLM and helper model routing. Empty provider/model values inherit the active chat route unless a specific helper/tool route is set.\"; }"
-    },
-    {
-      "name": "SHARED_CATEGORY_LABELS",
-      "kind": "const",
-      "text": "SHARED_CATEGORY_LABELS: { readonly display: \"Display\"; readonly ui: \"UI\"; readonly provider: \"Provider\"; readonly subscriptions: \"Subscriptions\"; readonly behavior: \"Behavior\"; readonly storage: \"Storage\"; readonly permissions: \"Permissions\"; readonly orchestration: \"Orchestration\"; readonly planner: \"Planner\"; readonly contract: \"Contracts\"; readonly judgment: \"Judgment\"; readonly helper: \"Helper\"; readonly tts: \"TTS\"; readonly service: \"Service\"; readonly daemon: \"Daemon\"; readonly controlPlane: \"Control Plane\"; readonly httpListener: \"HTTP Listener\"; readonly web: \"Web\"; readonly batch: \"Batch\"; readonly automation: \"Automation\"; readonly checkin: \"Check-in\"; readonly watchers: \"Watchers\"; readonly runtime: \"Runtime\"; readonly telemetry: \"Telemetry\"; readonly cache: \"Cache\"; readonly diagnostics: \"Diagnostics\"; readonly mcp: \"MCP\"; readonly sandbox: \"Sandbox\"; readonly conversationGate: \"Channel Message Handling\"; readonly cloudflare: \"Cloudflare\"; readonly email: \"Email Connection\"; readonly calendar: \"Calendar Connections\"; readonly google: \"Google Connection\"; readonly tools: \"Tools\"; readonly network: \"Network\"; readonly relay: \"Relay\"; readonly fetch: \"Fetch Safety\"; readonly notifications: \"Notifications\"; readonly payments: \"Payments\"; }"
-    },
-    {
       "name": "SHARED_SETTING_ENUM_DESCRIPTIONS",
       "kind": "const",
       "text": "SHARED_SETTING_ENUM_DESCRIPTIONS: { readonly 'behavior.hitlMode': { readonly off: \"Keep the baseline notification delivery policy; verbosity mode changes are rejected.\"; readonly quiet: \"Minimize operational interruptions and surface fewer Human-in-the-Loop prompts.\"; readonly balanced: \"Show important Human-in-the-Loop prompts without turning routine work into noise.\"; }; readonly 'behavior.guidanceMode': { readonly off: \"Do not add extra guidance beyond direct command output.\"; readonly minimal: \"Show concise guidance only when it helps avoid mistakes.\"; readonly guided: \"Provide more explanation and next-step context during configuration and operations.\"; }; readonly 'storage.secretPolicy': { readonly preferred_secure: \"Use secure secret storage when available, with supported fallback behavior.\"; readonly require_secure: \"Require secure secret storage and reject plaintext fallback.\"; readonly plaintext_allowed: \"Allow plaintext fallback when secure storage is unavailable.\"; }; readonly 'ui.systemMessages': { readonly conversation: \"Show system messages inline in the transcript.\"; }; readonly 'ui.operationalMessages': { readonly conversation: \"Show operational messages inline in the transcript.\"; }; readonly 'surfaces.whatsapp.provider': { readonly 'meta-cloud': \"Use Meta Cloud API credentials and identifiers.\"; }; readonly 'batch.mode': { readonly off: \"Keep daemon work on the immediate local path.\"; readonly explicit: \"Use batch only when callers explicitly request batch execution.\"; readonly 'eligible-by-default': \"Queue every non-streaming OpenAI-compatible chat completion as a batch unless it asks to run live; terminal and web chat stays live.\"; }; readonly 'batch.fallback': { readonly live: \"A batch job for a provider that cannot batch runs at once on the live path, at live prices, and comes back already finished.\"; readonly fail: \"A batch job for a provider that cannot batch is refused, and nothing is sent.\"; }; }"
-    },
-    {
-      "name": "SHARED_SETTING_LABELS",
-      "kind": "const",
-      "text": "SHARED_SETTING_LABELS: { readonly 'judgment.volumeMonitor': \"Decision Call-volume Alerts\"; readonly 'ui.systemMessages': \"System Message Target\"; readonly 'ui.operationalMessages': \"Operational Message Target\"; readonly 'behavior.autoCompactThreshold': \"Auto-Compact %\"; readonly 'behavior.staleContextWarnings': \"Context Warnings\"; readonly 'behavior.returnContextMode': \"Return Context\"; readonly 'behavior.guidanceMode': \"Guidance Mode\"; readonly 'storage.secretPolicy': \"Secret Policy\"; readonly 'tools.llmProvider': \"Tool LLM Provider\"; readonly 'tools.llmModel': \"Tool LLM Model\"; readonly 'tools.autoHeal': \"Auto-Heal\"; readonly 'tools.defaultTokenBudget': \"Default Token Budget\"; readonly 'tools.hooksFile': \"Hooks File\"; readonly 'helper.enabled': \"Helper Enabled\"; readonly 'helper.globalProvider': \"Helper Provider\"; readonly 'helper.globalModel': \"Helper Model\"; readonly 'surfaces.ntfy.enabled': \"ntfy Enabled\"; readonly 'surfaces.ntfy.baseUrl': \"ntfy Base URL\"; readonly 'surfaces.ntfy.topic': \"ntfy Default Delivery Topic\"; readonly 'surfaces.ntfy.chatTopic': \"ntfy Chat Topic\"; readonly 'surfaces.ntfy.agentTopic': \"ntfy Agent Topic\"; readonly 'surfaces.ntfy.token': \"ntfy Token\"; readonly 'surfaces.ntfy.defaultPriority': \"ntfy Default Priority\"; }"
-    },
-    {
-      "name": "settingCategoryLabel",
-      "kind": "function",
-      "text": "export declare function settingCategoryLabel(key: string, labels: Readonly<Record<string, string>>): string; ;; via Readonly = type Readonly<T> = { readonly [P in keyof T]: T[P]; }; ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
     }
   ],
   "./renderer/settings-rows": [
     {
       "name": "createSettingsRows",
       "kind": "function",
-      "text": "export declare function createSettingsRows<Modal extends SettingsRowState<Entry>, Entry extends SettingRowEntry>(policy: { readonly label: (entry: Entry) => string; readonly rowLabel: (entry: Entry) => string; readonly color: (entry: Entry) => string; readonly currentValue: (modal: Modal, entry: Entry, selected: boolean) => string; readonly unavailable: (entry: Entry) => boolean; readonly category: (entry: Entry) => string; readonly focused: (modal: Modal) => boolean; readonly routeLabel: (route: string) => string; readonly specialRow?: ((modal: Modal, entry: Entry, selected: boolean, focused: boolean, width: number, category?: string | undefined) => KitRow | undefined) | undefined; readonly specialList?: ((modal: Modal, width: number, focused: boolean, clamp: (length: number) => number) => { rows: KitRow[]; selected: number; } | undefined) | undefined; }): { settingRow: (modal: Modal, entry: Entry, selected: boolean, focused: boolean, width: number, category?: string) => KitRow; listRows: (modal: Modal, width: number) => { rows: KitRow[]; selected: number; }; }; ;; via KitRow = export interface KitRow { readonly selectable?: (boolean) | undefined; readonly onClick?: (() => void) | undefined; readonly header?: (string) | undefined; readonly headerRight?: (string) | undefined; readonly label?: (string) | undefined; readonly spans?: (readonly KitSpan[]) | undefined; readonly desc?: (string) | undefined; readonly detail?: string | undefined; readonly right?: (string) | undefined; readonly rightFg?: (string) | undefined; readonly mark?: (string) | undefined; readonly markFg?: (string) | undefined; readonly selected?: (boolean) | undefined; readonly current?: (boolean) | undefined; readonly danger?: (boolean) | undefined; readonly labelFg?: (string) | undefined; readonly bold?: (boolean) | undefined; readonly muted?: (boolean) | undefined; } ;; SettingRowEntry = interface SettingRowEntry { readonly isDefault: boolean; readonly locked?: unknown; readonly conflict?: unknown; } ;; SettingsRowState = interface SettingsRowState<Entry> { readonly editingMode: boolean; readonly searchFocused: boolean; readonly currentCategory: string; readonly selectedIndex: number; readonly currentItems: readonly Entry[]; readonly searchResults: readonly Entry[]; readonly editBuffer: string; readonly mcpEntries: readonly McpTrustRowEntry[]; readonly subscriptionEntries: readonly SubscriptionEntry[]; }"
+      "text": "export declare function createSettingsRows<Modal extends SettingsRowState<Entry, Category>, Entry extends SettingRowEntry, Category extends string>(policy: { readonly label: (entry: Entry) => string; readonly color: (entry: Entry) => string; readonly currentValue: (modal: Modal, entry: Entry, selected: boolean) => string; readonly unavailable: (entry: Entry) => boolean; readonly placeOf: (entry: Entry) => SettingPlace; readonly visibleRows: (modal: Modal) => readonly SettingsTopicRow<Entry, Category>[]; readonly listCount: (modal: Modal, category: Category) => string | undefined; readonly focused: (modal: Modal) => boolean; readonly routeLabel: (route: string) => string; readonly specialRow?: ((modal: Modal, entry: Entry, selected: boolean, focused: boolean, width: number, sub: string) => KitRow | undefined) | undefined; readonly specialList?: ((modal: Modal, width: number, focused: boolean, clamp: (length: number) => number) => { rows: KitRow[]; selected: number; } | undefined) | undefined; }): { settingRow: (modal: Modal, entry: Entry, selected: boolean, focused: boolean, width: number, place: SettingPlace) => KitRow; listRows: (modal: Modal, width: number) => { rows: KitRow[]; selected: number; }; }; ;; via KitRow = export interface KitRow { readonly selectable?: (boolean) | undefined; readonly onClick?: (() => void) | undefined; readonly header?: (string) | undefined; readonly headerRight?: (string) | undefined; readonly label?: (string) | undefined; readonly spans?: (readonly KitSpan[]) | undefined; readonly desc?: (string) | undefined; readonly sub?: (string) | undefined; readonly detail?: string | undefined; readonly right?: (string) | undefined; readonly rightFg?: (string) | undefined; readonly mark?: (string) | undefined; readonly markFg?: (string) | undefined; readonly selected?: (boolean) | undefined; readonly current?: (boolean) | undefined; readonly danger?: (boolean) | undefined; readonly labelFg?: (string) | undefined; readonly bold?: (boolean) | undefined; readonly muted?: (boolean) | undefined; } ;; SettingPlace = export interface SettingPlace { readonly topic: SettingTopicId; readonly sectionId: string; readonly section: string; } ;; SettingRowEntry = interface SettingRowEntry { readonly isDefault: boolean; readonly locked?: unknown; readonly conflict?: unknown; readonly setting: { readonly key: string; }; } ;; SettingsRowState = interface SettingsRowState<Entry, Category extends string> { readonly editingMode: boolean; readonly searchFocused: boolean; readonly currentCategory: string; readonly openList: Category | null; readonly selectedIndex: number; readonly searchResults: readonly Entry[]; readonly editBuffer: string; readonly mcpEntries: readonly McpTrustRowEntry[]; readonly subscriptionEntries: readonly SubscriptionEntry[]; } ;; SettingsTopicRow = export type SettingsTopicRow<Entry, Category extends string> = { readonly kind: 'setting'; readonly entry: Entry; readonly place: SettingPlace; } | { readonly kind: 'list'; readonly list: SettingsTopicList<Category>; readonly place: SettingPlace; };"
     },
     {
       "name": "settingsNavigationHints",
       "kind": "function",
-      "text": "export declare function settingsNavigationHints(state: { readonly editingMode: boolean; readonly searchFocused: boolean; readonly currentCategory: string; readonly subscriptionLogoutConfirmationTarget?: unknown; }, policy: { readonly resetPending: boolean; readonly categoryFocused: boolean; readonly flagToggle: boolean; }): KitHint[]; ;; via KitHint = export type KitHint = readonly [key: string, action: string];"
+      "text": "export declare function settingsNavigationHints(state: { readonly editingMode: boolean; readonly searchFocused: boolean; readonly currentCategory: string; readonly openList: string | null; readonly subscriptionLogoutConfirmationTarget?: unknown; }, policy: { readonly resetPending: boolean; readonly categoryFocused: boolean; readonly flagToggle: boolean; readonly resetTo: string | undefined; readonly onList: boolean; readonly adjustable: boolean; }): KitHint[]; ;; via KitHint = export type KitHint = readonly [key: string, action: string];"
     }
   ],
   "./renderer/settings-value-helpers": [
+    {
+      "name": "SettingWordsFacts",
+      "kind": "interface",
+      "required": [
+        "key"
+      ],
+      "text": "export interface SettingWordsFacts { readonly key: string; readonly label?: string | undefined; readonly type?: string | undefined; readonly enumValues?: readonly string[] | undefined; }"
+    },
     {
       "name": "SettingsValueEntry",
       "kind": "interface",
@@ -28835,12 +28840,12 @@
         "isDefault",
         "setting"
       ],
-      "text": "export interface SettingsValueEntry { readonly setting: { readonly key: string; }; readonly currentValue: unknown; readonly isDefault: boolean; readonly flag?: { readonly feature: { readonly name: string; }; } | undefined; readonly effectiveSource?: string | undefined; readonly sourceLabel?: string | undefined; }"
+      "text": "export interface SettingsValueEntry { readonly setting: { readonly key: string; readonly label?: string | undefined; readonly type?: string | undefined; readonly enumValues?: readonly string[] | undefined; readonly default?: unknown; }; readonly currentValue: unknown; readonly isDefault: boolean; readonly flag?: { readonly feature: { readonly name: string; }; } | undefined; readonly effectiveSource?: string | undefined; readonly sourceLabel?: string | undefined; }"
     },
     {
       "name": "createSettingsValueHelpers",
       "kind": "function",
-      "text": "export declare function createSettingsValueHelpers<Entry extends SettingsValueEntry>(policy: { readonly richValues: boolean; readonly featureLabels: boolean; readonly isSecretKey: (key: string) => boolean; readonly isSecretReference: (value: string) => boolean; readonly labels: Readonly<Partial<Record<string, string>>>; readonly panelDescription: string; readonly bothDescription: string; }): { formatValue: (entry: Entry) => string; valueColor: (entry: Entry) => string; getSettingLabel: (entry: Entry) => string; describeUiRouting: (value: string) => string; }; ;; via Partial = type Partial<T> = { [P in keyof T]?: T[P]; }; ;; Readonly = type Readonly<T> = { readonly [P in keyof T]: T[P]; }; ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
+      "text": "export declare function createSettingsValueHelpers<Entry extends SettingsValueEntry>(policy: { readonly isSecretKey: (key: string) => boolean; readonly isDaemonKept: (key: string) => boolean; }): { formatValue: (entry: Entry) => string; formatDefault: (entry: Entry) => string; valueColor: (entry: Entry) => string; getSettingLabel: (entry: Entry) => string; };"
     },
     {
       "name": "flagStateColor",
@@ -28851,6 +28856,16 @@
       "name": "mcpTrustColor",
       "kind": "function",
       "text": "export declare function mcpTrustColor(mode: string): string;"
+    },
+    {
+      "name": "settingChoiceWords",
+      "kind": "function",
+      "text": "export declare function settingChoiceWords(key: string, value: string): string;"
+    },
+    {
+      "name": "settingValueWords",
+      "kind": "function",
+      "text": "export declare function settingValueWords(setting: SettingWordsFacts, value: unknown): string;"
     },
     {
       "name": "subscriptionStateColor",
@@ -30211,7 +30226,7 @@
     {
       "name": "SettingsRouteState",
       "kind": "type",
-      "text": "export type SettingsRouteState<Context, Target, Action extends string> = { settingsModal: { active: boolean; editingMode: boolean; currentCategory: string; focusRegion?: ('categories' | 'settings') | undefined; focusPane?: ('categories' | 'settings') | undefined; toggleFocusPane?: (() => void) | undefined; searchFocused?: boolean | undefined; searchQuery: string; commitEdit: () => void; toggleSelectedFlag: () => void; scrollContext?: ((delta: number) => void) | undefined; activateSelected: () => void; refreshPickerValues?: (() => void) | undefined; setPickerExecutionMode?: ((value: string) => void) | undefined; handleSubscriptionLogoutKey?: ((key: string) => 'confirmed' | 'cancelled' | 'absorbed' | 'inactive') | undefined; adjustSelected: (direction: 'left' | 'right', step?: number | undefined) => void; moveFocusedUp?: (() => void) | undefined; moveFocusedDown?: (() => void) | undefined; moveUp?: (() => void) | undefined; moveDown?: (() => void) | undefined; focusCategories?: (() => void) | undefined; focusSettings?: (() => void) | undefined; toggleFocusRegion?: (() => void) | undefined; nextCategory: () => void; prevCategory?: (() => void) | undefined; editBackspace: () => void; editChar: (char: string) => void; focusSearch?: (() => void) | undefined; blurSearch?: (() => void) | undefined; setSearchQuery: (query: string) => void; clearSearch: () => void; cancelEdit?: (() => void) | undefined; pendingModelPickerTarget: Target | null; pendingProviderModelPickerTarget?: (Target | null) | undefined; pendingSettingsPickerAction?: (Action | null) | undefined; pendingGuidedAction?: ({ readonly command: string; readonly action: string; readonly values: Readonly<Record<string, string>>; } | null) | undefined; resetSelected?: (() => { key: string; value: unknown; } | null) | undefined; initiateResetCategory?: (() => void) | undefined; initiateResetAll?: (() => void) | undefined; handleResetConfirmKey?: ((key: string) => { result: 'confirmed'; entries: ReadonlyArray<{ key: string; value: unknown; }>; } | 'cancelled' | 'absorbed' | 'inactive') | undefined; }; commandContext?: Context | undefined; openModelPickerWithTarget?: ((target: Target) => void) | undefined; openProviderModelPickerWithTarget?: ((target: Target) => void) | undefined; requestRender: () => void; handleEscape: () => void; }; ;; via Readonly = type Readonly<T> = { readonly [P in keyof T]: T[P]; }; ;; ReadonlyArray = interface ReadonlyArray<T> { readonly length: number; toString(): string; toLocaleString(): string; concat(...items: ConcatArray<T>[]): T[]; concat(...items: (T | ConcatArray<T>)[]): T[]; join(separator?: string): string; slice(start?: number, end?: number): T[]; indexOf(searchElement: T, fromIndex?: number): number; lastIndexOf(searchElement: T, fromIndex?: number): number; every<S extends T>(predicate: (value: T, index: number, array: readonly T[]) => value is S, thisArg?: any): this is readonly S[]; every(predicate: (value: T, index: number, array: readonly T[]) => unknown, thisArg?: any): boolean; some(predicate: (value: T, index: number, array: readonly T[]) => unknown, thisArg?: any): boolean; forEach(callbackfn: (value: T, index: number, array: readonly T[]) => void, thisArg?: any): void; map<U>(callbackfn: (value: T, index: number, array: readonly T[]) => U, thisArg?: any): U[]; filter<S extends T>(predicate: (value: T, index: number, array: readonly T[]) => value is S, thisArg?: any): S[]; filter(predicate: (value: T, index: number, array: readonly T[]) => unknown, thisArg?: any): T[]; reduce(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T): T; reduce(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T, initialValue: T): T; reduce<U>(callbackfn: (previousValue: U, currentValue: T, currentIndex: number, array: readonly T[]) => U, initialValue: U): U; reduceRight(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T): T; reduceRight(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T, initialValue: T): T; reduceRight<U>(callbackfn: (previousValue: U, currentValue: T, currentIndex: number, array: readonly T[]) => U, initialValue: U): U; readonly [n: number]: T; } ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
+      "text": "export type SettingsRouteState<Context, Target, Action extends string> = { settingsModal: { active: boolean; editingMode: boolean; currentCategory: string; topicLabel?: string | undefined; leaveList?: (() => boolean) | undefined; focusRegion?: ('categories' | 'settings') | undefined; focusPane?: ('categories' | 'settings') | undefined; toggleFocusPane?: (() => void) | undefined; searchFocused?: boolean | undefined; searchQuery: string; commitEdit: () => void; toggleSelectedFlag: () => void; scrollContext?: ((delta: number) => void) | undefined; activateSelected: () => void; refreshPickerValues?: (() => void) | undefined; setPickerExecutionMode?: ((value: string) => void) | undefined; handleSubscriptionLogoutKey?: ((key: string) => 'confirmed' | 'cancelled' | 'absorbed' | 'inactive') | undefined; adjustSelected: (direction: 'left' | 'right', step?: number | undefined) => void; moveFocusedUp?: (() => void) | undefined; moveFocusedDown?: (() => void) | undefined; moveUp?: (() => void) | undefined; moveDown?: (() => void) | undefined; focusCategories?: (() => void) | undefined; focusSettings?: (() => void) | undefined; toggleFocusRegion?: (() => void) | undefined; nextCategory: () => void; prevCategory?: (() => void) | undefined; editBackspace: () => void; editChar: (char: string) => void; focusSearch?: (() => void) | undefined; blurSearch?: (() => void) | undefined; setSearchQuery: (query: string) => void; clearSearch: () => void; cancelEdit?: (() => void) | undefined; pendingModelPickerTarget: Target | null; pendingProviderModelPickerTarget?: (Target | null) | undefined; pendingSettingsPickerAction?: (Action | null) | undefined; pendingGuidedAction?: ({ readonly command: string; readonly action: string; readonly values: Readonly<Record<string, string>>; } | null) | undefined; resetSelected?: (() => { key: string; value: unknown; } | null) | undefined; initiateResetCategory?: (() => void) | undefined; initiateResetAll?: (() => void) | undefined; handleResetConfirmKey?: ((key: string) => { result: 'confirmed'; entries: ReadonlyArray<{ key: string; value: unknown; }>; } | 'cancelled' | 'absorbed' | 'inactive') | undefined; }; commandContext?: Context | undefined; openModelPickerWithTarget?: ((target: Target) => void) | undefined; openProviderModelPickerWithTarget?: ((target: Target) => void) | undefined; requestRender: () => void; handleEscape: () => void; }; ;; via Readonly = type Readonly<T> = { readonly [P in keyof T]: T[P]; }; ;; ReadonlyArray = interface ReadonlyArray<T> { readonly length: number; toString(): string; toLocaleString(): string; concat(...items: ConcatArray<T>[]): T[]; concat(...items: (T | ConcatArray<T>)[]): T[]; join(separator?: string): string; slice(start?: number, end?: number): T[]; indexOf(searchElement: T, fromIndex?: number): number; lastIndexOf(searchElement: T, fromIndex?: number): number; every<S extends T>(predicate: (value: T, index: number, array: readonly T[]) => value is S, thisArg?: any): this is readonly S[]; every(predicate: (value: T, index: number, array: readonly T[]) => unknown, thisArg?: any): boolean; some(predicate: (value: T, index: number, array: readonly T[]) => unknown, thisArg?: any): boolean; forEach(callbackfn: (value: T, index: number, array: readonly T[]) => void, thisArg?: any): void; map<U>(callbackfn: (value: T, index: number, array: readonly T[]) => U, thisArg?: any): U[]; filter<S extends T>(predicate: (value: T, index: number, array: readonly T[]) => value is S, thisArg?: any): S[]; filter(predicate: (value: T, index: number, array: readonly T[]) => unknown, thisArg?: any): T[]; reduce(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T): T; reduce(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T, initialValue: T): T; reduce<U>(callbackfn: (previousValue: U, currentValue: T, currentIndex: number, array: readonly T[]) => U, initialValue: U): U; reduceRight(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T): T; reduceRight(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T, initialValue: T): T; reduceRight<U>(callbackfn: (previousValue: U, currentValue: T, currentIndex: number, array: readonly T[]) => U, initialValue: U): U; readonly [n: number]: T; } ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
     },
     {
       "name": "createSettingsModalRoute",
@@ -30225,7 +30240,6 @@
       "kind": "class",
       "publicMembers": [
         "active",
-        "categoryIndex",
         "contextScroll",
         "editBackspace",
         "editBuffer",
@@ -30234,6 +30248,8 @@
         "lastSettingEffectMessage",
         "mcpAllowAllConfirmationTarget",
         "mcpEntries",
+        "openList",
+        "openListRow",
         "pendingGuidedAction",
         "pendingModelPickerTarget",
         "pendingProviderModelPickerTarget",
@@ -30243,9 +30259,13 @@
         "searchResults",
         "selectedIndex",
         "subscriptionEntries",
-        "subscriptionLogoutConfirmationTarget"
+        "subscriptionLogoutConfirmationTarget",
+        "topicIndex",
+        "topicLabel",
+        "topicRows",
+        "topics"
       ],
-      "text": "export declare class TerminalSettingsModalState<Category extends string, Entry, Target extends string, Action extends string> { active: boolean; categoryIndex: number; selectedIndex: number; editingMode: boolean; editBuffer: string; contextScroll: number; mcpAllowAllConfirmationTarget: string | null; pendingModelPickerTarget: Target | null; pendingProviderModelPickerTarget: Target | null; pendingSettingsPickerAction: Action | null; pendingGuidedAction: SettingsGuidedAction | null; subscriptionLogoutConfirmationTarget: string | null; groups: Map<Category, Entry[]>; mcpEntries: McpEntry[]; subscriptionEntries: SubscriptionEntry[]; searchQuery: string; searchResults: Entry[]; lastSettingEffectMessage: string | null; pendingSecretWrite: Promise<boolean> | null; editBackspace(): void; protected resetSettingsInteraction(): void; } ;; via Map = interface Map<K, V> { clear(): void; delete(key: K): boolean; forEach(callbackfn: (value: V, key: K, map: Map<K, V>) => void, thisArg?: any): void; get(key: K): V | undefined; has(key: K): boolean; set(key: K, value: V): this; readonly size: number; } ;; McpEntry = export interface McpEntry { name: string; connected: boolean; role: string; trustMode: 'constrained' | 'ask-on-risk' | 'allow-all' | 'blocked'; allowedPaths: string[]; allowedHosts: string[]; toolRules?: readonly McpEntryToolRule[]; } ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; SettingsGuidedAction = export interface SettingsGuidedAction { readonly command: string; readonly action: string; readonly values: Readonly<Record<string, string>>; } ;; SubscriptionEntry = export interface SubscriptionEntry { provider: string; state: 'active' | 'pending' | 'available'; tokenType?: string | undefined; expiresAt?: number | undefined; oauthConfigured: boolean; activeRoute?: ProviderAuthRoute | undefined; preferredRoute?: ProviderAuthRoute | undefined; authFreshness?: ProviderAuthFreshness | undefined; routeReason?: string | undefined; issues?: string[] | undefined; nextActions?: string[] | undefined; }"
+      "text": "export declare class TerminalSettingsModalState<Category extends string, Entry, Target extends string, Action extends string> { active: boolean; topicIndex: number; topics: SettingsTopicView<Entry, Category>[]; openList: Category | null; openListRow: number; selectedIndex: number; editingMode: boolean; editBuffer: string; contextScroll: number; mcpAllowAllConfirmationTarget: string | null; pendingModelPickerTarget: Target | null; pendingProviderModelPickerTarget: Target | null; pendingSettingsPickerAction: Action | null; pendingGuidedAction: SettingsGuidedAction | null; subscriptionLogoutConfirmationTarget: string | null; groups: Map<Category, Entry[]>; mcpEntries: McpEntry[]; subscriptionEntries: SubscriptionEntry[]; searchQuery: string; searchResults: Entry[]; lastSettingEffectMessage: string | null; pendingSecretWrite: Promise<boolean> | null; editBackspace(): void; get topicLabel(): string; get topicRows(): readonly SettingsTopicRow<Entry, Category>[]; protected selectedTopicRow(rows: readonly SettingsTopicRow<Entry, Category>[]): SettingsTopicRow<Entry, Category> | null; protected resetSettingsInteraction(): void; } ;; via Map = interface Map<K, V> { clear(): void; delete(key: K): boolean; forEach(callbackfn: (value: V, key: K, map: Map<K, V>) => void, thisArg?: any): void; get(key: K): V | undefined; has(key: K): boolean; set(key: K, value: V): this; readonly size: number; } ;; McpEntry = export interface McpEntry { name: string; connected: boolean; role: string; trustMode: 'constrained' | 'ask-on-risk' | 'allow-all' | 'blocked'; allowedPaths: string[]; allowedHosts: string[]; toolRules?: readonly McpEntryToolRule[]; } ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; SettingsGuidedAction = export interface SettingsGuidedAction { readonly command: string; readonly action: string; readonly values: Readonly<Record<string, string>>; } ;; SettingsTopicRow = export type SettingsTopicRow<Entry, Category extends string> = { readonly kind: 'setting'; readonly entry: Entry; readonly place: SettingPlace; } | { readonly kind: 'list'; readonly list: SettingsTopicList<Category>; readonly place: SettingPlace; }; ;; SettingsTopicView = export interface SettingsTopicView<Entry, Category extends string> { readonly id: SettingTopicId; readonly label: string; readonly description: string; readonly rows: readonly SettingsTopicRow<Entry, Category>[]; } ;; SubscriptionEntry = export interface SubscriptionEntry { provider: string; state: 'active' | 'pending' | 'available'; tokenType?: string | undefined; expiresAt?: number | undefined; oauthConfigured: boolean; activeRoute?: ProviderAuthRoute | undefined; preferredRoute?: ProviderAuthRoute | undefined; authFreshness?: ProviderAuthFreshness | undefined; routeReason?: string | undefined; issues?: string[] | undefined; nextActions?: string[] | undefined; }"
     }
   ],
   "./settings-model-types": [
@@ -30320,9 +30340,62 @@
   ],
   "./settings-navigation": [
     {
+      "name": "SettingPlace",
+      "kind": "interface",
+      "required": [
+        "section",
+        "sectionId",
+        "topic"
+      ],
+      "text": "export interface SettingPlace { readonly topic: SettingTopicId; readonly sectionId: string; readonly section: string; } ;; via SettingTopicId = export type SettingTopicId = 'general' | 'account' | 'models' | 'voice' | 'notifications' | 'memory' | 'permissions';"
+    },
+    {
       "name": "SettingsTargetOutcome",
       "kind": "type",
       "text": "export type SettingsTargetOutcome = 'category' | 'setting' | 'not-found' | 'none';"
+    },
+    {
+      "name": "SettingsTopicList",
+      "kind": "interface",
+      "required": [
+        "category",
+        "description",
+        "label",
+        "sectionId",
+        "topic"
+      ],
+      "text": "export interface SettingsTopicList<Category extends string> { readonly category: Category; readonly label: string; readonly description: string; readonly topic: SettingTopicId; readonly sectionId: string; } ;; via SettingTopicId = export type SettingTopicId = 'general' | 'account' | 'models' | 'voice' | 'notifications' | 'memory' | 'permissions';"
+    },
+    {
+      "name": "SettingsTopicRow",
+      "kind": "type",
+      "text": "export type SettingsTopicRow<Entry, Category extends string> = { readonly kind: 'setting'; readonly entry: Entry; readonly place: SettingPlace; } | { readonly kind: 'list'; readonly list: SettingsTopicList<Category>; readonly place: SettingPlace; };"
+    },
+    {
+      "name": "SettingsTopicTarget",
+      "kind": "type",
+      "text": "export type SettingsTopicTarget<Category extends string> = { readonly kind: 'topic'; readonly topicIndex: number; readonly rowIndex: number; } | { readonly kind: 'list'; readonly topicIndex: number; readonly rowIndex: number; readonly category: Category; } | { readonly kind: 'setting'; readonly topicIndex: number; readonly rowIndex: number; };"
+    },
+    {
+      "name": "SettingsTopicView",
+      "kind": "interface",
+      "required": [
+        "description",
+        "id",
+        "label",
+        "rows"
+      ],
+      "text": "export interface SettingsTopicView<Entry, Category extends string> { readonly id: SettingTopicId; readonly label: string; readonly description: string; readonly rows: readonly SettingsTopicRow<Entry, Category>[]; } ;; via SettingTopicId = export type SettingTopicId = 'general' | 'account' | 'models' | 'voice' | 'notifications' | 'memory' | 'permissions';"
+    },
+    {
+      "name": "buildSettingsTopics",
+      "kind": "function",
+      "text": "export declare function buildSettingsTopics<Category extends string, Entry extends { readonly setting: { readonly key: string; }; }>(groups: ReadonlyMap<Category, readonly Entry[]>, lists: readonly SettingsTopicList<Category>[]): SettingsTopicView<Entry, Category>[]; ;; via ReadonlyMap = interface ReadonlyMap<K, V> { forEach(callbackfn: (value: V, key: K, map: ReadonlyMap<K, V>) => void, thisArg?: any): void; get(key: K): V | undefined; has(key: K): boolean; readonly size: number; }"
+    },
+    {
+      "name": "findSettingsTopicTarget",
+      "kind": "function",
+      "text": "export declare function findSettingsTopicTarget<Entry extends { readonly setting: { readonly key: string; }; }, Category extends string>(topics: readonly SettingsTopicView<Entry, Category>[], target: string, label: (entry: Entry) => string): SettingsTopicTarget<Category> | null;"
     },
     {
       "name": "moveSettingsSelection",
@@ -30330,19 +30403,24 @@
       "text": "export declare function moveSettingsSelection(state: SettingsSelectionState, direction: -1 | 1, policy: { readonly items: () => number; readonly specialItems: () => number; readonly clearSearchConfirmation: boolean; }): void; ;; via SettingsSelectionState = interface SettingsSelectionState { editingMode: boolean; contextScroll: number; searchFocused: boolean; selectedIndex: number; readonly searchResults: readonly unknown[]; readonly currentCategory: string; subscriptionLogoutConfirmationTarget: string | null; }"
     },
     {
-      "name": "selectSettingsTarget",
-      "kind": "function",
-      "text": "export declare function selectSettingsTarget<Category extends string>(state: { categoryIndex: number; selectedIndex: number; contextScroll: number; }, target: string | undefined, categories: readonly Category[], groups: ReadonlyMap<Category, readonly { readonly setting: { readonly key: string; }; }[]>, policy: { readonly resetScroll: boolean; readonly focusSettings: () => void; readonly search?: ((query: string) => void) | undefined; }): SettingsTargetOutcome; ;; via ReadonlyMap = interface ReadonlyMap<K, V> { forEach(callbackfn: (value: V, key: K, map: ReadonlyMap<K, V>) => void, thisArg?: any): void; get(key: K): V | undefined; has(key: K): boolean; readonly size: number; }"
-    },
-    {
       "name": "selectedSettingsCategoryEntry",
       "kind": "function",
       "text": "export declare function selectedSettingsCategoryEntry<Entry>(category: string, expected: string, entries: readonly Entry[], index: number): Entry | null;"
     },
     {
+      "name": "settingPlace",
+      "kind": "function",
+      "text": "export declare function settingPlace(key: string, listedUnder: string): SettingPlace;"
+    },
+    {
       "name": "settingsTargetNotFoundMessage",
       "kind": "function",
       "text": "export declare function settingsTargetNotFoundMessage(target: string): string;"
+    },
+    {
+      "name": "settingsTopicEntries",
+      "kind": "function",
+      "text": "export declare function settingsTopicEntries<Entry, Category extends string>(topics: readonly SettingsTopicView<Entry, Category>[]): Entry[];"
     }
   ],
   "./settings-search": [
@@ -30360,9 +30438,9 @@
       "text": "export declare function fuzzyScoreSettingEntry<Entry extends SearchSettingEntry>(query: string, entry: Entry, getLabel: (e: Entry) => string): number | null;"
     },
     {
-      "name": "searchSettingEntries",
+      "name": "searchSettingsInOrder",
       "kind": "function",
-      "text": "export declare function searchSettingEntries<Category, Entry extends SearchSettingEntry>(query: string, groups: ReadonlyMap<Category, readonly Entry[]>, getLabel: (e: Entry) => string): Entry[]; ;; via ReadonlyMap = interface ReadonlyMap<K, V> { forEach(callbackfn: (value: V, key: K, map: ReadonlyMap<K, V>) => void, thisArg?: any): void; get(key: K): V | undefined; has(key: K): boolean; readonly size: number; }"
+      "text": "export declare function searchSettingsInOrder<Entry extends SearchSettingEntry>(query: string, entries: readonly Entry[], getLabel: (e: Entry) => string): Entry[];"
     }
   ],
   "./settings-secret-writes": [
@@ -31474,7 +31552,7 @@
     {
       "name": "listHeight",
       "kind": "function",
-      "text": "export declare function listHeight(rows: readonly KitRow[], x0: number, x1: number): number; ;; via KitRow = export interface KitRow { readonly selectable?: (boolean) | undefined; readonly onClick?: (() => void) | undefined; readonly header?: (string) | undefined; readonly headerRight?: (string) | undefined; readonly label?: (string) | undefined; readonly spans?: (readonly KitSpan[]) | undefined; readonly desc?: (string) | undefined; readonly detail?: string | undefined; readonly right?: (string) | undefined; readonly rightFg?: (string) | undefined; readonly mark?: (string) | undefined; readonly markFg?: (string) | undefined; readonly selected?: (boolean) | undefined; readonly current?: (boolean) | undefined; readonly danger?: (boolean) | undefined; readonly labelFg?: (string) | undefined; readonly bold?: (boolean) | undefined; readonly muted?: (boolean) | undefined; }"
+      "text": "export declare function listHeight(rows: readonly KitRow[], x0: number, x1: number): number; ;; via KitRow = export interface KitRow { readonly selectable?: (boolean) | undefined; readonly onClick?: (() => void) | undefined; readonly header?: (string) | undefined; readonly headerRight?: (string) | undefined; readonly label?: (string) | undefined; readonly spans?: (readonly KitSpan[]) | undefined; readonly desc?: (string) | undefined; readonly sub?: (string) | undefined; readonly detail?: string | undefined; readonly right?: (string) | undefined; readonly rightFg?: (string) | undefined; readonly mark?: (string) | undefined; readonly markFg?: (string) | undefined; readonly selected?: (boolean) | undefined; readonly current?: (boolean) | undefined; readonly danger?: (boolean) | undefined; readonly labelFg?: (string) | undefined; readonly bold?: (boolean) | undefined; readonly muted?: (boolean) | undefined; }"
     },
     {
       "name": "modalHeightFor",
@@ -31540,7 +31618,7 @@
     {
       "name": "KitRow",
       "kind": "interface",
-      "text": "export interface KitRow { readonly selectable?: (boolean) | undefined; readonly onClick?: (() => void) | undefined; readonly header?: (string) | undefined; readonly headerRight?: (string) | undefined; readonly label?: (string) | undefined; readonly spans?: (readonly KitSpan[]) | undefined; readonly desc?: (string) | undefined; readonly detail?: string | undefined; readonly right?: (string) | undefined; readonly rightFg?: (string) | undefined; readonly mark?: (string) | undefined; readonly markFg?: (string) | undefined; readonly selected?: (boolean) | undefined; readonly current?: (boolean) | undefined; readonly danger?: (boolean) | undefined; readonly labelFg?: (string) | undefined; readonly bold?: (boolean) | undefined; readonly muted?: (boolean) | undefined; }"
+      "text": "export interface KitRow { readonly selectable?: (boolean) | undefined; readonly onClick?: (() => void) | undefined; readonly header?: (string) | undefined; readonly headerRight?: (string) | undefined; readonly label?: (string) | undefined; readonly spans?: (readonly KitSpan[]) | undefined; readonly desc?: (string) | undefined; readonly sub?: (string) | undefined; readonly detail?: string | undefined; readonly right?: (string) | undefined; readonly rightFg?: (string) | undefined; readonly mark?: (string) | undefined; readonly markFg?: (string) | undefined; readonly selected?: (boolean) | undefined; readonly current?: (boolean) | undefined; readonly danger?: (boolean) | undefined; readonly labelFg?: (string) | undefined; readonly bold?: (boolean) | undefined; readonly muted?: (boolean) | undefined; }"
     },
     {
       "name": "KitRowSource",
@@ -31664,7 +31742,7 @@
         "rows",
         "width"
       ],
-      "text": "export interface PopupOptions { readonly width: number; readonly rows: KitRowSource; readonly activeIndex?: number | undefined; readonly header?: (KitRow) | undefined; readonly maxRows: number; readonly scrollOwner?: (object) | undefined; } ;; via KitRow = export interface KitRow { readonly selectable?: (boolean) | undefined; readonly onClick?: (() => void) | undefined; readonly header?: (string) | undefined; readonly headerRight?: (string) | undefined; readonly label?: (string) | undefined; readonly spans?: (readonly KitSpan[]) | undefined; readonly desc?: (string) | undefined; readonly detail?: string | undefined; readonly right?: (string) | undefined; readonly rightFg?: (string) | undefined; readonly mark?: (string) | undefined; readonly markFg?: (string) | undefined; readonly selected?: (boolean) | undefined; readonly current?: (boolean) | undefined; readonly danger?: (boolean) | undefined; readonly labelFg?: (string) | undefined; readonly bold?: (boolean) | undefined; readonly muted?: (boolean) | undefined; } ;; KitRowSource = export interface KitRowSource { readonly length: number; at(index: number): KitRow | undefined; readonly noHeaders?: boolean | undefined; }"
+      "text": "export interface PopupOptions { readonly width: number; readonly rows: KitRowSource; readonly activeIndex?: number | undefined; readonly header?: (KitRow) | undefined; readonly maxRows: number; readonly scrollOwner?: (object) | undefined; } ;; via KitRow = export interface KitRow { readonly selectable?: (boolean) | undefined; readonly onClick?: (() => void) | undefined; readonly header?: (string) | undefined; readonly headerRight?: (string) | undefined; readonly label?: (string) | undefined; readonly spans?: (readonly KitSpan[]) | undefined; readonly desc?: (string) | undefined; readonly sub?: (string) | undefined; readonly detail?: string | undefined; readonly right?: (string) | undefined; readonly rightFg?: (string) | undefined; readonly mark?: (string) | undefined; readonly markFg?: (string) | undefined; readonly selected?: (boolean) | undefined; readonly current?: (boolean) | undefined; readonly danger?: (boolean) | undefined; readonly labelFg?: (string) | undefined; readonly bold?: (boolean) | undefined; readonly muted?: (boolean) | undefined; } ;; KitRowSource = export interface KitRowSource { readonly length: number; at(index: number): KitRow | undefined; readonly noHeaders?: boolean | undefined; }"
     },
     {
       "name": "PopupResult",
@@ -31674,29 +31752,6 @@
         "list"
       ],
       "text": "export interface PopupResult { readonly lines: Line[]; readonly list: KitListResult; } ;; via KitListResult = export interface KitListResult { readonly listTop: number; readonly above: number; readonly below: number; readonly start: number; readonly endY: number; } ;; Line = export type Line = Cell[];"
-    },
-    {
-      "name": "ToastArea",
-      "kind": "interface",
-      "required": [
-        "bottom",
-        "top"
-      ],
-      "text": "export interface ToastArea { readonly top: number; readonly bottom: number; }"
-    },
-    {
-      "name": "ToastSpec",
-      "kind": "interface",
-      "required": [
-        "title",
-        "tone"
-      ],
-      "text": "export interface ToastSpec { readonly title: string; readonly body?: (string) | undefined; readonly tone: ToastTone; }"
-    },
-    {
-      "name": "ToastTone",
-      "kind": "type",
-      "text": "export type ToastTone = 'info' | 'success' | 'warning' | 'error';"
     },
     {
       "name": "button",
@@ -31772,11 +31827,6 @@
       "name": "renderPopup",
       "kind": "function",
       "text": "export declare function renderPopup(options: PopupOptions): PopupResult;"
-    },
-    {
-      "name": "renderToasts",
-      "kind": "function",
-      "text": "export declare function renderToasts(screenW: number, screenH: number, toasts: readonly ToastSpec[], area?: ToastArea): SurfaceLayer | null; ;; via SurfaceLayer = export interface SurfaceLayer { readonly hitTargets?: (readonly SurfaceHitTarget[]) | undefined; readonly x: number; readonly y: number; readonly lines: Line[]; readonly dim: boolean; readonly clearBlank?: (boolean) | undefined; }"
     },
     {
       "name": "tabs",
@@ -32956,46 +33006,6 @@
       "name": "resolveThrobberActivity",
       "kind": "function",
       "text": "export declare function resolveThrobberActivity(input: ThrobberActivityInput): ThrobberActivity | null;"
-    }
-  ],
-  "./toast-center": [
-    {
-      "name": "ToastCenter",
-      "kind": "class",
-      "publicMembers": [
-        "clear",
-        "constructor",
-        "hold",
-        "onChange",
-        "show",
-        "visible"
-      ],
-      "text": "export declare class ToastCenter { onChange: (() => void) | null; constructor(clock?: () => number, schedule?: ToastScheduler); show(spec: ToastSpec, durationMs?: number): void; hold(held: boolean, drop?: boolean): void; visible(): ToastSpec[]; clear(): void; } ;; via ToastSpec = export interface ToastSpec { readonly title: string; readonly body?: (string) | undefined; readonly tone: ToastTone; }"
-    },
-    {
-      "name": "ToastPrintLevel",
-      "kind": "type",
-      "text": "export type ToastPrintLevel = () => unknown;"
-    },
-    {
-      "name": "ToastScheduler",
-      "kind": "type",
-      "text": "export type ToastScheduler = (run: () => void, delayMs: number) => void;"
-    },
-    {
-      "name": "bridgeNotificationFeedToToasts",
-      "kind": "function",
-      "text": "export declare function bridgeNotificationFeedToToasts(feed: NotificationFeed, toasts: ToastCenter, printLevel?: ToastPrintLevel): () => void;"
-    },
-    {
-      "name": "createToastCenterScope",
-      "kind": "function",
-      "text": "export declare function createToastCenterScope(): () => ToastCenter;"
-    },
-    {
-      "name": "getSharedToastCenter",
-      "kind": "const",
-      "text": "getSharedToastCenter: () => ToastCenter"
     }
   ],
   "./todo-command": [

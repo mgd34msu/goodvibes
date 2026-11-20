@@ -25,8 +25,8 @@ import type { SettingEntry, SettingsCategory } from './settings-modal-types.ts';
 /** Build the daemon-owned disclosure note for a given daemon store path. */
 export function daemonOwnedSettingNote(daemonTierPath: string | null): string {
   return daemonTierPath
-    ? `This value is stored in the daemon's own configuration (${daemonTierPath}) and applies to every client; not just this one.`
-    : "This value is stored in the daemon's own configuration and applies to every client; not just this one.";
+    ? `The daemon keeps this setting (in ${daemonTierPath}), so it applies to every program, not just this one.`
+    : 'The daemon keeps this setting, so it applies to every program, not just this one.';
 }
 
 /**
@@ -46,7 +46,7 @@ export function enrichDaemonOwnedSettingDescriptions(
       if (entry.setting.description.includes(note)) continue;
       entries[i] = {
         ...entry,
-        setting: { ...entry.setting, description: `${entry.setting.description} ${note}` },
+        setting: { ...entry.setting, description: `${entry.setting.description.trim().replace(/[^.!?)]$/, (last) => `${last}.`)} ${note}` },
       };
     }
   }

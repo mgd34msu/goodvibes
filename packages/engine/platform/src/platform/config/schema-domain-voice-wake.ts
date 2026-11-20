@@ -100,7 +100,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
     appliesWhen: 'now',
     type: 'boolean',
     description:
-      'Run the wake-word detector, listening continuously for the wake phrase on the configured input device. '
+      'Listens all the time for the wake phrase on the chosen microphone. '
       + 'Turning it on starts a supervised capture process and a persistent listening indicator; turning it off stops '
       + 'it and releases the device immediately. '
       + 'WHERE IT LISTENS depends on the voice.wake.surfaces.* rows: the terminal captures through a recorder '
@@ -119,7 +119,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
     label: 'Wake words to listen for',
     type: 'string',
     description:
-      'Comma-separated wake-word models to run concurrently, by id. Default "hey_goodvibes" is the model the platform pins, hosts, '
+      'The wake-word models to listen with, by name, separated by commas. Default "hey_goodvibes" is the model the platform pins, hosts, '
       + 'and verifies by checksum. Additional ids resolve against voice.wake.customModelDir. Each model costs one classifier '
       + 'inference per 80 ms frame, the shared melspectrogram and speech-embedding front end is computed once regardless of how '
       + 'many models are listed, so a second model is far cheaper than a second detector. An empty list disables detection '
@@ -134,7 +134,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
     type: 'number',
     ...numRange(0, 1),
     description:
-      'Score, 0 to 1, a frame must reach for the wake phrase to count as heard. '
+      'How sure, from 0 to 1, the listener must be before the wake phrase counts as heard. '
       + 'DELIBERATELY 0.9, NOT openWakeWord\'s upstream default of 0.5 and not the 0.5 originally accepted for this row: measurement on '
       + 'the shipped hey_goodvibes model showed 0.5 fires on 34.5% of never-trained minimal-pair phrases ("hey good vibe check", '
       + '"hey goodbye vibes", ordinary English a user will actually say) at 99.2% recall, while 0.9 cuts that to 24.7% for 96.8% recall. '

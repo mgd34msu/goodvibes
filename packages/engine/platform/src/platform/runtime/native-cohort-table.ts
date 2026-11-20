@@ -6,9 +6,15 @@
  * installer's and CI's member lists are checked against it. `mode` is the
  * file mode (493 = 0o755, 420 = 0o644); `reader` is false for a member the
  * daemon's native cohort carries that its reader evidence does not.
+ *
+ * `packages` names each product as its release evidence and install records
+ * name it (`packageName`). These are the product identifiers in release
+ * evidence; they are a contract with installed updaters and are not the
+ * workspace package names. An identifier changes only in a release that still
+ * reads the old one, and is written one release after that.
  */
 const table = /* cohort-table:begin */ {
-  "packages": {"goodvibes": "@goodvibes/tui", "goodvibes-agent": "@goodvibes/agent", "goodvibes-daemon": "@goodvibes/daemon"},
+  "packages": {"goodvibes": "@goodvibes-jev/tui", "goodvibes-agent": "@goodvibes-jev/agent", "goodvibes-daemon": "@goodvibes-jev/daemon"},
   "members": [
     {"product": "goodvibes", "target": "linux-x64", "path": "goodvibes-linux-x64", "asset": "goodvibes-linux-x64", "mode": 493, "reader": true},
     {"product": "goodvibes", "target": "linux-x64", "path": "goodvibes-linux-x64.bun", "asset": "goodvibes-linux-x64.bun", "mode": 493, "reader": true},
@@ -49,7 +55,7 @@ const table = /* cohort-table:begin */ {
     {"product": "goodvibes-daemon", "target": "darwin-arm64", "path": "lib/sqlite-darwin-arm64/libsqlite3.dylib", "asset": "sqlite-darwin-arm64.dylib", "mode": 420, "reader": true},
     {"product": "goodvibes-daemon", "target": "darwin-arm64", "path": "lib/sqlite-darwin-arm64/libsqlite3.dylib.json", "asset": "sqlite-darwin-arm64.dylib.json", "mode": 420, "reader": true}
   ]
-} /* cohort-table:end */;
+} /* cohort-table:end */ as const;
 
 export type NativeCohortProduct = 'goodvibes' | 'goodvibes-agent' | 'goodvibes-daemon';
 export type NativeCohortTarget = 'linux-x64' | 'linux-arm64' | 'darwin-x64' | 'darwin-arm64';
@@ -68,16 +74,27 @@ export interface NativeCohortMember {
 }
 
 const MEMBERS: readonly NativeCohortMember[] = Object.freeze(
-  (table.members as NativeCohortMember[]).map((member) => Object.freeze({ ...member })),
+  (table.members as readonly NativeCohortMember[]).map((member) => Object.freeze({ ...member })),
 );
-const PACKAGES: Readonly<Record<NativeCohortProduct, string>> = Object.freeze({ ...table.packages });
+
+/** The product identifiers in release evidence; they are a contract with installed updaters and are not the workspace package names. */
+export const RELEASE_EVIDENCE_PRODUCT_IDS = Object.freeze({ ...table.packages });
+/** One product identifier in release evidence (`@goodvibes-jev/tui`, `@goodvibes-jev/agent`, `@goodvibes-jev/daemon`). */
+export type ReleaseEvidenceProductId = typeof table.packages[NativeCohortProduct];
+/** The terminal app's identifier in release evidence. */
+export const TUI_RELEASE_EVIDENCE_ID = table.packages['goodvibes'];
+/** The Agent's identifier in release evidence. */
+export const AGENT_RELEASE_EVIDENCE_ID = table.packages['goodvibes-agent'];
+/** The daemon's identifier in release evidence and in its install record. */
+export const DAEMON_RELEASE_EVIDENCE_ID = table.packages['goodvibes-daemon'];
+const PACKAGES: Readonly<Record<NativeCohortProduct, ReleaseEvidenceProductId>> = RELEASE_EVIDENCE_PRODUCT_IDS;
 
 /** Members of one product on one target, in table order (the launcher first). */
 export function nativeCohortMembers(product: NativeCohortProduct, target: NativeCohortTarget): readonly NativeCohortMember[] {
   return MEMBERS.filter((member) => member.product === product && member.target === target);
 }
 
-/** The product named by a package, or undefined for a package that ships no native program. */
+/** The product named by a release evidence identifier, or undefined for one that names no native program. */
 export function nativeCohortProductOf(packageName: string): NativeCohortProduct | undefined {
   return (Object.keys(PACKAGES) as NativeCohortProduct[]).find((product) => PACKAGES[product] === packageName);
 }

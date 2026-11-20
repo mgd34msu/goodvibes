@@ -26,11 +26,17 @@ export type ManagedServiceActionRunner = NonNullable<ManagedServiceManagerOption
 export const MANAGED_SERVICE_NAME = resolveDaemonServiceDefault();
 /** The description every GoodVibes-written definition carries (platform managed-service-definition.ts owns it). */
 export const MANAGED_SERVICE_DESCRIPTION = PLATFORM_SERVICE_DESCRIPTION;
+/**
+ * The description the 3.3.1 daemon gave a unit it wrote itself (boot promotion,
+ * update adoption, the web UI's install). Such a unit is still GoodVibes's own
+ * after an update, so it is recognised; nothing writes it any more.
+ */
+const EARLIER_DAEMON_SERVICE_DESCRIPTION = 'goodvibes omnichannel daemon host';
 
 /**
  * Who wrote the service definition at a path: `absent` (nothing there),
  * `product` (this product's own definition: it names
- * {@link MANAGED_SERVICE_DESCRIPTION}; a LaunchAgent carries it in its `GoodVibesManagedBy` key), `other` (anything
+ * {@link MANAGED_SERVICE_DESCRIPTION}, or the description an earlier daemon wrote; a LaunchAgent carries it in its `GoodVibesManagedBy` key), `other` (anything
  * else, a symlink included: a definition the owner keeps elsewhere is never
  * written through), or `unreadable`.
  */
@@ -59,7 +65,7 @@ function readDefinitionFile(path: string): DefinitionFile {
 export function readManagedDefinitionOwner(path: string): ManagedDefinitionOwner {
   const file = readDefinitionFile(path);
   if ('state' in file) return file.state;
-  return file.contents.includes(MANAGED_SERVICE_DESCRIPTION) ? 'product' : 'other';
+  return [MANAGED_SERVICE_DESCRIPTION, EARLIER_DAEMON_SERVICE_DESCRIPTION].some((mark) => file.contents.includes(mark)) ? 'product' : 'other';
 }
 
 /**

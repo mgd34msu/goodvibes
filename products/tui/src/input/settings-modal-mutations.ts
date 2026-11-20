@@ -65,6 +65,8 @@ export interface DaemonOwnedConfigWriter {
   reset?(key: string): Promise<void>;
   /** Whether the daemon can take a write now (no request); absent counts as reachable. */
   reachable?(): boolean;
+  /** Read a daemon-owned key; `undefined` when the daemon could not answer. */
+  get?(key: string): Promise<unknown>;
 }
 
 export function applySettingValue({

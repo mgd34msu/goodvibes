@@ -65,13 +65,13 @@ export const learningConfigSettings: ConfigSettingDefinition[] = [
     label: 'Tidy memory while idle',
     type: 'boolean',
     description:
-      'Master switch for the idle-time memory consolidation pass (dedupe merges, confidence decay of never-referenced records, and review proposals). On by default, the daemon runs it at idle and on a slow schedule; every outcome is reversible or proposal-gated, and false turns the pass off.',
+      'While nothing else is happening, tidies what GoodVibes remembers: merges duplicates, trusts memories never used a little less, and proposes what to review. On by default, the daemon runs it at idle and on a slow schedule; every outcome is reversible or proposal-gated, and false turns the pass off.',
   },
   {
     key: 'learning.consolidation.intervalMs',
     label: 'How often memory is tidied (ms)',
     type: 'number',
-    description: 'Minimum time between consolidation runs, in milliseconds. Doubles as the schedule cadence (default: 6 hours).',
+    description: 'The least time between two tidy-ups. Doubles as the schedule cadence (default: 6 hours).',
     ...intRange(1, 30 * 24 * 60 * 60 * 1000),
   },
   {

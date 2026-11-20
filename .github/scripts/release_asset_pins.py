@@ -33,10 +33,19 @@ COHORT_TABLE = Path(__file__).resolve().parents[2] / 'packages/engine/platform/s
 COHORT_MARKERS = re.compile(r'/\* cohort-table:begin \*/(.*?)/\* cohort-table:end \*/', re.S)
 
 
-def cohort_members():
+def cohort_table():
     match = COHORT_MARKERS.search(COHORT_TABLE.read_text(encoding='utf-8'))
     assert match, f'The cohort table markers are missing from {COHORT_TABLE}'
-    return json.loads(match[1])['members']
+    return json.loads(match[1])
+
+
+def cohort_members():
+    return cohort_table()['members']
+
+
+def evidence_product_ids():
+    """Each product's identifier in release evidence: a contract with installed updaters, not a workspace package name."""
+    return cohort_table()['packages']
 
 
 def reader_member_assets(name):
@@ -72,7 +81,7 @@ def validate_reader_assets(pins, metadata, tag, source=None):
         assert value['target'] == target, f'Reader target mismatch: {name}'
         assert value['schema'] == (2 if native_linux and reader else 1), f'Reader schema mismatch: {name}'
         if not native_linux:
-            package = '@goodvibes/' + {'goodvibes': 'tui', 'goodvibes-agent': 'agent', 'goodvibes-daemon': 'daemon'}[product]
+            package = evidence_product_ids()[product]
             assert value['packageName'] == package and value['version'] == version, f'Reader product/version mismatch: {name}'
         if reader:
             assert value['readers']['schema'] == 1 and value['readers']['version'] == version, f'Reader version mismatch: {name}'
@@ -99,7 +108,7 @@ def validate_reader_assets(pins, metadata, tag, source=None):
             assert producer_name in metadata, f'Darwin SQLite producer is absent: {asset}'
             owner = json.loads(metadata[producer_name])
             library = pins[f'sqlite-{target}.dylib']
-            assert owner['schema'] == 1 and owner['packageName'] == '@goodvibes/daemon' and owner['daemonVersion'] == version and owner['target'] == target, f'Darwin SQLite producer identity mismatch: {asset}'
+            assert owner['schema'] == 1 and owner['packageName'] == evidence_product_ids()['goodvibes-daemon'] and owner['daemonVersion'] == version and owner['target'] == target, f'Darwin SQLite producer identity mismatch: {asset}'
             assert owner['sha256'] == library['sha256'] and owner['size'] == library['size'], f'Darwin SQLite producer does not bind selected library: {asset}'
 
 

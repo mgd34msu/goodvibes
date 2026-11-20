@@ -56,13 +56,8 @@ export function ensureConfiguredModelIsRoutable(providerRegistry: ProviderRegist
   const modelId = modelParts.join(':').trim();
   if (!providerId || !modelId) return;
 
-  const provider = providerRegistry.tryGet(providerId);
-  if (!provider) return;
-
-  providerRegistry.registerRuntimeProvider({
-    provider,
-    replace: true,
-    appendModels: true,
-    models: [buildFallbackModelDefinition(providerId, modelId)],
-  });
+  // Only the model is added; the provider stays whoever registered it. Claiming
+  // a builtin as runtime-owned here took it off the credential chain, so a key
+  // kept in the secret store never reached the configured model.
+  providerRegistry.addFallbackModel(buildFallbackModelDefinition(providerId, modelId));
 }

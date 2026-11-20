@@ -7529,6 +7529,7 @@ export interface OperatorMethodInputMap {
         preferredTier?: "fast" | "fastest" | "normal";
         expirySeparator?: string;
         twoDigitYear?: boolean;
+        askedInSession?: string;
         standingId?: string;
         requestedMax?: string;
     };

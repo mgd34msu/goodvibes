@@ -5,7 +5,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertNativeArtifactFilesCurrent, inspectTerminalReaderArtifact, retainNativeArtifactFiles } from '@goodvibes/engine/toolchain';
 import { createReleaseStage } from '@goodvibes/engine/toolchain/release-publication';
-import { parseClientReaderArtifact } from '@goodvibes/engine/platform/platform/runtime/self-update';
+import { DAEMON_RELEASE_EVIDENCE_ID, parseClientReaderArtifact } from '@goodvibes/engine/platform/platform/runtime/self-update';
 import { runNativeArchive } from './native-execution-process.mjs';
 
 export const NATIVE_EXECUTION_TARGETS = Object.freeze(['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64']);
@@ -78,7 +78,9 @@ function owner(product, source) {
   const pkg = json(join(product, 'package.json'));
   assert.equal(pkg.name, '@goodvibes/daemon'); assert.match(pkg.version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
   return Object.freeze({ schema: 1, kind: 'daemon-native-execution', sourceCommit: source.sourceCommit, sourceTree: source.sourceTree,
-    headCommit: source.headCommit, target: source.target, runId: source.runId, runAttempt: source.runAttempt, packageName: pkg.name, version: pkg.version });
+    headCommit: source.headCommit, target: source.target, runId: source.runId, runAttempt: source.runAttempt,
+    // The daemon as its reader evidence and SQLite provenance name it, not its workspace package name.
+    packageName: DAEMON_RELEASE_EVIDENCE_ID, version: pkg.version });
 }
 
 function inspectSqliteCompanion(product, target, retained, artifactOwner) {

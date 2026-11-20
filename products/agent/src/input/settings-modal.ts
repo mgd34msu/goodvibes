@@ -787,6 +787,22 @@ export class SettingsModal extends TerminalSettingsModalState<
             this._refreshAllEntries();
             // The local store does not hold a value the host owns; show what was written there.
             if (routedValue) this._applyRoutedValue(key, routedValue.value);
+            // A credential the daemon keeps: ask it what it now holds, as the save's read-back does.
+            else if (isDaemonOwnedConfigKey(key) && configClient) {
+              void configClient.get(key).then(
+                (held) => {
+                  if (session !== this.secretWriteSession) return;
+                  if (held === undefined) this._markHostUnreadable(key, 'the daemon could not be asked what it holds');
+                  else this._applyRoutedValue(key, held);
+                  this.requestHostSettingRender?.();
+                },
+                () => {
+                  if (session !== this.secretWriteSession) return;
+                  this._markHostUnreadable(key, 'the daemon could not be asked what it holds');
+                  this.requestHostSettingRender?.();
+                },
+              );
+            }
           }
           this.requestHostSettingRender?.();
         }
@@ -1026,6 +1042,13 @@ export class SettingsModal extends TerminalSettingsModalState<
     this.hostUnreadable.delete(key);
     this.hostHeldValues.set(key, value);
     this._showRoutedValue(key, value);
+  }
+
+  /** The host could not say what it holds for `key`: the row reads Unknown, with why. */
+  private _markHostUnreadable(key: string, reason: string): void {
+    this.hostHeldValues.delete(key);
+    this.hostUnreadable.set(key, `host value unavailable: ${reason}`);
+    this._reapplyHostValues();
   }
 
   private _showRoutedValue(key: string, value: unknown): void {

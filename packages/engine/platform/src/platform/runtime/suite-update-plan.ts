@@ -8,6 +8,7 @@ import { resolveDaemonNativeTargets } from './daemon-native-cohort.js';
 import { captureUpdateFileIo, realUpdateFileIo, retainNativeUpdateDirectory, type UpdateFileIo } from './update-file-io.js';
 import type { UpdateTarget } from './self-update.js';
 import type { ClientReaderPackage, ClientReaderTarget } from './client-reader-artifact.js';
+import { AGENT_RELEASE_EVIDENCE_ID, DAEMON_RELEASE_EVIDENCE_ID, TUI_RELEASE_EVIDENCE_ID } from './native-cohort-table.js';
 
 export type SuiteProgram = 'goodvibes' | 'goodvibes-agent' | 'goodvibes-daemon';
 export interface SuiteProgramSelection {
@@ -44,9 +45,9 @@ export interface SuiteUpdatePlan {
   assertCurrent(): void;
 }
 const products: readonly { readonly name: SuiteProgram; readonly packageName: ClientReaderPackage }[] = [
-  { name: 'goodvibes-daemon', packageName: '@goodvibes/daemon' },
-  { name: 'goodvibes', packageName: '@goodvibes/tui' },
-  { name: 'goodvibes-agent', packageName: '@goodvibes/agent' },
+  { name: 'goodvibes-daemon', packageName: DAEMON_RELEASE_EVIDENCE_ID },
+  { name: 'goodvibes', packageName: TUI_RELEASE_EVIDENCE_ID },
+  { name: 'goodvibes-agent', packageName: AGENT_RELEASE_EVIDENCE_ID },
 ];
 
 export function resolveSuiteUpdatePlan(options: {

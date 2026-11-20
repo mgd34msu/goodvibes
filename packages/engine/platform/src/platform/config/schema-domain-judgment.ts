@@ -57,7 +57,7 @@ export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
     key: 'judgment.keySource',
     label: 'Where the decision model key comes from',
     type: 'enum',
-    description: 'Select where to resolve judgment.keyName: the literal enum env reads a process environment variable, secret reads a secret-store entry, and none disables authentication. This setting stores only one of those three words, never a credential or a credential reference',
+    description: 'Where the decision model\'s key comes from: env reads an environment variable, secret reads the secret store, and none sends no key. This setting stores only one of those three words, never a credential or a credential reference',
     enumValues: ['env', 'secret', 'none'],
   },
   {

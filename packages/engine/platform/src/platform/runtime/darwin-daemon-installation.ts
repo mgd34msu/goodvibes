@@ -5,11 +5,12 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { lstatSync } from 'node:fs';
 import { assertClientReaderPayload, clientReaderMemberPath, parseClientReaderArtifact, type ClientReaderArtifact } from './client-reader-artifact.js';
 import { retainDaemonNativeFiles } from './daemon-native-cohort.js';
+import { DAEMON_RELEASE_EVIDENCE_ID } from './native-cohort-table.js';
 import type { UpdateFileIo } from './update-file-io.js';
 import type { UpdateTarget } from './self-update.js';
 import type { NativeReaderCapabilities } from './native-reader-compatibility.js';
 export interface DarwinDaemonSqliteOwner {
-  readonly schema: 1; readonly packageName: '@goodvibes/daemon'; readonly daemonVersion: string;
+  readonly schema: 1; readonly packageName: typeof DAEMON_RELEASE_EVIDENCE_ID; readonly daemonVersion: string;
   readonly target: 'darwin-x64' | 'darwin-arm64'; readonly sqliteVersion: string;
   readonly sourceUrl: string; readonly sourceSha3: string; readonly sha256: string; readonly size: number;
 }
@@ -29,7 +30,7 @@ import { resolveDarwinDaemonTargets } from './darwin-daemon-paths.js';
 function sqliteOwner(value: unknown, target: string, version: string): DarwinDaemonSqliteOwner {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Darwin SQLite producer is invalid');
   const row = value as Record<string, unknown>, keys = ['schema', 'packageName', 'daemonVersion', 'target', 'sqliteVersion', 'sourceUrl', 'sourceSha3', 'sha256', 'size'];
-  if (Object.keys(row).length !== keys.length || keys.some(key => !Object.hasOwn(row, key)) || row['schema'] !== 1 || row['packageName'] !== '@goodvibes/daemon'
+  if (Object.keys(row).length !== keys.length || keys.some(key => !Object.hasOwn(row, key)) || row['schema'] !== 1 || row['packageName'] !== DAEMON_RELEASE_EVIDENCE_ID
     || row['daemonVersion'] !== version || row['target'] !== target || typeof row['sqliteVersion'] !== 'string' || !/^\d+\.\d+\.\d+$/.test(row['sqliteVersion'])
     || typeof row['sourceUrl'] !== 'string' || !/^https:\/\/www\.sqlite\.org\/\d{4}\/sqlite-autoconf-\d+\.tar\.gz$/.test(row['sourceUrl'])
     || typeof row['sourceSha3'] !== 'string' || !/^[a-f0-9]{64}$/.test(row['sourceSha3']) || typeof row['sha256'] !== 'string' || !/^[a-f0-9]{64}$/.test(row['sha256'])
@@ -56,7 +57,7 @@ export function inspectDarwinDaemonInstallation(execPath: string, arch: string, 
   };
   const artifact = parseClientReaderArtifact(JSON.parse(bounded(selected[1]!.path, 128 * 1024).toString('utf8')));
   const target = `darwin-${arch}`;
-  if (artifact.packageName !== '@goodvibes/daemon' || artifact.target !== target || artifact.files.length !== 4) throw new Error('Darwin daemon reader artifact identifies another installation');
+  if (artifact.packageName !== DAEMON_RELEASE_EVIDENCE_ID || artifact.target !== target || artifact.files.length !== 4) throw new Error('Darwin daemon reader artifact identifies another installation');
   const ownerBytes = bounded(selected[4]!.path, 16 * 1024), owner = sqliteOwner(JSON.parse(ownerBytes.toString('utf8')), target, artifact.version);
   const expected = options.expectedSqliteOwner === undefined ? undefined : sqliteOwner(options.expectedSqliteOwner, target, artifact.version);
   if (expected && Object.entries(expected).some(([key, value]) => Reflect.get(owner, key) !== value)) throw new Error('Darwin SQLite producer differs from the actual compiled owner');

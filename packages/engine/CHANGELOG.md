@@ -69,6 +69,13 @@ commands, is in
   fewer per chat message, and one database statement instead of sixteen to
   open the Agent workspace.
 
+- Name the workspace packages `@goodvibes/*` (`@goodvibes/engine`,
+  `@goodvibes/judgment`, `@goodvibes/tui`, `@goodvibes/agent`,
+  `@goodvibes/daemon`, `@goodvibes/webui`) instead of `@goodvibes-jev/*`. The
+  product names in release evidence and install records stay
+  `@goodvibes-jev/tui`, `@goodvibes-jev/agent` and `@goodvibes-jev/daemon`, so
+  an installed 3.3.1 updates to this release and this release rolls back to it.
+
 ### Removed
 
 - Remove many slash commands and every short alias; the 3.3.2 notes list each
@@ -1369,7 +1376,7 @@ for policy behavior, limits and qualification requirements.
 ### Changed
 
 - Unify Judgment, Engine, Daemon, TUI, Agent and WebUI at version 3.0.0 under
-  the `@goodvibes` namespace and one root lockfile. Protocol and persisted
+  the `@goodvibes-jev` namespace and one root lockfile. Protocol and persisted
   schema versions remain independent.
 - Support Jev, Clef, Clef-flash, DiffusionGemma Jev, Kev-9B and Laya through
   model-neutral protocol adapters with explicit endpoint, authentication,

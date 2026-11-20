@@ -44,7 +44,8 @@ export interface CommitEditContext {
   rejectEdit?(message: string): void;
   /** Captured owner: completion must never target a subsequently reopened modal. */
   setSecretConfigValue?(key: ConfigKey, value: unknown): void | Promise<void>;
-  trackSecretWrite?(write: Promise<boolean>): void;
+  /** `key`: the credential written, read back from the daemon when it keeps it. */
+  trackSecretWrite?(write: Promise<boolean>, key?: ConfigKey): void;
   setEditingMode(value: boolean): void;
   setEditBuffer(value: string): void;
   setMcpEntries(entries: McpEntry[]): void;
@@ -178,7 +179,7 @@ export function commitEditValue(ctx: CommitEditContext): boolean {
       },
       ...(ctx.reportError ? { onError: ctx.reportError } : {}),
     });
-    ctx.trackSecretWrite?.(write);
+    ctx.trackSecretWrite?.(write, setting.key);
   } else {
     ctx.setValue(setting.key as ConfigKey, parsed);
   }

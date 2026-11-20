@@ -42,14 +42,14 @@ export const ownerProfileConfigSettings: ConfigSettingDefinition[] = [
     label: 'Keep a profile about you',
     type: 'boolean',
     description:
-      'Load and serve the owner profile. On by default because the owner asked for it built, and a feature that ships off ships dark. Turning it off means the file is never opened and every profile verb answers "your profile is turned off", a stated state, not an empty profile that would read as "I know nothing about you". Applies when the daemon starts.',
+      'Keeps a profile about you: what you have told GoodVibes about yourself, in one file you can read and edit. On by default because the owner asked for it built, and a feature that ships off ships dark. Turning it off means the file is never opened and every profile verb answers "your profile is turned off", a stated state, not an empty profile that would read as "I know nothing about you". Applies when the daemon starts.',
   },
   {
     key: 'profile.autonomousWrites',
     label: 'Save what you tell GoodVibes about yourself without asking',
     type: 'boolean',
     description:
-      'Let the runtime record facts it learns from things you say directly to it, without asking each time. On by default because that was the owner\'s explicit choice over propose-first. Off leaves reads and your own hand edits working exactly as before, the honest "I will curate this myself" mode, not a disabled feature. Untrusted sources are barred either way.',
+      'Lets GoodVibes save facts it learns from what you tell it about yourself, without asking each time. On by default because that was the owner\'s explicit choice over propose-first. Off leaves reads and your own hand edits working exactly as before, the honest "I will curate this myself" mode, not a disabled feature. Untrusted sources are barred either way.',
   },
   {
     key: 'profile.discloseWrites',
@@ -63,28 +63,28 @@ export const ownerProfileConfigSettings: ConfigSettingDefinition[] = [
     label: 'Tell the model how you like to be addressed',
     type: 'boolean',
     description:
-      'Put the open tier, how you like to be addressed, your pronouns, your city, your timezone, your unit/date/locale preferences and your style notes, into system context as a short block each turn. On by default because otherwise the agent still guesses a metro area for a weather answer, which is the failure that started this. Closed-tier content (addresses, contact details, people, notes) is never bulk-injected regardless of this setting.',
+      'Tells the model, each turn, what about you is not private: how you like to be addressed, your pronouns, city and timezone, your units and date format, and your style notes. On by default because otherwise the agent still guesses a metro area for a weather answer, which is the failure that started this. Closed-tier content (addresses, contact details, people, notes) is never bulk-injected regardless of this setting.',
   },
   {
     key: 'profile.discloseClosedTierReads',
     label: 'Say when private profile details are used',
     type: 'boolean',
     description:
-      'Announce it in the reply when a closed-tier value is used, e.g. "Used your shipping address from your profile." On by default because using your address on an order should be visible to you at the moment it happens rather than discoverable afterwards in a log.',
+      'Says so in the reply when a private detail from your profile is used, for example "Used your shipping address from your profile." On by default because using your address on an order should be visible to you at the moment it happens rather than discoverable afterwards in a log.',
   },
   {
     key: 'profile.consumerFallback',
     label: 'Fill unset settings from your profile',
     type: 'boolean',
     description:
-      'Let an UNSET consumer setting read its value from the matching profile field, quiet hours, delivery channel, and the commerce fields as their keys arrive. On because a profile nothing reads is a diary. A value you configured explicitly always wins; the profile only fills a gap, and only for a single keyed read, never in a settings listing or export.',
+      'Lets a setting you have not set take its value from your profile: quiet hours, where notifications go, and your shopping details. On because a profile nothing reads is a diary. A value you configured explicitly always wins; the profile only fills a gap, and only for a single keyed read, never in a settings listing or export.',
   },
   {
     key: 'profile.reloadThrottleMs',
     label: 'How often to check for edits to your profile (ms)',
     type: 'number',
     description:
-      'How often, in milliseconds, to check the profile file for a hand edit on hosts where filesystem watching is unavailable. Used only on that fallback path and never on a read, so it costs nothing in the common case. 2000 sits under human edit-then-check latency: you save the file, look at the assistant, and it already knows. Applies when the daemon starts.',
+      'How often to look for your own edits to the profile file, on a computer that cannot report file changes. Used only on that fallback path and never on a read, so it costs nothing in the common case. 2000 sits under human edit-then-check latency: you save the file, look at the assistant, and it already knows. Applies when the daemon starts.',
     ...intRange(50, 3_600_000),
   },
   {
@@ -92,7 +92,7 @@ export const ownerProfileConfigSettings: ConfigSettingDefinition[] = [
     label: 'Profile file',
     type: 'string',
     description:
-      'Absolute path to the profile Markdown file. Empty means the default, owner-profile.md under the daemon home, which already honours GOODVIBES_DAEMON_HOME, so this override is only for keeping the file somewhere else entirely. Applies when the daemon starts.',
+      'Where the profile file is kept (a full path). Empty means the default, owner-profile.md under the daemon home, which already honours GOODVIBES_DAEMON_HOME, so this override is only for keeping the file somewhere else entirely. Applies when the daemon starts.',
   },
   {
     key: 'profile.conversationalCapture',

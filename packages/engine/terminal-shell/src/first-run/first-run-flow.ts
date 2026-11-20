@@ -522,14 +522,14 @@ export class FirstRunModal implements SurfaceModal {
 
 /**
  * Start first run when the session's model is not ready; otherwise record
- * nothing to show but the starting prompts. Waits for the provider registry
- * (custom providers load in the background) before deciding. Returns true
- * when first run opened.
+ * nothing to show but the starting prompts. Decides from what a request would
+ * use, so it waits for the provider registry first: custom providers load in
+ * the background, and the keys kept in the secret stores are applied by the
+ * boot credential refresh (no request is made; the stores are read once, by
+ * that refresh). Returns true when first run opened.
  */
 export async function startFirstRun(deps: FirstRunDeps): Promise<boolean> {
-  try {
-    await deps.providerRegistry.ready();
-  } catch { /* decided from what is registered */ }
+  await Promise.allSettled([deps.providerRegistry.ready(), deps.providerRegistry.credentialsResolved()]);
   if (sessionModelReady(deps)) {
     // A ready model on a first launch: first run has nothing to ask; it is recorded as done.
     if (!deps.isMarkedDone()) deps.markDone();

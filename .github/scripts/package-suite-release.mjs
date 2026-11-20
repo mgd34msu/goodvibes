@@ -34,7 +34,7 @@ const runBuild = async (command, args, cwd = root) => {
 // coordinator's former relative directory or a nearby installed engine.
 const { inspectTerminalReaderArtifact, retainTerminalReaderCohort } = await import(pathToFileURL(join(root, 'packages/engine/toolchain/src/lib/client-reader-artifact.ts')).href);
 const { retainNativeArtifactFiles, nativeArtifactPins, readNativeArtifactFile } = await import(pathToFileURL(join(root, 'packages/engine/toolchain/src/lib/retained-native-artifact-files.ts')).href);
-const { clientReaderPayloadPaths, clientReaderMemberAsset } = await import(pathToFileURL(join(root, 'packages/engine/platform/src/platform/runtime/client-reader-artifact.ts')).href);
+const { clientReaderPayloadPaths, clientReaderMemberAsset, RELEASE_EVIDENCE_PRODUCT_IDS } = await import(pathToFileURL(join(root, 'packages/engine/platform/src/platform/runtime/client-reader-artifact.ts')).href);
 const { resolveDaemonNativePayloads, retainDaemonNativeFiles, parseDaemonCiArtifact, assertDaemonNativePayloadPins } = await import(pathToFileURL(join(root, 'packages/engine/platform/src/platform/runtime/daemon-native-cohort.ts')).href);
 const { realUpdateFileIo } = await import(pathToFileURL(join(root, 'packages/engine/platform/src/platform/runtime/update-file-io.ts')).href);
 const { parseNativeReaderCapabilities } = await import(pathToFileURL(join(root, 'packages/engine/platform/src/platform/runtime/native-reader-compatibility.ts')).href);
@@ -99,11 +99,12 @@ try {
     const extension = platform === 'linux' ? 'so' : 'dylib';
     const daemonPayloads = product === 'daemon' && platform === 'linux' ? resolveDaemonNativePayloads(platform, arch) : undefined;
     const readerCurrent = daemonPayloads ? retainDaemonNativeFiles(daemonPayloads.map(payload => ({ label: payload.relativePath, path: join(directory, payload.relativePath), assetName: payload.assetName, executable: payload.executable })), realUpdateFileIo)
-      : retainTerminalReaderCohort(directory, `@goodvibes/${product}`, target);
+      : retainTerminalReaderCohort(directory, RELEASE_EVIDENCE_PRODUCT_IDS[command], target);
     readerCurrent?.();
     assert.equal(run(binary, ['--version']), `${command} ${tag.slice(1)}`);
     readerCurrent?.();
-    const packageName = `@goodvibes/${product}`;
+    // The product as release evidence names it, a contract with installed updaters; not the workspace package name.
+    const packageName = RELEASE_EVIDENCE_PRODUCT_IDS[command];
     const names = daemonPayloads ? [] : clientReaderPayloadPaths(packageName, target);
     // Capture only after the cheap version refusal. Publication and compiled
     // reader inspection share this genuine original owner, avoiding a second

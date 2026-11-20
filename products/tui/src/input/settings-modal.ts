@@ -36,7 +36,7 @@ import { settingSourceWords } from '@goodvibes/engine/terminal-shell/renderer/se
  * Mutation logic delegates to settings-modal-mutations.ts (applySettingValue, etc.).
  */
 
-import { type ConfigKey } from '@goodvibes/engine/platform/platform/config';
+import { isDaemonOwnedConfigKey, type ConfigKey } from '@goodvibes/engine/platform/platform/config';
 import type { ModelPickerTarget } from './model-picker.ts';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { SubscriptionManager } from '@goodvibes/engine/platform/platform/config';
@@ -768,7 +768,7 @@ export class SettingsModal extends TerminalSettingsModalState<
         if (result.settled) await result.settled;
         effectMessage = result.settled ? null : result.effectMessage;
       },
-      trackSecretWrite: (write: Promise<boolean>) => {
+      trackSecretWrite: (write: Promise<boolean>, key?: ConfigKey) => {
         if (session === this.secretWriteSession) this.lastSettingEffectMessage = 'Saving credential…';
         this.pendingSecretWrite = write
           .then((ok) => {
@@ -777,6 +777,7 @@ export class SettingsModal extends TerminalSettingsModalState<
                 // A cleared credential whose stored value could not be removed still completes; keep that warning.
                 this.lastSettingEffectMessage = secretWriteError ?? effectMessage ?? 'Credential saved.';
                 if (configManager) refreshEntryValues(this.groups, configManager);
+                if (key && configManager) this._readBackDaemonCredential(key, configManager, session);
               } else this.lastSettingEffectMessage = secretWriteError ?? 'Saving that credential failed.';
               this.requestRender?.();
             }
@@ -787,6 +788,39 @@ export class SettingsModal extends TerminalSettingsModalState<
           });
       },
     };
+  }
+
+  /**
+   * A credential the daemon keeps is held there, not in this program's store: ask the daemon what it
+   * now holds for the key (the read the save's own read-back makes) and show whether a value is held.
+   */
+  private _readBackDaemonCredential(key: ConfigKey, configManager: ConfigManager, session: number): void {
+    const daemon = this.daemonConfig;
+    if (!isDaemonOwnedConfigKey(key) || !daemon?.get) return;
+    const show = (held: unknown, unknown: boolean): void => {
+      if (session !== this.secretWriteSession) return;
+      for (const entries of this.groups.values())
+        for (const entry of entries) {
+          if (entry.setting.key !== key) continue;
+          entry.currentValue = unknown ? undefined : held;
+          entry.isDefault = !unknown && (held === '' || held === undefined || held === entry.setting.default);
+          entry.effectiveSource = unknown ? 'unavailable' : entry.effectiveSource;
+          entry.sourceLabel = unknown ? 'the daemon could not be asked what it holds' : entry.sourceLabel;
+        }
+      this.requestRender?.();
+    };
+    void daemon.get(key).then(
+      (held) => {
+        if (held === undefined) return show(undefined, true);
+        try {
+          configManager.adoptDaemonValue(key, held);
+        } catch {
+          // The row still shows what the daemon holds.
+        }
+        show(held, false);
+      },
+      () => show(undefined, true),
+    );
   }
 
   private _createSecretResetter(): (entries: ReadonlyArray<{ key: ConfigKey; value: unknown }>) => void {

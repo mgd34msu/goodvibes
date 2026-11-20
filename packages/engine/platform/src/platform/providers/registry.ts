@@ -280,6 +280,25 @@ export class ProviderRegistry {
    * change replaces nothing. Runs at boot and on secrets changes.
    */
   async refreshProviderCredentials(): Promise<void> {
+    const run = this.applyResolvedCredentials();
+    this._credentialsResolved ??= run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  /** Settled once the first credential refresh has run (the boot one); resolved, never rejected. */
+  private _credentialsResolved: Promise<void> | null = null;
+
+  /**
+   * Resolves once every builtin carries the key a request would send: the
+   * environment and every secret store the turn reads, applied by the first
+   * credential refresh. Waits for the boot refresh when one started; starts
+   * one when none did. Never rejects: a failed refresh leaves the environment's keys.
+   */
+  credentialsResolved(): Promise<void> {
+    return this._credentialsResolved ?? this.refreshProviderCredentials().then(() => undefined, () => undefined);
+  }
+
+  private async applyResolvedCredentials(): Promise<void> {
     const resolved = await resolveApiKeys(this.runtimeMetadataDeps.secretsManager);
     const previous = this.builtinKeys;
     const changed = new Set<string>();
@@ -493,6 +512,22 @@ export class ProviderRegistry {
     this.liveModelDiscoveryTail = result.then(() => undefined, () => undefined);
     const reports = await result;
     return reports;
+  }
+
+  /**
+   * List a model of an already registered provider before any listing names it
+   * (fallback-model.ts). Only the model is added: the provider keeps its owner,
+   * so a builtin stays on the credential chain and a key from the secret store
+   * still reaches it. A no-op for an unregistered provider or a listed model.
+   */
+  addFallbackModel(model: ModelDefinition): void {
+    const provider = this.tryGet(model.provider);
+    if (!provider) return;
+    const registryKey = model.registryKey || `${model.provider}:${model.id}`;
+    if (this.runtimeModels.some((entry) => entry.registryKey === registryKey)) return;
+    this.runtimeModels = [...this.runtimeModels, withRegistryKey({ ...model, provider: provider.name, registryKey })];
+    this.capabilityRegistry.invalidate();
+    this._invalidateModelRegistry();
   }
 
   /** Register a runtime/plugin-owned provider + optional models; returns an unregister callback. */

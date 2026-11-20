@@ -4,6 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { readTarGzEntries } from '@goodvibes/engine/platform/platform/browser';
+import { DAEMON_RELEASE_EVIDENCE_ID } from '@goodvibes/engine/platform/platform/runtime/compiled-native-startup';
 import { assertDaemonSqliteArchitecture, daemonSqliteRuntime, type DaemonSqliteOwner } from '../src/cli/native-sqlite-runtime.ts';
 import { VERSION } from '../src/version.ts';
 
@@ -82,7 +83,7 @@ export async function buildDaemonSqliteRuntime(root: string, target: string): Pr
     const bytes = readFileSync(library); assertDaemonSqliteArchitecture(bytes, runtime.target); chmodSync(library, 0o644);
     const output = join(root, 'native', runtime.libraryPath), provenance = join(root, 'native', runtime.provenancePath);
     mkdirSync(dirname(output), { recursive: true });
-    const metadata: DaemonSqliteOwner = { schema: 1, packageName: '@goodvibes/daemon', daemonVersion: VERSION, target: runtime.target,
+    const metadata: DaemonSqliteOwner = { schema: 1, packageName: DAEMON_RELEASE_EVIDENCE_ID, daemonVersion: VERSION, target: runtime.target,
       sqliteVersion: runtime.sqliteVersion, sourceUrl: runtime.sourceUrl, sourceSha3: runtime.sourceSha3,
       sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length };
     publishDaemonSqliteCompanion(output, provenance, bytes, metadata);

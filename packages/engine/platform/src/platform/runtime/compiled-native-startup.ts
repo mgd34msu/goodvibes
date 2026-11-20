@@ -4,3 +4,4 @@ export { detectInstallKind } from './install-kind.js';
 export { captureUpdateFileIo, realUpdateFileIo } from './update-file-io.js';
 export { resolveDarwinDaemonTargets } from './darwin-daemon-paths.js';
 export { retainNativeUpdateSources } from './native-file-sources.js';
+export { DAEMON_RELEASE_EVIDENCE_ID } from './native-cohort-table.js';

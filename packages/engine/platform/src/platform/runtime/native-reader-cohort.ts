@@ -6,6 +6,7 @@ import { lstatSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { readFileObservation } from '../utils/file-observation.js';
 import { assertClientReaderPayload, clientReaderMemberPath, parseClientReaderArtifact, type ClientReaderPackage, type ClientReaderTarget } from './client-reader-artifact.js';
+import { AGENT_RELEASE_EVIDENCE_ID, DAEMON_RELEASE_EVIDENCE_ID, TUI_RELEASE_EVIDENCE_ID } from './native-cohort-table.js';
 import { inspectDaemonNativeInstallation, resolveDaemonNativeTargets } from './daemon-native-cohort.js';
 import { NativeDataCompatibilityError, nativeReaderCapabilities, type NativeDataFormat } from './native-reader-compatibility.js';
 import { captureUpdateFileIo, realUpdateFileIo, releaseAbandonedUpdateClaim, UPDATE_CLAIM_SUFFIX, type UpdateFileIo } from './update-file-io.js';
@@ -44,9 +45,9 @@ function readPeer(program: typeof PROGRAMS[number], path: string, target: Client
     const profilePath = path + '.readers.json'; boundedProfile(profilePath);
     const originalProfile = readFileObservation(profilePath);
     const artifact = parseClientReaderArtifact(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(originalProfile.bytes)));
-    const expectedPackage: ClientReaderPackage = program === 'goodvibes' ? '@goodvibes/tui' : program === 'goodvibes-agent' ? '@goodvibes/agent' : '@goodvibes/daemon';
+    const expectedPackage: ClientReaderPackage = program === 'goodvibes' ? TUI_RELEASE_EVIDENCE_ID : program === 'goodvibes-agent' ? AGENT_RELEASE_EVIDENCE_ID : DAEMON_RELEASE_EVIDENCE_ID;
     if (artifact.packageName !== expectedPackage || artifact.target !== target) throw new NativeDataCompatibilityError('mixed-readers');
-    if ((target.startsWith('linux-') || artifact.packageName === '@goodvibes/daemon') && artifact.files.length !== 4) throw new NativeDataCompatibilityError('unconfirmed-reader');
+    if ((target.startsWith('linux-') || artifact.packageName === DAEMON_RELEASE_EVIDENCE_ID) && artifact.files.length !== 4) throw new NativeDataCompatibilityError('unconfirmed-reader');
     const members = artifact.files.map(member => ({ member, path: clientReaderMemberPath(path, artifact, member.path) }));
     const assertCurrent = retainFiles([profilePath, ...members.map(item => item.path), path, ...['.bun', '.bun.json', '.bun.LICENSE.md'].map(suffix => path + suffix)], io);
     for (const item of members) {

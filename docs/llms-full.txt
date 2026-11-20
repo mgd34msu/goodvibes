@@ -4027,15 +4027,15 @@ To make failover possible, give keys for several free providers, for example `GR
 
 | Key | Type | Default | Allowed | Stored in | What it does |
 | --- | --- | --- | --- | --- | --- |
-| `provider.decisionRouter` | object | `{"categories":{"lookup-navigation":{"label":"Lookup / navigation","description":"Find a definition, locate a file or setting, or answer a narrow question about existing work.","target":null},"coding-implementation":{"label":"Coding / implementation","description":"Implement, modify or refactor code and configuration.","target":null},"analysis-decisions":{"label":"Analysis / decisions","description":"Reason through a problem, compare options, plan an approach or make a decision.","target":null},"documentation-writing":{"label":"Documentation / writing","description":"Write or edit documentation, explanations and other prose.","target":null},"summarization-extraction":{"label":"Summarization / extraction","description":"Summarize supplied material or extract its facts into a requested form.","target":null},"general":{"label":"General","description":"Catch-all for conversation and requests that do not fit a more specific category.","target":null},"debugging-diagnosis":{"label":"Debugging / diagnosis","description":"Identify the cause of an error, failing test, crash or unexpected behavior.","target":null},"review-verification":{"label":"Review / verification","description":"Review a change or verify claims, correctness, behavior or test evidence.","target":null},"research":{"label":"Research","description":"Find and synthesize information from external sources.","target":null},"data-analysis":{"label":"Data analysis","description":"Analyze datasets, calculate metrics, or interpret quantitative results.","target":null}},"initialContextChars":3000,"expandedContextChars":10000}` |  | shared file | Decision Router category descriptions and answer provider/model/effort targets. Used only when decision-router:auto is selected. Empty categories use the required General target. Contains no credentials. |
-| `provider.embeddingProvider` | string | `"hashed-local"` |  | each program | Default memory embedding provider. |
+| `provider.decisionRouter` | object | `{"categories":{"lookup-navigation":{"label":"Lookup / navigation","description":"Find a definition, locate a file or setting, or answer a narrow question about existing work.","target":null},"coding-implementation":{"label":"Coding / implementation","description":"Implement, modify or refactor code and configuration.","target":null},"analysis-decisions":{"label":"Analysis / decisions","description":"Reason through a problem, compare options, plan an approach or make a decision.","target":null},"documentation-writing":{"label":"Documentation / writing","description":"Write or edit documentation, explanations and other prose.","target":null},"summarization-extraction":{"label":"Summarization / extraction","description":"Summarize supplied material or extract its facts into a requested form.","target":null},"general":{"label":"General","description":"Catch-all for conversation and requests that do not fit a more specific category.","target":null},"debugging-diagnosis":{"label":"Debugging / diagnosis","description":"Identify the cause of an error, failing test, crash or unexpected behavior.","target":null},"review-verification":{"label":"Review / verification","description":"Review a change or verify claims, correctness, behavior or test evidence.","target":null},"research":{"label":"Research","description":"Find and synthesize information from external sources.","target":null},"data-analysis":{"label":"Data analysis","description":"Analyze datasets, calculate metrics, or interpret quantitative results.","target":null}},"initialContextChars":3000,"expandedContextChars":10000}` |  | shared file | Which model answers which kind of decision, and how hard it thinks. Used only when decision-router:auto is selected. Empty categories use the required General target. Contains no credentials. |
+| `provider.embeddingProvider` | string | `"hashed-local"` |  | each program | The provider that turns memories into a form GoodVibes can search. |
 | `provider.fallbackModels` | array | `[]` | list of provider-qualified model ids, for example ["anthropic:claude-sonnet-5"] | each program | Your fallback order: the models a turn moves to, in order, when the selected model fails on every sign-in of its provider (OpenAI tries the same model through the API key after the subscription first). Empty (default): the turn stops and says so; no other model is chosen for you. Applies from the next failure, in every program that runs a turn: the terminal app, `goodvibes run`, the Agent, the daemon's hosted sessions and its agents. The model that answers instead is named in a [Failover] line, and the next turn starts on the selected model again. A provider may be named by its id or display name. |
-| `provider.localContextIngestion` | boolean | `true` |  | each program | Ingest max_context_length from local/custom provider /v1/models endpoints so local models use the provider-reported context window for token budgeting and compaction thresholds. Turn off to use only explicitly configured or static limits. |
-| `provider.model` | string | `"openrouter:openrouter/free"` |  | each program | Default provider-qualified LLM model registry key. |
-| `provider.optimizerMode` | enum | `"off"` | `off`, `manual`, `auto`, `pinned` | each program | Provider routing optimizer: off (optimizer inactive, default), manual (optimizer active but never auto-routes), auto (selects the best capable provider per request via capability contracts), or pinned (force one model, see provider.optimizerPinnedModel). Applies at once from any settings path; /provider-opt commands write this setting. |
-| `provider.optimizerPinnedModel` | string | `""` |  | each program | Provider-qualified model id (e.g. anthropic:claude-sonnet-4) the provider optimizer routes to while provider.optimizerMode is "pinned"; a change applies at once. Empty leaves the optimizer unpinned (falls back to manual). |
-| `provider.reasoningEffort` | string | `"medium"` | a known reasoning effort level, run /effort for the current model choices | each program | Reasoning effort level for models that support it. |
-| `provider.systemPromptFile` | string | `""` |  | each program | Path to a file containing the system prompt (empty = none) |
+| `provider.localContextIngestion` | boolean | `true` |  | each program | Uses the context size a local model's server reports, so the conversation is shortened at the right point for that model. Turn off to use only explicitly configured or static limits. |
+| `provider.model` | string | `"openrouter:openrouter/free"` |  | each program | The model new conversations use, written as provider:model. |
+| `provider.optimizerMode` | enum | `"off"` | `off`, `manual`, `auto`, `pinned` | each program | How GoodVibes picks a provider for each request: off (the default), manual (it compares but never switches), auto (it picks the best provider that can do the request), or pinned (always the one model named in the next setting). Applies at once from any settings path; /provider-opt commands write this setting. |
+| `provider.optimizerPinnedModel` | string | `""` |  | each program | The one model used while provider choice is pinned, written as provider:model (for example anthropic:claude-sonnet-4); a change applies at once. Empty leaves the optimizer unpinned (falls back to manual). |
+| `provider.reasoningEffort` | string | `"medium"` | a known reasoning effort level, run /effort for the current model choices | each program | How much the model reasons before it answers, for models that can be told. |
+| `provider.systemPromptFile` | string | `""` |  | each program | A file of standing instructions the model gets at the start of every conversation; empty for none. |
 | `provider.visionFallbackModel` | string | `""` |  | each program | Model (provider-qualified, e.g. openai:gpt-4o, or a unique bare id) that reads an image you attach when the current model cannot accept images. Empty (default): such an image is refused and sent nowhere, and the refusal names the models that can read it. Setting this sends those images to the named model's provider. |
 
 Full entries (files, project rule, environment variable): "Settings" in the part "Reference", under "provider".
@@ -4418,15 +4418,15 @@ Files, artifacts, browser history, connectors and the map are Agent Knowledge's;
 
 | Key | Type | Default | Allowed | Stored in | What it does |
 | --- | --- | --- | --- | --- | --- |
-| `memory.budgetMb` | number | `0` | integer in [0, 1048576] | each program | MemoryGovernor budget in MB. The governor sheds caches and pauses background jobs as RSS approaches this budget. 0 means auto: min(25% of system RAM, 4096 MB), resolved at daemon start. Applies after the daemon restarts. |
-| `memory.hardLimitPct` | number | `90` | integer in [1, 100] | each program | Absolute-memory backstop as a percent of the EFFECTIVE KILL CEILING, the daemon's own cgroup memory limit where one applies, else physical RAM. If RSS holds at/above this percent of that ceiling for memory.tripwire.sustainSec, the governor writes a hard-limit receipt and exits so a supervisor restarts clean, catching a leak too slow for memory.tripwire.rateMbPerSec just before the kernel/cgroup OOM killer would strike. Default 90: fire at 90% of the real kill line, leaving a safety margin for the exit itself. Deliberately anchored to the kill ceiling and NOT to memory.budgetMb: the budget caps small by design (25% of RAM, max 4096 MB), and a large-but-stable working set above the budget on a big-RAM host is handled by the critical tier (refuse new expensive work, stay alive), anchoring the exit to the budget would put such a healthy daemon in a permanent restart loop. Applies after the daemon restarts. |
+| `memory.budgetMb` | number | `0` | integer in [0, 1048576] | each program | How much memory the daemon plans to use, in MB. The governor sheds caches and pauses background jobs as RSS approaches this budget. 0 means auto: min(25% of system RAM, 4096 MB), resolved at daemon start. Applies after the daemon restarts. |
+| `memory.hardLimitPct` | number | `90` | integer in [1, 100] | each program | The daemon restarts before its memory reaches this share of the most it may use: its own memory limit where it has one, else the computer's memory. If RSS holds at/above this percent of that ceiling for memory.tripwire.sustainSec, the governor writes a hard-limit receipt and exits so a supervisor restarts clean, catching a leak too slow for memory.tripwire.rateMbPerSec just before the kernel/cgroup OOM killer would strike. Default 90: fire at 90% of the real kill line, leaving a safety margin for the exit itself. Deliberately anchored to the kill ceiling and NOT to memory.budgetMb: the budget caps small by design (25% of RAM, max 4096 MB), and a large-but-stable working set above the budget on a big-RAM host is handled by the critical tier (refuse new expensive work, stay alive), anchoring the exit to the budget would put such a healthy daemon in a permanent restart loop. Applies after the daemon restarts. |
 | `memory.projection.dir` | string | `".goodvibes/memory/projection"` |  | terminal app only | /memory sync-files writes one markdown file per standing (project/team-scope) memory record here, and commits the directory when it sits inside a git repository. Relative paths resolve against the project working directory. /recall files review reads user edits back from this directory as proposals; a file edit or deletion never mutates the store directly. |
 | `memory.showProvenance` | boolean | `false` |  | terminal app only | Show a "used N memories" chip on turns that drew on your standing memories, with a drill-in listing them (Alt+M to expand). Off by default; when off, nothing is rendered and no metadata is read. |
-| `memory.tier.criticalPct` | number | `95` | integer in [1, 100] | each program | Critical tier threshold, as a percent of the budget: at/above this the governor refuses new expensive work with an honest structured outcome and emits an ops attention event. Applies after the daemon restarts. |
-| `memory.tier.elevatedPct` | number | `60` | integer in [1, 100] | each program | Elevated tier threshold, as a percent of the budget: at/above this the governor trims registered caches to their floor and runs a gc. Applies after the daemon restarts. |
-| `memory.tier.highPct` | number | `80` | integer in [1, 100] | each program | High tier threshold, as a percent of the budget: at/above this the governor flushes all registered caches and pauses deferrable background jobs. Applies after the daemon restarts. |
-| `memory.tripwire.rateMbPerSec` | number | `25` | number in [1, 100000] | each program | Leak tripwire rate in MB/s: if RSS keeps growing faster than this AFTER a full cache flush, the flush did not help and a leak is suspected. Applies after the daemon restarts. |
-| `memory.tripwire.sustainSec` | number | `60` | integer in [1, 86400] | each program | Leak tripwire sustain window in seconds: the post-flush growth rate must exceed memory.tripwire.rateMbPerSec continuously for this long before the governor writes a receipt and exits for a clean supervisor restart. Applies after the daemon restarts. |
+| `memory.tier.criticalPct` | number | `95` | integer in [1, 100] | each program | At this share of the memory budget, the daemon refuses new heavy work and says why. Applies after the daemon restarts. |
+| `memory.tier.elevatedPct` | number | `60` | integer in [1, 100] | each program | At this share of the memory budget, the daemon trims what it keeps in memory. Applies after the daemon restarts. |
+| `memory.tier.highPct` | number | `80` | integer in [1, 100] | each program | At this share of the memory budget, the daemon empties what it keeps in memory and pauses background work that can wait. Applies after the daemon restarts. |
+| `memory.tripwire.rateMbPerSec` | number | `25` | number in [1, 100000] | each program | If memory use keeps growing faster than this, in MB per second, after the daemon has emptied what it keeps, it suspects a leak. Applies after the daemon restarts. |
+| `memory.tripwire.sustainSec` | number | `60` | integer in [1, 86400] | each program | How long, in seconds, that growth must last before the daemon records why and restarts itself cleanly. Applies after the daemon restarts. |
 
 Full entries (files, project rule, environment variable): "Settings" in the part "Reference", under "memory".
 
@@ -4435,8 +4435,8 @@ Full entries (files, project rule, environment variable): "Settings" in the part
 | `learning.consolidation.archiveConfidenceFloor` | number | `40` | integer in [0, 100] | each program | A decaying record whose confidence would fall to or below this is archived (marked stale). |
 | `learning.consolidation.decayAgeDays` | number | `45` | integer in [1, 3650] | each program | Active records older than this (by updatedAt) become decay candidates, in days. |
 | `learning.consolidation.decayConfidenceStep` | number | `10` | integer in [1, 100] | each program | Confidence points removed from a never-referenced decaying record per run. |
-| `learning.consolidation.enabled` | boolean | `true` |  | each program | Master switch for the idle-time memory consolidation pass (dedupe merges, confidence decay of never-referenced records, and review proposals). On by default, the daemon runs it at idle and on a slow schedule; every outcome is reversible or proposal-gated, and false turns the pass off. |
-| `learning.consolidation.intervalMs` | number | `21600000` | integer in [1, 2592000000] | each program | Minimum time between consolidation runs, in milliseconds. Doubles as the schedule cadence (default: 6 hours). |
+| `learning.consolidation.enabled` | boolean | `true` |  | each program | While nothing else is happening, tidies what GoodVibes remembers: merges duplicates, trusts memories never used a little less, and proposes what to review. On by default, the daemon runs it at idle and on a slow schedule; every outcome is reversible or proposal-gated, and false turns the pass off. |
+| `learning.consolidation.intervalMs` | number | `21600000` | integer in [1, 2592000000] | each program | The least time between two tidy-ups. Doubles as the schedule cadence (default: 6 hours). |
 | `learning.consolidation.maxDecaysPerRun` | number | `20` | integer in [1, 10000] | each program | Maximum records decayed or archived in a single consolidation run. |
 | `learning.consolidation.maxMergesPerRun` | number | `10` | integer in [1, 10000] | each program | Maximum duplicate groups merged in a single consolidation run. |
 | `learning.consolidation.maxProposalsPerRun` | number | `20` | integer in [1, 10000] | each program | Maximum review proposals emitted in a single consolidation run. |
@@ -5290,16 +5290,16 @@ Every key is listed under "Settings" in the reference part. The prefixes that ch
 
 | Key | Type | Default | Allowed | Stored in | What it does |
 | --- | --- | --- | --- | --- | --- |
-| `display.collapseThreshold` | number | `30` | number in [1, 1000] | each program | Line count threshold for collapsing tool output. |
-| `display.lineNumbers` | enum | `"off"` | `all`, `code`, `off` | each program | Show line numbers for all assistant output, code blocks only, or not at all. |
+| `display.collapseThreshold` | number | `30` | number in [1, 1000] | each program | Tool output longer than this many lines is folded; open it to see the rest. |
+| `display.lineNumbers` | enum | `"off"` | `all`, `code`, `off` | each program | Shows line numbers in answers: on every line, in code blocks only, or not at all. |
 | `display.showReasoningSummary` | boolean | `false` |  | each program | Shows a short summary of the model's thinking above each answer, for models that give one. |
 | `display.showThinking` | boolean | `false` |  | each program | Shows what the model was reasoning about above each answer. |
-| `display.showTokenSpeed` | boolean | `false` |  | each program | Show streaming tokens/sec counter during generation. |
+| `display.showTokenSpeed` | boolean | `false` |  | each program | Shows how fast the answer is arriving while the model writes it. |
 | `display.showToolPreview` | boolean | `false` |  | each program | Show partial tool call preview while streaming. |
-| `display.stream` | boolean | `true` |  | each program | Stream LLM tokens as they arrive. |
-| `display.theme` | enum | `"goodvibes"` | `goodvibes`, `goodvibes-neon`, `catppuccin`, `tokyonight`, `dracula`, `nord`, `gruvbox`, `one-dark`, `rosepine`, `solarized`, `github`, `system` | each program | Color theme name, the color palette (e.g. goodvibes-neon). Independent of display.themeMode, which controls light/dark appearance. |
-| `display.themeMode` | enum | `"auto"` | `auto`, `dark`, `light` | each program | Light/dark appearance: auto probes the terminal background colour (OSC 11) once at startup and picks light or dark; dark/light force a fixed appearance regardless of terminal background. Independent of display.theme, which picks the color palette. |
-| `display.treeGlyphs` | enum | `"rounded"` | `rounded`, `square`, `ascii` | each program | Work tree connector style: rounded, square or ASCII. Terminals without Unicode support always use ASCII. |
+| `display.stream` | boolean | `true` |  | each program | Shows the answer as the model writes it, instead of all at once at the end. |
+| `display.theme` | enum | `"goodvibes"` | `goodvibes`, `goodvibes-neon`, `catppuccin`, `tokyonight`, `dracula`, `nord`, `gruvbox`, `one-dark`, `rosepine`, `solarized`, `github`, `system` | each program | The colour palette, by name (for example goodvibes-neon). Independent of display.themeMode, which controls light/dark appearance. |
+| `display.themeMode` | enum | `"auto"` | `auto`, `dark`, `light` | each program | Light or dark appearance: auto asks the terminal for its background colour once at start and picks light or dark; dark and light always use that one, whatever the terminal's background. Independent of display.theme, which picks the color palette. |
+| `display.treeGlyphs` | enum | `"rounded"` | `rounded`, `square`, `ascii` | each program | The lines drawn between items in the work tree: rounded, square or plain ASCII. Terminals without Unicode support always use ASCII. |
 
 Full entries (files, project rule, environment variable): "Settings" in the part "Reference", under "display".
 
@@ -5345,9 +5345,9 @@ Full entries (files, project rule, environment variable): "Settings" in the part
 | `tools.defaultTokenBudget` | number | `0` | non-negative safe integer; 0 means unlimited | each program | Optional token budget for precision read operations; 0 includes the complete result. |
 | `tools.hooksFile` | string | `"hooks.json"` |  | each program | Hook configuration file name, relative to the project working directory (so the default is <project>/hooks.json, not a file under .goodvibes) |
 | `tools.hostedResearchScreening` | boolean | `false` |  | Agent only | Explicitly allow raw research report text and source URLs to be screened by Abacus route-llm and TypeSafe Jev. Providers manage retention; zero retention is unverified. Requires native ABACUSAI_API_KEY and TYPESAFE_API_KEY credentials. Covers research report preview, save, and the research editor only. |
-| `tools.llmEnabled` | boolean | `false` |  | each program | Enable dedicated tool LLM for internal operations (off = tools use the main conversation model only when needed) |
-| `tools.llmModel` | string | `""` |  | each program | Model for tool LLM calls (empty = fastest available for the provider) |
-| `tools.llmProvider` | string | `""` |  | each program | Provider for tool LLM calls (empty = use currently selected provider) |
+| `tools.llmEnabled` | boolean | `false` |  | each program | Uses a separate model for GoodVibes's own background work; off, that work uses the conversation's model when it needs one. |
+| `tools.llmModel` | string | `""` |  | each program | That separate model; empty uses the provider's fastest. |
+| `tools.llmProvider` | string | `""` |  | each program | The provider of that separate model; empty uses the conversation's provider. |
 | `tools.outputSchemaFingerprints` | boolean | `false` |  | each program | Append _meta.outputSchemaFingerprint (exact sorted result key names) and _meta.schemaShapeId to results from the find, analyze, and inspect tools, enabling schema drift detection. Default off. |
 | `tools.overflowSpillBackend` | enum | `"file"` | `file`, `ledger`, `diagnostics` | each program | Where large tool-output overflow content spills: file (on-disk .overflow, default), ledger (execution ledger), or diagnostics. An injected custom backend still takes precedence. |
 | `tools.validators.build` | string | `""` |  | each program | Command the write and edit tools run for validate "build" in a project that declares no build command of its own (no package.json script, Cargo or Go toolchain, Makefile target or pyproject tool), e.g. "pnpm -r build" for a monorepo whose scripts live in its packages. Split like a shell command line, without pipes or substitution, and run through the exec tool's own path. Your own settings only: a project settings file cannot set a command. Empty: the validator is refused with what the project does declare. |
@@ -6256,16 +6256,16 @@ Full entries (files, project rule, environment variable): "Settings" in the part
 
 | Key | Type | Default | Allowed | Stored in | What it does |
 | --- | --- | --- | --- | --- | --- |
-| `profile.autonomousWrites` | boolean | `true` |  | daemon file | Let the runtime record facts it learns from things you say directly to it, without asking each time. On by default because that was the owner's explicit choice over propose-first. Off leaves reads and your own hand edits working exactly as before, the honest "I will curate this myself" mode, not a disabled feature. Untrusted sources are barred either way. |
-| `profile.consumerFallback` | boolean | `true` |  | daemon file | Let an UNSET consumer setting read its value from the matching profile field, quiet hours, delivery channel, and the commerce fields as their keys arrive. On because a profile nothing reads is a diary. A value you configured explicitly always wins; the profile only fills a gap, and only for a single keyed read, never in a settings listing or export. |
+| `profile.autonomousWrites` | boolean | `true` |  | daemon file | Lets GoodVibes save facts it learns from what you tell it about yourself, without asking each time. On by default because that was the owner's explicit choice over propose-first. Off leaves reads and your own hand edits working exactly as before, the honest "I will curate this myself" mode, not a disabled feature. Untrusted sources are barred either way. |
+| `profile.consumerFallback` | boolean | `true` |  | daemon file | Lets a setting you have not set take its value from your profile: quiet hours, where notifications go, and your shopping details. On because a profile nothing reads is a diary. A value you configured explicitly always wins; the profile only fills a gap, and only for a single keyed read, never in a settings listing or export. |
 | `profile.conversationalCapture` | boolean | `true` |  | daemon file | Let a conversation record what you say about yourself as you say it, a trip and its itinerary, a birthday, a preference, a person. On by default because the alternative is what shipped before it: you paste a flight itinerary, get a warm reply, and nothing is stored. Off leaves conversations working and every profile read unchanged; it only stops the writing, and a turn that would have recorded something says so instead of staying quiet. |
-| `profile.discloseClosedTierReads` | boolean | `true` |  | daemon file | Announce it in the reply when a closed-tier value is used, e.g. "Used your shipping address from your profile." On by default because using your address on an order should be visible to you at the moment it happens rather than discoverable afterwards in a log. |
+| `profile.discloseClosedTierReads` | boolean | `true` |  | daemon file | Says so in the reply when a private detail from your profile is used, for example "Used your shipping address from your profile." On by default because using your address on an order should be visible to you at the moment it happens rather than discoverable afterwards in a log. |
 | `profile.discloseWrites` | boolean | `true` |  | daemon file | Say in one line what was recorded, e.g. "Noted, saved your office address to your profile." On by default because telling you what it recorded was a condition attached to autonomous learning. Editable because the receipts may read as noisy over time, but turning them off is your decision made knowingly rather than a default that hides writes. |
-| `profile.enabled` | boolean | `true` |  | daemon file | Load and serve the owner profile. On by default because the owner asked for it built, and a feature that ships off ships dark. Turning it off means the file is never opened and every profile verb answers "your profile is turned off", a stated state, not an empty profile that would read as "I know nothing about you". Applies when the daemon starts. |
-| `profile.injectOpenTier` | boolean | `true` |  | daemon file | Put the open tier, how you like to be addressed, your pronouns, your city, your timezone, your unit/date/locale preferences and your style notes, into system context as a short block each turn. On by default because otherwise the agent still guesses a metro area for a weather answer, which is the failure that started this. Closed-tier content (addresses, contact details, people, notes) is never bulk-injected regardless of this setting. |
+| `profile.enabled` | boolean | `true` |  | daemon file | Keeps a profile about you: what you have told GoodVibes about yourself, in one file you can read and edit. On by default because the owner asked for it built, and a feature that ships off ships dark. Turning it off means the file is never opened and every profile verb answers "your profile is turned off", a stated state, not an empty profile that would read as "I know nothing about you". Applies when the daemon starts. |
+| `profile.injectOpenTier` | boolean | `true` |  | daemon file | Tells the model, each turn, what about you is not private: how you like to be addressed, your pronouns, city and timezone, your units and date format, and your style notes. On by default because otherwise the agent still guesses a metro area for a weather answer, which is the failure that started this. Closed-tier content (addresses, contact details, people, notes) is never bulk-injected regardless of this setting. |
 | `profile.ownerChannels` | string | `""` |  | daemon file | The channels whose incoming messages are you, comma-separated, each as a surface name or surface:address, the same form as occasions.nudgeChannel. Only these may record to your profile; anything arriving anywhere else is treated as someone else's words and is refused, which is the rule that keeps a forwarded email from editing what the system believes about you. Empty means no channel counts as you on a conversational turn: only a surface you are sitting at (the terminal, the web UI) can record to your profile, and the refusal names this setting. occasions.nudgeChannel is where reminders are sent and is not an owner grant, so the channel that sends you a birthday reminder cannot also record that your flight leaves at nine until you list it here. |
-| `profile.path` | string | `""` |  | daemon file | Absolute path to the profile Markdown file. Empty means the default, owner-profile.md under the daemon home, which already honours GOODVIBES_DAEMON_HOME, so this override is only for keeping the file somewhere else entirely. Applies when the daemon starts. |
-| `profile.reloadThrottleMs` | number | `2000` | integer in [50, 3600000] | daemon file | How often, in milliseconds, to check the profile file for a hand edit on hosts where filesystem watching is unavailable. Used only on that fallback path and never on a read, so it costs nothing in the common case. 2000 sits under human edit-then-check latency: you save the file, look at the assistant, and it already knows. Applies when the daemon starts. |
+| `profile.path` | string | `""` |  | daemon file | Where the profile file is kept (a full path). Empty means the default, owner-profile.md under the daemon home, which already honours GOODVIBES_DAEMON_HOME, so this override is only for keeping the file somewhere else entirely. Applies when the daemon starts. |
+| `profile.reloadThrottleMs` | number | `2000` | integer in [50, 3600000] | daemon file | How often to look for your own edits to the profile file, on a computer that cannot report file changes. Used only on that fallback path and never on a read, so it costs nothing in the common case. 2000 sits under human edit-then-check latency: you save the file, look at the assistant, and it already knows. Applies when the daemon starts. |
 
 Full entries (files, project rule, environment variable): "Settings" in the part "Reference", under "profile".
 
@@ -7266,26 +7266,26 @@ In `goodvibes run` and `goodvibes-agent run`, a call that needs the owner is ref
 | --- | --- | --- | --- | --- | --- |
 | `permissions.commandParser` | enum | `"ast"` | `ast`, `flat` | each program | Shell parse before an exec command runs: ast (default) parses the command into segments and refuses one in which a segment has nothing to run, naming it; a command the parser cannot read runs as the permission gate decided. flat skips the parse. The permission gate decides risk, including the catastrophic-command block, identically in both modes. |
 | `permissions.divergenceDashboard` | boolean | `true` |  | each program | Aggregate permission-evaluator divergence by tool/prefix/mode, expose trend history in diagnostics, and block enforce-mode transitions while the divergence rate exceeds permissions.divergenceThreshold. Turn off to fall back to warn mode (no gate enforcement). |
-| `permissions.divergenceThreshold` | number | `0.05` | number in [0, 1] | each program | Maximum permission-evaluator divergence rate (0.0–1.0) the permission-divergence-dashboard enforce gate tolerates before blocking a transition from simulation to enforce mode. Default 0.05 = 5%. A per-simulator divergenceThreshold override still wins. |
+| `permissions.divergenceThreshold` | number | `0.05` | number in [0, 1] | each program | While new permission rules are tried out beside the rules in force, how often they may disagree (0 to 1) before switching to them is refused. Default 0.05 = 5%. A per-simulator divergenceThreshold override still wins. |
 | `permissions.engine` | enum | `"baseline"` | `baseline`, `policy-engine` | each program | Permission evaluator: baseline (default) or policy-engine (the redesigned layered model with granular tool-level, path-level, and parameter-level rules). Restart to apply. Default baseline until divergence evidence from the shadow simulation clears the gate. |
 | `permissions.execEnvScrubAllowlist` | array | `[]` |  | terminal app only | Comma-separated environment variable NAMES always kept in a spawned exec command's environment even when the name looks credential-bearing (case-insensitive). Names only: this never inspects or reports values. The scrub itself stays on; this only widens what it lets through, from the next command. Empty = the built-in credential-name scrub applies with no extra exceptions. |
-| `permissions.maxDivergenceRecords` | number | `500` | integer in [1, 1000000] | each program | Maximum divergence records the permissions simulator retains for the divergence dashboard/trend history. A per-simulator maxDivergenceRecords override still wins. |
+| `permissions.maxDivergenceRecords` | number | `500` | integer in [1, 1000000] | each program | How many of those disagreements are kept for the comparison report. A per-simulator maxDivergenceRecords override still wins. |
 | `permissions.mode` | enum | `"jev-decides"` | `ask-me`, `jev-decides`, `just-vibes`, `yolo`, `plan` | each program | Who decides what ordinary work does not settle. Ask me: you are asked about dangerous actions and owner-only decisions. Jev decides (the default): Jev, the decision model, decides judgment calls and you are asked only owner-only decisions; with no working decision model it behaves as Ask me, and while it is only the default (not chosen) it also does until a calibration run has measured Jev's decisions on the configured decision model. Just vibes: does as much as it can without interrupting you; Jev decides judgment calls when a decision model works, and anything that needs you is held and listed at the end. YOLO: runs every action without safety denials (containment, secret storage and payment limits still apply). Plan: a separate read-only planning posture. |
 | `permissions.simulation` | boolean | `true` |  | each program | Run the candidate permission evaluator beside the active one, recording divergence without changing enforcement. Default on so divergence evidence accumulates before stricter enforcement is considered; it never blocks tool execution by itself. Restart to apply. |
-| `permissions.tools.agent` | enum | `"prompt"` | `allow`, `prompt`, `deny` | each program | Permission for spawning subagents or delegating tasks. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision. |
-| `permissions.tools.analyze` | enum | `"allow"` | `allow`, `prompt`, `deny` | each program | Permission for code/project analysis operations. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision. |
-| `permissions.tools.delegate` | enum | `"prompt"` | `allow`, `prompt`, `deny` | each program | Permission for unknown or unregistered tools (safe default: prompt). deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision. |
-| `permissions.tools.edit` | enum | `"prompt"` | `allow`, `prompt`, `deny` | each program | Permission for file edit/patch operations. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision. |
-| `permissions.tools.exec` | enum | `"prompt"` | `allow`, `prompt`, `deny` | each program | Permission for shell command execution. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision. |
-| `permissions.tools.fetch` | enum | `"prompt"` | `allow`, `prompt`, `deny` | each program | Permission for outbound network fetch requests. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision. |
-| `permissions.tools.find` | enum | `"allow"` | `allow`, `prompt`, `deny` | each program | Permission for file/directory search operations. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision. |
-| `permissions.tools.inspect` | enum | `"allow"` | `allow`, `prompt`, `deny` | each program | Permission for inspecting runtime state and objects. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision. |
-| `permissions.tools.mcp` | enum | `"prompt"` | `allow`, `prompt`, `deny` | each program | Permission for MCP tool calls (external server tools). deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision. |
-| `permissions.tools.read` | enum | `"allow"` | `allow`, `prompt`, `deny` | each program | Permission for the read tool only; find and analyze have their own settings below. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision. |
-| `permissions.tools.registry` | enum | `"allow"` | `allow`, `prompt`, `deny` | each program | Permission for querying the tool/skill registry. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision. |
-| `permissions.tools.state` | enum | `"allow"` | `allow`, `prompt`, `deny` | each program | Permission for reading runtime/session state. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision. |
-| `permissions.tools.workflow` | enum | `"prompt"` | `allow`, `prompt`, `deny` | each program | Permission for executing multi-step workflow automation. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision. |
-| `permissions.tools.write` | enum | `"prompt"` | `allow`, `prompt`, `deny` | each program | Permission for file write operations, and for changing settings through the goodvibes_settings tool. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision. |
+| `permissions.tools.agent` | enum | `"prompt"` | `allow`, `prompt`, `deny` | each program | Permission for spawning subagents or delegating tasks. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes. |
+| `permissions.tools.analyze` | enum | `"allow"` | `allow`, `prompt`, `deny` | each program | Permission for code/project analysis operations. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes. |
+| `permissions.tools.delegate` | enum | `"prompt"` | `allow`, `prompt`, `deny` | each program | Permission for unknown or unregistered tools (safe default: prompt). Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes. |
+| `permissions.tools.edit` | enum | `"prompt"` | `allow`, `prompt`, `deny` | each program | Whether GoodVibes may edit files. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes. |
+| `permissions.tools.exec` | enum | `"prompt"` | `allow`, `prompt`, `deny` | each program | Whether GoodVibes may run commands. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes. |
+| `permissions.tools.fetch` | enum | `"prompt"` | `allow`, `prompt`, `deny` | each program | Whether GoodVibes may fetch things from the network. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes. |
+| `permissions.tools.find` | enum | `"allow"` | `allow`, `prompt`, `deny` | each program | Whether GoodVibes may search for files and folders. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes. |
+| `permissions.tools.inspect` | enum | `"allow"` | `allow`, `prompt`, `deny` | each program | Permission for inspecting runtime state and objects. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes. |
+| `permissions.tools.mcp` | enum | `"prompt"` | `allow`, `prompt`, `deny` | each program | Permission for MCP tool calls (external server tools). Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes. |
+| `permissions.tools.read` | enum | `"allow"` | `allow`, `prompt`, `deny` | each program | Whether GoodVibes may read files; finding and analysing files have their own settings below. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes. |
+| `permissions.tools.registry` | enum | `"allow"` | `allow`, `prompt`, `deny` | each program | Permission for querying the tool/skill registry. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes. |
+| `permissions.tools.state` | enum | `"allow"` | `allow`, `prompt`, `deny` | each program | Permission for reading runtime/session state. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes. |
+| `permissions.tools.workflow` | enum | `"prompt"` | `allow`, `prompt`, `deny` | each program | Permission for executing multi-step workflow automation. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes. |
+| `permissions.tools.write` | enum | `"prompt"` | `allow`, `prompt`, `deny` | each program | Whether GoodVibes may write files, and change settings for you. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes. |
 
 Full entries (files, project rule, environment variable): "Settings" in the part "Reference", under "permissions".
 
@@ -7302,7 +7302,7 @@ Full entries (files, project rule, environment variable): "Settings" in the part
 | `judgment.endpoint` | string | `""` | empty, or an http(s) URL without embedded credentials, query or fragment | daemon file | Address of the decision model server the engine asks for judgments (a server that answers the decision API, POST /v1/systemone, as the hosted Jev does); empty uses TYPESAFE_BASE_URL, then the hosted endpoint. A loopback address selects a local model. While judgment.keySource is not none, change or reset it only together with judgment.keySource or judgment.keyName in one update (keep or clear the credential), or it is refused; embedded credentials, query strings and fragments are refused. |
 | `judgment.fallbacks` | array | `[]` | array of { endpoint, model, keySource: "env" \| "secret" \| "none", keyName } (keyName empty for "none"); no credentials in URLs or inline keys | daemon file | Ordered decision targets with endpoint, model, keySource, keyName and optional backend capabilities. Each target may use a different decision model or adapter. keySource is env, secret or none; none requires an empty keyName. Credentials are privately resolved from references, never inline values. An empty array disables inherited fallbacks. Each target is attempted with a finite timeout; when the chain is exhausted, a decision that has a fallback takes it and any other decision stops. |
 | `judgment.keyName` | string | `"TYPESAFE_API_KEY"` | a credential reference name | daemon file | Primary decision credential reference, such as TYPESAFE_API_KEY or CLOUDFLARE_API_TOKEN; never an inline key value. Ignored when keySource is none. |
-| `judgment.keySource` | enum | `"env"` | `env`, `secret`, `none` | daemon file | Select where to resolve judgment.keyName: the literal enum env reads a process environment variable, secret reads a secret-store entry, and none disables authentication. This setting stores only one of those three words, never a credential or a credential reference. |
+| `judgment.keySource` | enum | `"env"` | `env`, `secret`, `none` | daemon file | Where the decision model's key comes from: env reads an environment variable, secret reads the secret store, and none sends no key. This setting stores only one of those three words, never a credential or a credential reference. |
 | `judgment.model` | string | `""` |  | daemon file | Judgment model or alias; empty uses TYPESAFE_DEFAULT_MODEL, then jev-latest. |
 | `judgment.policy` | enum | `"Hybrid"` | `Hybrid`, `Decision Model Only`, `No Decision Model` | daemon file | Hybrid (default) uses the set decision model and, when none is set or it fails, continues without it: decisions take their fallbacks and a failure is shown once with the model, what failed and the next step. Decision Model Only stops the operation and reports when the set decision model fails. No Decision Model makes no decision-model calls. With no decision model set, every policy continues without one. |
 | `judgment.timeoutMs` | number | `30000` | integer in [0, 2147483647] | daemon file | Finite timeout per judgment target in milliseconds; legacy 0 uses the default 30000 ms. Cancellation may stop the operation sooner. |
@@ -8751,14 +8751,14 @@ Full entries (files, project rule, environment variable): "Settings" in the part
 
 | Key | Type | Default | Allowed | Stored in | What it does |
 | --- | --- | --- | --- | --- | --- |
-| `notifications.adaptiveSuppression` | boolean | `true` |  | each program | Adaptive notification suppression: past notifications.burstThreshold notifications of one kind (same domain, level and title) in one collapse window, the rest are counted into that kind's notification-history entry instead of each adding one. Critical, milestone, and alert notifications are always exempt. Turn off to record every one as its own entry. Read when the app starts. |
-| `notifications.blockedEscalationFollowUpMs` | number | `300000` | integer in [0, 86400000] | each program | Interval between the bounded follow-up reminders that fire after the first blocked-too-long escalation, while the block remains unanswered. Read live per reminder. |
-| `notifications.blockedEscalationGraceMs` | number | `300000` | integer in [0, 86400000] | each program | How long a fleet node blocked on the operator may wait for a HUMAN response before a device push is sent REGARDLESS of an attached surface. Presence (an open TUI, a heartbeat) suppresses only the immediate push, never this escalation, a process being attended is not a human answer. A real interaction that clears the block cancels the escalation. Read live when a block is first tracked. |
-| `notifications.blockedEscalationMaxFollowUps` | number | `2` | integer in [0, 100] | each program | Upper bound on follow-up reminders after the first blocked-too-long escalation (0 = escalate exactly once, no reminders). Keeps a long-unanswered block from becoming an unbounded stream of pushes. |
-| `notifications.burstThreshold` | number | `3` | integer in [1, 10000] | each program | How many notifications with the same domain, level and title are recorded as their own entries within one collapse window while notifications.adaptiveSuppression is on; later ones in that window are counted into the same notification-history entry. The window follows the print level (behavior.hitlMode: 5 s quiet, 2 s balanced, 0.5 s operator) and runs from the first notification, so a steady trickle cannot keep one open. Critical, milestone and alert notifications never collapse. Read when the app starts. |
-| `notifications.pushApproval` | boolean | `true` |  | each program | Device-push fan-out for the approval class: a pending approval pushes to every paired push target. On by default, the toggle exists to silence the class, never as a prerequisite for it to work. Read live per event. |
-| `notifications.pushCompletion` | boolean | `true` |  | each program | Device-push fan-out for the completion class: a tracked run reaching a terminal state (done/failed/killed) pushes to every paired push target. On by default with zero setup; the toggle only silences. Read live per event. |
-| `notifications.pushNeedsInput` | boolean | `true` |  | each program | Device-push fan-out for the needs-input class: a fleet node blocked on the operator pushes to every paired push target (presence-suppressed when a surface is attached). On by default; the toggle only silences. Read live per event. |
+| `notifications.adaptiveSuppression` | boolean | `true` |  | each program | When many notifications of one kind arrive close together, lists the first few and counts the rest in one entry instead of listing each. Critical, milestone, and alert notifications are always exempt. Turn off to record every one as its own entry. Read when the app starts. |
+| `notifications.blockedEscalationFollowUpMs` | number | `300000` | integer in [0, 86400000] | each program | Time between reminders after that first push, while the agent is still waiting for you. Read live per reminder. |
+| `notifications.blockedEscalationGraceMs` | number | `300000` | integer in [0, 86400000] | each program | How long an agent waiting for you may wait before your devices get a push, even while a screen is open. Presence (an open TUI, a heartbeat) suppresses only the immediate push, never this escalation, a process being attended is not a human answer. A real interaction that clears the block cancels the escalation. Read live when a block is first tracked. |
+| `notifications.blockedEscalationMaxFollowUps` | number | `2` | integer in [0, 100] | each program | Most reminders after that first push (0 sends the one push and no reminders). Keeps a long-unanswered block from becoming an unbounded stream of pushes. |
+| `notifications.burstThreshold` | number | `3` | integer in [1, 10000] | each program | How many notifications of one kind are listed one by one in a short time before the rest are counted together. The window follows the print level (behavior.hitlMode: 5 s quiet, 2 s balanced, 0.5 s operator) and runs from the first notification, so a steady trickle cannot keep one open. Critical, milestone and alert notifications never collapse. Read when the app starts. |
+| `notifications.pushApproval` | boolean | `true` |  | each program | Sends a push to your paired devices when something is waiting for your approval. On by default, the toggle exists to silence the class, never as a prerequisite for it to work. Read live per event. |
+| `notifications.pushCompletion` | boolean | `true` |  | each program | Sends a push to your paired devices when a run you follow finishes, fails or is stopped. On by default with zero setup; the toggle only silences. Read live per event. |
+| `notifications.pushNeedsInput` | boolean | `true` |  | each program | Sends a push to your paired devices when an agent is waiting for you, unless you are already looking. On by default; the toggle only silences. Read live per event. |
 | `notifications.webhookUrls` | array | `[]` | list of goodvibes://secrets/ references to stored webhook URLs; add a URL with /notify add <url> | each program | Webhook URLs that receive the notifications this machine sends (turn ends, approvals waiting, budget alerts). Each URL carries its own key, so it is kept in the secret store and this list holds a goodvibes://secrets/ reference to each; add one with /notify add <url>. Screens show only each URL's host. Applies at the next start. |
 
 Full entries (files, project rule, environment variable): "Settings" in the part "Reference", under "notifications".
@@ -8949,8 +8949,8 @@ Full entries (files, project rule, environment variable): "Settings" in the part
 
 | Key | Type | Default | Allowed | Stored in | What it does |
 | --- | --- | --- | --- | --- | --- |
-| `tts.llmModel` | string | `""` |  | shared file | Optional LLM model override for spoken-output turns; empty means use the active chat model. |
-| `tts.llmProvider` | string | `""` |  | shared file | Optional LLM provider override for spoken-output turns; empty means use the active chat provider. |
+| `tts.llmModel` | string | `""` |  | shared file | The model that writes answers meant to be spoken; empty uses the conversation's model. |
+| `tts.llmProvider` | string | `""` |  | shared file | The provider that writes answers meant to be spoken; empty uses the conversation's provider. |
 | `tts.provider` | string | `"elevenlabs"` |  | shared file | Default TTS provider used by spoken-output clients when no provider is supplied on the request. |
 | `tts.speed` | number | `1` | number in [0.25, 4] | shared file | Playback speed multiplier for TTS synthesis (0.25–4.0); 1.0 is normal speed. |
 | `tts.voice` | string | `""` |  | shared file | Default TTS voice id used by spoken-output clients when no voice is supplied on the request. |
@@ -8959,12 +8959,12 @@ Full entries (files, project rule, environment variable): "Settings" in the part
 
 | Key | Type | Default | Allowed | Stored in | What it does |
 | --- | --- | --- | --- | --- | --- |
-| `voice.local.sttBinary` | string | `""` |  | daemon file | Absolute path to the local STT engine binary (e.g. whisper.cpp's whisper-cli). Managed setup installs the engine and sets this. |
-| `voice.local.sttEngine` | enum | `""` | ``, `whisper-cpp`, `faster-whisper` | daemon file | Local speech-to-text engine: whisper-cpp (blessed default, CPU-first, realtime-capable) or faster-whisper (NVIDIA-GPU alternative via a wrapper script). Empty means not configured, and the machine says so honestly rather than erroring. Managed setup installs whisper-cpp and fills this in. |
-| `voice.local.sttModelPath` | string | `""` |  | daemon file | Absolute path to the local STT model file (e.g. ggml-tiny.en.bin). Managed setup downloads the model, checksum-verifies it and sets this path; a path you set yourself is kept unless it names an install the managed runtime replaces, which is reported when it happens. |
-| `voice.local.ttsBinary` | string | `""` |  | daemon file | Absolute path to the local TTS engine binary (e.g. piper). Managed setup installs the engine and sets this. |
-| `voice.local.ttsEngine` | enum | `""` | ``, `piper`, `kokoro` | daemon file | Local text-to-speech engine: piper (blessed default, sub-50ms first-audio class, MIT) or kokoro (quality alternative, Apache 2.0, via a wrapper script). Empty means not configured. Managed setup installs piper and fills this in. |
-| `voice.local.ttsModelPath` | string | `""` |  | daemon file | Absolute path to the local TTS voice model (e.g. en_US-lessac-low.onnx with its .json beside it). Managed setup downloads the voice, checksum-verifies it and sets this path; a path you set yourself is kept unless it names an install the managed runtime replaces, which is reported when it happens. |
+| `voice.local.sttBinary` | string | `""` |  | daemon file | Where the speech-to-text program is (a full path, for example whisper.cpp's whisper-cli). Managed setup installs the engine and sets this. |
+| `voice.local.sttEngine` | enum | `""` | ``, `whisper-cpp`, `faster-whisper` | daemon file | The program that turns your speech into text on this computer: whisper-cpp (the default; runs on the processor, fast enough for live speech) or faster-whisper (for NVIDIA graphics cards, through a wrapper script). Empty means not configured, and the machine says so honestly rather than erroring. Managed setup installs whisper-cpp and fills this in. |
+| `voice.local.sttModelPath` | string | `""` |  | daemon file | Where the speech-to-text model file is (a full path, for example ggml-tiny.en.bin). Managed setup downloads the model, checksum-verifies it and sets this path; a path you set yourself is kept unless it names an install the managed runtime replaces, which is reported when it happens. |
+| `voice.local.ttsBinary` | string | `""` |  | daemon file | Where the text-to-speech program is (a full path, for example piper). Managed setup installs the engine and sets this. |
+| `voice.local.ttsEngine` | enum | `""` | ``, `piper`, `kokoro` | daemon file | The program that reads answers aloud on this computer: piper (the default; starts speaking almost at once) or kokoro (a better-sounding voice, through a wrapper script). Empty means not configured. Managed setup installs piper and fills this in. |
+| `voice.local.ttsModelPath` | string | `""` |  | daemon file | Where the voice model file is (a full path, for example en_US-lessac-low.onnx, with its .json file beside it). Managed setup downloads the voice, checksum-verifies it and sets this path; a path you set yourself is kept unless it names an install the managed runtime replaces, which is reported when it happens. |
 | `voice.wake.activationSound` | enum | `"chime"` | `none`, `chime`, `custom` | each program | Sound played the moment a wake is confirmed. "chime" by default because audible confirmation is how a user knows the microphone acted, a silent wake is the behaviour people distrust. "custom" plays voice.wake.activationSoundPath; "none" is silent and leaves voice.wake.indicator as the only feedback. |
 | `voice.wake.activationSoundPath` | string | `""` |  | each program | Absolute path to the audio file played on wake. Read only when voice.wake.activationSound is "custom"; ignored otherwise. A host surface plays the file through the same player local voice output uses. A browser tab cannot read a path on your machine, so it plays the built-in chime instead and reports that this row is not in force there, a wake stays audible either way. |
 | `voice.wake.autoSubmit` | boolean | `false` |  | each program | Submit the transcribed text as a turn automatically instead of placing it in the input for review. Applies to the utterance captured after a WAKE; push-to-talk always places its transcript in the composer, because a person who pressed a key is already looking at the screen. Off by default, matching the never-auto-send posture of the existing voice input: a misheard transcript must not become a submitted turn without a human seeing it first. |
@@ -8974,11 +8974,11 @@ Full entries (files, project rule, environment variable): "Settings" in the part
 | `voice.wake.cooldownMs` | number | `2000` | integer in [0, 60000] | each program | Milliseconds after a confirmed wake during which further detections are ignored, so one spoken phrase cannot fire twice as it passes through the detector's rolling window. Applied after patience confirms a hit. 0 disables the cooldown and lets every confirmed frame fire. |
 | `voice.wake.crashWindowSeconds` | number | `60` | integer in [1, 3600] | each program | Rolling window in which repeated crashes count toward voice.wake.maxRestarts. Exceeding the ceiling inside this window latches the supervisor off so a detector that cannot stay up stops consuming the device; a clean run past the window resets the count. |
 | `voice.wake.customModelDir` | string | `""` |  | each program | Directory searched for wake models whose ids are not the pinned default. Empty uses the managed wake model directory under the surface storage root. Set it to keep your own models outside the managed tree; files there are loaded as-is and are not checksum-pinned, unlike the managed download. |
-| `voice.wake.enabled` | boolean | `false` |  | each program | Run the wake-word detector, listening continuously for the wake phrase on the configured input device. Turning it on starts a supervised capture process and a persistent listening indicator; turning it off stops it and releases the device immediately. WHERE IT LISTENS depends on the voice.wake.surfaces.* rows: the terminal captures through a recorder subprocess and is on by default, the agent captures the same way and is opted in per surface, and a browser tab captures through getUserMedia and is opted in per origin. Off by default because an always-on microphone must be an explicit act, not something a user discovers after the fact. THE MODEL IS ALREADY THERE: installing goodvibes downloads and checksum-verifies the pinned classifier, and a daemon retries at boot if the install could not reach the network, so turning this on normally needs no setup step at all. Turning it on in the terminal app or Agent (settings, /settings, a model's settings call) runs the same setup as /voice wake-setup: it turns the wake rows on, fetches any missing wake-word model files and shows the plan; installing a speech-to-text engine is only proposed. |
+| `voice.wake.enabled` | boolean | `false` |  | each program | Listens all the time for the wake phrase on the chosen microphone. Turning it on starts a supervised capture process and a persistent listening indicator; turning it off stops it and releases the device immediately. WHERE IT LISTENS depends on the voice.wake.surfaces.* rows: the terminal captures through a recorder subprocess and is on by default, the agent captures the same way and is opted in per surface, and a browser tab captures through getUserMedia and is opted in per origin. Off by default because an always-on microphone must be an explicit act, not something a user discovers after the fact. THE MODEL IS ALREADY THERE: installing goodvibes downloads and checksum-verifies the pinned classifier, and a daemon retries at boot if the install could not reach the network, so turning this on normally needs no setup step at all. Turning it on in the terminal app or Agent (settings, /settings, a model's settings call) runs the same setup as /voice wake-setup: it turns the wake rows on, fetches any missing wake-word model files and shows the plan; installing a speech-to-text engine is only proposed. |
 | `voice.wake.indicator` | enum | `"statusline"` | `off`, `statusline`, `banner` | each program | How the surface shows that the microphone is live. "statusline" keeps a persistent listening marker for as long as the detector runs, not only at the moment of a wake, so an always-on microphone is never invisible: a footer row in the terminal, a status-strip chip in the web UI. "banner" is more prominent; "off" removes the marker entirely and is not the default for that reason. |
 | `voice.wake.inputDevice` | string | `""` |  | each program | Capture device to listen on. Empty means the operating system default source. Shared by BOTH microphone consumers: wake detection and push-to-talk voice input open the same device through the same path, so this row moves both rather than only the always-on one. Device identifiers are host-specific, list real ones with `pactl list short sources` or `arecord -L`, or use a navigator.mediaDevices deviceId in a browser tab. Note pw-record takes a PipeWire node serial or node name here, not a PulseAudio device name, and sox cannot target a device at all (it reads AUDIODEV from the environment), which the surface reports rather than silently ignoring. |
 | `voice.wake.maxRestarts` | number | `3` | integer in [0, 20] | each program | How many times the supervisor restarts a crashed detector process inside voice.wake.crashWindowSeconds before it stops trying and reports the failure. Matches the restart ceiling used for MCP clients. 0 disables restarts, so any crash is terminal and immediately visible. |
-| `voice.wake.models` | string | `"hey_goodvibes"` | comma-separated ids made of letters, digits, dot, underscore and hyphen (no path separators) | each program | Comma-separated wake-word models to run concurrently, by id. Default "hey_goodvibes" is the model the platform pins, hosts, and verifies by checksum. Additional ids resolve against voice.wake.customModelDir. Each model costs one classifier inference per 80 ms frame, the shared melspectrogram and speech-embedding front end is computed once regardless of how many models are listed, so a second model is far cheaper than a second detector. An empty list disables detection without stopping the service. Ids are letters, digits, dot, underscore and hyphen only, since each becomes a file name. |
+| `voice.wake.models` | string | `"hey_goodvibes"` | comma-separated ids made of letters, digits, dot, underscore and hyphen (no path separators) | each program | The wake-word models to listen with, by name, separated by commas. Default "hey_goodvibes" is the model the platform pins, hosts, and verifies by checksum. Additional ids resolve against voice.wake.customModelDir. Each model costs one classifier inference per 80 ms frame, the shared melspectrogram and speech-embedding front end is computed once regardless of how many models are listed, so a second model is far cheaper than a second detector. An empty list disables detection without stopping the service. Ids are letters, digits, dot, underscore and hyphen only, since each becomes a file name. |
 | `voice.wake.noiseSuppression` | enum | `"none"` | `none`, `speex` | each program | Noise suppression applied to captured audio before anything reads it, the wake classifier scores filtered frames, and the utterance recorded after a wake (and push-to-talk voice input) is filtered audio too. "speex" is SpeexDSP's own denoiser, carried in the platform as a WebAssembly module and applied on every surface that has WebAssembly, which is both shipped ones: nothing to install, nothing to download, no per-host library. It attenuates the estimated noise floor by about 15 dB, measured at 13.2 dB against a synthetic tone-plus-white-noise set, for 0.24 ms of work per 80 ms frame beside the detector's own 3.46 ms. "none" ships as the default and is a true passthrough: the captured bytes reach the detector exactly as the device produced them. Choose "speex" on a noisy input (a fan, an air conditioner, street noise through an open window), and "none" on a quiet one, where a denoiser only has speech to work on. |
 | `voice.wake.patienceFrames` | number | `2` | integer in [1, 10] | each program | Consecutive 80 ms frames that must all score above voice.wake.threshold before the wake fires. Two frames is about 160 ms of agreement, which removes most single-frame false accepts for one extra frame of latency. Set to 1 for the fastest possible trigger at the cost of more spurious wakes. |
 | `voice.wake.preRollMs` | number | `500` | integer in [0, 2000] | each program | Milliseconds of audio kept from BEFORE the wake fired and prepended to the speech-to-text request, so a phrase run straight into the command ("hey goodvibes, what's—") is not clipped at the front. 500 ms covers the detector's own confirmation latency plus a fast speaker. 0 starts capture at the moment of detection. |
@@ -8991,7 +8991,7 @@ Full entries (files, project rule, environment variable): "Settings" in the part
 | `voice.wake.surfaces.app` | boolean | `false` |  | each program | Listen for the wake phrase in the desktop companion app, which runs the detector inside its embedded webview on a WASM backend, the same runtime and download path the web UI uses. Off by default because webview capture is a separate stack with its own microphone permission prompt, it is opted into per install, not inherited from the host. While it is off the webview never calls getUserMedia at all, so no permission prompt appears. |
 | `voice.wake.surfaces.tui` | boolean | `true` |  | each program | Listen for the wake phrase on the terminal, through a recorder subprocess on the host. On by default: once wake detection is enabled the terminal is the primary surface, and a wake that reaches no surface is a detector that appears broken. A confirmed wake plays the activation sound, shows the listening indicator, captures the utterance that follows and sends it to speech-to-text, then places the transcript in the composer, or submits it when voice.wake.autoSubmit is on. |
 | `voice.wake.surfaces.webui` | boolean | `false` |  | each program | Listen for the wake phrase in the web UI, which runs the detector inside the browser tab on a WASM backend and downloads the pinned model through the daemon. This daemon's setting: once it is on, every browser that opens this daemon's web UI listens, each only after its own microphone permission prompt is accepted. Off by default because browser capture is a separate stack from the terminal's. While it is off a tab never calls getUserMedia at all, so no permission prompt appears. A plain-http origin cannot capture and says so instead of failing silently. |
-| `voice.wake.threshold` | number | `0.9` | number in [0, 1] | each program | Score, 0 to 1, a frame must reach for the wake phrase to count as heard. DELIBERATELY 0.9, NOT openWakeWord's upstream default of 0.5 and not the 0.5 originally accepted for this row: measurement on the shipped hey_goodvibes model showed 0.5 fires on 34.5% of never-trained minimal-pair phrases ("hey good vibe check", "hey goodbye vibes", ordinary English a user will actually say) at 99.2% recall, while 0.9 cuts that to 24.7% for 96.8% recall. Trading 2.4 points of recall to remove roughly a third of the wrong wakes is the better default for a microphone that is always on. Lower it toward 0.5 if the detector misses you; raise it above 0.9 if it fires when you did not speak to it. Recall figures here are synthetic-only, no human has recorded the phrase. |
+| `voice.wake.threshold` | number | `0.9` | number in [0, 1] | each program | How sure, from 0 to 1, the listener must be before the wake phrase counts as heard. DELIBERATELY 0.9, NOT openWakeWord's upstream default of 0.5 and not the 0.5 originally accepted for this row: measurement on the shipped hey_goodvibes model showed 0.5 fires on 34.5% of never-trained minimal-pair phrases ("hey good vibe check", "hey goodbye vibes", ordinary English a user will actually say) at 99.2% recall, while 0.9 cuts that to 24.7% for 96.8% recall. Trading 2.4 points of recall to remove roughly a third of the wrong wakes is the better default for a microphone that is always on. Lower it toward 0.5 if the detector misses you; raise it above 0.9 if it fires when you did not speak to it. Recall figures here are synthetic-only, no human has recorded the phrase. |
 | `voice.wake.vadThreshold` | number | `0` | number in [0, 1] | each program | Speech-probability floor, 0 to 1, from the speech gate run ahead of the wake classifier; frames below it are withheld from scoring instead of being classified. The gate is our own speech/non-speech head over the SAME embedding the wake classifier consumes, so it costs one extra inference of 0.025 ms per 80 ms frame, beside the detector's own 3.46 ms, and no extra front end. It provisions with the wake models. Measured on 106,390 held-out frames: at 0.3 it passes 96.0% of speech frames and withholds 95.7% of non-speech ones, which is the recommended value; lower passes more speech and screens less, higher screens more and starts costing wakes. 0 is the shipped default and turns the stage off entirely, it is the configuration that has been exercised longest, and a gate can only ever cost you a detection. A surface that has not loaded the gate REFUSES TO START with any value above 0, rather than running unscreened frames through a stage you have configured. |
 
 Full entries (files, project rule, environment variable): "Settings" in the part "Reference", under "voice".
@@ -9017,7 +9017,7 @@ Full entries (files, project rule, environment variable): "Settings" in the part
 | `payments.budget.overageToleranceEnabled` | boolean | `false` |  | daemon file | When true, a purchase whose unavoidable charges cannot fit the overage budget even at the CHEAPEST delivery option may draw the shortfall from the tolerance allowance below instead of being refused. Default FALSE. Enabling it alone changes nothing, the allowance also starts at 0. |
 | `payments.budget.perPurchaseCeiling` | number | `0` | a plain number like 100 or 19.99, no greater than 1000000 | daemon file | The most any single purchase may come to in total, items plus tax, fees and delivery, applied when perPurchaseCeilingEnabled is true. A purchase over it asks you first and names the ceiling and by how much. Written the way you would say it, 100 is a hundred, 19.99 is nineteen ninety-nine. Default 0, so with the ceiling on and this unset every purchase needs your explicit approval, the safe direction until you choose a number. |
 | `payments.budget.perPurchaseCeilingEnabled` | boolean | `true` |  | daemon file | When true (DEFAULT), no single purchase may come to more than payments.budget.perPurchaseCeiling in total (items, tax, fees and delivery) without your explicit approval, no matter how much of the daily budget is left. A separate question from the daily budget: both must pass. Turn it off only if you want one purchase to be able to consume the whole day at once. |
-| `payments.cardsOnFile` | string | `""` |  | not stored | Cards purchases can use. Enter closes Settings, lists the cards on the daemon, and starts "Add a card" (Esc stops it); /payments remove-card deletes one. Settings never takes a card number. This value is stored in the daemon's own configuration (~/.goodvibes/daemon/settings.json) and applies to every client; not just this one. |
+| `payments.cardsOnFile` | string | `""` |  | not stored | Cards purchases can use. Enter closes Settings, lists the cards on the daemon, and starts "Add a card" (Esc stops it); /payments remove-card deletes one. Settings never takes a card number. The daemon keeps this setting (in ~/.goodvibes/daemon/settings.json), so it applies to every program, not just this one. |
 | `payments.confirmEveryPurchase` | boolean | `false` |  | daemon file | When true, every purchase needs your approval first, given with /payments approve (or payments.checkout.approve) naming the merchant, the item and the most it may cost, before the agent may start it; the approval lasts five minutes and is used once. Default FALSE: the agent buys on your behalf inside your budgets without asking first, and that standing answer is kept here until you change it. Either way, a purchase over a budget or at a shop nobody vouches for still asks you before it is bought, and an approval you give in advance answers that question for a total up to the amount you named. |
 | `payments.currency` | string | `"USD"` | a three-letter ISO-4217 code such as USD, GBP or EUR | daemon file | ISO-4217 code your budgets are denominated in. A checkout priced in any other currency is REFUSED rather than converted, the issuer converts at its own rate on its own date, so any number shown to you before the charge would not be the number you are charged. |
 | `payments.cvvHandling` | enum | `"stored"` | `stored`, `prompt` | daemon file | How the card verification value is handled at checkout. 'stored' (DEFAULT) keeps it in the daemon secret store beside the card number, encrypted at rest, so a purchase within budget completes while you are away, which is what autonomous action requires. Choosing 'prompt' stores nothing: when a purchase is approved and reaches payment, it stops and asks you to type the code in the terminal app (/payments pending) or the local web UI, waiting as long as an approval window, and nothing is bought if the code is not typed in time. So nothing completes while you are away. Never send the code in a chat; a likely code typed on a remote channel while one is awaited is refused there. Surfaces show CVV_PROMPT_TRADEOFF_WARNING at the moment you select it. Provisioning a virtual card with a hard issuer cap bounds what any leak of stored card material could cost; a real card number does not. |
@@ -12991,12 +12991,12 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
 
 ### display
 
-- `display.collapseThreshold`: Line count threshold for collapsing tool output.
+- `display.collapseThreshold`: Tool output longer than this many lines is folded; open it to see the rest.
   - type `number`; default `30`; allowed: number in [1, 1000].
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it.
 
-- `display.lineNumbers`: Show line numbers for all assistant output, code blocks only, or not at all.
+- `display.lineNumbers`: Shows line numbers in answers: on every line, in code blocks only, or not at all.
   - type `enum`; default `"off"`; allowed: `all`, `code`, `off`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it.
@@ -13011,7 +13011,7 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it.
 
-- `display.showTokenSpeed`: Show streaming tokens/sec counter during generation.
+- `display.showTokenSpeed`: Shows how fast the answer is arriving while the model writes it.
   - type `boolean`; default `false`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it.
@@ -13021,22 +13021,22 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it.
 
-- `display.stream`: Stream LLM tokens as they arrive.
+- `display.stream`: Shows the answer as the model writes it, instead of all at once at the end.
   - type `boolean`; default `true`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it.
 
-- `display.theme`: Color theme name, the color palette (e.g. goodvibes-neon). Independent of display.themeMode, which controls light/dark appearance.
+- `display.theme`: The colour palette, by name (for example goodvibes-neon). Independent of display.themeMode, which controls light/dark appearance.
   - type `enum`; default `"goodvibes"`; allowed: `goodvibes`, `goodvibes-neon`, `catppuccin`, `tokyonight`, `dracula`, `nord`, `gruvbox`, `one-dark`, `rosepine`, `solarized`, `github`, `system`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it.
 
-- `display.themeMode`: Light/dark appearance: auto probes the terminal background colour (OSC 11) once at startup and picks light or dark; dark/light force a fixed appearance regardless of terminal background. Independent of display.theme, which picks the color palette.
+- `display.themeMode`: Light or dark appearance: auto asks the terminal for its background colour once at start and picks light or dark; dark and light always use that one, whatever the terminal's background. Independent of display.theme, which picks the color palette.
   - type `enum`; default `"auto"`; allowed: `auto`, `dark`, `light`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it.
 
-- `display.treeGlyphs`: Work tree connector style: rounded, square or ASCII. Terminals without Unicode support always use ASCII.
+- `display.treeGlyphs`: The lines drawn between items in the work tree: rounded, square or plain ASCII. Terminals without Unicode support always use ASCII.
   - type `enum`; default `"rounded"`; allowed: `rounded`, `square`, `ascii`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it.
@@ -13248,7 +13248,7 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it; a change that would change which decision model decides for you counts as loosening security.
 
-- `judgment.keySource`: Select where to resolve judgment.keyName: the literal enum env reads a process environment variable, secret reads a secret-store entry, and none disables authentication. This setting stores only one of those three words, never a credential or a credential reference.
+- `judgment.keySource`: Where the decision model's key comes from: env reads an environment variable, secret reads the secret store, and none sends no key. This setting stores only one of those three words, never a credential or a credential reference.
   - type `enum`; default `"env"`; allowed: `env`, `secret`, `none`.
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it; a change that would change which decision model decides for you counts as loosening security.
@@ -13292,12 +13292,12 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `learning.consolidation.enabled`: Master switch for the idle-time memory consolidation pass (dedupe merges, confidence decay of never-referenced records, and review proposals). On by default, the daemon runs it at idle and on a slow schedule; every outcome is reversible or proposal-gated, and false turns the pass off.
+- `learning.consolidation.enabled`: While nothing else is happening, tidies what GoodVibes remembers: merges duplicates, trusts memories never used a little less, and proposes what to review. On by default, the daemon runs it at idle and on a slow schedule; every outcome is reversible or proposal-gated, and false turns the pass off.
   - type `boolean`; default `true`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `learning.consolidation.intervalMs`: Minimum time between consolidation runs, in milliseconds. Doubles as the schedule cadence (default: 6 hours).
+- `learning.consolidation.intervalMs`: The least time between two tidy-ups. Doubles as the schedule cadence (default: 6 hours).
   - type `number`; default `21600000`; allowed: integer in [1, 2592000000].
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
@@ -13324,12 +13324,12 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
 
 ### memory
 
-- `memory.budgetMb`: MemoryGovernor budget in MB. The governor sheds caches and pauses background jobs as RSS approaches this budget. 0 means auto: min(25% of system RAM, 4096 MB), resolved at daemon start. Applies after the daemon restarts.
+- `memory.budgetMb`: How much memory the daemon plans to use, in MB. The governor sheds caches and pauses background jobs as RSS approaches this budget. 0 means auto: min(25% of system RAM, 4096 MB), resolved at daemon start. Applies after the daemon restarts.
   - type `number`; default `0`; allowed: integer in [0, 1048576].
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `memory.hardLimitPct`: Absolute-memory backstop as a percent of the EFFECTIVE KILL CEILING, the daemon's own cgroup memory limit where one applies, else physical RAM. If RSS holds at/above this percent of that ceiling for memory.tripwire.sustainSec, the governor writes a hard-limit receipt and exits so a supervisor restarts clean, catching a leak too slow for memory.tripwire.rateMbPerSec just before the kernel/cgroup OOM killer would strike. Default 90: fire at 90% of the real kill line, leaving a safety margin for the exit itself. Deliberately anchored to the kill ceiling and NOT to memory.budgetMb: the budget caps small by design (25% of RAM, max 4096 MB), and a large-but-stable working set above the budget on a big-RAM host is handled by the critical tier (refuse new expensive work, stay alive), anchoring the exit to the budget would put such a healthy daemon in a permanent restart loop. Applies after the daemon restarts.
+- `memory.hardLimitPct`: The daemon restarts before its memory reaches this share of the most it may use: its own memory limit where it has one, else the computer's memory. If RSS holds at/above this percent of that ceiling for memory.tripwire.sustainSec, the governor writes a hard-limit receipt and exits so a supervisor restarts clean, catching a leak too slow for memory.tripwire.rateMbPerSec just before the kernel/cgroup OOM killer would strike. Default 90: fire at 90% of the real kill line, leaving a safety margin for the exit itself. Deliberately anchored to the kill ceiling and NOT to memory.budgetMb: the budget caps small by design (25% of RAM, max 4096 MB), and a large-but-stable working set above the budget on a big-RAM host is handled by the critical tier (refuse new expensive work, stay alive), anchoring the exit to the budget would put such a healthy daemon in a permanent restart loop. Applies after the daemon restarts.
   - type `number`; default `90`; allowed: integer in [1, 100].
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
@@ -13345,27 +13345,27 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - Stored in the terminal app's own file only (`~/.goodvibes/tui/settings.json`); the other programs do not have this setting.
   - A project file may not set it.
 
-- `memory.tier.criticalPct`: Critical tier threshold, as a percent of the budget: at/above this the governor refuses new expensive work with an honest structured outcome and emits an ops attention event. Applies after the daemon restarts.
+- `memory.tier.criticalPct`: At this share of the memory budget, the daemon refuses new heavy work and says why. Applies after the daemon restarts.
   - type `number`; default `95`; allowed: integer in [1, 100].
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `memory.tier.elevatedPct`: Elevated tier threshold, as a percent of the budget: at/above this the governor trims registered caches to their floor and runs a gc. Applies after the daemon restarts.
+- `memory.tier.elevatedPct`: At this share of the memory budget, the daemon trims what it keeps in memory. Applies after the daemon restarts.
   - type `number`; default `60`; allowed: integer in [1, 100].
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `memory.tier.highPct`: High tier threshold, as a percent of the budget: at/above this the governor flushes all registered caches and pauses deferrable background jobs. Applies after the daemon restarts.
+- `memory.tier.highPct`: At this share of the memory budget, the daemon empties what it keeps in memory and pauses background work that can wait. Applies after the daemon restarts.
   - type `number`; default `80`; allowed: integer in [1, 100].
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `memory.tripwire.rateMbPerSec`: Leak tripwire rate in MB/s: if RSS keeps growing faster than this AFTER a full cache flush, the flush did not help and a leak is suspected. Applies after the daemon restarts.
+- `memory.tripwire.rateMbPerSec`: If memory use keeps growing faster than this, in MB per second, after the daemon has emptied what it keeps, it suspects a leak. Applies after the daemon restarts.
   - type `number`; default `25`; allowed: number in [1, 100000].
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `memory.tripwire.sustainSec`: Leak tripwire sustain window in seconds: the post-flush growth rate must exceed memory.tripwire.rateMbPerSec continuously for this long before the governor writes a receipt and exits for a clean supervisor restart. Applies after the daemon restarts.
+- `memory.tripwire.sustainSec`: How long, in seconds, that growth must last before the daemon records why and restarts itself cleanly. Applies after the daemon restarts.
   - type `number`; default `60`; allowed: integer in [1, 86400].
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
@@ -13404,42 +13404,42 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
 
 ### notifications
 
-- `notifications.adaptiveSuppression`: Adaptive notification suppression: past notifications.burstThreshold notifications of one kind (same domain, level and title) in one collapse window, the rest are counted into that kind's notification-history entry instead of each adding one. Critical, milestone, and alert notifications are always exempt. Turn off to record every one as its own entry. Read when the app starts.
+- `notifications.adaptiveSuppression`: When many notifications of one kind arrive close together, lists the first few and counts the rest in one entry instead of listing each. Critical, milestone, and alert notifications are always exempt. Turn off to record every one as its own entry. Read when the app starts.
   - type `boolean`; default `true`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `notifications.blockedEscalationFollowUpMs`: Interval between the bounded follow-up reminders that fire after the first blocked-too-long escalation, while the block remains unanswered. Read live per reminder.
+- `notifications.blockedEscalationFollowUpMs`: Time between reminders after that first push, while the agent is still waiting for you. Read live per reminder.
   - type `number`; default `300000`; allowed: integer in [0, 86400000].
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `notifications.blockedEscalationGraceMs`: How long a fleet node blocked on the operator may wait for a HUMAN response before a device push is sent REGARDLESS of an attached surface. Presence (an open TUI, a heartbeat) suppresses only the immediate push, never this escalation, a process being attended is not a human answer. A real interaction that clears the block cancels the escalation. Read live when a block is first tracked.
+- `notifications.blockedEscalationGraceMs`: How long an agent waiting for you may wait before your devices get a push, even while a screen is open. Presence (an open TUI, a heartbeat) suppresses only the immediate push, never this escalation, a process being attended is not a human answer. A real interaction that clears the block cancels the escalation. Read live when a block is first tracked.
   - type `number`; default `300000`; allowed: integer in [0, 86400000].
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `notifications.blockedEscalationMaxFollowUps`: Upper bound on follow-up reminders after the first blocked-too-long escalation (0 = escalate exactly once, no reminders). Keeps a long-unanswered block from becoming an unbounded stream of pushes.
+- `notifications.blockedEscalationMaxFollowUps`: Most reminders after that first push (0 sends the one push and no reminders). Keeps a long-unanswered block from becoming an unbounded stream of pushes.
   - type `number`; default `2`; allowed: integer in [0, 100].
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `notifications.burstThreshold`: How many notifications with the same domain, level and title are recorded as their own entries within one collapse window while notifications.adaptiveSuppression is on; later ones in that window are counted into the same notification-history entry. The window follows the print level (behavior.hitlMode: 5 s quiet, 2 s balanced, 0.5 s operator) and runs from the first notification, so a steady trickle cannot keep one open. Critical, milestone and alert notifications never collapse. Read when the app starts.
+- `notifications.burstThreshold`: How many notifications of one kind are listed one by one in a short time before the rest are counted together. The window follows the print level (behavior.hitlMode: 5 s quiet, 2 s balanced, 0.5 s operator) and runs from the first notification, so a steady trickle cannot keep one open. Critical, milestone and alert notifications never collapse. Read when the app starts.
   - type `number`; default `3`; allowed: integer in [1, 10000].
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `notifications.pushApproval`: Device-push fan-out for the approval class: a pending approval pushes to every paired push target. On by default, the toggle exists to silence the class, never as a prerequisite for it to work. Read live per event.
+- `notifications.pushApproval`: Sends a push to your paired devices when something is waiting for your approval. On by default, the toggle exists to silence the class, never as a prerequisite for it to work. Read live per event.
   - type `boolean`; default `true`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `notifications.pushCompletion`: Device-push fan-out for the completion class: a tracked run reaching a terminal state (done/failed/killed) pushes to every paired push target. On by default with zero setup; the toggle only silences. Read live per event.
+- `notifications.pushCompletion`: Sends a push to your paired devices when a run you follow finishes, fails or is stopped. On by default with zero setup; the toggle only silences. Read live per event.
   - type `boolean`; default `true`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `notifications.pushNeedsInput`: Device-push fan-out for the needs-input class: a fleet node blocked on the operator pushes to every paired push target (presence-suppressed when a surface is attached). On by default; the toggle only silences. Read live per event.
+- `notifications.pushNeedsInput`: Sends a push to your paired devices when an agent is waiting for you, unless you are already looking. On by default; the toggle only silences. Read live per event.
   - type `boolean`; default `true`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
@@ -13585,7 +13585,7 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it; a change that would turn the per-purchase spending ceiling off counts as loosening security.
 
-- `payments.cardsOnFile`: Cards purchases can use. Enter closes Settings, lists the cards on the daemon, and starts "Add a card" (Esc stops it); /payments remove-card deletes one. Settings never takes a card number. This value is stored in the daemon's own configuration (~/.goodvibes/daemon/settings.json) and applies to every client; not just this one.
+- `payments.cardsOnFile`: Cards purchases can use. Enter closes Settings, lists the cards on the daemon, and starts "Add a card" (Esc stops it); /payments remove-card deletes one. Settings never takes a card number. The daemon keeps this setting (in ~/.goodvibes/daemon/settings.json), so it applies to every program, not just this one.
   - type `string`; default `""`.
   - Not stored: it is a row of the terminal app's settings screen that opens a command, with no value of its own.
   - 
@@ -13703,7 +13703,7 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `permissions.divergenceThreshold`: Maximum permission-evaluator divergence rate (0.0–1.0) the permission-divergence-dashboard enforce gate tolerates before blocking a transition from simulation to enforce mode. Default 0.05 = 5%. A per-simulator divergenceThreshold override still wins.
+- `permissions.divergenceThreshold`: While new permission rules are tried out beside the rules in force, how often they may disagree (0 to 1) before switching to them is refused. Default 0.05 = 5%. A per-simulator divergenceThreshold override still wins.
   - type `number`; default `0.05`; allowed: number in [0, 1].
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
@@ -13719,7 +13719,7 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - 
   - Only the terminal app's `/settings` screen lists it; the shared settings schema does not declare it.
 
-- `permissions.maxDivergenceRecords`: Maximum divergence records the permissions simulator retains for the divergence dashboard/trend history. A per-simulator maxDivergenceRecords override still wins.
+- `permissions.maxDivergenceRecords`: How many of those disagreements are kept for the comparison report. A per-simulator maxDivergenceRecords override still wins.
   - type `number`; default `500`; allowed: integer in [1, 1000000].
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
@@ -13734,72 +13734,72 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `permissions.tools.agent`: Permission for spawning subagents or delegating tasks. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.
+- `permissions.tools.agent`: Permission for spawning subagents or delegating tasks. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.
   - type `enum`; default `"prompt"`; allowed: `allow`, `prompt`, `deny`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it only to a stricter value; a change that would loosen a per-tool permission counts as loosening security.
 
-- `permissions.tools.analyze`: Permission for code/project analysis operations. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.
+- `permissions.tools.analyze`: Permission for code/project analysis operations. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.
   - type `enum`; default `"allow"`; allowed: `allow`, `prompt`, `deny`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it only to a stricter value; a change that would loosen a per-tool permission counts as loosening security.
 
-- `permissions.tools.delegate`: Permission for unknown or unregistered tools (safe default: prompt). deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.
+- `permissions.tools.delegate`: Permission for unknown or unregistered tools (safe default: prompt). Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.
   - type `enum`; default `"prompt"`; allowed: `allow`, `prompt`, `deny`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it only to a stricter value; a change that would loosen a per-tool permission counts as loosening security.
 
-- `permissions.tools.edit`: Permission for file edit/patch operations. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.
+- `permissions.tools.edit`: Whether GoodVibes may edit files. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.
   - type `enum`; default `"prompt"`; allowed: `allow`, `prompt`, `deny`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it only to a stricter value; a change that would loosen a per-tool permission counts as loosening security.
 
-- `permissions.tools.exec`: Permission for shell command execution. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.
+- `permissions.tools.exec`: Whether GoodVibes may run commands. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.
   - type `enum`; default `"prompt"`; allowed: `allow`, `prompt`, `deny`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it only to a stricter value; a change that would loosen a per-tool permission counts as loosening security.
 
-- `permissions.tools.fetch`: Permission for outbound network fetch requests. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.
+- `permissions.tools.fetch`: Whether GoodVibes may fetch things from the network. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.
   - type `enum`; default `"prompt"`; allowed: `allow`, `prompt`, `deny`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it only to a stricter value; a change that would loosen a per-tool permission counts as loosening security.
 
-- `permissions.tools.find`: Permission for file/directory search operations. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.
+- `permissions.tools.find`: Whether GoodVibes may search for files and folders. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.
   - type `enum`; default `"allow"`; allowed: `allow`, `prompt`, `deny`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it only to a stricter value; a change that would loosen a per-tool permission counts as loosening security.
 
-- `permissions.tools.inspect`: Permission for inspecting runtime state and objects. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.
+- `permissions.tools.inspect`: Permission for inspecting runtime state and objects. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.
   - type `enum`; default `"allow"`; allowed: `allow`, `prompt`, `deny`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it only to a stricter value; a change that would loosen a per-tool permission counts as loosening security.
 
-- `permissions.tools.mcp`: Permission for MCP tool calls (external server tools). deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.
+- `permissions.tools.mcp`: Permission for MCP tool calls (external server tools). Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.
   - type `enum`; default `"prompt"`; allowed: `allow`, `prompt`, `deny`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it only to a stricter value; a change that would loosen a per-tool permission counts as loosening security.
 
-- `permissions.tools.read`: Permission for the read tool only; find and analyze have their own settings below. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.
+- `permissions.tools.read`: Whether GoodVibes may read files; finding and analysing files have their own settings below. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.
   - type `enum`; default `"allow"`; allowed: `allow`, `prompt`, `deny`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it only to a stricter value; a change that would loosen a per-tool permission counts as loosening security.
 
-- `permissions.tools.registry`: Permission for querying the tool/skill registry. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.
+- `permissions.tools.registry`: Permission for querying the tool/skill registry. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.
   - type `enum`; default `"allow"`; allowed: `allow`, `prompt`, `deny`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it only to a stricter value; a change that would loosen a per-tool permission counts as loosening security.
 
-- `permissions.tools.state`: Permission for reading runtime/session state. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.
+- `permissions.tools.state`: Permission for reading runtime/session state. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.
   - type `enum`; default `"allow"`; allowed: `allow`, `prompt`, `deny`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it only to a stricter value; a change that would loosen a per-tool permission counts as loosening security.
 
-- `permissions.tools.workflow`: Permission for executing multi-step workflow automation. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.
+- `permissions.tools.workflow`: Permission for executing multi-step workflow automation. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.
   - type `enum`; default `"prompt"`; allowed: `allow`, `prompt`, `deny`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it only to a stricter value; a change that would loosen a per-tool permission counts as loosening security.
 
-- `permissions.tools.write`: Permission for file write operations, and for changing settings through the goodvibes_settings tool. deny refuses this tool in every mode but yolo. prompt sets no rule of its own: the execution mode decides each call, and ask-me runs a read, or a change to files inside the workspace that can be undone, without asking. allow also runs this tool without asking when no decision model works, except an owner-only decision.
+- `permissions.tools.write`: Whether GoodVibes may write files, and change settings for you. Deny refuses it in every mode but YOLO. Prompt sets no rule of its own: the permission mode decides each time, and Ask me allows a read, or a change to files inside the folder that can be undone, without asking. Allow also lets it run without asking when no decision model works, except for a decision only the owner makes.
   - type `enum`; default `"prompt"`; allowed: `allow`, `prompt`, `deny`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it only to a stricter value; a change that would loosen a per-tool permission counts as loosening security.
@@ -13880,12 +13880,12 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
 
 ### profile
 
-- `profile.autonomousWrites`: Let the runtime record facts it learns from things you say directly to it, without asking each time. On by default because that was the owner's explicit choice over propose-first. Off leaves reads and your own hand edits working exactly as before, the honest "I will curate this myself" mode, not a disabled feature. Untrusted sources are barred either way.
+- `profile.autonomousWrites`: Lets GoodVibes save facts it learns from what you tell it about yourself, without asking each time. On by default because that was the owner's explicit choice over propose-first. Off leaves reads and your own hand edits working exactly as before, the honest "I will curate this myself" mode, not a disabled feature. Untrusted sources are barred either way.
   - type `boolean`; default `true`.
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it.
 
-- `profile.consumerFallback`: Let an UNSET consumer setting read its value from the matching profile field, quiet hours, delivery channel, and the commerce fields as their keys arrive. On because a profile nothing reads is a diary. A value you configured explicitly always wins; the profile only fills a gap, and only for a single keyed read, never in a settings listing or export.
+- `profile.consumerFallback`: Lets a setting you have not set take its value from your profile: quiet hours, where notifications go, and your shopping details. On because a profile nothing reads is a diary. A value you configured explicitly always wins; the profile only fills a gap, and only for a single keyed read, never in a settings listing or export.
   - type `boolean`; default `true`.
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it.
@@ -13895,7 +13895,7 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it.
 
-- `profile.discloseClosedTierReads`: Announce it in the reply when a closed-tier value is used, e.g. "Used your shipping address from your profile." On by default because using your address on an order should be visible to you at the moment it happens rather than discoverable afterwards in a log.
+- `profile.discloseClosedTierReads`: Says so in the reply when a private detail from your profile is used, for example "Used your shipping address from your profile." On by default because using your address on an order should be visible to you at the moment it happens rather than discoverable afterwards in a log.
   - type `boolean`; default `true`.
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it.
@@ -13905,12 +13905,12 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it.
 
-- `profile.enabled`: Load and serve the owner profile. On by default because the owner asked for it built, and a feature that ships off ships dark. Turning it off means the file is never opened and every profile verb answers "your profile is turned off", a stated state, not an empty profile that would read as "I know nothing about you". Applies when the daemon starts.
+- `profile.enabled`: Keeps a profile about you: what you have told GoodVibes about yourself, in one file you can read and edit. On by default because the owner asked for it built, and a feature that ships off ships dark. Turning it off means the file is never opened and every profile verb answers "your profile is turned off", a stated state, not an empty profile that would read as "I know nothing about you". Applies when the daemon starts.
   - type `boolean`; default `true`.
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it.
 
-- `profile.injectOpenTier`: Put the open tier, how you like to be addressed, your pronouns, your city, your timezone, your unit/date/locale preferences and your style notes, into system context as a short block each turn. On by default because otherwise the agent still guesses a metro area for a weather answer, which is the failure that started this. Closed-tier content (addresses, contact details, people, notes) is never bulk-injected regardless of this setting.
+- `profile.injectOpenTier`: Tells the model, each turn, what about you is not private: how you like to be addressed, your pronouns, city and timezone, your units and date format, and your style notes. On by default because otherwise the agent still guesses a metro area for a weather answer, which is the failure that started this. Closed-tier content (addresses, contact details, people, notes) is never bulk-injected regardless of this setting.
   - type `boolean`; default `true`.
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it.
@@ -13920,24 +13920,24 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it.
 
-- `profile.path`: Absolute path to the profile Markdown file. Empty means the default, owner-profile.md under the daemon home, which already honours GOODVIBES_DAEMON_HOME, so this override is only for keeping the file somewhere else entirely. Applies when the daemon starts.
+- `profile.path`: Where the profile file is kept (a full path). Empty means the default, owner-profile.md under the daemon home, which already honours GOODVIBES_DAEMON_HOME, so this override is only for keeping the file somewhere else entirely. Applies when the daemon starts.
   - type `string`; default `""`.
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it.
 
-- `profile.reloadThrottleMs`: How often, in milliseconds, to check the profile file for a hand edit on hosts where filesystem watching is unavailable. Used only on that fallback path and never on a read, so it costs nothing in the common case. 2000 sits under human edit-then-check latency: you save the file, look at the assistant, and it already knows. Applies when the daemon starts.
+- `profile.reloadThrottleMs`: How often to look for your own edits to the profile file, on a computer that cannot report file changes. Used only on that fallback path and never on a read, so it costs nothing in the common case. 2000 sits under human edit-then-check latency: you save the file, look at the assistant, and it already knows. Applies when the daemon starts.
   - type `number`; default `2000`; allowed: integer in [50, 3600000].
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it.
 
 ### provider
 
-- `provider.decisionRouter`: Decision Router category descriptions and answer provider/model/effort targets. Used only when decision-router:auto is selected. Empty categories use the required General target. Contains no credentials.
+- `provider.decisionRouter`: Which model answers which kind of decision, and how hard it thinks. Used only when decision-router:auto is selected. Empty categories use the required General target. Contains no credentials.
   - type `object`; default `{"categories":{"lookup-navigation":{"label":"Lookup / navigation","description":"Find a definition, locate a file or setting, or answer a narrow question about existing work.","target":null},"coding-implementation":{"label":"Coding / implementation","description":"Implement, modify or refactor code and configuration.","target":null},"analysis-decisions":{"label":"Analysis / decisions","description":"Reason through a problem, compare options, plan an approach or make a decision.","target":null},"documentation-writing":{"label":"Documentation / writing","description":"Write or edit documentation, explanations and other prose.","target":null},"summarization-extraction":{"label":"Summarization / extraction","description":"Summarize supplied material or extract its facts into a requested form.","target":null},"general":{"label":"General","description":"Catch-all for conversation and requests that do not fit a more specific category.","target":null},"debugging-diagnosis":{"label":"Debugging / diagnosis","description":"Identify the cause of an error, failing test, crash or unexpected behavior.","target":null},"review-verification":{"label":"Review / verification","description":"Review a change or verify claims, correctness, behavior or test evidence.","target":null},"research":{"label":"Research","description":"Find and synthesize information from external sources.","target":null},"data-analysis":{"label":"Data analysis","description":"Analyze datasets, calculate metrics, or interpret quantitative results.","target":null}},"initialContextChars":3000,"expandedContextChars":10000}`.
   - Stored in the shared file (one value, which wins over each program's own file).
   - A project file may not set it.
 
-- `provider.embeddingProvider`: Default memory embedding provider.
+- `provider.embeddingProvider`: The provider that turns memories into a form GoodVibes can search.
   - type `string`; default `"hashed-local"`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
@@ -13947,32 +13947,32 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `provider.localContextIngestion`: Ingest max_context_length from local/custom provider /v1/models endpoints so local models use the provider-reported context window for token budgeting and compaction thresholds. Turn off to use only explicitly configured or static limits.
+- `provider.localContextIngestion`: Uses the context size a local model's server reports, so the conversation is shortened at the right point for that model. Turn off to use only explicitly configured or static limits.
   - type `boolean`; default `true`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `provider.model`: Default provider-qualified LLM model registry key.
+- `provider.model`: The model new conversations use, written as provider:model.
   - type `string`; default `"openrouter:openrouter/free"`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `provider.optimizerMode`: Provider routing optimizer: off (optimizer inactive, default), manual (optimizer active but never auto-routes), auto (selects the best capable provider per request via capability contracts), or pinned (force one model, see provider.optimizerPinnedModel). Applies at once from any settings path; /provider-opt commands write this setting.
+- `provider.optimizerMode`: How GoodVibes picks a provider for each request: off (the default), manual (it compares but never switches), auto (it picks the best provider that can do the request), or pinned (always the one model named in the next setting). Applies at once from any settings path; /provider-opt commands write this setting.
   - type `enum`; default `"off"`; allowed: `off`, `manual`, `auto`, `pinned`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `provider.optimizerPinnedModel`: Provider-qualified model id (e.g. anthropic:claude-sonnet-4) the provider optimizer routes to while provider.optimizerMode is "pinned"; a change applies at once. Empty leaves the optimizer unpinned (falls back to manual).
+- `provider.optimizerPinnedModel`: The one model used while provider choice is pinned, written as provider:model (for example anthropic:claude-sonnet-4); a change applies at once. Empty leaves the optimizer unpinned (falls back to manual).
   - type `string`; default `""`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `provider.reasoningEffort`: Reasoning effort level for models that support it.
+- `provider.reasoningEffort`: How much the model reasons before it answers, for models that can be told.
   - type `string`; default `"medium"`; allowed: a known reasoning effort level, run /effort for the current model choices.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `provider.systemPromptFile`: Path to a file containing the system prompt (empty = none)
+- `provider.systemPromptFile`: A file of standing instructions the model gets at the start of every conversation; empty for none.
   - type `string`; default `""`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
@@ -15110,17 +15110,17 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - Stored in Agent's own file only (`~/.goodvibes/agent/settings.json`); the other programs do not have this setting.
   - A project file may not set it.
 
-- `tools.llmEnabled`: Enable dedicated tool LLM for internal operations (off = tools use the main conversation model only when needed)
+- `tools.llmEnabled`: Uses a separate model for GoodVibes's own background work; off, that work uses the conversation's model when it needs one.
   - type `boolean`; default `false`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `tools.llmModel`: Model for tool LLM calls (empty = fastest available for the provider)
+- `tools.llmModel`: That separate model; empty uses the provider's fastest.
   - type `string`; default `""`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `tools.llmProvider`: Provider for tool LLM calls (empty = use currently selected provider)
+- `tools.llmProvider`: The provider of that separate model; empty uses the conversation's provider.
   - type `string`; default `""`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
@@ -15157,12 +15157,12 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
 
 ### tts
 
-- `tts.llmModel`: Optional LLM model override for spoken-output turns; empty means use the active chat model.
+- `tts.llmModel`: The model that writes answers meant to be spoken; empty uses the conversation's model.
   - type `string`; default `""`.
   - Stored in the shared file (one value, which wins over each program's own file).
   - A project file may not set it.
 
-- `tts.llmProvider`: Optional LLM provider override for spoken-output turns; empty means use the active chat provider.
+- `tts.llmProvider`: The provider that writes answers meant to be spoken; empty uses the conversation's provider.
   - type `string`; default `""`.
   - Stored in the shared file (one value, which wins over each program's own file).
   - A project file may not set it.
@@ -15253,32 +15253,32 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
 
 ### voice
 
-- `voice.local.sttBinary`: Absolute path to the local STT engine binary (e.g. whisper.cpp's whisper-cli). Managed setup installs the engine and sets this.
+- `voice.local.sttBinary`: Where the speech-to-text program is (a full path, for example whisper.cpp's whisper-cli). Managed setup installs the engine and sets this.
   - type `string`; default `""`.
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it.
 
-- `voice.local.sttEngine`: Local speech-to-text engine: whisper-cpp (blessed default, CPU-first, realtime-capable) or faster-whisper (NVIDIA-GPU alternative via a wrapper script). Empty means not configured, and the machine says so honestly rather than erroring. Managed setup installs whisper-cpp and fills this in.
+- `voice.local.sttEngine`: The program that turns your speech into text on this computer: whisper-cpp (the default; runs on the processor, fast enough for live speech) or faster-whisper (for NVIDIA graphics cards, through a wrapper script). Empty means not configured, and the machine says so honestly rather than erroring. Managed setup installs whisper-cpp and fills this in.
   - type `enum`; default `""`; allowed: ``, `whisper-cpp`, `faster-whisper`.
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it.
 
-- `voice.local.sttModelPath`: Absolute path to the local STT model file (e.g. ggml-tiny.en.bin). Managed setup downloads the model, checksum-verifies it and sets this path; a path you set yourself is kept unless it names an install the managed runtime replaces, which is reported when it happens.
+- `voice.local.sttModelPath`: Where the speech-to-text model file is (a full path, for example ggml-tiny.en.bin). Managed setup downloads the model, checksum-verifies it and sets this path; a path you set yourself is kept unless it names an install the managed runtime replaces, which is reported when it happens.
   - type `string`; default `""`.
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it.
 
-- `voice.local.ttsBinary`: Absolute path to the local TTS engine binary (e.g. piper). Managed setup installs the engine and sets this.
+- `voice.local.ttsBinary`: Where the text-to-speech program is (a full path, for example piper). Managed setup installs the engine and sets this.
   - type `string`; default `""`.
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it.
 
-- `voice.local.ttsEngine`: Local text-to-speech engine: piper (blessed default, sub-50ms first-audio class, MIT) or kokoro (quality alternative, Apache 2.0, via a wrapper script). Empty means not configured. Managed setup installs piper and fills this in.
+- `voice.local.ttsEngine`: The program that reads answers aloud on this computer: piper (the default; starts speaking almost at once) or kokoro (a better-sounding voice, through a wrapper script). Empty means not configured. Managed setup installs piper and fills this in.
   - type `enum`; default `""`; allowed: ``, `piper`, `kokoro`.
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it.
 
-- `voice.local.ttsModelPath`: Absolute path to the local TTS voice model (e.g. en_US-lessac-low.onnx with its .json beside it). Managed setup downloads the voice, checksum-verifies it and sets this path; a path you set yourself is kept unless it names an install the managed runtime replaces, which is reported when it happens.
+- `voice.local.ttsModelPath`: Where the voice model file is (a full path, for example en_US-lessac-low.onnx, with its .json file beside it). Managed setup downloads the voice, checksum-verifies it and sets this path; a path you set yourself is kept unless it names an install the managed runtime replaces, which is reported when it happens.
   - type `string`; default `""`.
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it.
@@ -15328,7 +15328,7 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `voice.wake.enabled`: Run the wake-word detector, listening continuously for the wake phrase on the configured input device. Turning it on starts a supervised capture process and a persistent listening indicator; turning it off stops it and releases the device immediately. WHERE IT LISTENS depends on the voice.wake.surfaces.* rows: the terminal captures through a recorder subprocess and is on by default, the agent captures the same way and is opted in per surface, and a browser tab captures through getUserMedia and is opted in per origin. Off by default because an always-on microphone must be an explicit act, not something a user discovers after the fact. THE MODEL IS ALREADY THERE: installing goodvibes downloads and checksum-verifies the pinned classifier, and a daemon retries at boot if the install could not reach the network, so turning this on normally needs no setup step at all. Turning it on in the terminal app or Agent (settings, /settings, a model's settings call) runs the same setup as /voice wake-setup: it turns the wake rows on, fetches any missing wake-word model files and shows the plan; installing a speech-to-text engine is only proposed.
+- `voice.wake.enabled`: Listens all the time for the wake phrase on the chosen microphone. Turning it on starts a supervised capture process and a persistent listening indicator; turning it off stops it and releases the device immediately. WHERE IT LISTENS depends on the voice.wake.surfaces.* rows: the terminal captures through a recorder subprocess and is on by default, the agent captures the same way and is opted in per surface, and a browser tab captures through getUserMedia and is opted in per origin. Off by default because an always-on microphone must be an explicit act, not something a user discovers after the fact. THE MODEL IS ALREADY THERE: installing goodvibes downloads and checksum-verifies the pinned classifier, and a daemon retries at boot if the install could not reach the network, so turning this on normally needs no setup step at all. Turning it on in the terminal app or Agent (settings, /settings, a model's settings call) runs the same setup as /voice wake-setup: it turns the wake rows on, fetches any missing wake-word model files and shows the plan; installing a speech-to-text engine is only proposed.
   - type `boolean`; default `false`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
@@ -15348,7 +15348,7 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `voice.wake.models`: Comma-separated wake-word models to run concurrently, by id. Default "hey_goodvibes" is the model the platform pins, hosts, and verifies by checksum. Additional ids resolve against voice.wake.customModelDir. Each model costs one classifier inference per 80 ms frame, the shared melspectrogram and speech-embedding front end is computed once regardless of how many models are listed, so a second model is far cheaper than a second detector. An empty list disables detection without stopping the service. Ids are letters, digits, dot, underscore and hyphen only, since each becomes a file name.
+- `voice.wake.models`: The wake-word models to listen with, by name, separated by commas. Default "hey_goodvibes" is the model the platform pins, hosts, and verifies by checksum. Additional ids resolve against voice.wake.customModelDir. Each model costs one classifier inference per 80 ms frame, the shared melspectrogram and speech-embedding front end is computed once regardless of how many models are listed, so a second model is far cheaper than a second detector. An empty list disables detection without stopping the service. Ids are letters, digits, dot, underscore and hyphen only, since each becomes a file name.
   - type `string`; default `"hey_goodvibes"`; allowed: comma-separated ids made of letters, digits, dot, underscore and hyphen (no path separators)
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
@@ -15413,7 +15413,7 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `voice.wake.threshold`: Score, 0 to 1, a frame must reach for the wake phrase to count as heard. DELIBERATELY 0.9, NOT openWakeWord's upstream default of 0.5 and not the 0.5 originally accepted for this row: measurement on the shipped hey_goodvibes model showed 0.5 fires on 34.5% of never-trained minimal-pair phrases ("hey good vibe check", "hey goodbye vibes", ordinary English a user will actually say) at 99.2% recall, while 0.9 cuts that to 24.7% for 96.8% recall. Trading 2.4 points of recall to remove roughly a third of the wrong wakes is the better default for a microphone that is always on. Lower it toward 0.5 if the detector misses you; raise it above 0.9 if it fires when you did not speak to it. Recall figures here are synthetic-only, no human has recorded the phrase.
+- `voice.wake.threshold`: How sure, from 0 to 1, the listener must be before the wake phrase counts as heard. DELIBERATELY 0.9, NOT openWakeWord's upstream default of 0.5 and not the 0.5 originally accepted for this row: measurement on the shipped hey_goodvibes model showed 0.5 fires on 34.5% of never-trained minimal-pair phrases ("hey good vibe check", "hey goodbye vibes", ordinary English a user will actually say) at 99.2% recall, while 0.9 cuts that to 24.7% for 96.8% recall. Trading 2.4 points of recall to remove roughly a third of the wrong wakes is the better default for a microphone that is always on. Lower it toward 0.5 if the detector misses you; raise it above 0.9 if it fires when you did not speak to it. Recall figures here are synthetic-only, no human has recorded the phrase.
   - type `number`; default `0.9`; allowed: number in [0, 1].
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.

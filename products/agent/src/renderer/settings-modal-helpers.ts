@@ -11,9 +11,10 @@ export { inferSubscriptionRouteReason } from '@goodvibes/engine/terminal-shell/s
  */
 
 import type { SettingEntry } from '../input/settings-modal.ts';
-import { isSecretConfigKey, isSecretReferenceValue } from '../config/secret-config.ts';
+import { isSecretConfigKey } from '../config/secret-config.ts';
+import { isDaemonOwnedConfigKey } from '@goodvibes/engine/platform/platform/config';
 
 export const { formatValue, formatDefault, valueColor, getSettingLabel } = createSettingsValueHelpers<SettingEntry>({
   isSecretKey: isSecretConfigKey,
-  isSecretReference: isSecretReferenceValue,
+  isDaemonKept: isDaemonOwnedConfigKey,
 });

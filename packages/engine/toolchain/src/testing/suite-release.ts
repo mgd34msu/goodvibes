@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { makeTestTempDir } from '../test-runner/temp.js';
-import { nativeReaderCapabilities, sha256, clientReaderMemberAsset, clientReaderPayloadPaths } from '@goodvibes/engine/platform/platform/runtime/self-update';
+import { nativeReaderCapabilities, sha256, clientReaderMemberAsset, clientReaderPayloadPaths, AGENT_RELEASE_EVIDENCE_ID, DAEMON_RELEASE_EVIDENCE_ID, TUI_RELEASE_EVIDENCE_ID } from '@goodvibes/engine/platform/platform/runtime/self-update';
 import { type ClientReaderArtifact, type ClientReaderPackage, type ClientReaderTarget } from '@goodvibes/engine/platform/platform/runtime/self-update';
 
 export function suiteArchive(files: Readonly<Record<string, string>>): Buffer {
@@ -22,9 +22,9 @@ export function suiteArchive(files: Readonly<Record<string, string>>): Buffer {
 export function suiteReleaseFixture() {
   const root = makeTestTempDir('goodvibes-suite-update');
   const programs = [
-    { name: 'goodvibes', packageName: '@goodvibes/tui' },
-    { name: 'goodvibes-agent', packageName: '@goodvibes/agent' },
-    { name: 'goodvibes-daemon', packageName: '@goodvibes/daemon' },
+    { name: 'goodvibes', packageName: TUI_RELEASE_EVIDENCE_ID },
+    { name: 'goodvibes-agent', packageName: AGENT_RELEASE_EVIDENCE_ID },
+    { name: 'goodvibes-daemon', packageName: DAEMON_RELEASE_EVIDENCE_ID },
   ] as const;
   const release = new Map<string, Buffer>(), original = new Map<string, Buffer>();
   const originalPins = new WeakMap<Buffer, { readonly bytes: Buffer; readonly pin: string }>();
@@ -71,7 +71,7 @@ export function suiteReleaseFixture() {
     const version = previous ? '3.1.2' : '3.1.3', library = Buffer.alloc(64, previous ? 1 : 2);
     library.writeUInt32LE(0xfeedfacf, 0); library.writeUInt32LE(0x01000007, 4); library.writeUInt32LE(6, 12);
     const pin = pinOriginal(library); sqlitePins.set(previous, { bytes: library, pin });
-    const owner = Buffer.from(JSON.stringify({ schema: 1, packageName: '@goodvibes/daemon', daemonVersion: version,
+    const owner = Buffer.from(JSON.stringify({ schema: 1, packageName: DAEMON_RELEASE_EVIDENCE_ID, daemonVersion: version,
       target: 'darwin-x64', sqliteVersion: '3.54.0', sourceUrl: 'https://www.sqlite.org/2026/sqlite-autoconf-3540000.tar.gz',
       sourceSha3: 'c'.repeat(64), sha256: pin, size: library.length }));
     if (previous) {
@@ -83,7 +83,7 @@ export function suiteReleaseFixture() {
   // program. Terminal-only Darwin artifacts remain single-file profiles.
   const daemon = join(root, 'goodvibes-daemon'), daemonAsset = 'goodvibes-daemon-macos-x64';
   for (const { previous, metadata } of daemonIdentities) {
-    const files = clientReaderPayloadPaths('@goodvibes/daemon', 'darwin-x64').map(path => {
+    const files = clientReaderPayloadPaths(DAEMON_RELEASE_EVIDENCE_ID, 'darwin-x64').map(path => {
       const bytes = previous ? original.get(path === daemonAsset ? daemon : join(root, path)) : release.get(clientReaderMemberAsset(metadata, path));
       if (!bytes) throw new Error('Missing synthetic Darwin daemon cohort member');
       let pin: string;
@@ -122,7 +122,7 @@ export function terminalFixturePayload(program: 'goodvibes' | 'goodvibes-agent',
   const target: ClientReaderTarget = `${platform}-${arch}`, asset = `${program}-${platform === 'darwin' ? 'macos' : platform}-${arch}`;
   const files = new Map<string, Buffer>([[asset, Buffer.from(source)]]);
   if (platform === 'linux') for (const ending of ['.bun', '.bun.LICENSE.md', '.bun.json']) files.set(asset + ending, Buffer.from(`${version} fixture runtime ${ending}\n`));
-  const metadata: ClientReaderArtifact = { schema: 1, packageName: program === 'goodvibes' ? '@goodvibes/tui' : '@goodvibes/agent', version, target,
+  const metadata: ClientReaderArtifact = { schema: 1, packageName: program === 'goodvibes' ? TUI_RELEASE_EVIDENCE_ID : AGENT_RELEASE_EVIDENCE_ID, version, target,
     sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'a'.repeat(40), readers: nativeReaderCapabilities(version),
     files: [...files].map(([path, bytes]) => ({ path, sha256: fixtureDigest(bytes), mode: path === asset || path === asset + '.bun' ? 0o755 : 0o644, size: bytes.length })),
   };

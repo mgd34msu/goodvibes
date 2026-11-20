@@ -9,11 +9,13 @@ import {
 } from '@goodvibes/engine/platform/platform/runtime/self-update';
 import { retainVerifiedDaemonCiArtifact } from './ci-artifact.ts';
 import { nativeArtifactPins } from '@goodvibes/engine/toolchain';
+import { DAEMON_RELEASE_EVIDENCE_ID } from '@goodvibes/engine/platform/platform/runtime/compiled-native-startup';
 import { assertNativeInstallHost, assertPath, expectedModes, inspectInstallation, inspectInstallationIdentity, targetPaths, validateOwner, type DaemonInstallOwner, type InstallationReceipt } from '../src/cli/native-installation.ts';
 import { daemonCiMetadataPath, daemonCiPayloads, daemonNativeHost, type DaemonNativeTarget } from '../src/cli/native-artifact.ts';
 
 export { assertNativeInstallHost, type DaemonInstallOwner } from '../src/cli/native-installation.ts';
 
+/** The workspace package this source checkout must be. */
 const PACKAGE = '@goodvibes/daemon';
 const LOCAL_ORIGIN = 'https://daemon-local-artifacts.invalid';
 /** Version identity belongs to the selected daemon source manifest, not root release tags. */
@@ -87,7 +89,7 @@ export async function installDaemonNative(options: InstallDaemonNativeOptions): 
   });
   assertDaemonNativePayloadPins(artifact, nativeArtifactPins(verified.retained, join(artifactRoot, 'native'), paths), buffers[paths.indexOf(daemonCiMetadataPath(owner.target))]);
   assertSourceCurrent();
-  const receipt: InstallationReceipt = { schema: 1, packageName: PACKAGE, version: owner.version, artifact };
+  const receipt: InstallationReceipt = { schema: 1, packageName: DAEMON_RELEASE_EVIDENCE_ID, version: owner.version, artifact };
   const checksums = targets.slice(0, -1).map((target, index) => `${artifact.files[index]!.sha256}  ${target.assetName}`).join('\n');
   // This adapter only serves captured local bytes. It cannot fall through to fetch.
   const readLocal: UpdateFetchLike = async url => {

@@ -14,7 +14,7 @@ export interface NativeExecutionMember { readonly path: string; readonly mode: n
 export interface NativeExecutionArtifact extends NativeExecutionSource {
   readonly schema: 1;
   readonly kind: 'daemon-native-execution';
-  readonly packageName: '@goodvibes/daemon';
+  readonly packageName: '@goodvibes-jev/daemon';
   readonly version: string;
   readonly files: readonly (NativeExecutionMember & { readonly sha256: string; readonly size: number })[];
 }

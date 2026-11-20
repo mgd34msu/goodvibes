@@ -60,7 +60,7 @@ export const featureControlSettings: ConfigSettingRow[] = [
     appliesWhen: 'now',
     type: 'boolean',
     description:
-      'Ingest max_context_length from local/custom provider /v1/models endpoints so local models use the provider-reported context window for token budgeting and compaction thresholds. Turn off to use only explicitly configured or static limits.',
+      'Uses the context size a local model\'s server reports, so the conversation is shortened at the right point for that model. Turn off to use only explicitly configured or static limits.',
   },
   {
     key: 'planner.adaptive',
@@ -148,14 +148,14 @@ export const featureControlSettings: ConfigSettingRow[] = [
     appliesWhen: 'now',
     type: 'boolean',
     description:
-      'Adaptive notification suppression: past notifications.burstThreshold notifications of one kind (same domain, level and title) in one collapse window, the rest are counted into that kind\'s notification-history entry instead of each adding one. Critical, milestone, and alert notifications are always exempt. Turn off to record every one as its own entry. Read when the app starts.',
+      'When many notifications of one kind arrive close together, lists the first few and counts the rest in one entry instead of listing each. Critical, milestone, and alert notifications are always exempt. Turn off to record every one as its own entry. Read when the app starts.',
   },
   {
     key: 'notifications.burstThreshold',
     label: 'Repeats shown before notifications go quiet',
     type: 'number',
     description:
-      'How many notifications with the same domain, level and title are recorded as their own entries within one collapse window while notifications.adaptiveSuppression is on; later ones in that window are counted into the same notification-history entry. The window follows the print level (behavior.hitlMode: 5 s quiet, 2 s balanced, 0.5 s operator) and runs from the first notification, so a steady trickle cannot keep one open. Critical, milestone and alert notifications never collapse. Read when the app starts.',
+      'How many notifications of one kind are listed one by one in a short time before the rest are counted together. The window follows the print level (behavior.hitlMode: 5 s quiet, 2 s balanced, 0.5 s operator) and runs from the first notification, so a steady trickle cannot keep one open. Critical, milestone and alert notifications never collapse. Read when the app starts.',
     ...intRange(1, 10_000),
   },
   {
@@ -163,28 +163,28 @@ export const featureControlSettings: ConfigSettingRow[] = [
     label: 'Notify your devices when something needs approval',
     type: 'boolean',
     description:
-      'Device-push fan-out for the approval class: a pending approval pushes to every paired push target. On by default, the toggle exists to silence the class, never as a prerequisite for it to work. Read live per event.',
+      'Sends a push to your paired devices when something is waiting for your approval. On by default, the toggle exists to silence the class, never as a prerequisite for it to work. Read live per event.',
   },
   {
     key: 'notifications.pushNeedsInput',
     label: 'Notify your devices when an agent needs you',
     type: 'boolean',
     description:
-      'Device-push fan-out for the needs-input class: a fleet node blocked on the operator pushes to every paired push target (presence-suppressed when a surface is attached). On by default; the toggle only silences. Read live per event.',
+      'Sends a push to your paired devices when an agent is waiting for you, unless you are already looking. On by default; the toggle only silences. Read live per event.',
   },
   {
     key: 'notifications.pushCompletion',
     label: 'Notify your devices when work finishes',
     type: 'boolean',
     description:
-      'Device-push fan-out for the completion class: a tracked run reaching a terminal state (done/failed/killed) pushes to every paired push target. On by default with zero setup; the toggle only silences. Read live per event.',
+      'Sends a push to your paired devices when a run you follow finishes, fails or is stopped. On by default with zero setup; the toggle only silences. Read live per event.',
   },
   {
     key: 'notifications.blockedEscalationGraceMs',
     label: 'Notify your devices when an agent has waited this long (ms)',
     type: 'number',
     description:
-      'How long a fleet node blocked on the operator may wait for a HUMAN response before a device push is sent REGARDLESS of an attached surface. Presence (an open TUI, a heartbeat) suppresses only the immediate push, never this escalation, a process being attended is not a human answer. A real interaction that clears the block cancels the escalation. Read live when a block is first tracked.',
+      'How long an agent waiting for you may wait before your devices get a push, even while a screen is open. Presence (an open TUI, a heartbeat) suppresses only the immediate push, never this escalation, a process being attended is not a human answer. A real interaction that clears the block cancels the escalation. Read live when a block is first tracked.',
     ...intRange(0, 24 * 60 * 60 * 1000),
   },
   {
@@ -192,7 +192,7 @@ export const featureControlSettings: ConfigSettingRow[] = [
     label: 'Remind again every (ms)',
     type: 'number',
     description:
-      'Interval between the bounded follow-up reminders that fire after the first blocked-too-long escalation, while the block remains unanswered. Read live per reminder.',
+      'Time between reminders after that first push, while the agent is still waiting for you. Read live per reminder.',
     ...intRange(0, 24 * 60 * 60 * 1000),
   },
   {
@@ -200,7 +200,7 @@ export const featureControlSettings: ConfigSettingRow[] = [
     label: 'Most reminders (0 for none)',
     type: 'number',
     description:
-      'Upper bound on follow-up reminders after the first blocked-too-long escalation (0 = escalate exactly once, no reminders). Keeps a long-unanswered block from becoming an unbounded stream of pushes.',
+      'Most reminders after that first push (0 sends the one push and no reminders). Keeps a long-unanswered block from becoming an unbounded stream of pushes.',
     ...intRange(0, 100),
   },
 ];

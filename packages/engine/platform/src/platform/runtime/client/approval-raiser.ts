@@ -73,6 +73,12 @@
  * raised it is still waiting, so a joiner leaving never denies the others.
  * Every raise also carries a deadline, so a record whose cancel could not be
  * delivered (the daemon was unreachable at that moment) still expires.
+ *
+ * A caller that has the decision (from the record, or its own answer once the
+ * write-back finished) gives its hold up too: that release is the evidence the
+ * approval's reading shows as `receipt: delivered`. A decision the daemon
+ * recorded while the stream was down (a restart between the decision and its
+ * event) is read back by the fallback read, then released the same way.
  */
 import { logger, summarizeError } from '../../utils/index.js';
 import { contentDigest } from '../../utils/target-ref.js';
@@ -533,10 +539,16 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
     let left = false;
     // This ask's own write-back of a local decision, which its release waits for.
     let reported: Promise<unknown> = Promise.resolve();
+    let released = false;
     try {
       const raising = raiseOnDaemon(input);
-      // A raise that lands after this caller already left still created a record.
-      void raising.then((raised) => { if (raised && left && !decided) releaseHold(raised, false); }, () => {});
+      // A raise that lands after this caller left (decided or not) still gets its hold given up.
+      void raising.then((raised) => {
+        if (!raised || !left || released) return;
+        released = true;
+        if (decided) void reported.then(() => releaseHold(raised, true), () => releaseHold(raised, true));
+        else releaseHold(raised, false);
+      }, () => {});
       const prompt = options.localPrompt();
       // The prompt is drawn now, not after the raise: the daemon's answer
       // time never decides when the person in front of this surface is asked.
@@ -572,7 +584,8 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
       promptLifetime.abort();
       observations.abort();
       signal?.removeEventListener('abort', abort);
-      if (raisedOnDaemon) {
+      if (raisedOnDaemon && !released) {
+        released = true;
         const raised = raisedOnDaemon;
         // Decided: the hold confirms receipt once this surface's own write-back (if any) finished.
         if (decided) void reported.then(() => releaseHold(raised, true), () => releaseHold(raised, true));

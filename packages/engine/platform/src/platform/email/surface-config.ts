@@ -48,6 +48,7 @@
  * shared one to be wrong.
  */
 
+import type { Secret } from '../security/secret.js';
 import { daemonSecretKeyFor } from '../config/daemon-secret-keys.js';
 import { parseEmailSecretRef } from './email-config.js';
 import type { EmailServiceDeps } from './email-service.js';
@@ -142,7 +143,7 @@ export function configReaderWithOrigins(manager: ConfigOriginSource): ConfigRead
 export interface SecretReader {
   getCredentialMutationState?(): Readonly<{ generation: number; pending: boolean }>;
   onDidInvalidateCredentials?(listener: () => void): () => void;
-  get(key: string): Promise<string | null>;
+  get(key: string): Promise<Secret | null>;
 }
 
 /**
@@ -359,10 +360,10 @@ export function createSurfaceEmailInboxConfigReader(getConfig: ConfigReader): Co
 async function firstStoredSecret(
   secrets: SecretReader,
   keys: readonly string[],
-): Promise<string | null> {
+): Promise<Secret | null> {
   for (const key of keys) {
     const value = await secrets.get(key);
-    if (value !== null && value.length > 0) return value;
+    if (value !== null && !value.empty) return value;
   }
   return null;
 }
@@ -380,7 +381,7 @@ export function createSurfaceEmailSecretReader(secrets: SecretReader, getConfig?
   return {
     ...(secrets.getCredentialMutationState ? { getCredentialMutationState: () => secrets.getCredentialMutationState!() } : {}),
     ...(secrets.onDidInvalidateCredentials ? { onDidInvalidateCredentials: (listener: () => void) => secrets.onDidInvalidateCredentials!(listener) } : {}),
-    async get(key: string): Promise<string | null> {
+    async get(key: string): Promise<Secret | null> {
       if (key === SHARED_PASSWORD_SECRET_KEY) return firstStoredSecret(secrets, sharedPasswordChain(getConfig));
       if (key === SMTP_PASSWORD_SECRET_KEY) return firstStoredSecret(secrets, smtpPasswordChain(getConfig));
       return secrets.get(key);

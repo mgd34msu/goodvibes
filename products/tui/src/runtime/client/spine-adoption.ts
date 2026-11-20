@@ -46,6 +46,7 @@
  * handler takes a narrower `{ mode, baseUrl }` signal instead, so the adapting
  * happens inside this module rather than at the call site.
  */
+import { parseDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
 import { createDaemonHttpTransport, type HostServiceStatus, type DaemonHttpTransportOptions } from '@/runtime/index.ts';
 import { createSessionInputChangeSubscriber, createSpineAdoptionSync as createPlatformSpineAdoptionSync } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import type { SpineAdoptionOptions as PlatformSpineAdoptionOptions } from '@goodvibes-jev/engine/platform/platform/runtime/client';
@@ -94,6 +95,8 @@ export function createSpineAdoptionSync(
           // Input moves are pushed from the daemon's session-update stream, so a hosted
           // session is read when one of its inputs moved, not every two seconds.
           subscribeInputChanges: createSessionInputChangeSubscriber({ baseUrl, getAuthToken: () => authToken }),
+          // This client always goes to the daemon it was made for: answers owed to it are sent only through it.
+          targetId: () => parseDaemonOrigin(baseUrl)?.baseUrl ?? baseUrl,
         },
         sessionList: { list: (limit: number) => httpTransport.operator.sessions.list(limit) },
         memoryTransport: createTuiMemorySpineTransport({ baseUrl, authToken }),

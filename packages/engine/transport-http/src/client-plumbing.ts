@@ -1,5 +1,5 @@
 import type { OmitNamed, RequiredNamedKeys } from '@goodvibes-jev/engine/contracts';
-import { ContractError, admitRegex, type SharedRegexTester } from '@goodvibes-jev/engine/errors';
+import { ContractError, admitRegex, failedRead, present, refusal, type Observed, type SharedRegexTester } from '@goodvibes-jev/engine/errors';
 
 const MAX_SCHEMA_PATTERN_CHARS = 512;
 
@@ -654,8 +654,12 @@ function* walkJsonSchemaStep(
   _depth = 0,
 ): SchemaStep {
   if (typeof schema.$ref === 'string') {
+    // A reference the validator cannot resolve is a failure, never a pass.
     const resolved = resolveLocalSchemaRef(root, schema.$ref);
-    return resolved ? yield* requestSchema(resolved, value, path, root, _depth + 1) : undefined;
+    if (resolved.kind !== 'present') {
+      return { path, expected: `schema reference ${schema.$ref} to resolve`, received: 'a reference that could not be resolved' };
+    }
+    return yield* requestSchema(resolved.value, value, path, root, _depth + 1);
   }
   const excluded = schema.not;
   if (excluded === true || (excluded !== null && typeof excluded === 'object' && !Array.isArray(excluded)
@@ -785,18 +789,26 @@ function* walkJsonSchemaStep(
   return undefined;
 }
 
-function resolveLocalSchemaRef(root: Record<string, unknown>, ref: string): Record<string, unknown> | undefined {
-  if (ref === '#') return root;
-  if (!ref.startsWith('#/')) return undefined;
+/**
+ * A local JSON-pointer reference (`#` or `#/a/b`) read against the schema's
+ * root: the schema it names, or why it could not be read (another form of
+ * reference, or a path that names no schema).
+ */
+function resolveLocalSchemaRef(root: Record<string, unknown>, ref: string): Observed<Record<string, unknown>> {
+  const unresolved = (reason: string): Observed<never> => failedRead(refusal({
+    code: 'SCHEMA_REF_UNRESOLVED', state: 'not validated', reason: `schema reference ${ref} could not be resolved: ${reason}`,
+  }));
+  if (ref === '#') return present(root);
+  if (!ref.startsWith('#/')) return unresolved('only local JSON-pointer references (#/...) are read');
   let current: unknown = root;
   for (const token of ref.slice(2).split('/')) {
-    if (!current || typeof current !== 'object' || Array.isArray(current)) return undefined;
+    if (!current || typeof current !== 'object') return unresolved(`nothing at ${token}`);
     const key = token.replace(/~1/g, '/').replace(/~0/g, '~');
-    current = (current as Record<string, unknown>)[key];
+    current = Array.isArray(current) ? current[Number(key)] : (current as Record<string, unknown>)[key];
   }
   return current && typeof current === 'object' && !Array.isArray(current)
-    ? current as Record<string, unknown>
-    : undefined;
+    ? present(current as Record<string, unknown>)
+    : unresolved('it does not name a schema');
 }
 
 function bestSchemaFailure(failures: readonly (JsonSchemaValidationFailure | undefined)[]): JsonSchemaValidationFailure | undefined {

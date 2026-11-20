@@ -1603,7 +1603,7 @@ Facts about individual tools that change how the owner works with them:
 - `exec` runs background processes: `bg_output <id>` shows the newest 256 KB of a process's output; a finished process's record is kept for 30 minutes.
 - `fetch` uses named services from `~/.goodvibes/tui/services.json` (see "Named API services").
 - `repl` exists only where the command sandbox is on (`sandbox.enabled` and the `exec-sandbox` feature) and bubblewrap is installed.
-- `query` posts a question to the owner inbox and returns at once; the owner answers with `/questions answer <id> <answer>`, in the web UI or from a phone, and the answer reaches the asking session on its next model request, or when that session is next opened.
+- `query` posts a question to the owner inbox and returns at once; the owner answers with `/questions answer <id> <answer>`, in the web UI or from a phone, and the answer reaches the asking session on its next model request, or when that session is next opened. It needs no permission in any mode: its category is `read` and it touches only the app's own state (the inbox), so asking the owner a question is never itself an approval. On a turn a guest started on a channel it is still put to the owner, like every call that reads the app's own state.
 - MCP tools are named `mcp:<server>:<tool>`; the model calls them through the `mcp` tool with `mode: "call"`.
 
 ## Helper agents and worktrees

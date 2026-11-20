@@ -15,6 +15,7 @@ import { createSessionInputChangeSubscriber } from '@goodvibes-jev/engine/platfo
 import type { DaemonVerbCaller, SessionInputsWireClient } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import type { SharedSessionInputRecord } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { Page } from '@goodvibes-jev/engine/errors';
+import { parseDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
 
 /** What `sessions.inputs.list` answers with, tolerating a bare array. */
 /** One page of `sessions.inputs.list`: its inputs, and the cursor to ask again from when the daemon says more remain. */
@@ -42,6 +43,12 @@ export type SessionInputsConnection = () => { readonly baseUrl: string; readonly
  */
 export function createAgentSessionInputsClient(verbs: DaemonVerbCaller, connection?: SessionInputsConnection): SessionInputsWireClient {
   return {
+    // The connected host the verbs dial now: an answer owed to another host waits for that one.
+    targetId() {
+      const resolved = connection?.();
+      return resolved && !('reason' in resolved) ? parseDaemonOrigin(resolved.baseUrl)?.baseUrl ?? resolved.baseUrl : null;
+    },
+
     subscribeInputChanges(onChange, handlers) {
       const resolved = connection?.();
       if (!resolved || 'reason' in resolved) {

@@ -13,6 +13,8 @@ import type { TerminalConversationManager } from './terminal-conversation.js';
 import type { InfiniteBuffer } from './conversation-history.js';
 import type { SelectionManager } from './text-selection.js';
 import type { BookmarkManager } from '@goodvibes-jev/engine/platform/platform/bookmarks';
+import type { ConcealedInputRequest } from './concealed-input.js';
+import { pasteIntoConcealed } from './concealed-input-route.js';
 import { activeTokens } from './renderer/theme.js';
 export interface HandlerContentHost extends PasteRegistryState {
   prompt: string;
@@ -47,6 +49,17 @@ export function createHandlerContentBindings<Host extends HandlerContentHost>(po
   readonly ownCtrlCTimeout: boolean;
 }) {
   function handlePasteForHandler(host: Host): ReturnType<typeof handleClipboardPaste> {
+    // A concealed prompt takes clipboard text into its own state: never a paste
+    // marker, an undo snapshot or the ordinary draft (concealed-input-route.ts).
+    const concealed = (host as { readonly concealedInput?: ConcealedInputRequest | null }).concealedInput ?? null;
+    if (concealed) {
+      const text = host.clipboardSource.pasteFromClipboard();
+      const inserted = text ? pasteIntoConcealed(host, concealed, text) : 0;
+      return {
+        prompt: host.prompt, cursorPos: host.cursorPos, nextImageId: host.nextImageId, nextPasteId: host.nextPasteId,
+        pasted: inserted > 0, kind: inserted > 0 ? 'text' : 'none', lines: inserted > 0 ? text.split(/\r\n|\r|\n/).length : 0,
+      };
+    }
     const result = handleClipboardPaste(
       {
         prompt: host.prompt,

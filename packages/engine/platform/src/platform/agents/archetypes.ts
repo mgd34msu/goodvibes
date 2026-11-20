@@ -196,6 +196,12 @@ export class ArchetypeLoader {
   private cache = new Map<string, AgentArchetype>();
   /** Map from archetype name -> raw markdown body (lazy) */
   private bodyCache = new Map<string, string>();
+  /**
+   * The prompt as run, `@` references read, by archetype name: a form of its
+   * own beside the body as written, so a listing after a run still shows the
+   * text as written. Cleared with the scan that would change it.
+   */
+  private resolvedCache = new Map<string, string>();
   /** The stat signature of the last scan; null before the first. */
   private signature: DirectorySignature | null = null;
   /** Directory to scan for .md files */
@@ -224,6 +230,7 @@ export class ArchetypeLoader {
     if (this.isCurrent()) return;
     this.cache.clear();
     this.bodyCache.clear();
+    this.resolvedCache.clear();
 
     // Seed built-ins first; local markdown files override matching names.
     for (const builtin of BUILT_IN_ARCHETYPES) {
@@ -352,16 +359,19 @@ export class ArchetypeLoader {
     const archetype = this.cache.get(name);
     if (!archetype || archetype.usable === false) return null;
 
-    // Lazy-load body as system prompt if not yet resolved
+    // The body as run: read once per scan, kept apart from the cached entry,
+    // which keeps the text as written (listArchetypes shows that).
+    const owned = copyArchetype(archetype);
     if (!archetype.systemPrompt && this.bodyCache.has(name)) {
-      const body = this.bodyCache.get(name)!;
-      archetype.systemPrompt = archetype.sourcePath
-        ? materializeMarkdownBody(archetype.sourcePath, body)
-        : body;
-      this.bodyCache.delete(name);
+      let resolved = this.resolvedCache.get(name);
+      if (resolved === undefined) {
+        const body = this.bodyCache.get(name)!;
+        resolved = archetype.sourcePath ? materializeMarkdownBody(archetype.sourcePath, body) : body;
+        this.resolvedCache.set(name, resolved);
+      }
+      owned.systemPrompt = resolved;
     }
-
-    return { ...archetype };
+    return owned;
   }
 
   /**
@@ -373,7 +383,9 @@ export class ArchetypeLoader {
     this.scan();
     return Array.from(this.cache.values()).map((a) => {
       const body = options.withPrompts && a.systemPrompt === undefined ? this.bodyCache.get(a.name) : undefined;
-      return body === undefined ? { ...a } : { ...a, systemPrompt: body };
+      const owned = copyArchetype(a);
+      if (body !== undefined) owned.systemPrompt = body;
+      return owned;
     });
   }
 
@@ -403,8 +415,20 @@ export class ArchetypeLoader {
   clear(): void {
     this.cache.clear();
     this.bodyCache.clear();
+    this.resolvedCache.clear();
     this.signature = null;
   }
+}
+
+/** An archetype the caller owns: its arrays are its own, so changing them never reaches the loader's cache. */
+function copyArchetype(archetype: AgentArchetype): AgentArchetype {
+  return {
+    ...archetype,
+    tools: [...archetype.tools],
+    ...(archetype.validationIssues ? { validationIssues: [...archetype.validationIssues] } : {}),
+    ...(archetype.includes ? { includes: [...archetype.includes] } : {}),
+    ...(archetype.sections ? { sections: [...archetype.sections] } : {}),
+  };
 }
 
 const sharedLoaders = new Map<string, ArchetypeLoader>();

@@ -43,6 +43,7 @@ function blank(): Block['rows'][number] {
  */
 export function drawSplashAdditions(viewport: readonly Line[], height: number, width: number, options: { readonly modeKey: string }): Line[] {
   const out = [...viewport];
+  if (process.env['U1A_BEFORE_CAPTURE'] === '1') return out; // TEMPORARY, removed after the before capture
   const view = readSplashAdditions();
   const first = out.findIndex((line) => !isBlank(line));
   if (!view || first < 0) { recordDrawnPrompts(null); return out; }

@@ -144,7 +144,7 @@ function relativize(p: string, cwd?: string): string {
  */
 export function rememberScope(request: PermissionPromptRequest): string {
   const session = buildRememberOptions(request.tool, request.args ?? {}).find((option) => option.tier === 'session');
-  return session?.label.replace(/ this session$/, '') ?? `every ${request.tool} call`;
+  return session?.label.replace(/, this session only$/, '') ?? `every ${request.tool} call`;
 }
 
 function riskColor(level: PermissionRequestAnalysis['riskLevel']): string {

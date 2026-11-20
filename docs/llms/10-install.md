@@ -10,7 +10,7 @@ Terms used here:
 - The web UI is the browser app that the daemon serves.
 - The owner is the person whose installation it is.
 - A provider is a model service (for example OpenRouter or Anthropic).
-- The suite is the three programs plus the web UI bundle, the browser driver and the native libraries, all from one release.
+- The suite is the three programs plus the web UI bundle, the browser driver and the native libraries, all from one release. When a later step of an install fails, the replaced programs are put back and so is the browser driver the run had replaced, so the programs and the driver stay from one release.
 - The install directory is the directory that holds the programs. It is `~/.local/bin` unless an option changes it.
 - A release is a tagged GoodVibes version such as `v3.3.1`, published at `https://github.com/mgd34msu/goodvibes/releases`.
 
@@ -1332,7 +1332,7 @@ Re-run to update from the current checkout. Use ./scripts/uninstall.sh to remove
 
 `--prefix`, `--bin-dir` and `--data-dir` must be three separate directories inside the home directory that do not contain each other, must not be symbolic links (nor have one anywhere in their path), and must not contain `~/.config/systemd/user`. Programs and data must be outside the checkout. A value that starts with `--` is not accepted as an option's value.
 
-On a later run, options that are not given keep the values from the receipt. `--bin-dir` and `--data-dir` cannot change on an update (`Keep existing command/data paths when updating, or uninstall first.`); `--port`, `--workspace` and `--service`/`--no-service` can.
+On a later run, options that are not given keep the values from the receipt. `--bin-dir` and `--data-dir` cannot change on an update (`Keep existing command/data paths when updating, or uninstall first.`); `--port`, `--workspace` and `--service`/`--no-service` can. Before the service unit is written or removed, the receipt records that a service change is under way; a run stopped part way (killed, power lost) is put back by the next run, which restores the unit the receipt records (or removes the one the stopped run wrote) and then proceeds, instead of refusing with `Service has been modified or is not owned`.
 
 Set the Jev key (the hosted decision model's key) before the first install so it lands in the private environment file:
 

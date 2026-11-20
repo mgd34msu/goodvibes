@@ -1079,6 +1079,26 @@ export class SecretsManager {
     return value === null ? null : Secret.of(value, key);
   }
 
+  /**
+   * `key` as the stores hold it, in read order, never the environment: the
+   * value that is still there after a restart without the variable. A literal
+   * is decoded; a stored reference is returned as stored, not followed. An
+   * unreadable store throws, so a caller never reads it as "not stored".
+   */
+  async getStored(key: string): Promise<Secret | null> {
+    for (const path of this.getReadOrder()) {
+      const result = path.secure ? this.readEncryptedStore(path.path) : this.readPlaintextStore(path.path);
+      if (result.status === 'unreadable') {
+        throw new SecretStoreUnreadableError(`The secrets store at ${path.path} exists but cannot be read (${result.reason}).`);
+      }
+      if (result.status !== 'ok' || !Object.hasOwn(result.secrets, key) || !this.#usable(path, key, result.secrets[key])) continue;
+      const stored = result.secrets[key];
+      if (typeof stored !== 'string') continue;
+      return Secret.of(decodeLiteralSecret(stored) ?? stored, key);
+    }
+    return null;
+  }
+
   /** Atomic first creation for daemon-owned material, shared across process creators.
    * References and unreadable tiers cannot be treated as missing material.
    * This does not authorize replacing an existing key or changing its scope.

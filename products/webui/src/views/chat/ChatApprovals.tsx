@@ -47,10 +47,10 @@ export function ChatApprovals({ sessionId }: { sessionId: string }) {
                 </a>
               ) : (
                 <>
-                  <Button size="sm" variant="primary" disabled={busy} onClick={() => actions.approve.mutate({ id: record.id })}>
+                  <Button size="sm" variant="primary" disabled={busy} onClick={() => actions.approve.mutate({ id: record.id, expectedRevision: record.revision })}>
                     Approve
                   </Button>
-                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => actions.deny.mutate({ id: record.id })}>
+                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => actions.deny.mutate({ id: record.id, expectedRevision: record.revision })}>
                     Deny
                   </Button>
                 </>

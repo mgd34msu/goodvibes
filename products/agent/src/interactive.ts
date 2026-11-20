@@ -397,7 +397,7 @@ async function main(prepared: PreparedShellCliRuntime) {
   };
   // The status bar's mode words, recomputed only when the mode in force can change (session-permission-mode.ts);
   // its flash after Shift+Tab, and the unread notices count, each repaint when they change.
-  const modeWords = createModeWordsSource(configManager, () => render());
+  const modeWords = createModeWordsSource(configManager, () => render(), getSharedModeFlash());
   getSharedModeFlash().onChange = () => render();
   unsubs.push(() => modeWords.stop(), getSharedNotificationFeed().subscribe(() => render()));
   // The status bar's branch: read once, then polled the way the terminal app does (a few file stats

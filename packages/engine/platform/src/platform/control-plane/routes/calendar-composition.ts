@@ -24,6 +24,7 @@ import {
   createGoogleCalendarGatewayService,
   type GoogleCalendarGatewayServiceOptions,
 } from '../../google/gateway-calendar-service.js';
+import { revealOrNull, type Secret } from '../../security/secret.js';
 import { createFetchCalDavHttpPort, nodeGoogleFilePort } from '../../google/node.js';
 import { daemonGoogleConnectionOwner } from '../../google/daemon-connection.js';
 import type { CalDavHttpPort } from '../../google/caldav-client.js';
@@ -44,7 +45,7 @@ import { GatewayVerbError } from './gateway-verb-error.js';
 /** The slice of the verb-group deps this composition needs. */
 export interface CalendarCompositionDeps {
   readonly configManager: { get(key: never): unknown };
-  readonly secretsManager: { get(key: string): Promise<string | null> };
+  readonly secretsManager: { get(key: string): Promise<Secret | null> };
   /** Absent in narrow compositions; the adoption probe needs a real home. */
   readonly homeDirectory?: string | undefined;
   /** Test seam: overrides the whole service, so no real store is touched. */
@@ -126,7 +127,7 @@ export function createDaemonCalendarGatewayService(
       // reads as "not configured" instead of surfacing Invalid config path as
       // a 500 from a route.
       configGet: (key) => deps.configManager.get(key as never),
-      secretGet: (key) => deps.secretsManager.get(key),
+      secretGet: async (key) => revealOrNull(await deps.secretsManager.get(key), 'dispatch'),
     },
     fetch: deps.calendarFetch ?? { fetch: (url, init) => fetch(url, init) },
     // The daemon's one token manager, shared with the Gmail reader and the start-up check.

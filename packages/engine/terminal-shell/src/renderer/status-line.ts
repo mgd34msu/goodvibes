@@ -212,9 +212,10 @@ interface AsksForm {
 function asksWordRuns(asks: StatusAsks, form: AsksForm): Run[] {
     const t = activeTokens();
     const flash = asks.flash === true;
-    // Inverse while flashing: the whole of the words on the text color.
+    // Inverse while flashing: the whole of the words on the text color, in the
+    // panel color (the theme's background can be the terminal's own, no color).
     const paint = (text: string, fg: string, bold?: boolean): Run => flash
-        ? { text, fg: t.background, bg: t.text, bold: true }
+        ? { text, fg: t.backgroundPanel, bg: t.text, bold: true }
         : { text, fg, bold };
     const runs: Run[] = [paint('Asks: ', t.textFaint), paint(asks.chosen, t.textMuted, false)];
     if (asks.inForce) {

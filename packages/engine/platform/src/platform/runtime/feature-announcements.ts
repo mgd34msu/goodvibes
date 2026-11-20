@@ -40,7 +40,7 @@ interface AnnouncementFileState {
 }
 
 /** The outcome of {@link FeatureAnnouncementStore.recordOnce}. */
-export type AnnouncementRecordOutcome = 'recorded' | 'announced-before' | 'busy';
+export type AnnouncementRecordOutcome = 'recorded' | 'recorded-unsaved' | 'announced-before' | 'busy';
 
 /** How many undelivered lines the pending queue keeps; older ones are dropped first. */
 export const PENDING_ANNOUNCEMENTS_KEPT = 50;
@@ -108,7 +108,8 @@ export class FeatureAnnouncementStore {
     }
   }
 
-  private persist(state: AnnouncementFileState, context: string): void {
+  /** Writes the store; returns whether the write landed (a failure is logged and said, never treated as saved). */
+  private persist(state: AnnouncementFileState, context: string): boolean {
     const announced: Record<string, number> = {};
     for (const [id, at] of Object.entries(state.announced)) if (!isRetiredRunReceiptId(id)) announced[id] = at;
     const pending = state.pending.length > PENDING_ANNOUNCEMENTS_KEPT
@@ -116,6 +117,7 @@ export class FeatureAnnouncementStore {
       : state.pending;
     try {
       writeJsonFileAtomic(this.path, { announced, pending });
+      return true;
     } catch (err) {
       // An unwritable store must never block the feature; the announcement
       // may repeat on the next start, which is noisy but honest.
@@ -123,6 +125,7 @@ export class FeatureAnnouncementStore {
         context,
         error: err instanceof Error ? err.message : String(err),
       });
+      return false;
     }
   }
 
@@ -140,9 +143,12 @@ export class FeatureAnnouncementStore {
   }
 
   /**
-   * Record an announcement once per install. `recorded`: this call made it (the
-   * caller announces); `announced-before`: it was already made (stay silent);
-   * `busy`: another process held the store, nothing was written (try again later).
+   * Record an announcement once per install. `recorded`: this call made it and
+   * it is saved (the caller announces); `recorded-unsaved`: this call made it but
+   * the save failed (the caller still announces; it will be announced again on
+   * a later start, noisy but honest); `announced-before`: it was already made
+   * (stay silent); `busy`: another process held the store, nothing was written
+   * (try again later).
    * With `text`, the first record also enqueues the line for surface delivery
    * (see drainPending), so the announcement reaches a rendering surface, not
    * only the log.
@@ -156,29 +162,31 @@ export class FeatureAnnouncementStore {
       if (typeof text === 'string' && text.length > 0) {
         state.pending.push({ id, text, at });
       }
-      this.persist(state, id);
-      return 'recorded';
+      return this.persist(state, id) ? 'recorded' : 'recorded-unsaved';
     });
     return attempt.ran ? attempt.value : 'busy';
   }
 
-  /** {@link recordOnce} as a boolean: true only when this call made the announcement. */
+  /** {@link recordOnce} as a boolean: true only when this call made the announcement (saved or not). */
   record(id: string, text?: string): boolean {
-    return this.recordOnce(id, text) === 'recorded';
+    const outcome = this.recordOnce(id, text);
+    return outcome === 'recorded' || outcome === 'recorded-unsaved';
   }
 
   /**
    * Queue a recurring notice for surface delivery without an announce-once id
    * (a run receipt). The queue keeps the newest {@link PENDING_ANNOUNCEMENTS_KEPT}.
-   * Returns false when another process held the store and nothing was queued.
+   * Returns false when nothing was queued: another process held the store, or
+   * the write failed.
    */
   notify(id: string, text: string): boolean {
     if (text.length === 0) return false;
-    return this.locked(() => {
+    const attempt = this.locked(() => {
       const state = this.read();
       state.pending.push({ id, text, at: Date.now() });
-      this.persist(state, id);
-    }).ran;
+      return this.persist(state, id);
+    });
+    return attempt.ran && attempt.value;
   }
 
   /**
@@ -192,8 +200,8 @@ export class FeatureAnnouncementStore {
       const state = this.read();
       if (state.pending.length === 0) return [];
       const pending = state.pending;
-      this.persist({ announced: state.announced, pending: [] }, 'drain');
-      return pending;
+      // Handed out only once cleared on disk: a failed clear keeps them queued for the next drain, never handed out twice.
+      return this.persist({ announced: state.announced, pending: [] }, 'drain') ? pending : [];
     });
     return attempt.ran ? attempt.value : [];
   }
@@ -208,33 +216,35 @@ export class FeatureAnnouncementStore {
    * Forgets every announced id the predicate selects (and any of them still
    * pending), so a condition that went away and comes back is announced again.
    * Reads without the lock first so a store with nothing to forget is not rewritten.
-   * Returns false when another process held the store and nothing was forgotten
+   * Returns false when nothing was forgotten (another process held the store, or the write failed)
    * (the callers run at every start or settings load, so the next one retries).
    */
   forgetMatching(selects: (id: string) => boolean): boolean {
     if (!Object.keys(this.read().announced).some(selects)) return true;
-    return this.locked(() => {
+    const attempt = this.locked(() => {
       const state = this.read();
       const announced: Record<string, number> = {};
       for (const [id, at] of Object.entries(state.announced)) if (!selects(id)) announced[id] = at;
       const pending = state.pending.filter((entry) => !selects(entry.id));
-      if (Object.keys(announced).length === Object.keys(state.announced).length && pending.length === state.pending.length) return;
-      this.persist({ announced, pending }, 'forget');
-    }).ran;
+      if (Object.keys(announced).length === Object.keys(state.announced).length && pending.length === state.pending.length) return true;
+      return this.persist({ announced, pending }, 'forget');
+    });
+    return attempt.ran && attempt.value;
   }
 
   /**
    * Removes the named announcements from the pending queue; ids not pending are
-   * ignored. Returns false when another process held the store and nothing was
-   * removed: the caller keeps the acknowledgement and tries again.
+   * ignored. Returns false when nothing was removed (another process held the
+   * store, or the write failed): the caller keeps the acknowledgement and tries again.
    */
   acknowledge(ids: ReadonlySet<string>): boolean {
-    return this.locked(() => {
+    const attempt = this.locked(() => {
       const state = this.read();
       const remaining = state.pending.filter((entry) => !ids.has(entry.id));
-      if (remaining.length === state.pending.length) return;
-      this.persist({ announced: state.announced, pending: remaining }, 'acknowledge');
-    }).ran;
+      if (remaining.length === state.pending.length) return true;
+      return this.persist({ announced: state.announced, pending: remaining }, 'acknowledge');
+    });
+    return attempt.ran && attempt.value;
   }
 }
 

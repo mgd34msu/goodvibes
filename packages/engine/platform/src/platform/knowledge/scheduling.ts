@@ -666,17 +666,19 @@ export class KnowledgeScheduleService {
       }
       const settledAt = Date.now();
       const following = getNextAutomationOccurrence(schedule.schedule, settledAt);
-      await this.context.store.upsertSchedule({
-        id: schedule.id,
-        jobId: schedule.jobId,
-        label: schedule.label,
+      // Written onto the schedule only if it is still the one this run started from: a disable, edit or delete
+      // made while the run went wins, and this run's write-back is discarded (only its own columns are ever set).
+      const written = await this.context.store.completeScheduleRun(schedule, {
         // A one-time schedule has no next occurrence: it ran, so it is finished.
         enabled: following !== undefined,
-        schedule: schedule.schedule,
         lastRunAt: completed ? settledAt : schedule.lastRunAt,
-        nextRunAt: following ?? null,
-        metadata: schedule.metadata,
+        nextRunAt: following,
       });
+      if (!written.applied) {
+        logger.info('A scheduled knowledge run ended after its schedule was changed, disabled or removed; the run\'s schedule update was discarded', {
+          scheduleId: schedule.id, jobId: schedule.jobId, now: written.current === null ? 'removed' : written.current.enabled ? 'changed' : 'disabled',
+        });
+      }
       recorded = true;
     } finally {
       // A failed run or schedule write must not leave the schedule unarmed;

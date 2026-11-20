@@ -127,8 +127,10 @@ import {
   type KnowledgeSpaceDeleteResult,
 } from './store-space-delete.js';
 import {
+  completeKnowledgeScheduleRun,
   deleteKnowledgeSchedule,
   upsertKnowledgeSchedule,
+  type KnowledgeScheduleRunWrite,
 } from './store-schedules.js';
 import {
   edgesForKnowledgeStore,
@@ -2021,6 +2023,12 @@ export class KnowledgeStore {
   async deleteSchedule(id: string): Promise<boolean> {
     await this.init();
     return deleteKnowledgeSchedule(this.sqlite, this.schedules, id);
+  }
+
+  /** A scheduled run's end, written only onto the schedule it started from (see completeKnowledgeScheduleRun). */
+  async completeScheduleRun(expected: KnowledgeScheduleRecord, write: KnowledgeScheduleRunWrite): ReturnType<typeof completeKnowledgeScheduleRun> {
+    await this.init();
+    return completeKnowledgeScheduleRun(this.sqlite, this.schedules, expected, write);
   }
 
   async planKnowledgeSpaceDelete(spaceId: string): Promise<KnowledgeSpaceDeleteResult> {

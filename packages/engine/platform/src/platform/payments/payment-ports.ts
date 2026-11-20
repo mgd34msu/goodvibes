@@ -23,7 +23,13 @@ export interface PurchaseLedger {
   /** Synchronous evidence check before admitting a new checkout and again at
    * the submit actuator. An unreadable ledger must not become empty history. */
   assertAvailable?(): void;
-  record(entry: PurchaseRecord): Promise<void>;
+  /**
+   * `ownerNotice`: the report the owner is owed for this purchase, saved in the
+   * same write as the record, so a restart before it is sent still sends it.
+   */
+  record(entry: PurchaseRecord, options?: { readonly ownerNotice?: string | undefined }): Promise<void>;
+  /** The owed report was handed to a channel that took it: it is no longer owed (one write). */
+  settleOwnerNotice?(purchaseId: string): Promise<void>;
   /**
    * Optional lookup. Boot recovery uses it to verify that a `submitted`
    * journal record really has its purchase on the ledger before closing the

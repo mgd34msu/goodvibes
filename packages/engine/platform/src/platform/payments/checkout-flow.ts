@@ -1346,7 +1346,9 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     merchantDiscovered: request.merchantDiscovered ?? false,
     ...(request.standingAuthorizationId === undefined ? {} : { standingAuthorizationId: request.standingAuthorizationId }),
   };
-  await deps.purchases.record(record);
+  // The owner's report is owed from the record's own write, so a restart before it is sent still sends it.
+  const ownerReport = renderPurchaseReport({ facts, merchantOrderId: submission.orderId, verified: submission.verified });
+  await deps.purchases.record(record, { ownerNotice: ownerReport });
   await registry.advance(request.purchaseId, 'submitted', {}, now());
   // The journal is the only thing that lets a restart settle a hold whose commit did not reach
   // the budget file. Closing it while that write is still pending would strand the hold.
@@ -1374,14 +1376,17 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   // world disagreeing about whether it did.
   try {
     addressCurrent();
-    await notifier.deliver({
+    const deliveries = await notifier.deliver({
       kind: 'notice',
-      message: renderPurchaseReport({ facts, merchantOrderId: submission.orderId, verified: submission.verified }),
+      message: ownerReport,
       signal, assertCurrent: addressCurrent,
     });
+    // Owed until a channel took it; the next start sends one still owed.
+    if (deliveries.some((delivery) => delivery.delivered)) await deps.purchases.settleOwnerNotice?.(request.purchaseId);
   } catch {
-    // Nothing to unwind and nothing to retry. The purchase is recorded, and
-    // `payments.purchases.list` is the durable answer to "what did you buy".
+    // Nothing to unwind. The purchase is recorded, the report stays owed and
+    // is sent at the next start, and `payments.purchases.list` is the durable
+    // answer to "what did you buy".
   }
 
   return { kind: 'purchased', record, orderId: submission.orderId };

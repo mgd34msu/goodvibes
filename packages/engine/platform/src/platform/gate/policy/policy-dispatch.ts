@@ -138,7 +138,8 @@ async function handleLoad(args: string[], context: PolicyCommandContext): Promis
     context.print(`[policy] Load failed, the current and candidate bundles are unchanged: ${summarizeError(error)}`);
     return;
   }
-  const result = registry.loadCandidate(bundle);
+  // The file is kept with the candidate, so the activation record names it and a restart reads this bundle.
+  const result = registry.loadCandidate(bundle, { sourcePath: resolve(context.workingDirectory(), file) });
   if (!result.ok) {
     context.print(`[policy] Load failed: ${result.error ?? 'unknown error'}`);
     return;

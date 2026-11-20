@@ -13,27 +13,30 @@
  */
 
 import { readApprovalEditHunks as readPlatformEditHunks } from '@goodvibes-jev/engine/platform/platform/control-plane/approval-hunk-apply';
-import type { ApprovalActionResult, ApprovalAttribution, ApprovalAuditRecord, ApprovalEditHunk, ApprovalRecord, ApprovalRememberOption, ApprovalStatus } from './goodvibes';
+import type { ApprovalReading } from '@goodvibes-jev/engine/platform/platform/control-plane/approval-lifecycle';
+import type { ApprovalActionResult, ApprovalAttribution, ApprovalAuditRecord, ApprovalEditHunk, ApprovalRecord, ApprovalRememberOption } from './goodvibes';
 
-/** APPROVAL_STATUS_SCHEMA (operator-contract-schemas-runtime.ts) at time of writing. */
-export const KNOWN_APPROVAL_STATUSES: readonly ApprovalStatus[] = [
-  'pending',
-  'claimed',
-  'approved',
-  'denied',
-  'cancelled',
-  'expired',
-];
+export type { ApprovalReading };
 
-const TERMINAL_APPROVAL_STATUSES = new Set<ApprovalStatus>(['approved', 'denied', 'cancelled', 'expired']);
-
-export function isTerminalApprovalStatus(status: ApprovalStatus): boolean {
-  return TERMINAL_APPROVAL_STATUSES.has(status);
+/**
+ * The daemon's reading of an approval for this signed-in person
+ * (approval-lifecycle.ts): what is waiting, on whom, until when, what this
+ * person may do now, how it ended, whether the asker received it. This surface
+ * words it its own way; it never decides any of it from the status itself.
+ */
+export function approvalReading(record: ApprovalRecord): ApprovalReading {
+  return record.reading as ApprovalReading;
 }
 
-/** True only for a status this surface may act on directly (never claimed-by-another, never terminal). */
+/** True once the approval is decided or ended (the reading's phase), never while it waits. */
+export function isTerminalApproval(record: ApprovalRecord): boolean {
+  return approvalReading(record).phase !== 'waiting';
+}
+
+/** True when this person may answer it now (the reading's allowed actions). */
 export function isActionableApproval(record: ApprovalRecord): boolean {
-  return record.status === 'pending';
+  const allowed = approvalReading(record).allowedActions;
+  return allowed.includes('approve') || allowed.includes('deny');
 }
 
 /**

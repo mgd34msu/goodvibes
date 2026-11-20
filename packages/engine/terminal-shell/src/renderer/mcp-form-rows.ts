@@ -50,12 +50,14 @@ export function formRows(workspace: {
   return workspace.formFields.map((field, index) => {
     const selected = index === workspace.formIndex;
     const isAction = field.id === 'save' || field.id === 'cancel';
-    // The field being edited shows its real text; every other row hides literal secrets.
+    // Environment values and secret-looking launch arguments stay hidden on
+    // every row, the one being edited included: a value typed there is masked
+    // as it is typed, and a saved one is replaced by typing over it, never shown.
     const shown = field.id === 'env' ? maskEnvText(field.value) : field.id === 'args' ? formatArgs(maskLaunchArgs(parseArgs(field.value))) : field.value;
     const value = isAction ? undefined : shown.length > 0 ? shown : '(empty)';
     return {
       label: field.label,
-      desc: value !== undefined && selected && field.editable ? `${field.value}▏` : value,
+      desc: value !== undefined && selected && field.editable ? `${shown}▏` : value,
       right: !isAction && !field.editable ? '←→' : undefined,
       labelFg: field.id === 'save' ? t.success : field.id === 'cancel' ? t.warning : undefined,
       bold: isAction,

@@ -61,6 +61,12 @@ const PURCHASES_FILE_VERSION = 1;
 export const MAX_PURCHASE_LIST_LIMIT = 500;
 const missing = (error: unknown): boolean => error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
 
+/** The owed owner reports kept in the purchases file: purchase id -> report text. Anything malformed reads as nothing owed. */
+function readOwedNotices(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+}
+
 export class PaymentPurchaseLedgerError extends Error {
   override readonly name = 'PaymentPurchaseLedgerError';
   constructor(readonly kind: 'unavailable' | 'invalid-record' | 'write-uncertain') {
@@ -145,7 +151,7 @@ export class DaemonPurchaseLedger implements PurchaseLedger {
 
   /** Detach before the lock await. An observed merchant submit must still be
    * recorded when its initiating request or owner has since been cancelled. */
-  async record(entry: PurchaseRecord): Promise<void> {
+  async record(entry: PurchaseRecord, options: { readonly ownerNotice?: string | undefined } = {}): Promise<void> {
     const row = capturePurchaseRecord(entry);
     if (!row) throw new PaymentPurchaseLedgerError('invalid-record');
     let release: (() => void) | undefined;
@@ -153,7 +159,10 @@ export class DaemonPurchaseLedger implements PurchaseLedger {
       release = await acquireCrossProcessLock(`${this.filePath}.mutation.lock`, { totalTimeoutMs: 10_000 });
       const previous = this.read();
       const rows = Object.freeze([...previous.rows, row]);
-      const envelope = { ...previous.envelope, version: PURCHASES_FILE_VERSION, purchases: rows };
+      // The owner's report is owed from the same write as the record (no write of its own).
+      const owed = options.ownerNotice === undefined ? undefined
+        : { ...readOwedNotices(previous.envelope['ownerNoticesOwed']), [row.purchaseId]: options.ownerNotice };
+      const envelope = { ...previous.envelope, version: PURCHASES_FILE_VERSION, purchases: rows, ...(owed ? { ownerNoticesOwed: owed } : {}) };
       const contents = `${JSON.stringify(envelope, null, 2)}\n`;
       atomicWriteFileSync(this.filePath, contents, { mode: 0o600, mkdirp: true,
         assertCurrent: () => this.assertFileCurrent(previous.observation) });
@@ -313,6 +322,37 @@ export class DaemonPurchaseLedger implements PurchaseLedger {
       if (!observation.bytes.equals(Buffer.from(contents, 'utf8'))) throw new Error();
       this.cached = { ...previous, observation, envelope };
       return true;
+    } catch (error) {
+      if (error instanceof PaymentPurchaseLedgerError) throw error;
+      this.unavailable = true;
+      throw new PaymentPurchaseLedgerError('write-uncertain');
+    } finally {
+      try { release?.(); }
+      catch { this.unavailable = true; throw new PaymentPurchaseLedgerError('write-uncertain'); }
+    }
+  }
+
+  /** Reports owed to the owner for recorded purchases (id -> text): sent at start when the process stopped before sending them. */
+  owedOwnerNotices(): ReadonlyMap<string, string> {
+    return new Map(Object.entries(readOwedNotices(this.read().envelope['ownerNoticesOwed'])));
+  }
+
+  /** The owed report was sent: removed from the file (one write). No-op when nothing is owed for it. */
+  async settleOwnerNotice(purchaseId: string): Promise<void> {
+    let release: (() => void) | undefined;
+    try {
+      release = await acquireCrossProcessLock(`${this.filePath}.mutation.lock`, { totalTimeoutMs: 10_000 });
+      const previous = this.read();
+      const owed = readOwedNotices(previous.envelope['ownerNoticesOwed']);
+      if (!(purchaseId in owed)) return;
+      const { [purchaseId]: _settled, ...remaining } = owed;
+      const envelope = { ...previous.envelope, version: PURCHASES_FILE_VERSION, purchases: previous.rows, ownerNoticesOwed: remaining };
+      const contents = `${JSON.stringify(envelope, null, 2)}\n`;
+      atomicWriteFileSync(this.filePath, contents, { mode: 0o600, mkdirp: true,
+        assertCurrent: () => this.assertFileCurrent(previous.observation) });
+      const observation = readFileObservation(this.filePath);
+      if (!observation.bytes.equals(Buffer.from(contents, 'utf8'))) throw new Error();
+      this.cached = { ...previous, observation, envelope };
     } catch (error) {
       if (error instanceof PaymentPurchaseLedgerError) throw error;
       this.unavailable = true;

@@ -6,6 +6,7 @@
  * store, so a token refreshed for one serves the others and a grant Google has
  * declared dead is latched once for all of them.
  */
+import { revealOrNull, type Secret } from '../security/secret.js';
 import { GoogleConnectionOwner, sharedGoogleConnectionOwner, subscribeGoogleCredentialChanges } from './connection-owner.js';
 import type { GoogleApiFetchPort } from './api-client.js';
 import type { GoogleFetchPort } from './oauth-loopback.js';
@@ -15,7 +16,7 @@ import type { GoogleFilePort } from './credential-adoption.js';
 
 export interface DaemonGoogleConnectionDeps {
   readonly configManager: { get(key: never): unknown };
-  readonly secretsManager: { get(key: string): Promise<string | null> };
+  readonly secretsManager: { get(key: string): Promise<Secret | null> };
   readonly homeDirectory: string;
   /** Where the adopted credential files are read (the node file port in the daemon). */
   readonly files: GoogleFilePort;
@@ -54,7 +55,7 @@ export function daemonGoogleConnectionOwner(deps: DaemonGoogleConnectionDeps): G
         // connector reads every value through its own guard, so an absent
         // section reads as "not configured".
         configGet: (key) => deps.configManager.get(key as never),
-        secretGet: (key) => deps.secretsManager.get(key),
+        secretGet: async (key) => revealOrNull(await deps.secretsManager.get(key), 'dispatch'),
       },
       fetch: deps.fetch ?? { fetch: (url: string, init: RequestInit) => fetch(url, init) },
       ...(config === undefined && secrets === undefined ? {} : {

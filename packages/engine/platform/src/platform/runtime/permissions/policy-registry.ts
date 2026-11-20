@@ -27,7 +27,7 @@ import type { SimulationMode } from './types.js';
 import type { PolicyImpact } from './policy-impact.js';
 import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 import { revisionSource, type RevisionSource } from '../../utils/revision.js';
-import { createHash } from 'node:crypto';
+import { contentDigest } from '../../utils/target-ref.js';
 import { readFileSync } from 'node:fs';
 import { writeDocument } from '../../utils/atomic-json-store.js';
 import { summarizeError } from '../../utils/error-display.js';
@@ -81,6 +81,8 @@ export interface PolicyBundleVersion {
   rolledBackAt?: string | undefined;
   /** What the candidate would decide differently on this installation's recorded calls, from `/policy simulate`. */
   impact?: PolicyImpact | undefined;
+  /** The absolute path the bundle was read from, when it came from a file: the activation record names it. */
+  sourcePath?: string | undefined;
 }
 
 /**
@@ -99,6 +101,10 @@ export interface PolicyDiffResult {
   changed: Array<{ ruleId: string; from: PolicyRule; to: PolicyRule }>;
   /** Rules identical in both bundles. */
   unchanged: PolicyRule[];
+  /** Rules found at a different position (rules are evaluated in order, so a move can change which one decides). */
+  moved: Array<{ ruleId: string; from: number; to: number }>;
+  /** Ids used by more than one rule in a bundle: each copy is compared at its own position, never collapsed. */
+  duplicateIds: Array<{ ruleId: string; bundle: 'from' | 'to'; count: number }>;
   /** Total count of changed rules (added + removed + modified). */
   totalChanges: number;
 }
@@ -123,15 +129,18 @@ export interface PromoteResult {
  * Result of a rollback operation.
  */
 /** What the activation record keeps about the active bundle. */
-interface ActivationRecord {
+/** Which bundle is active, as promote and rollback record it for the next start. */
+export interface PolicyActivationRecord {
   readonly bundleId: string;
   readonly payloadHash: string;
   readonly activatedAt: string;
+  /** The file the active bundle was read from; the next start reads this one, not the configured path, when they differ. */
+  readonly bundlePath?: string | undefined;
 }
 
 /** A hash of a bundle's payload, so a changed file is told apart from the one promoted. */
 function payloadHash(bundle: SignedPolicyBundle<PolicyBundlePayload>): string {
-  return createHash('sha256').update(JSON.stringify(bundle.payload)).digest('hex');
+  return contentDigest(bundle.payload);
 }
 
 export interface RollbackResult {
@@ -218,6 +227,7 @@ export class PolicyRegistry {
    */
   public loadCandidate(
     bundle: SignedPolicyBundle<PolicyBundlePayload>,
+    options: { readonly sourcePath?: string | undefined } = {},
   ): PolicyLoadResult {
     const result = loadPolicyBundle(bundle, this._loaderOptions);
 
@@ -231,6 +241,7 @@ export class PolicyRegistry {
       rules: result.rules ?? [],
       state: 'loaded',
       loadedAt: new Date().toISOString(),
+      ...(options.sourcePath !== undefined ? { sourcePath: options.sourcePath } : {}),
     };
 
     this._publicationRevision++;
@@ -384,12 +395,14 @@ export class PolicyRegistry {
     const path = this._activationRecordPath;
     const candidate = this._candidate;
     if (!path || !candidate || this._current) return { restored: false };
-    let record: ActivationRecord | null = null;
-    try {
-      const parsed = JSON.parse(readFileSync(path, 'utf-8')) as Partial<ActivationRecord> | null;
-      if (parsed && typeof parsed.bundleId === 'string' && typeof parsed.payloadHash === 'string') record = parsed as ActivationRecord;
-    } catch { return { restored: false }; }
-    if (!record || record.bundleId !== candidate.bundle.bundleId) return { restored: false };
+    const record = this.readActivationRecord();
+    if (record === 'unreadable') {
+      return { restored: false, reason: `the record of which policy bundle was active (${path}) could not be read, so "${candidate.bundle.bundleId}" is loaded as a candidate only. Run /policy simulate, then /policy promote, to enforce it.` };
+    }
+    if (!record) return { restored: false };
+    if (record.bundleId !== candidate.bundle.bundleId) {
+      return { restored: false, reason: `policy bundle "${record.bundleId}" was the active one${record.bundlePath ? ` (${record.bundlePath})` : ''}, but "${candidate.bundle.bundleId}" was loaded at start; it is a candidate only and "${record.bundleId}" is not enforced. Load and promote the bundle you want enforced.` };
+    }
     if (record.payloadHash !== payloadHash(candidate.bundle)) {
       return { restored: false, reason: `policy bundle "${record.bundleId}" was promoted, but its rules changed on disk since; it is loaded as a candidate only. Run /policy simulate, then /policy promote, to enforce it again.` };
     }
@@ -399,13 +412,32 @@ export class PolicyRegistry {
     return { restored: true };
   }
 
+  /**
+   * The activation record as written, null when there is none, 'unreadable'
+   * when one is there and cannot be read. The host reads it at start to load
+   * the bundle that was active (its path) before the configured one.
+   */
+  public readActivationRecord(): PolicyActivationRecord | null | 'unreadable' {
+    const path = this._activationRecordPath;
+    if (!path) return null;
+    let text: string;
+    try { text = readFileSync(path, 'utf-8'); }
+    catch (error) { return (error as NodeJS.ErrnoException | null)?.code === 'ENOENT' ? null : 'unreadable'; }
+    try {
+      const parsed = JSON.parse(text) as Partial<PolicyActivationRecord> | null;
+      if (parsed && typeof parsed.bundleId === 'string' && typeof parsed.payloadHash === 'string') return parsed as PolicyActivationRecord;
+    } catch { /* falls through */ }
+    return 'unreadable';
+  }
+
   /** Write the activation record; returns a sentence when it could not be kept. */
   private _recordActivation(): string | undefined {
     const path = this._activationRecordPath;
     const current = this._current;
     if (!path || !current) return undefined;
     try {
-      writeDocument(path, { bundleId: current.bundle.bundleId, payloadHash: payloadHash(current.bundle), activatedAt: current.activatedAt ?? new Date().toISOString() } satisfies ActivationRecord);
+      writeDocument(path, { bundleId: current.bundle.bundleId, payloadHash: payloadHash(current.bundle), activatedAt: current.activatedAt ?? new Date().toISOString(),
+        ...(current.sourcePath !== undefined ? { bundlePath: current.sourcePath } : {}) } satisfies PolicyActivationRecord);
       return undefined;
     } catch (error) {
       return `The active policy could not be recorded (${summarizeError(error)}); after a restart the bundle is loaded as a candidate and must be promoted again.`;
@@ -477,31 +509,48 @@ export class PolicyRegistry {
     const fromId = this._current?.bundle.bundleId ?? 'unknown';
     const toId = this._candidate?.bundle.bundleId ?? 'unknown';
 
-    const fromMap = new Map(from.map((r) => [r.id, r]));
-    const toMap = new Map(to.map((r) => [r.id, r]));
+    // Rules are matched by (id, occurrence): the n-th rule with an id in one
+    // bundle against the n-th with that id in the other. A duplicated id is
+    // reported as such, and each copy is compared; nothing collapses into one.
+    const keyed = (rules: readonly PolicyRule[]): Map<string, { rule: PolicyRule; position: number }> => {
+      const seen = new Map<string, number>();
+      const out = new Map<string, { rule: PolicyRule; position: number }>();
+      rules.forEach((rule, position) => {
+        const occurrence = seen.get(rule.id) ?? 0;
+        seen.set(rule.id, occurrence + 1);
+        out.set(`${rule.id}\u0000${occurrence}`, { rule, position });
+      });
+      return out;
+    };
+    const duplicates = (rules: readonly PolicyRule[], bundle: 'from' | 'to'): Array<{ ruleId: string; bundle: 'from' | 'to'; count: number }> => {
+      const counts = new Map<string, number>();
+      for (const rule of rules) counts.set(rule.id, (counts.get(rule.id) ?? 0) + 1);
+      return [...counts].filter(([, count]) => count > 1).map(([ruleId, count]) => ({ ruleId, bundle, count }));
+    };
+    const fromMap = keyed(from);
+    const toMap = keyed(to);
 
     const removed: PolicyRule[] = [];
     const added: PolicyRule[] = [];
     const changed: Array<{ ruleId: string; from: PolicyRule; to: PolicyRule }> = [];
     const unchanged: PolicyRule[] = [];
+    const moved: Array<{ ruleId: string; from: number; to: number }> = [];
 
-    for (const [id, fromRule] of fromMap) {
-      const toRule = toMap.get(id);
-      if (!toRule) {
-        removed.push(fromRule);
-      // Safe: PolicyRule objects are constructed uniformly with consistent key ordering
-      // (all shapes extend BaseRule and are created only through controlled factory paths),
-      // so JSON.stringify produces a stable, deterministic representation for deep equality.
-      } else if (JSON.stringify(fromRule) !== JSON.stringify(toRule)) {
-        changed.push({ ruleId: id, from: fromRule, to: toRule });
+    for (const [key, entry] of fromMap) {
+      const toEntry = toMap.get(key);
+      if (!toEntry) {
+        removed.push(entry.rule);
+      } else if (contentDigest(entry.rule) !== contentDigest(toEntry.rule)) {
+        changed.push({ ruleId: entry.rule.id, from: entry.rule, to: toEntry.rule });
       } else {
-        unchanged.push(fromRule);
+        unchanged.push(entry.rule);
       }
+      if (toEntry && toEntry.position !== entry.position) moved.push({ ruleId: entry.rule.id, from: entry.position, to: toEntry.position });
     }
 
-    for (const [id, toRule] of toMap) {
-      if (!fromMap.has(id)) {
-        added.push(toRule);
+    for (const [key, entry] of toMap) {
+      if (!fromMap.has(key)) {
+        added.push(entry.rule);
       }
     }
 
@@ -512,7 +561,9 @@ export class PolicyRegistry {
       added,
       changed,
       unchanged,
-      totalChanges: added.length + removed.length + changed.length,
+      moved,
+      duplicateIds: [...duplicates(from, 'from'), ...duplicates(to, 'to')],
+      totalChanges: added.length + removed.length + changed.length + moved.length,
     };
   }
 

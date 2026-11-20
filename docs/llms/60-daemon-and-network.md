@@ -687,7 +687,7 @@ The webhook listener receives inbound webhooks from external services. It opens 
 
 The web UI is a built bundle of static files (an `index.html` and its assets). The daemon serves it on the control-plane listener, at the same origin as the API, so the address to open is the control-plane address, `http://127.0.0.1:3421` by default, not `web.port`.
 
-Its pages are sent with `Content-Security-Policy: img-src 'self' data: blob:`. A reply, tool result or data block shows an image inline only when it is a `data:` or `blob:` image or an artifact the daemon serves (`/api/artifacts/...`); any other image URL is shown as a link (`Image: <alt text>`) that opens in a new tab when clicked, so rendering a message never sends a request to a server the message names.
+Its pages are sent with `Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' <relay>; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'`, where `<relay>` is the `wss://` and `https://` origin of `relay.url` when one is set. The page runs only its own scripts (and the WebAssembly and worklets it builds from them), connects only to this daemon and the relay, and cannot be framed by another site, so a script injected into it cannot send the stored credential anywhere else. Signing out (account menu, or Clear stored token in Account) clears the credential in this browser and then ends its sign-in session on the daemon with `POST /logout`, so the old bearer stops working everywhere; when the daemon cannot be reached the page says "Signed out here; the daemon session could not be ended" with Try again. A sign-in still in flight when the browser signs out or signs in another way is dropped, and its session is ended, rather than stored over the newer one. A reply, tool result or data block shows an image inline only when it is a `data:` or `blob:` image or an artifact the daemon serves (`/api/artifacts/...`); any other image URL is shown as a link (`Image: <alt text>`) that opens in a new tab when clicked, so rendering a message never sends a request to a server the message names.
 
 | Command | Effect |
 | --- | --- |
@@ -1523,7 +1523,7 @@ The web UI shows the fleet in Work. Its line "N running" counts only what is doi
 
 | Method | Does |
 | --- | --- |
-| `fleet.snapshot` | Every live and finished process as a flat list linked by `parentId`, at most 2000 nodes. |
+| `fleet.snapshot` | Every live and finished process as a flat list linked by `parentId`, at most 2000 nodes. Each node carries `serves`: `system` for the platform's own upkeep (the runtime and daemon heartbeats, the CI watch poller, the code index), `you` for everything else; an agent node carries `progress` (`filesRead`, `filesChanged`, counted from its settled read, write and edit calls) and, while a call runs, its activity in the tool's words (`Writing docs/usage.md`); a schedule, trigger or watcher node carries `schedule` (its `cadence`, `lastRunAt`, `lastOutcome`; for a trigger `firedCount`, `lastFiredAt`, `since`). An agent's label is its archetype's display name (`Helper agent` for `general`). |
 | `fleet.list` | The same, filtered by kind and state, with cursor pagination. |
 | `fleet.stop` (admin) | Hard-stop one node; `cascade: true` stops its descendants first. |
 | `fleet.interrupt` (admin) | End an agent's current turn, or pause a trigger or schedule. |

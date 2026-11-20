@@ -82,6 +82,8 @@ export interface SweepableSecrets {
   set(key: string, value: string, options?: { scope?: SecretScope; medium?: SecretStorageMedium }): Promise<void>;
   getFromScope(key: string, scope: SecretScope): Promise<string | null>;
   get(key: string): Promise<string | null>;
+  /** The value the stores hold, never the environment (SecretsManager.getStored). */
+  getStored(key: string): Promise<string | null>;
 }
 
 /**
@@ -131,7 +133,10 @@ async function sweepOne(
   const secretKey = daemonSecretKeyFor(configKey);
   const base = { configKey, secretKey } as const;
 
-  const existing = await secrets.get(secretKey);
+  // The stores only: a variable in the environment that happens to equal the
+  // literal is not a stored copy, and the file's value would be gone after a
+  // restart without it.
+  const existing = await secrets.getStored(secretKey);
   if (existing !== null && existing.length > 0) {
     if (existing !== literal) {
       // The owner may have pasted a newer credential into the file, or the file
@@ -151,7 +156,7 @@ async function sweepOne(
     return { ...base, outcome: 'left-in-place', detail: summarizeError(error) };
   }
 
-  const readBack = await secrets.get(secretKey);
+  const readBack = await secrets.getStored(secretKey);
   if (readBack !== literal) {
     return {
       ...base,

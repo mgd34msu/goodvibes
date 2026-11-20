@@ -1,5 +1,6 @@
 /** The feed owns one context for its lifetime; callbacks keep product ports typed. */
 import type { SelectionResult } from './selection-modal.js';
+import type { ConcealedInputRequest } from './concealed-input.js';
 export interface FeedContextMutableInit {
   prompt: string;
   cursorPos: number;
@@ -207,6 +208,16 @@ export function projectFeedContextClosures<
     ...forwards,
     getSessionView: () => host.sessionView as Host['sessionView'],
     isConcealedInput: (): boolean => host.isConcealedInput?.() ?? (host.concealedInput ?? null) !== null,
+    // The open concealed request: its value is typed in concealed-input-route.ts's own state, not the prompt.
+    concealedRequest: (): ConcealedInputRequest | null => {
+      const request = host.concealedInput;
+      return request !== null && typeof request === 'object' && typeof (request as { onSubmit?: unknown }).onSubmit === 'function'
+        ? request as ConcealedInputRequest : null;
+    },
+    readClipboardText: (): string | null => {
+      const source = (host as { readonly clipboardSource?: { pasteFromClipboard(): string | null } }).clipboardSource;
+      return source?.pasteFromClipboard() ?? null;
+    },
     handleEscape: () => {
       if (!host.cancelConcealedInput()) host.handleEscape();
     },

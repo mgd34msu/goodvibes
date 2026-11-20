@@ -28,6 +28,7 @@
  *    scheme+host a credential is scoped to.
  */
 
+import { revealOrNull, type Secret } from '../security/secret.js';
 import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
 import { daemonSecretKeyFor } from '../config/daemon-secret-keys.js';
 
@@ -72,7 +73,7 @@ export interface CalDavGatewayConfig {
  * derivation cannot drift from the one `setup-plan.ts` writes with.
  */
 export function createCalDavSecretPort(
-  secretsManager: { get(key: string): Promise<string | null> },
+  secretsManager: { get(key: string): Promise<Secret | null> },
 ): CalDavSecretPort {
   return {
     async resolveRef(ref: string): Promise<string | null> {
@@ -89,10 +90,10 @@ export function createCalDavSecretPort(
         return null;
       }
       if (!key.startsWith(CALENDAR_SECRET_PREFIX)) return null;
-      return secretsManager.get(key);
+      return revealOrNull(await secretsManager.get(key), 'dispatch');
     },
     async resolveConfigSecret(configKey: string): Promise<string | null> {
-      return secretsManager.get(daemonSecretKeyFor(configKey));
+      return revealOrNull(await secretsManager.get(daemonSecretKeyFor(configKey)), 'dispatch');
     },
   };
 }

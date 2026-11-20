@@ -6,7 +6,10 @@
  * the registry as a CANDIDATE at startup, making the config keys live without
  * requiring a /policy command. Promotion requires simulation evidence and a
  * passing divergence gate; once promoted, the same unchanged bundle is enforced
- * again at the next start (policy-activation.json records it). Never throws, a
+ * again at the next start (policy-activation.json records it, with the file it
+ * was read from: a bundle promoted or rolled back to from another file than
+ * policy.bundlePath, one loaded with /policy load, is the one read at start).
+ * A bundle loaded at start that is not restored as active says why. Never throws, a
  * missing, unreadable, malformed or unverifiable bundle is logged, recorded on the
  * policy runtime state as the reason the configured bundle is not loaded, and skipped
  * (registry stays empty).
@@ -34,9 +37,17 @@ export function loadConfiguredPolicyBundle(
   if (!configuredPath) return;
 
   const workingDir = configManager.getWorkingDirectory();
-  const bundlePath = isAbsolute(configuredPath)
+  const configuredBundlePath = isAbsolute(configuredPath)
     ? configuredPath
     : resolve(workingDir ?? process.cwd(), configuredPath);
+  // The bundle that was last made active (promote or rollback) is the one
+  // enforced; it may have come from another file than the configured one.
+  const registry = policyRuntimeState.getRegistry();
+  const configDir = configManager.getControlPlaneConfigDir?.();
+  if (configDir) registry.bindActivationRecord(join(configDir, POLICY_ACTIVATION_FILE));
+  const activation = registry.readActivationRecord();
+  const recordedPath = activation !== null && activation !== 'unreadable' ? activation.bundlePath : undefined;
+  const bundlePath = recordedPath && recordedPath !== configuredBundlePath ? recordedPath : configuredBundlePath;
 
   const fail = (reason: string): void => {
     logger.warn('[policy-as-code] configured policy bundle not loaded', { bundlePath, error: reason });
@@ -53,7 +64,7 @@ export function loadConfiguredPolicyBundle(
 
   let result: ReturnType<PolicyRegistry['loadCandidate']>;
   try {
-    result = policyRuntimeState.getRegistry().loadCandidate(bundle);
+    result = registry.loadCandidate(bundle, { sourcePath: bundlePath });
   } catch (error) {
     fail(`rejected at load (${summarizeError(error)})`);
     return;
@@ -62,16 +73,14 @@ export function loadConfiguredPolicyBundle(
     fail(`rejected at load (${result.error ?? 'unknown reason'})`);
     return;
   }
-  // A bundle promoted before, unchanged, is enforced again at once; any other stays a candidate.
-  const registry = policyRuntimeState.getRegistry();
-  const configDir = configManager.getControlPlaneConfigDir?.();
-  if (configDir) registry.bindActivationRecord(join(configDir, POLICY_ACTIVATION_FILE));
+  // A bundle promoted before, unchanged, is enforced again at once; any other stays a candidate and says why.
   const restored = registry.restoreActivation();
   policyRuntimeState.recordConfiguredBundleFailure?.(restored.reason ?? null);
   logger.info(restored.restored ? '[policy-as-code] configured policy bundle is the promoted one; enforcing it' : '[policy-as-code] loaded configured policy bundle as candidate', {
     bundlePath,
     bundleId: result.provenance.policyBundleId,
     signatureStatus: result.provenance.signatureStatus,
+    ...(bundlePath !== configuredBundlePath ? { configuredBundlePath, readFrom: 'the activation record' } : {}),
     ...(restored.reason ? { note: restored.reason } : {}),
   });
 }

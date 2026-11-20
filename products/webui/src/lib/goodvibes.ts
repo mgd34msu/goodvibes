@@ -7,7 +7,7 @@ import {
 } from '@goodvibes-jev/engine/platform/browser/knowledge';
 import type { BrowserKnowledgeMethodId } from '@goodvibes-jev/engine/platform/browser/knowledge';
 import { WEBUI_METHOD_ROUTES } from '@goodvibes-jev/engine/contracts/generated/webui-facade';
-import { getClientLifetime, isClientLifetimeCurrent, tokenStore, WEBUI_TOKEN_STORE_KEY, type ClientLifetime } from './client-lifetime';
+import { getClientLifetime, invalidateClientLifetime, isClientLifetimeCurrent, tokenStore, WEBUI_TOKEN_STORE_KEY, type ClientLifetime } from './client-lifetime';
 export { tokenStore, WEBUI_TOKEN_STORE_KEY } from './client-lifetime';
 import { isRuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
 import { routedFetch } from './relay-connection';
@@ -2285,6 +2285,8 @@ async function endDaemonSignIn(token: string): Promise<SignOutOutcome> {
  * session it held is ended with `POST /logout`, so the old bearer stops working everywhere.
  */
 export async function signOut(): Promise<SignOutOutcome> {
+  // A new identity generation even when nothing was stored: a sign-in still in flight is older and is dropped.
+  invalidateClientLifetime();
   const token = await tokenStore.getToken();
   await client.auth.clearToken();
   const outcome = token ? await endDaemonSignIn(token) : { endedOnDaemon: true };

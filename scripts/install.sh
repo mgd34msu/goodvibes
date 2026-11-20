@@ -773,9 +773,26 @@ commit_install_journal() {
 rollback_install_swap() {
   [ -n "$INSTALL_JOURNAL" ] && [ -f "$INSTALL_JOURNAL" ] || return 0
   _rollback_ok=1
+  _rollback_directory=''
   while IFS= read -r _journal_line; do
     _journal_path=${_journal_line#?}
-    case "$_journal_line" in O*) continue ;; esac
+    case "$_journal_line" in
+      T*) _rollback_directory=$_journal_path; continue ;;
+      O*)
+        # A support directory (the browser driver) this run replaced: the new tree goes and the
+        # parked previous one comes back, so a suite rolled back never keeps a newer support tree
+        # beside the previous programs.
+        if [ -n "$_rollback_directory" ] && [ -d "$_journal_path" ] && [ ! -L "$_journal_path" ]; then
+          _rollback_aside="$_journal_path.rolled-back"
+          if { [ ! -e "$_rollback_directory" ] || mv "$_rollback_directory" "$_rollback_aside"; } && mv "$_journal_path" "$_rollback_directory"; then
+            rm -rf "${_rollback_aside:?}" 2>/dev/null || :
+          else
+            _rollback_ok=0
+          fi
+        fi
+        _rollback_directory=''
+        continue ;;
+    esac
     rm -f "$_journal_path.incoming" || _rollback_ok=0
     case "$_journal_line" in
       R*) if [ -e "$_journal_path.goodvibes-previous" ] || [ -L "$_journal_path.goodvibes-previous" ]; then
@@ -2169,7 +2186,8 @@ publish_release_directory() (
         && [ -d "$_directory_outgoing" ] && [ ! -L "$_directory_outgoing" ] && installer_open_file_matches 6 "$_directory_outgoing" \
         && [ -f "$_directory_outgoing/.goodvibes-release.json" ] && [ ! -L "$_directory_outgoing/.goodvibes-release.json" ] \
         && ! grep -qF "\"version\":\"${VERSION#v}\"" "$_directory_outgoing/.goodvibes-release.json" 2>/dev/null; then
-        if printf 'O%s\n' "$_directory_outgoing" >> "$INSTALL_JOURNAL"; then _directory_queued=1; fi
+        # T names the directory the parked tree (O) came from, so a rollback of the suite puts it back there.
+        if printf 'T%s\nO%s\n' "$_directory_target" "$_directory_outgoing" >> "$INSTALL_JOURNAL"; then _directory_queued=1; fi
       fi
       if _directory_base_current && rmdir "$_directory_work" 2>/dev/null; then :
       elif [ "$_directory_queued" = 1 ]; then say "  retained   $_directory_work (the previous directory is removed when the whole suite install has finished)"

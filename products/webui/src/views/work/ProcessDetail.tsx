@@ -28,7 +28,7 @@ import {
   kindLabel,
   wireBackedActions,
 } from '../../lib/fleet';
-import { isTerminalApprovalStatus } from '../../lib/approvals';
+import { isTerminalApproval } from '../../lib/approvals';
 import { compactJson } from '../../lib/object';
 import { formatError } from '../../lib/errors';
 import { useToast } from '../../lib/toast';
@@ -144,7 +144,7 @@ export function ProcessDetail({ node, archived, approvals, onOpenItem, onClose, 
   const confirm = useConfirm();
   const backed = useMemo(() => wireBackedActions(node), [node]);
   const pendingApprovals = useMemo(
-    () => approvalsForNode(node, approvals).filter((a) => !isTerminalApprovalStatus(a.status)),
+    () => approvalsForNode(node, approvals).filter((a) => !isTerminalApproval(a)),
     [node, approvals],
   );
   const sessionId = node.sessionRef?.sessionId;

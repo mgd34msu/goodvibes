@@ -4,16 +4,24 @@ import type { InfiniteBuffer } from './conversation-history.js';
 import type { FeedContextMutableInit } from './input-feed-context.js';
 import { handleSessionViewToken, type SessionViewControls } from './session-view-input.js';
 import type { SurfaceModalHost } from './surface-modal-host.js';
+import { routeConcealedToken } from './concealed-input-route.js';
+import type { ConcealedInputRequest } from './concealed-input.js';
 
 type KeyToken = InputToken & { type: 'key' };
 type MouseToken = InputToken & { type: 'mouse' };
 export interface FeedPipelineContext extends FeedContextMutableInit {
   readonly focusTracker: { setFocused(focused: boolean): void };
-  readonly keybindingsManager: { matches(action: 'clear-cancel', token: KeyToken): boolean };
+  readonly keybindingsManager: { matches(action: 'clear-cancel', token: KeyToken): boolean; lookup?(token: KeyToken): string | null | undefined };
   readonly surfaceModals?: Pick<SurfaceModalHost, 'kitModalOnTop' | 'handleToken'> | undefined;
   readonly getSessionView: () => SessionViewControls | null;
   /** True while the composer collects a concealed value; command dispatch must not see that text. */
   readonly isConcealedInput?: (() => boolean) | undefined;
+  /** The open concealed request: while there is one, concealed-input-route.ts takes every key and text token. */
+  readonly concealedRequest?: (() => ConcealedInputRequest | null) | undefined;
+  /** Delivers a concealed value to its request. */
+  readonly submitConcealedInput?: ((value: string) => boolean) | undefined;
+  /** The clipboard's text, for the paste key inside a concealed prompt. */
+  readonly readClipboardText?: (() => string | null) | undefined;
   readonly getHistory: () => InfiniteBuffer;
   readonly getViewportHeight: () => number;
   readonly getScrollTop: () => number;
@@ -110,6 +118,10 @@ export function createFeedInputTokens<Context extends FeedPipelineContext>(ports
         return;
       }
       if (ports.pairing?.(context, token)) return;
+      // A concealed value is typed in its own state: no shortcut, undo, kill
+      // ring, history search or command sees it, and Ctrl+C cancels it
+      // (concealed-input-route.ts). A kit modal opened on top keeps its tokens.
+      if (!context.surfaceModals?.kitModalOnTop && routeConcealedToken(context, token)) return;
       if (token.type === 'key' && context.keybindingsManager.matches('clear-cancel', token)) {
         context.handleCtrlC();
         return;

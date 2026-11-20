@@ -22,6 +22,8 @@ import { useToast } from '../../lib/toast';
 /** What an approve action carries beyond the id. */
 export interface ApprovalApproveRequest {
   readonly id: string;
+  /** The revision of the record the person was shown; a stale one is refused and the reading shown again. */
+  readonly expectedRevision: number;
   readonly selectedHunks?: readonly number[];
   /** The remember tier picked (undefined = just this once). */
   readonly rememberTier?: string;
@@ -47,17 +49,25 @@ export function describeUnappliedDecision(
   action: ApprovalAction,
 ): { title: string; description: string; tone: 'info' } | null {
   if (!result) return null;
-  const applied = 'applied' in result && typeof result.applied === 'boolean'
-    ? result.applied
-    : result.approval?.status === ACTION_TARGET[action];
-  if (applied) return null;
+  if (result.applied) return null;
   const status = result.approval?.status ?? 'unknown';
-  const refusal = 'refusal' in result && typeof result.refusal === 'string' ? result.refusal : null;
+  // The daemon's refusal says why (settled, changed since it was shown, expired, owner's own decision); the
+  // returned record and reading are what the list shows after the refetch.
+  const refusal = result.refusal;
+  const changed = refusal?.code === 'APPROVAL_CHANGED';
   return {
-    title: `Already ${status}, nothing changed`,
-    description: refusal ?? `This approval is ${status}, so it could not be ${ACTION_TARGET[action]}.`,
+    title: changed ? 'It changed while you were looking; nothing was done' : `Already ${status}, nothing changed`,
+    description: refusal?.reason ?? `This approval is ${status}, so it could not be ${ACTION_TARGET[action]}.`,
     tone: 'info',
   };
+}
+
+/** The revision an approval reads now, for an action that was not given the one it was shown at. */
+async function currentRevision(id: string): Promise<number> {
+  const listed = await platformClient.operator.approvals.list({ approvalId: id });
+  const record = listed.approvals.find((entry) => entry.id === id);
+  if (!record) throw new Error(`Approval ${id} is not in the daemon's approvals.`);
+  return record.revision;
 }
 
 function friendlyError(error: unknown): string {
@@ -77,13 +87,14 @@ export function useApprovalActions({ onOpenApproval, pushHandoff = true }: Appro
   const { toast } = useToast();
 
   const approve = useMutation({
-    mutationFn: ({ id, selectedHunks, rememberTier, answer }: ApprovalApproveRequest) => {
+    mutationFn: ({ id, expectedRevision, selectedHunks, rememberTier, answer }: ApprovalApproveRequest) => {
       const input: ApprovalApproveInput = {
+        expectedRevision,
         ...(selectedHunks && selectedHunks.length > 0 ? { selectedHunks } : {}),
         ...(rememberTier ? { rememberTier, remember: true } : {}),
         ...(answer !== undefined ? { modifiedArgs: { answer } } : {}),
       };
-      return platformClient.operator.approvals.approve(id, Object.keys(input).length > 0 ? input : undefined);
+      return platformClient.operator.approvals.approve(id, input);
     },
     onSuccess: async (result, variables) => {
       await refetchAfterDecision(queryClient, queryKeys.approvals);
@@ -121,8 +132,12 @@ export function useApprovalActions({ onOpenApproval, pushHandoff = true }: Appro
 
   const deny = useMutation({
     // The one optional reason rides both wire fields (note + reason).
-    mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
-      platformClient.operator.approvals.deny(id, reason ? { note: reason, reason } : undefined),
+    // A deny from a push hand-off names no revision: refusing is always safe, so it denies the record as it reads now.
+    mutationFn: async ({ id, expectedRevision, reason }: { id: string; expectedRevision?: number; reason?: string }) =>
+      platformClient.operator.approvals.deny(id, {
+        expectedRevision: expectedRevision ?? await currentRevision(id),
+        ...(reason ? { note: reason, reason } : {}),
+      }),
     onSuccess: async (result, variables) => {
       await refetchAfterDecision(queryClient, queryKeys.approvals);
       const unapplied = describeUnappliedDecision(result, 'deny');
@@ -137,7 +152,7 @@ export function useApprovalActions({ onOpenApproval, pushHandoff = true }: Appro
   });
 
   const claim = useMutation({
-    mutationFn: (id: string) => platformClient.operator.approvals.claim(id),
+    mutationFn: ({ id, expectedRevision }: { id: string; expectedRevision: number }) => platformClient.operator.approvals.claim(id, { expectedRevision }),
     onSuccess: async (result) => {
       await refetchAfterDecision(queryClient, queryKeys.approvals);
       toast(describeUnappliedDecision(result, 'claim') ?? { title: 'Claimed', tone: 'info' });
@@ -148,7 +163,7 @@ export function useApprovalActions({ onOpenApproval, pushHandoff = true }: Appro
   });
 
   const cancel = useMutation({
-    mutationFn: (id: string) => platformClient.operator.approvals.cancel(id),
+    mutationFn: ({ id, expectedRevision }: { id: string; expectedRevision: number }) => platformClient.operator.approvals.cancel(id, { expectedRevision }),
     onSuccess: async (result) => {
       await refetchAfterDecision(queryClient, queryKeys.approvals);
       toast(describeUnappliedDecision(result, 'cancel') ?? { title: 'Cancelled', tone: 'info' });

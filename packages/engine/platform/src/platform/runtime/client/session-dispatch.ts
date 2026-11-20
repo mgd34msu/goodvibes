@@ -157,6 +157,13 @@ export interface SessionInputsWireClient {
    * the stream could not be opened or has ended.
    */
   subscribeInputChanges?(onChange: (sessionId: string) => void, handlers?: SessionInputChangeHandlers): () => void;
+  /**
+   * The daemon the next call goes to (its origin, `DaemonTarget.origin.baseUrl`),
+   * read before each delivery: an answer or acknowledgement owed to one daemon
+   * is sent only while the client goes there, never to a daemon selected since.
+   * Optional: a client fixed to one daemon may omit it.
+   */
+  readonly targetId?: (() => string | null) | undefined;
   deliverInput(
     sessionId: string,
     inputId: string,
@@ -230,6 +237,10 @@ const AWAITED_ANSWER_MAX_AGE_MS = 6 * 60 * 60 * 1_000;
 interface AwaitedAnswer {
   readonly sessionId: string;
   readonly inputId: string;
+  /** The daemon that holds the input (see `SessionInputsWireClient.targetId`); the answer goes only there. */
+  readonly targetId: string | null;
+  /** Said once in the log when the answer waits for its daemon to be selected again. */
+  heldForTarget?: boolean;
   readonly startedAt: number;
   /** Failed attempts to report this answer; bounded by MAX_ANSWER_DELIVERY_ATTEMPTS. */
   deliveryFailures: number;
@@ -249,8 +260,8 @@ const MAX_ANSWER_DELIVERY_ATTEMPTS = 10;
  * second call would start a second agent for the same message.
  */
 type DispatchClaim =
-  | { readonly kind: 'agent'; readonly agentId: string; readonly claimEpoch?: number | undefined }
-  | { readonly kind: 'consumed'; readonly claimEpoch?: number | undefined };
+  | { readonly kind: 'agent'; readonly agentId: string; readonly claimEpoch?: number | undefined; readonly targetId: string | null }
+  | { readonly kind: 'consumed'; readonly claimEpoch?: number | undefined; readonly targetId: string | null };
 
 /** Bound on remembered claims; each is removed once its acknowledgement lands. */
 const MAX_DISPATCH_CLAIMS = 500;
@@ -330,16 +341,23 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
   /** `sessionId\0inputId` -> what the runner did with it, until the daemon has the acknowledgement. */
   const claims = new Map<string, DispatchClaim>();
   const claimKey = (sessionId: string, inputId: string): string => `${sessionId}\0${inputId}`;
+  /** The daemon a client goes to now; null for a client that does not say (fixed to one daemon). */
+  const targetOf = (active: SessionInputsWireClient): string | null => active.targetId?.() ?? null;
+  /** Whether work recorded for `recorded` belongs to the daemon `active` goes to now. */
+  const sameTarget = (recorded: string | null, active: SessionInputsWireClient): boolean => {
+    const current = targetOf(active);
+    return recorded === null || current === null || recorded === current;
+  };
   /**
    * Inputs this process holds the daemon's claim on and has not started yet (held, capacity-blocked, unknown, or
    * the runner threw), with the claim's token and when it was last granted or renewed. The claim is renewed before
    * its lease runs out, so another surface never takes an input this one still means to run; a renewal that is
    * refused means another surface holds it now, and this one drops it.
    */
-  const claimedUnstarted = new Map<string, { readonly epoch: number | undefined; readonly at: number }>();
-  const rememberUnstarted = (key: string, epoch: number | undefined): void => {
+  const claimedUnstarted = new Map<string, { readonly epoch: number | undefined; readonly at: number; readonly targetId: string | null }>();
+  const rememberUnstarted = (key: string, epoch: number | undefined, targetId: string | null): void => {
     claimedUnstarted.delete(key);
-    claimedUnstarted.set(key, { epoch, at: now() });
+    claimedUnstarted.set(key, { epoch, at: now(), targetId });
     while (claimedUnstarted.size > MAX_DISPATCH_CLAIMS) {
       const oldest = claimedUnstarted.keys().next();
       if (oldest.done) break;
@@ -466,12 +484,13 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
     // An acknowledgement whose reply was lost still reached the daemon: the
     // input is no longer waiting for an agent, so its claim has nothing left to protect.
     const stillWaiting = new Set(inputs.map((input) => claimKey(sessionId, input.id)));
+    // Only this daemon's view prunes this daemon's claims: work owed to another stays for it.
     if (sawDelivered) {
-      for (const key of [...claims.keys()]) {
-        if (key.startsWith(`${sessionId}\0`) && !stillWaiting.has(key)) claims.delete(key);
+      for (const [key, claim] of [...claims]) {
+        if (key.startsWith(`${sessionId}\0`) && !stillWaiting.has(key) && sameTarget(claim.targetId, active)) claims.delete(key);
       }
-      for (const key of [...claimedUnstarted.keys()]) {
-        if (key.startsWith(`${sessionId}\0`) && !stillWaiting.has(key)) claimedUnstarted.delete(key);
+      for (const [key, held] of [...claimedUnstarted]) {
+        if (key.startsWith(`${sessionId}\0`) && !stillWaiting.has(key) && sameTarget(held.targetId, active)) claimedUnstarted.delete(key);
       }
     }
     // Every page was read, oldest first, so a held tail never starves older eligible inputs.
@@ -485,6 +504,8 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
       if (input.intent !== 'submit') continue;
       const key = claimKey(sessionId, input.id);
       const earlier = claims.get(key);
+      // A claim recorded on another daemon is that daemon's; this one's input of the same ids is left alone.
+      if (earlier && !sameTarget(earlier.targetId, active)) continue;
       if (earlier) {
         // One input the daemon keeps rejecting must not hold up the ones behind it.
         try {
@@ -500,10 +521,12 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
       // A claim this process already holds is renewed with its token once half
       // its lease has passed, so it never lapses while the input waits here.
       const held = claimedUnstarted.get(key);
+      if (held && !sameTarget(held.targetId, active)) continue;
+      const target = targetOf(active);
       if (active.claimInput && (held === undefined || now() - held.at >= CLAIM_RENEW_MS)) {
         try {
           const granted = await active.claimInput(sessionId, input.id, held?.epoch);
-          rememberUnstarted(key, grantedClaimEpoch(granted) ?? held?.epoch);
+          rememberUnstarted(key, grantedClaimEpoch(granted) ?? held?.epoch, target);
         } catch (error) {
           if (isInputClaimRefusal(error)) {
             // Superseded or taken: another surface holds this input now; this one must not start it.
@@ -523,7 +546,7 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
         if (spawned?.disposition === 'held' || spawned?.disposition === 'unknown' || spawned?.disposition === 'capacity') continue;
         if (spawned?.disposition === 'transferred') {
           if (!spawned.requestId.trim()) continue;
-          claim = { kind: 'consumed', claimEpoch };
+          claim = { kind: 'consumed', claimEpoch, targetId: target };
         } else {
           const agentId = spawned?.agentId?.trim();
           if (spawned?.disposition === 'started' && !agentId) continue;
@@ -532,7 +555,7 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
           // is still consumed, because leaving it queued would have it
           // dispatched again; there is nothing to bind a reply to, and claiming
           // otherwise would bind one to an agent that does not exist.
-          claim = agentId ? { kind: 'agent', agentId, claimEpoch } : { kind: 'consumed', claimEpoch };
+          claim = agentId ? { kind: 'agent', agentId, claimEpoch, targetId: target } : { kind: 'consumed', claimEpoch, targetId: target };
         }
       } catch (error) {
         const failures = (runnerFailures.get(key) ?? 0) + 1;
@@ -570,7 +593,7 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
       // moment the daemon acknowledges it: an acknowledgement whose reply was
       // lost must not leave the sender without an answer.
       if (claim.kind === 'agent' && options.readAgentOutcome && !awaitingAnswers.has(claim.agentId)) {
-        trackAnswer(claim.agentId, { sessionId, inputId: input.id, startedAt: now(), deliveryFailures: 0 });
+        trackAnswer(claim.agentId, { sessionId, inputId: input.id, targetId: target, startedAt: now(), deliveryFailures: 0 });
       }
       if (!current()) return;
       try {
@@ -585,6 +608,17 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
     const readOutcome = options.readAgentOutcome;
     if (!readOutcome || awaitingAnswers.size === 0) return;
     for (const [agentId, awaited] of [...awaitingAnswers]) {
+      // The answer is owed to the daemon that holds the input: while another is selected it
+      // waits for that one, and is never sent to the daemon selected now.
+      if (!sameTarget(awaited.targetId, active)) {
+        if (!awaited.heldForTarget) {
+          awaited.heldForTarget = true;
+          log.info('[session dispatch] an answer is held for the daemon that sent its message; it is reported when that daemon is selected again', {
+            sessionId: awaited.sessionId, inputId: awaited.inputId, daemon: awaited.targetId,
+          });
+        }
+        continue;
+      }
       const outcome = readOutcome(agentId);
       let report: Parameters<SessionInputsWireClient['deliverInput']>[2];
       if (outcome && (outcome.status === 'pending' || outcome.status === 'running')) {

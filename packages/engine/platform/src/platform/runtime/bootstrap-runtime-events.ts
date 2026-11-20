@@ -385,10 +385,10 @@ export function registerHostRuntimeEvents(options: HostRuntimeEventBridgeOptions
     requestRender();
   }));
 
-  unsubs.push(runtimeBus.on<Extract<GateEvent, { type: 'PRESET_CHANGED' }>>('PRESET_CHANGED', ({ payload }) => {
-    withRouter(getSystemMessageRouter, (router) => {
-      router.high(`[Permissions] Permission preset changed: ${payload.previousPreset} -> ${payload.preset}.`);
-    });
+  // A change of the mode in force is the status bar's: its mode segment shows
+  // the new words and flashes (terminal-shell session-permission-mode.ts).
+  // Nothing is written into the conversation or posted as a notice.
+  unsubs.push(runtimeBus.on<Extract<GateEvent, { type: 'PRESET_CHANGED' }>>('PRESET_CHANGED', () => {
     requestRender();
   }));
 

@@ -22,7 +22,7 @@ import {
   hunkSummary,
   isActionableApproval,
   isDurableRememberTier,
-  isTerminalApprovalStatus,
+  isTerminalApproval,
   judgmentLabel,
   judgmentVerdict,
   partialApprovalLabel,
@@ -78,8 +78,9 @@ export interface ApprovalDetailProps {
 export function ApprovalDetail({ record, actions, onClose }: ApprovalDetailProps) {
   const hunks = useMemo(() => readApprovalEditHunks(record), [record]);
   const claimed = record.status === 'claimed';
-  const actionable = isActionableApproval(record) || claimed;
-  const terminal = isTerminalApprovalStatus(record.status);
+  // What this person may do and whether it still waits come from the daemon's reading, not from the status.
+  const actionable = isActionableApproval(record);
+  const terminal = isTerminalApproval(record);
   const partialLabel = useMemo(() => partialApprovalLabel(record), [record]);
   const auditEntries = useMemo(() => auditTrail(record), [record]);
   const attribution = useMemo(() => attributionLabel(record.request.attribution), [record]);
@@ -102,13 +103,15 @@ export function ApprovalDetail({ record, actions, onClose }: ApprovalDetailProps
   const tool = record.request.tool;
   const risk = record.request.analysis.riskLevel;
   const approveExtras = rememberTier ? { rememberTier } : {};
+  // Every action names the revision of the record shown here; a stale one is refused and the refetch shows it again.
   const approve = (extra?: { selectedHunks?: readonly number[]; answer?: string }) => actions.approve.mutate({
     id: record.id,
+    expectedRevision: record.revision,
     ...approveExtras,
     ...extra,
     ...(hunks ? { totalHunks: hunks.length } : {}),
   });
-  const deny = () => actions.deny.mutate({ id: record.id, ...(denyReason.trim() ? { reason: denyReason.trim() } : {}) });
+  const deny = () => actions.deny.mutate({ id: record.id, expectedRevision: record.revision, ...(denyReason.trim() ? { reason: denyReason.trim() } : {}) });
 
   const toggleHunk = (index: number) => setSelected((current) => {
     const next = new Set(current);
@@ -128,11 +131,11 @@ export function ApprovalDetail({ record, actions, onClose }: ApprovalDetailProps
         <Button disabled={busy} onClick={deny}>{denying ? 'Stopping…' : 'Stop command'}</Button>
         <span className="work-footer__spacer" />
         {!claimed && (
-          <Button variant="ghost" size="sm" disabled={busy} onClick={() => actions.claim.mutate(record.id)} title="Mark this approval as yours; others can still answer it">
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => actions.claim.mutate({ id: record.id, expectedRevision: record.revision })} title="Mark this approval as yours; others can still answer it">
             {claiming ? 'Claiming…' : 'Claim'}
           </Button>
         )}
-        <Button variant="ghost" size="sm" disabled={busy} onClick={() => actions.cancel.mutate(record.id)} title="Withdraw without a decision">
+        <Button variant="ghost" size="sm" disabled={busy} onClick={() => actions.cancel.mutate({ id: record.id, expectedRevision: record.revision })} title="Withdraw without a decision">
           {cancelling ? 'Cancelling…' : 'Withdraw'}
         </Button>
       </>
@@ -153,11 +156,11 @@ export function ApprovalDetail({ record, actions, onClose }: ApprovalDetailProps
         <Button disabled={busy} onClick={deny}>{denying ? 'Denying…' : 'Deny'}</Button>
         <span className="work-footer__spacer" />
         {!claimed && (
-          <Button variant="ghost" size="sm" disabled={busy} onClick={() => actions.claim.mutate(record.id)} title="Mark this approval as yours; others can still answer it">
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => actions.claim.mutate({ id: record.id, expectedRevision: record.revision })} title="Mark this approval as yours; others can still answer it">
             {claiming ? 'Claiming…' : 'Claim'}
           </Button>
         )}
-        <Button variant="ghost" size="sm" disabled={busy} onClick={() => actions.cancel.mutate(record.id)} title="Withdraw without a decision">
+        <Button variant="ghost" size="sm" disabled={busy} onClick={() => actions.cancel.mutate({ id: record.id, expectedRevision: record.revision })} title="Withdraw without a decision">
           {cancelling ? 'Cancelling…' : 'Withdraw'}
         </Button>
       </>

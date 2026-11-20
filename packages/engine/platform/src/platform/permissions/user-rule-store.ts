@@ -33,6 +33,7 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { revisionSource, type RevisionSource } from '../utils/revision.js';
 import { compileRules, ruleCovers, type CompiledRules, type RememberTier } from './approval-rules.js';
+import { contentDigest } from '../utils/target-ref.js';
 
 /** One project's rules for evaluation: the committed and remembered lists, and both compiled for matching. */
 export interface CompiledProjectRules {
@@ -472,14 +473,19 @@ export class UserPermissionRuleStore {
 
   /** Bring live readers in line with a file this process just wrote. */
   private adoptDisk(written: readonly StoredUserPermissionRule[], covered?: ReadonlySet<string>): boolean {
-    const ids = new Set(written.map((record) => record.rule.id));
-    const committed = this.records.filter((record) => ids.has(record.rule.id));
-    const known = new Set([...committed, ...this.remembered].map((record) => record.rule.id));
+    // A rule is the same rule only when its id AND its content match the disk:
+    // a rule another process changed in place under the same id is taken from
+    // the disk, and the one held here stops matching (as a deleted one does).
+    const onDisk = new Map(written.map((record) => [record.rule.id, contentDigest(record)]));
+    const unchanged = (record: StoredUserPermissionRule): boolean => onDisk.get(record.rule.id) === contentDigest(record);
+    const committed = this.records.filter(unchanged);
+    const keptRemembered = this.remembered.filter(unchanged);
+    const known = new Set([...committed, ...keptRemembered].map((record) => record.rule.id));
     const remembered = [
-      ...this.remembered.filter((record) => ids.has(record.rule.id)),
+      ...keptRemembered,
       ...written.filter((record) => !known.has(record.rule.id)),
     ];
-    const dropped = this.records.some((record) => !ids.has(record.rule.id) && !covered?.has(record.rule.id));
+    const dropped = this.records.some((record) => !unchanged(record) && !covered?.has(record.rule.id));
     if (dropped) this.publicationRevision++;
     // Every call follows a write, this process's or another's.
     this.#changeRevision++;

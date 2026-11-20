@@ -1,24 +1,18 @@
+/**
+ * Providers of your own (an OpenAI-compatible server you name): adding one
+ * reads its model list from the address and keeps a provider file with only a
+ * reference to its key; removing one deletes the file and its stored key.
+ * `/provider add` and `/provider remove` (provider-command.ts) run these.
+ */
 import { join } from 'node:path';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { unlink, writeFile } from 'node:fs/promises';
 import { fetchModelContextWindows } from '@goodvibes-jev/engine/platform/platform/discovery';
-import type { CustomProviderConfig, ProviderApi } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { CustomProviderConfig } from '@goodvibes-jev/engine/platform/platform/providers';
 import { findCredentialScopeDeclaration, listDaemonOwnedSecretKeys, type SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { formatProviderModel } from '@goodvibes-jev/engine/platform/platform/providers/provider-model';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import type { TerminalCommandRegistry } from './command-registry.js';
-import type { ConcealedInputRequest } from './concealed-input.js';
-import { commandRefusal, stripYesFlag } from './command-confirmation.js';
-import { readRefusal } from '@goodvibes-jev/engine/errors';
+import { commandRefusal } from './command-confirmation.js';
 
-export interface LocalProviderCommandContext {
-  readonly print: (message: string) => void;
-  readonly beginConcealedInput?: ((request: ConcealedInputRequest) => void) | undefined;
-  readonly openProviderPicker?: (() => void) | undefined;
-  readonly session: { readonly runtime: { model: string; provider: string } };
-  readonly platform: { readonly configManager: { set(key: 'provider.model', model: string): unknown } };
-}
 export function customProviderKeyName(providerName: string): string {
   return `${providerName.replace(/[^A-Za-z0-9]/g, '_').toUpperCase()}_API_KEY`;
 }
@@ -31,7 +25,7 @@ function platformCredentialSlot(providerName: string): string | undefined {
   const slot = customProviderKeyName(providerName);
   return findCredentialScopeDeclaration(slot) !== null || listDaemonOwnedSecretKeys().has(slot) ? slot : undefined;
 }
-function validProviderName(name: string): boolean {
+export function validProviderName(name: string): boolean {
   return /^[a-zA-Z0-9_-]+$/.test(name);
 }
 function discoveredModelIds(body: unknown): string[] {
@@ -41,294 +35,152 @@ function discoveredModelIds(body: unknown): string[] {
     .map((value) => String(value.id))
     .filter(Boolean);
 }
-/** Custom provider names are owner-defined, so their credentials explicitly belong to the daemon tier. */
-async function storeProviderKey(manager: Pick<SecretsManager, 'set'>, name: string, value: string): Promise<void> {
-  await manager.set(customProviderKeyName(name), value, { scope: 'daemon', medium: 'secure' });
+/** Another provider file whose name maps to the same key slot, which would share and overwrite its key. */
+function keySlotOwner(directory: string, name: string): string | undefined {
+  const slot = customProviderKeyName(name);
+  return customProviderNames(directory).find((other) => other !== name && customProviderKeyName(other) === slot);
 }
-export function createLocalProviderCommands<Context extends LocalProviderCommandContext>(
-  services: {
-    readonly requireProviderApi: (context: Context) => ProviderApi;
-    readonly requireShellPaths: (context: Context) => ShellPathService;
-    readonly requireSecretsManager: (context: Context) => Pick<SecretsManager, 'set' | 'delete'>;
-  },
-  policy: {
-    readonly surfaceRoot: string;
-    readonly hidden: boolean;
-    readonly allowInlineKey: boolean;
-    readonly captureMissingKey: boolean;
-    readonly explicitModelSelection: boolean;
-    readonly codeEditing: boolean;
-    readonly beforeSelection: (context: Context, provider: string, complete: () => void) => void;
-  },
-) {
-  /**
-   * Asks for the key before the endpoint is probed, so a key-protected endpoint
-   * answers with its models instead of a refusal. Empty input or Escape adds the
-   * provider without a key.
-   */
-  function requestKeyThen(context: Context, name: string, next: (apiKey: string | undefined) => void): void {
-    context.print(
-      `Enter the API key for provider '${name}' (input is masked; press Enter to continue, or Enter on an empty line or Esc if the endpoint needs no key).`,
-    );
-    context.beginConcealedInput!({
-      label: name,
-      onSubmit: (value) => next(value.length ? value : undefined),
-      onCancel: () => next(undefined),
-    });
+
+/** The providers of your own kept in `directory`, by name. */
+export function customProviderNames(directory: string): string[] {
+  let files: string[];
+  try {
+    files = readdirSync(directory);
+  } catch {
+    return [];
   }
-  /** Another provider file whose name maps to the same key slot, which would share and overwrite its key. */
-  function keySlotOwner(directory: string, name: string): string | undefined {
-    const slot = customProviderKeyName(name);
-    let files: string[];
+  return files.filter((file) => file.endsWith('.json')).map((file) => file.slice(0, -'.json'.length)).sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Add a provider of your own: read its models from `<address>/models` (with the
+ * key, when one is given), write its file with an exclusive create, then store
+ * the key. Throws a refusal saying why when it was not added; returns what was added.
+ */
+export async function addCustomProvider(
+  request: { readonly name: string; readonly address: string; readonly apiKey: string | undefined; readonly directory: string; readonly codeEditing: boolean },
+  secrets: Pick<SecretsManager, 'set'>,
+  progress: (line: string) => void,
+): Promise<string> {
+  const { name, address, apiKey, directory } = request;
+  if (!validProviderName(name)) throw commandRefusal(`"${name}" is not a provider name: use only letters, numbers, - and _.`);
+  let endpoint: URL;
+  try {
+    endpoint = new URL(address);
+    if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password) throw new Error('invalid endpoint');
+  } catch {
+    throw commandRefusal(`"${address}" is not an address to add: use an http:// or https:// address without a user name or password in it.`);
+  }
+  const baseURL = address.replace(/\/+$/, '');
+  const file = join(directory, `${name}.json`);
+  if (existsSync(file)) throw commandRefusal(`A provider named ${name} already exists (${file}); nothing was added.`, `Remove it first: /provider remove ${name}`);
+  const platformSlot = platformCredentialSlot(name);
+  if (platformSlot) {
+    throw commandRefusal(`${name} was not added: its key would be stored as ${platformSlot}, the key of a built-in provider or service, so adding it would overwrite that key and removing it would delete it.`, `Choose another name, such as /provider add ${name}-local ${baseURL}`);
+  }
+  const sharing = keySlotOwner(directory, name);
+  if (sharing) {
+    throw commandRefusal(`${name} was not added: its key would be stored as ${customProviderKeyName(name)}, which ${sharing} already uses.`, `Choose a name that differs by more than - and _, or remove ${sharing} first.`);
+  }
+  progress(`Reading the models ${baseURL}/models lists…`);
+  let ids: string[] = [];
+  let unreadable = false;
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), 5000);
+  try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+    let response: Response | undefined;
     try {
-      files = readdirSync(directory);
+      response = await fetch(`${baseURL}/models`, { signal: abort.signal, headers });
     } catch {
-      return undefined;
+      progress(`${baseURL}/models did not answer: ${name} is added with a starter model entry; edit ${file} once the server is up.`);
     }
-    return files
-      .filter((file) => file.endsWith('.json'))
-      .map((file) => file.slice(0, -'.json'.length))
-      .find((other) => other !== name && customProviderKeyName(other) === slot);
-  }
-  async function addProvider(
-    context: Context,
-    request: { readonly name: string; readonly baseURL: string; readonly endpoint: URL; readonly directory: string; readonly file: string },
-    apiKey: string | undefined,
-  ): Promise<void> {
-    const { name, baseURL, endpoint, directory, file } = request;
-    context.print(`Probing ${baseURL}/models ...`);
-    let ids: string[] = [];
-    let unreadable = false;
-    const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), 5000);
-    try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-      let response: Response | undefined;
+    if (response && !response.ok) {
+      const keyHint = response.status === 401 || response.status === 403 ? (apiKey ? ' It did not accept the key.' : ' It needs a key.') : '';
+      throw commandRefusal(`${baseURL}/models answered HTTP ${response.status}, so ${name} was not added.${keyHint}`, `Fix the server${keyHint ? ' or the key' : ''}, then add it again.`);
+    }
+    if (response) {
       try {
-        response = await fetch(`${baseURL}/models`, { signal: abort.signal, headers });
+        ids = discoveredModelIds(await response.json());
       } catch {
-        context.print(`Could not reach ${baseURL}/models: creating provider with a starter model entry; edit ${file} once the endpoint is up.`);
+        unreadable = true;
       }
-      if (response && !response.ok) {
-        const keyHint = response.status === 401 || response.status === 403
-          ? apiKey ? ' The endpoint did not accept the key.' : ' The endpoint needs an API key.'
-          : '';
-        context.print(
-          `${baseURL}/models answered HTTP ${response.status}, so provider '${name}' was not added.${keyHint} Fix the endpoint${response.status === 401 || response.status === 403 ? ' or key' : ''}, then run /provider add ${name} ${baseURL} again.`,
-        );
-        return;
-      }
-      if (response) {
-        try {
-          ids = discoveredModelIds(await response.json());
-        } catch {
-          unreadable = true;
-        }
-        if (!ids.length) unreadable = true;
-      }
-    } finally {
-      clearTimeout(timer);
+      if (!ids.length) unreadable = true;
     }
-    if (unreadable) context.print(`${baseURL}/models answered without a model list: creating provider with a starter model entry; edit ${file} to name its models.`);
-    let windows: Record<string, number> = {};
-    if (ids.length) {
-      if (endpoint.protocol === 'http:') {
-        try {
-          windows = await fetchModelContextWindows(endpoint.hostname, Number.parseInt(endpoint.port, 10) || 80, 'unknown', ids);
-        } catch {
-          /* Missing metadata stays unknown. */
-        }
-      } else
-        context.print(
-          'Note: Context window detection is only supported for http:// URLs. Windows the endpoint does not report are left unknown.',
-        );
-    }
-    const starter = `${name}-model`;
-    const models: CustomProviderConfig['models'] = (ids.length ? ids : [starter]).map((id) => {
-      const window = Object.hasOwn(windows, id) ? windows[id] : undefined;
-      return {
-        id,
-        displayName: id,
-        ...(window !== undefined && window > 0 ? { contextWindow: window } : {}),
-        capabilities: { toolCalling: true, codeEditing: policy.codeEditing, reasoning: false, multimodal: false },
-      };
-    });
-    // Provider JSON contains only the vault reference, never the credential.
-    const config: CustomProviderConfig = {
-      name,
-      displayName: name,
-      type: 'openai-compat',
-      baseURL,
-      apiKeyEnv: customProviderKeyName(name),
-      models,
-    };
-    try {
-      mkdirSync(directory, { recursive: true });
-      // Exclusive create: a second add of the same name cannot overwrite the first.
-      await writeFile(file, JSON.stringify(config, null, 2), { encoding: 'utf-8', flag: 'wx' });
-    } catch (error) {
-      throw (error as NodeJS.ErrnoException).code === 'EEXIST'
-        ? commandRefusal(`Provider '${name}' already exists at ${file}`, `Remove it first with: /provider remove ${name}`)
-        : commandRefusal(`Error writing provider file: ${summarizeError(error)}`, undefined, 'COMMAND_FAILED');
-    }
-    // The key is stored last, so a failed write leaves no key without a provider; a failed
-    // store takes the provider file back out so the two never disagree.
-    if (apiKey) {
+  } finally {
+    clearTimeout(timer);
+  }
+  if (unreadable) progress(`${baseURL}/models answered without a model list: ${name} is added with a starter model entry; edit ${file} to name its models.`);
+  let windows: Record<string, number> = {};
+  if (ids.length) {
+    if (endpoint.protocol === 'http:') {
       try {
-        await storeProviderKey(services.requireSecretsManager(context), name, apiKey);
-      } catch (error) {
-        await unlink(file).catch(() => undefined);
-        throw commandRefusal(`Could not store the key for '${name}': ${summarizeError(error)}. The provider was not added.`);
+        windows = await fetchModelContextWindows(endpoint.hostname, Number.parseInt(endpoint.port, 10) || 80, 'unknown', ids);
+      } catch {
+        /* Missing metadata stays unknown. */
       }
+    } else {
+      progress('Context windows are read only from http:// addresses; the ones the server does not report stay unknown.');
     }
-    const modelLines = ids.length
-      ? ids
-          .map((id) => {
-            const window = Object.hasOwn(windows, id) ? windows[id] : undefined;
-            return `  • ${id} (${window !== undefined && window > 0 ? `${window.toLocaleString()} ctx` : 'context window unknown'})`;
-          })
-          .join('\n')
-      : `  • ${starter} (starter entry: not reported by the endpoint)`;
-    context.print(
-      `Provider '${name}' added with ${models.length} model(s)${apiKey ? '; its API key is stored (value hidden)' : ' and no API key'}:\n${modelLines}\nThe file watcher will auto-register it shortly.`,
-    );
   }
-  function registerLocalProviderRuntimeCommands(registry: Pick<TerminalCommandRegistry<Context>, 'register'>): void {
-    registry.register({
-      name: 'provider',
-      effect: 'mixed',
-      aliases: ['p'],
-      description: 'Switch provider or manage custom providers (add/remove)',
-      ...(policy.hidden ? { firstScreen: false } : {}),
-      usage: `[add <name> <baseURL>${policy.allowInlineKey ? ' [apiKey]' : ''} | remove <name> | <provider-name>]`,
-      argsHint: '[add|remove|name]',
-      async handler(args, context) {
-        const commandArgs = stripYesFlag(args).rest;
-        const paths = services.requireShellPaths(context);
-        if (commandArgs[0] === 'add') {
-          const name = commandArgs[1];
-          const baseURL = commandArgs[2];
-          const apiKey = policy.allowInlineKey ? commandArgs[3] : undefined;
-          const usage = `/provider add <name> <baseURL>${policy.allowInlineKey ? ' [apiKey]' : ''}`;
-          if (!name || !baseURL) {
-            throw commandRefusal(`Usage: ${usage}\nExample: /provider add my-server http://192.168.0.85:8001/v1`);
-          }
-          if (!validProviderName(name)) {
-            throw commandRefusal('Error: Provider name must contain only letters, numbers, hyphens, and underscores.');
-          }
-          let endpoint: URL;
-          try {
-            endpoint = new URL(baseURL);
-            if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password)
-              throw new Error('invalid endpoint');
-          } catch {
-            throw commandRefusal('Error: Use an http:// or https:// provider endpoint without embedded credentials.');
-          }
-          const directory = paths.resolveUserPath(policy.surfaceRoot, 'providers');
-          const file = join(directory, `${name}.json`);
-          if (existsSync(file)) {
-            context.print(
-              `Provider '${name}' already exists at ${file}\nRemove it first with: /provider remove ${name}`,
-            );
-            return;
-          }
-          const platformSlot = platformCredentialSlot(name);
-          if (platformSlot) {
-            context.print(
-              `Provider '${name}' was not added: its API key would be stored as ${platformSlot}, which is the key of a built-in provider or service, so adding it would overwrite that key and removing it would delete it. Choose another name, for example /provider add ${name}-local ${baseURL}.`,
-            );
-            return;
-          }
-          const sharing = keySlotOwner(directory, name);
-          if (sharing) {
-            context.print(
-              `Provider '${name}' was not added: its API key would be stored as ${customProviderKeyName(name)}, which provider '${sharing}' already uses. Choose a name that differs by more than - and _, or remove '${sharing}' first with /provider remove ${sharing}.`,
-            );
-            return;
-          }
-          const request = { name, baseURL, endpoint, directory, file };
-          if (!apiKey && policy.captureMissingKey && context.beginConcealedInput) {
-            requestKeyThen(context, name, (key) => {
-              void addProvider(context, request, key).catch((error: unknown) => context.print(`Provider '${name}' was not added: ${summarizeError(error)}`));
-            });
-            return;
-          }
-          await addProvider(context, request, apiKey);
-          return;
-        }
-        if (commandArgs[0] === 'remove' || commandArgs[0] === 'rm') {
-          const name = commandArgs[1];
-          const usage = `/provider remove <name>`;
-          if (!name) {
-            throw commandRefusal(`Usage: ${usage}`);
-          }
-          if (!validProviderName(name)) {
-            throw commandRefusal('Error: Provider name must contain only letters, numbers, hyphens, and underscores.');
-          }
-          const file = paths.resolveUserPath(policy.surfaceRoot, 'providers', `${name}.json`);
-          if (!existsSync(file)) {
-            throw commandRefusal(`No custom provider '${name}' found at ${file}`);
-          }
-          try {
-            await unlink(file);
-          } catch (error) {
-            throw commandRefusal(`Error removing provider file: ${summarizeError(error)}`);
-          }
-          // The key belongs to this provider alone (an add refuses a name that maps to a key slot in use).
-          const keyName = customProviderKeyName(name);
-          if (platformCredentialSlot(name)) {
-            // A provider file made by hand, or before add refused such names: the key is a built-in one and stays.
-            context.print(`Provider '${name}' removed. Its key slot ${keyName} belongs to a built-in provider or service, so the stored key was kept. The file watcher will deregister it shortly.`);
-            return;
-          }
-          try {
-            await services.requireSecretsManager(context).delete(keyName, { scope: 'daemon' });
-          } catch (error) {
-            throw commandRefusal(`Provider '${name}' removed, but its stored API key ${keyName} could not be deleted: ${summarizeError(error)}`,
-              `Delete it with /secrets delete ${keyName}`, 'PARTIALLY_DONE');
-          }
-          context.print(`Provider '${name}' and its stored API key ${keyName} (if any) removed. The file watcher will deregister it shortly.`);
-          return;
-        }
-        if (!commandArgs.length) {
-          if (context.openProviderPicker) {
-            context.openProviderPicker();
-            return;
-          }
-          const providers = services.requireProviderApi(context).listProviderIds();
-          context.print(
-            [
-              'Available providers:',
-              ...providers.map((provider) => `  ${provider === context.session.runtime.provider ? '▶' : ' '} ${provider}`),
-            ].join('\n'),
-          );
-          return;
-        }
-        const provider = commandArgs[0];
-        if (provider === undefined) return;
-        const requestedModel = policy.explicitModelSelection ? commandArgs[1] : undefined;
-        const api = services.requireProviderApi(context);
-        try {
-          const models = await api.listModels({ providerId: provider, selectableOnly: true });
-          const match = models[0];
-          if (!match) {
-            throw commandRefusal(`Unknown provider: ${provider}. Available: ${api.listProviderIds().join(', ')}`);
-          }
-          const registryKey = requestedModel ? formatProviderModel(provider, requestedModel) : match.registryKey;
-          const selected = await api.selectModel(registryKey);
-          policy.beforeSelection(context, selected.providerId, () => {
-            context.session.runtime.model = selected.registryKey;
-            context.session.runtime.provider = selected.providerId;
-            context.platform.configManager.set('provider.model', selected.registryKey);
-            context.print(`Switched to provider: ${selected.providerId} (model: ${selected.modelId})`);
-          });
-        } catch (error) {
-          if (readRefusal(error)) throw error;
-          throw commandRefusal(`Error: ${summarizeError(error)}`, undefined, 'COMMAND_FAILED');
-        }
-      },
-    });
+  const starter = `${name}-model`;
+  const models: CustomProviderConfig['models'] = (ids.length ? ids : [starter]).map((id) => {
+    const window = Object.hasOwn(windows, id) ? windows[id] : undefined;
+    return {
+      id,
+      displayName: id,
+      ...(window !== undefined && window > 0 ? { contextWindow: window } : {}),
+      capabilities: { toolCalling: true, codeEditing: request.codeEditing, reasoning: false, multimodal: false },
+    };
+  });
+  // The provider file holds only the name of its key, never the key.
+  const config: CustomProviderConfig = { name, displayName: name, type: 'openai-compat', baseURL, apiKeyEnv: customProviderKeyName(name), models };
+  try {
+    mkdirSync(directory, { recursive: true });
+    // Exclusive create: a second add of the same name cannot overwrite the first.
+    await writeFile(file, JSON.stringify(config, null, 2), { encoding: 'utf-8', flag: 'wx' });
+  } catch (error) {
+    throw (error as NodeJS.ErrnoException).code === 'EEXIST'
+      ? commandRefusal(`A provider named ${name} already exists (${file}); nothing was added.`, `Remove it first: /provider remove ${name}`)
+      : commandRefusal(`${name} was not added: its file could not be written (${summarizeError(error)}).`, undefined, 'COMMAND_FAILED');
   }
-  return { registerLocalProviderRuntimeCommands };
+  // The key is stored last, so a failed write leaves no key without a provider; a failed
+  // store takes the provider file back out so the two never disagree.
+  if (apiKey) {
+    try {
+      await secrets.set(customProviderKeyName(name), apiKey, { scope: 'daemon', medium: 'secure' });
+    } catch (error) {
+      await unlink(file).catch(() => undefined);
+      throw commandRefusal(`${name} was not added: its key could not be stored (${summarizeError(error)}).`);
+    }
+  }
+  const modelLines = ids.length
+    ? ids.map((id) => {
+      const window = Object.hasOwn(windows, id) ? windows[id] : undefined;
+      return `  • ${id} (${window !== undefined && window > 0 ? `${window.toLocaleString()} ctx` : 'context window unknown'})`;
+    }).join('\n')
+    : `  • ${starter} (starter entry: not reported by the server)`;
+  return `Added ${name} with ${models.length} model${models.length === 1 ? '' : 's'}${apiKey ? '; its key is stored (not shown)' : ' and no key'}:\n${modelLines}\nIts models join the list in a moment.`;
+}
+
+/** Remove a provider of your own: its file, then its stored key (unless the slot is a built-in one). */
+export async function removeCustomProvider(name: string, directory: string, secrets: Pick<SecretsManager, 'delete'>): Promise<string> {
+  if (!validProviderName(name)) throw commandRefusal(`"${name}" is not a provider name: use only letters, numbers, - and _.`);
+  const file = join(directory, `${name}.json`);
+  if (!existsSync(file)) throw commandRefusal(`No provider of your own is named ${name} (${file}); nothing was removed.`, '/provider list shows them.');
+  try {
+    await unlink(file);
+  } catch (error) {
+    throw commandRefusal(`${name} was not removed: its file could not be deleted (${summarizeError(error)}).`);
+  }
+  const keyName = customProviderKeyName(name);
+  // A provider file made by hand may name a built-in provider's or service's key slot: that key stays.
+  if (platformCredentialSlot(name)) return `Its key slot ${keyName} belongs to a built-in provider or service, so that key was kept. Its models leave the list in a moment.`;
+  try {
+    await secrets.delete(keyName, { scope: 'daemon' });
+  } catch (error) {
+    throw commandRefusal(`${name} was removed, but its stored key ${keyName} could not be deleted: ${summarizeError(error)}`, `Delete it with /secrets delete ${keyName}`, 'PARTIALLY_DONE');
+  }
+  return `Its stored key ${keyName} (if any) was deleted too. Its models leave the list in a moment.`;
 }

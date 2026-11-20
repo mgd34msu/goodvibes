@@ -75,7 +75,10 @@ const TURN_FAILURE_READING_SCHEMA = objectSchema({
   turnId: STRING_SCHEMA,
   headline: STRING_SCHEMA,
   cause: STRING_SCHEMA,
-  changed: objectSchema({ text: STRING_SCHEMA, files: STRING_LIST_SCHEMA }, ['text', 'files']),
+  changed: objectSchema({
+    text: STRING_SCHEMA, known: BOOLEAN_SCHEMA, files: STRING_LIST_SCHEMA, commands: NUMBER_SCHEMA, messages: NUMBER_SCHEMA, unknown: NUMBER_SCHEMA,
+  }, ['text', 'known', 'files', 'commands', 'messages', 'unknown']),
+  attempts: objectSchema({ count: NUMBER_SCHEMA, times: arraySchema(NUMBER_SCHEMA) }, ['count', 'times']),
   next: arraySchema(objectSchema({
     action: enumSchema(['retry', 'other-model', 'details', 'sign-in', 'choose-model', 'start-daemon']),
     label: STRING_SCHEMA,

@@ -293,14 +293,13 @@ export function createTerminalCommandRegistry<
     const raw = directOwnerCommands.get(context)?.rawInput;
     return raw && /^\s*\/remote\s+dispatch(?:-pool)?\s/.test(raw) ? raw : undefined;
   }
-  /** New planning goals share the terminal-only capture boundary with workstream starts.
-   * Exactly one separator is syntax; the remaining source is retained verbatim.
-   * Aliases resolve to project-plan in the private dispatch mark, never in source.
+  /** A work request (`/work request <goal>`) shares the terminal-only capture boundary with workstream starts.
+   * Exactly one separator after `request` is syntax; the remaining source is retained verbatim.
    */
   function directOwnerPlanningInput(context: Context): NativeConversationInput | undefined {
-    if (!isDirectOwnerCommandContext(context, 'project-plan')) return undefined;
+    if (!isDirectOwnerCommandContext(context, 'work')) return undefined;
     const raw = directOwnerCommands.get(context)?.rawInput;
-    const match = raw?.match(/^\s*\/(?:project-plan|planning)(?:(?:\r\n|\s)([\s\S]*))?$/);
+    const match = raw?.match(/^\s*\/work\s+request(?:(?:\r\n|\s)([\s\S]*))?$/);
     return match ? captureNativeConversationInput(match[1] ?? '') : undefined;
   }
   class CommandRegistry {

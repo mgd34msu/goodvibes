@@ -388,7 +388,6 @@ interface SlashRegistry { getAll(): SlashRecord[]; register(command: SlashRecord
 interface TuiCommandsModule { categorizeBuiltinCommands(): { command: SlashRecord; category: string }[] }
 interface CommandRegistryModule { CommandRegistry: new () => SlashRegistry }
 interface WorkLedgerHostModule { registerNativeWorkLedgerCommand(registry: SlashRegistry, view: object): void }
-interface TuiLegacyImportModule { registerTuiLegacyImportCommands(registry: SlashRegistry): void }
 interface AgentCommandsModule { registerBuiltinCommands(registry: SlashRegistry): void }
 
 const EFFECT_WORDS: Readonly<Record<string, string>> = {
@@ -426,12 +425,10 @@ async function slashTui(): Promise<string> {
   const { categorizeBuiltinCommands } = await loadProductModule<TuiCommandsModule>('products/tui/src/input/commands.ts');
   const { CommandRegistry } = await loadProductModule<CommandRegistryModule>('products/tui/src/input/command-registry.ts');
   const { registerNativeWorkLedgerCommand } = await loadProductModule<WorkLedgerHostModule>('products/tui/src/runtime/native-work-ledger-host.ts');
-  const { registerTuiLegacyImportCommands } = await loadProductModule<TuiLegacyImportModule>('products/tui/src/input/commands/legacy-work-ledger-import-runtime.ts');
   const entries = categorizeBuiltinCommands().map(({ command, category }) => ({ command, category }));
   // Registered beside the built-in groups at start-up (runtime/bootstrap-shell.ts).
   const extra = new CommandRegistry();
   registerNativeWorkLedgerCommand(extra, { selectProject: () => undefined });
-  registerTuiLegacyImportCommands(extra);
   const known = new Set(entries.map((entry) => entry.command.name));
   for (const command of extra.getAll()) if (!known.has(command.name)) entries.push({ command, category: 'Work' });
   entries.sort((a, b) => byText(a.command.name, b.command.name));

@@ -3,7 +3,7 @@
  * about him, from inside a session.
  *
  * A thin wrapper over the same `handleOwnerProfileCommand` the top-level CLI
- * runs, in the shape `compat-runtime.ts` already uses: parse, build a
+ * runs, in the shape `/health compat` (health-runtime.ts) uses: parse, build a
  * `CliCommandRuntime`, print the result. One implementation, so the shell and
  * the shell-less binary can never answer differently, which matters more here
  * than usual, because "what do you know about me" and "where did you get that"

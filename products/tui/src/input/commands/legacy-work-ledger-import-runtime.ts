@@ -2,12 +2,13 @@ import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platfo
 import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
 import { createNativeHostFetch } from '@goodvibes-jev/engine/terminal-shell/native';
 import { realpathSync } from 'node:fs';
-import { openLegacyImportOperator, registerLegacyImportCommands, resolveLegacyImportJournalLocation, retainLegacyImportJournalOwner, type LegacyImportOperatorSession } from '@goodvibes-jev/engine/terminal-shell/legacy-work-ledger-import';
-import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import { openLegacyImportOperator, resolveLegacyImportJournalLocation, retainLegacyImportJournalOwner, type LegacyImportOperatorSession } from '@goodvibes-jev/engine/terminal-shell/legacy-work-ledger-import';
+import type { CommandContext } from '../command-registry.ts';
 import { resolveNativeHostCredential } from '../../runtime/client/native-host-credential.ts';
 import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
 export type OpenTuiLegacyImportSession = (context: CommandContext, projectId: string) => Promise<LegacyImportOperatorSession>;
-export function registerTuiLegacyImportCommands(registry: CommandRegistry, _daemonHomeDirectory?: string, open: OpenTuiLegacyImportSession = async (context, projectId) => {
+/** An import session for `/work import…` (terminal-shell/native/work-command.ts) on this terminal's host. */
+export const openTuiLegacyImport: OpenTuiLegacyImportSession = async (context, projectId) => {
   const credentialObservation = new OwnedSelectionObservation();
   const paths = requireShellPaths(context);
   // A device pairing, or on the daemon's own machine the operator token this terminal already holds.
@@ -38,4 +39,4 @@ export function registerTuiLegacyImportCommands(registry: CommandRegistry, _daem
       return { baseUrl: credential.baseUrl, token: credential.token, workspace };
     },
   });
-}): void { registerLegacyImportCommands(registry, open); }
+};

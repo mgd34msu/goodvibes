@@ -3,7 +3,7 @@
  *
  * Views live in four kit modals (Usage, Changes, Agents, Notifications), the
  * session picker and the config-modal surfaces. Old names still arrive from
- * many places: `/panel open <id>`, notifications that name the view they are
+ * many places: deep links, notifications that name the view they are
  * about, cross-modal jumps (the work plan's "show this agent"), saved muscle
  * memory. resolveViewName turns any of them into the modal that holds that
  * content now, so none of them dead-ends.
@@ -99,7 +99,7 @@ export function resolveViewName(name: string, modalRedirect: (name: string) => s
   return null;
 }
 
-/** A one-line description of where a view name goes, for `/panel list`. */
+/** A one-line description of where a view name goes. */
 export function describeViewRoute(route: ViewRoute): string {
   switch (route.kind) {
     case 'agents': return route.hosted ? 'Your agents (the hosted session)' : 'Your agents';

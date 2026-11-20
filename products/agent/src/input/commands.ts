@@ -13,7 +13,6 @@ import { registerOperatorRuntimeCommands } from './commands/operator-runtime.ts'
 import { registerNotifyRuntimeCommands } from './commands/notify-runtime.ts';
 import { registerProductRuntimeCommands } from './commands/product-runtime.ts';
 import { registerPlatformAccessRuntimeCommands } from './commands/platform-access-runtime.ts';
-import { registerStateRuntimeCommands } from './commands/state-runtime.ts';
 import { registerSubscriptionRuntimeCommands } from './commands/subscription-runtime.ts';
 import { registerSecurityRuntimeCommands } from './commands/security-runtime.ts';
 import { registerMcpRuntimeCommands } from './commands/mcp-runtime.ts';
@@ -31,7 +30,6 @@ import { registerQrcodeRuntimeCommands } from './commands/qrcode-runtime.ts';
 import { registerOnboardingRuntimeCommands } from './commands/onboarding-runtime.ts';
 import { registerTtsRuntimeCommands } from './commands/tts-runtime.ts';
 import { registerAgentWorkspaceRuntimeCommands } from './commands/agent-workspace-runtime.ts';
-import { registerLegacyWorkLedgerImportCommands } from './commands/legacy-work-ledger-import-runtime.ts';
 import { registerAgentRuntimeProfileRuntimeCommands } from './commands/agent-runtime-profile-runtime.ts';
 import { registerDelegationRuntimeCommands } from './commands/delegation-runtime.ts';
 import { registerPersonasRuntimeCommands } from './commands/personas-runtime.ts';
@@ -42,7 +40,6 @@ import { registerChannelsRuntimeCommands } from './commands/channels-runtime.ts'
 import { registerTelegramIntakeCommands } from './commands/telegram-intake-runtime.ts';
 import { registerBriefRuntimeCommands } from './commands/brief-runtime.ts';
 import { registerSupportBundleRuntimeCommands } from './commands/support-bundle-runtime.ts';
-import { registerCompatRuntimeCommands } from './commands/compat-runtime.ts';
 import { registerOwnerProfileRuntimeCommands } from './commands/owner-profile-runtime.ts';
 import { registerOperatorActionRuntimeCommands } from './commands/operator-actions-runtime.ts';
 import { registerConnectedHostAdminCommands } from './commands/connected-host-admin-runtime.ts';
@@ -74,10 +71,8 @@ export function registerBuiltinCommands(
   registerAgentWorkspaceRuntimeCommands(registry);
   registerWorkPlanRuntimeCommands(registry);
   registerWorkstreamRuntimeCommands(registry);
-  registerLegacyWorkLedgerImportCommands(registry);
   registerBriefRuntimeCommands(registry);
   registerSupportBundleRuntimeCommands(registry);
-  registerCompatRuntimeCommands(registry);
   registerOwnerProfileRuntimeCommands(registry);
   registerOperatorActionRuntimeCommands(registry);
   registerConnectedHostAdminCommands(registry);
@@ -101,7 +96,6 @@ export function registerBuiltinCommands(
   registerNotifyRuntimeCommands(registry);
   registerProductRuntimeCommands(registry);
   registerPlatformAccessRuntimeCommands(registry);
-  registerStateRuntimeCommands(registry);
   registerSubscriptionRuntimeCommands(registry);
   registerSecurityRuntimeCommands(registry);
   registerMcpRuntimeCommands(registry);

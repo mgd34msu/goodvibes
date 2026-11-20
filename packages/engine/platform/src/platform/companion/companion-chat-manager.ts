@@ -85,7 +85,8 @@ import type { ToolRegistry } from '../tools/registry.js';
 import type { ToolCall, ToolResult } from '../types/tools.js';
 import { toolCallActivity } from '@goodvibes-jev/engine/contracts';
 import { runTurn, type TurnModelResponse, type TurnRequest } from '../core/turn-loop.js';
-import { readTurnFailure, turnFailureText } from '../core/turn-failure.js';
+import { readTurnFailure, turnFailureText, type TurnChanges } from '../core/turn-failure.js';
+import { TurnAttemptRecord, TurnChangeRecord } from '../core/turn-changes.js';
 import { providerDisplayLabel } from '../providers/provider-labels.js';
 import { createTurnFailover, describeFailoverCost, readFallbackOrder, type TurnFailoverModel } from '../providers/failover.js';
 import type { ProviderRegistry } from '../providers/registry.js';
@@ -1359,6 +1360,9 @@ export class CompanionChatManager {
     const failoverMoves: { readonly from: string; readonly to: string; readonly because: string }[] = [];
     const failoverLines: string[] = [];
     let failoverStop: string | undefined;
+    // What the failure row says about this turn: the requests to the model that failed last, and what its tools changed.
+    const turnAttempts = new TurnAttemptRecord();
+    const turnChanges = new TurnChangeRecord();
     let actualUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
     try {
       // Inside the try so a throwing publisher still releases the slot and drains the queue.
@@ -1468,7 +1472,12 @@ export class CompanionChatManager {
 
       await runTurn({
         signal: abortSignal,
-        request,
+        request: async (turnRequest) => {
+          turnAttempts.sent(`${route.provider ?? ''}:${route.model ?? ''}`, Date.now());
+          const response = await request(turnRequest);
+          turnAttempts.answered();
+          return response;
+        },
         ...(turnFailover ? {
           failoverAvailable: () => turnFailover.available(),
           failOver: (error: unknown) => {
@@ -1493,7 +1502,13 @@ export class CompanionChatManager {
           executeTools: (calls: ToolCall[], { signal, onSettled }: { signal: AbortSignal; onSettled(result: ToolResult): void }) => executeCompanionToolCalls(
             { toolRegistry, permissionManager: this.permissionManager, hookDispatcher: this.hookDispatcher, runtimeBus: this.runtimeBus, configManager: this.configManager,
               autonomousSource: () => ({ goal: userMsg?.content ?? '', criteria: [] }) },
-            calls, publish, sessionId, turnId, { signal, onSettled },
+            calls, publish, sessionId, turnId, {
+              signal,
+              onSettled: (result) => {
+                turnChanges.note(calls, [result], (name) => toolRegistry.definitionOf(name));
+                onSettled(result);
+              },
+            },
           ),
         } : {}),
       }, {
@@ -1560,7 +1575,7 @@ export class CompanionChatManager {
         // A provider failure with nothing left in the fallback order says why nothing else was tried.
         this.recordFailedTurn(session, {
           error: err, ...(failoverStop ? { failoverStop } : {}), turnId, userMessageId, assistantMessageId, writer,
-          assistantContent, uncommittedContent, publish,
+          assistantContent, uncommittedContent, publish, attempts: turnAttempts, changes: turnChanges.changes,
         });
       } else {
         finalizeCancelled();
@@ -1592,6 +1607,9 @@ export class CompanionChatManager {
     readonly error: unknown;
     /** Why the failover tried no other model, when it stopped. */
     readonly failoverStop?: string | undefined;
+    /** The requests to the model that failed last, and what the turn's tools changed. */
+    readonly attempts: TurnAttemptRecord;
+    readonly changes: TurnChanges;
     readonly turnId: string;
     readonly userMessageId: string;
     readonly assistantMessageId: string;
@@ -1614,6 +1632,8 @@ export class CompanionChatManager {
       stopReason: providerFailed ? 'provider_error' : 'unexpected_error',
       ...(normalized.statusCode !== undefined ? { status: normalized.statusCode } : {}),
       ...(normalized.provider ? { provider: normalized.provider, providerName: providerDisplayLabel(normalized.provider) } : {}),
+      ...(providerFailed && turn.attempts.count > 0 ? { attempts: turn.attempts.count, attemptTimes: [...turn.attempts.times] } : {}),
+      changes: turn.changes,
       fallbackOrderSet: readFallbackOrder(this.configManager?.get('provider.fallbackModels')).some((entry) => entry.trim().length > 0),
       ...(stopped ? { fallbackNote: stopped } : {}),
     });

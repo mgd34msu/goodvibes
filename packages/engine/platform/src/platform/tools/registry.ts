@@ -427,6 +427,13 @@ function assertRegistrableDefinition(definition: ToolDefinition): void {
  */
 const toolActivityByName = new Map<string, ToolActivity>();
 
+const toolDescriptionByName = new Map<string, string>();
+
+/** A registered tool's own description, by its name: what an ask about a tool with no display words is worded from. */
+export function toolDescriptionOf(name: string): string | undefined {
+  return toolDescriptionByName.get(name);
+}
+
 /** The display words a registered tool declared, by its name; undefined for a tool that declared none. */
 export function toolActivityOf(name: string): ToolActivity | undefined {
   return toolActivityByName.get(name);
@@ -559,6 +566,7 @@ export class ToolRegistry {
     const signal = projector ? projectionSignal(projectionProperty(projector, 'signal')) : undefined;
     this.tools.set(name, tool);
     if (definition.activity) toolActivityByName.set(name, definition.activity);
+    if (typeof definition.description === 'string' && definition.description.trim() !== '') toolDescriptionByName.set(name, definition.description);
     this.registrations.set(name, Object.freeze({ tool, projector, project, captureNativeReferences, assertCurrent, signal,
       revision: `tool-input-projection:${++this.registrationRevision}` }));
   }

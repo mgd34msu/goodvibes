@@ -14,7 +14,7 @@
  */
 import { basename, isAbsolute, relative, resolve } from 'node:path';
 import { toolActivityFallback, toolCallActivity } from '@goodvibes-jev/engine/contracts';
-import { toolActivityOf } from '../tools/registry.js';
+import { toolActivityOf, toolDescriptionOf } from '../tools/registry.js';
 import { extractHostname } from '../tools/fetch/trust-tiers.js';
 import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';
 import { ownerOnlyReason } from '../gate/classify.js';
@@ -29,7 +29,7 @@ import type { ModeInForceWords } from './decision-model-readiness.js';
 
 export type AskKind =
   | 'run-command' | 'answer-command-prompt' | 'change-files' | 'fetch' | 'start-agent' | 'hand-off-work'
-  | 'change-setting' | 'mcp-tool' | 'other-tool' | 'purchase' | 'question' | 'decision' | 'claim' | 'queued-action' | 'report';
+  | 'change-setting' | 'mcp-tool' | 'other-tool' | 'purchase' | 'send-message' | 'question' | 'decision' | 'claim' | 'queued-action' | 'report';
 
 export interface AskChoice {
   readonly id: 'once' | 'remember' | 'no' | 'apply-selected' | `option:${number}` | 'own-words' | 'object' | 'acknowledge';
@@ -143,34 +143,102 @@ function lowerFirst(text: string): string {
   return text.charAt(0).toLowerCase() + text.slice(1);
 }
 
-/** The imperative of a tool's running words: "Searching" → "Search". */
+/** Imperatives a regular rule would get wrong ("Analyzing" is "Analyze", "Using" is "Use"). */
 const IMPERATIVES: Readonly<Record<string, string>> = {
-  Searching: 'Search', Running: 'Run', Checking: 'Check', Writing: 'Write', Updating: 'Update', Stopping: 'Stop',
-  Reading: 'Read', Messaging: 'Message', Inspecting: 'Inspect', Fetching: 'Fetch', Editing: 'Edit', Analyzing: 'Analyze', Using: 'Use',
+  Analyzing: 'Analyze', Using: 'Use', Writing: 'Write', Sharing: 'Share', Scheduling: 'Schedule', Creating: 'Create',
+  Saving: 'Save', Removing: 'Remove', Changing: 'Change', Managing: 'Manage', Comparing: 'Compare', Generating: 'Generate',
+  Consolidating: 'Consolidate', Updating: 'Update', Configuring: 'Configure', Ingesting: 'Ingest', Preparing: 'Prepare',
+  Delegating: 'Delegate', Composing: 'Compose', Browsing: 'Browse', Starting: 'Start', Handing: 'Hand',
 };
 
-/** "Search the web?" from the tool's own display words; "Use <name>?" for a tool that declares none. */
+/** The imperative of a running verb: "Searching" → "Search", "Running" → "Run", "Writing" → "Write". */
+function imperativeOf(doing: string): string {
+  const known = IMPERATIVES[doing];
+  if (known) return known;
+  if (!doing.endsWith('ing') || doing.length < 5) return doing;
+  const base = doing.slice(0, -3);
+  // A doubled last consonant (Running, Stopping) is one in the imperative; ll and ss stay.
+  if (/([bdfgmnprt])\1$/.test(base)) return base.slice(0, -1);
+  // A silent e dropped before -ing (Writing, Sharing): consonant, vowel, consonant other than w, x, y.
+  if (/[^aeiou][aeiou][bcdgkmnprstvz]$/i.test(base) && !/(en|er|on|it|et|ol)$/.test(base)) return `${base}e`;
+  return base;
+}
+
+/** What a tool does, in a sentence's words: its description's first sentence, without the tool's name. */
+function descriptionQuestion(tool: string): string | undefined {
+  const description = toolDescriptionOf(tool);
+  if (!description) return undefined;
+  const first = description.replace(/\s+/g, ' ').trim().split(/(?<=[.!?:;])\s|\s\(|,\s/)[0]!.replace(/[.!?:;]+$/, '').trim();
+  if (first === '' || first.toLowerCase().includes(tool.toLowerCase())) return undefined;
+  return `${capitalize(clipLine(first, 70))}?`;
+}
+
+/** "a, b and 2 more" for a list a sentence names. */
+function listShort(items: readonly string[]): string {
+  if (items.length <= 2) return items.join(' and ');
+  return `${items.slice(0, 2).join(', ')} and ${items.length - 2} more`;
+}
+
+/** A tool's own name as words ("create_issue" → "create issue"). */
+function nameWords(name: string): string {
+  return name.replace(/[_-]+/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').trim().toLowerCase();
+}
+
+/**
+ * "Search the web?" from the tool's own display words; else a sentence from
+ * its description; never the tool's name as if it were words.
+ */
 function toolQuestion(tool: string, args: Record<string, unknown>): string {
-  const words = toolCallActivity(toolActivityOf(tool), args) ?? toolActivityFallback(tool);
-  const verb = IMPERATIVES[words.doing] ?? 'Use';
-  const object = verb === 'Use' && !IMPERATIVES[words.doing] ? (tool.includes('__') ? tool.split('__').pop()! : tool) : words.object;
-  return `${verb}${object ? ` ${object}` : ''}?`;
+  const words = toolCallActivity(toolActivityOf(tool), args);
+  if (words) return `${imperativeOf(words.doing)}${words.object ? ` ${words.object}` : ''}?`;
+  if (tool.includes('__')) {
+    // A plugin or MCP tool registered as <source>__<tool>: its title and where it comes from.
+    const parts = tool.split('__');
+    return `Use ${nameWords(parts[parts.length - 1]!)} from ${parts.slice(tool.startsWith('mcp__') ? 1 : 0, -1).join(' ') || 'a tool server'}?`;
+  }
+  return descriptionQuestion(tool) ?? 'Allow this action?';
+}
+
+function textArg(args: Record<string, unknown>, ...names: string[]): string | undefined {
+  for (const name of names) {
+    const value = args[name];
+    if (typeof value === 'string' && value.trim() !== '') return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return undefined;
+}
+
+/** The recipients a send names, as written ("alex@example.com", "#garden"). */
+function recipientsOf(args: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  for (const name of ['to', 'recipient', 'recipients', 'cc', 'bcc', 'channel', 'chatId', 'chat_id']) {
+    const value = args[name];
+    if (typeof value === 'string' && value.trim() !== '') out.push(value.trim());
+    else if (Array.isArray(value)) for (const entry of value) if (typeof entry === 'string' && entry.trim() !== '') out.push(entry.trim());
+  }
+  return [...new Set(out)];
 }
 
 /** Which kind of ask a permission request is. */
-export function askKindOf(request: Pick<PermissionPromptRequest, 'tool' | 'args' | 'attribution' | 'category'>): AskKind {
+export function askKindOf(request: Pick<PermissionPromptRequest, 'tool' | 'args' | 'attribution' | 'category'> & { readonly ownerOnly?: PermissionPromptRequest['ownerOnly'] }): AskKind {
   const attribution = request.attribution;
   if (attribution?.kind === 'exec-prompt') return 'answer-command-prompt';
   if (attribution?.kind === 'fetch-localhost') return 'fetch';
   if (attribution?.kind === 'mcp-server') return 'mcp-tool';
   const tool = request.tool;
-  const mode = typeof request.args['mode'] === 'string' ? request.args['mode'] : undefined;
+  const args = request.args;
+  const mode = typeof args['mode'] === 'string' ? args['mode'] : undefined;
   if (tool === 'exec' || attribution?.kind === 'sandbox-escalation') return 'run-command';
   if (tool === 'write' || tool === 'edit') return 'change-files';
   if (tool === 'fetch') return 'fetch';
   if (tool === 'agent' && (mode === 'spawn' || mode === 'batch-spawn')) return 'start-agent';
   if (tool === 'delegate' || (tool === 'agent' && mode === 'message')) return 'hand-off-work';
   if (tool === 'goodvibes_settings') return 'change-setting';
+  // Money and sends are read from what the gate holds them for, whatever the tool is called.
+  if (request.ownerOnly === 'spend-over-limit' || request.ownerOnly === 'payment-step') return 'purchase';
+  if (request.ownerOnly === 'new-recipient' || request.ownerOnly === 'untrusted-derived-send') return 'send-message';
+  // A tool that sets a key to a value under a settings or config name changes a setting.
+  if (/setting|config/i.test(tool) && typeof args['key'] === 'string' && ('value' in args || mode === 'reset')) return 'change-setting';
   if (tool === 'mcp' || tool.startsWith('mcp__')) return 'mcp-tool';
   return 'other-tool';
 }
@@ -178,10 +246,8 @@ export function askKindOf(request: Pick<PermissionPromptRequest, 'tool' | 'args'
 function whoAsked(request: PermissionPromptRequest): string | undefined {
   const attribution = request.attribution;
   switch (attribution?.kind) {
+    // An agent this chat started, by its display name; everything else this chat's own work asked is GoodVibes's ask.
     case 'background-agent': return attribution.template ? `the ${lowerFirst(archetypeDisplayName(attribution.template))}` : 'the agent';
-    case 'mcp-server': return `the ${attribution.serverName} tool server`;
-    case 'sandbox-escalation': return 'the sandbox';
-    case 'exec-prompt': return 'a running command';
     default: return undefined;
   }
 }
@@ -201,17 +267,20 @@ function rememberOf(request: PermissionPromptRequest, cannotUndo: boolean): AskP
   return { offered: true, tiers: tiers.map((option) => ({ tier: option.tier, label: option.label, detail: option.detail })) };
 }
 
-function approvalChoices(kind: AskKind, remember: AskPresentation['remember'], cannotUndo: boolean, tool: string): AskChoice[] {
+/** Owner-only asks whose effect cannot be taken back: the choices open on No (money spent, a message sent as the owner). */
+const OPENS_ON_NO: ReadonlySet<string> = new Set(['unrecoverable-delete', 'irreversible-operator', 'spend-over-limit', 'payment-step', 'new-recipient', 'untrusted-derived-send']);
+
+function approvalChoices(kind: AskKind, remember: AskPresentation['remember'], cannotUndo: boolean, tool: string, opensOnNo = cannotUndo): AskChoice[] {
   if (kind === 'answer-command-prompt') {
     return [{ id: 'once', label: 'Send the answer', key: 'y', default: true }, { id: 'no', label: 'No', key: 'n' }];
   }
   const yes: AskChoice = kind === 'change-files' && tool === 'edit'
-    ? { id: 'apply-selected', label: 'Apply selected', key: 'y', ...(cannotUndo ? { danger: true as const } : { default: true as const }) }
-    : { id: 'once', label: 'Yes, once', key: 'y', ...(cannotUndo ? { danger: true as const } : { default: true as const }) };
+    ? { id: 'apply-selected', label: 'Apply selected', key: 'y', ...(cannotUndo ? { danger: true as const } : opensOnNo ? {} : { default: true as const }) }
+    : { id: 'once', label: 'Yes, once', key: 'y', ...(cannotUndo ? { danger: true as const } : opensOnNo ? {} : { default: true as const }) };
   return [
     yes,
     ...(remember.offered ? [{ id: 'remember' as const, label: 'Yes, and don\'t ask again…', key: 'a' }] : []),
-    { id: 'no', label: 'No', key: 'n', ...(cannotUndo ? { default: true as const } : {}) },
+    { id: 'no', label: 'No', key: 'n', ...(opensOnNo ? { default: true as const } : {}) },
   ];
 }
 
@@ -252,23 +321,45 @@ function questionOf(kind: AskKind, request: PermissionPromptRequest, facts: Pick
       const key = typeof args['key'] === 'string' ? args['key'] : undefined;
       const label = key ? facts.settingLabel?.(key) : undefined;
       if (!label) return { question: 'Change a setting?', title: 'Change a setting?' };
-      const name = lowerFirst(label);
+      // The setting by the name the settings list shows it under, quoted: the names are phrases ("Run commands in a sandbox").
+      const name = `"${label}"`;
       const value = args['value'];
+      const onOff = value === true || value === 'on' || value === 'true' ? 'on' : value === false || value === 'off' || value === 'false' ? 'off' : undefined;
       const question = args['mode'] === 'reset' ? `Reset ${name} to its default?`
-        : value === true ? `Turn ${name} on?` : value === false ? `Turn ${name} off?` : `Change ${name} to ${clipLine(String(JSON.stringify(value) ?? ''), 40)}?`;
+        : onOff !== undefined ? `Turn ${onOff} ${name}?`
+          : `Change ${name} to ${typeof value === 'string' || typeof value === 'number' ? clipLine(String(value), 40) : clipLine(String(JSON.stringify(value) ?? ''), 40)}?`;
+      return { question, title: question };
+    }
+    case 'purchase': {
+      const item = textArg(args, 'item', 'product', 'title', 'description');
+      const shop = textArg(args, 'merchant', 'shop', 'store', 'merchantName', 'merchantDomain', 'site');
+      const amount = textArg(args, 'amount', 'price', 'total', 'cost');
+      const currency = textArg(args, 'currency');
+      const money = amount !== undefined ? (currency && !amount.includes(currency) && /^[\d.,]+$/.test(amount) ? `${amount} ${currency}` : amount) : undefined;
+      const question = item ? `Buy ${item}${shop ? ` from ${shop}` : ''}${money ? ` for ${money}` : ''}?`
+        : shop && money ? `Pay ${shop} ${money}?` : shop ? `Pay ${shop}?` : money ? `Pay ${money}?` : 'Make this payment?';
+      return { question, title: question };
+    }
+    case 'send-message': {
+      const recipients = recipientsOf(args);
+      const email = /mail/i.test(request.tool) || recipients.some((recipient) => recipient.includes('@'));
+      const to = recipients.length > 0 ? listShort(recipients) : undefined;
+      const question = `Send ${email ? 'an email' : 'a message'}${to ? ` to ${to}` : ''}?`;
       return { question, title: question };
     }
     case 'mcp-tool': {
       // The mcp tool's own call names its target as mcp:<server>:<tool>.
       const qualified = typeof args['qualifiedName'] === 'string' ? /^mcp:([^:]+):(.+)$/.exec(args['qualifiedName']) : null;
       if (qualified) {
-        const question = `Let ${qualified[1]} use ${qualified[2]}?`;
+        const question = `Use ${nameWords(qualified[2]!)} from ${qualified[1]}?`;
         return { question, title: question };
       }
       const server = request.attribution?.kind === 'mcp-server' ? request.attribution.serverName
-        : typeof args['server'] === 'string' ? args['server'] : request.tool.startsWith('mcp__') ? request.tool.split('__')[1] ?? 'a tool server' : 'a tool server';
-      const toolName = typeof args['tool'] === 'string' ? args['tool'] : request.tool.startsWith('mcp__') ? request.tool.split('__').pop() ?? 'a tool' : 'a tool';
-      const question = `Let ${server} use ${toolName}?`;
+        : typeof args['server'] === 'string' ? args['server'] : request.tool.startsWith('mcp__') ? request.tool.split('__')[1] : undefined;
+      const toolName = typeof args['tool'] === 'string' ? args['tool'] : request.tool.startsWith('mcp__') ? request.tool.split('__').pop() : undefined;
+      // The mcp tool's own listing and trust modes have display words of their own.
+      if (server === undefined) return { question: toolQuestion(request.tool, args), title: toolQuestion(request.tool, args) };
+      const question = toolName ? `Use ${nameWords(toolName)} from ${server}?` : `Answer ${server}'s request?`;
       return { question, title: question };
     }
     default: {
@@ -279,6 +370,23 @@ function questionOf(kind: AskKind, request: PermissionPromptRequest, facts: Pick
 }
 
 function subjectOf(kind: AskKind, request: PermissionPromptRequest, values: readonly string[]): AskPresentation['subject'] {
+  // A send acts on its subject line; a purchase on the shop; an MCP call on its input, one value per line.
+  if (kind === 'send-message') {
+    const subject = textArg(request.args, 'subject', 'title');
+    return subject ? { kind: 'text', lines: [subject] } : undefined;
+  }
+  if (kind === 'purchase') {
+    const shop = textArg(request.args, 'merchant', 'shop', 'store', 'merchantName', 'merchantDomain', 'site');
+    return shop ? { kind: 'money', lines: [shop] } : undefined;
+  }
+  const mcpInput = kind !== 'mcp-tool' ? undefined
+    : request.args['input'] && typeof request.args['input'] === 'object' ? request.args['input'] as Record<string, unknown>
+      : request.tool.startsWith('mcp__') ? request.args : undefined;
+  if (mcpInput) {
+    const lines = Object.entries(mcpInput)
+      .map(([key, value]) => `${nameWords(key)}: ${typeof value === 'string' ? value : JSON.stringify(value)}`);
+    return lines.length > 0 ? { kind: 'text', lines } : undefined;
+  }
   if (values.length === 0) return undefined;
   if (kind === 'answer-command-prompt' && request.attribution?.kind === 'exec-prompt') {
     return { kind: 'command', lines: [request.attribution.command, request.attribution.prompt] };
@@ -378,7 +486,7 @@ export function presentApprovalAsk(request: PermissionPromptRequest, facts: AskF
     ...(place ? { place } : {}),
     ...(subjectOf(kind, request, subjectValues) ? { subject: subjectOf(kind, request, subjectValues)! } : {}),
     ...(consequence ? { consequence } : {}),
-    choices: approvalChoices(kind, remember, cannotUndo, request.tool),
+    choices: approvalChoices(kind, remember, cannotUndo, request.tool, cannotUndo || (request.ownerOnly !== undefined && OPENS_ON_NO.has(request.ownerOnly))),
     remember,
     typeToRefuse: kind !== 'answer-command-prompt',
     ...(origin ? { origin } : {}),
@@ -478,7 +586,7 @@ export function presentInboxAsk(item: OwnerItem, facts: AskFacts, request?: Perm
       const purchaseId = metadataText(item, 'purchaseId');
       const purchase = purchaseId !== undefined ? facts.purchase?.(purchaseId) : undefined;
       const windowKind = purchase?.kind ?? (item.options.includes('go') ? 'veto' : item.options.includes('approve') ? 'approval' : undefined);
-      const question = purchase?.item && purchase.price ? `Buy ${purchase.item} for ${purchase.price}?`
+      const question = purchase?.item && purchase.price ? `Buy ${purchase.item}${purchase.merchant ? ` from ${purchase.merchant}` : ''} for ${purchase.price}?`
         : windowKind === 'veto' ? 'Let this purchase go ahead?' : windowKind === 'approval' ? 'Approve this purchase?' : 'A purchase update';
       // A veto window opens only for a purchase inside the budget (payments/merchant-recourse.ts windowForPurchase:
       // anything above it gets an approval window), so a veto window is inside it by construction.

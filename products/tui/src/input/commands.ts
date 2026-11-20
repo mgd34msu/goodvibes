@@ -34,7 +34,6 @@ import { registerPlatformAccessRuntimeCommands } from './commands/platform-acces
 import { registerPlatformServicesRuntimeCommands } from './commands/platform-services-runtime.ts';
 import { registerMarketplaceRuntimeCommands } from './commands/marketplace-runtime.ts';
 import { registerGuidanceRuntimeCommands } from './commands/guidance-runtime.ts';
-import { registerStateRuntimeCommands } from './commands/state-runtime.ts';
 import { registerRemoteRuntimeCommands } from './commands/remote-runtime.ts';
 import { registerSubscriptionRuntimeCommands } from './commands/subscription-runtime.ts';
 import { registerHooksRuntimeCommands } from './commands/hooks-runtime.ts';
@@ -48,7 +47,6 @@ import { registerWorkstreamRuntimeCommands } from './commands/workstream-runtime
 import { registerCodebaseRuntimeCommands } from './commands/codebase-runtime.ts';
 import { registerLocalRuntimeCommands } from './commands/local-runtime.ts';
 import { registerExperienceRuntimeCommands } from './commands/experience-runtime.ts';
-import { registerIncidentRuntimeCommands } from './commands/incident-runtime.ts';
 import { registerSkillsRuntimeCommands } from './commands/skills-runtime.ts';
 import { registerServicesRuntimeCommands } from './commands/services-runtime.ts';
 import { registerTasksRuntimeCommands } from './commands/tasks-runtime.ts';
@@ -128,14 +126,12 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: 'Platform Services', register: registerPlatformServicesRuntimeCommands },
   { category: 'Marketplace', register: registerMarketplaceRuntimeCommands },
   { category: 'Guidance', register: registerGuidanceRuntimeCommands },
-  { category: 'Diagnostics', register: registerStateRuntimeCommands },
   { category: 'Remote', register: registerRemoteRuntimeCommands },
   { category: 'Subscriptions', register: registerSubscriptionRuntimeCommands },
   { category: 'Hooks', register: registerHooksRuntimeCommands },
   { category: 'Editor', register: registerEditorRuntimeCommands },
   { category: 'Control Room', register: registerControlRoomRuntimeCommands },
   { category: 'MCP', register: registerMcpRuntimeCommands },
-  { category: 'Incidents', register: registerIncidentRuntimeCommands },
   { category: 'Skills', register: registerSkillsRuntimeCommands },
   { category: 'Experience', register: registerExperienceRuntimeCommands },
   { category: 'Services', register: registerServicesRuntimeCommands },

@@ -39,7 +39,7 @@ import { createPlanningModalSurface } from './modals/planning-modal.ts';
  * once at startup from createShellViews (builtin-views.ts). For each surface
  * this does two things:
  *   1. registerModalSurface, the data + actions the config-modal host renders.
- *   2. registerModalRedirect, so `/panel open <old-id>`, notifications and any
+ *   2. registerModalRedirect, so deep links, notifications and any
  *      alias still resolve to the modal (views.ts consults these).
  *
  * `openMaskedEntry` opens the local-auth password prompt (a kit modal), which

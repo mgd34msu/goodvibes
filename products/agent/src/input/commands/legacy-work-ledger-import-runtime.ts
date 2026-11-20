@@ -1,15 +1,16 @@
 import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client/selection-observation';
 import { realpathSync } from 'node:fs';
 import { resolveConnectedHostDialEnabled } from '@goodvibes-jev/engine/platform/platform/config';
-import { openLegacyImportOperator, registerLegacyImportCommands, resolveLegacyImportJournalLocation, retainLegacyImportJournalOwner, type LegacyImportOperatorSession } from '@goodvibes-jev/engine/terminal-shell/legacy-work-ledger-import';
-import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import { openLegacyImportOperator, resolveLegacyImportJournalLocation, retainLegacyImportJournalOwner, type LegacyImportOperatorSession } from '@goodvibes-jev/engine/terminal-shell/legacy-work-ledger-import';
+import type { CommandContext } from '../command-registry.ts';
 import { connectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
 import { canonicalizePairingHost, readAgentHostPairing } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-pairing-store';
 import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-auth';
 import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/utils/reachable-base-url';
 import { requireShellPaths } from './runtime-services.ts';
 export type OpenLegacyImportCommandSession = (context: CommandContext, projectId: string) => Promise<LegacyImportOperatorSession>;
-export function registerLegacyWorkLedgerImportCommands(registry: CommandRegistry, open: OpenLegacyImportCommandSession = async (context, projectId) => {
+/** An import session for `/work import…` (terminal-shell/native/work-command.ts) on the connected host. */
+export const openAgentLegacyImport: OpenLegacyImportCommandSession = async (context, projectId) => {
   const paths = requireShellPaths(context);
   const configOwner = context.platform.configManager, stateDirectory = paths.resolveUserPath();
   const location = resolveLegacyImportJournalLocation({ workspace: paths.workingDirectory, projectId, stateDirectory });
@@ -40,4 +41,4 @@ export function registerLegacyWorkLedgerImportCommands(registry: CommandRegistry
         selectionIdentity: selection.observe([current.homeDirectory, baseUrl, pairing], config) };
     } catch (error) { selection.retire(); throw error; }
   } });
-}): void { registerLegacyImportCommands(registry, open); }
+};

@@ -397,14 +397,13 @@ export interface CommandContext extends CommandUiActions, CommandShellUiOpeners 
  * unaffected, fuzzyMatch still searches every registered command exactly as
  * before; this only reorders the empty-query case. Curated for breadth across
  * the product's main workflows rather than raw usage frequency: help/config
- * (orientation), panel (legacy view aliases)/model (workspace + provider), recall/codebase/search
+ * (orientation), model (workspace + provider), recall/codebase/search
  * (knowledge), workstream/checkpoint (control-plane), imagine (generation),
  * sessions (continuity), quit (exit).
  */
 export const COMMON_COMMAND_NAMES: ReadonlySet<string> = new Set([
   'help',
   'config',
-  'panel',
   'model',
   'recall',
   'codebase',

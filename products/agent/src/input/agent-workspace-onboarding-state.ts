@@ -64,13 +64,12 @@ export function deriveOnboardingEntry(obs: OnboardingState): OnboardingEntryResu
 /**
  * Given an OnboardingState, computes the set of ONBOARDING category IDs that are
  * currently unlocked and adds them to the provided mutable revealed set.
- * 'setup' is always present; other categories unlock once their step is ready.
+ * A category unlocks once its step is ready.
  */
 export function updateRevealedOnboardingCategories(
   obs: OnboardingState,
   revealed: Set<string>,
 ): void {
-  revealed.add('setup');
   for (const step of obs.steps) {
     if (step.status === 'ready') revealed.add(step.categoryId);
   }

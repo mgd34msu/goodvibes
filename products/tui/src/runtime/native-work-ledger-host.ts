@@ -1,5 +1,6 @@
 import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client/selection-observation';
-import { handleNativeIntakeCommand, handleNativeSubmissionCommand } from '@goodvibes-jev/engine/terminal-shell/native/work-command';
+import { registerWorkCommand } from '@goodvibes-jev/engine/terminal-shell/native/work-command';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import {
   createBoundNativeWorkLedgerView,
   type NativeLedgerBindingFactory,
@@ -9,7 +10,9 @@ import type { NativeWorkLedgerView } from '@goodvibes-jev/engine/terminal-shell/
 import { TUI_NATIVE_INTAKE_POLICY } from '@goodvibes-jev/engine/terminal-shell/native-intake';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveNativeHostCredential } from './client/native-host-credential.ts';
-import type { CommandRegistry } from '../input/command-registry.ts';
+import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
+import { openTuiLegacyImport } from '../input/commands/legacy-work-ledger-import-runtime.ts';
+import { workRequestsHost } from '../input/commands/planning-runtime.ts';
 
 /** What the /work modal reads: the shared view and one change listener at a time. */
 export interface NativeWorkLedgerModalSource {
@@ -68,35 +71,18 @@ export function createNativeWorkLedgerHost(
   };
 }
 
+/** `/work` (terminal-shell/native/work-command.ts) in the terminal app: its work view, its host's imports, and requests in your own words. */
 export function registerNativeWorkLedgerCommand(registry: CommandRegistry, view: NativeWorkLedgerView): void {
-  const submitFile = view.submitFile, submissionStatus = view.submissionStatus, retrySubmission = view.retrySubmission,
-    discardSubmission = view.discardSubmission;
-  const submission =
-    submitFile && submissionStatus && retrySubmission && discardSubmission
-      ? {
-          submitFile: (path: string) => submitFile.call(view, path),
-          status: () => submissionStatus.call(view),
-          retry: () => retrySubmission.call(view),
-          discard: () => discardSubmission.call(view),
-        }
-      : undefined;
-  registry.register({
-    name: 'work',
-    description:
-      'Inspect native work, submit source with submit-file <JSON-path> and settle it with submission-status/submission-retry/submission-discard, and recover ordinary input with intake-status/intake-retry/intake-resume/intake-cancel; /work <daemon-project-id> selects a project.',
-    handler: async (args, ctx) => {
-      if (await handleNativeIntakeCommand(args, ctx, false)) return;
-      if (await handleNativeSubmissionCommand(args, (text) => ctx.print(text), submission)) return;
-      if (args.length > 1) {
-        ctx.print('Usage: /work [exact-daemon-project-id]');
-        return;
-      }
-      if (args[0]) view.selectProject(args[0]);
-      if (!ctx.openModal) {
-        ctx.print('Native work view is unavailable in this shell.');
-        return;
-      }
+  registerWorkCommand<CommandContext>(registry, {
+    view: () => view,
+    open(ctx, project) {
+      if (project) view.selectProject(project);
+      if (!ctx.openModal) throw commandRefusal('The native work view is not available in this shell.');
       ctx.openModal('native-work-ledger-modal');
     },
+    // The terminal app runs selected diffs; a hosted turn is not resumed here.
+    allowHostedDispatch: false,
+    openImport: openTuiLegacyImport,
+    requests: workRequestsHost(),
   });
 }

@@ -39,22 +39,24 @@ function worktreeSection(ctx: CommandContext): string[] {
   return ['Worktrees', ...worktreeStatusLines(worktrees.lastStartupReport(), workingDirectory).map((line) => `  ${line}`)];
 }
 
-/** Print /status for the current model. Returns the text it printed (for tests). */
-export function handleStatusCommand(ctx: CommandContext): string {
+/** The /status text for the current model and the worktrees. */
+export function agentStatusText(ctx: CommandContext): string {
   const registry = ctx.provider.providerRegistry;
   const model = registry.getCurrentModel();
-  const text = [
+  return [
     buildAgentStatusText(model, registry.getKnownContextWindowForModel(model), registry.getModelContextCap(model.registryKey)),
     ...worktreeSection(ctx),
   ].join('\n');
+}
+
+/** Print /status for the current model. Returns the text it printed (for tests). */
+export function handleStatusCommand(ctx: CommandContext): string {
+  const text = agentStatusText(ctx);
   ctx.print(text);
   return text;
 }
 
 export function registerStatusRuntimeCommands(registry: CommandRegistry): void {
   // One description shared with the terminal app (terminal-shell/health-command.ts); this is the Agent's report.
-  registry.register(createStatusCommand<CommandContext>((ctx) => [
-    buildAgentStatusText(ctx.provider.providerRegistry.getCurrentModel(), ctx.provider.providerRegistry.getKnownContextWindowForModel(ctx.provider.providerRegistry.getCurrentModel()), ctx.provider.providerRegistry.getModelContextCap(ctx.provider.providerRegistry.getCurrentModel().registryKey)),
-    ...worktreeSection(ctx),
-  ].join('\n')));
+  registry.register(createStatusCommand<CommandContext>(agentStatusText));
 }

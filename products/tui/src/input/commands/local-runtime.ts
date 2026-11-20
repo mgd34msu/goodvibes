@@ -26,19 +26,6 @@ const secretsCommand = createSecretsCommand<CommandContext>({
 
 export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
-    name: 'incident-review',
-    aliases: [],
-    description: 'Alias for /incident open',
-    handler(_args, ctx) {
-      if (ctx.openIncidentView) {
-        ctx.openIncidentView();
-        return;
-      }
-      ctx.print('The Agents view is not available in this runtime.');
-    },
-  });
-
-  registry.register({
     name: 'tools',
     aliases: ['t'],
     description: 'List available tools and review compact native tool capabilities',

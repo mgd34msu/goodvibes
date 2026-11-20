@@ -11,12 +11,19 @@ import { evaluateSessionMaintenance, formatSessionMaintenanceLines } from '@/run
 import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
 import { formatDoctorReport } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import { createHealthCommand, type HealthArea } from '@goodvibes-jev/engine/terminal-shell/health-command';
+import type { CommandReport } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { isSetupIssue } from '@goodvibes-jev/engine/terminal-shell/setup-review';
+import { formatRuntimeStateSnapshot, snapshotRuntimeState } from '@/runtime/index.ts';
+import type { CliCommandRuntime } from '../../cli/management.ts';
+import { handleCompatCommand } from '../../cli/agent-knowledge-command.ts';
+import { parseGoodVibesCli } from '../../cli/parser.ts';
+import { requireShellPaths } from './runtime-services.ts';
+import { refuseCliParseErrors } from './cli-command-output.ts';
 import { buildSetupReviewSnapshot } from './local-setup-review.ts';
 import { setupReviewLines } from '@goodvibes-jev/engine/terminal-shell/setup-review';
 import { describeApprovalsUnavailable } from '../../runtime/client/approvals-view.ts';
 import { buildProviderAccountSnapshot } from '@/runtime/index.ts';
-import { getSettingsControlPlaneSnapshot } from '@/runtime/index.ts';
-import '@/runtime/index.ts';
 import {
   requireMemoryGovernor,
   requireProvider,
@@ -27,7 +34,6 @@ import {
   requireSessionMemoryStore,
 } from './runtime-services.ts';
 import { commandRefusal } from './confirmation.ts';
-import { readRefusal } from '@goodvibes-jev/engine/errors';
 
 async function loadProviderAccountSnapshot(ctx: CommandContext) {
   return await buildProviderAccountSnapshot({
@@ -53,7 +59,7 @@ async function renderApprovalsHealth(ctx: CommandContext): Promise<string> {
   const view = ctx.ops.approvalsView;
   if (!view) {
     return [
-      'Health Review Approvals',
+      'Approvals waiting',
       '  the approvals view is not wired in this runtime, so no list can be shown.',
       '  This is not "no approvals waiting", nothing was read.',
     ].join('\n');
@@ -70,7 +76,7 @@ async function renderApprovalsHealth(ctx: CommandContext): Promise<string> {
   });
 
   return [
-    'Health Review Approvals',
+    'Approvals waiting',
     ...(unavailable === null ? [] : [`  ${unavailable}`]),
     `  source ${snapshot.hostRecordRead ? 'connected host record + this process' : 'this process only'}`,
     // How current the list is, which is a different claim from where it came
@@ -89,400 +95,240 @@ async function renderApprovalsHealth(ctx: CommandContext): Promise<string> {
   ].join('\n');
 }
 
-const HEALTH_USAGE = '[review|setup|approvals|host|provider|accounts|auth|settings|remote|mcp|memory|continuity|maintenance|repair [domain]] | <symptom> (/doctor stuck turn runs that runbook\'s checks)';
-const HEALTH_SUBCOMMANDS = new Set(['review', 'open', 'panel', 'setup', 'approvals', 'host', 'services', 'provider', 'accounts', 'auth', 'settings', 'remote', 'mcp', 'memory', 'continuity', 'maintenance', 'repair']);
+function maintenanceOf(ctx: CommandContext) {
+  const session = requireReadModels(ctx).session.getSnapshot();
+  // The known window, resolved as the footer meter and /context resolve it, so every
+  // diagnostics surface shows the same usage and remaining tokens.
+  const providerRegistry = requireProvider(ctx).providerRegistry;
+  const llmMessages =
+    typeof ctx.session.conversationManager.getMessagesForLLM === 'function' ? ctx.session.conversationManager.getMessagesForLLM() : [];
+  return evaluateSessionMaintenance({
+    configManager: ctx.platform.configManager,
+    currentTokens: estimateConversationTokens(llmMessages),
+    contextWindow: providerRegistry.getKnownContextWindowForModel(providerRegistry.getCurrentModel()) ?? 0, // 0: unknown window, no usage percentage
+    messageCount: llmMessages.length,
+    sessionMemoryCount: requireSessionMemoryStore(ctx).list().length,
+    session: session.session,
+  });
+}
+
+/**
+ * The short status `/health` prints bare: one line when everything works, or
+ * each thing that does not with the command that fixes it. Reads the same
+ * snapshots the area checks read; no model request, no host write.
+ */
+async function healthReport(ctx: CommandContext): Promise<CommandReport> {
+  const readModels = requireReadModels(ctx);
+  const snapshot = await buildSetupReviewSnapshot(ctx);
+  const accounts = await loadProviderAccountSnapshot(ctx);
+  const items: { sentence: string; fix?: { label: string; line: string } }[] = [];
+  const fixFor: Readonly<Record<string, { label: string; line: string }>> = {
+    providers: { label: 'Sign in to a provider', line: '/setup sign-in' },
+    integrations: { label: 'See which integrations are not ready', line: '/health check services' },
+    mcp: { label: 'See which servers need attention', line: '/mcp review' },
+  };
+  for (const check of snapshot.checks.filter(isSetupIssue)) {
+    items.push({ sentence: `${check.area}: ${check.message}.`, ...(fixFor[check.area] ? { fix: fixFor[check.area] } : {}) });
+  }
+  for (const provider of accounts.providers) {
+    for (const issue of provider.issues) items.push({ sentence: `${provider.providerId}: ${issue}.`, fix: { label: 'Fix the account', line: `/accounts repair ${provider.providerId}` } });
+  }
+  for (const issue of collectSettingsHealthIssues(readModels.settings.getSnapshot(), 'a pending managed settings bundle is waiting to be applied or rolled back')) {
+    items.push({ sentence: `Settings: ${issue}.`, fix: { label: 'See the setting', line: '/config open' } });
+  }
+  const mcp = readModels.mcp.getSnapshot();
+  for (const issue of collectMcpLifecycleIssues(mcp.servers, (id, kind, value) => `${id}: ${kind === 'error' ? value : `${kind === 'schema' ? 'tool-definition review' : kind} ${formatHealthStatusValue(value)}`}`)) {
+    items.push({ sentence: `MCP server ${issue}.`, fix: { label: 'See which servers need attention', line: '/mcp review' } });
+  }
+  const maintenance = maintenanceOf(ctx);
+  if (maintenance.compactRecommended) items.push({ sentence: `The conversation fills the context window: ${maintenance.summary}`, fix: { label: 'Compact it', line: '/compact' } });
+  if (items.length === 0) return { verdict: 'ok', headline: 'Everything is working.', items: [] };
+  return { verdict: 'attention', headline: `${items.length} thing${items.length === 1 ? '' : 's'} need${items.length === 1 ? 's' : ''} attention:`, items };
+}
+
+/** One area in detail, for "Check one area". */
+async function checkArea(ctx: CommandContext, area: HealthArea): Promise<string> {
+  switch (area) {
+    case 'provider': {
+      const providerApi = requireProviderApi(ctx);
+      const currentModel = await providerApi.getCurrentModel().catch(() => null);
+      const accounts = await loadProviderAccountSnapshot(ctx);
+      return [
+        'Model providers',
+        `  selected model ${currentModel?.registryKey ?? 'unknown'}`,
+        `  providers ${providerApi.listProviderIds().length}`,
+        `  configured accounts ${accounts.configuredCount}`,
+        `  account issues ${accounts.issueCount}`,
+        ...(accounts.issueCount > 0
+          ? accounts.providers.flatMap((provider) => provider.issues.map((issue) => `  ${provider.providerId} ${issue}`))
+          : ['  no provider account issues detected']),
+      ].join('\n');
+    }
+    case 'approvals':
+      return renderApprovalsHealth(ctx);
+    case 'services': {
+      const { configured, issues } = await collectServiceReadiness(requireServiceRegistry(ctx), ' ');
+      return [
+        'Connected host integrations',
+        `  configured integrations ${configured}`,
+        `  issues ${issues.length}`,
+        ...(issues.length > 0 ? issues.map((issue) => `  ${issue}`) : ['  all configured host integrations passed readiness checks']),
+      ].join('\n');
+    }
+    case 'accounts': {
+      const accounts = await loadProviderAccountSnapshot(ctx);
+      return [
+        'Provider accounts',
+        `  providers ${accounts.providers.length}`,
+        `  configured ${accounts.configuredCount}`,
+        `  issues ${accounts.issueCount}`,
+        ...accounts.providers.flatMap((provider) => [
+          ...provider.issues.map((issue) => `  ${provider.providerId} ${issue}`),
+          ...(provider.fallbackRisk ? [`  ${provider.providerId} ${provider.fallbackRisk}`] : []),
+        ]),
+      ].join('\n');
+    }
+    case 'auth': {
+      const auth = requireReadModels(ctx).localAuth.getSnapshot();
+      return [
+        'Connected host sign-in',
+        `  users visible ${auth.userCount}`,
+        `  sessions visible ${auth.sessionCount}`,
+        `  first-run sign-in file ${auth.bootstrapCredentialPresent ? 'present (the host removes it: goodvibes /local-auth)' : 'removed'}`,
+        '  The Agent reads the host\'s sign-in; its users and first-run file are changed on the host.',
+      ].join('\n');
+    }
+    case 'settings': {
+      const settings = requireReadModels(ctx).settings.getSnapshot();
+      const issues = collectSettingsHealthIssues(settings, 'pending managed settings bundle is awaiting apply or rollback');
+      return [
+        'Settings',
+        `  available ${settings.available ? 'yes' : 'no'}`,
+        `  managed locks ${settings.managedLockCount}`,
+        `  conflicts ${settings.conflictCount}`,
+        `  recent failures ${settings.recentFailureCount}`,
+        `  pending managed bundle ${settings.hasStagedManagedBundle ? 'present' : 'none'}`,
+        ...(issues.length > 0 ? issues.map((issue) => `  issue ${issue}`) : ['  no active settings-control issues detected']),
+      ].join('\n');
+    }
+    case 'remote': {
+      const snapshot = requireReadModels(ctx).remote.getSnapshot().supervisor;
+      const issues = collectRemoteRecoveryIssues(
+        snapshot.sessions,
+        (id, kind, value) => id + ' ' + (kind === 'error' ? value : kind + ' ' + formatHealthStatusValue(value)),
+      );
+      return [
+        'Remote runners',
+        `  sessions ${snapshot.sessions.length}`,
+        `  active connections ${snapshot.activeConnections}`,
+        `  degraded ${snapshot.degradedConnections}`,
+        ...(issues.length > 0 ? issues.map((issue) => `  issue ${issue}`) : ['  no active remote recovery issues detected']),
+        '  Remote runners are set up and recovered from the terminal app (goodvibes /remote).',
+      ].join('\n');
+    }
+    case 'memory': {
+      // Live MemoryGovernor snapshot, the same data ops.memory.get serves.
+      let snapshot: ReturnType<ReturnType<typeof requireMemoryGovernor>['snapshot']>;
+      try {
+        snapshot = requireMemoryGovernor(ctx).snapshot();
+      } catch {
+        throw commandRefusal('No memory governor runs in this program, so there is no memory reading.');
+      }
+      return [
+        'Memory use',
+        `  tier ${snapshot.tier}`,
+        `  rss ${snapshot.rssMb} MB of ${snapshot.budgetMb} MB budget (${snapshot.usedPct}%)`,
+        `  heap used ${snapshot.heapUsedMb} MB${snapshot.heapTotalMb !== undefined ? ` of ${snapshot.heapTotalMb} MB` : ''}`,
+        `  expensive work ${snapshot.refusingExpensiveWork ? 'refused (critical pressure)' : 'admitted'}`,
+        `  tier thresholds ${snapshot.thresholds.elevatedPct}% elevated, ${snapshot.thresholds.highPct}% high, ${snapshot.thresholds.criticalPct}% critical`,
+        `  leak tripwire ${snapshot.tripwire.armed ? `ARMED (${snapshot.tripwire.rateMbPerSec} MB/s sustained ${snapshot.tripwire.sustainedSec}s)` : 'not armed'}`,
+        `  caches ${snapshot.caches.length}`,
+        ...snapshot.caches.map(
+          (cache) => `    ${cache.id} ${cache.entries} entries${cache.estimatedBytes !== undefined ? ` (~${Math.round(cache.estimatedBytes / 1024)} KiB)` : ''}, ${cache.name}`,
+        ),
+        `  paused background jobs ${snapshot.pausedJobs.length === 0 ? 'none' : snapshot.pausedJobs.join(', ')}`,
+        '  The budget is the setting memory.budgetMb (/config open memory.budgetMb).',
+      ].join('\n');
+    }
+    case 'mcp': {
+      const mcp = requireReadModels(ctx).mcp.getSnapshot();
+      const issues = collectMcpLifecycleIssues(
+        mcp.servers,
+        (id, kind, value) => id + ' ' + (kind === 'error' ? value : (kind === 'schema' ? 'tool-definition review' : kind) + ' ' + formatHealthStatusValue(value)),
+      );
+      return [
+        'MCP servers',
+        `  servers ${mcp.servers.length}`,
+        `  connected ${mcp.connectedServerNames.length}`,
+        `  tools ${mcp.availableToolCount}`,
+        `  connection failures ${mcp.totalErrors}`,
+        ...(issues.length > 0 ? issues.map((issue) => `  issue ${issue}`) : ['  no active MCP lifecycle issues detected']),
+      ].join('\n');
+    }
+    case 'continuity': {
+      const continuity = requireReadModels(ctx).continuity.getSnapshot();
+      const returnMode = String(ctx.platform.configManager.get('behavior.returnContextMode') ?? 'off');
+      const issues = collectContinuityIssues(continuity, returnMode);
+      return [
+        'Picking up where you left off',
+        `  return context mode ${returnMode}`,
+        `  last session pointer ${continuity.lastSessionPointer ?? 'none'}`,
+        `  recovery file ${continuity.recoveryFilePresent ? 'present' : 'clear'}`,
+        ...(continuity.returnContext
+          ? [`  recovery activity ${continuity.returnContext.activityLabel}`, `  recovery status ${continuity.returnContext.statusLabel}`]
+          : []),
+        ...(issues.length > 0 ? issues.map((issue) => `  issue ${issue}`) : ['  no active session continuity issues detected']),
+      ].join('\n');
+    }
+    case 'maintenance':
+      return ['Conversation size', ...formatSessionMaintenanceLines(maintenanceOf(ctx), 'guided')].join('\n');
+    case 'setup': {
+      const snapshot = await buildSetupReviewSnapshot(ctx);
+      return [
+        'Setup',
+        ...setupReviewLines(snapshot.checks, ' '),
+        ...(snapshot.hostIntegrationIssues.length > 0
+          ? ['', '  Connected host integration issues', ...snapshot.hostIntegrationIssues.map((issue) => `    - ${issue}`)]
+          : []),
+      ].join('\n');
+    }
+    case 'intelligence':
+    case 'metrics':
+    case 'worktrees':
+    case 'sandbox':
+    case 'terminal':
+      throw commandRefusal(`The Agent does not check ${area}; nothing was checked.`, `It is checked in the terminal app: goodvibes, /health check ${area}.`);
+  }
+}
 
 export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
-    name: 'health',
-    // A symptom is described in the words typed.
-    rawRest: (args) => ((args[0] ?? '').toLowerCase() === 'diagnose' ? 1 : undefined),
-    effect: 'read-only',
-    aliases: ['doctor'],
-    description: 'Health workspace for startup posture, connected host readiness, provider health, and Agent continuity',
-    firstScreen: false,
-    usage: HEALTH_USAGE,
-    async handler(args, ctx) {
-      const sub = (args[0] ?? 'review').toLowerCase();
-      // Anything that is not a health domain is a symptom: find its runbook and
-      // run the checks against this app's live state (no model request).
-      if (sub === 'diagnose' || !HEALTH_SUBCOMMANDS.has(sub)) {
-        const symptom = (sub === 'diagnose' ? args.slice(1) : args).join(' ');
-        if (!symptom.trim()) {
-          throw commandRefusal('Usage: /doctor <symptom>, for example /doctor stuck turn');
-        }
-        ctx.print(formatDoctorReport(await requireReadModels(ctx).doctor.diagnose(symptom)).join('\n'));
-        return;
-      }
-      try {
-        if (sub === 'open' || sub === 'panel') {
-          ctx.print('Open Agent Workspace -> Home for the workspace view, or run /health review for the compact command output.');
-          return;
-        }
-
-        if (sub === 'provider') {
-          const providerApi = requireProviderApi(ctx);
-          const currentModel = await providerApi.getCurrentModel().catch(() => null);
-          const accounts = await loadProviderAccountSnapshot(ctx);
-          ctx.print(
-            [
-              'Health Review Provider',
-              `  selected model ${currentModel?.registryKey ?? 'unknown'}`,
-              `  providers ${providerApi.listProviderIds().length}`,
-              `  configured accounts ${accounts.configuredCount}`,
-              `  account issues ${accounts.issueCount}`,
-              ...(accounts.issueCount > 0
-                ? accounts.providers.flatMap((provider) => provider.issues.map((issue) => `  ${provider.providerId} ${issue}`))
-                : ['  no provider account issues detected']),
-              '  next /model',
-              '  next /provider',
-              '  next /accounts review',
-            ].join('\n'),
-          );
-          return;
-        }
-
-        if (sub === 'approvals') {
-          ctx.print(await renderApprovalsHealth(ctx));
-          return;
-        }
-
-        const readModels = requireReadModels(ctx);
-
-        if (sub === 'host' || sub === 'services') {
-          const { configured, issues } = await collectServiceReadiness(requireServiceRegistry(ctx), ' ');
-          ctx.print(
-            [
-              'Health Review Connected Host Integrations',
-              `  configured integrations ${configured}`,
-              `  issues ${issues.length}`,
-              ...(issues.length > 0 ? issues.map((issue) => `  ${issue}`) : ['  all configured host integrations passed readiness checks']),
-            ].join('\n'),
-          );
-          return;
-        }
-
-        if (sub === 'accounts') {
-          const accounts = await loadProviderAccountSnapshot(ctx);
-          ctx.print(
-            [
-              'Health Review Accounts',
-              `  providers ${accounts.providers.length}`,
-              `  configured ${accounts.configuredCount}`,
-              `  issues ${accounts.issueCount}`,
-              ...accounts.providers.flatMap((provider) => {
-                const findings = [
-                  ...provider.issues.map((issue) => `  ${provider.providerId} ${issue}`),
-                  ...(provider.fallbackRisk ? [`  ${provider.providerId} ${provider.fallbackRisk}`] : []),
-                ];
-                return findings;
-              }),
-            ].join('\n'),
-          );
-          return;
-        }
-
-        if (sub === 'auth') {
-          const auth = readModels.localAuth.getSnapshot();
-          ctx.print(
-            [
-              'Health Review Connected Host Auth',
-              '  owner connected GoodVibes host',
-              `  compatibility users visible ${auth.userCount}`,
-              `  compatibility sessions visible ${auth.sessionCount}`,
-              `  bootstrap file signal ${auth.bootstrapCredentialPresent ? 'present' : 'cleared'}`,
-              '  Agent action review provider/subscription auth only; do not mutate connected-host auth users or bootstrap credentials.',
-              ...(auth.bootstrapCredentialPresent ? ['  issue bootstrap cleanup belongs outside Agent'] : []),
-            ].join('\n'),
-          );
-          return;
-        }
-
-        if (sub === 'settings') {
-          const settings = readModels.settings.getSnapshot();
-          const issues = collectSettingsHealthIssues(settings, 'pending managed settings bundle is awaiting apply or rollback');
-          ctx.print(
-            [
-              'Health Review Settings',
-              `  available ${settings.available ? 'yes' : 'no'}`,
-              `  managed locks ${settings.managedLockCount}`,
-              `  conflicts ${settings.conflictCount}`,
-              `  recent failures ${settings.recentFailureCount}`,
-              `  pending managed bundle ${settings.hasStagedManagedBundle ? 'present' : 'none'}`,
-              ...(issues.length > 0 ? issues.map((issue) => `  issue ${issue}`) : ['  no active settings-control issues detected']),
-              '  next /settings',
-              '  next /config <key>',
-              '  next /health repair settings',
-            ].join('\n'),
-          );
-          return;
-        }
-
-        if (sub === 'remote') {
-          const snapshot = readModels.remote.getSnapshot().supervisor;
-          const issues = collectRemoteRecoveryIssues(
-            snapshot.sessions,
-            (id, kind, value) => id + ' ' + (kind === 'error' ? value : kind + ' ' + formatHealthStatusValue(value)),
-          );
-          ctx.print(
-            [
-              'Health Review Remote',
-              `  sessions ${snapshot.sessions.length}`,
-              `  active connections ${snapshot.activeConnections}`,
-              `  degraded ${snapshot.degradedConnections}`,
-              ...(issues.length > 0 ? issues.map((issue) => `  issue ${issue}`) : ['  no active remote recovery issues detected']),
-              '  next /delegate <build/fix/review task> for explicit TUI build work',
-              '  next repair remote build-host state outside Agent',
-            ].join('\n'),
-          );
-          return;
-        }
-
-        if (sub === 'memory') {
-          // Live MemoryGovernor snapshot, the same data ops.memory.get serves.
-          // The governor is composed and started by this runtime root
-          // (runtime/services.ts, wireDaemonMemoryGovernance); a context without
-          // one (an older host runtime predating memory governance) degrades to
-          // the honest unavailable line below, never a fabricated snapshot.
-          let snapshot: ReturnType<ReturnType<typeof requireMemoryGovernor>['snapshot']>;
-          try {
-            snapshot = requireMemoryGovernor(ctx).snapshot();
-          } catch {
-            ctx.print(
-              [
-                'Health Review Memory',
-                '  available: no',
-                '  reason: no memory governor is running in this build (older host runtime without memory governance)',
-              ].join('\n'),
-            );
-            return;
-          }
-          ctx.print(
-            [
-              'Health Review Memory',
-              `  tier ${snapshot.tier}`,
-              `  rss ${snapshot.rssMb} MB of ${snapshot.budgetMb} MB budget (${snapshot.usedPct}%)`,
-              `  heap used ${snapshot.heapUsedMb} MB${snapshot.heapTotalMb !== undefined ? ` of ${snapshot.heapTotalMb} MB` : ''}`,
-              `  expensive work ${snapshot.refusingExpensiveWork ? 'refused (critical pressure)' : 'admitted'}`,
-              `  tier thresholds ${snapshot.thresholds.elevatedPct}% elevated, ${snapshot.thresholds.highPct}% high, ${snapshot.thresholds.criticalPct}% critical`,
-              `  leak tripwire ${snapshot.tripwire.armed ? `ARMED (${snapshot.tripwire.rateMbPerSec} MB/s sustained ${snapshot.tripwire.sustainedSec}s)` : 'not armed'}`,
-              `  caches ${snapshot.caches.length}`,
-              ...snapshot.caches.map(
-                (cache) =>
-                  `    ${cache.id} ${cache.entries} entries${cache.estimatedBytes !== undefined ? ` (~${Math.round(cache.estimatedBytes / 1024)} KiB)` : ''}, ${cache.name}`,
-              ),
-              `  paused background jobs ${snapshot.pausedJobs.length === 0 ? 'none' : snapshot.pausedJobs.join(', ')}`,
-              '  next /config memory.budgetMb',
-              '  next /health maintenance',
-            ].join('\n'),
-          );
-          return;
-        }
-
-        if (sub === 'mcp') {
-          const mcp = readModels.mcp.getSnapshot();
-          const issues = collectMcpLifecycleIssues(
-            mcp.servers,
-            (id, kind, value) =>
-              id +
-              ' ' +
-              (kind === 'error' ? value : (kind === 'schema' ? 'tool-definition review' : kind) + ' ' + formatHealthStatusValue(value)),
-          );
-          ctx.print(
-            [
-              'Health Review MCP',
-              `  servers ${mcp.servers.length}`,
-              `  connected ${mcp.connectedServerNames.length}`,
-              `  tools ${mcp.availableToolCount}`,
-              `  connection failures ${mcp.totalErrors}`,
-              ...(issues.length > 0 ? issues.map((issue) => `  issue ${issue}`) : ['  no active MCP lifecycle issues detected']),
-              '  next /mcp review',
-              '  next /mcp repair',
-            ].join('\n'),
-          );
-          return;
-        }
-
-        if (sub === 'continuity') {
-          const continuity = readModels.continuity.getSnapshot();
-          const returnMode = String(ctx.platform.configManager.get('behavior.returnContextMode') ?? 'off');
-          const issues = collectContinuityIssues(continuity, returnMode);
-          ctx.print(
-            [
-              'Health Review Continuity',
-              `  return context mode ${returnMode}`,
-              `  last session pointer ${continuity.lastSessionPointer ?? 'none'}`,
-              `  recovery file ${continuity.recoveryFilePresent ? 'present' : 'clear'}`,
-              ...(continuity.returnContext
-                ? [
-                    `  recovery activity ${continuity.returnContext.activityLabel}`,
-                    `  recovery status ${continuity.returnContext.statusLabel}`,
-                  ]
-                : []),
-              ...(issues.length > 0 ? issues.map((issue) => `  issue ${issue}`) : ['  no active session continuity issues detected']),
-              '  next /session list',
-              '  next /session hotspots',
-            ].join('\n'),
-          );
-          return;
-        }
-
-        if (sub === 'maintenance') {
-          const session = readModels.session.getSnapshot();
-          // The known window, resolved as the footer meter and /context resolve it, so every
-          // diagnostics surface shows the same usage and remaining tokens.
-          const providerRegistry = requireProvider(ctx).providerRegistry;
-          const llmMessages =
-            typeof ctx.session.conversationManager.getMessagesForLLM === 'function'
-              ? ctx.session.conversationManager.getMessagesForLLM()
-              : [];
-          const maintenance = evaluateSessionMaintenance({
-            configManager: ctx.platform.configManager,
-            currentTokens: estimateConversationTokens(llmMessages),
-            contextWindow: providerRegistry.getKnownContextWindowForModel(providerRegistry.getCurrentModel()) ?? 0, // 0: unknown window, no usage percentage
-            messageCount: llmMessages.length,
-            sessionMemoryCount: requireSessionMemoryStore(ctx).list().length,
-            session: session.session,
-          });
-          ctx.print(['Health Review Maintenance', ...formatSessionMaintenanceLines(maintenance, 'guided')].join('\n'));
-          return;
-        }
-
-        if (sub === 'repair') {
-          const domain = (args[1] ?? 'review').toLowerCase();
-          const lines = ['Health Repair'];
-          if (domain === 'settings') {
-            const settings = getSettingsControlPlaneSnapshot(ctx.platform.configManager);
-            lines.push('  domain settings');
-            lines.push(
-              ...(settings.conflicts.length > 0
-                ? ['  /settings', '  /config <key>', '  host-owned managed setting repair stays external']
-                : ['  no active settings repair actions suggested']),
-            );
-            lines.push('  verify /health settings');
-          } else if (domain === 'auth') {
-            lines.push('  domain auth');
-            lines.push('  /auth review');
-            lines.push('  /provider');
-            lines.push('  /subscription providers');
-            lines.push('  connected host auth users/bootstrap cleanup manage outside Agent');
-            lines.push('  verify /health auth');
-          } else if (domain === 'accounts') {
-            lines.push('  domain accounts');
-            lines.push('  /accounts review');
-            lines.push('  /accounts routes <provider>');
-            lines.push('  /accounts repair <provider>');
-            lines.push('  /auth show <provider>');
-            lines.push('  verify /health accounts');
-          } else if (domain === 'host' || domain === 'services') {
-            lines.push('  domain host');
-            lines.push('  /health host');
-            lines.push('  connected host repair belongs outside Agent');
-            lines.push('  verify /health host');
-          } else if (domain === 'remote') {
-            lines.push('  domain remote');
-            lines.push('  /delegate <build/fix/review task> for explicit TUI build work');
-            lines.push('  remote build-host setup and recovery belong outside Agent');
-            lines.push('  verify /health remote');
-          } else if (domain === 'mcp') {
-            lines.push('  domain mcp');
-            lines.push('  /mcp review');
-            lines.push('  /mcp repair [server]');
-            lines.push('  verify /health mcp');
-          } else if (domain === 'memory') {
-            lines.push('  domain memory');
-            lines.push('  /health memory');
-            lines.push('  /config memory.budgetMb');
-            lines.push('  /config memory.hardLimitPct');
-            lines.push('  tier thresholds and the leak tripwire are configurable under settings -> Memory Governance');
-            lines.push('  verify /health memory');
-          } else if (domain === 'continuity') {
-            lines.push('  domain continuity');
-            lines.push('  /session list');
-            lines.push('  /session resume <id>');
-            lines.push('  /session hotspots');
-            lines.push('  verify /health continuity');
-          } else if (domain === 'maintenance') {
-            lines.push('  domain maintenance');
-            lines.push('  /health maintenance');
-            lines.push('  /verbosity');
-            lines.push('  /compact');
-            lines.push('  verify /health maintenance');
-          } else {
-            lines.push('  domains settings, auth, accounts, host, remote, mcp, memory, continuity, maintenance');
-            lines.push('  use /health repair <domain>');
-          }
-          ctx.print(lines.join('\n'));
-          return;
-        }
-
-        const session = readModels.session.getSnapshot();
-        const providerRegistry = requireProvider(ctx).providerRegistry;
-        const llmMessages =
-          typeof ctx.session.conversationManager.getMessagesForLLM === 'function'
-            ? ctx.session.conversationManager.getMessagesForLLM()
-            : [];
-        const contextWindow = providerRegistry.getKnownContextWindowForModel(providerRegistry.getCurrentModel()) ?? 0; // 0: unknown window, no usage percentage
-        const maintenance = evaluateSessionMaintenance({
-          configManager: ctx.platform.configManager,
-          currentTokens: estimateConversationTokens(llmMessages),
-          contextWindow,
-          messageCount: llmMessages.length,
-          sessionMemoryCount: requireSessionMemoryStore(ctx).list().length,
-          session: session.session,
-        });
-
-        const snapshot = await buildSetupReviewSnapshot(ctx);
-        const accountSnapshot = await loadProviderAccountSnapshot(ctx);
-        const settingsSnapshot = getSettingsControlPlaneSnapshot(ctx.platform.configManager);
-        if (sub === 'setup') {
-          ctx.print(
-            [
-              'Health Review Setup',
-              ...setupReviewLines(snapshot.checks, ' '),
-              ...(snapshot.hostIntegrationIssues.length > 0
-                ? ['', '  Connected host integration issues', ...snapshot.hostIntegrationIssues.map((issue) => `    - ${issue}`)]
-                : []),
-            ].join('\n'),
-          );
-          return;
-        }
-
-        ctx.print(
-          [
-            'Health Review',
-            `  session ${snapshot.sessionId}`,
-            `  setup issues ${snapshot.issues.length}`,
-            `  host integration issues ${snapshot.hostIntegrationIssues.length}`,
-            `  active subscriptions ${snapshot.activeSubscriptionCount}`,
-            `  account issues ${accountSnapshot.issueCount}`,
-            `  settings conflicts ${settingsSnapshot.conflicts.length}`,
-            `  managed locks ${settingsSnapshot.managedLockCount}`,
-            `  connected host auth owner outside Agent`,
-            ...formatSessionMaintenanceLines(maintenance, 'guided').map((line) => `  ${line}`),
-            '',
-            ...setupReviewLines(snapshot.checks, ' '),
-            ...(snapshot.hostIntegrationIssues.length > 0
-              ? ['', ...snapshot.hostIntegrationIssues.map((issue) => `  host integration ${issue}`)]
-              : []),
-            '',
-            'Next steps',
-            '  /health review',
-            '  /health approvals',
-            '  /health host',
-            '  /health accounts',
-            '  /health auth',
-            '  /health settings',
-            '  /health memory',
-            '  /health maintenance',
-            '  /health repair <domain>',
-            '  /setup',
-          ].join('\n'),
-        );
-      } catch (error) {
-        if (readRefusal(error)) throw error;
-        throw commandRefusal(`Health command failed: ${error instanceof Error ? error.message : String(error)}`);
-      }
+  registry.register(createHealthCommand<CommandContext>({
+    report: healthReport,
+    check: (ctx, area) => checkArea(ctx, area),
+    async diagnose(ctx, symptom) {
+      return formatDoctorReport(await requireReadModels(ctx).doctor.diagnose(symptom)).join('\n');
     },
-  });
+    runtimeState(ctx, domains) {
+      // This app's runtime store as the platform's snapshot reader shows it: JSON-safe, credential-masked, bounded.
+      const store = ctx.platform.runtimeStore;
+      if (!store) throw commandRefusal('The runtime store is not available in this session.');
+      const snapshot = snapshotRuntimeState(store, domains.length > 0 ? { domains: [...domains] } : {});
+      return formatRuntimeStateSnapshot(snapshot, `Runtime State (${new Date(snapshot.capturedAt).toISOString()})`);
+    },
+    async compat(ctx, json) {
+      const cli = parseGoodVibesCli(['compat', ...(json ? ['--json'] : [])], 'goodvibes-agent');
+      refuseCliParseErrors(cli.errors);
+      const shellPaths = requireShellPaths(ctx);
+      const runtime: CliCommandRuntime = {
+        cli,
+        configManager: ctx.platform.configManager,
+        workingDirectory: shellPaths.workingDirectory,
+        homeDirectory: shellPaths.homeDirectory,
+      };
+      const result = await handleCompatCommand(runtime);
+      if (result.exitCode !== 0) throw commandRefusal(result.output, undefined, 'COMMAND_FAILED');
+      return result.output;
+    },
+    elsewhere: 'the terminal app (goodvibes)',
+  }));
 }

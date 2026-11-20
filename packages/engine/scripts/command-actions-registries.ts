@@ -18,12 +18,10 @@ export async function loadCommandRegistries(): Promise<{ readonly tui: readonly 
   const tuiCommands = await import(join(REPO_ROOT, 'products/tui/src/input/commands.ts')) as { categorizeBuiltinCommands(): { command: RegisteredCommand }[] };
   const tuiRegistry = await import(join(REPO_ROOT, 'products/tui/src/input/command-registry.ts')) as { CommandRegistry: new () => Registry };
   const workLedger = await import(join(REPO_ROOT, 'products/tui/src/runtime/native-work-ledger-host.ts')) as { registerNativeWorkLedgerCommand(registry: unknown, view: object): void };
-  const legacyImport = await import(join(REPO_ROOT, 'products/tui/src/input/commands/legacy-work-ledger-import-runtime.ts')) as { registerTuiLegacyImportCommands(registry: unknown): void };
   const tui = tuiCommands.categorizeBuiltinCommands().map((entry) => entry.command);
   // Registered beside the built-in groups at start-up (runtime/bootstrap-shell.ts).
   const extra = new tuiRegistry.CommandRegistry();
   workLedger.registerNativeWorkLedgerCommand(extra, { selectProject: () => undefined });
-  legacyImport.registerTuiLegacyImportCommands(extra);
   const known = new Set(tui.map((command) => command.name));
   const agentCommands = await import(join(REPO_ROOT, 'products/agent/src/input/commands.ts')) as { registerBuiltinCommands(registry: unknown): void };
   const agentRegistry = await import(join(REPO_ROOT, 'products/agent/src/input/command-registry.ts')) as { CommandRegistry: new () => Registry };

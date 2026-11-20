@@ -2,7 +2,6 @@ import { createWorkstreamDraftService } from '@goodvibes-jev/engine/platform/pla
 import { chosenSystemMessageTarget, configuredSystemMessageTarget } from '@goodvibes-jev/engine/terminal-shell/system-message-router';
 import { projectBootstrapShellCommandOptions } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
 import { createNativeWorkLedgerHost, registerNativeWorkLedgerCommand } from './native-work-ledger-host.ts';
-import { registerTuiLegacyImportCommands } from '../input/commands/legacy-work-ledger-import-runtime.ts';
 import 'node:path';
 import { refreshMemoryRecallSnapshot } from './orchestrator-core-services.ts';
 import { ownerInputFor } from '@goodvibes-jev/engine/terminal-shell/companion-input';
@@ -220,7 +219,6 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
   const commandRegistry = new CommandRegistry();
   registerBuiltinCommands(commandRegistry);
   registerNativeWorkLedgerCommand(commandRegistry, nativeWorkLedgerHost.view);
-  registerTuiLegacyImportCommands(commandRegistry, options.daemonHomeDirectory);
   const remoteRuntime = createShellRemoteCommandService({
     readModels: uiServices.readModels,
     remoteRunnerRegistry: services.remoteRunnerRegistry,

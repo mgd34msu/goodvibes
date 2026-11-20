@@ -61,6 +61,9 @@ const MODELS = defineList<ModelCommandContext>({
   operator: { method: 'models.list', input: {}, rows: { from: 'providers', each: 'models', value: 'registryKey', label: 'label', detail: 'provider' } },
 });
 
+/** The models you can switch to, as a live list (`/provider pin-route` chooses from it too). */
+export const MODELS_LIST = MODELS;
+
 function backupOrder(ctx: ModelCommandContext): string[] {
   const current = ctx.platform.configManager.get('provider.fallbackModels');
   return Array.isArray(current) ? current.filter((entry): entry is string => typeof entry === 'string') : [];

@@ -1,5 +1,3 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
 import {
   createContextInspectionCommand,
 } from '@goodvibes-jev/engine/terminal-shell/context-inspection-command';
@@ -7,17 +5,12 @@ import { registerInteractionModeCommand } from '@goodvibes-jev/engine/terminal-s
 import { settingsTargetNotFoundMessage } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { ToolContractVerifier } from '@/runtime/index.ts';
-import type { ReplaySnapshotInput } from '@/runtime/index.ts';
 import '@goodvibes-jev/engine/platform/platform/utils';
-import { registerLegacyPanelCommand } from './legacy-panel-command.ts';
-import { requireOpsApi, requireProfileManager, requireReplayEngine, requireShellPaths } from './runtime-services.ts';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { requireProfileManager } from './runtime-services.ts';
 import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
 import { handleContextWindowSubcommand } from './context-window.ts';
 
 export function registerOperatorRuntimeCommands(registry: CommandRegistry): void {
-  registerLegacyPanelCommand(registry);
-
   registry.register({
     name: 'settings',
     aliases: ['cfg-ui'],
@@ -59,89 +52,6 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
 
 
   registerInteractionModeCommand<CommandContext>(registry);
-
-  registry.register({
-    name: 'ops',
-    // A note is free text, kept as typed.
-    rawRest: (args) => ((args[0] ?? '').toLowerCase() === 'task' || (args[0] ?? '').toLowerCase() === 'agent' ? 3 : undefined),
-    description: 'Operator Control Plane: view audit log, cancel/pause/resume/retry tasks and agents',
-    usage: 'view | task <cancel|pause|resume|retry> <id> [note] | agent cancel <id> [note]',
-    argsHint: '[view|task|agent]',
-    async handler(args, ctx) {
-      const sub = args[0];
-
-      if (sub === 'view' || sub === undefined) {
-        // The flag-wired opener when the control plane is on, else the
-        // Agents view, which holds the live operations content either way.
-        if (ctx.openOpsView) ctx.openOpsView();
-        else if (!ctx.openView?.('ops-control')) ctx.print('The Agents view is not available in this shell.');
-        return;
-      }
-
-      if (sub === 'task') {
-        const action = args[1];
-        const taskId = args[2];
-        const note = args.slice(3).join(' ') || undefined;
-        if (!action || !taskId) {
-          ctx.print('Usage: /ops task <cancel|pause|resume|retry> <task-id> [note]');
-          return;
-        }
-        const opsApi = requireOpsApi(ctx);
-        try {
-          switch (action) {
-            case 'cancel':
-              await opsApi.tasks.cancel(taskId, note);
-              break;
-            case 'pause':
-              await opsApi.tasks.pause(taskId, note);
-              break;
-            case 'resume':
-              await opsApi.tasks.resume(taskId, note);
-              break;
-            case 'retry':
-              await opsApi.tasks.retry(taskId, note);
-              break;
-            default:
-              ctx.print(`Unknown task action "${action}". Use: cancel, pause, resume, retry`);
-              return;
-          }
-          // Printed once the task's owner acted, so it never reports a change that did not happen.
-          ctx.print(`[Ops] Task ${taskId}: ${action} done.`);
-        } catch (e) {
-          ctx.print(`[Ops] Error: ${summarizeError(e)}`);
-        }
-        return;
-      }
-
-      if (sub === 'agent') {
-        const action = args[1];
-        const agentId = args[2];
-        const note = args.slice(3).join(' ') || undefined;
-        if (action !== 'cancel' || !agentId) {
-          ctx.print('Usage: /ops agent cancel <agent-id> [note]');
-          return;
-        }
-        const opsApi = requireOpsApi(ctx);
-        try {
-          opsApi.agents.cancel(agentId, note);
-          ctx.print(`[Ops] Agent ${agentId}: cancel dispatched.`);
-        } catch (e) {
-          ctx.print(`[Ops] Error: ${summarizeError(e)}`);
-        }
-        return;
-      }
-
-      ctx.print(
-        'Usage: /ops <subcommand>\n' +
-          '  /ops view                              — open Agents (F2 or Ctrl+O)\n' +
-          '  /ops task cancel <id> [note]           — cancel a task\n' +
-          '  /ops task pause  <id> [note]           — pause a task\n' +
-          '  /ops task resume <id> [note]           — resume a blocked task\n' +
-          '  /ops task retry  <id> [note]           — retry a failed task\n' +
-          '  /ops agent cancel <id> [note]          — cancel a running agent',
-      );
-    },
-  });
 
   registry.register({
     name: 'tool',
@@ -188,117 +98,6 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
           '  /tool verify <name>             — verify contract for a specific registered tool\n' +
           '  /tool verify-all                — verify contracts for all registered tools\n' +
           '  /tool contract show <name>      — show full contract details for a tool',
-      );
-    },
-  });
-
-  registry.register({
-    name: 'forensics',
-    aliases: ['foren'],
-    description: 'Failure Forensics: view, inspect, and export auto-classified failure reports',
-    usage: '[latest | show <id> | export <id> [path] [--overwrite]]',
-    argsHint: '[latest|show|export]',
-    handler(args, ctx) {
-      const sub = args[0];
-      if (sub === undefined || sub === 'view') {
-        if (ctx.openForensicsView) ctx.openForensicsView();
-        else ctx.print('The Agents view is not available.');
-        return;
-      }
-      if (sub === 'latest') {
-        if (!ctx.extensions.forensicsRegistry) {
-          ctx.print('[Forensics] Registry not active.');
-          return;
-        }
-        const report = ctx.extensions.forensicsRegistry.latest();
-        if (!report) {
-          ctx.print('[Forensics] No failure reports recorded this session.');
-          return;
-        }
-        const lines: string[] = [
-          `[Forensics] Latest failure report (id: ${report.id})`,
-          `  Time:           ${new Date(report.generatedAt).toISOString()}`,
-          `  Classification: ${report.classification}`,
-          `  Summary:        ${report.summary}`,
-        ];
-        if (report.errorMessage) lines.push(`  Error:          ${report.errorMessage}`);
-        if (report.stopReason) lines.push(`  Stop reason:    ${report.stopReason}`);
-        if (report.taskId) lines.push(`  Task ID:        ${report.taskId}`);
-        if (report.turnId) lines.push(`  Turn ID:        ${report.turnId}`);
-        if (report.causalChain.length > 0) {
-          lines.push('  Causal chain:');
-          for (const entry of report.causalChain) {
-            const marker = entry.isRootCause ? '  ● ' : '  · ';
-            lines.push(`  ${marker}${entry.description}`);
-          }
-        }
-        if (report.jumpLinks.length > 0) {
-          lines.push('  Jump links:');
-          for (const link of report.jumpLinks) {
-            lines.push(`    [${link.kind}] ${link.label} → ${link.target}${link.args ? ` (${link.args})` : ''}`);
-          }
-        }
-        lines.push(`  Use "/forensics show ${report.id}" for full JSON.`);
-        ctx.print(lines.join('\n'));
-        return;
-      }
-      if (sub === 'show') {
-        const id = args[1];
-        if (!id) {
-          ctx.print('Usage: /forensics show <id>');
-          return;
-        }
-        if (!ctx.extensions.forensicsRegistry) {
-          ctx.print('[Forensics] Registry not active.');
-          return;
-        }
-        const json = ctx.extensions.forensicsRegistry.exportAsJson(id);
-        if (!json) {
-          ctx.print(`[Forensics] No report found with id "${id}". Use /forensics latest to see the most recent.`);
-          return;
-        }
-        ctx.print(json);
-        return;
-      }
-      if (sub === 'export') {
-        const id = args[1];
-        if (!id) {
-          ctx.print('Usage: /forensics export <id> [path] [--overwrite]');
-          return;
-        }
-        if (!ctx.extensions.forensicsRegistry) {
-          ctx.print('[Forensics] Registry not active.');
-          return;
-        }
-        const json = ctx.extensions.forensicsRegistry.exportBundleAsJson(id, {
-          replaySnapshot: requireReplayEngine(ctx).getSnapshot() as ReplaySnapshotInput,
-        });
-        if (!json) {
-          ctx.print(`[Forensics] No report found with id "${id}".`);
-          return;
-        }
-        // Same convention as /incident export: a path writes a file and never replaces one silently.
-        const pathArg = args.slice(2).find((word) => !word.startsWith('--'));
-        if (pathArg) {
-          const targetPath = requireShellPaths(ctx).resolveWorkspacePath(pathArg);
-          if (existsSync(targetPath) && !args.includes('--overwrite')) {
-            ctx.print(`[Forensics] ${targetPath} already exists; nothing was written. Choose another path or add --overwrite.`);
-            return;
-          }
-          mkdirSync(dirname(targetPath), { recursive: true });
-          writeFileSync(targetPath, `${json}\n`, 'utf-8');
-          ctx.print(`[Forensics] Exported incident bundle ${id} (with the replay snapshot) to ${targetPath}`);
-          return;
-        }
-        ctx.print(`[Forensics] Incident bundle ${id}:\n${json}`);
-        return;
-      }
-      ctx.print(
-        'Usage: /forensics <subcommand>\n' +
-          '  /forensics             — open Agents on forensics\n' +
-          '  /forensics latest      — print the most recent failure report summary\n' +
-          '  /forensics show <id>   — show full JSON for a specific report\n' +
-          '  /forensics export <id> [path] — print the incident bundle JSON (with the replay snapshot) here, or write it to a file; /incident export <id> <path> writes the bundle without the replay snapshot',
       );
     },
   });

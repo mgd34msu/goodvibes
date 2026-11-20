@@ -41,7 +41,7 @@
  */
 
 import type { ToolCall, ToolResult } from '@goodvibes-jev/engine/platform/platform/types';
-import { readTurnFailure, type TokenUsage, type TurnFailureReading, type TurnRefusalReason } from '@goodvibes-jev/engine/platform/platform/core';
+import { readTurnFailure, type TokenUsage, type TurnChanges, type TurnFailureReading, type TurnRefusalReason } from '@goodvibes-jev/engine/platform/platform/core';
 import { readTurnSettlement, stopReasonOfSettlement, type TurnSettlement } from '@goodvibes-jev/engine/transport-core/turn-settlement';
 
 /**
@@ -134,6 +134,18 @@ function readNumber(source: Record<string, unknown> | undefined, key: string): n
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+/** A hosted TURN_ERROR's `changes`, or undefined when it carried none. */
+function hostedChanges(value: unknown): TurnChanges | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  const files = Array.isArray(record['files']) ? record['files'].filter((entry): entry is string => typeof entry === 'string') : undefined;
+  const commands = readNumber(record, 'commands');
+  const messages = readNumber(record, 'messages');
+  const unknown = readNumber(record, 'unknown');
+  if (!files || commands === undefined || messages === undefined || unknown === undefined) return undefined;
+  return { files, commands, messages, unknown };
+}
+
 const REFUSALS: readonly TurnRefusalReason[] = ['no-provider', 'no-model', 'daemon-unreachable', 'workspace-not-registered'];
 
 /** The failure reading of a hosted turn's TURN_ERROR, from the facts its payload carries. */
@@ -156,8 +168,7 @@ function hostedTurnFailure(payload: Record<string, unknown> | undefined, turnId:
     providerName: readString(payload, 'providerName'),
     provider: readString(payload, 'provider'),
     model: readString(payload, 'model'),
-    changedFiles: strings('changedFiles'),
-    changedUnknown: payload?.['changedUnknown'] === true,
+    changes: hostedChanges(payload?.['changes']),
     fallbackOrderSet: typeof fallbackOrderSet === 'boolean' ? fallbackOrderSet : undefined,
     fallbackNote: readString(payload, 'fallbackNote'),
     refusal: REFUSALS.find((reason) => reason === refusal),

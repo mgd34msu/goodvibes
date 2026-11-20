@@ -182,7 +182,6 @@ Single-item inspect modes:
 | `project_context_file` | `contextFileId`, `target`, or `query` |
 | `agent_orchestration_agent` | `agentId`, `target`, or `query` |
 | `setup_item`, `setup_repair`, `model_route`, `execution action:"route"`, `pairing_route`, `delegation action:"route"` | Exact id/model key or `target`/`query` |
-| `setup_checkpoint` | Saved setup wizard checkpoint and current resume step, no lookup required |
 | `personal_ops_briefing`, `personal_ops_queue`, `personal_ops_intake` | `query` or `target` |
 | `personal_ops_lane`, `document_ops_lane` | `laneId`, `target`, or `query` |
 | `memory action:"candidate"` or lower-level `learning_candidate` | `candidateId`, `target`, or `query` |
@@ -196,11 +195,10 @@ Effect modes:
 
 | Mode | Effect |
 | --- | --- |
-| `setup` tool | Preferred first-run setup route: `action:"status\|item\|repair\|checkpoint"` reads, including setup wizard closeout plus saved/artifact/live-read-model/ordered-event-stream receipt evidence; `action:"save_checkpoint\|clear_checkpoint\|token\|smoke\|finish"` delegates to existing confirmed setup effects, `action:"import_settings"` previews the shared-settings import, and `action:"import"` (or `apply_import`) applies it under a current recorded admission. |
+| `setup` tool | Preferred first-run setup route: `action:"status\|item\|repair"` reads (status lists the `/setup` topics as `setupTopics`), including setup wizard closeout plus saved/artifact/live-read-model/ordered-event-stream receipt evidence; `action:"token\|smoke\|finish"` delegates to existing confirmed setup effects, `action:"import_settings"` previews the shared-settings import, and `action:"import"` (or `apply_import`) applies it under a current recorded admission. |
 | `workspace action:"run"` | Executes one resolved workspace action through the same editor, command, or local route as the TUI; `actionId:"onboarding-apply-close"` is the confirmed setup closeout marker write. |
 | `workspace action:"run_command"` | Executes one resolved slash command through the shared command registry. |
 | `provision_connected_host_token` | Creates or repairs the local canonical connected-host token after confirmation without returning the raw token. |
-| `mark_setup_checkpoint`, `clear_setup_checkpoint` | Saves or clears the Agent-owned setup wizard resume checkpoint after confirmation. |
 | `run_setup_smoke` | Collects redacted first-run setup smoke evidence and can save user-run output as an artifact without implicit shell or host commands; `setup_posture` uses that evidence for setup closeout. |
 | `workspace action:"open"` | Routes visible shell navigation. |
 | `workspace action:"run_keybinding"` | Runs supported shell-safe keybinding actions only. |

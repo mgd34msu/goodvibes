@@ -193,7 +193,7 @@ Common model routes:
 | Channels, notifications, reminders, scheduled autonomy, media | `channels action:"status\|channel\|setup\|triage\|deliveries"`, `agent_channel_send`, `agent_notify`, `schedule action:"list\|create\|remind\|edit\|run\|pause\|resume\|delete"`, lower-level channel harness modes and `agent_reminder_schedule`/`agent_autonomy_schedule`/`agent_schedule_edit`, `agent_media_generate` |
 | Operator state/actions | `agent_operator_briefing`, `agent_operator_action`, `agent_operator_method`; inspect method contracts with `host action:"methods\|method"` |
 | Connected host/daemon posture | `host action:"status\|capabilities\|capability\|services\|service\|methods\|method"`; lower-level connected-host harness modes remain available for detailed inspection |
-| First-run setup plan | `setup action:"status"` exposes `setupCloseout`; use `action:"repair"` for the safest next repair route, `action:"item"`, `action:"checkpoint"`, `action:"save_checkpoint"`, `action:"clear_checkpoint"`, `action:"token"`, `action:"smoke"`, and confirmed `action:"finish"` for the guided setup path |
+| First-run setup plan | `setup action:"status"` exposes `setupCloseout`; use `action:"repair"` for the safest next repair route, `action:"item"`, `action:"token"`, `action:"smoke"`, and confirmed `action:"finish"` for the guided setup path |
 | Operator/audit evidence | `audit action:"readiness\|item\|evidence\|artifact"`; lower-level `agent_harness mode:"release_evidence"`, `mode:"release_evidence_artifact"`, `mode:"release_readiness"`, and `mode:"release_readiness_item"` remain available |
 
 All effects require explicit user request and confirmation. Ambiguous lookup is refused with candidates.

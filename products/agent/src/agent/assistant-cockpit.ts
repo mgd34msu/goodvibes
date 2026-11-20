@@ -103,9 +103,6 @@ export function buildAssistantCockpitFromMetrics(metrics: AssistantCockpitMetric
         routes: [
           'setup action:"status"',
           'setup action:"item"',
-          'setup action:"checkpoint"',
-          'setup action:"save_checkpoint"',
-          'setup action:"clear_checkpoint"',
           'setup action:"token"',
           'setup action:"smoke"',
         ],

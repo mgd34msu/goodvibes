@@ -9,6 +9,7 @@ import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/pr
 import { describeContextWindowSource } from '@goodvibes-jev/engine/platform/platform/providers';
 import { abbreviateCount } from '../../utils/format-number.ts';
 import { worktreeStatusLines } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { createStatusCommand } from '@goodvibes-jev/engine/terminal-shell/health-command';
 
 /** The /status text for a model, its known window (null when unknown) and any user override. */
 export function buildAgentStatusText(model: ModelDefinition, knownWindow: number | null, override: number | null): string {
@@ -51,12 +52,9 @@ export function handleStatusCommand(ctx: CommandContext): string {
 }
 
 export function registerStatusRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
-    name: 'status',
-    effect: 'read-only',
-    description: 'Show the current model and its context window, with where the window came from, and the worktrees the start-up pass removed or kept for you',
-    handler: (_args, ctx) => {
-      handleStatusCommand(ctx);
-    },
-  });
+  // One description shared with the terminal app (terminal-shell/health-command.ts); this is the Agent's report.
+  registry.register(createStatusCommand<CommandContext>((ctx) => [
+    buildAgentStatusText(ctx.provider.providerRegistry.getCurrentModel(), ctx.provider.providerRegistry.getKnownContextWindowForModel(ctx.provider.providerRegistry.getCurrentModel()), ctx.provider.providerRegistry.getModelContextCap(ctx.provider.providerRegistry.getCurrentModel().registryKey)),
+    ...worktreeSection(ctx),
+  ].join('\n')));
 }

@@ -197,10 +197,13 @@ export type TurnEvent =
     /** The provider id and model id that failed last. */
     provider?: string | undefined;
     model?: string | undefined;
-    /** Files the turn's successful tool calls changed before it stopped (empty: none). */
-    changedFiles?: readonly string[] | undefined;
-    /** A tool that may change things without naming files (a command) ran before it stopped. */
-    changedUnknown?: boolean | undefined;
+    /**
+     * What the turn's successful tool calls changed before it stopped, from the
+     * turn's own record: files written, commands run, messages sent, tools of
+     * undeclared effect run. Absent: not recorded (the failure then says
+     * nothing about changes); all empty: nothing was changed.
+     */
+    changes?: { readonly files: readonly string[]; readonly commands: number; readonly messages: number; readonly unknown: number } | undefined;
     /** Whether provider.fallbackModels names any model. */
     fallbackOrderSet?: boolean | undefined;
     /** Why the fallback order did not move the turn, when it was consulted. */

@@ -110,7 +110,7 @@ function detailedHarnessModelAccessGuide(): Record<string, string> {
     notifications: 'List mode:"notifications"; inspect mode:"notification_target"; deliver with agent_notify under current recorded send admission.',
     providerAccounts: 'Prefer models action:"providers|provider" for account and subscription posture. Lower-level mode:"provider_accounts" and mode:"provider_account" remain available; auth changes stay confirmed workspace/command flows.',
     mcpServers: 'List mode:"mcp_servers"; inspect mode:"mcp_server"; trust/server changes stay confirmed workspace/command flows.',
-    setupPosture: 'Prefer setup action:"status|item|repair|checkpoint|token|smoke|finish"; lower-level setup_* modes remain available for detailed harness inspection.',
+    setupPosture: 'Prefer setup action:"status|item|repair|token|smoke|finish"; lower-level setup_* modes remain available for detailed harness inspection.',
     routeDecision: 'Prefer route action:"plan" before choosing a specialized tool when the user task could map to setup, Personal Ops, research, autonomy, execution, delegation, computer/browser, workspace, host, or device routes.',
     projectContext: 'Prefer context action:"files|file"; lower-level project_context modes remain available for detail. Context files are read-only and secret-scanned.',
     promptContext: 'Prefer context action:"prompt|receipts|receipt" for prompt composition, selected/suppressed records, token budget, and prompt receipt outcomes.',

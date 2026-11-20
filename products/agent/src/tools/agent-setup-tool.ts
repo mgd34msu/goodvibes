@@ -12,9 +12,6 @@ type AgentSetupAction =
   | 'status'
   | 'item'
   | 'repair'
-  | 'checkpoint'
-  | 'save_checkpoint'
-  | 'clear_checkpoint'
   | 'token'
   | 'smoke'
   | 'finish'
@@ -50,9 +47,6 @@ function normalizeSetupAction(value: unknown): AgentSetupAction | null {
   if (action === 'setup' || action === 'posture' || action === 'status' || action === 'summary' || action === 'list') return 'status';
   if (action === 'item' || action === 'show' || action === 'inspect') return 'item';
   if (action === 'repair' || action === 'fix' || action === 'diagnose_repair' || action === 'host_repair' || action === 'repair_host' || action === 'launch_host') return 'repair';
-  if (action === 'checkpoint' || action === 'resume' || action === 'checkpoint_status') return 'checkpoint';
-  if (action === 'save_checkpoint' || action === 'mark_checkpoint' || action === 'checkpoint_save' || action === 'save') return 'save_checkpoint';
-  if (action === 'clear_checkpoint' || action === 'reset_checkpoint' || action === 'checkpoint_clear' || action === 'clear') return 'clear_checkpoint';
   if (action === 'token' || action === 'auth' || action === 'provision_token' || action === 'repair_token') return 'token';
   if (action === 'smoke' || action === 'run_smoke' || action === 'install_smoke') return 'smoke';
   if (action === 'finish' || action === 'closeout' || action === 'apply_close' || action === 'apply_and_close') return 'finish';
@@ -61,7 +55,7 @@ function normalizeSetupAction(value: unknown): AgentSetupAction | null {
   return null;
 }
 
-const SETUP_ACTION_WORDS = ['status', 'item', 'repair', 'checkpoint', 'save_checkpoint', 'clear_checkpoint', 'token', 'smoke', 'finish', 'import_settings', 'import', 'apply_import'] as const;
+const SETUP_ACTION_WORDS = ['status', 'item', 'repair', 'token', 'smoke', 'finish', 'import_settings', 'import', 'apply_import'] as const;
 
 /**
  * The action, inferred from the fields only when none was named. A word that was
@@ -121,7 +115,7 @@ export function createAgentSetupTool(deps: AgentSetupToolDeps): Tool {
           action: {
             type: 'string',
             enum: [...SETUP_ACTION_WORDS],
-            description: 'Setup action; status/item/checkpoint read. import_settings previews the shared-settings import; import (or apply_import) applies it. Effects need a current recorded admission.',
+            description: 'Setup action; status/item read (status lists the /setup topics a person sets things up with). import_settings previews the shared-settings import; import (or apply_import) applies it. Effects need a current recorded admission.',
           },
           setupItemId: { type: 'string', description: 'Setup item id.' },
           itemId: { type: 'string', description: 'Alias for setupItemId.' },

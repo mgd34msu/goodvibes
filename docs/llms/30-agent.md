@@ -295,7 +295,7 @@ VIBE.md is managed with `/personas`: `vibe` (which files apply and which are blo
 | `/intelligence` | The same description as the terminal app's: the lookups (`symbols`, `outline`, `definition`, `references`, `hover`) and `install`; `review` and `diagnostics` are the terminal app's and are refused here. |
 | `/tts` | `<prompt>` and `stop` only. |
 | `/undo`, `/redo`, `/retry` | `/undo` and `/redo` take `file` (as in the terminal app) but not `rewind`; `/retry` re-sends the last message. |
-| `/approval` | The same description as the terminal app's: `kinds [<kind>]` and `waiting` (opens Work & Approvals). An approval is answered with `/questions answer`. |
+| `/approval` | The same description as the terminal app's: `kinds [<kind>]` and `waiting` (opens Work & Approvals). An approval is answered with `/questions answer`; a request you raised is withdrawn with `/questions withdraw`. |
 | `/health` | The same description as the terminal app's. `check` reads `setup`, `services` (the connected host's integrations), `provider`, `accounts`, `auth`, `settings`, `remote`, `mcp`, `memory`, `continuity`, `maintenance` and `approvals`; the other areas, the failure reports and `stop-agent` are refused and name the terminal app. `/health compat [--json]` is `goodvibes-agent compat`. |
 | `/status` | The same description as the terminal app's; here it shows the current model and its context window with where the window came from, and the worktrees the start-up pass removed or kept. |
 | `/services` | The same command as the terminal app's; `open` refuses because the Agent has no services screen. |

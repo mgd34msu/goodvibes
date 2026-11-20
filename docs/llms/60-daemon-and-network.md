@@ -675,6 +675,14 @@ No restart is needed. The listener reads the setting on every request, and a run
 
 The webhook listener receives inbound webhooks from external services. It opens only when `danger.httpListener` is `true`. It binds `httpListener.host:httpListener.port` (default `127.0.0.1:3422`) and accepts the bearer token in `GOODVIBES_HTTP_TOKEN`, or the operator token when that is not set. `POST /webhook` fires the owner's hooks, so it needs what the daemon's own hook routes need: the operator token, an admin sign-in or a paired device with full authority; a narrowed device token or a sign-in without the admin role is refused `403` `ADMIN_REQUIRED` naming the `hook.fire` effect, and nothing fires. `httpListener.trustCloudflare` (with `httpListener.trustProxy`) reads the client address from `CF-Connecting-IP`, but only from a peer inside a published Cloudflare range. `goodvibes listener test` (terminal app) checks it.
 
+### Deliveries to machines on your own network
+
+What you set up to receive deliveries may sit on your own network: a self-hosted ntfy, a webhook receiver, Home Assistant. `network.privateDeliveryHosts` ("Machines on your network deliveries may reach") lists those hosts, comma-separated: an address (`192.168.1.20`, `10.0.0.5`, `127.0.0.1`), a name (`ntfy.home.lan`, `localhost`) or `*.home.lan` for every name under it. It applies to the targets you configured: a notification webhook (`/notify add`), a watcher's target and the default webhook target (`surfaces.webhook.defaultTarget`). For a listed host a private, loopback, link-local, unique-local or shared (CGNAT, Tailscale) address is admitted, every address a name resolves to is checked, and the request is sent to the address that was checked, with redirects not followed. A cloud metadata address is never reached, listed or not. A host on your network that is not listed is refused, and the refusal names this setting and the host to add.
+
+The list never applies to an address someone else supplied: a webhook sender's callback or response URL, a chat platform's response URL, a device's push endpoint. Those reach public hosts only. The servers of the chat channels you connect (`surfaces.ntfy.baseUrl`, Mattermost, Matrix, Home Assistant) are the addresses you entered for those channels and are used as written, without this list.
+
+The setting is daemon-owned (it is kept in `~/.goodvibes/daemon/settings.json` whichever program sets it) and only your own settings can set it; a project settings file cannot. Each program reads it at every delivery, so a host added takes effect at the next one.
+
 ### Settings for listeners and exposure
 
 <!-- generated: settings:controlPlane -->

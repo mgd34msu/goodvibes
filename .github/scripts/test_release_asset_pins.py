@@ -7,7 +7,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from release_asset_pins import needs_metadata, release_exists, resume_existing_assets, stage_release_assets, validate_reader_assets
+from release_asset_pins import evidence_product_ids, needs_metadata, release_exists, resume_existing_assets, stage_release_assets, validate_reader_assets
+
+# Each product's identifier in release evidence, read from the product's own table as publication reads it.
+PRODUCT_IDS = evidence_product_ids()
 
 SOURCE = 'a' * 40
 
@@ -31,7 +34,7 @@ def linux_tui_cohort():
     payloads = reader_payloads()
     pins = {name: pin(payload) for name, payload in payloads.items()}
     descriptor = {
-        'target': 'linux-x64', 'schema': 1, 'packageName': '@goodvibes/tui', 'version': '3.1.2',
+        'target': 'linux-x64', 'schema': 1, 'packageName': PRODUCT_IDS['goodvibes'], 'version': '3.1.2',
         'readers': {'schema': 1, 'version': '3.1.2'}, 'sourceCommit': SOURCE, 'headCommit': SOURCE,
         'files': [member(name, payload, 0o755 if name in (asset, asset + '.bun') else 0o644) for name, payload in payloads.items()],
     }
@@ -61,9 +64,9 @@ def darwin_daemon_cohort():
     paths = {asset: asset, 'lib/sqlite-vec-darwin-arm64/vec0.dylib': 'sqlite-vec-darwin-arm64.dylib',
              'lib/sqlite-darwin-arm64/libsqlite3.dylib': 'sqlite-darwin-arm64.dylib', 'lib/sqlite-darwin-arm64/libsqlite3.dylib.json': 'sqlite-darwin-arm64.dylib.json'}
     files = [member(path, payloads[name], 0o755 if path == asset else 0o644) for path, name in paths.items()]
-    descriptor = {'target': 'darwin-arm64', 'schema': 1, 'packageName': '@goodvibes/daemon', 'version': '3.1.2',
+    descriptor = {'target': 'darwin-arm64', 'schema': 1, 'packageName': PRODUCT_IDS['goodvibes-daemon'], 'version': '3.1.2',
                   'readers': {'schema': 1, 'version': '3.1.2'}, 'sourceCommit': SOURCE, 'headCommit': SOURCE, 'files': files}
-    producer = {'schema': 1, 'packageName': '@goodvibes/daemon', 'daemonVersion': '3.1.2', 'target': 'darwin-arm64', **pins['sqlite-darwin-arm64.dylib']}
+    producer = {'schema': 1, 'packageName': PRODUCT_IDS['goodvibes-daemon'], 'daemonVersion': '3.1.2', 'target': 'darwin-arm64', **pins['sqlite-darwin-arm64.dylib']}
     return pins, {asset + '.reader-ci-artifact.json': descriptor, 'sqlite-darwin-arm64.dylib.json': producer}
 
 
@@ -89,7 +92,7 @@ class ReleasePinSelection(unittest.TestCase):
         cases = [
             ('target', lambda p, m: m[tui].update(target='linux-arm64'), 'Reader target mismatch'),
             ('schema', lambda p, m: m[tui].update(schema=2), 'Reader schema mismatch'),
-            ('package', lambda p, m: m[tui].update(packageName='@goodvibes/agent'), 'Reader product/version mismatch'),
+            ('package', lambda p, m: m[tui].update(packageName=PRODUCT_IDS['goodvibes-agent']), 'Reader product/version mismatch'),
             ('version', lambda p, m: m[tui].update(version='3.1.1'), 'Reader product/version mismatch'),
             ('reader version', lambda p, m: m[tui]['readers'].update(version='3.1.1'), 'Reader version mismatch'),
             ('source commit', lambda p, m: m[tui].update(sourceCommit='b' * 40), 'Reader source mismatch'),

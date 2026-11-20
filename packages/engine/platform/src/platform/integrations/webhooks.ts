@@ -5,7 +5,8 @@ import { logger } from '../utils/logger.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { classifyHostTrustTier, extractHostname, emitSsrfDeny } from '../tools/fetch/trust-tiers.js';
 import { sanitizeUrlForLog } from '../utils/fetch-with-timeout.js';
-import { ownerDeliveryTargetProblem, postToPublicWebhook } from '../utils/url-safety.js';
+import { ownerDeliveryTargetProblem, ownerPrivateHostRefusal, postToPublicWebhook, PrivateDeliveryHostRefusedError } from '../utils/url-safety.js';
+import { hostIsApproved } from '../runtime/network/destination.js';
 import { isNotifySuppressed } from '../utils/notify.js';
 import { HttpStatusError } from '@goodvibes/engine/errors';
 import { assertDeliveryCurrent, type DeliveryLifetime } from '../utils/delivery-lifetime.js';
@@ -24,12 +25,16 @@ const WEBHOOK_POLICY_ERRORS = {
   suppressed: 'WebhookNotifier: delivery suppressed under test (pass { force: true } to enable)',
   privacy: 'Notification privacy changed before delivery',
   unresolved: 'WebhookNotifier: the stored webhook URL could not be read',
+  'private-host': 'WebhookNotifier: the host is on your own network and is not approved',
 } as const;
 class WebhookPolicyError extends Error {
   /** A refusal by policy is not cleared by sending again. */
   readonly retryable = false;
-  constructor(readonly kind: keyof typeof WEBHOOK_POLICY_ERRORS) {
-    super(WEBHOOK_POLICY_ERRORS[kind]);
+  /** `private-host` only: the refusal naming the host and the setting that would admit it (never the URL's path, which carries its key). */
+  readonly detail: string | undefined;
+  constructor(readonly kind: keyof typeof WEBHOOK_POLICY_ERRORS, detail?: string) {
+    super(detail ?? WEBHOOK_POLICY_ERRORS[kind]);
+    this.detail = detail;
     Object.freeze(this);
   }
 }
@@ -37,6 +42,7 @@ function describeWebhookError(error: unknown): string {
   try {
     if (error instanceof WebhookPolicyError) {
       const kind = error.kind;
+      if (kind === 'private-host') return error.detail ?? WEBHOOK_POLICY_ERRORS[kind];
       if (kind === 'blocked' || kind === 'suppressed' || kind === 'privacy' || kind === 'closed' || kind === 'unresolved') return WEBHOOK_POLICY_ERRORS[kind];
     }
   } catch { /* Even prototype/field inspection of an unknown rejection may throw. */ }
@@ -371,15 +377,19 @@ export class WebhookNotifier implements NotificationDeadLetterSource {
     if (url === null) throw new WebhookPolicyError('unresolved');
     assertDeliveryCurrent(lifetime);
     this.assertOpen();
-    // SSRF tier filter, block requests to internal/private hosts.
+    // SSRF tier filter, block requests to internal/private hosts. Every entry
+    // is the owner's own target, so a host he listed in
+    // network.privateDeliveryHosts is left to the delivery's own check below,
+    // which admits it and pins the request to the address it checked.
+    const approvedPrivateHosts = this.privateDeliveryHosts();
     const hostname = extractHostname(url);
-    if (hostname !== null) {
+    if (hostname !== null && !hostIsApproved(hostname, approvedPrivateHosts)) {
       const trustResult = classifyHostTrustTier(hostname);
-      // Automated webhook egress has no interactive approval flow: loopback
-      // targets stay refused here alongside the absolute SSRF block.
       if (trustResult.tier === 'blocked' || trustResult.tier === 'localhost') {
         emitSsrfDeny(hostname, sanitizeUrlForLog(url), trustResult.reason);
-        throw new WebhookPolicyError('blocked');
+        // A host on the owner's own network is refused naming the setting that would admit it.
+        const refusal = ownerPrivateHostRefusal(url, { allowHttp: true, approvedPrivateHosts });
+        throw refusal !== undefined ? new WebhookPolicyError('private-host', refusal) : new WebhookPolicyError('blocked');
       }
     }
 
@@ -421,8 +431,11 @@ export class WebhookNotifier implements NotificationDeadLetterSource {
         assertDeliveryCurrent(lifetime);
         const res = await postToPublicWebhook(url, {
           method: 'POST', headers, body, signal: controller.signal,
-        }, { ...lifetime, allowHttp: true, approvedPrivateHosts: this.privateDeliveryHosts(), assertCurrent: () => { assertDeliveryCurrent(lifetime); this.assertOpen(controller.signal);
-          if (!envelope.isCurrent(prepared.revision)) throw new WebhookPolicyError('privacy'); } });
+        }, { ...lifetime, allowHttp: true, approvedPrivateHosts, assertCurrent: () => { assertDeliveryCurrent(lifetime); this.assertOpen(controller.signal);
+          if (!envelope.isCurrent(prepared.revision)) throw new WebhookPolicyError('privacy'); } }).catch((error: unknown) => {
+          // A name that resolves to the owner's own network, not listed: refused (never retried) naming the setting.
+          throw error instanceof PrivateDeliveryHostRefusedError ? new WebhookPolicyError('private-host', error.message) : error;
+        });
         // Own both successful and failed response cleanup. Never retain body
         // text: a remote response can echo previously permitted private content.
         try {

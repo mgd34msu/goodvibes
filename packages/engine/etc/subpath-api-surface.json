@@ -87635,6 +87635,15 @@
       "text": "export interface PrioritizedSegment { readonly text: string; readonly priority: number; }"
     },
     {
+      "name": "PrivateDeliveryHostRefusedError",
+      "kind": "class",
+      "publicMembers": [
+        "code",
+        "constructor"
+      ],
+      "text": "export declare class PrivateDeliveryHostRefusedError extends Error { readonly code = \"PRIVATE_DELIVERY_HOST_NOT_APPROVED\"; constructor(message: string, options?: { readonly cause?: unknown; }); }"
+    },
+    {
       "name": "ProcessLockBusyError",
       "kind": "class",
       "publicMembers": [
@@ -88098,6 +88107,11 @@
       "name": "ownerDeliveryTargetProblem",
       "kind": "function",
       "text": "export declare function ownerDeliveryTargetProblem(rawUrl: string, options: { readonly allowHttp?: boolean | undefined; readonly approvedPrivateHosts: readonly string[]; }): string | undefined;"
+    },
+    {
+      "name": "ownerPrivateHostRefusal",
+      "kind": "function",
+      "text": "export declare function ownerPrivateHostRefusal(rawUrl: string, options: { readonly allowHttp?: boolean | undefined; readonly approvedPrivateHosts: readonly string[]; }): string | undefined;"
     },
     {
       "name": "padDisplayEnd",

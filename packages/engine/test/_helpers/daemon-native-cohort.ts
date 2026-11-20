@@ -1,5 +1,6 @@
 import { dirname, join } from 'node:path';
 import { resolveDaemonNativePayloads, sha256, type DaemonCiArtifact, type NativeReaderCapabilities } from '../../platform/src/platform/runtime/self-update.ts';
+import { DAEMON_RELEASE_EVIDENCE_ID } from '../../platform/src/platform/runtime/native-cohort-table.ts';
 
 interface NativeCohortOptions {
   readonly version: string;
@@ -18,7 +19,7 @@ function fixtureArtifact(arch: 'x64' | 'arm64', files: DaemonCiArtifact['files']
   return readers === undefined ? base : { ...base, schema: 2, readers };
 }
 function fixtureReceipt(version: string, artifact: DaemonCiArtifact): Buffer {
-  return Buffer.from(JSON.stringify({ schema: 1, packageName: '@goodvibes/daemon', version, artifact }));
+  return Buffer.from(JSON.stringify({ schema: 1, packageName: DAEMON_RELEASE_EVIDENCE_ID, version, artifact }));
 }
 
 /** Actual installed bytes/receipt. Five member pins; no release manifest. */

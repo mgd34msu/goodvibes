@@ -39,6 +39,7 @@ import {
   type ResolvedAddressRange,
 } from '../runtime/network/destination.js';
 import { emitSsrfDeny } from '../tools/fetch/trust-tiers.js';
+import { CONFIG_SCHEMA } from '../config/schema.js';
 
 /** Ranges an approved private host may be written as. Metadata, unspecified, multicast and reserved addresses stay refused. */
 const APPROVED_PRIVATE_RANGES: ReadonlySet<ResolvedAddressRange> = new Set(['loopback', 'private', 'link-local', 'unique-local', 'shared']);
@@ -47,8 +48,32 @@ function normalizeHost(host: string): string {
   return host.trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
 }
 
+let privateDeliveryHostsName: string | undefined;
+
+/** The setting by its plain name, as the settings screen shows it, with its key. */
+function namedSetting(): string {
+  privateDeliveryHostsName ??= (() => {
+    const label = CONFIG_SCHEMA.find((setting) => setting.key === PRIVATE_DELIVERY_HOSTS_SETTING)?.label;
+    return label ? `"${label}" (${PRIVATE_DELIVERY_HOSTS_SETTING})` : PRIVATE_DELIVERY_HOSTS_SETTING;
+  })();
+  return privateDeliveryHostsName;
+}
+
 function approvalHint(hostname: string): string {
-  return `To deliver to a host on your own network, add "${normalizeHost(hostname)}" to ${PRIVATE_DELIVERY_HOSTS_SETTING}.`;
+  return `To deliver to a host on your own network, add "${normalizeHost(hostname)}" to the setting ${namedSetting()}.`;
+}
+
+/**
+ * An owner-configured target refused because its host is on the owner's own
+ * network and not in `network.privateDeliveryHosts`. The message names the
+ * setting by its plain name and the host to add; adding it is the owner's call.
+ */
+export class PrivateDeliveryHostRefusedError extends Error {
+  readonly code = 'PRIVATE_DELIVERY_HOST_NOT_APPROVED';
+  constructor(message: string, options?: { readonly cause?: unknown }) {
+    super(message, options);
+    this.name = 'PrivateDeliveryHostRefusedError';
+  }
 }
 
 function isBlockedHostname(hostname: string): boolean {
@@ -63,7 +88,7 @@ export function validatePublicWebhookUrl(rawUrl: string): { ok: true; url: strin
   return validateWebhookDeliveryUrl(rawUrl, false);
 }
 
-function validateWebhookDeliveryUrl(rawUrl: string, allowHttp: boolean, approvedPrivateHosts?: readonly string[]): { ok: true; url: string } | { ok: false; error: string } {
+function validateWebhookDeliveryUrl(rawUrl: string, allowHttp: boolean, approvedPrivateHosts?: readonly string[]): { ok: true; url: string } | { ok: false; error: string; privateHost?: true } {
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
@@ -81,7 +106,7 @@ function validateWebhookDeliveryUrl(rawUrl: string, allowHttp: boolean, approved
     const range = isIP(host) ? classifyResolvedAddress(host) : 'loopback';
     if (approvedPrivateHosts !== undefined && range !== null && APPROVED_PRIVATE_RANGES.has(range)) {
       if (hostIsApproved(host, approvedPrivateHosts)) return { ok: true, url: parsed.toString() };
-      return { ok: false, error: `Webhook URL host ${host} is on a private network and is not approved. ${approvalHint(host)}` };
+      return { ok: false, error: `Webhook URL host ${host} is on your own network and is not approved. ${approvalHint(host)}`, privateHost: true };
     }
     return { ok: false, error: 'Webhook URL host is not allowed' };
   }
@@ -101,6 +126,19 @@ export function ownerDeliveryTargetProblem(rawUrl: string, options: {
 }): string | undefined {
   const validation = validateWebhookDeliveryUrl(rawUrl, options.allowHttp === true, options.approvedPrivateHosts);
   return validation.ok ? undefined : validation.error;
+}
+
+/**
+ * The refusal of an owner-configured target whose host, as written, is on the
+ * owner's own network and not in `network.privateDeliveryHosts` (naming the
+ * setting), or undefined for any other outcome. No I/O.
+ */
+export function ownerPrivateHostRefusal(rawUrl: string, options: {
+  readonly allowHttp?: boolean | undefined;
+  readonly approvedPrivateHosts: readonly string[];
+}): string | undefined {
+  const validation = validateWebhookDeliveryUrl(rawUrl, options.allowHttp === true, options.approvedPrivateHosts);
+  return !validation.ok && validation.privateHost === true ? validation.error : undefined;
 }
 
 /**
@@ -128,7 +166,7 @@ export async function postToPublicWebhook(
   assertDeliveryCurrent(lifetime);
   const approved = options.approvedPrivateHosts;
   const validation = validateWebhookDeliveryUrl(rawUrl, options.allowHttp === true, approved);
-  if (!validation.ok) throw new Error(validation.error);
+  if (!validation.ok) throw validation.privateHost ? new PrivateDeliveryHostRefusedError(validation.error) : new Error(validation.error);
   const hostname = new URL(validation.url).hostname;
   let addresses;
   try {
@@ -139,9 +177,10 @@ export async function postToPublicWebhook(
   } catch (error) {
     if (!(error instanceof DestinationRefusedError)) throw error;
     emitSsrfDeny('[redacted-host]', '[redacted-url]', 'Resolved address is not allowed');
-    // An owner-configured target gets the setting that would admit it.
-    if (approved !== undefined && error.range !== 'unresolved' && error.range !== 'scheme') {
-      throw new Error(`${error.message}. ${approvalHint(hostname)}`, { cause: error });
+    // An owner-configured target on his own network gets the setting that would admit it;
+    // a range no approval admits (cloud metadata, reserved, multicast) is refused as it is.
+    if (approved !== undefined && APPROVED_PRIVATE_RANGES.has(error.range as ResolvedAddressRange)) {
+      throw new PrivateDeliveryHostRefusedError(`${error.message}. ${approvalHint(hostname)}`, { cause: error });
     }
     throw error;
   }

@@ -2,6 +2,8 @@
 // Red when: An embedded daemon starts the update loop or installs a service unit and exits, or a standalone daemon stops or exits before the user service manager answered and the unit was installed and reloaded.
 // Proves: The running daemon installs a download whose bytes do not match the release's checksums, swaps its programs while work is running, or reinstalls the release a rollback rejected.
 // Red when: The update loop skips the checksum comparison, swaps while the daemon is not idle, or ignores the version a crash-loop rollback rejected.
+// Proves: This release's packaging writes evidence the previous release's updater refuses, so no installed copy can update.
+// Red when: A program's identifier in release evidence, the saved-data format name the release publishes, or the service description 3.3.1 wrote no longer matches what version 3.3.1 accepts.
 /**
  * A daemon replaces or hands itself over only when it owns the artifact and a
  * successor is ready:
@@ -26,6 +28,10 @@ import { DaemonAutoUpdater } from '../platform/src/platform/daemon/auto-updater.
 import { DaemonReceiptStore } from '../platform/src/platform/daemon/receipts.ts';
 import { PREVIOUS_FILE_SUFFIX, sha256 } from '../platform/src/platform/runtime/self-update.ts';
 import { nativeCohortFixture } from './_helpers/daemon-native-cohort.ts';
+import { RELEASE_EVIDENCE_PRODUCT_IDS } from '../platform/src/platform/runtime/native-cohort-table.ts';
+import { NATIVE_READER_REQUIREMENT_FILE, createNativeDataWriteOwner } from '../platform/src/platform/runtime/native-reader-compatibility.ts';
+import { readManagedDefinitionOwner } from '../terminal-shell/src/managed-daemon-service.ts';
+import { VERSION } from '../platform/src/platform/version.ts';
 
 const scratchDirs: string[] = [];
 
@@ -242,5 +248,39 @@ describe('the update loop', () => {
     expect(readFileSync(good.execPath, 'utf8')).toBe('daemon 2.0.0');
     expect(readFileSync(good.execPath + PREVIOUS_FILE_SUFFIX, 'utf8')).toBe('daemon 1.0.0');
     expect(good.restarts).toEqual([1]);
+  });
+});
+
+/**
+ * The previous release's contract, written out: these are what version 3.3.1's
+ * client-reader-artifact.ts accepts as each program's identifier in release
+ * evidence, the saved-data format name it knows, and the service description it
+ * wrote. Changing any of them needs a release that reads both first.
+ */
+const ACCEPTED_BY_3_3_1 = {
+  goodvibes: '@goodvibes-jev/tui', 'goodvibes-agent': '@goodvibes-jev/agent', 'goodvibes-daemon': '@goodvibes-jev/daemon',
+  knowledgeFormats: ['knowledge-schema-v12', 'knowledge-schema-v13', 'knowledge-schema-v14', 'knowledge-schema-v15', 'knowledge-schema-v16', 'knowledge-schema-v17'],
+  serviceDescription: 'goodvibes omnichannel daemon host',
+} as const;
+
+test('the evidence this release publishes is what the previous release accepts: each program, the saved-data format and its own service unit', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gv-release-contract-'));
+  scratchDirs.push(dir);
+  // The identifier packaging writes into each program's evidence (package-suite-release.mjs, self-update.ts's daemon receipt).
+  const programs = (['goodvibes', 'goodvibes-agent', 'goodvibes-daemon'] as const).map((command) =>
+    `${command}: ${RELEASE_EVIDENCE_PRODUCT_IDS[command] === ACCEPTED_BY_3_3_1[command] ? 'accepted' : `refused (${RELEASE_EVIDENCE_PRODUCT_IDS[command]})`}`);
+  // The requirement file this release writes at its first data write, which 3.3.1 reads before its own writes and a rollback.
+  const execPath = join(dir, 'goodvibes-daemon');
+  writeFileSync(execPath, '');
+  createNativeDataWriteOwner({ execPath, version: VERSION, assertCurrent: () => {} }).declare('knowledge-schema-v18');
+  const published = (JSON.parse(readFileSync(join(dir, NATIVE_READER_REQUIREMENT_FILE), 'utf8')) as { formats: string[] }).formats.filter((name) => name.startsWith('knowledge-schema-')).sort((a, b) => Number(a.slice(18)) - Number(b.slice(18)));
+  // A unit 3.3.1 wrote is still this product's own.
+  const unit = join(dir, 'goodvibes-daemon.service');
+  writeFileSync(unit, `[Unit]\nDescription=${ACCEPTED_BY_3_3_1.serviceDescription}\n\n[Service]\nExecStart=%h/.local/bin/goodvibes-daemon\n`);
+  const knowledge = { newest: published.at(-1), unknownTo331: published.filter((name) => !(ACCEPTED_BY_3_3_1.knowledgeFormats as readonly string[]).includes(name)) };
+  expect({ programs, knowledge, unit: readManagedDefinitionOwner(unit) }).toEqual({
+    programs: ['goodvibes: accepted', 'goodvibes-agent: accepted', 'goodvibes-daemon: accepted'],
+    knowledge: { newest: 'knowledge-schema-v17', unknownTo331: [] },
+    unit: 'product',
   });
 });

@@ -19,6 +19,7 @@ import { estimateConversationTokens, estimateTokens } from './context-compaction
 import { ProviderError, isContextSizeExceededError, streamRetryFacts } from '../types/errors.js';
 import { formatError, formatProviderError } from '../utils/error-display.js';
 import { createTurnFailover, describeFailoverCost, readFallbackOrder } from '../providers/failover.js';
+import { readTurnFailure } from './turn-failure.js';
 import { findModelDefinition } from '../providers/registry-models.js';
 import { buildFallbackModelDefinition } from '../providers/fallback-model.js';
 import type { ProviderRegistry } from '../providers/registry.js';
@@ -195,6 +196,12 @@ export interface OrchestratorTurnLoopContext {
   /** A provider failure moved the rest of this turn to the next model of the fallback order. */
   readonly onFailover?: ((move: TurnFailoverMove) => void) | undefined;
   /**
+   * The fallback order could not move the turn (none set, or every entry
+   * tried): why, for the failure row's details. The row itself says the turn
+   * stopped, so this is not a notice of its own.
+   */
+  readonly onFailoverStop?: ((line: string) => void) | undefined;
+  /**
    * The model/provider reported its context window filled (see
    * isContextOverflowSignal). The orchestrator must compact at the next
    * opportunity regardless of locally estimated usage, the provider's own
@@ -343,6 +350,11 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       decisionRoute = undefined;
     },
     notify: (line, level) => {
+      // 'error' is the failover's stop: the turn's failure row says it, with this line in its details.
+      if (level === 'error' && context.onFailoverStop) {
+        context.onFailoverStop(line);
+        return;
+      }
       context.conversation.addNotice(line, { level, kind: 'operational' });
       context.requestRender();
     },
@@ -591,7 +603,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         // turn does not end with STREAM_START unmatched.
         endStream(true);
         const reason = preResult.reason ?? 'LLM call blocked by hook';
-        context.conversation.addTurnFailure(reason);
+        context.conversation.addTurnFailure(readTurnFailure({ turnId: context.turnId, stopReason: 'hook_denied', error: reason }));
         return failTurn(reason, () => emitTurnError(context.runtimeBus!, context.emitterContext(context.turnId), {
           turnId: context.turnId,
           error: reason,
@@ -842,13 +854,11 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       if (chatErr instanceof ProviderError && chatErr.statusCode === 429 && model.provider === 'synthetic' && model.tier !== 'free') {
         // Every backend of the synthetic model is spent: the fallback order comes next.
         if (turnFailover(chatErr)) return 'again';
-        context.conversation.addTurnFailure(
-          `All providers for ${model.displayName} are currently exhausted.\n`
-          + `Options:\n`
-          + `  • Wait a few minutes for the rate limit to reset and retry\n`
-          + `  • Switch to a different model with /model\n`
-          + `  • Switch to a free model via /model and selecting the free tier`,
-        );
+        context.conversation.addTurnFailure(readTurnFailure({
+          turnId: context.turnId, stopReason: 'provider_exhausted', status: 429, provider: model.provider, model: model.id,
+          error: `All providers for ${model.displayName} are currently exhausted. Wait a few minutes for the rate limit to reset, or choose another model with /model.`,
+          fallbackOrderSet: readFallbackOrder(context.configManager.get('provider.fallbackModels')).length > 0,
+        }));
         return failTurn('All providers for the selected synthetic model are exhausted', () => emitTurnError(context.runtimeBus!, context.emitterContext(context.turnId), {
           turnId: context.turnId,
           error: 'All providers for the selected synthetic model are exhausted',

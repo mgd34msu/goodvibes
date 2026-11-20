@@ -183,6 +183,8 @@ export type ContractOperatorErrorCode =
   | 'CONTRACT_NOT_RUNNING'
   /** Native work is stopped through its own execution, not this surface. */
   | 'CONTRACT_NATIVE'
+  /** The contract is held because no run claim could be taken; another process may run it, so it is not cancelled here. */
+  | 'CONTRACT_HELD'
   /** The session id names a hosted session that is no longer live. */
   | 'SESSION_NOT_LIVE'
   /** The session id names a hosted session another caller owns. */

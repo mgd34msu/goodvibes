@@ -224,7 +224,7 @@ type NoticeRouteAnswer =
  *, while the condition surfaced through `email.inbound.status` and the health
  * entry carries the reason and its own remedial step.
  */
-function resolveNoticeRoute(
+export function resolveNoticeRoute(
   configManager: ConfigManager,
   routeBindings: InboundMailCompositionOptions['routeBindings'],
   channelOwner: InboundMailCompositionOptions['channelOwner'],

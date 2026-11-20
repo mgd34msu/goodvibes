@@ -22,7 +22,7 @@ export interface PaletteEntry {
   readonly keywords: readonly string[];
   /** What the command can do, by its actions' labels (a described command); empty otherwise. */
   readonly actions: readonly string[];
-  readonly argsHint?: string;
+  readonly argsHint?: string | undefined;
   /** True when the command has required arguments: Enter fills the composer. */
   readonly needsArgs: boolean;
   /** Right column: the slash command, or a shortcut's key. */

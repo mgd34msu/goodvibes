@@ -70,13 +70,20 @@ function taskArgs(preview: ScheduleEditPreview): { readonly task: string; readon
   return task && successCriteria ? { task, successCriteria } : null;
 }
 
-/** The terminal command that applies exactly this preview, bound to the revision it read. */
+/** The /schedule change line that applies this preview; it is bound to the schedule's revision when it runs. */
 function scheduleEditConfirmCommand(preview: ScheduleEditPreview): string {
   const [id = '', ...rest] = preview.commandArgs;
-  const args = ['/schedule edit', scheduleRouteArg(id)];
-  for (const arg of rest) args.push(arg.startsWith('--') ? arg : scheduleRouteArg(arg));
-  if (preview.revision) args.push('--revision', scheduleRouteArg(preview.revision));
-  args.push('--yes');
+  const args = ['/schedule change', scheduleRouteArg(id)];
+  let prompt: string | undefined;
+  for (let index = 0; index < rest.length; index += 1) {
+    const flag = rest[index]!, value = rest[index + 1] ?? '';
+    if (!flag.startsWith('--')) continue;
+    index += 1;
+    if (flag === '--prompt') { prompt = value; continue; }
+    if (flag === '--stagger-ms') { args.push('--stagger', scheduleRouteArg(`${value}ms`)); continue; }
+    args.push(flag === '--timezone' ? '--tz' : flag, scheduleRouteArg(value));
+  }
+  if (prompt) args.push(prompt);
   return args.join(' ');
 }
 

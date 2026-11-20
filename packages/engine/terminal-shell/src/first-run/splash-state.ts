@@ -97,6 +97,11 @@ export function requestSplashRender(): void {
   if (render) queueMicrotask(render);
 }
 
+/** First run is open (step 1 or 2): a model chosen meanwhile is said by first run, not by a line in the conversation. */
+export function firstRunOpen(): boolean {
+  return state?.firstRun?.kind === 'pending';
+}
+
 /** Record what the last frame drew (the prompts and the viewport row of each), or null when none. */
 export function recordDrawnPrompts(drawn: { readonly prompts: readonly string[]; readonly rows: readonly { readonly row: number; readonly prompt: string }[] } | null): void {
   if (state) state.drawn = drawn;

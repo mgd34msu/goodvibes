@@ -1,198 +1,38 @@
-import { createMemorySnapshotCommands, createRecallDispatch, memoryRestoreConfirmation } from '@goodvibes-jev/engine/terminal-shell/recall-dispatch';
 /**
- * /recall command handler.
- *
- * Implements the Project Memory Substrate commands:
- *
- *   /recall add <class> <summary>          , Add a new memory record
- *   /recall add <class> <summary> --detail <text> --tags <tag,tag>
- *   /recall search [query]                 , Search memory records
- *   /recall search --cls <class>           , Filter by class
- *   /recall link <fromId> <toId> <relation>, Link two records
- *   /recall get <id>                       , Show a single record with provenance
- *   /recall list [class]                   , List all records (optionally by class)
- *   /recall remove <id>                    , Delete a record
+ * `/memory` is one description shared with the other terminal app
+ * (terminal-shell/memory-command.ts). This app opens the Memory screen and
+ * shows the memory each recorded turn was given.
  */
+import { createMemoryCommand } from '@goodvibes-jev/engine/terminal-shell/memory-command';
+import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { MemorySpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import type { CommandContext, SlashCommand } from '../command-registry.ts';
+import { buildMainSessionTurnInjectionsText, buildTurnInjectionsText } from '../../renderer/turn-injection.ts';
 
-import type { SlashCommand, CommandContext } from '../command-registry.ts';
-import { handleRecallAdd, handleRecallCapture } from './recall-capture.ts';
-import {
-  handleRecallExport,
-  handleRecallHandoffExport,
-  handleRecallHandoffImport,
-  handleRecallHandoffInspect,
-  handleRecallImport,
-} from './recall-bundle.ts';
-import {
-  getMemorySpine,
-  handleRecallEdit,
-  handleRecallGet,
-  handleRecallLink,
-  handleRecallList,
-  handleRecallRemove,
-  handleRecallSearch,
-  handleRecallVector,
-} from './recall-query.ts';
-import {
-  handleRecallExplain,
-  handleRecallInjections,
-  handleRecallPromote,
-  handleRecallQueue,
-  handleRecallReview,
-} from './recall-review.ts';
-import { VALID_CLASSES } from './recall-shared.ts';
-import { handleRecallFilesApply, handleRecallFilesReview, handleRecallFilesSync } from './recall-files.ts';
-
-// ── Top-level command ─────────────────────────────────────────────────────────
-
-/**
- * item 3 divergence note (historical): the work order that shipped
- * this command named its front door "/memory", but at the time `/memory` was
- * already a distinct, unrelated command (session-pinned sticky notes,
- * src/input/commands/session-content.ts) with no modal surface, so that
- * work order deliberately did NOT touch /memory and used /recall instead.
- *
- * Update from the core-verb naming pass (MEMORY fragmentation, worst-class
- * collision #2): the agent's own `/memory` command was a plain alias for its
- * `/recall`-equivalent the whole time, meaning "/memory" meant two unrelated
- * things depending which surface you were on. The session-notes command was
- * renamed to `/note` (session-content.ts) to free the word, and `/memory` is
- * now registered here as a real alias of `/recall`, the word means the same
- * durable Project Memory Substrate on both surfaces. The modal that exists
- * for this data, the Project Memory Substrate, is still `memory-modal.ts`,
- * owned by THIS command, confirmed by the view-id redirect
- * `registerModalRedirect('memory', 'memory-modal')` in builtin-modals.ts.
- */
-function printRecallUsage(context: CommandContext): void {
-  const usage = [
-    'Usage: /recall <subcommand>',
-    '  add <class> <summary> [--scope <session|project|team>] [--detail <text>] [--tags <t,t>] [--session <id>] [--task <id>] [--file <path>]',
-    `       classes: ${VALID_CLASSES.join(', ')}`,
-    '  capture incident <id|latest>                    — Capture a forensics incident as durable memory',
-    '  capture policy                                  — Capture the latest policy preflight review as durable memory',
-    '  capture mcp <server>                            — Capture MCP trust/quarantine posture as durable memory',
-    '  capture plugin <name>                           — Capture plugin trust/quarantine posture as durable memory',
-    '  search [query] [--semantic] [--cls <class>] [--scope <scope>] [--limit <n>]  — Full-text or sqlite-vec semantic search',
-    '  vector [status|doctor|rebuild]                  — Inspect or rebuild the sqlite-vec memory index',
-    '  get <id>                                       — Show record with provenance + links',
-    '  edit <id> [--summary <text>] [--detail <text>] [--tags <t,t>] [--scope <scope>] — Correct a record in place',
-    '  link <fromId> <toId> <relation>               — Create a directed relation between records',
-    '  queue [limit]                                  — Show the operator review queue',
-    '  review <id> <state> [--confidence <n>] [--by <name>] [--reason <text>]',
-    '  stale <id> [reason...]                          — Mark a record stale with an operator reason',
-    '  contradict <id> [reason...]                     — Mark a record contradicted with an operator reason',
-    '  files sync [--dir <path>]                       — Project standing (project/team) records to git-backed markdown files',
-    '  files review [--dir <path>]                     — Diff the projection directory against the store; prints proposals, applies nothing',
-    "  files apply <id> [<id> ...] | --all [--dir <path>] — Apply only the named proposals from the last review, through the store's own update/delete",
-    '  explain <task...> [--scope <path> ...]         — Show the knowledge records that would be injected for a task',
-    '  injections [agentId]                           — Show per-turn passive knowledge injection records; no id shows the main session, an id shows that spawned agent',
-    '  promote <id> <scope>                           — Promote a memory record into session|project|team scope',
-    '  export <path> [--scope <scope>] [--cls <class>] — Export a durable knowledge bundle',
-    '  import <path>                                  — Import a durable knowledge bundle',
-    '  handoff-export <path> [--scope <scope>]        — Export a reviewable handoff bundle for team/shared use',
-    '  handoff-inspect <path>                         — Inspect a handoff bundle before import',
-    '  handoff-import <path>                          — Import a handoff bundle into durable memory',
-    '  list [class] [--scope <scope>]                 — List all records grouped by class',
-    '  remove <id>                                    — Delete a record',
-    '  snapshots                                      — List the point-in-time copies of memory (daily, before a migration, before a restore)',
-    '  restore <name|latest|date>                     — Replace all memory with one copy; the current records are copied first',
-  ].join('\n');
-  context.print(usage);
+/** This app's own memory store, for the reads that stay local (`/incident`, `/orchestration`). Prints why when absent. */
+export function getMemoryApi(context: CommandContext): MemoryApi | null {
+  const memoryApi = context.clients?.knowledgeApi?.memory;
+  if (!memoryApi) context.print('Memory is not available in this session.');
+  return memoryApi ?? null;
 }
 
-const memoryCopies = createMemorySnapshotCommands<CommandContext>(getMemorySpine, { tag: '[recall]', command: 'recall' });
+/** The memory spine: this app's store, or the attached daemon's. Prints why when absent. */
+export function getMemorySpine(context: CommandContext): MemorySpineClient | null {
+  const memorySpine = context.clients?.memorySpine;
+  if (!memorySpine) context.print('Memory is not available in this session.');
+  return memorySpine ?? null;
+}
 
-const dispatchRecall = createRecallDispatch<CommandContext>({
-  add: handleRecallAdd,
-  search: handleRecallSearch,
-  vector: handleRecallVector,
-  capture: handleRecallCapture,
-  get: handleRecallGet,
-  queue: handleRecallQueue,
-  review: handleRecallReview,
-  explain: handleRecallExplain,
-  promote: handleRecallPromote,
-  link: handleRecallLink,
-  list: handleRecallList,
-  remove: handleRecallRemove,
-  edit: handleRecallEdit,
-  export: handleRecallExport,
-  import: handleRecallImport,
-  handoffExport: handleRecallHandoffExport,
-  handoffInspect: handleRecallHandoffInspect,
-  handoffImport: handleRecallHandoffImport,
+export const memoryCommand: SlashCommand = createMemoryCommand<CommandContext>({
+  open(ctx) {
+    if (!ctx.openModal) throw commandRefusal('This surface has no Memory screen.', '/memory list shows the records.');
+    ctx.openModal('memory-modal');
+  },
+  injections(ctx, agentId) {
+    if (!agentId) return buildMainSessionTurnInjectionsText(ctx.session.getMainSessionTurnInjections?.() ?? []);
+    const record = (ctx.ops.agentManager?.exportState() ?? []).find((candidate) => candidate.id === agentId);
+    if (!record) throw commandRefusal(`No agent is ${agentId}.`, '/agents lists them.');
+    return buildTurnInjectionsText(agentId, record.turnInjections ?? []);
+  },
 });
-
-export const recallCommand: SlashCommand = {
-  name: 'recall',
-  aliases: ['rc', 'memory', 'mem'],
-  description:
-    'Bare opens the Memory modal; project memory subcommands add decisions, constraints, incidents, and patterns with provenance',
-  usage: '[<subcommand> [args]]: bare opens the modal; report prints the subcommand usage text',
-  argsHint: 'add|search|link|get|edit|list|remove|report',
-  confirm(args) {
-    const restore = memoryRestoreConfirmation(args, 'recall');
-    if (restore) return restore;
-    if (args[0] !== 'remove' || !args[1]) return undefined;
-    return {
-      title: `Delete memory record ${args[1]}?`,
-      detail: `The durable memory record ${args[1]} and its links are deleted and cannot be recovered; /recall get ${args[1]} shows it first.`,
-      confirmLabel: 'Delete',
-    };
-  },
-  handler: async (args: string[], context: CommandContext): Promise<void> => {
-    const [sub, ...rest] = args;
-
-    // item 3: bare `/recall` opens the memory-modal surface, the old
-    // bare/unknown-subcommand usage block moved to an explicit `report`
-    // subcommand (scriptability preserved: /recall report).
-    if (sub === undefined) {
-      context.openModal?.('memory-modal');
-      return;
-    }
-
-    const dispatched = dispatchRecall(sub, rest, context);
-    if (dispatched instanceof Promise ? await dispatched : dispatched) return;
-
-    switch (sub) {
-      case 'report':
-        printRecallUsage(context);
-        break;
-
-      case 'files': {
-        const [filesSub, ...filesRest] = rest;
-        switch (filesSub) {
-          case 'sync':
-            await handleRecallFilesSync(filesRest, context);
-            break;
-          case 'review':
-            await handleRecallFilesReview(filesRest, context);
-            break;
-          case 'apply':
-            await handleRecallFilesApply(filesRest, context);
-            break;
-          default:
-            context.print('[recall] Usage: /recall files <sync|review|apply> ...');
-            break;
-        }
-        break;
-      }
-
-      case 'injections':
-        handleRecallInjections(rest, context);
-        break;
-
-      case 'snapshots':
-        await memoryCopies.snapshots(rest, context);
-        break;
-
-      case 'restore':
-        await memoryCopies.restore(rest, context);
-        break;
-
-      default:
-        printRecallUsage(context);
-        break;
-    }
-  },
-};

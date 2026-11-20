@@ -877,12 +877,13 @@ async function handleApprovalAction(
   const viewer = context.approvalBroker.viewerOf(context.resolveAuthenticatedPrincipal?.(req)?.actor);
   const note = typeof payload.note === 'string' ? payload.note : undefined;
   const answer = (outcome: ApprovalActionResultLike, extra: Record<string, unknown> = {}): Response => context.recordApiResponse(req, path,
-    outcome.record === null
+    // Unknown is 404; an outcome that cannot be known (the owning node did not answer) is 200 with its refusal.
+    outcome.record === null && (outcome.applied || outcome.refusal.code === 'UNKNOWN_APPROVAL')
       ? jsonErrorResponse({ error: outcome.applied ? 'Unknown approval' : outcome.refusal.reason, code: 'APPROVAL_NOT_FOUND',
         ...(outcome.applied ? {} : { state: outcome.refusal.state, next: [...outcome.refusal.next] }) }, { status: 404 })
       // Applied or not, the answer carries the record and the caller's reading as they are now: a raced or stale
       // action is 200 with `applied: false` and the refusal saying why, so it can be shown again in place.
-      : Response.json({ applied: outcome.applied, approval: outcome.record, reading: outcome.reading,
+      : Response.json({ applied: outcome.applied, ...(outcome.record !== null ? { approval: outcome.record, reading: outcome.reading } : {}),
         ...(outcome.applied ? {} : { refusal: outcome.refusal }), ...extra }));
   // A surface leaving an ask it raised, or confirming it received the decision, gives up its own hold; no revision needed.
   if (action === 'cancel' && payload.release === true) {

@@ -1,3 +1,4 @@
+import { providerDisplayLabel } from './provider-labels.js';
 import { DecisionRouterProvider } from './decision-router.js';
 import { installCatalogModelFacts } from './model-catalog-facts.js';
 import { isDeepStrictEqual } from 'node:util';
@@ -967,6 +968,11 @@ export class ProviderRegistry {
   /** Whether `getCurrentModel()` names a model of a provider that is not registered. */
   isUnregisteredModel(model: Pick<ModelDefinition, 'provider'>): boolean {
     return !this.providers.has(model.provider);
+  }
+
+  /** The name a provider is shown by: a custom provider's own `displayName`, else the built-in label. */
+  providerDisplayName(name: string): string {
+    return this.customProviderDisplayNames.get(name)?.trim() || providerDisplayLabel(name);
   }
 
   private unregisteredModelDefinition(registryKey: string): ModelDefinition {

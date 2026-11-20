@@ -11,7 +11,7 @@
 import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 import { createEmptyLine, type Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { HostedSessionFeedState, HostedSessionRow } from '../views/hosted-session-feed.ts';
-import type { AgentsText } from '../renderer/agents-modal.ts';
+import type { PanelText as AgentsText } from '@goodvibes-jev/engine/terminal-shell/work-board';
 import { activeTokens } from '../renderer/theme.ts';
 import { wrapText, getDisplayWidth, expandTabs } from '../utils/terminal-width.ts';
 

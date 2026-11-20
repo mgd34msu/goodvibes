@@ -7,7 +7,7 @@
  * scheduler (MemoryConsolidationScheduler.listProposals), so the list is the
  * same after a restart and a proposal found by several passes appears once.
  * Each line jumps into the EXISTING review flow (`/memory review <id> <state>`,
- * handleRecallReview in input/commands/recall-review.ts) rather than adding a
+ * the review action of /memory, terminal-shell/memory-command.ts) rather than adding a
  * second, parallel review mechanism.
  */
 import type { MemoryConsolidationProposal } from '@goodvibes-jev/engine/platform/platform/state';

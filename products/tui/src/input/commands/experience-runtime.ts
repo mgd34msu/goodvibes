@@ -22,28 +22,6 @@ import { requireVoiceSetup } from './runtime-services.ts';
 export function registerExperienceRuntimeCommands(registry: CommandRegistry): void {
   registry.register(approvalMatrixCommand);
 
-  registry.register({
-    name: 'memory-review',
-    aliases: ['knowledge-review'],
-    description: 'Dedicated front-door for knowledge review queues and task-specific memory injection explanations',
-    usage: '[queue [limit]|explain <task...> [--scope <path> ...]]',
-    async handler(args, ctx) {
-      const sub = (args[0] ?? 'queue').toLowerCase();
-      if (!ctx.executeCommand) {
-        ctx.print('Memory review controls are not available in this runtime.');
-        return;
-      }
-      if (sub === 'queue') {
-        await ctx.executeCommand('knowledge', ['queue', ...(args[1] ? [args[1]] : [])]);
-        return;
-      }
-      if (sub === 'explain' && args.length >= 2) {
-        await ctx.executeCommand('knowledge', ['explain', ...args.slice(1)]);
-        return;
-      }
-      ctx.print('Usage: /memory-review [queue [limit]|explain <task...> [--scope <path> ...]]');
-    },
-  });
 
   registry.register(voiceExperienceCommand);
 }

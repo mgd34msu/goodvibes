@@ -57,7 +57,11 @@ import { type ReconciliationReason } from './tool-reconciliation.js';
 import type { FeatureFlagManager } from '../runtime/feature-flags/manager.js';
 import type { CompactionManager } from '../runtime/compaction/index.js';
 import { createSessionCompactionManager } from './compaction-lifecycle-route.js';
-import type { RuntimeEventBus, TurnInputOrigin } from '../runtime/events/index.js';
+import type { RuntimeEventBus, TurnEvent, TurnInputOrigin } from '../runtime/events/index.js';
+import { readTurnFailure, turnFailureText, type TurnRefusalReason } from './turn-failure.js';
+import { resolveDefaultModelReadiness } from '../providers/keyless-default.js';
+import { readFallbackOrder } from '../providers/failover.js';
+import { declaredValues } from '../gate/classify.js';
 import { HelperModel } from '../config/helper-model.js';
 import {
   emitPreflightFail,
@@ -115,6 +119,32 @@ function providerFailureFacts(err: ProviderError): { status?: number; code?: str
     ...(typeof cause === 'string' ? { code: cause } : {}),
   };
 }
+/** Refused before any request: the selected model cannot be asked (core/turn-failure.ts words it). */
+class TurnNotReadyError extends Error {
+  constructor(readonly refusal: TurnRefusalReason) {
+    super(refusal === 'no-model' ? 'No model is set up yet.' : 'The selected model\'s provider is not signed in.');
+    this.name = 'TurnNotReadyError';
+  }
+}
+
+/**
+ * What the running turn did that its failure row reports, held in memory for
+ * the turn only: the requests made to the provider that failed last (counted
+ * from the turn's own LLM_REQUEST_STARTED events since its last answer) and
+ * the files its successful tool calls changed.
+ */
+interface TurnFailureFacts {
+  readonly turnId: string;
+  provider?: string | undefined;
+  model?: string | undefined;
+  attempts: number;
+  attemptTimes: number[];
+  readonly changedFiles: Set<string>;
+  changedUnknown: boolean;
+  fallbackNote?: string | undefined;
+  readonly stop: () => void;
+}
+
 const THINKING_SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 interface LowPrioritySystemMessageSink {
@@ -373,6 +403,8 @@ export class Orchestrator {
 
   /** True when the turn failed (set in catch; read in finally to settle the submission claim complete or failed). */
   private _turnFailed = false;
+  /** The running turn's facts for its failure row; null between turns. */
+  private turnFailureFacts: TurnFailureFacts | null = null;
   /** The failover move in force for the running turn (providers/failover.ts), cleared when the turn ends. */
   private turnFailover: { readonly configuredRegistryKey: string; readonly servingRegistryKey: string } | null = null;
   private readonly turnFailoverListeners = new Set<(move: TurnFailoverMove) => void>();
@@ -1117,6 +1149,7 @@ export class Orchestrator {
     if (!preflight) return; // duplicate in-flight turn was rejected and reported
     const { submissionKey, submissionClaim, turnId } = preflight;
     const hookOwner = this.turnHookOwner!;
+    this.watchTurnFailureFacts(turnId);
     // `answered`: the checked final answer is in the transcript and its
     // completion is registered. From then on the turn's outcome is that
     // answer; an abort stops only the maintenance that follows it.
@@ -1134,6 +1167,9 @@ export class Orchestrator {
       );
       signal?.throwIfAborted();
       this.turnStartMessageCount = this.conversation.getMessageCount();
+      // A model that cannot be asked refuses the turn before any request (the prompt stays as sent).
+      const refusal = this.readinessRefusal(providerRegistry);
+      if (refusal) throw new TurnNotReadyError(refusal);
       this.scrollToEnd(this.getViewportHeight());
       this.streamingInputTokens = estimateFreshTurnInputTokens(this.lastInputTokens, estimateConversationTokens(this.conversation.getMessagesForLLM()), text, content);
       this.contractAnswer = options?.answersContractQuestion;
@@ -1171,6 +1207,8 @@ export class Orchestrator {
       await this.handleTurnError(err, turnId, providerRegistry);
     } finally {
       this.turnHookOwner = null;
+      this.turnFailureFacts?.stop();
+      this.turnFailureFacts = null;
       // A user turn sent after the failure completed: the failed prompt is no longer offered again.
       const failed = this.lastFailedUserTurn;
       if (failed && userTurnSeq !== undefined && !this._turnFailed && userTurnSeq > failed.clearsAfterSeq) this.lastFailedUserTurn = null;
@@ -1313,6 +1351,9 @@ export class Orchestrator {
           try { listener(move); } catch (error) { logger.warn('Orchestrator: a failover listener failed', { error: summarizeError(error) }); }
         }
       },
+      onFailoverStop: (line) => {
+        if (this.turnFailureFacts) this.turnFailureFacts.fallbackNote = line.replace(/^\[Failover\]\s*/, '');
+      },
       noteModelContextWindowWarning: (details) => {
         this.modelContextWarning = details;
         logger.warn('Orchestrator: model reported context window exhaustion - forcing compaction at next opportunity', details);
@@ -1452,6 +1493,10 @@ export class Orchestrator {
       return;
     }
 
+    if (err instanceof TurnNotReadyError) {
+      this.refuseTurn(err.refusal, turnId, providerRegistry);
+      return;
+    }
     const error = err instanceof Error ? err : new Error(summarizeError(err));
     const judgmentFailed = error instanceof JudgmentError || error instanceof JudgmentPortMissingError || error instanceof JudgmentInputError || error instanceof PlannerJudgmentError || error instanceof ResponseCompletionError;
     const display = error instanceof ProviderError ? { provider: providerRegistry.getCurrentModel().provider, source: 'provider' as const } : {};
@@ -1459,24 +1504,132 @@ export class Orchestrator {
     const structured = (error instanceof AppError && (error.statusCode !== undefined || error.category !== 'unknown')) || classifyFailure(error) !== undefined;
     const msg = judgmentFailed ? `[Judgment] ${error.message}` : structured ? formatError(error, display)
       : await readFormattedError(error, { site: 'core.orchestrator.turn-error', ...display }).catch(() => formatError(error, display));
-    // A model request that failed with no hint of its own says what the person can do next.
-    const next = error instanceof ProviderError && !/\n\s+Hint: /.test(msg)
-      ? '\n  Next: send it again, or choose another provider or model with /model.' : '';
-    this.conversation.addTurnFailure(`${msg}${next}`);
+    // The person's fallback order was already tried inside the turn (providers/failover.ts);
+    // why it did not move the turn is in the facts, for the row's details.
+    const wire = msg.length > MAX_TURN_ERROR_TEXT ? `${msg.slice(0, MAX_TURN_ERROR_TEXT - 1)}…` : msg;
+    const facts = {
+      turnId,
+      // The same redacted text the local transcript keeps; the raw summary is never put on the wire.
+      error: wire,
+      stopReason: err instanceof ProviderError ? 'provider_error' as const : 'unexpected_error' as const,
+      // The structured facts the reading words 401, 429 and network failures from; the text above cannot carry them.
+      ...(err instanceof ProviderError ? providerFailureFacts(err) : {}),
+      ...this.failureFactsOf(providerRegistry, err instanceof ProviderError),
+    };
+    this.conversation.addTurnFailure(readTurnFailure(facts));
     this.requestRender();
-    // The person's fallback order was already tried inside the turn (providers/failover.ts),
-    // and its [Failover] line said which models answered or why the turn stopped.
     this._turnFailed = true;
     this.turnCancellation.end(turnId);
-    if (this.runtimeBus) {
-      emitTurnError(this.runtimeBus, createEmitterContext(this.currentSessionId, turnId), {
-        turnId,
-        // The same redacted text, hint and retry wait the local transcript shows; the raw summary is never put on the wire.
-        error: msg.length > MAX_TURN_ERROR_TEXT ? `${msg.slice(0, MAX_TURN_ERROR_TEXT - 1)}…` : msg,
-        stopReason: err instanceof ProviderError ? 'provider_error' : 'unexpected_error',
-        // The structured facts the reader fixes 401, 429 and network failures from; the text above cannot carry them.
-        ...(err instanceof ProviderError ? providerFailureFacts(err) : {}),
-      });
+    if (this.runtimeBus) emitTurnError(this.runtimeBus, createEmitterContext(this.currentSessionId, turnId), facts);
+  }
+
+  /** A turn refused before any request: the row says why and how to set a model up; TURN_ERROR ends it everywhere. */
+  private refuseTurn(refusal: TurnRefusalReason, turnId: string, providerRegistry: ReturnType<typeof requireProviderRegistry>): void {
+    const model = this.safeCurrentModel(providerRegistry);
+    const facts = {
+      turnId, refusal, stopReason: 'preflight_failed' as const,
+      ...(model ? { provider: model.provider, model: model.id, providerName: providerRegistry.providerDisplayName(model.provider) } : {}),
+    };
+    const reading = readTurnFailure(facts);
+    this.conversation.addTurnFailure(reading);
+    this.requestRender();
+    this._turnFailed = true;
+    this.turnCancellation.end(turnId);
+    if (this.runtimeBus) emitTurnError(this.runtimeBus, createEmitterContext(this.currentSessionId, turnId), { ...facts, error: turnFailureText(reading) });
+  }
+
+  private safeCurrentModel(providerRegistry: ReturnType<typeof requireProviderRegistry>): ModelDefinition | undefined {
+    try { return providerRegistry.getCurrentModel(); } catch { return undefined; }
+  }
+
+  /**
+   * Why the selected model cannot be asked, from what the registry holds
+   * (memory reads, no request): it names no provider that is registered, or
+   * its provider needs a key or sign-in it does not have. Undefined when it
+   * can be asked.
+   */
+  private readinessRefusal(providerRegistry: ReturnType<typeof requireProviderRegistry>): TurnRefusalReason | undefined {
+    const model = this.safeCurrentModel(providerRegistry);
+    if (!model || providerRegistry.isUnregisteredModel(model)) return 'no-model';
+    const readiness = resolveDefaultModelReadiness(providerRegistry, model.registryKey);
+    if (readiness.kind === 'unresolvable') return 'no-model';
+    if (readiness.kind === 'needs-key') return 'no-provider';
+    return undefined;
+  }
+
+  /** The running turn's facts for its failure reading: the provider that failed last, its attempts, what changed, the fallback order. */
+  private failureFactsOf(providerRegistry: ReturnType<typeof requireProviderRegistry>, providerFailed: boolean) {
+    const record = this.turnFailureFacts;
+    const current = this.safeCurrentModel(providerRegistry);
+    const provider = record?.provider ?? current?.provider;
+    const model = record?.model ?? current?.id;
+    const fallbackOrderSet = readFallbackOrder(requireConfigManager(this.coreServices).get('provider.fallbackModels'))
+      .some((entry) => entry.trim().length > 0);
+    return {
+      ...(provider ? { provider, providerName: providerRegistry.providerDisplayName(provider) } : {}),
+      ...(model ? { model } : {}),
+      ...(providerFailed && record && record.attempts > 0 ? { attempts: record.attempts, attemptTimes: [...record.attemptTimes] } : {}),
+      ...(record ? { changedFiles: [...record.changedFiles], ...(record.changedUnknown ? { changedUnknown: true } : {}) } : {}),
+      ...(record?.fallbackNote ? { fallbackNote: record.fallbackNote } : {}),
+      fallbackOrderSet,
+    };
+  }
+
+  /**
+   * Start holding the turn's facts for a failure row: each request to a
+   * provider (LLM_REQUEST_STARTED of this turn) counts toward the attempts of
+   * the request that fails; an answer (LLM_RESPONSE_RECEIVED), or a request to
+   * another model, starts the count again. Two in-memory listeners per turn.
+   */
+  private watchTurnFailureFacts(turnId: string): void {
+    this.turnFailureFacts?.stop();
+    const bus = this.runtimeBus;
+    const stops: (() => void)[] = [];
+    const record: TurnFailureFacts = { turnId, attempts: 0, attemptTimes: [], changedFiles: new Set(), changedUnknown: false,
+      stop: () => { for (const stop of stops.splice(0)) stop(); } };
+    if (bus) {
+      stops.push(bus.on<Extract<TurnEvent, { type: 'LLM_REQUEST_STARTED' }>>('LLM_REQUEST_STARTED', (envelope) => {
+        const payload = envelope.payload;
+        if (payload.turnId !== turnId) return;
+        if (payload.provider !== record.provider || payload.model !== record.model) {
+          record.attempts = 0;
+          record.attemptTimes = [];
+        }
+        record.provider = payload.provider;
+        record.model = payload.model;
+        record.attempts += 1;
+        record.attemptTimes.push(envelope.ts);
+      }));
+      stops.push(bus.on<Extract<TurnEvent, { type: 'LLM_RESPONSE_RECEIVED' }>>('LLM_RESPONSE_RECEIVED', (envelope) => {
+        if (envelope.payload.turnId !== turnId) return;
+        record.attempts = 0;
+        record.attemptTimes = [];
+      }));
+    }
+    this.turnFailureFacts = record;
+  }
+
+  /**
+   * Record what a batch of the running turn's tool calls changed: the declared
+   * paths of each successful call to a tool that writes files; a successful
+   * call whose effects are not declared, or a command, may have changed
+   * something the row cannot name.
+   */
+  private recordTurnChanges(calls: readonly ToolCall[], results: readonly ToolResult[]): void {
+    const record = this.turnFailureFacts;
+    if (!record) return;
+    for (const result of results) {
+      if (!result.success) continue;
+      const call = calls.find((candidate) => candidate.id === result.callId);
+      if (!call) continue;
+      const definition = this.toolRegistry.definitionOf(call.name);
+      const effects = definition?.sideEffects;
+      if (effects === undefined) { record.changedUnknown = true; continue; }
+      if (effects.includes('write_fs')) {
+        const paths = declaredValues(call.arguments, definition?.subjects?.paths);
+        if (paths && paths.length > 0) for (const path of paths) record.changedFiles.add(path);
+        else record.changedUnknown = true;
+      } else if (effects.includes('exec')) record.changedUnknown = true;
     }
   }
 
@@ -1670,6 +1823,7 @@ export class Orchestrator {
       // No configured provider (e.g. a bare test harness), record under 'unknown'.
     }
     toolFormatTelemetry.observeToolResults(model, calls, results);
+    this.recordTurnChanges(calls, results);
     return results;
   }
 }

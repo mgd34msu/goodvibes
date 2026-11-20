@@ -23,7 +23,7 @@
  *   - `/checkpoints` works with zero arguments and behaves correctly at any
  *     checkpoint count (including zero), advertised whenever the checkpoint
  *     manager is available in this session.
- *   - `/recall` (memory) is only advertised when the memory API is actually
+ *   - `/memory` is only advertised when the memory API is actually
  *     wired up in this session (context.clients?.knowledgeApi?.memory),
  *     some runtimes don't have it, and claiming it works there would not be
  *     honest.
@@ -71,7 +71,7 @@ export interface ResumeNoticeFacts {
   readonly checkpointCount: number | null;
   /** Outcome of the most recently known contract. Null when there is no chain history at all. */
   readonly lastContractOutcome: ContractOutcome | null;
-  /** Whether /recall (memory) is wired up in this session. */
+  /** Whether /memory is wired up in this session. */
   readonly memoryAvailable: boolean;
 }
 
@@ -109,7 +109,7 @@ export function buildResumeNotice(facts: ResumeNoticeFacts): string | null {
   // form as a secondary hint, see the header doc for why both are honest.
   if (hasSession) hints.push(`/resume to continue (or /session resume ${facts.lastSessionId} directly)`);
   if (hasCheckpoints) hints.push('/checkpoints to browse');
-  if (facts.memoryAvailable) hints.push('/recall for memory');
+  if (facts.memoryAvailable) hints.push('/memory for memory');
   if (hints.length > 0) notice += `: ${hints.join(' · ')}`;
 
   return notice;

@@ -129,20 +129,20 @@ Key remote API paths:
 
 ## High-signal commands
 
-`/remote` inspects, dispatches, and reviews self-hosted remote runners and artifacts. The subcommands most work reaches for:
+`/remote` inspects, dispatches, and reviews self-hosted remote runners and artifacts. `/remote` alone opens its list of actions; each asks for what it needs, picking runners, pools and artifacts from lists. The actions most work reaches for:
 
 | Command | Does |
 | --- | --- |
-| `/remote` | List runners and their state |
-| `/remote show <runner>` | Show one runner in detail |
+| `/remote list` | List runners and their state |
+| `/remote show [connection]` | Show one connection in detail |
 | `/remote capabilities [runner]` | Show what a runner can execute and what holds it there: files, commands, approvals, artifacts, resume, and containment (an external runner is a host process held to its tools and write scope at each permission ask; nothing contains the process itself) |
 | `/remote recover [runner]` | Recover a runner's stalled work |
-| `/remote dispatch ...` | Dispatch work to a runner |
-| `/remote dispatch-pool <pool> ...` | Dispatch work to a runner pool |
+| `/remote dispatch <task> [--template <kind>]` | Dispatch work to a runner |
+| `/remote dispatch-pool <pool> <task>` | Dispatch work to a runner pool |
 | `/remote export <runner>` | Export a runner's work record |
-| `/remote artifact show <id>` | Show a produced artifact |
-| `/remote import <path>` | Import an exported record |
-| `/remote setup` | Review or export the remote setup |
+| `/remote review <artifact>` | Show a produced artifact |
+| `/remote import <file>` | Import an exported record |
+| `/remote setup`, `/remote setup-export <file>` | Review or export the remote setup |
 
 A dispatched runner is an external agent that runs its own tools, so its tool ceiling is held at the one place this side decides: its permission asks. The runner is told its tools in its prompt, and an ask for a call outside them (a command from a runner without `exec`, an edit from a read-only one; a call of unknown kind counts as a command) is answered with a refusal before you or Jev are asked, and the reason is kept on the runner. A runner given a write scope has an edit outside it, or any command, refused the same way. `/remote contract <runner>` shows the tools and scope it is held to.
 

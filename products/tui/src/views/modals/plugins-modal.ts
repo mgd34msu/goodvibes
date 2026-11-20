@@ -148,7 +148,7 @@ class PluginsModalSurface implements ConfigModalSurface {
         if (plugin.quarantined) runModalCommand(ctx, 'plugin', ['quarantine', plugin.name, 'lift'], `/plugin quarantine ${plugin.name} lift`);
         break;
       case 'captureToMemory':
-        if (plugin.quarantined) runModalCommand(ctx, 'recall', ['capture', 'plugin', plugin.name], `/recall capture plugin ${plugin.name}`);
+        if (plugin.quarantined) runModalCommand(ctx, 'memory', ['capture', 'plugin', plugin.name], `/memory capture plugin ${plugin.name}`);
         break;
     }
   }

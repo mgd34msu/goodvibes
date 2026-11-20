@@ -53,7 +53,7 @@ export function renderGoodVibesHelp(binary = 'goodvibes-agent'): string {
     '  /vibe                    Inspect or create VIBE.md personality',
     '  /personas, /skills        Tune Agent-local behavior',
     '  /routines                 Run local routines in the main conversation',
-    '  /schedule remind          Create confirmed reminders or inspect schedules',
+    '  /schedule                 Schedule something to run, see, pause, resume, change or remove schedules',
     '  /delegate                 Explicitly hand build/fix/review work to GoodVibes TUI',
     '',
     'Scriptable mirrors:',

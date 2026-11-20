@@ -329,3 +329,4 @@ export {
   type AuthorityWriteResult,
 } from './authority-record-file.js';
 export { AuthoritySync, type AuthoritySyncHost, type EpochSecrets } from './authority-sync.js';
+export { stableJson as groupTenantStableJson, type GroupTenant, type GroupTenantHost } from './group-tenants.js';

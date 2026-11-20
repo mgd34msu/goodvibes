@@ -70,7 +70,7 @@ export const { registerTasksRuntimeCommands } = createTasksRuntimeCommands<Comma
         return worktrees.total > 0
           ? [
               `  worktrees: ${worktrees.total} tracked (${worktrees.active} active / ${worktrees.paused} paused / ${worktrees.kept} kept)`,
-              `  worktree next: /worktree task ${task.id}`,
+              `  worktree next: /worktree attached task ${task.id}`,
             ]
           : [];
       })(),

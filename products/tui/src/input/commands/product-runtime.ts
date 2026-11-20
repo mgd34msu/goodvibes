@@ -196,7 +196,7 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
             '  2. Run /security review and /trust review',
             '  3. Run /policy preflight and /policy simulate',
             '  4. Run /eval gate [suite-dir] over the project\'s eval tasks',
-            '  5. Review /incident latest and /bridge status',
+            '  5. Review /incident latest and /remote list',
             '  6. Export /release bundle export <path> for release evidence',
           ].join('\n'),
         );

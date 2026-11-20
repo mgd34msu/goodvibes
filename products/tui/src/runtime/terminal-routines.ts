@@ -19,7 +19,6 @@ import { existsSync, readdirSync, readFileSync, renameSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import {
   AutomationJobStore,
-  formatEveryInterval,
   resolveAutomationStorePath,
   type AutomationJob,
   type AutomationManager,
@@ -28,6 +27,7 @@ import {
 import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 import type { OperatorMethodInput } from '@goodvibes-jev/engine/platform';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { scheduleTimingFields } from '@goodvibes-jev/engine/terminal-shell/schedule-command';
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import { writeJsonFileAtomic } from '@goodvibes-jev/engine/platform/platform/state/durable-file-io';
 import { holdProcessLock, logger, summarizeError, type HeldProcessLock } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -46,18 +46,8 @@ const TAKEOVER_RETRY_MS = 60_000;
 
 /** The daemon's create fields for a schedule this terminal read or held. */
 export function daemonScheduleFields(schedule: AutomationScheduleDefinition): DaemonScheduleFields {
-  switch (schedule.kind) {
-    case 'cron':
-      return {
-        kind: 'cron', cron: schedule.expression,
-        ...(schedule.timezone ? { timezone: schedule.timezone } : {}),
-        ...(schedule.staggerMs !== undefined ? { staggerMs: schedule.staggerMs } : {}),
-      };
-    case 'every':
-      return { kind: 'every', every: formatEveryInterval(schedule.intervalMs) };
-    case 'at':
-      return { kind: 'at', at: new Date(schedule.at).toISOString() };
-  }
+  // One mapping for both terminal apps: /schedule's own (terminal-shell/schedule-command.ts).
+  return scheduleTimingFields(schedule) as DaemonScheduleFields;
 }
 
 /** This terminal's own routine file, or null when the config manager names no control-plane directory. */

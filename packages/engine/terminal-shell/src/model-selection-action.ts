@@ -7,6 +7,7 @@ import {
 } from '@goodvibes-jev/engine/platform/platform/providers/reasoning-effort-surface';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { activeTokens } from './renderer/theme.js';
+import { firstRunOpen } from './first-run/splash-state.js';
 /** Keys a model selection writes that hold text. */
 type SelectionTextKey =
   | 'helper.globalProvider'
@@ -29,6 +30,8 @@ export interface TerminalModelSelection {
   readonly contextCap?: number | null | undefined;
   readonly target?: string | undefined;
   readonly effortChosenByUser?: boolean | undefined;
+  /** Write no "Switched to model" line: the caller says it (first run, under the splash). */
+  readonly quiet?: boolean | undefined;
 }
 export function createModelSelectionAction(
   options: {
@@ -58,7 +61,7 @@ export function createModelSelectionAction(
       selecting = false;
     }
   };
-  const selectModel = ({ model, effort, contextCap, target, effortChosenByUser }: TerminalModelSelection): void => {
+  const selectModel = ({ model, effort, contextCap, target, effortChosenByUser, quiet }: TerminalModelSelection): void => {
     if (!model) return;
     const def = model;
     const key = def.registryKey ?? `${def.provider}:${def.id}`;
@@ -128,9 +131,11 @@ export function createModelSelectionAction(
         const ctxNote = contextCap != null && contextCap > 0 ? `, context cap: ${contextCap.toLocaleString()}` : '';
         const effortNote =
           policy.alwaysShowEffort || serving.requested !== '' ? `, effort: ${describeServingEffort(serving, effortModel)}` : '';
-        conversation.log(`Switched to model: ${def.displayName} (${def.provider})${effortNote}${ctxNote}`, {
-          fg: activeTokens().secondary,
-        });
+        if (!quiet && !firstRunOpen()) {
+          conversation.log(`Switched to model: ${def.displayName} (${def.provider})${effortNote}${ctxNote}`, {
+            fg: activeTokens().secondary,
+          });
+        }
         // The switch receipt already includes requested and effective effort.
       }
     } catch (e) {

@@ -250,7 +250,7 @@ export async function runRoutineSchedulePromotion(
     if (!live.ok || existing) {
       const origin = earlier.status === 'created' ? 'from the earlier promotion' : 'most likely from the earlier attempt';
       ctx.print(existing
-        ? `A schedule named "${scheduleName}" (id ${existing.id}) already exists on the connected host, ${origin} (receipt ${earlier.id}). Nothing was created. Run /schedule reconcile to review it, or promote with a different --name to create another.`
+        ? `A schedule named "${scheduleName}" (id ${existing.id}) already exists on the connected host, ${origin} (receipt ${earlier.id}). Nothing was created. Run /routines reconcile to review it, or promote with a different --name to create another.`
         : `An earlier promotion of this routine (receipt ${earlier.id}) ${earlier.status === 'created' ? 'created a schedule' : 'failed without a known outcome'}, and the connected host's schedules could not be read to check (${live.error ?? 'no detail'}). Nothing was created. Retry once the host is reachable.`);
       return;
     }
@@ -468,7 +468,7 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
       ctx.print(formatRoutineReceipt('Marked Agent routine stale', routine));
       return;
     }
-    if (sub === 'promote' || sub === 'schedule' || sub === 'promote-schedule') {
+    if (sub === 'promote') {
       await promoteRoutine(args.slice(1), routineRegistry, ctx);
       return;
     }

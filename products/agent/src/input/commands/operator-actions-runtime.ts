@@ -80,7 +80,7 @@ function approvalActionFromSubcommand(sub: string): OperatorActionId | null {
 
 function automationActionFromParts(scope: string, verb: string): {
   readonly action: OperatorActionId;
-  readonly targetField: 'jobId' | 'runId' | 'scheduleId';
+  readonly targetField: 'jobId' | 'runId';
 } | null {
   if ((scope === 'job' || scope === 'jobs') && verb === 'run') return { action: 'automation.jobs.run', targetField: 'jobId' };
   // automation.jobs.pause/resume retired (redundant with
@@ -90,10 +90,7 @@ function automationActionFromParts(scope: string, verb: string): {
   if ((scope === 'job' || scope === 'jobs') && verb === 'resume') return { action: 'automation.jobs.enable', targetField: 'jobId' };
   if ((scope === 'run' || scope === 'runs') && verb === 'cancel') return { action: 'automation.runs.cancel', targetField: 'runId' };
   if ((scope === 'run' || scope === 'runs') && verb === 'retry') return { action: 'automation.runs.retry', targetField: 'runId' };
-  if ((scope === 'schedule' || scope === 'schedules') && verb === 'run') return { action: 'automation.schedules.run', targetField: 'scheduleId' };
-  if ((scope === 'schedule' || scope === 'schedules') && verb === 'enable') return { action: 'automation.schedules.enable', targetField: 'scheduleId' };
-  if ((scope === 'schedule' || scope === 'schedules') && verb === 'disable') return { action: 'automation.schedules.disable', targetField: 'scheduleId' };
-  if ((scope === 'schedule' || scope === 'schedules') && (verb === 'delete' || verb === 'remove')) return { action: 'automation.schedules.delete', targetField: 'scheduleId' };
+  // A schedule is run, paused, resumed and removed with /schedule (terminal-shell/schedule-command.ts).
   return null;
 }
 
@@ -117,14 +114,14 @@ export function registerOperatorActionRuntimeCommands(registry: CommandRegistry)
     aliases: ['auto'],
     description: 'Run confirmed connected-host automation actions from the Agent TUI',
     firstScreen: false,
-    usage: 'job <run|pause|resume> <job-id> --yes | run <cancel|retry> <run-id> --yes | schedule <run|enable|disable|delete> <schedule-id> --yes',
-    argsHint: 'job run <id> --yes | run cancel <id> --yes | schedule disable <id> --yes',
+    usage: 'job <run|pause|resume> <job-id> --yes | run <cancel|retry> <run-id> --yes',
+    argsHint: 'job run <id> --yes | run cancel <id> --yes',
     async handler(args, ctx) {
       const scope = (args[0] ?? '').toLowerCase();
       const verb = (args[1] ?? '').toLowerCase();
       const targetId = args[2] ?? '';
       const mapping = automationActionFromParts(scope, verb);
-      const usage = '/automation job <run|pause|resume> <job-id> --yes | /automation run <cancel|retry> <run-id> --yes | /automation schedule <run|enable|disable|delete> <schedule-id> --yes';
+      const usage = '/automation job <run|pause|resume> <job-id> --yes | /automation run <cancel|retry> <run-id> --yes';
       if (!mapping || !targetId) {
         throw commandRefusal(`Usage: ${usage}`);
       }

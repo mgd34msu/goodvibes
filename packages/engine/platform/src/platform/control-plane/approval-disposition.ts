@@ -17,6 +17,8 @@ export interface SharedApprovalDecision extends PermissionPromptDecision {
    * narrowed the call differently runs this recorded decision instead.
    */
   readonly argsDigest?: string | undefined;
+  /** A decision relayed from another node: the id that node gave it, so a repeat or a lost reply is recognised. */
+  readonly relayRequestId?: string | undefined;
 }
 
 /** How a finished approval ended, as the record's status names it. */

@@ -33,6 +33,8 @@ export interface ResolveSharedApprovalInput {
    * paths, whose prompt is the record itself.
    */
   readonly expectedRevision: number | undefined;
+  /** A decision relayed from another node: its request id, stored on the decision. */
+  readonly relayRequestId?: string | undefined;
 }
 
 export interface ResolveOwnerApprovalInput {

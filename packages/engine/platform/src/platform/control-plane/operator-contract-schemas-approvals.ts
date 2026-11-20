@@ -32,6 +32,8 @@ export const SHARED_APPROVAL_DECISION_SCHEMA = objectSchema({
   disposition: enumSchema(SHARED_APPROVAL_DISPOSITIONS),
   /** On an approval: the digest of the arguments the call runs with (modified or its own). */
   argsDigest: STRING_SCHEMA,
+  // A decision relayed from another node of the group: the id that node gave it.
+  relayRequestId: STRING_SCHEMA,
 }, ['approved']);
 
 const APPROVAL_STATUS_SCHEMA = enumSchema(['pending', 'claimed', 'approved', 'denied', 'cancelled', 'expired']);
@@ -254,7 +256,7 @@ export const APPROVAL_ACTION_OUTPUT_SCHEMA = objectSchema({
   reading: APPROVAL_READING_SCHEMA,
   refusal: APPROVAL_REFUSAL_SCHEMA,
   recorded: APPROVAL_RECORDED_DECISION_SCHEMA,
-}, ['applied', 'approval', 'reading']);
+}, ['applied']);
 
 // approvals.raise, a surface CREATING an ask in the shared broker, which no
 // verb could do before (list/claim/approve/deny/cancel could only act on asks

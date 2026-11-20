@@ -10,6 +10,7 @@ import { describedCommandByName, runGuided } from '@goodvibes-jev/engine/termina
 import type { CommandContext } from './command-registry.ts';
 import { TODO_WORKSPACE_ACTIONS } from './workspace-actions/todo.ts';
 import { SECRETS_WORKSPACE_ACTIONS } from './workspace-actions/secrets.ts';
+import { MEMORY_WORKSPACE_ACTIONS } from './workspace-actions/memory.ts';
 
 export interface WorkspaceActionTarget {
   /** The described command's name. */
@@ -22,6 +23,7 @@ export interface WorkspaceActionTarget {
 const TARGETS: ReadonlyMap<string, WorkspaceActionTarget> = new Map(Object.entries({
   ...TODO_WORKSPACE_ACTIONS,
   ...SECRETS_WORKSPACE_ACTIONS,
+  ...MEMORY_WORKSPACE_ACTIONS,
 }));
 
 /** The action a workspace row's form kind now opens, or undefined while the row still opens its form. */

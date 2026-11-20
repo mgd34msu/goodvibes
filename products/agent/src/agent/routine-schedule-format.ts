@@ -55,7 +55,7 @@ export function routineScheduleConfirmCommand(preview: RoutineSchedulePromotionP
   const selector = routineScheduleSelector(preview);
   const { payload } = preview;
   const args = [
-    '/schedule promote-routine',
+    '/routines promote',
     scheduleRouteArg(preview.routineId),
     selector.flag,
     scheduleRouteArg(selector.value),
@@ -127,7 +127,7 @@ export function formatRoutineScheduleReceipts(snapshot: RoutineScheduleReceiptSn
       'Agent routine schedule receipts',
       `  store ${snapshot.path}`,
       '  No routine schedule promotions have been recorded yet.',
-      '  Create one with /schedule promote-routine <routine-id> --cron <expr> --yes.',
+      '  Create one with /routines promote <routine-id> --cron <expr> --yes.',
     ].join('\n');
   }
   return [
@@ -190,7 +190,7 @@ export function formatRoutineScheduleCorrelation(result: RoutineScheduleCorrelat
       `  route: ${result.kind} ${result.route}`,
       `  live schedules: ${result.scheduleCount}`,
       '  No local routine promotion receipts exist yet.',
-      '  Create one with /schedule promote-routine <routine-id> --cron <expr> --yes.',
+      '  Create one with /routines promote <routine-id> --cron <expr> --yes.',
     ].join('\n');
   }
   const matched = result.correlations.filter((entry) => entry.liveStatus === 'matched').length;
@@ -215,7 +215,7 @@ export function formatRoutineScheduleCorrelation(result: RoutineScheduleCorrelat
     }),
     result.correlations.length > correlations.length ? `  ...${result.correlations.length - correlations.length} more` : '',
     result.reaping && result.reaping.reaped > 0
-      ? `  retired ${result.reaping.reaped} local receipt${result.reaping.reaped === 1 ? '' : 's'} whose schedule the host no longer lists (removed from /schedule receipts): ${result.reaping.reapedIds.join(', ')}`
+      ? `  retired ${result.reaping.reaped} local receipt${result.reaping.reaped === 1 ? '' : 's'} whose schedule the host no longer lists (removed from /routines receipts): ${result.reaping.reapedIds.join(', ')}`
       : '',
   ].filter((line): line is string => Boolean(line)).join('\n');
 }

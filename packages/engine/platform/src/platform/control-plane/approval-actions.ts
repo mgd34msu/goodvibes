@@ -10,16 +10,17 @@
  * on and comes back with the current reading, applied or not, so a stale
  * action is refused with what is true now instead of a bare error.
  *
- * This is the local implementation: the records of this node's broker. An id
- * written `<id>@<node>` for another node is answered as unknown here; the
- * cross-node relay supplies the implementation that forwards it.
+ * It reads this node's broker and, in a group, the other members' approvals
+ * through the relay (approval-relay.ts): an id written `<id>@<node>` names
+ * another node's approval, and an action on it is relayed to that node, which
+ * alone decides it.
  *
  * Cost: a reading is a pure function of the record (no I/O); an action is the
  * broker's one write.
  */
 import type { Actor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 import { admitEffects } from '../security/effect-authority.js';
-import type { ApprovalActionInput, ApprovalBroker, SharedApprovalRecord } from './approval-broker.js';
+import type { ApprovalActionInput, ApprovalBroker, ApprovalRelayPort, SharedApprovalRecord } from './approval-broker.js';
 import type { ResolveSharedApprovalInput } from './approval-broker-owner.js';
 import {
   approvalRefusal,
@@ -54,8 +55,9 @@ export interface ApprovalActions {
   release(ref: string, input: Omit<ApprovalActionInput, 'expectedRevision'> & { readonly holdId?: string | undefined }, viewer: ApprovalViewer): Promise<ApprovalActionResult>;
 }
 
-/** The broker surface the local port needs. */
-export type ApprovalActionsBroker = Pick<ApprovalBroker, 'homeNode' | 'listApprovals' | 'getApproval' | 'claimApproval' | 'resolveApproval' | 'cancelApproval' | 'releaseApproval'>;
+/** The broker surface the port needs; `relay` is set when the daemon is in a group. */
+export type ApprovalActionsBroker = Pick<ApprovalBroker, 'homeNode' | 'listApprovals' | 'getApproval' | 'claimApproval' | 'resolveApproval' | 'cancelApproval' | 'releaseApproval'>
+  & { readonly relay?: ApprovalRelayPort | null | undefined };
 
 /**
  * The viewer an actor is. In-process callers (no actor) are the program
@@ -80,46 +82,84 @@ export function approvalViewerOfActor(actor: Actor | undefined, node: string): A
   };
 }
 
-/** The port over this node's broker. */
+/**
+ * The port over this node's broker, and, when the daemon is in a group, the
+ * other members' approvals through the relay: listed from their summaries
+ * (with `homeReachable` from when each was last heard), and acted on by
+ * relaying the action to the node that owns it, which decides.
+ */
 export function localApprovalActions(broker: ApprovalActionsBroker, now: () => number = Date.now): ApprovalActions {
   const row = (record: SharedApprovalRecord, viewer: ApprovalViewer): ApprovalReadingRow => ({ record, reading: readApproval(record, viewer, now()) });
-  const localId = (ref: string): string | null => {
-    const parsed = parseApprovalRef(ref, broker.homeNode);
-    return parsed.node === broker.homeNode ? parsed.id : null;
-  };
+  const remoteRow = (record: SharedApprovalRecord, viewer: ApprovalViewer, relay: ApprovalRelayPort): ApprovalReadingRow =>
+    ({ record, reading: readApproval(record, viewer, now(), relay.reachable(record.homeNode)) });
+  const parse = (ref: string) => parseApprovalRef(ref, broker.homeNode);
   const elsewhere = (ref: string): ApprovalActionResult => ({
     applied: false,
     record: null,
     reading: null,
-    refusal: approvalRefusal('UNKNOWN_APPROVAL', null, `${ref} belongs to another node; this node decides only its own approvals.`),
+    refusal: approvalRefusal('UNKNOWN_APPROVAL', null, `${ref} belongs to another node, and this node is in no group that reaches it.`),
   });
   const withReading = (outcome: TransitionOutcome, viewer: ApprovalViewer): ApprovalActionResult => ({
     ...outcome,
     reading: outcome.record ? readApproval(outcome.record, viewer, now()) : null,
   });
+  /** An action on another node's approval goes to that node; a release is the home node's raisers' own. */
+  const relayed = async (ref: string, input: { readonly expectedRevision: number | undefined; readonly reason?: string | undefined; readonly note?: string | undefined; readonly selectedHunks?: readonly number[] | undefined },
+    action: 'claim' | 'approve' | 'deny' | 'amend' | 'cancel', viewer: ApprovalViewer): Promise<ApprovalActionResult> => {
+    const parsed = parse(ref);
+    const relay = broker.relay;
+    if (!relay || input.expectedRevision === undefined) return elsewhere(ref);
+    return relay.forward(parsed.node, parsed.id, {
+      action, expectedRevision: input.expectedRevision,
+      ...(input.reason !== undefined ? { reason: input.reason } : {}),
+      ...(input.note !== undefined ? { note: input.note } : {}),
+      ...(input.selectedHunks !== undefined ? { selectedHunks: input.selectedHunks } : {}),
+    }, viewer);
+  };
+  const local = (ref: string): string | null => {
+    const parsed = parse(ref);
+    return parsed.node === broker.homeNode ? parsed.id : null;
+  };
   return {
     get homeNode() { return broker.homeNode; },
     viewerOf: (actor) => approvalViewerOfActor(actor, broker.homeNode),
-    list: (viewer, limit = 50) => broker.listApprovals(limit).map((record) => row(record, viewer)),
+    list: (viewer, limit = 50) => {
+      const rows = broker.listApprovals(limit).map((record) => row(record, viewer));
+      const relay = broker.relay;
+      if (!relay) return rows;
+      // This node's own first, then the group's, newest first within each.
+      return [...rows, ...relay.remote().slice(0, limit).map((record) => remoteRow(record, viewer, relay))];
+    },
     get: (ref, viewer) => {
-      const id = localId(ref);
-      const record = id === null ? null : broker.getApproval(id);
-      return record ? row(record, viewer) : null;
+      const parsed = parse(ref);
+      if (parsed.node === broker.homeNode) {
+        const record = broker.getApproval(parsed.id);
+        return record ? row(record, viewer) : null;
+      }
+      const relay = broker.relay;
+      const record = relay?.get(parsed.node, parsed.id);
+      return relay && record ? remoteRow(record, viewer, relay) : null;
     },
     claim: async (ref, input, viewer) => {
-      const id = localId(ref);
-      return id === null ? elsewhere(ref) : withReading(await broker.claimApproval(id, input), viewer);
+      const id = local(ref);
+      return id === null ? relayed(ref, input, 'claim', viewer) : withReading(await broker.claimApproval(id, input), viewer);
     },
     resolve: async (ref, input, viewer) => {
-      const id = localId(ref);
-      return id === null ? elsewhere(ref) : withReading(await broker.resolveApproval(id, input), viewer);
+      const id = local(ref);
+      if (id !== null) return withReading(await broker.resolveApproval(id, input), viewer);
+      // Only hunk indexes travel; changed arguments are computed by the node that owns the ask.
+      if (input.modifiedArgs !== undefined && input.selectedHunks === undefined) {
+        return { applied: false, record: null, reading: null, refusal: approvalRefusal('ILLEGAL_TRANSITION', null,
+          'Changed arguments cannot be relayed to the node that owns this approval; approve the whole request or select hunks.') };
+      }
+      return relayed(ref, input, input.approved ? 'approve' : input.disposition === 'amended' ? 'amend' : 'deny', viewer);
     },
     cancel: async (ref, input, viewer) => {
-      const id = localId(ref);
-      return id === null ? elsewhere(ref) : withReading(await broker.cancelApproval(id, input), viewer);
+      const id = local(ref);
+      return id === null ? relayed(ref, input, 'cancel', viewer) : withReading(await broker.cancelApproval(id, input), viewer);
     },
     release: async (ref, input, viewer) => {
-      const id = localId(ref);
+      const id = local(ref);
       return id === null ? elsewhere(ref) : withReading(await broker.releaseApproval(id, input), viewer);
     },
   };

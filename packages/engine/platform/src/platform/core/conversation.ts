@@ -499,6 +499,7 @@ export class ConversationManager {
     if (tail?.role === 'system' && tail.runtimeEvent?.type === TURN_RETRY_EVENT) {
       this.messages[last] = line;
       this._messagesRevision++;
+      this._noticeRevisions++;
       return;
     }
     this.messages.push(line);

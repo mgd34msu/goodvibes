@@ -111,6 +111,8 @@ export interface HttpTransportSessionsClient {
       /** That agent's finished output, reported with `consumed:true`. */
       readonly answer?: string | undefined;
       readonly status?: 'completed' | 'failed' | 'cancelled' | undefined;
+      /** The surface's claim token (`metadata.claimEpoch` of its granted claim): renews the claim with `claim`, and must be current on every other report. */
+      readonly claimEpoch?: number | undefined;
     },
   ): Promise<SharedSessionInputRecord | null>;
 }

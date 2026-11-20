@@ -4,7 +4,7 @@ import { registerWorkstreamRuntimeCommands } from './commands/workstream-runtime
 import type { CommandRegistry } from './command-registry.ts';
 import type { CommandContext } from './command-registry.ts';
 import { sessionCommand } from './commands/session.ts';
-import { recallCommand } from './commands/memory.ts';
+import { memoryCommand } from './commands/memory.ts';
 import { knowledgeCommand } from './commands/knowledge.ts';
 import { registerShellCoreCommands } from './commands/shell-core.ts';
 import { registerConfigCommand } from './commands/config.ts';
@@ -61,22 +61,6 @@ import { commandVerbPolicy, declareCommandVerbs, SHARED_COMMAND_VERBS } from './
 import { registerPermissionsRuntimeCommands } from './commands/permissions-runtime.ts';
 import type { RememberedRuleStore } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 
-function registerAgentMemoryCommand(registry: CommandRegistry): void {
-  registry.register({
-    name: 'memory',
-    effect: 'local-state',
-    readVerbs: ['list', 'search', 'queue', 'snapshots'],
-    aliases: ['mem'],
-    description: 'Agent-local memory: add, search, review, stale, and delete durable memory records; list its copies and restore one',
-    usage: '<list|add|search|get|link|queue|review|stale|contradict|promote|remove|snapshots|restore> [args]',
-    argsHint: 'list|add|search|get|link|queue|review|stale|contradict|promote|remove|snapshots|restore',
-    // The same lines ask the owner as under /recall (remove, restore).
-    confirm: recallCommand.confirm,
-    handler: async (args: string[], context: CommandContext): Promise<void> => {
-      await recallCommand.handler(args.length === 0 ? ['list'] : args, context);
-    },
-  });
-}
 
 /**
  * registerBuiltinCommands - Register all built-in slash commands into the registry.
@@ -141,7 +125,7 @@ export function registerBuiltinCommands(
   registerScheduleRuntimeCommands(registry);
   registerSessionContentCommands(registry);
   registerPaymentCardCommands(registry);
-  registerAgentMemoryCommand(registry);
+  registry.register(memoryCommand);
 
   // ── /session ─────────────────────────────────────────────────────────────
   registry.register(sessionCommand);

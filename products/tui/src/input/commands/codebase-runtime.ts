@@ -8,7 +8,7 @@
 // CommandContext.session.codeIndexStore exactly like wrfcController/
 // workstreamEngine already are (bootstrap-command-context.ts).
 //
-// Mirrors /recall's transparency idiom (recall-query.ts's handleRecallVector:
+// Mirrors /memory's transparency idiom (memory-command.ts's search index report:
 // status/rebuild) and /workstream's registerXRuntimeCommands function-export
 // shape: build (schedules the index build, visible as a fleet 'code-index'
 // node while it runs), status (counts, skips, degradation state, last

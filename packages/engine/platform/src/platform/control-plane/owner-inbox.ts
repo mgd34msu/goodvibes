@@ -36,7 +36,7 @@ import { refusal, type Refusal } from '@goodvibes-jev/engine/errors';
 import type { ApprovalBroker, SharedApprovalRecord } from './approval-broker.js';
 import { approvalViewerOfActor, localApprovalActions, type ApprovalActions } from './approval-actions.js';
 import type { Actor } from '@goodvibes-jev/engine/daemon-api/http-policy';
-import { readApproval, type ApprovalReading, type ApprovalViewer } from './approval-lifecycle.js';
+import { formatApprovalRef, readApproval, type ApprovalReading, type ApprovalViewer } from './approval-lifecycle.js';
 import { FenceIssuer } from '../utils/owner-fence.js';
 import {
   OWNER_ANSWER_AGENT_METADATA,
@@ -515,7 +515,8 @@ function approvalClosingSurface(record: SharedApprovalRecord): string {
   return 'unknown surface';
 }
 
-function projectApproval(record: SharedApprovalRecord, reading?: ApprovalReading): OwnerItem {
+/** `localNode`: this inbox's node; another node's approval (listed through the group) is named `<id>@<node>`. */
+function projectApproval(record: SharedApprovalRecord, reading?: ApprovalReading, localNode?: string): OwnerItem {
   const status = approvalStatus(record);
   const answered = record.status === 'approved' || record.status === 'denied';
   // The choices are the viewer's allowed actions when there is a reading: an agent reading the inbox is offered none.
@@ -525,7 +526,7 @@ function projectApproval(record: SharedApprovalRecord, reading?: ApprovalReading
   return {
     revision: record.revision,
     ...(reading !== undefined ? { reading } : {}),
-    id: record.id,
+    id: localNode === undefined || record.homeNode === localNode ? record.id : formatApprovalRef({ node: record.homeNode, id: record.id }),
     kind: 'approval',
     status,
     ...(record.sessionId !== undefined ? { sessionId: record.sessionId } : {}),
@@ -754,7 +755,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     const entry = this.#questions.get(id);
     if (entry) return this.#project(entry, this.#now());
     const row = this.#approvalActions?.get(id, this.#viewer(viewer));
-    return row ? projectApproval(row.record, row.reading) : undefined;
+    return row ? projectApproval(row.record, row.reading, this.#approvalActions?.homeNode) : undefined;
   }
 
   async find(id: string, viewer?: ApprovalViewer): Promise<OwnerItem | undefined> {
@@ -773,7 +774,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     const items: OwnerItem[] = [];
     if (!kinds || kinds.has('approval')) {
       for (const row of this.#approvalActions?.list(this.#viewer(filter.viewer), MAX_LIST_LIMIT) ?? []) {
-        const item = projectApproval(row.record, row.reading);
+        const item = projectApproval(row.record, row.reading, this.#approvalActions?.homeNode);
         if (matchesFilter(item, filter, kinds)) items.push(item);
       }
     }
@@ -1155,7 +1156,8 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     by: OwnerAnswerSource,
     viewer: ApprovalViewer,
   ): Promise<OwnerAnswerOutcome> {
-    const item = projectApproval(record, actions.get(record.id, viewer)?.reading);
+    const ref = record.homeNode === actions.homeNode ? record.id : formatApprovalRef({ node: record.homeNode, id: record.id });
+    const item = projectApproval(record, actions.get(ref, viewer)?.reading, actions.homeNode);
     if (item.status !== 'open') return { applied: false, item, refusal: closedRefusal(item) };
     // The answer names the revision of the approval it was given to; without it nothing is answered.
     if (typeof answer.expectedRevision !== 'number' || !Number.isInteger(answer.expectedRevision)) {
@@ -1166,7 +1168,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     const approved = checked.answer.option === APPROVE;
     let outcome: Awaited<ReturnType<ApprovalActions['resolve']>>;
     try {
-      outcome = await actions.resolve(record.id, {
+      outcome = await actions.resolve(ref, {
         approved,
         disposition: approved ? 'approved' : 'denied',
         actor: by.actor,
@@ -1175,10 +1177,10 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
         ...(checked.answer.text !== undefined ? (approved ? { note: checked.answer.text } : { reason: checked.answer.text }) : {}),
       }, viewer);
     } catch (error) {
-      const latest = actions.get(record.id, viewer);
+      const latest = actions.get(ref, viewer);
       return {
         applied: false,
-        ...(latest ? { item: projectApproval(latest.record, latest.reading) } : {}),
+        ...(latest ? { item: projectApproval(latest.record, latest.reading, actions.homeNode) } : {}),
         refusal: refusal({
           code: 'ANSWER_NOT_RECORDED',
           state: latest && approvalStatus(latest.record) === 'open' ? 'still open' : 'changed while answering',
@@ -1188,8 +1190,8 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
         }),
       };
     }
-    if (!outcome.record) return { applied: false, refusal: unknownRefusal(record.id) };
-    const projected = projectApproval(outcome.record, outcome.reading ?? undefined);
+    if (!outcome.record) return { applied: false, refusal: outcome.applied ? unknownRefusal(ref) : outcome.refusal };
+    const projected = projectApproval(outcome.record, outcome.reading ?? undefined, actions.homeNode);
     // A stale or settled answer comes back with the approval's current reading and the broker's own refusal.
     if (!outcome.applied) return { applied: false, item: projected, refusal: outcome.refusal };
     return { applied: true, item: projected };

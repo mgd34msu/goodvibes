@@ -38,7 +38,7 @@ export interface FirstRunDeps {
   readonly serviceConfig?: ((provider: string) => Parameters<typeof getSubscriptionProviderConfig>[1]) | undefined;
   readonly pushSurfaceModal?: ((modal: SurfaceModal) => void) | undefined;
   readonly renderRequest: () => void;
-  readonly completeModelSelection?: ((selection: { model: SelectedModel; effort: string }) => void) | undefined;
+  readonly completeModelSelection?: ((selection: { model: SelectedModel; effort: string; quiet?: boolean }) => void) | undefined;
   /** The full provider picker ("Another provider…"). */
   readonly openProviderPicker?: (() => void) | undefined;
   /** Look for model servers on this computer now, the app's own scan (one at a time). */
@@ -179,7 +179,8 @@ export class FirstRunModal implements SurfaceModal {
     if (this.finished) return;
     this.finished = true;
     const effort = this.deps.configManager.get('provider.reasoningEffort');
-    this.deps.completeModelSelection?.({ model, effort: typeof effort === 'string' ? effort : '' });
+    // Quiet: a line in the conversation would retire the splash; "You're set" says it instead.
+    this.deps.completeModelSelection?.({ model, effort: typeof effort === 'string' ? effort : '', quiet: true });
     this.deps.markDone();
     setFirstRunScreen({ kind: 'set', model: model.displayName || model.id, signIn });
     this.stopSpinner();

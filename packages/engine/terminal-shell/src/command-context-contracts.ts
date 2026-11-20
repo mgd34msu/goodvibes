@@ -62,6 +62,8 @@ export interface TerminalCommandUiActions<Target extends ModelPickerTarget> {
      * storing that is how a one-time snap down used to become permanent.
      */
     effortChosenByUser?: boolean;
+    /** Write no "Switched to model" line into the conversation; the caller says it (first run). */
+    quiet?: boolean;
   }) => void;
   clearScreen?: () => void;
   beginConcealedInput?: (request: import('./concealed-input.js').ConcealedInputRequest) => void;

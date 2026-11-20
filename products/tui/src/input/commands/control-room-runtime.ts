@@ -1,10 +1,8 @@
 import { createSecurityCommand } from '@goodvibes-jev/engine/terminal-shell/security-command';
 import type { CommandRegistry, CommandContext } from '../command-registry.ts';
 import '@/runtime/index.ts';
-import { buildKnowledgeInjectionPrompt, selectKnowledgeForTask } from '@goodvibes-jev/engine/platform/platform/state';
 import '@goodvibes-jev/engine/platform/platform/config';
 import { requireReadModels, requireSubscriptionManager, requireTokenAuditor } from './runtime-services.ts';
-import { getMemoryApi, getMemorySpine } from './recall-query.ts';
 
 export function registerControlRoomRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
@@ -133,70 +131,4 @@ export function registerControlRoomRuntimeCommands(registry: CommandRegistry): v
     ),
   );
 
-  registry.register({
-    name: 'project-memory',
-    aliases: ['pmem'],
-    description: 'Inspect durable project memory: risks, runbooks, and architecture notes',
-    usage: '[open | queue [limit] | explain <task...> [--scope <path> ...]]',
-    async handler(args, ctx) {
-      const subcommand = (args[0] ?? 'open').toLowerCase();
-      if (subcommand === 'open') {
-        if (ctx.openMemoryView) {
-          ctx.openMemoryView();
-          return;
-        }
-        ctx.print('The Memory view is not available in this runtime.');
-        return;
-      }
-      if (subcommand === 'queue') {
-        // Repointed onto the memory spine (platform 1.2.0 full-detach) so the
-        // queue reflects the daemon's own canonical store when adopted.
-        const memory = getMemorySpine(ctx);
-        if (!memory) return;
-        const limit = Math.max(1, parseInt(args[1] ?? '10', 10) || 10);
-        const queue = await memory.reviewQueue(limit);
-        if (queue.length === 0) {
-          ctx.print('Knowledge review queue is empty.');
-          return;
-        }
-        ctx.print(
-          [
-            `Knowledge Review Queue (${queue.length})`,
-            ...queue.map(
-              (record) => `  ${record.id}  [${record.scope}/${record.cls}] ${record.reviewState} ${record.confidence}%  ${record.summary}`,
-            ),
-          ].join('\n'),
-        );
-        return;
-      }
-      if (subcommand === 'explain') {
-        // Stays on the local MemoryApi: `explain` is a host-side projection
-        // over whatever read surface is active, not a store operation
-        // (docs/decisions/2026-07-06-memory-wire-full-detach.md, platform repo).
-        const memory = getMemoryApi(ctx);
-        if (!memory) return;
-        const scopeIdx = args.indexOf('--scope');
-        const scopeValues = scopeIdx !== -1 ? args.slice(scopeIdx + 1).filter((token) => !token.startsWith('--')) : [];
-        const taskTokens = args.slice(1).filter((token, index) => {
-          if (token === '--scope') return false;
-          if (scopeIdx !== -1 && index + 1 > scopeIdx) return false;
-          return true;
-        });
-        const task = taskTokens.join(' ').trim();
-        if (!task) {
-          ctx.print('Usage: /project-memory explain <task...> [--scope <path> ...]');
-          return;
-        }
-        const injections = await selectKnowledgeForTask(memory, task, scopeValues);
-        const prompt = buildKnowledgeInjectionPrompt(injections);
-        ctx.print(prompt ?? 'No reviewed project knowledge matched that task.');
-        return;
-      }
-      if (ctx.openMemoryView) {
-        ctx.openMemoryView();
-        return;
-      }
-      ctx.print(`Unknown project-memory subcommand: ${subcommand}`);
-    },
-  });
 }

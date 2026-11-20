@@ -6,7 +6,7 @@ import { policyCommand } from './commands/policy.ts';
 import { providerCommand } from './commands/provider.ts';
 import { evalCommand } from './commands/eval.ts';
 import { sessionCommand, resumeCommand } from './commands/session.ts';
-import { recallCommand } from './commands/memory.ts';
+import { memoryCommand } from './commands/memory.ts';
 import { knowledgeCommand } from './commands/knowledge.ts';
 import { registerShellCoreCommands } from './commands/shell-core.ts';
 import { registerConfigCommand } from './commands/config.ts';
@@ -53,7 +53,6 @@ import { registerCodebaseRuntimeCommands } from './commands/codebase-runtime.ts'
 import { registerLocalRuntimeCommands } from './commands/local-runtime.ts';
 import { registerExperienceRuntimeCommands } from './commands/experience-runtime.ts';
 import { registerIncidentRuntimeCommands } from './commands/incident-runtime.ts';
-import { registerMemoryProductRuntimeCommands } from './commands/memory-product-runtime.ts';
 import { registerSkillsRuntimeCommands } from './commands/skills-runtime.ts';
 import { registerServicesRuntimeCommands } from './commands/services-runtime.ts';
 import { registerTasksRuntimeCommands } from './commands/tasks-runtime.ts';
@@ -145,7 +144,6 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: 'Control Room', register: registerControlRoomRuntimeCommands },
   { category: 'MCP', register: registerMcpRuntimeCommands },
   { category: 'Incidents', register: registerIncidentRuntimeCommands },
-  { category: 'Memory', register: registerMemoryProductRuntimeCommands },
   { category: 'Skills', register: registerSkillsRuntimeCommands },
   { category: 'Experience', register: registerExperienceRuntimeCommands },
   { category: 'Services', register: registerServicesRuntimeCommands },
@@ -202,7 +200,7 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: 'Sessions & Replay', register: registerHostedRuntimeCommands },
   { category: 'Sessions & Replay', register: (registry) => registry.register(sessionCommand) },
   { category: 'Sessions & Replay', register: (registry) => registry.register(resumeCommand) },
-  { category: 'Memory', register: (registry) => registry.register(recallCommand) },
+  { category: 'Memory', register: (registry) => registry.register(memoryCommand) },
   { category: 'Knowledge', register: (registry) => registry.register(knowledgeCommand) },
 ];
 

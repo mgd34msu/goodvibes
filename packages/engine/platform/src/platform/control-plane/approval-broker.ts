@@ -108,6 +108,20 @@ export interface RequestSharedApprovalInput {
   readonly localPromptActor?: string | undefined;
 }
 
+/** What the approvals port needs of the cross-node relay (approval-relay.ts implements it). */
+export interface ApprovalRelayPort {
+  remote(): readonly SharedApprovalRecord[];
+  get(node: string, id: string): SharedApprovalRecord | null;
+  reachable(node: string): boolean;
+  forward(node: string, id: string, input: {
+    readonly action: 'claim' | 'approve' | 'deny' | 'amend' | 'cancel';
+    readonly expectedRevision: number;
+    readonly reason?: string | undefined;
+    readonly note?: string | undefined;
+    readonly selectedHunks?: readonly number[] | undefined;
+  }, viewer: import('./approval-lifecycle.js').ApprovalViewer): Promise<import('./approval-lifecycle.js').TransitionOutcome & { readonly reading: import('./approval-lifecycle.js').ApprovalReading | null }>;
+}
+
 /** Who acts on an approval, and the revision of the record they acted on. */
 export interface ApprovalActionInput {
   readonly actor: string;
@@ -430,6 +444,18 @@ export class ApprovalBroker {
     return this.#homeNode;
   }
 
+  /** Other nodes' approvals, read and decided through the group (approval-relay.ts); null outside a group. */
+  #relay: ApprovalRelayPort | null = null;
+
+  /** The daemon wires the cross-node relay when it is in a group; the approvals port reads it. */
+  useRelay(relay: ApprovalRelayPort | null): void {
+    this.#relay = relay;
+  }
+
+  get relay(): ApprovalRelayPort | null {
+    return this.#relay;
+  }
+
   /** The daemon names its cluster node once it is composed, before anything is raised. */
   useHomeNode(nodeId: string | (() => string)): void {
     this.#homeNode = nodeId;
@@ -675,6 +701,7 @@ export class ApprovalBroker {
       ...(input.reason !== undefined ? { reason: input.reason } : {}),
       ...(modifiedArgs !== undefined ? { modifiedArgs } : {}),
       ...(argsDigest !== undefined ? { argsDigest } : {}),
+      ...(input.relayRequestId !== undefined ? { relayRequestId: input.relayRequestId } : {}),
     };
     let outcome: TransitionOutcome;
     try {

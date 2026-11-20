@@ -123,6 +123,8 @@ export class GroupWireRouter {
   private electionListener: ((datagram: string | Readonly<Record<string, unknown>>) => void) | null = null;
   private electionListenerGeneration = 0;
   private seq = 0;
+  /** Envelope types a group tenant registered (group-tenants.ts): handled by the group layer, never the election. */
+  private readonly tenantTypes = new Set<string>();
 
   constructor(private readonly options: GroupWireRouterOptions) {}
 
@@ -137,6 +139,15 @@ export class GroupWireRouter {
 
   describe(): ClusterTransportDescription {
     return this.options.inner.describe();
+  }
+
+  /** Hand `types` to the group layer instead of the election; returns the removal. */
+  ownTypes(types: readonly string[]): () => void {
+    for (const type of types) {
+      if (GROUP_OWNED_TYPES.has(type)) throw new Error(`cluster: ${type} is a group message type already`);
+      this.tenantTypes.add(type);
+    }
+    return () => { for (const type of types) this.tenantTypes.delete(type); };
   }
 
   /** Next per-node sequence number. Shared by both tenants so it never repeats. */
@@ -343,7 +354,7 @@ export class GroupWireRouter {
       return;
     }
 
-    if (GROUP_OWNED_TYPES.has(decoded.envelope.type)) {
+    if (GROUP_OWNED_TYPES.has(decoded.envelope.type) || this.tenantTypes.has(decoded.envelope.type)) {
       this.options.onGroupMessage(decoded.envelope);
       return;
     }

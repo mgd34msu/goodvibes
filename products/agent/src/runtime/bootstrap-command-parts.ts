@@ -164,7 +164,7 @@ export interface BootstrapCommandSectionOptions {
   readonly sandboxSessionRegistry: SandboxSessionRegistry;
   /**
    * The runtime's own memory-consolidation scheduler, exposed to the memory
-   * review surface (input/commands/recall-review.ts) as
+   * review surface (the review action of /memory, terminal-shell/memory-command.ts) as
    * clients.memoryConsolidation, see agent/memory-consolidation-proposals.ts.
    */
   readonly memoryConsolidationScheduler?: ConsolidationReceiptSource;

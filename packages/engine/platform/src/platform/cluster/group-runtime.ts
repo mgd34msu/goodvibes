@@ -44,6 +44,7 @@ import {
   signWithIdentity,
   verifyWithIdentity,
 } from './group-crypto.js';
+import { tenantSigningBytes, type GroupTenant, type GroupTenantHost } from './group-tenants.js';
 import { summarizeError } from '../utils/error-display.js';
 import { GROUP_MESSAGE_TYPES, joinKeyFingerprint } from './group-membership.js';
 import {
@@ -259,6 +260,9 @@ export class ClusterGroupRuntime {
    * it into the roster rewrote the roster file on every beacon.
    */
   private readonly lastHeard = new Map<string, number>();
+  /** Group tenants by the message type they own (group-tenants.ts). */
+  readonly #tenants = new Map<string, GroupTenant>();
+  readonly #memberHeardListeners = new Set<(nodeId: string) => void>();
   /** When this process started listening to the group, or null before it has. */
   private listeningSince: number | null = null;
   /** A key material write is failing; its cause has been logged. */
@@ -1481,7 +1485,15 @@ export class ClusterGroupRuntime {
     if (this.runtimeStopping || this.membershipTransition || !this.membershipOperations.available) return;
     // Every datagram that verified under the group key is proof of life.
     if (this.state && envelope.groupId === this.state.groupId && isCurrentMember(this.state, envelope.nodeId)) {
-      this.lastHeard.set(envelope.nodeId, this.options.clock.now());
+      const now = this.options.clock.now();
+      const before = this.lastHeard.get(envelope.nodeId);
+      this.lastHeard.set(envelope.nodeId, now);
+      // Heard after silence (or for the first time): a tenant may want to ask it for its state.
+      if (envelope.nodeId !== this.options.nodeId && (before === undefined || now - before > this.tenantSilenceMs())) {
+        for (const listener of [...this.#memberHeardListeners]) {
+          try { listener(envelope.nodeId); } catch { /* a tenant's listener never stops the group layer */ }
+        }
+      }
     }
     this.incoming.admit(() => this.runGroupWork(() => this.handleGroupMessage(envelope)));
   }
@@ -1501,9 +1513,80 @@ export class ClusterGroupRuntime {
       case CONFIG_MESSAGE_TYPES.request:
         await this.replication?.handle(envelope);
         return;
-      default:
+      default: {
+        const tenant = this.#tenants.get(envelope.type);
+        if (tenant) {
+          await this.deliverToTenant(tenant, envelope);
+          return;
+        }
         this.options.logger.debug('cluster: ignored an unrecognised group message', { type: envelope.type });
+      }
     }
+  }
+
+  /**
+   * A tenant message reaches its tenant only from a current member other than
+   * this machine, addressed to everyone or to this machine, with an identity
+   * signature that verifies against the key the group record holds for the
+   * member it claims to be from.
+   */
+  private async deliverToTenant(tenant: GroupTenant, envelope: ClusterEnvelope): Promise<void> {
+    const state = this.state;
+    if (!state || envelope.nodeId === this.options.nodeId || !isCurrentMember(state, envelope.nodeId)) return;
+    const to = envelope.body['to'];
+    if (to !== undefined && to !== this.options.nodeId) return;
+    const member = state.members.find((candidate) => candidate.nodeId === envelope.nodeId);
+    const signature = envelope.body['idSig'];
+    if (!member || typeof signature !== 'string'
+      || !verifyWithIdentity(member.identityKey, tenantSigningBytes(envelope.groupId, envelope.type, envelope.nodeId, envelope.ts, envelope.seq, envelope.body), signature)) {
+      this.options.logger.debug('cluster: dropped a group tenant message whose sender could not be verified', { type: envelope.type, nodeId: envelope.nodeId });
+      return;
+    }
+    try {
+      await tenant.handle(envelope, { nodeId: envelope.nodeId });
+    } catch (error) {
+      this.options.logger.warn('cluster: a group tenant could not handle a message', { type: envelope.type, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  /** A member silent through three of its beacons or roster gossips reads as unreachable to tenants. */
+  private tenantSilenceMs(): number {
+    return Math.max(5_000, 3_000 * Math.max(this.options.settings.beaconSeconds, this.options.settings.rosterGossipSeconds));
+  }
+
+  /** The host group tenants use (group-tenants.ts): identity-signed messages on this group's channel. */
+  tenantHost(): GroupTenantHost {
+    return {
+      selfNode: this.options.nodeId,
+      silenceMs: this.tenantSilenceMs(),
+      register: (tenant) => {
+        for (const type of tenant.types) if (this.#tenants.has(type)) throw new Error(`cluster: ${type} already has a tenant`);
+        const disown = this.router.ownTypes(tenant.types);
+        for (const type of tenant.types) this.#tenants.set(type, tenant);
+        return () => {
+          disown();
+          for (const type of tenant.types) if (this.#tenants.get(type) === tenant) this.#tenants.delete(type);
+        };
+      },
+      send: async (type, body, to) => {
+        const keyring = this.keyringInstance;
+        const material = this.material;
+        if (!keyring || !material || !this.#tenants.has(type)) return;
+        const router = this.router;
+        const seq = router.nextSeq();
+        const ts = this.options.clock.now();
+        const unsigned = { ...body, ...(to !== undefined ? { to } : {}) };
+        const idSig = signWithIdentity(material.node.identity, tenantSigningBytes(material.groupId, type, this.options.nodeId, ts, seq, unsigned));
+        await router.sendRaw(encodeEnvelope({ type, nodeId: this.options.nodeId, nodeVersion: this.options.version, seq, ts, surfaceId: null,
+          body: { ...unsigned, idSig } }, keyring));
+      },
+      isCurrentMember: (nodeId) => this.state !== null && isCurrentMember(this.state, nodeId),
+      lastHeardFrom: (nodeId) => this.lastHeardFrom(nodeId),
+      onMemberHeard: (listener) => {
+        this.#memberHeardListeners.add(listener);
+        return () => { this.#memberHeardListeners.delete(listener); };
+      },
+    };
   }
 
   private async onRoster(envelope: ClusterEnvelope): Promise<void> {

@@ -143,7 +143,8 @@ export type ApprovalRefusalCode =
   | 'ILLEGAL_TRANSITION'
   | 'OWNER_DECISION_REQUIRED'
   | 'APPROVAL_EXPIRED'
-  | 'UNKNOWN_APPROVAL';
+  | 'UNKNOWN_APPROVAL'
+  | 'NODE_UNREACHABLE';
 
 export type TransitionOutcome =
   | { readonly applied: true; readonly record: SharedApprovalRecord }
@@ -413,6 +414,12 @@ export function approvalRefusal(code: ApprovalRefusalCode, record: SharedApprova
         code, state, status: 403,
         reason: detail ?? 'This approval needs the owner\'s own decision on the device that raised it. Deny and cancel are allowed here.',
         next: ['Approve it with the paired-owner decision on the device that raised it, or deny it here.'],
+      });
+    case 'NODE_UNREACHABLE':
+      return refusal({
+        code, state: 'unknown', status: 504, retryable: false,
+        reason: detail ?? 'The node that owns this approval did not answer in time, so whether the action was applied is not known.',
+        next: ['Read the approval again; the node that owns it decides whether it was applied.'],
       });
     case 'ILLEGAL_TRANSITION':
       return refusal({ code, state, status: 409, reason: detail ?? 'That move is not one an approval can make now.', next: ['Read the approval again.'] });

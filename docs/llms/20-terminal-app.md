@@ -784,7 +784,7 @@ Pickers (session picker, profile picker, selection lists, the recovery offer) sh
 | `Backspace` | Delete one character of the filter. |
 | `Esc` | Close the list in one press. |
 
-Configuration workspaces (`/recall`, `/todo open`, `/marketplace`, `/plugin`, `/services`, `/subscription` and others) keep a search row that always takes typed characters.
+Configuration workspaces (`/memory open`, `/todo open`, `/marketplace`, `/plugin`, `/services`, `/subscription` and others) keep a search row that always takes typed characters.
 An action there fires from `Enter`, from `Ctrl` plus its letter (the hint bar shows `^d delete`), or from `Ctrl+G` followed by its key for keys a terminal cannot send with `Ctrl` (`c`, `h`, `i`, `j`, `m`, digits and capitals; the hint bar shows `^G c`).
 An action that deletes, uninstalls or clears asks for the same key a second time; `Esc` cancels.
 
@@ -972,7 +972,7 @@ A line typed in the Agents view for the hosted session is sent only to the sessi
 An attachment belongs to the daemon it was made on. After `daemon.connectedHost.url` points elsewhere, `/hosted say`, `later`, `cancel` and `kill` of that session are refused naming both daemons, and `/hosted detach` releases it on the daemon that holds it.
 With nothing attached: `[hosted] no hosted session is attached; /hosted attach <id> first.` Hosted sessions are described under "Hosted sessions" in the daemon part.
 
-`/teleport <export|inspect|import> <path> [--yes]` exports, inspects or imports a remote session bundle (runner pools, contracts, artifacts); it is the same as `/remote session`. `import` replaces what is held here only with `--yes`.
+`/remote session-export <file>`, `session-inspect <file>` and `session-import <file>` save, inspect or bring in a remote session bundle (runner pools, contracts, artifacts, never the conversation); `session-import` asks first, since it replaces anything held here with the same ids.
 
 `/replay [load [runId] | step [n] | seek <rev> | diff <runId> | export <path>]` (alias `/rep`) loads a recorded run, steps or seeks through its revisions, compares two runs and exports one.
 
@@ -1189,25 +1189,24 @@ The run works in a copy of the suite. Before a task's session starts, its `verif
 - `/teamwork recipe research-implement-review "add rate limiting"` runs the recipe's steps in order and prints a line per step: `[Teamwork research-implement-review] step 1/3 research: agent <id> (researcher) started.`; a step whose agent fails stops the recipe and lists the steps not started.
 - `/teamwork create-archetype <name> <title...>` starts an agent from a custom archetype; `/teamwork validate` lists archetype problems.
 
-`/worktree [review|panel|inspect <path>|setup <path>|attach <path> <session|task> <id>|session <id>|task <id>|recover <session|task> <id>|pause <path>|resume <path>|keep <path>|discard <path>|cleanup <path>]` (alias `/worktrees`) manages the git worktrees helper agents work in (see "Helper agents and worktrees").
+`/worktree` manages the git worktrees helper agents work in (see "Helper agents and worktrees").
 
 `/workstream`, `/graph`, `/todo` and `/project-plan` are described under "Contracts, workstreams and work plans" below.
 
-`/remote [list | show [agentId] | supervisor [runnerId] | capabilities [runnerId] | recover [runnerId] | setup [export <path>] | env [export <path>] | tunnel [review|export <path>] | bootstrap [export <path>|inspect <path>] | session <export|inspect|import> <path> | pool <list|show|create|assign|unassign> ... | dispatch [template] <description> | dispatch-pool <pool> [template] <description> | contract [agentId] | cancel <agentId> | export <agentId> [path] | artifact list | artifact show <id> | artifact export <id> [path] | review <id> | rerun-local <id> | import <path>]` works with self-hosted remote runners.
+`/remote` works with self-hosted remote runners. `/remote` alone opens its actions ("See remote runners at a glance" first; a model or script running it alone gets that overview), grouped as: start a runner (`dispatch <task> [--template <kind>]`, `dispatch-pool <pool> <task>`); follow and stop runners (`show [connection]`, `contract <runner>`, `supervisor [runner]`, `capabilities [runner]`, `recover [runner]`, `stop <connection>`, which asks first); review what runners handed back (`artifacts`, `review <artifact>`, `export <runner> [--to <file>]`, `artifact-export <artifact> [--to <file>]`, `rerun-local <artifact>`, `import <file>`); runner pools (`pools`, `pool <pool>`, `create-pool <id> [label]`, `assign <pool> <runner>`, `unassign <pool> <runner>`); set up another machine (`setup`, `setup-export <file>`, `env`, `env-export <file>`, `tunnel`, `tunnel-export <file>`, `bootstrap-export <file>`, `bootstrap-inspect <file>`); move runners between sessions (`session-export`, `session-inspect`, `session-import`); and `open` for the full-screen view. Each action picks runners, pools and artifacts from lists.
 
-- `/remote dispatch engineer "port the parser to Rust"` starts an ACP subagent (the command `goodvibes acp`, or `ACP_AGENT_CMD`) as a remote runner.
-- `/remote dispatch-pool <pool> ...` dispatches into a pool; a full pool is refused with what to remove.
-- `/remote review <artifactId>` reviews the runner's result; `/remote rerun-local <artifactId>` shows its task and tools and asks before running it locally.
-- `/remote dispatch`, `dispatch-pool` and `rerun-local` refuse unless the owner typed them in the terminal.
+- `/remote dispatch port the parser to Rust --template engineer` starts an ACP subagent (the command `goodvibes acp`, or `ACP_AGENT_CMD`) as a remote runner.
+- `/remote dispatch-pool <pool> <task>` dispatches into a pool; a full pool is refused with what to remove.
+- `/remote review <artifact>` reviews the runner's result; `/remote rerun-local <artifact>` asks before running its task locally with only the tools it recorded (the artifact list shows them).
+- `/remote dispatch`, `dispatch-pool` and `rerun-local` refuse unless the owner typed them in the terminal or chose them from the list.
 
-`/bridge [status|pools|assign <pool> <runner>|runner <id>|review <artifactId>|export <artifactId> [path]|import <path>]` operates self-hosted bridge runners the same way.
-`/runner-pool [list|show <id>|create <id> <label...>|assign <pool> <runner>|unassign <pool> <runner>]` (alias `/pool`), `/remote-setup [review|export <path>]`, `/remote-env [review|export <path>]`, `/tunnel [review|export <path>]` and `/bootstrap [export <path>|inspect <path>]` are front doors to the matching `/remote` subcommands. `/remote env` prints the shell lines (including `ACP_AGENT_CMD`) a remote machine needs.
+`/remote env` prints the shell lines (including `ACP_AGENT_CMD`) a remote machine needs.
 `/release [review|checklist|bundle export <path>|bundle inspect <path>]` prints release readiness and a checklist.
 `/helpers [review]` (alias `/integration-api`) lists the local helper APIs remote clients can use.
 
 ### Memory and knowledge
 
-`/recall`, `/knowledge`, `/project-memory`, `/memory-review`, `/memory-sync`, `/handoff`, `/session-memory` and `/team-memory` are described under "Memory and knowledge" below.
+`/memory` and `/knowledge` are described under "Memory and knowledge" below.
 
 ### Extensions
 
@@ -1257,7 +1256,7 @@ With no daemon: `Routines are kept and run by the GoodVibes daemon, so each runs
 `/qrcode [regenerate]` (aliases `/qr`, `/pair`) opens the device-pairing view; `r` there mints a new device token.
 `/host` inspects, pairs or unpairs this terminal with its host; only the owner typing it can pair or unpair (`Usage: /host pair [--bootstrap-shared] [--name <device-name>] [--apply] | /host unpair`).
 `/relay [status|pair [name]|codes|revoke <id>]` shows outbound relay status, mints a relay pairing payload for one device (it carries a relay code for that device alone, labelled with the name), lists the devices' relay codes, or revokes one (that device is refused through the relay from its next request; every other keeps working); with `relay.enabled` off, `pair` answers `Relay is disabled: turn on relay.enabled in /config relay first.`
-`/cluster [status|create|join|key|nodes|forget|rotate|leave|rename|groups|publish|accept]` shares inbound channel work with other machines; add `--host`, `--port`, `--token` to reach another machine's daemon.
+`/cluster` shares inbound channel work with other machines: `status` (what `/cluster` alone shows a model or script), `groups`, `join <group> --key <key>`, `create [--name ...]`, `nodes`, `key [--qr]`, `rename <name>`, `rotate [--now]`, `forget <machine>`, `leave`, `publish <setting>`, `accept <setting>`. Every action takes "Which machine" (`--host https://host:port`, this machine when left out) and, for another machine whose token is not stored, `--token`. `forget`, `leave`, `publish`, `accept` and `rotate --now` ask first.
 `/cloudflare [status|setup|requirements|create-token|discover|validate|provision|verify|disable] [flags]` (alias `/cf`) manages the optional Cloudflare integration: `/cloudflare create-token --account <account-id> --bootstrap-env <ENV_NAME> [--new]`.
 `/voice [review|status|setup|enable|disable|wake status|wake setup [yes]|bundle export <path>|bundle inspect <path>|bundle import <path>]` manages always-speak mode and installs the managed local voice runtime and wake-word models.
 `/tts <prompt>|stop|on|off` sends one prompt whose answer is also spoken, stops playback, or turns always-speak on or off. Live local playback needs `mpv` or `ffplay` on `PATH`.
@@ -1704,22 +1703,24 @@ What is left behind:
 - A unit that failed or was cancelled: its worktree is removed only when it holds nothing unique (no uncommitted changes, no unmerged commits); otherwise it is kept, and the oldest kept worktrees are removed first when too many are kept.
 - A unit whose merge conflicted: worktree and branch kept.
 - On restart, a passed unit whose branch had not been merged is put back on the integration lane, and worktrees on disk that belong to known units are adopted or reported, never deleted.
-- `/worktree discard <path>` removes a kept worktree (refused with the reason when it holds unique work); `/worktree keep <path>` marks one to keep. A keep, pause, resume or attach made while the retention sweep is already removing that worktree is refused with the reason, never recorded and then ignored; one made before the sweep claims the tree keeps it.
+- `/worktree discard <worktree>` removes a kept worktree after asking (refused with the reason when it holds unique work); `/worktree keep <worktree>` marks one to keep. A keep, pause, resume or attach made while the retention sweep is already removing that worktree is refused with the reason, never recorded and then ignored; one made before the sweep claims the tree keeps it.
 
 `/worktree` subcommands:
 
-| Form | Effect |
+`/worktree` alone opens these actions (a model or script running it alone gets the review); a worktree is picked from the list of this project's worktrees.
+
+| Line | Effect |
 | --- | --- |
-| `/worktree` or `review` | Every tracked worktree with its age, size and why it is kept. |
-| `panel` | Open Agents on the worktree list. |
-| `inspect <path>` | One worktree's metadata. Unknown: `Worktree inspect: no tracked worktree metadata for <path>.` |
-| `setup <path>` | Run the cold-start setup again. When both settings are empty: `[worktree setup] skipped: ...`. |
-| `attach <path> <session\|task> <id>` | Tie a worktree to a session or task. |
-| `session <id>`, `task <id>` | Worktrees of one session or task. |
-| `recover <session\|task> <id>` | Recover the worktrees of a session or task. |
-| `pause <path>`, `resume <path>`, `keep <path>` | Change a worktree's state (`Updated <path> to state <state>.`). |
-| `discard <path>` | Ask the daemon to remove it; a worktree with unique work is refused with the reason. |
-| `cleanup <path>` | Remove a worktree's tracking after it is gone (`Cleaned up worktree <path>.`). |
+| `/worktree review` | Every tracked worktree with its age, size and why it is kept. |
+| `open` | Open Agents on the worktree list. |
+| `inspect <worktree>` | One worktree's metadata. Unknown: `No tracked worktree at <path>.` |
+| `setup <worktree>` | Run the cold-start setup again. When both settings are empty: `Setup skipped: ...`. |
+| `attach <worktree> <id> --to session\|task` | Tie a worktree to a session or task. |
+| `attached session\|task <id>` | Worktrees of one session or task. |
+| `recover session\|task <id>` | The worktrees of a session or task and the line that brings each back. |
+| `pause <worktree>`, `resume <worktree>`, `keep <worktree>` | Change a worktree's state (`<path> is <state>.`). |
+| `discard <worktree>` | Asks, then has the daemon remove it; a worktree with unique work is refused with the reason. |
+| `cleanup <worktree>` | Asks, then removes a worktree's tracking after it is gone (`Stopped tracking <path>.`). |
 
 <!-- generated: settings:worktree -->
 
@@ -1813,7 +1814,7 @@ Changes are the owner's: a model running a `/todo` change is refused and keeps i
 
 Session memory is text pinned to this session; it survives compaction.
 Add to it with `/keep <text>`, `/note add <text>`, `!# <text>` (pins and sends) or `# <text>` (saves and sends nothing).
-`/session-memory [queue [limit] | export <path> | add <class> <summary...>]` works with session-scoped durable records.
+Durable records that apply to this session only are `/memory` records with `--scope session` (`/memory add <kind> <summary> --scope session`, `/memory queue --scope session`).
 
 ### Durable memory
 
@@ -1826,47 +1827,39 @@ Each record has a class, a scope, a summary, optional detail and tags, a confide
 | scope | `session`, `project`, `team` |
 | review state | `fresh`, `reviewed`, `stale`, `contradicted` |
 
-Records that match a turn can be added to the model's context; `/recall explain <task>` shows which would be, and `Alt+M` lists the memories the last turn used.
+Records that match a turn can be added to the model's context; `/memory explain <task>` shows which would be, and `Alt+M` lists the memories the last turn used.
 
-`/recall` (aliases `/rc`, `/memory`, `/mem`) with no argument opens the Memory view. Its subcommands:
+`/memory` is described once for both programs (the Agent has the same command). Bare, it opens its list of actions with "See your memory" first and the rest grouped ("Correct or review a record", "See what a task is given", "Keep memory as files, or move it", "Copies of memory and the search index"); a model or a script running it bare gets the list of records. Each action asks for what it needs, from the live list of records or copies where there is one, says what it will do in one sentence, and ends with the line that does the same. The typed lines:
 
-| Form | Effect |
+| Line | Action |
 | --- | --- |
-| `add <class> <summary> [--scope <scope>] [--detail <text>] [--tags <t,t>] [--session <id>] [--task <id>] [--file <path>]` | Add a record: `[recall] Added decision: <id>`. |
-| `capture incident <id\|latest>`, `capture policy`, `capture mcp <server>`, `capture plugin <name>` | Store a forensics incident, the latest policy review, or an MCP server's or plugin's trust posture as a record. |
-| `search [query] [--semantic] [--cls <class>] [--scope <scope>] [--limit <n>]` | Full-text search, or vector search with `--semantic`. |
-| `vector [status\|doctor\|rebuild]` | Inspect or rebuild the vector index. Each stored vector records the embedding space it was made in (provider, model and width); a search compares only vectors of the current space, so after `provider.embeddingProvider` or its model changes, `status` shows `awaiting re-embedding: <n>` and semantic search says how many memories it left out until `rebuild` re-embeds them. |
-| `get <id>` | One record with provenance and links. |
-| `edit <id> [--summary <text>] [--detail <text>] [--tags <t,t>] [--scope <session\|project\|team>]` | Correct a record in place: each option given replaces that field, the rest (class, provenance, links, review state) stay. `[recall] Edited <id> (summary, tags): <summary>`; an unknown id: `[recall] Record not found: <id>. Nothing was changed.` |
-| `link <fromId> <toId> <relation>` | Link two records. |
-| `queue [limit]` | The review queue: records not yet reviewed, contradicted and stale ones first; a record you reviewed leaves it. |
-| `review <id> <fresh\|reviewed\|stale\|contradicted> [--confidence <0-100>] [--by <name>] [--reason <text>]` | Review a record. |
-| `stale <id> [reason...]`, `contradict <id> [reason...]` | Mark a record stale or contradicted. |
-| `promote <id> <session\|project\|team>` | Move a record to a wider scope. |
-| `explain <task...> [--scope <path> ...]` | The records that would be injected for a task. |
-| `injections [agentId]` | Records injected per turn for the main session or one helper agent. |
-| `files sync [--dir <path>]` | Write project and team records as Markdown files. |
-| `files review [--dir <path>]` | Compare the files with the store and list proposals; applies nothing. |
-| `files apply <id> [<id> ...] \| --all [--dir <path>]` | Apply chosen proposals. |
-| `export <path> [--scope <scope>] [--cls <class>]`, `import <path>` | Move records as a bundle. |
-| `handoff-export <path> [--scope <scope>]`, `handoff-inspect <path>`, `handoff-import <path>` | Reviewable handoff bundles for a team. |
-| `list [class] [--scope <scope>]` | All records by class. |
-| `remove <id>` | Delete a record (asks first). |
-| `snapshots` | Point-in-time copies of memory (daily, before a migration, before a restore). |
-| `restore <name\|latest\|date>` | Replace all memory with a copy; the current records are copied first (asks first). |
-| `report` | Print this usage. |
+| `list [--class <kind>] [--scope session\|project\|team]` | See your memory: records by kind. |
+| `add <kind> <summary...> [--detail <text>] [--tags <t,t>] [--scope <scope>] [--session <id>] [--task <id>] [--file <path>]` | Remember something (scope `project` unless given): `Remembered "<summary>".` with `Its id is <id>.` |
+| `search [<words...>] [--class <kind>] [--scope <scope>] [--limit <n>] [--semantic]` | Search memory by the words, or by what they mean with `--semantic`. |
+| `show <record>` | See one record: where it applies, detail, tags, where it came from, links. |
+| `edit <record> [--summary <text>] [--detail <text>] [--tags <t,t>] [--scope <scope>]` | Correct a record in place; what is not given is kept, and the record keeps its id, kind, origin and links. |
+| `review <record> <fresh\|reviewed\|stale\|contradicted> [--confidence <0-100>] [--reason <text>] [--by <name>]` | Say whether a record is still right. |
+| `promote <record> <session\|project\|team>` | Change where a record applies. |
+| `link <from> <to> <relation...>` | Link two records. |
+| `remove <record>` | Forget a record (asks first; it cannot be undone). |
+| `queue [<n>] [--scope <scope>]` | See records waiting for review. |
+| `explain <task...> [--scope <path>]...` | See what memory a task would be given. |
+| `injections [<agent id>]` | See what memory each recent turn (of this session, or of one agent) was given; terminal app only. |
+| `sync-files [--dir <folder>]`, `review-files [--dir <folder>]`, `apply-files <id\|all> [--dir <folder>]` | Keep memory as Markdown files in their own repository (`memory.projection.dir`, default `.goodvibes/memory/projection`), see what your edits to them would change, and take chosen changes into memory. A file still as `sync-files` wrote it is never read as an edit, and a file whose top lines were broken is reported as unreadable, never as a deletion. When the store holds more records than one read takes (5000), files of records past that are left as they are and not compared. `apply-files` only counts when you type it. |
+| `export <file> [--scope <scope>] [--class <kind>]`, `inspect <file>`, `import <file>` | Save memory to a file (a team handoff is `--scope team`), read one before loading it, load one (records already there are left as they are). A line the model runs may only use paths inside the project. |
+| `snapshots`, `restore <copy\|latest\|date>` | Copies of memory (daily, before a migration, before a restore); `restore` replaces all memory with one, copying the current records first, and only counts when you type it. |
+| `index`, `rebuild-index` | The semantic search index: each stored vector records the embedding space it was made in (provider, model and width); a search compares only vectors of the current space, so after `provider.embeddingProvider` or its model changes, `index` shows `waiting to be embedded again: <n>` and semantic search says how many memories it left out until `rebuild-index` embeds them again. |
+| `capture <incident\|policy\|mcp\|plugin> [<which>]` | Remember an incident report, the last policy check, or an MCP server's or plugin's trust as a record. |
+| `open` | The Memory screen (terminal app; the Agent opens its workspace's Memory page). |
 
 Worked example:
 
 ```text
-/recall add decision "Use Postgres advisory locks for the job queue" --scope project --tags queue,db
-[recall] Added decision: <record-id>
-  Scope:   project
-  Summary: Use Postgres advisory locks for the job queue
-  Tags: queue, db
+/memory add decision Use Postgres advisory locks for the job queue --tags queue,db
+Remembered "Use Postgres advisory locks for the job queue".
+Its id is <record-id>.
+The command for this is: /memory add decision Use Postgres advisory locks for the job queue --tags queue,db
 ```
-
-Front doors for parts of `/recall`: `/memory-sync [export <path> [scope] | import <path>]`, `/handoff [export <path> [scope] | inspect <path> | import <path>]`, `/team-memory [queue [limit] | export <path> | import <path> | capture policy]` (team scope), `/memory-review [queue [limit]|explain <task...>]` (alias `/knowledge-review`), and `/project-memory [open | queue [limit] | explain <task...> [--scope <path> ...]]` (alias `/pmem`).
 
 ### Knowledge
 

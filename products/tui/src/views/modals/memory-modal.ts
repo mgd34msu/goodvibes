@@ -16,7 +16,7 @@ import { classifyConsolidationFetchError } from '../memory-consolidation-gateway
 // (the full record list) and 'Review Queue' (the operator review queue), the
 // same split the earlier view toggled with Tab, now real host tabs. Review-state
 // mutations (reviewed/stale/contradicted/fresh) and record delete route to the
-// existing `/recall review` / `/recall remove` command path (charter: no
+// existing `/memory review` / `/memory remove` command path (charter: no
 // destructive mutation direct-called from a modal). Selection-blind port: the
 // view's selected-record scope/class/tags/provenance detail is folded into
 // each row label. `memoryRegistry` absent → the retired Memory view's
@@ -88,7 +88,7 @@ class MemoryModalSurface implements ConfigModalSurface {
     { key: 's', id: 'markStale', label: 'stale', enabledFor: this.reviewGate },
     { key: 'c', id: 'markContradicted', label: 'contradicted', enabledFor: this.reviewGate },
     { key: 'f', id: 'markFresh', label: 'fresh', enabledFor: this.reviewGate },
-    // /recall remove asks in its own dialog, naming the record; a second press here would ask twice.
+    // /memory remove asks in its own dialog, naming the record; a second press here would ask twice.
     { key: 'd', id: 'remove', label: 'delete', enabledFor: (row: ConfigModalRow | null) => row !== null },
     { key: 'r', id: 'refresh', label: 'refresh' },
     // Jump from a selected proposal to one of its affected records in the
@@ -286,14 +286,14 @@ class MemoryModalSurface implements ConfigModalSurface {
     const review = (state: string, confidence: number, reason?: string): void => {
       const args = ['review', record.id, state, '--confidence', String(confidence), '--by', 'operator'];
       if (reason) args.push('--reason', reason);
-      runModalCommand(ctx, 'recall', args, `/recall review ${record.id} ${state}`, { afterSettle: () => { void this.refresh(); } });
+      runModalCommand(ctx, 'memory', args, `/memory review ${record.id} ${state}`, { afterSettle: () => { void this.refresh(); } });
     };
     switch (id) {
       case 'markReviewed': review('reviewed', Math.max(record.confidence, 85)); break;
       case 'markStale': review('stale', Math.min(record.confidence, 40), 'marked stale from the memory modal'); break;
       case 'markContradicted': review('contradicted', 0, 'marked contradicted from the memory modal'); break;
       case 'markFresh': review('fresh', Math.max(record.confidence, 60)); break;
-      case 'remove': runModalCommand(ctx, 'recall', ['remove', record.id], `/recall remove ${record.id}`, { afterSettle: () => { void this.refresh(); } }); break;
+      case 'remove': runModalCommand(ctx, 'memory', ['remove', record.id], `/memory remove ${record.id}`, { afterSettle: () => { void this.refresh(); } }); break;
     }
   }
 

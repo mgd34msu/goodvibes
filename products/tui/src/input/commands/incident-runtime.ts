@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import type { CommandRegistry } from '../command-registry.ts';
 import { buildIncidentMemoryAddOptions } from '@goodvibes-jev/engine/platform/platform/state';
 import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
-import { getMemorySpine } from './recall-query.ts';
+import { getMemorySpine } from './memory.ts';
 
 export function registerIncidentRuntimeCommands(registry: CommandRegistry): void {
   registry.register({

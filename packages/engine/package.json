@@ -868,6 +868,11 @@
       "types": "./platform/dist/platform/gate/index.d.ts",
       "import": "./platform/dist/platform/gate/index.js"
     },
+    "./platform/platform/core/turn-failure": {
+      "bun": "./platform/src/platform/core/turn-failure.ts",
+      "types": "./platform/dist/platform/core/turn-failure.d.ts",
+      "import": "./platform/dist/platform/core/turn-failure.js"
+    },
     "./platform/platform/gate/presets": {
       "bun": "./platform/src/platform/gate/presets.ts",
       "types": "./platform/dist/platform/gate/presets.d.ts",
@@ -2608,6 +2613,21 @@
       "types": "./terminal-shell/dist/session-views.d.ts",
       "import": "./terminal-shell/dist/session-views.js"
     },
+    "./terminal-shell/work-board": {
+      "bun": "./terminal-shell/src/renderer/work-board.ts",
+      "types": "./terminal-shell/dist/renderer/work-board.d.ts",
+      "import": "./terminal-shell/dist/renderer/work-board.js"
+    },
+    "./terminal-shell/work-board-input": {
+      "bun": "./terminal-shell/src/work-board-input.ts",
+      "types": "./terminal-shell/dist/work-board-input.d.ts",
+      "import": "./terminal-shell/dist/work-board-input.js"
+    },
+    "./terminal-shell/fleet-spawn": {
+      "bun": "./terminal-shell/src/fleet-spawn.ts",
+      "types": "./terminal-shell/dist/fleet-spawn.d.ts",
+      "import": "./terminal-shell/dist/fleet-spawn.js"
+    },
     "./terminal-shell/input-feed-context": {
       "bun": "./terminal-shell/src/input-feed-context.ts",
       "types": "./terminal-shell/dist/input-feed-context.d.ts",
@@ -2898,30 +2918,10 @@
       "types": "./terminal-shell/dist/audio/retained-wake-clip.d.ts",
       "import": "./terminal-shell/dist/audio/retained-wake-clip.js"
     },
-    "./terminal-shell/recall-capture": {
-      "bun": "./terminal-shell/src/recall-capture.ts",
-      "types": "./terminal-shell/dist/recall-capture.d.ts",
-      "import": "./terminal-shell/dist/recall-capture.js"
-    },
     "./terminal-shell/feed-token-routes": {
       "bun": "./terminal-shell/src/feed-token-routes.ts",
       "types": "./terminal-shell/dist/feed-token-routes.d.ts",
       "import": "./terminal-shell/dist/feed-token-routes.js"
-    },
-    "./terminal-shell/recall-query": {
-      "bun": "./terminal-shell/src/recall-query.ts",
-      "types": "./terminal-shell/dist/recall-query.d.ts",
-      "import": "./terminal-shell/dist/recall-query.js"
-    },
-    "./terminal-shell/recall-bundle": {
-      "bun": "./terminal-shell/src/recall-bundle.ts",
-      "types": "./terminal-shell/dist/recall-bundle.d.ts",
-      "import": "./terminal-shell/dist/recall-bundle.js"
-    },
-    "./terminal-shell/recall-review": {
-      "bun": "./terminal-shell/src/recall-review.ts",
-      "types": "./terminal-shell/dist/recall-review.d.ts",
-      "import": "./terminal-shell/dist/recall-review.js"
     },
     "./terminal-shell/modal-token-pipeline": {
       "bun": "./terminal-shell/src/modal-token-pipeline.ts",
@@ -2992,6 +2992,11 @@
       "bun": "./terminal-shell/src/command-palette.ts",
       "types": "./terminal-shell/dist/command-palette.d.ts",
       "import": "./terminal-shell/dist/command-palette.js"
+    },
+    "./terminal-shell/setup-command": {
+      "bun": "./terminal-shell/src/setup-command.ts",
+      "types": "./terminal-shell/dist/setup-command.d.ts",
+      "import": "./terminal-shell/dist/setup-command.js"
     },
     "./terminal-shell/command-palette-types": {
       "bun": "./terminal-shell/src/command-palette-types.ts",
@@ -3167,6 +3172,11 @@
       "bun": "./terminal-shell/src/secrets-command.ts",
       "types": "./terminal-shell/dist/secrets-command.d.ts",
       "import": "./terminal-shell/dist/secrets-command.js"
+    },
+    "./terminal-shell/memory-command": {
+      "bun": "./terminal-shell/src/memory-command.ts",
+      "types": "./terminal-shell/dist/memory-command.d.ts",
+      "import": "./terminal-shell/dist/memory-command.js"
     },
     "./terminal-shell/device-capabilities-command": {
       "bun": "./terminal-shell/src/device-capabilities-command.ts",
@@ -3522,11 +3532,6 @@
       "bun": "./terminal-shell/src/permission-prompt-facts.ts",
       "types": "./terminal-shell/dist/permission-prompt-facts.d.ts",
       "import": "./terminal-shell/dist/permission-prompt-facts.js"
-    },
-    "./terminal-shell/recall-dispatch": {
-      "bun": "./terminal-shell/src/recall-dispatch.ts",
-      "types": "./terminal-shell/dist/recall-dispatch.d.ts",
-      "import": "./terminal-shell/dist/recall-dispatch.js"
     },
     "./terminal-shell/command-arguments": {
       "bun": "./terminal-shell/src/command-arguments.ts",

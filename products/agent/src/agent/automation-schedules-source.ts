@@ -1,7 +1,7 @@
 /**
  * Connected-host schedules for the Activity view's "Coming up".
  *
- * Schedules a person creates (`/schedule remind`, a promoted routine, the
+ * Schedules a person creates (`/schedule add`, a promoted routine, the
  * schedule tools) live on the connected host, the same place the away digest
  * reads their run outcomes from (automation-runs-source.ts). This reads the
  * host's `automation.schedules.list` and keeps only what "Coming up" shows:

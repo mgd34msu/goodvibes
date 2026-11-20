@@ -237,7 +237,6 @@ export function initialTerminalRuntimeFields(
   return {
     model: config.get('provider.model') as string,
     provider: providerFromModel(config.get('provider.model')),
-    debugMode: false,
     systemPrompt: loadSystemPrompt(),
     reasoningEffort: (config.get('provider.reasoningEffort') as string | undefined) ?? '',
   };

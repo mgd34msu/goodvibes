@@ -5,7 +5,6 @@
 export interface MutableRuntimeState {
   model: string;
   provider: string;
-  debugMode: boolean;
   systemPrompt: string;
   /** Empty string if not configured. */
   reasoningEffort: string;

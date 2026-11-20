@@ -394,7 +394,7 @@ Mail is read and sent by the daemon over IMAP and SMTP (or Gmail through Google,
 ```
 
 - The message is the words after the options; `--subject` takes one quoted value.
-- `send` shows the recipient, subject and message and asks once, because a sent message cannot be recalled. `--yes` typed by the owner answers in advance.
+- `send` shows the recipient, subject and message and asks once, because a sent message cannot be recalled. `--yes` typed by the owner right after `send` answers in advance; the same word inside the message is text and still asks (the word itself is dropped from the message). The same holds for `/channels send` and `/notify send`.
 - The same exact message is not sent twice from one session. `--again` ("Send it again") sends it anyway (for a retry after a timeout); check the Sent folder first.
 - The terminal app reads and sends through the daemon; the Agent uses its own mail service on the same `surfaces.email.*` settings and records each message it reads as untrusted content.
 - In the terminal app message bodies are printed as transcript output only; they never enter the model's history from `/mail read`.

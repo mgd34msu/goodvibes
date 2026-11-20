@@ -98,15 +98,3 @@ export function resolveViewName(name: string, modalRedirect: (name: string) => s
   if (id.endsWith('-modal')) return { kind: 'modal', name: id };
   return null;
 }
-
-/** A one-line description of where a view name goes. */
-export function describeViewRoute(route: ViewRoute): string {
-  switch (route.kind) {
-    case 'agents': return route.hosted ? 'Your agents (the hosted session)' : 'Your agents';
-    case 'usage': return 'Usage';
-    case 'changes': return route.mode === 'review' ? 'Changes (review)' : 'Changes';
-    case 'notifications': return 'Notifications';
-    case 'sessions': return 'Sessions';
-    case 'modal': return route.name;
-  }
-}

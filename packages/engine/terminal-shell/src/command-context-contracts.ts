@@ -15,7 +15,6 @@ import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 export interface TerminalCommandRuntimeState {
   model: string;
   provider: string;
-  debugMode: boolean;
   systemPrompt: string;
   reasoningEffort: string;
   sessionId: string;

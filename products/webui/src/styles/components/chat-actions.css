@@ -604,6 +604,13 @@
   white-space: nowrap;
 }
 
+.tool-line--failed .tool-line__result {
+  flex: 1 1 100%;
+  margin-left: calc(1em + 8px);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .tool-line__result--good { color: var(--ok); }
 .tool-line__result--warn { color: var(--warn); }
 .tool-line__result--bad { color: var(--bad); }

@@ -251,8 +251,10 @@ const ADAPTERS: readonly AdapterRow[] = [
 
 test('every webhook adapter answers 401 to a missing, wrong or replayed credential and asks nothing; with the right one a refused sender starts nothing', async () => {
   const outcomes: Array<Record<string, unknown>> = [];
+  // One daemon with every row's surface configured (no two rows set the same key), as one owner sets up many channels;
+  // each request is judged by what it changed.
+  const daemon = await daemonFor(Object.assign({}, ...ADAPTERS.map((row) => row.config)), Object.assign({}, ...ADAPTERS.map((row) => row.secrets ?? {})));
   for (const row of ADAPTERS) {
-    const daemon = await daemonFor(row.config, row.secrets);
     for (const credential of ['right', 'wrong', 'none'] as const) {
       const before = footprint(daemon);
       const response = await row.handle(await row.request(credential), daemon);
@@ -285,10 +287,11 @@ test('every webhook adapter answers 401 to a missing, wrong or replayed credenti
         send: (d) => handleSignalSurfaceWebhook(post('http://localhost/webhook/signal', json({ source: '+15550002', message: 'hello' }), { 'x-goodvibes-signal-token': 'env-token' }), d.adapterContext()) },
     ];
     for (const row of extra) {
-      const daemon = await daemonFor(row.config, row.secrets);
-      const before = footprint(daemon);
-      const response = await row.send(daemon);
-      outcomes.push({ surface: row.name, credential: 'right', status: response.status, reached: JSON.stringify(footprint(daemon)) === JSON.stringify(before) });
+      // The replays reuse the daemon above (same keys); the unresolvable reference needs its own setting.
+      const target = row.name === 'signal unresolvable reference' ? await daemonFor(row.config, row.secrets) : daemon;
+      const before = footprint(target);
+      const response = await row.send(target);
+      outcomes.push({ surface: row.name, credential: 'right', status: response.status, reached: JSON.stringify(footprint(target)) === JSON.stringify(before) });
     }
   } finally {
     if (previousSignalEnv === undefined) delete process.env.SIGNAL_BRIDGE_TOKEN;

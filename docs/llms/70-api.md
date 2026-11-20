@@ -375,25 +375,25 @@ A call made after the credential was revoked answers `{"type":"response","id":".
 
 Every error is a JSON object. Only `error` (one sentence for a person) is always present; branch on `code`, never on the text. The other fields an error can carry (`code`, `status`, `category`, `state`, `next`, `hint`, `source`, `recoverable`, `requestId`, `retryAfterMs`, the provider fields, `requiredScopes`/`grantedScopes`/`missingScopes` on `MISSING_SCOPE`, and `changes` on `TARGET_CHANGED`) are described in "Error body" in the reference. What a client must know about them:
 
-- Many answers carry only some fields: `{"error":"Unknown approval","status":404}` has no `code`; `{"error":"Missing required field: task (non-empty string)"}` has neither `code` nor `status`; the unknown-`modelId` `500` has `category` but no `code`. Read the HTTP status from the response, not from the body.
+- Many answers carry only some fields: `{"error":"Invalid config key","status":400}` has no `code`; `{"error":"Unknown shared session","code":"SESSION_NOT_FOUND","status":404}` has no `category`. Read the HTTP status from the response, not from the body.
 - `recoverable` is often absent; when present it settles whether to retry (see "Deciding whether to retry").
 - A `429` gives its wait as `retryAfterMs` in the body or as the `Retry-After` header (seconds), or neither.
 - `TARGET_CHANGED` (`409`) means what a preview or confirmation showed is no longer what the call would act on; nothing was done. `changes` lists each changed field as `{"field","was","now"}` (`now` is `null` when the target is gone) and `next` names the call that shows it again: look again, never repeat the same request. `CREDENTIAL_NOT_FOR_TARGET` means a credential was about to go to a daemon it was not issued for, and nothing was sent. `CREDENTIAL_DESTINATION_UNBOUND` (`409`, from `config.set`, `config.setMany` and `config.reset`) means the write would move where a configured credential is sent (`judgment.endpoint`, a channel's server or bridge URL such as `surfaces.ntfy.baseUrl`) without stating that credential; nothing was saved: send the destination together with its credential key in one `config.setMany` (its current value keeps it, an empty value or `none` clears it), or clear the credential first.
 - Some refusals are not errors: a `200` with `"applied":false` and a `refusal` (approvals, the owner inbox), and a `202`/`409` with `"mode":"rejected"` (`POST /task` in a session, `sessions.steer`).
 - `/v1/*` routes answer in the OpenAI error shape (see "OpenAI-compatible endpoints"); WebSocket calls wrap the body in `{"type":"response","ok":false,"status":...,"body":{...}}`.
 
-Examples captured from a 3.3.1 daemon:
+Examples captured from a 3.3.2 daemon:
 
 ```json
 {"error":"Authentication required","code":"AUTH_REQUIRED","category":"authentication","source":"runtime","status":401}
 ```
 
 ```json
-{"error":"Missing required scope for approvals.list: read:approvals","code":"MISSING_SCOPE","category":"authorization","source":"permission","recoverable":false,"status":403,"state":"the credential does not hold read:approvals","next":["Use a credential that holds read:approvals, or an admin session."],"requiredScopes":["read:approvals"],"grantedScopes":["read:events","read:sessions","read:tasks","read:transcripts"],"missingScopes":["read:approvals"]}
+{"error":"Missing required scope for approvals.list: read:approvals","code":"MISSING_SCOPE","category":"authorization","source":"permission","recoverable":false,"status":403,"state":"the credential does not hold read:approvals","next":["Use a credential that holds read:approvals, or an admin session."],"requiredScopes":["read:approvals"],"grantedScopes":["read:events","read:sessions","read:tasks","read:transcripts"],"missingScopes":["read:approvals"],"effect":"approvals.read","missing":"read:approvals"}
 ```
 
 ```json
-{"error":"Gateway method requires admin access: sessions.create","code":"ADMIN_REQUIRED","category":"authorization","status":403}
+{"error":"Gateway method requires admin access: sessions.create","code":"ADMIN_REQUIRED","category":"authorization","status":403,"effect":"sessions.administer","missing":"admin","next":["Sign in with an admin account or use the operator token."]}
 ```
 
 ```json
@@ -767,7 +767,7 @@ When the permission mode needs the owner to decide a tool call, the gate raises 
    | `403` | `ADMIN_REQUIRED` | Not an admin credential. |
    | `403` | `{"error":"approvals.approve: approval.answer is the owner's own act; an admin cannot make it.","code":"OWNER_ONLY","effect":"approval.answer","missing":"owner",...}` | An admin credential that is not the owner's (an admin sign-in of someone else, a token minted for automation). Only the owner answers an approval. |
    | `403` | `{"error":"approvals.approve is the owner's own act; a call the Agent makes for him is refused. The owner does it from his own app.","code":"OWNER_ONLY","category":"authorization","status":403}` (`approvals.deny` for a denial) | The request came with the Agent's own credential (credential kind `agent`). Observed the same through `POST /api/approvals/{id}/approve` and through invoke. Applies to approve and deny, not to claim or cancel. |
-   | `404` | `{"error":"Unknown approval","status":404}` | No approval has that id. |
+   | `404` | `{"error":"No approval has that id.","code":"APPROVAL_NOT_FOUND","state":"not in this daemon's approvals","next":["List approvals again and act on an id it shows."],"status":404}` | No approval has that id. |
 
    The contract marks approve and deny as owner-only but does not name the `OWNER_ONLY` code or the `400` validation messages; the table above is what the daemon returns. The `OWNER_ONLY` check runs before the approval is looked up, so it answers the same for an id that does not exist. The approval id is taken from the path; an `approvalId` in the body is not used.
 4. `POST /api/approvals/<approvalId>/claim` marks that you are handling it (advisory). `POST /api/approvals/<approvalId>/cancel` withdraws it. Both take `expectedRevision`.
@@ -794,7 +794,7 @@ All `config.*` and `credentials.*` methods are admin methods: a non-admin, whate
 | `credentials.set` | invoke only: `{"body":{"key":"<config key>","value":"<secret>"}}` | `write:config`, owner-only | Store a secret for a credential setting (for example `surfaces.telegram.botToken`) in the encrypted store and point the setting at it. Answers `success`, `key`, `secretKey`, `scope`, `reference`, `configScope`, `ownership`, `credentialScope`; never the value. |
 | `credentials.delete` | invoke only: `{"body":{"key":"<config key>"}}` | `write:config`, owner-only | Delete the stored secret, then the reference. `cleared: false` means nothing was stored (not an error). |
 
-Example, checked against a 3.3.1 daemon:
+Example, checked against a 3.3.2 daemon:
 
 ```sh
 curl -sS -X POST -H "Authorization: Bearer $GV_TOKEN" -H 'content-type: application/json' \
@@ -986,7 +986,7 @@ Always read `withheldDomains` in the `ready` frame: a stream that opened is not 
 
 #### What a stream without `domains` carries
 
-Two kinds of frame travel on a stream, and `domains` filters them differently (from the code, `control-plane/gateway.ts` and `gateway-scope-enforcement.ts`; the admin results observed on a 3.3.1 daemon):
+Two kinds of frame travel on a stream, and `domains` filters them differently (from the code, `control-plane/gateway.ts` and `gateway-scope-enforcement.ts`; the admin results observed on a 3.3.2 daemon):
 
 | Frames | Opened without `domains` | Opened with `domains=<list>` |
 | --- | --- | --- |

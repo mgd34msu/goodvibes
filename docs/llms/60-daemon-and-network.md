@@ -368,7 +368,7 @@ goodvibes-daemon mcp serve --categories all --allow-write --allow-destructive
 | `--allow-destructive` | Also serve the methods the contract marks dangerous. |
 | `--host`, `--port`, `--token` | As for `status`. |
 
-With no flags it serves the agent slice: the sessions, tasks, contracts and approvals methods that read, plus creating a session, sending it a message and steering it. Creating a session, sending a message and steering are admin methods: with a scoped device token as `--token`, those tools are listed but the daemon refuses each call with `403` `ADMIN_REQUIRED`, which the MCP client receives as a failed tool call. Give `mcp serve` an admin credential (a device token minted without a scope list) if those tools must work. In 3.3.1 that is 24 tools; the command prints the count on standard error when it starts, for example `goodvibes-daemon mcp serve: serving 24 tools (sessions, tasks, contracts, approvals; reads and the session lifecycle); --allow-write and --categories serve more`.
+With no flags it serves the agent slice: the sessions, tasks, contracts and approvals methods that read, plus creating a session, sending it a message and steering it. Creating a session, sending a message and steering are admin methods: with a scoped device token as `--token`, those tools are listed but the daemon refuses each call with `403` `ADMIN_REQUIRED`, which the MCP client receives as a failed tool call. Give `mcp serve` an admin credential (a device token minted without a scope list) if those tools must work. In 3.3.2 that is 25 tools; the command prints the count on standard error when it starts, for example `goodvibes-daemon mcp serve: serving 25 tools (sessions, tasks, contracts, approvals; reads and the session lifecycle); --allow-write and --categories serve more`.
 
 Standard output carries only protocol frames; every message for a person goes to standard error. When the daemon is not running, or the token is missing or refused, it prints one line on standard error and exits `1` before writing any frame. It exits `0` when the client closes standard input. A client cancellation (`notifications/cancelled`) stops the request to the daemon.
 
@@ -985,7 +985,7 @@ Three ways reach the daemon from outside the local network. None is on by defaul
 
 ### Tailscale
 
-Tailscale gives the daemon an encrypted address and a real `https://` name on the owner's tailnet with no certificate handling. Manual setup, which works in 3.3.1:
+Tailscale gives the daemon an encrypted address and a real `https://` name on the owner's tailnet with no certificate handling. Manual setup in 3.3.2:
 
 1. Install Tailscale on the daemon's machine and the phone, and log both in (`tailscale up`).
 2. Serve the daemon's control-plane port over HTTPS on the tailnet:
@@ -998,15 +998,18 @@ Tailscale gives the daemon an encrypted address and a real `https://` name on th
 
    ```sh
    goodvibes-daemon config set web.publicBaseUrl https://desktop.your-tailnet.ts.net
+   goodvibes-daemon config set controlPlane.cors.allowedOrigins https://desktop.your-tailnet.ts.net
    goodvibes-daemon webui enable        # add --bundle-dir <dir> when no bundle is configured yet
    ```
 
+   The second line is needed in 3.3.2: `tailscale serve` hands the daemon a plain `http` request, so a page on the `https://` tailnet name is not the daemon's own origin, and without that origin in `controlPlane.cors.allowedOrigins` the web UI's sign-in answers `403` `ORIGIN_NOT_ALLOWED` (`This browser origin is not allowed to sign this browser in`). `web.publicBaseUrl` alone does not allow it. The setting is a comma-separated list: add the address to any origins already there.
+
 4. On the phone, open `https://desktop.your-tailnet.ts.net` and pair (`goodvibes pair`). The page is a secure context, so installing the app, push and the microphone all work.
-5. To stop: `tailscale serve --https=443 off`, then `goodvibes-daemon config unset web.publicBaseUrl`.
+5. To stop: `tailscale serve --https=443 off`, then `goodvibes-daemon config unset web.publicBaseUrl` and remove the address from `controlPlane.cors.allowedOrigins`.
 
 `tailscale serve` forwards from `localhost`, so the daemon can stay bound to loopback with `controlPlane.enabled` `false`.
 
-The daemon also has three API methods for this (Settings, General, Network in the web UI shows them): `tailscale.get` (read-only: is the binary there, logged in, the MagicDNS name, the serve the daemon started), `tailscale.serve.run` (admin: runs `tailscale serve --bg <port>`, records a receipt, and on success sets `web.publicBaseUrl` to the `https://` address) and `tailscale.serve.stop` (admin: runs `tailscale serve --https=443 off` and puts `web.publicBaseUrl` back). `tailscale.serve.run` serves the port the web UI is served on, the control-plane port while the daemon serves the bundle; with no web UI served it is refused with `409` `WEB_UI_NOT_SERVED` and runs nothing (serve the bundle first with `goodvibes-daemon webui enable`). When the tailnet has Serve switched off, Tailscale prints a link to switch it on; the receipt carries it as `enableUrl`.
+The daemon also has three API methods for this (Settings, General, Network in the web UI shows them): `tailscale.get` (read-only: is the binary there, logged in, the MagicDNS name, the serve the daemon started), `tailscale.serve.run` (admin: runs `tailscale serve --bg <port>`, records a receipt, and on success sets `web.publicBaseUrl` to the `https://` address; it does not add that address to `controlPlane.cors.allowedOrigins`, so set it as in step 3) and `tailscale.serve.stop` (admin: runs `tailscale serve --https=443 off` and puts `web.publicBaseUrl` back). `tailscale.serve.run` serves the port the web UI is served on, the control-plane port while the daemon serves the bundle; with no web UI served it is refused with `409` `WEB_UI_NOT_SERVED` and runs nothing (serve the bundle first with `goodvibes-daemon webui enable`). When the tailnet has Serve switched off, Tailscale prints a link to switch it on; the receipt carries it as `enableUrl`.
 
 ### The relay
 
@@ -1024,7 +1027,7 @@ Setting it up, end to end:
 
    From the published `@goodvibes/engine` package the same program is `daemon-api/dist/relay-server-entry.js`. `GOODVIBES_RELAY_PORT` sets the port (default `8787`); `GOODVIBES_RELAY_HOST` sets the bind address (default all interfaces; use `127.0.0.1` behind a reverse proxy on the same machine). `GET /` on the relay reports how many daemons and devices are connected.
 2. Put TLS in front of it so it is reached as `wss://relay.example.com`.
-3. Point the daemon at it and restart. The registration is opened only when the daemon starts: a running daemon never dials a newly set or changed `relay.url` by itself (the code that would re-read it has no caller in 3.3.1).
+3. Point the daemon at it and restart. The registration is opened only when the daemon starts: a running daemon never dials a newly set or changed `relay.url` by itself (in 3.3.2 the code that would re-read it has no caller).
 
    ```sh
    goodvibes-daemon config set relay.url wss://relay.example.com

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { openRecordLog, type RecordLog } from '../state/record-log.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
 import { WITHHELD_PROMPT_ANSWER, type PermissionPromptDecision, type PermissionPromptRequest, type PermissionRequestHandler } from '../permissions/prompt.js';
@@ -304,6 +305,34 @@ function decodeStoredApproval(value: unknown): SharedApprovalRecord {
   return { ...value, status: outcome.status, decision: { ...decision, approved: outcome.approved } } as unknown as SharedApprovalRecord;
 }
 
+/**
+ * A record of the snapshot file 3.3.1 kept (`approvals.json`, `{ approvals: [...] }`),
+ * in the form this version stores. Revision and sequence start at 1 and the
+ * home node is this broker's. The requester is the one 3.3.1 implied: an ask
+ * raised over the wire stayed open for its caller after a restart, and any
+ * other open ask was cancelled. A finished record written before dispositions
+ * takes the disposition its status names. The result is read by
+ * decodeStoredApproval like any other line.
+ */
+function approvalFromSnapshotFile(value: unknown, homeNode: string): Record<string, unknown> | null {
+  if (!isRecord(value) || typeof value['id'] !== 'string') return null;
+  const metadata = value['metadata'];
+  const upgraded: Record<string, unknown> = {
+    ...value,
+    revision: 1,
+    sequence: 1,
+    homeNode,
+    requester: isRecord(metadata) && metadata['raisedVia'] === 'approvals.raise' ? { kind: 'wire', holds: [] } : { kind: 'in-process' },
+  };
+  const decision = value['decision'];
+  const status = value['status'];
+  if (isRecord(decision) && decision['disposition'] === undefined && typeof status === 'string'
+    && TERMINAL_APPROVAL_STATUSES.has(status as SharedApprovalStatus)) {
+    upgraded['decision'] = { ...decision, disposition: status };
+  }
+  return upgraded;
+}
+
 function argumentsDigest(args: unknown): string {
   return `sha256:${createHash('sha256').update(stableJson(args)).digest('hex')}`;
 }
@@ -507,6 +536,7 @@ export class ApprovalBroker {
     this.log?.close();
     const log = openRecordLog<Record<string, unknown>>(this.logPath, { fsync: 'each' });
     this.log = log;
+    if (log.size === 0) this.#carryForwardSnapshotFile(log);
     // The newest line of each id is its record.
     const newest = new Map<string, unknown>();
     let position = 0;
@@ -535,6 +565,36 @@ export class ApprovalBroker {
     if (log.size > this.approvals.size + COMPACT_SLACK) await this.#compact();
     this.loaded = true;
     this.rearmRestoredTimers();
+  }
+
+  /**
+   * 3.3.1 kept approvals in one snapshot file, `approvals.json` beside this
+   * log. While the log is empty and that file is there, its records are
+   * appended to the log in this version's form, each line synced, and only
+   * then is the file removed. It runs once: afterwards the log has lines or
+   * the file is gone. A file that cannot be read is left where it is, named.
+   */
+  #carryForwardSnapshotFile(log: RecordLog<Record<string, unknown>>): void {
+    const snapshotPath = this.logPath.endsWith('.jsonl') ? this.logPath.slice(0, -1) : null;
+    if (!snapshotPath || !existsSync(snapshotPath)) return;
+    let records: unknown[];
+    try {
+      const snapshot: unknown = JSON.parse(readFileSync(snapshotPath, 'utf8'));
+      if (!isRecord(snapshot) || !Array.isArray(snapshot['approvals'])) throw new Error('it holds no approvals list');
+      records = snapshot['approvals'] as unknown[];
+    } catch (error) {
+      logger.warn('Approvals saved by an earlier version could not be read and were left in place', { file: snapshotPath, error: failureText(error) });
+      return;
+    }
+    let carried = 0;
+    for (const record of records) {
+      const upgraded = approvalFromSnapshotFile(record, this.homeNode);
+      if (!upgraded) continue;
+      log.append(upgraded);
+      carried += 1;
+    }
+    rmSync(snapshotPath, { force: true });
+    logger.info('Approvals saved by an earlier version were carried into the approvals log', { from: snapshotPath, to: this.logPath, approvals: carried });
   }
 
   /**

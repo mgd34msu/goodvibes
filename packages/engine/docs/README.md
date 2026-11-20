@@ -115,3 +115,4 @@ Repository-wide policies and engine references:
 - [Installation and updates](../../../docs/installation.md)
 - [Security policy](../../../SECURITY.md)
 - [Changelog](../CHANGELOG.md)
+- [Releasing GoodVibes](./release-and-publishing.md)

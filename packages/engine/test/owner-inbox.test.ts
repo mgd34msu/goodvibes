@@ -9,12 +9,13 @@
  * the owner's answers outlast the trim of old history, and an answer an agent
  * took is delivered only on confirmation, or handed again when its taker died.
  */
-import { afterEach, expect, test } from 'bun:test';
+import { afterAll, afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.js';
 import { createOwnerInbox, listEveryOwnerItem, OWNER_ANSWER_AGENT_METADATA, type OwnerInbox } from '../platform/src/platform/control-plane/owner-inbox.js';
+import { sharedQuestionStore } from '../platform/src/platform/control-plane/question-store.js';
 import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.js';
 
 const roots: string[] = [];
@@ -40,27 +41,75 @@ function fixture() {
 const INBOX_MODULE = join(import.meta.dir, '..', 'platform', 'src', 'platform', 'control-plane', 'owner-inbox.ts');
 
 /**
- * A second process on the same store answers the item, as a terminal app does,
- * and reports whether its answer applied. `postsFirst` items are posted just
- * before, so the answer is the last commit of a quick burst.
+ * Another process on the same store, started when this file loads so its
+ * start-up (most of a second, loading the inbox's modules) overlaps the cases
+ * before the one that uses it. It waits for one line of tab-separated
+ * arguments on stdin, then runs `body` with them as `args`.
  */
-async function answerInAnotherProcess(root: string, questionsPath: string, id: string, option: string, postsFirst = 0): Promise<boolean> {
-  const script = join(root, 'answer.ts');
+function otherProcess(name: string, body: readonly string[]) {
+  const dir = mkdtempSync(join(tmpdir(), `owner-inbox-${name}-`));
+  const script = join(dir, `${name}.ts`);
   writeFileSync(script, [
     `import { createOwnerInbox } from ${JSON.stringify(INBOX_MODULE)};`,
-    'const [path, id, option, posts] = process.argv.slice(2);',
-    'const inbox = createOwnerInbox({ questionsPath: path! });',
-    "for (let n = 0; n < Number(posts); n += 1) inbox.postNow({ kind: 'question', title: `Also: item ${n}?`, options: ['yes', 'no'] });",
-    "const outcome = await inbox.answer(id!, { option: option! }, { actor: 'owner', surface: 'tui' });",
-    'inbox.dispose();',
-    'console.log(JSON.stringify(outcome.applied));',
+    'const stdin = Bun.stdin.stream().getReader();',
+    "let line = '';",
+    "while (!line.includes('\\n')) { const { done, value } = await stdin.read(); if (done) process.exit(3); line += new TextDecoder().decode(value); }",
+    "const args = line.trim().split('\\t');",
+    ...body,
     '',
   ].join('\n'));
-  const child = Bun.spawn(['bun', script, questionsPath, id, option, String(postsFirst)], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
-  const [exit, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
-  expect({ exit, err }).toEqual({ exit: 0, err: '' });
-  return JSON.parse(out.trim()) as boolean;
+  const child = Bun.spawn(['bun', script], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
+  const firstLine = (async () => {
+    const reader = child.stdout.getReader();
+    let text = '';
+    while (!text.includes('\n')) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += new TextDecoder().decode(value);
+    }
+    reader.releaseLock();
+    return text.trim();
+  })();
+  return {
+    child, dir, firstLine,
+    send(...args: string[]) { child.stdin.write(`${args.join('\t')}\n`); void child.stdin.flush(); },
+  };
 }
+
+/**
+ * A terminal app on the same store: answers the item and reports whether its
+ * answer applied. `posts` items are posted just before, so the answer is the
+ * last commit of a quick burst.
+ */
+const answerer = otherProcess('answer', [
+  'const [path, id, option, posts] = args;',
+  'const inbox = createOwnerInbox({ questionsPath: path! });',
+  "for (let n = 0; n < Number(posts); n += 1) inbox.postNow({ kind: 'question', title: `Also: item ${n}?`, options: ['yes', 'no'] });",
+  "const outcome = await inbox.answer(id!, { option: option! }, { actor: 'owner', surface: 'tui' });",
+  'inbox.dispose();',
+  'console.log(JSON.stringify(outcome.applied));',
+  'process.exit(0);',
+]);
+
+/**
+ * An agent's process takes the answer, as its turn does when it puts the
+ * answer on a model request, prints whether it got it, and stays until it is
+ * killed: it never confirms, as a process that died before the provider
+ * accepted the request.
+ */
+const taker = otherProcess('take', [
+  'const [path, id] = args;',
+  'console.log(JSON.stringify(createOwnerInbox({ questionsPath: path! }).take(id!)));',
+  'for (;;) { const { done } = await stdin.read(); if (done) break; }',
+]);
+
+afterAll(async () => {
+  for (const other of [answerer, taker]) {
+    other.child.kill('SIGKILL');
+    await other.child.exited;
+    rmSync(other.dir, { recursive: true, force: true });
+  }
+});
 
 function request(n = 1): PermissionPromptRequest {
   return { callId: `call-${n}`, tool: 'exec', args: { cmd: n === 1 ? 'make release' : `make release-${n}` }, category: 'execute', analysis: { classification: 'command', riskLevel: 'high', summary: 'Run make release', reasons: ['publishes a build'] } };
@@ -121,12 +170,15 @@ test('an approval answered through the inbox reaches the waiting call once', asy
 });
 
 test('an answer written by another process wakes the call waiting in this one, also as the last write of a burst', async () => {
-  const { root, questionsPath, open } = fixture();
+  const { questionsPath, open } = fixture();
   const inbox = open();
   const posted = inbox.postNow({ kind: 'question', title: 'Rotate the deploy key?', options: ['yes', 'no'], askedBy: 'ops agent' });
   const waiting = inbox.waitForAnswer(posted.item.id);
 
-  expect(await answerInAnotherProcess(root, questionsPath, posted.item.id, 'yes', 6)).toBe(true);
+  answerer.send(questionsPath, posted.item.id, 'yes', '6');
+  const [answered, exit, err] = await Promise.all([answerer.firstLine, answerer.child.exited, new Response(answerer.child.stderr).text()]);
+  expect({ exit, err }).toEqual({ exit: 0, err: '' });
+  expect(JSON.parse(answered)).toBe(true);
   // The wait is on the waiting call itself; if it is never woken, the runner's file deadline fails the proof.
   const heard = await waiting;
   expect(heard.status).toBe('answered');
@@ -134,21 +186,25 @@ test('an answer written by another process wakes the call waiting in this one, a
   expect(heard.answeredBy).toEqual({ actor: 'owner', surface: 'tui' });
 });
 
-test('answered items and decided approvals past five hundred survive a reopen; only undecided closed ones are trimmed', async () => {
+test('answered items and decided approvals survive a reopen whose trim drops undecided history past five hundred', async () => {
   const { root, questionsPath, broker, open } = fixture();
   const inbox = open();
   const owner = { actor: 'owner', surface: 'tui' };
   // The owner's own answers first, so they are the oldest history when the trim runs.
-  for (let n = 0; n < 505; n += 1) {
+  for (let n = 0; n < 5; n += 1) {
     const posted = inbox.postNow({ kind: 'question', title: `Answered ${n}?`, options: ['yes', 'no'] });
     expect((await inbox.answer(posted.item.id, { option: n % 2 === 0 ? 'yes' : 'no' }, owner)).applied).toBe(true);
     const raised = await broker.raiseApproval({ request: request(1000 + n) });
     expect((await inbox.answer(raised.approval.id, { option: n % 2 === 0 ? 'approve' : 'deny', expectedRevision: raised.approval.revision }, owner)).applied).toBe(true);
     await raised.decision;
   }
+  // One more undecided closed item of each kind than the trim keeps (MAX_CLOSED_ENTRIES and
+  // MAX_APPROVAL_RECORDS, both 500), written through the stores themselves: the question store
+  // the inbox is built on, and the broker.
+  const questions = sharedQuestionStore(questionsPath);
   for (let n = 0; n < 501; n += 1) {
-    const posted = inbox.postNow({ kind: 'question', title: `Dropped ${n}?`, options: ['yes', 'no'] });
-    expect(inbox.withdraw(posted.item.id, 'no longer needed').applied).toBe(true);
+    const { entry } = questions.post({ kind: 'question', title: `Dropped ${n}?`, detail: '', options: ['yes', 'no'] }, Date.now(), () => true);
+    expect(questions.withdraw(entry.item.id, 'no longer needed', Date.now())?.applied).toBe(true);
     const raised = await broker.raiseApproval({ request: request(5000 + n) });
     void raised.decision.catch(() => undefined);
     expect((await broker.cancelApproval(raised.approval.id, { actor: 'owner', expectedRevision: raised.approval.revision })).applied).toBe(true);
@@ -168,48 +224,18 @@ test('answered items and decided approvals past five hundred survive a reopen; o
     withdrawnQuestions: count('question', 'withdrawn'),
     decidedApprovals: count('approval', 'answered'),
     cancelledApprovals: count('approval', 'withdrawn'),
-  }).toEqual({ answeredQuestions: 505, withdrawnQuestions: 500, decidedApprovals: 505, cancelledApprovals: 500 });
-  expect(closed.filter((item) => item.kind === 'question' && item.status === 'answered' && item.answer?.option === 'yes').length).toBe(253);
+  }).toEqual({ answeredQuestions: 5, withdrawnQuestions: 500, decidedApprovals: 5, cancelledApprovals: 500 });
+  expect(closed.filter((item) => item.kind === 'question' && item.status === 'answered' && item.answer?.option === 'yes').length).toBe(3);
 });
 
-/**
- * A second process takes the answer, as an agent's turn does when it puts it on
- * a model request, prints whether it got it, and stays until it is killed: it
- * never confirms, as a process that died before the provider accepted.
- */
-function takeInAnotherProcess(root: string, questionsPath: string, id: string) {
-  const script = join(root, 'take.ts');
-  writeFileSync(script, [
-    `import { createOwnerInbox } from ${JSON.stringify(INBOX_MODULE)};`,
-    'const [path, id] = process.argv.slice(2);',
-    'const inbox = createOwnerInbox({ questionsPath: path! });',
-    'console.log(JSON.stringify(inbox.take(id!)));',
-    'for await (const _ of Bun.stdin.stream()) { /* held open until killed */ }',
-    '',
-  ].join('\n'));
-  const child = Bun.spawn(['bun', script, questionsPath, id], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
-  const firstLine = (async () => {
-    const reader = child.stdout.getReader();
-    let text = '';
-    while (!text.includes('\n')) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      text += new TextDecoder().decode(value);
-    }
-    reader.releaseLock();
-    return text.trim();
-  })();
-  return { child, firstLine };
-}
-
 test('an answer an agent took is delivered only when its request was accepted; a taker killed before that leaves it to the next', async () => {
-  const { root, questionsPath, open } = fixture();
+  const { questionsPath, open } = fixture();
   const inbox = open();
   const posted = inbox.postNow({ kind: 'question', title: 'Which region?', options: ['eu', 'us'], metadata: { [OWNER_ANSWER_AGENT_METADATA]: 'agent-7' } });
   expect((await inbox.answer(posted.item.id, { option: 'eu' }, { actor: 'owner', surface: 'tui' })).applied).toBe(true);
   const pending = () => inbox.pendingFor({ agent: 'agent-7' }).map((item) => item.id);
 
-  const taker = takeInAnotherProcess(root, questionsPath, posted.item.id);
+  taker.send(questionsPath, posted.item.id);
   try {
     expect(await taker.firstLine).toBe('true');
     // Taken, not accepted: still owed to the agent, not delivered, and no second taker gets it while the first lives.

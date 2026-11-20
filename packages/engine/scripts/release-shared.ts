@@ -577,6 +577,6 @@ export function assertChangelogSection(version: string, label: string): void {
     `    ### Added\n` +
     `    ### Fixed\n` +
     `    ### Migration\n\n` +
-    `  See docs/release-and-publishing.md for the Changelog Gate requirements.`,
+    `  See packages/engine/docs/release-and-publishing.md for the release procedure.`,
   );
 }

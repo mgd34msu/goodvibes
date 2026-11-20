@@ -4,7 +4,7 @@
  * Creates an annotated git tag for the current engine version.
  * Usage: bun scripts/create-release-tag.ts [--push]
  *
- * See docs/release-and-publishing.md for the full release workflow.
+ * See packages/engine/docs/release-and-publishing.md for the full release procedure.
  */
 
 import { execFileSync } from 'node:child_process';

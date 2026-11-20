@@ -26,6 +26,7 @@ import { buildPermissionApprovalBrief } from './briefs/build.js';
 import { execRunPlace, permissionSubject } from './subject.js';
 import { composeConsequence, folderName, readingAnswer, undoFactOf, commandEffect, type SandboxFact } from './ask-consequence.js';
 import type { ModeInForceWords } from './decision-model-readiness.js';
+import { PURCHASE_AMOUNT_METADATA, PURCHASE_ITEM_METADATA, PURCHASE_SHOP_METADATA } from '../payments/payment-ports.js';
 
 export type AskKind =
   | 'run-command' | 'answer-command-prompt' | 'change-files' | 'fetch' | 'start-agent' | 'hand-off-work'
@@ -81,6 +82,16 @@ export interface AskPresentation {
   readonly details: readonly { readonly label: string; readonly value: string }[];
   /** One line for lists, channels and notifications: "Run bun test?" */
   readonly title: string;
+}
+
+/**
+ * The ask's words for a list row or an event: the question, place, subject,
+ * consequence, choices, remember tiers, why and title. The details (the tool,
+ * the arguments as JSON, the checklist, the review reasons) are left for the
+ * read of one item, so a list of asks stays small.
+ */
+export function compactAskPresentation(presentation: AskPresentation): AskPresentation {
+  return { ...presentation, details: [] };
 }
 
 /** The facts an ask is worded from, held by the surface that shows it. */
@@ -636,7 +647,10 @@ export function presentInboxAsk(item: OwnerItem, facts: AskFacts, request?: Perm
     }
     case 'purchase': {
       const purchaseId = metadataText(item, 'purchaseId');
-      const purchase = purchaseId !== undefined ? facts.purchase?.(purchaseId) : undefined;
+      // The window's facts as the payments host posted them on the item (payments/host/notifier.ts), else the host's lookup.
+      const posted = metadataText(item, PURCHASE_ITEM_METADATA);
+      const purchase: Partial<PurchaseAskFacts> | undefined = (purchaseId !== undefined ? facts.purchase?.(purchaseId) : undefined)
+        ?? (posted !== undefined ? { item: posted, merchant: metadataText(item, PURCHASE_SHOP_METADATA), price: metadataText(item, PURCHASE_AMOUNT_METADATA) } : undefined);
       const windowKind = purchase?.kind ?? (item.options.includes('go') ? 'veto' : item.options.includes('approve') ? 'approval' : undefined);
       const question = purchase?.item && purchase.price ? `Buy ${purchase.item}${purchase.merchant ? ` from ${purchase.merchant}` : ''} for ${purchase.price}?`
         : windowKind === 'veto' ? 'Let this purchase go ahead?' : windowKind === 'approval' ? 'Approve this purchase?' : 'A purchase update';

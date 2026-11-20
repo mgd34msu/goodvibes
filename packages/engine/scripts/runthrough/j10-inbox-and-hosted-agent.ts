@@ -66,7 +66,8 @@ try {
       listed = await tui.waitFor(/(\S+)\s+question\s+RTJ10 which colour should the release banner be\?/, 20_000, mark);
       if (listed) {
         mark = tui.raw().length;
-        await tui.type(`/questions answer ${listed[1]} green`);
+        // An answer cannot be undone, so the typed line says --yes right after its action word.
+        await tui.type(`/questions answer --yes ${listed[1]} green`);
         tui.press('\r');
         replied = await tui.waitFor(/Answered [^\n]*?green[^\n]{0,80}/, 20_000, mark);
       }
@@ -76,7 +77,7 @@ try {
     const after = ((await invoke(s.daemon, owner, 'inbox.list', { status: 'all' })).body as { items?: Array<Record<string, unknown>> }).items ?? [];
     const answeredItem = after.find((entry) => entry.id === item.id);
     const answer = answeredItem?.answer as { option?: string } | undefined;
-    journey.check('the owner answers it in the TUI with keystrokes, and the answer says tui', 'goodvibes (TUI) in a pseudo-terminal: type /questions list, then /questions answer <id> green; inbox.list',
+    journey.check('the owner answers it in the TUI with keystrokes, and the answer says tui', 'goodvibes (TUI) in a pseudo-terminal: type /questions list, then /questions answer --yes <id> green; inbox.list',
       `listed ${listed ? `id ${listed[1]}` : `no; screen ${short(tui.screen().slice(-600), 600)}`}; reply ${short(replied?.[0] ?? 'none', 200)}; item ${answeredItem?.status} ${JSON.stringify(answer ?? null)} by ${short(answeredItem?.answeredBy ?? 'nobody', 120)}`,
       listed !== null && /Answered/.test(replied?.[0] ?? '') && answeredItem?.status === 'answered' && answer?.option === 'green'
         // The answer is attributed to the app it was given in.

@@ -11,7 +11,8 @@ import {
   objectSchema,
 } from './method-catalog-shared.js';
 import { METADATA_SCHEMA, enumSchema } from './operator-contract-schemas-shared.js';
-import { APPROVAL_READING_SCHEMA } from './operator-contract-schemas-approvals.js';
+import { APPROVAL_READING_SCHEMA, ASK_PRESENTATION_SCHEMA } from './operator-contract-schemas-approvals.js';
+export { ASK_PRESENTATION_SCHEMA };
 
 export const OWNER_ITEM_KIND_SCHEMA = enumSchema(['approval', 'question', 'claim', 'purchase', 'queued-action', 'decision', 'report']);
 const POSTABLE_OWNER_ITEM_KIND_SCHEMA = enumSchema(['question', 'queued-action']);
@@ -43,44 +44,6 @@ const OWNER_ANSWER_DELIVERY_SCHEMA = objectSchema({
   to: STRING_SCHEMA,
   reason: STRING_SCHEMA,
 }, ['state', 'to']);
-
-const LABELLED_TEXT_SCHEMA = objectSchema({ label: STRING_SCHEMA, value: STRING_SCHEMA }, ['label', 'value']);
-
-/**
- * What an ask says (permissions/ask-presentation.ts AskPresentation): the
- * question, where, what it acts on, the consequence, the choices with their
- * keys, whether an answer can be remembered, why the person is asked, and the
- * rest as details. Every surface renders this and words nothing itself.
- */
-export const ASK_PRESENTATION_SCHEMA = objectSchema({
-  kind: enumSchema(['run-command', 'answer-command-prompt', 'change-files', 'fetch', 'start-agent', 'hand-off-work', 'change-setting',
-    'mcp-tool', 'other-tool', 'purchase', 'send-message', 'question', 'decision', 'claim', 'queued-action', 'report']),
-  mark: enumSchema(['ask', 'cannot-undo', 'question']),
-  question: STRING_SCHEMA,
-  place: objectSchema({ short: STRING_SCHEMA, full: STRING_SCHEMA }, ['short', 'full']),
-  subject: objectSchema({ kind: enumSchema(['command', 'paths', 'urls', 'text', 'money']), lines: arraySchema(STRING_SCHEMA) }, ['kind', 'lines']),
-  body: STRING_SCHEMA,
-  consequence: objectSchema({ text: STRING_SCHEMA, withPlace: STRING_SCHEMA, tone: enumSchema(['plain', 'cannot-undo']) }, ['text', 'withPlace', 'tone']),
-  choices: arraySchema(objectSchema({
-    id: STRING_SCHEMA,
-    label: STRING_SCHEMA,
-    key: STRING_SCHEMA,
-    default: BOOLEAN_SCHEMA,
-    danger: BOOLEAN_SCHEMA,
-    value: STRING_SCHEMA,
-  }, ['id', 'label'])),
-  remember: objectSchema({
-    offered: BOOLEAN_SCHEMA,
-    tiers: arraySchema(objectSchema({ tier: STRING_SCHEMA, label: STRING_SCHEMA, detail: STRING_SCHEMA }, ['tier', 'label', 'detail'])),
-    why: STRING_SCHEMA,
-  }, ['offered']),
-  typeToRefuse: BOOLEAN_SCHEMA,
-  countdown: objectSchema({ verb: STRING_SCHEMA, at: NUMBER_SCHEMA }, ['verb', 'at']),
-  origin: objectSchema({ sessionTitle: STRING_SCHEMA, by: STRING_SCHEMA }, ['by']),
-  why: STRING_SCHEMA,
-  details: arraySchema(LABELLED_TEXT_SCHEMA),
-  title: STRING_SCHEMA,
-}, ['kind', 'mark', 'question', 'choices', 'remember', 'typeToRefuse', 'why', 'details', 'title']);
 
 export const OWNER_ITEM_SCHEMA = objectSchema({
   id: STRING_SCHEMA,

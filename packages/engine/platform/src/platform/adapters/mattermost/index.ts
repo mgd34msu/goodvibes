@@ -88,7 +88,7 @@ export async function handleMattermostSurfaceWebhook(req: Request, context: Surf
       groupId: teamId ?? channelId,
       threadId,
       workspaceId: teamId,
-      conversationKind: threadId ? 'thread' : 'channel',
+      conversationKind: threadId ? 'thread' : direct ? 'direct' : 'channel',
       text: task,
       // An outgoing webhook only fires on its trigger word, which is the mention;
       // a direct message is addressed to the bot by definition.
@@ -106,7 +106,9 @@ export async function handleMattermostSurfaceWebhook(req: Request, context: Surf
       channelId,
       threadId,
       title: readString(body.channel_name) ?? channelId,
-      metadata: {},
+      // Who it is with and whether it is one-to-one: the owner's own
+      // conversations (owner-alert.ts isOwnerConversation) are read from these.
+      metadata: { ...(userId ? { userId } : {}), conversationKind: threadId ? 'thread' : direct ? 'direct' : 'channel' },
     },
     text: task,
     logLabel: 'handleMattermostSurfaceWebhook',

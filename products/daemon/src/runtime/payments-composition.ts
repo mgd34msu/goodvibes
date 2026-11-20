@@ -91,7 +91,7 @@ export interface PaymentsCompositionOptions {
    * key lookup, feed and claim of the daemon's inbox, the owner is also offered,
    * once per limit, to set a spending limit a purchase met unset.
    */
-  readonly ownerInbox?: (RestoredInboxWindow['port'] & Partial<Pick<LimitOfferInbox, 'latestByKey' | 'subscribe' | 'claim'>>) | undefined;
+  readonly ownerInbox?: (RestoredInboxWindow['port'] & Partial<Pick<LimitOfferInbox, 'latestByKey' | 'subscribe' | 'take' | 'confirmDelivered'>>) | undefined;
 }
 
 /** Most messages remembered so a poll that offers one again is not reported twice. */
@@ -291,12 +291,13 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
   const detachOwnerMail = options.ownerMail?.attach(createOrderMailObserver({ purchases, notifier, operations }));
   const inbox = options.ownerInbox;
   const setConfig = options.configManager.set?.bind(options.configManager);
-  const limitOffers = inbox?.latestByKey && inbox.subscribe && inbox.claim && setConfig
+  const limitOffers = inbox?.latestByKey && inbox.subscribe && inbox.take && inbox.confirmDelivered && setConfig
     ? createLimitOffers({
       postNow: (item) => inbox.postNow(item),
       latestByKey: inbox.latestByKey.bind(inbox),
       subscribe: inbox.subscribe.bind(inbox),
-      claim: inbox.claim.bind(inbox),
+      take: inbox.take.bind(inbox),
+      confirmDelivered: inbox.confirmDelivered.bind(inbox),
       withdraw: (id, reason) => inbox.withdraw(id, reason),
     }, {
       get: (key) => options.configManager.get(key),

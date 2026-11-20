@@ -24,7 +24,7 @@ import type { ChannelDeliveryRouter, ChannelDeliveryTarget } from '../../channel
 import { createChannelPaymentNotifier } from '../notice-delivery.js';
 import type { PaymentNoticeRouter, PaymentNoticeTarget, PaymentReplySource } from '../notice-delivery.js';
 import { absent, failedRead, present, refusal, RefusalError, type Observed } from '@goodvibes-jev/engine/errors';
-import { PAYMENT_ANSWER_UNREADABLE, type PaymentNotifier, type PaymentNoticeWindow } from '../payment-ports.js';
+import { PAYMENT_ANSWER_UNREADABLE, PURCHASE_AMOUNT_METADATA, PURCHASE_ITEM_METADATA, PURCHASE_SHOP_METADATA, type PaymentNotifier, type PaymentNoticeWindow, type PurchaseNoticeFacts } from '../payment-ports.js';
 import type { NewOwnerItem, OwnerItem } from '../../control-plane/owner-inbox.js';
 import type { ChannelDelivery } from '../windows.js';
 import { readNotifyChannels, type PaymentsConfigReader } from '../payments-config.js';
@@ -143,14 +143,19 @@ export function purchaseInboxKey(purchaseId: string, kind: PaymentWindowKind | '
 }
 
 /** The owner-inbox item for one purchase notice or window. */
-export function purchaseInboxItem(kind: PaymentWindowKind | 'notice', message: string, expiresAt: number, purchaseId?: string): NewOwnerItem {
+export function purchaseInboxItem(kind: PaymentWindowKind | 'notice', message: string, expiresAt: number, purchaseId?: string, facts?: PurchaseNoticeFacts): NewOwnerItem {
   return {
     kind: 'purchase',
     title: INBOX_TITLES[kind],
     detail: message.length > INBOX_DETAIL_CHARS ? `${message.slice(0, INBOX_DETAIL_CHARS - 1)}…` : message,
     options: kind === 'notice' ? ['ok'] : INBOX_OPTIONS[kind],
     expiresAt,
-    ...(purchaseId === undefined ? {} : { key: purchaseInboxKey(purchaseId, kind), metadata: { purchaseId } }),
+    // The window's subject travels as facts, so every surface asks "Buy <item> from <shop> for <amount>?" from them.
+    ...(purchaseId === undefined ? {} : { key: purchaseInboxKey(purchaseId, kind) }),
+    ...(purchaseId === undefined && !facts ? {} : { metadata: {
+      ...(purchaseId === undefined ? {} : { purchaseId }),
+      ...(facts ? { [PURCHASE_ITEM_METADATA]: facts.item, [PURCHASE_SHOP_METADATA]: facts.shop, [PURCHASE_AMOUNT_METADATA]: facts.amount } : {}),
+    } }),
   };
 }
 
@@ -193,9 +198,9 @@ export function withOwnerInbox(
       ? Date.now() + INBOX_NOTICE_LIFETIME_MS
       : Date.now() + (minutes + 1) * 60_000;
   };
-  const post = (kind: PaymentWindowKind | 'notice', message: string, purchaseId?: string): OwnerItem | null => {
+  const post = (kind: PaymentWindowKind | 'notice', message: string, purchaseId?: string, facts?: PurchaseNoticeFacts): OwnerItem | null => {
     try {
-      return inbox.postNow(purchaseInboxItem(kind, message, expiry(kind), purchaseId)).item;
+      return inbox.postNow(purchaseInboxItem(kind, message, expiry(kind), purchaseId, facts)).item;
     } catch (error) {
       logger.warn('A purchase notice could not be posted to the owner inbox', { error: error instanceof Error ? error.message : String(error) });
       return null;
@@ -274,7 +279,7 @@ export function withOwnerInbox(
     async deliver(input) {
       const deliveries = await inner.deliver(input);
       input.signal?.throwIfAborted(); input.assertCurrent?.();
-      const item = post(input.kind, input.message);
+      const item = post(input.kind, input.message, undefined, input.kind === 'notice' ? undefined : input.facts);
       if (input.kind !== 'notice') posted.set(`${input.kind}\n${input.message}`, item);
       return [...deliveries, inboxDelivery(item)];
     },
@@ -292,7 +297,7 @@ export function withOwnerInbox(
       let item: OwnerItem | null = null;
       const deliveries = window.deliveries.then((report) => {
         input.signal?.throwIfAborted(); input.assertCurrent?.();
-        item = post(input.kind, input.notice, input.purchaseId);
+        item = post(input.kind, input.notice, input.purchaseId, input.facts);
         return Object.freeze([...report, Object.freeze(inboxDelivery(item))]);
       });
       return Object.freeze({

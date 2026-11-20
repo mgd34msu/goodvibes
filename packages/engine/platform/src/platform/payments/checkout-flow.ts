@@ -77,7 +77,7 @@ import { readShippingTierChoice } from './shipping.js';
 import { evaluatePaymentTaint, type OwnerOriginIntent } from './taint-gate.js';
 import { extractCheckout, type ExtractedCheckout, type RawCheckoutReading } from './checkout-extraction.js';
 import { parseRequestedMaximum } from './money-parsing.js';
-import { cartDigest, compareMoney, money, settleSubmission, type OrderEvidence, type SubmissionDispatch } from './money.js';
+import { cartDigest, compareMoney, formatMoney, money, settleSubmission, type OrderEvidence, type SubmissionDispatch } from './money.js';
 import {
   classifyMerchant,
   windowForPurchase,
@@ -886,6 +886,8 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
    * windows' silence rules are opposite and stay in their own state machines.
    */
   type WindowAnswer = Awaited<ReturnType<PaymentNotifier['awaitAnswer']>>;
+  // What the window is about, as facts on its inbox item: every surface asks "Buy <item> from <shop> for <amount>?".
+  const noticeFacts = { item: request.item, shop: request.merchantDomain, amount: formatMoney(money(draw.totalMinorUnits, checkout.currency)) };
   const runWindow = async (kind: 'approval' | 'veto', message: string, minutes: number, restored: boolean, heldReply = false)
     : Promise<{ readonly done: CheckoutOutcome } | { readonly deliveries: readonly ChannelDelivery[]; readonly answer: WindowAnswer | undefined }> => {
     if (!addressStillCurrent()) { await releaseUnlessStopped(); return { done: refused('no-shipping-address', 'The stored address changed before the purchase notice.') }; }
@@ -900,8 +902,8 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
           const prepared = resumption.prepare({ signal, assertCurrent: addressCurrent, keepOnStop });
           reception = Object.freeze({ deliveries: prepared.deliveries, awaitAnswer: prepared.awaitAnswer.bind(prepared), cancel: prepared.cancel.bind(prepared) });
           restoredDeadline = prepared.deadlineMs;
-        } else reception = notifier.prepareWindow?.({ purchaseId: request.purchaseId, kind, notice: message, assertCurrent: addressCurrent, signal, keepOnStop });
-        deliveries = await (reception?.deliveries ?? notifier.deliver({ kind, message, assertCurrent: addressCurrent, signal }));
+        } else reception = notifier.prepareWindow?.({ purchaseId: request.purchaseId, kind, notice: message, facts: noticeFacts, assertCurrent: addressCurrent, signal, keepOnStop });
+        deliveries = await (reception?.deliveries ?? notifier.deliver({ kind, message, facts: noticeFacts, assertCurrent: addressCurrent, signal }));
         addressCurrent();
       }
       catch (error) {

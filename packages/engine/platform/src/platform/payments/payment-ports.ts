@@ -44,6 +44,18 @@ export interface PurchaseLedger {
 /** The refusal code of an owner answer to a purchase window that could not be read (never silence). */
 export const PAYMENT_ANSWER_UNREADABLE = 'PAYMENT_ANSWER_UNREADABLE';
 
+/** The owner-inbox metadata a purchase window's facts are posted under (host/notifier.ts), read by the ask's wording. */
+export const PURCHASE_ITEM_METADATA = 'purchaseItem';
+export const PURCHASE_SHOP_METADATA = 'purchaseShop';
+export const PURCHASE_AMOUNT_METADATA = 'purchaseAmount';
+
+/** A purchase window's subject as facts: the item, the shop and the amount with its currency ("USD 64.00"). */
+export interface PurchaseNoticeFacts {
+  readonly item: string;
+  readonly shop: string;
+  readonly amount: string;
+}
+
 export interface PaymentNotifier {
   /** The native channel composition reserves reply reception before sending,
    * so an owner answering during delivery/journal I/O cannot fall through to
@@ -53,6 +65,8 @@ export interface PaymentNotifier {
     readonly purchaseId: string;
     readonly kind: 'approval' | 'veto';
     readonly notice: string;
+    /** What the window is about, as facts: carried on its owner-inbox item so every surface words it the same. */
+    readonly facts?: PurchaseNoticeFacts | undefined;
     readonly assertCurrent?: (() => void) | undefined;
     readonly signal?: AbortSignal | undefined;
     /**
@@ -67,6 +81,8 @@ export interface PaymentNotifier {
   deliver(input: {
     readonly kind: 'approval' | 'veto' | 'notice';
     readonly message: string;
+    /** For a window: what it is about, as facts (see prepareWindow). */
+    readonly facts?: PurchaseNoticeFacts | undefined;
     readonly assertCurrent?: (() => void) | undefined;
     readonly signal?: AbortSignal | undefined;
   }): Promise<readonly ChannelDelivery[]>;

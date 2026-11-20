@@ -161,8 +161,47 @@ const SHARED_APPROVAL_RECORD_REQUIRED = ['id', 'callId', 'status', 'request', 'c
 
 export const SHARED_APPROVAL_RECORD_SCHEMA = objectSchema(SHARED_APPROVAL_RECORD_PROPERTIES, SHARED_APPROVAL_RECORD_REQUIRED);
 
+const LABELLED_TEXT_SCHEMA = objectSchema({ label: STRING_SCHEMA, value: STRING_SCHEMA }, ['label', 'value']);
+
+/**
+ * What an ask says (permissions/ask-presentation.ts AskPresentation): the
+ * question, where, what it acts on, the consequence, the choices with their
+ * keys, whether an answer can be remembered, why the person is asked, and the
+ * rest as details. Every surface renders this and words nothing itself. A list
+ * row or an event carries it compact (no details); the read of one item in full.
+ */
+export const ASK_PRESENTATION_SCHEMA = objectSchema({
+  kind: enumSchema(['run-command', 'answer-command-prompt', 'change-files', 'fetch', 'start-agent', 'hand-off-work', 'change-setting',
+    'mcp-tool', 'other-tool', 'purchase', 'send-message', 'question', 'decision', 'claim', 'queued-action', 'report']),
+  mark: enumSchema(['ask', 'cannot-undo', 'question']),
+  question: STRING_SCHEMA,
+  place: objectSchema({ short: STRING_SCHEMA, full: STRING_SCHEMA }, ['short', 'full']),
+  subject: objectSchema({ kind: enumSchema(['command', 'paths', 'urls', 'text', 'money']), lines: arraySchema(STRING_SCHEMA) }, ['kind', 'lines']),
+  body: STRING_SCHEMA,
+  consequence: objectSchema({ text: STRING_SCHEMA, withPlace: STRING_SCHEMA, tone: enumSchema(['plain', 'cannot-undo']) }, ['text', 'withPlace', 'tone']),
+  choices: arraySchema(objectSchema({
+    id: STRING_SCHEMA,
+    label: STRING_SCHEMA,
+    key: STRING_SCHEMA,
+    default: BOOLEAN_SCHEMA,
+    danger: BOOLEAN_SCHEMA,
+    value: STRING_SCHEMA,
+  }, ['id', 'label'])),
+  remember: objectSchema({
+    offered: BOOLEAN_SCHEMA,
+    tiers: arraySchema(objectSchema({ tier: STRING_SCHEMA, label: STRING_SCHEMA, detail: STRING_SCHEMA }, ['tier', 'label', 'detail'])),
+    why: STRING_SCHEMA,
+  }, ['offered']),
+  typeToRefuse: BOOLEAN_SCHEMA,
+  countdown: objectSchema({ verb: STRING_SCHEMA, at: NUMBER_SCHEMA }, ['verb', 'at']),
+  origin: objectSchema({ sessionTitle: STRING_SCHEMA, by: STRING_SCHEMA }, ['by']),
+  why: STRING_SCHEMA,
+  details: arraySchema(LABELLED_TEXT_SCHEMA),
+  title: STRING_SCHEMA,
+}, ['kind', 'mark', 'question', 'choices', 'remember', 'typeToRefuse', 'why', 'details', 'title']);
+
 // A listed record carries its reading for the caller beside its own fields; the reading is not stored.
-const APPROVAL_LIST_ROW_SCHEMA = objectSchema({ ...SHARED_APPROVAL_RECORD_PROPERTIES, reading: APPROVAL_READING_SCHEMA },
+const APPROVAL_LIST_ROW_SCHEMA = objectSchema({ ...SHARED_APPROVAL_RECORD_PROPERTIES, reading: APPROVAL_READING_SCHEMA, presentation: ASK_PRESENTATION_SCHEMA },
   [...SHARED_APPROVAL_RECORD_REQUIRED, 'reading']);
 
 export const APPROVAL_SNAPSHOT_SCHEMA = objectSchema({

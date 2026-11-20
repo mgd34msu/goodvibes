@@ -239,7 +239,9 @@ export function createDaemonSystemRouteHandlers(
       const snapshot = context.integrationHelpers.getApprovalSnapshot(approvalId);
       return Response.json({
         ...(isJsonRecord(snapshot) ? snapshot : {}),
-        approvals: rows.map((row) => ({ ...(isJsonRecord(row.record) ? row.record : {}), reading: row.reading })),
+        // An open ask carries its words: compact in the list, in full when one approval is read.
+        approvals: rows.map((row) => ({ ...(isJsonRecord(row.record) ? row.record : {}), reading: row.reading,
+          ...(row.presentation !== undefined ? { presentation: row.presentation } : {}) })),
       });
     },
     // A decision grants or withholds tool execution (and can persist a durable

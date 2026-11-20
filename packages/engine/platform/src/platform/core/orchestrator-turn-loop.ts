@@ -431,6 +431,8 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
   let pendingKnowledgeRecord: TurnInjectionRecord | undefined;
   /** What the next dispatched request carries that must be reported once it went out (contract nudges). */
   const afterDispatch: Array<() => void> = [];
+  /** At the turn's end: nudges taken for a request that never went out go back to the runner's queue. */
+  const unsentAtEnd: Array<() => void> = [];
   let assertCodeInjectionCurrent: (() => Promise<void>) | undefined;
   // While the block carries code hits: its memory part and record, so the code can be withdrawn on its own.
   let turnCodeInjection: { readonly memoryBlock: string | null; readonly record: TurnInjectionRecord } | undefined;
@@ -550,6 +552,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         hostInstructions.set('correction', nudges.messages.map(message => '[Contract check] ' + message).join('\n\n'), { once: true, append: true });
         // Reported consumed once the request carrying them was dispatched (below).
         afterDispatch.push(nudges.reportConsumed);
+        unsentAtEnd.push(nudges.returnUnsent);
       }
     }
 
@@ -1216,7 +1219,10 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       },
     },
   // A held answer that never became a message (cancelled, ended, failed) leaves the screen with the turn.
-  }).finally(() => context.conversation.releaseHeldReply());
+  }).finally(() => {
+    context.conversation.releaseHeldReply();
+    for (const giveBack of unsentAtEnd.splice(0)) giveBack();
+  });
 
   if (outcome.status === 'cancelled') {
     // The orchestrator's cancellation path settles the turn (unfinished calls, rollback, TURN_CANCEL).

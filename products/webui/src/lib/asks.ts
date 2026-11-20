@@ -120,11 +120,11 @@ function inboxStandIn(item: InboxAskItem): AskPresentation {
 
 /**
  * One approval as an ask, whatever its phase (Work's detail shows a decided one
- * too). Its words are the presentation on the record, else the one the inbox
- * listed for it (`words`), else the record's own summary.
+ * too). Its words are the presentation its `approvals.list` row carries (or its
+ * `approval-update` frame), else, from a daemon that sends none, the record's own summary.
  */
-export function approvalAsk(record: ApprovalRecord, words?: AskPresentation): OpenAsk {
-  const worded = wirePresentation(record) ?? words;
+export function approvalAsk(record: ApprovalRecord): OpenAsk {
+  const worded = wirePresentation(record);
   const attribution = record.request.attribution;
   return {
     key: `approval:${record.id}`,
@@ -139,22 +139,9 @@ export function approvalAsk(record: ApprovalRecord, words?: AskPresentation): Op
   };
 }
 
-/** Approvals still waiting, as asks; `words` holds the inbox's presentation by approval id. */
-export function approvalAsks(records: readonly ApprovalRecord[], words?: ReadonlyMap<string, AskPresentation>): OpenAsk[] {
-  return records.filter((record) => approvalReading(record).phase === 'waiting').map((record) => approvalAsk(record, words?.get(record.id)));
-}
-
-/** The presentation `inbox.list` gave each approval item, by approval id. */
-export function readApprovalWords(page: unknown): Map<string, AskPresentation> {
-  const items = (page as { items?: unknown } | null | undefined)?.items;
-  const words = new Map<string, AskPresentation>();
-  if (!Array.isArray(items)) return words;
-  for (const raw of items) {
-    const item = raw as Record<string, unknown>;
-    const presentation = wirePresentation(item);
-    if (item.kind === 'approval' && typeof item.id === 'string' && presentation) words.set(item.id, presentation);
-  }
-  return words;
+/** Approvals still waiting, as asks: each worded by the presentation its `approvals.list` row carries. */
+export function approvalAsks(records: readonly ApprovalRecord[]): OpenAsk[] {
+  return records.filter((record) => approvalReading(record).phase === 'waiting').map((record) => approvalAsk(record));
 }
 
 /** The open ask items of an `inbox.list` page (approvals come from `approvals.list`). */
@@ -196,8 +183,8 @@ export function inboxAsks(items: readonly InboxAskItem[]): OpenAsk[] {
 }
 
 /** Every open ask, newest first. */
-export function openAsks(approvals: readonly ApprovalRecord[], inboxItems: readonly InboxAskItem[], approvalWords?: ReadonlyMap<string, AskPresentation>): OpenAsk[] {
-  return [...approvalAsks(approvals, approvalWords), ...inboxAsks(inboxItems)].sort((a, b) => b.askedAt - a.askedAt);
+export function openAsks(approvals: readonly ApprovalRecord[], inboxItems: readonly InboxAskItem[]): OpenAsk[] {
+  return [...approvalAsks(approvals), ...inboxAsks(inboxItems)].sort((a, b) => b.askedAt - a.askedAt);
 }
 
 /** An ask as the work board reads it. */

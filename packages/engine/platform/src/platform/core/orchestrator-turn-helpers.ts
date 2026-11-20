@@ -144,14 +144,19 @@ export function reportSessionToolRound(session: ContractSessionTurn, round: { re
  * provider request carrying them was dispatched: a turn stopped before that
  * never says the model was told.
  */
-export function takeSessionNudges(args: ConsumedEmitterArgs, session: ContractSessionTurn): { readonly messages: string[]; readonly reportConsumed: () => void } {
+export function takeSessionNudges(args: ConsumedEmitterArgs, session: ContractSessionTurn): { readonly messages: string[]; readonly reportConsumed: () => void; readonly returnUnsent: () => void } {
   const messages: string[] = [];
-  const ids: string[] = [];
+  const taken: { readonly message: string; readonly nudgeId: string }[] = [];
   for (let nudge = session.hooks.takeSessionNudge(session.record); nudge !== null; nudge = session.hooks.takeSessionNudge(session.record)) {
     messages.push(nudge.message);
-    ids.push(nudge.nudgeId);
+    taken.push(nudge);
   }
-  return { messages, reportConsumed: () => { for (const id of ids.splice(0)) nudgeConsumed(args, session, id); } };
+  return {
+    messages,
+    reportConsumed: () => { for (const nudge of taken.splice(0)) nudgeConsumed(args, session, nudge.nudgeId); },
+    // A turn that ends before the request carrying them went out puts them back, oldest first, for the next turn.
+    returnUnsent: () => { for (const nudge of taken.splice(0).reverse()) session.hooks.returnSessionNudge?.(session.record, nudge); },
+  };
 }
 
 /**

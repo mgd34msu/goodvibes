@@ -39,8 +39,10 @@ export interface LimitOfferInbox {
   postNow(item: NewOwnerItem): { readonly item: OwnerItem };
   latestByKey(kind: 'question', key: string): OwnerItem | undefined;
   subscribe(listener: (item: OwnerItem) => void): () => void;
-  /** True only for the first caller: the answer is applied once, by one process. */
-  claim(id: string): boolean;
+  /** Marks the answer taken by this process: true for the first taker (owner-inbox.ts take). */
+  take(id: string): boolean;
+  /** The taken answers were applied: they are delivered and no process takes them again. */
+  confirmDelivered(ids: readonly string[]): void;
   withdraw(id: string, reason: string): unknown;
 }
 
@@ -113,8 +115,10 @@ export function createLimitOffers(inbox: LimitOfferInbox, settings: LimitOfferSe
   };
 
   const apply = (item: OwnerItem, setting: OfferableLimitSetting): void => {
-    // The claim is the store's once-only mark: of two processes hearing the answer, one writes it.
-    if (!inbox.claim(item.id)) return;
+    // Taking it is the store's once-only mark: of two processes hearing the answer, one writes it;
+    // it is delivered at once, so this process does not apply it a second time either.
+    if (!inbox.take(item.id)) return;
+    inbox.confirmDelivered([item.id]);
     const text = (item.answer?.text ?? item.answer?.option ?? '').trim();
     if (DECLINES.has(text.toLowerCase())) {
       logger.info('The owner kept a spending limit unset; every purchase keeps asking', { setting });

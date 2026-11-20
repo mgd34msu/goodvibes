@@ -773,13 +773,19 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     this.#presenter = presenter;
   }
 
-  /** The item with its words, and an approval's title from them; unchanged without a presenter. */
-  #present(item: OwnerItem): OwnerItem {
+  /**
+   * The item with its words, and an approval's title from them; unchanged
+   * without a presenter. Compact in a list or an event; in full (with the
+   * details) for the read of one item.
+   */
+  #present(item: OwnerItem, full = false): OwnerItem {
     const presenter = this.#presenter;
     if (presenter === null) return item;
     try {
       const request = item.kind === 'approval' ? this.#approvals?.getApproval(item.id)?.request : undefined;
-      const presentation = presenter(item, request);
+      const worded = presenter(item, request);
+      // Compact: the details (arguments, checklist) stay for the read of one item (ask-presentation.ts compactAskPresentation).
+      const presentation: AskPresentation = full ? worded : { ...worded, details: [] };
       return { ...item, presentation, ...(item.kind === 'approval' ? { title: presentation.title } : {}) };
     } catch (error) {
       logger.debug('[owner-inbox] an item could not be worded; it is listed without its words', { itemId: item.id, error: error instanceof Error ? error.message : String(error) });
@@ -789,9 +795,9 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
 
   get(id: string, viewer?: ApprovalViewer): OwnerItem | undefined {
     const entry = this.#questions.get(id);
-    if (entry) return this.#present(this.#project(entry, this.#now()));
+    if (entry) return this.#present(this.#project(entry, this.#now()), true);
     const row = this.#approvalActions?.get(id, this.#viewer(viewer));
-    return row ? this.#present(projectApproval(row.record, row.reading, this.#approvalActions?.homeNode)) : undefined;
+    return row ? this.#present(projectApproval(row.record, row.reading, this.#approvalActions?.homeNode), true) : undefined;
   }
 
   async find(id: string, viewer?: ApprovalViewer): Promise<OwnerItem | undefined> {

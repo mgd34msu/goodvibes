@@ -4,6 +4,7 @@ import { StoreWriteQueue } from '../state/store-write-queue.js';
 import { WITHHELD_PROMPT_ANSWER, type PermissionPromptDecision, type PermissionPromptRequest, type PermissionRequestHandler } from '../permissions/prompt.js';
 import { buildDurableRuleForDecision, compileRules, type CompiledRuleMatch } from '../permissions/approval-rules.js';
 import type { ControlPlaneSurfaceMessage } from './types.js';
+import type { AskPresentation } from '../permissions/ask-presentation.js';
 import { logger } from '../utils/logger.js';
 import { isRecord } from '../utils/record-coerce.js';
 import { contentDigest } from '../utils/target-ref.js';
@@ -416,6 +417,8 @@ export class ApprovalBroker {
   /** Names the store in a notice about a record that cannot be read. */
   private readonly storeFile: string;
   #homeNode: string | (() => string);
+  /** Words each ask with the host's facts (permissions/ask-facts-host.ts); set by the composition that has them. */
+  #presenter: ((request: PermissionPromptRequest, sessionId?: string | undefined) => AskPresentation) | null = null;
 
   constructor(
     options: {
@@ -1096,6 +1099,32 @@ export class ApprovalBroker {
     }
   }
 
+  /**
+   * Word every ask this broker publishes and lists (`approval-update`,
+   * `approvals.list`) with `presenter`, so a surface draws the same question,
+   * consequence and choices without another read. One pure call per record.
+   */
+  usePresentation(presenter: ((request: PermissionPromptRequest, sessionId?: string | undefined) => AskPresentation) | null): void {
+    this.#presenter = presenter;
+  }
+
+  /**
+   * The ask's words, when a presenter is set: compact (the question, subject,
+   * consequence, choices and remember tiers) for a list row or an event, in
+   * full (with the details: arguments, checklist) for the read of one record.
+   */
+  presentationOf(record: SharedApprovalRecord, full = false): AskPresentation | undefined {
+    if (this.#presenter === null) return undefined;
+    try {
+      const presentation = this.#presenter(record.request, record.sessionId);
+      // Compact: the details (arguments, checklist) stay for the read of one record (ask-presentation.ts compactAskPresentation).
+      return full ? presentation : { ...presentation, details: [] };
+    } catch (error) {
+      logger.debug('An approval could not be worded; it is sent without its words', { approvalId: record.id, error: error instanceof Error ? error.message : String(error) });
+      return undefined;
+    }
+  }
+
   private publish(approval: SharedApprovalRecord): void {
     // The record is already durable and its waiters are settled by the caller.
     // A publisher that refuses (the gateway feature is off, a stream closed
@@ -1106,6 +1135,8 @@ export class ApprovalBroker {
         approval,
         // The reading for an admin who may answer: what is waiting, the deadline, the decision and its receipt.
         reading: readApproval(approval, adminApprovalViewer(approval.homeNode), now),
+        // The ask's words while it waits, so a surface draws the card from the frame alone.
+        ...(isOpenApprovalStatus(approval.status) ? withPresentation(this.presentationOf(approval)) : {}),
         createdAt: now,
       });
     } catch (error) {
@@ -1157,4 +1188,9 @@ function denyDirection(status: SharedApprovalStatus): boolean {
 
 function actorOf(input: { readonly actor: string; readonly actorSurface?: string | undefined; readonly actorNode?: string | undefined }): ApprovalActor {
   return { id: input.actor, surface: input.actorSurface ?? 'web', ...(input.actorNode !== undefined ? { node: input.actorNode } : {}) };
+}
+
+/** The `presentation` field of a frame or row, when there are words. */
+function withPresentation(presentation: AskPresentation | undefined): { readonly presentation?: AskPresentation } {
+  return presentation ? { presentation } : {};
 }

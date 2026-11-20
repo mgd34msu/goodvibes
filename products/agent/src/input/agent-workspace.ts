@@ -971,6 +971,7 @@ export class AgentWorkspace {
       // The form is reopened with the reason only when it is still the one
       // shown; a form opened since is never replaced by this one.
       if (this.editorInstance === instance && this.localEditor !== null) this.localEditor = { ...editor, message: detail };
+      else this.reportOnOpenForm(`${editor.title} failed: ${detail}`);
       this.status = detail;
       this.lastActionResult = {
         kind: 'error',
@@ -980,10 +981,21 @@ export class AgentWorkspace {
     }
   }
 
+  /**
+   * A save whose form was closed settles while another form is open: its
+   * outcome goes on that form's message line, the one line shown while a form
+   * is open, so "the result will be shown" holds. The open form stays as it is.
+   */
+  private reportOnOpenForm(outcome: string): void {
+    const open = this.localEditor;
+    if (open !== null) this.localEditor = { ...open, message: `${outcome} (the earlier form's save)` };
+  }
+
   private finishMemoryEditor(record: MemoryRecord, verb: 'Created' | 'Updated', instance: number): void {
     // Only the form this save started from closes; one opened since stays open.
     const stillShown = this.editorInstance === instance && this.localEditor !== null;
     if (stillShown) this.localEditor = null;
+    else this.reportOnOpenForm(`${verb} memory ${record.summary}`);
     this.runtimeSnapshot = this.context ? buildAgentWorkspaceRuntimeSnapshot(this.context) : this.runtimeSnapshot;
     const categoryIndex = this.localEditor === null ? this.categories.findIndex((category) => category.id === 'memory') : -1;
     if (categoryIndex >= 0) {

@@ -1,7 +1,7 @@
 import type { GatewayEventDescriptor } from './method-catalog-shared.js';
 import { STRING_SCHEMA,NUMBER_SCHEMA,JSON_OBJECT_SCHEMA,arraySchema,objectSchema,eventDescriptor,runtimeDomainEvent } from './method-catalog-shared.js';
 import { CONTROL_PLANE_SURFACE_MESSAGE_SCHEMA } from './operator-contract-schemas.js';
-import { APPROVAL_READING_SCHEMA, SHARED_APPROVAL_RECORD_SCHEMA } from './operator-contract-schemas-approvals.js';
+import { APPROVAL_READING_SCHEMA, ASK_PRESENTATION_SCHEMA, SHARED_APPROVAL_RECORD_SCHEMA } from './operator-contract-schemas-approvals.js';
 import { OWNER_ITEM_SCHEMA } from './operator-contract-schemas-owner-inbox.js';
 import { HOSTED_SESSION_RECORD_SCHEMA } from './method-catalog-hosted-sessions.js';
 import { RUNTIME_EVENT_DOMAINS, type RuntimeEventDomain } from '../../events/domain-map.js';
@@ -293,6 +293,8 @@ export const builtinGatewayEventDescriptors: readonly GatewayEventDescriptor[] =
     outputSchema: objectSchema({
       approval: SHARED_APPROVAL_RECORD_SCHEMA,
       reading: APPROVAL_READING_SCHEMA,
+      // While it waits: the ask's words, compact (no details), so a surface draws the card from the frame.
+      presentation: ASK_PRESENTATION_SCHEMA,
       createdAt: NUMBER_SCHEMA,
     }, ['approval', 'createdAt']),
   }),

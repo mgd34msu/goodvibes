@@ -18,6 +18,7 @@
  * Cost: a reading is a pure function of the record (no I/O); an action is the
  * broker's one write.
  */
+import type { AskPresentation } from '../permissions/ask-presentation.js';
 import type { Actor } from '@goodvibes-jev/engine/daemon-api/http-policy';
 import { admitEffects } from '../security/effect-authority.js';
 import type { ApprovalActionInput, ApprovalBroker, ApprovalRelayPort, SharedApprovalRecord } from './approval-broker.js';
@@ -35,6 +36,8 @@ import {
 export interface ApprovalReadingRow {
   readonly record: SharedApprovalRecord;
   readonly reading: ApprovalReading;
+  /** What the ask says (permissions/ask-presentation.ts): compact in a list, in full for the read of one record. */
+  readonly presentation?: AskPresentation | undefined;
 }
 
 /** An action's outcome with the current reading for the same viewer (null only for an unknown id). */
@@ -57,7 +60,8 @@ export interface ApprovalActions {
 
 /** The broker surface the port needs; `relay` is set when the daemon is in a group. */
 export type ApprovalActionsBroker = Pick<ApprovalBroker, 'homeNode' | 'listApprovals' | 'getApproval' | 'claimApproval' | 'resolveApproval' | 'cancelApproval' | 'releaseApproval'>
-  & { readonly relay?: ApprovalRelayPort | null | undefined };
+  & { readonly relay?: ApprovalRelayPort | null | undefined }
+  & Partial<Pick<ApprovalBroker, 'presentationOf'>>;
 
 /**
  * The viewer an actor is. In-process callers (no actor) are the program
@@ -89,7 +93,10 @@ export function approvalViewerOfActor(actor: Actor | undefined, node: string): A
  * relaying the action to the node that owns it, which decides.
  */
 export function localApprovalActions(broker: ApprovalActionsBroker, now: () => number = Date.now): ApprovalActions {
-  const row = (record: SharedApprovalRecord, viewer: ApprovalViewer): ApprovalReadingRow => ({ record, reading: readApproval(record, viewer, now()) });
+  const row = (record: SharedApprovalRecord, viewer: ApprovalViewer, full = false): ApprovalReadingRow => {
+    const presentation = broker.presentationOf?.(record, full);
+    return { record, reading: readApproval(record, viewer, now()), ...(presentation ? { presentation } : {}) };
+  };
   const remoteRow = (record: SharedApprovalRecord, viewer: ApprovalViewer, relay: ApprovalRelayPort): ApprovalReadingRow =>
     ({ record, reading: readApproval(record, viewer, now(), relay.reachable(record.homeNode)) });
   const parse = (ref: string) => parseApprovalRef(ref, broker.homeNode);
@@ -134,7 +141,7 @@ export function localApprovalActions(broker: ApprovalActionsBroker, now: () => n
       const parsed = parse(ref);
       if (parsed.node === broker.homeNode) {
         const record = broker.getApproval(parsed.id);
-        return record ? row(record, viewer) : null;
+        return record ? row(record, viewer, true) : null;
       }
       const relay = broker.relay;
       const record = relay?.get(parsed.node, parsed.id);

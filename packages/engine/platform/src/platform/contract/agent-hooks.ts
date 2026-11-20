@@ -90,6 +90,8 @@ export interface ContractSessionHooks extends ContractAgentHooks {
   sessionTurn(sessionId: string, turnId: string, except?: ReadonlySet<string>): AgentRecord | null;
   /** Session mode: the oldest mid-run nudge waiting for the turn, taken once. */
   takeSessionNudge(record: AgentRecord): { readonly message: string; readonly nudgeId: string } | null;
+  /** Session mode: a taken nudge whose request was never dispatched goes back to the front of the queue for the next turn. */
+  returnSessionNudge?(record: AgentRecord, nudge: { readonly message: string; readonly nudgeId: string }): void;
 }
 
 // ── The runner's side ─────────────────────────────────────────────────────────
@@ -602,6 +604,10 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
     return found?.runtime.session?.queued.shift() ?? null;
   }
 
+  function returnSessionNudge(record: AgentRecord, nudge: { readonly message: string; readonly nudgeId: string }): void {
+    locate(record)?.runtime.session?.queued.unshift(nudge);
+  }
+
   function actionSource(record: AgentRecord): AutonomousToolSource | null {
     const found = locate(record);
     if (!found) return null;
@@ -619,7 +625,7 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
     return Object.freeze({ goal: found.run.contract.ask, criteria: Object.freeze(criteria) });
   }
 
-  return { hooks: { onTurnEnd, holdCompletion, sessionTurn, takeSessionNudge, actionSource }, runCheck, supersede, passUnit };
+  return { hooks: { onTurnEnd, holdCompletion, sessionTurn, takeSessionNudge, returnSessionNudge, actionSource }, runCheck, supersede, passUnit };
 }
 
 /**

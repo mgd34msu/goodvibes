@@ -21,7 +21,8 @@ const AGENT_READ_MODES: Readonly<Record<string, ToolReadModes>> = Object.freeze(
   mcp: { field: 'mode', values: ['servers', 'tools', 'schema', 'resources', 'security', 'auth'] },
   control: { field: 'mode', values: ['commands', 'panels', 'subscriptions'] },
   task: { field: 'mode', values: ['list', 'show', 'handoffs'] },
-  query: { field: 'mode', values: ['list', 'show'] },
+  // query is not listed: every mode (ask, show, list, withdraw) acts only on the owner's own inbox, so it keeps the
+  // read category it has everywhere (types/tools.ts); a guest's turn is still asked by the gate (gate/classify.ts).
   // The facades over agent_harness: the actions that forward to a read mode of
   // the harness mode catalog (agent_harness declares its own from the catalog).
   models: { field: 'action', values: ['status', 'route', 'local', 'providers', 'provider'] },

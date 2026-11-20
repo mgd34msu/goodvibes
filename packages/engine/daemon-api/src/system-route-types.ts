@@ -231,8 +231,9 @@ export interface ApprovalActionInputLike {
  */
 export interface ApprovalActionsLike {
   viewerOf(actor: Actor | undefined): ApprovalViewerLike;
-  list(viewer: ApprovalViewerLike, limit?: number): readonly { readonly record: unknown; readonly reading: unknown }[];
-  get(ref: string, viewer: ApprovalViewerLike): { readonly record: unknown; readonly reading: unknown } | null;
+  /** Each row may carry the ask's words: compact in a list, in full for one record. */
+  list(viewer: ApprovalViewerLike, limit?: number): readonly { readonly record: unknown; readonly reading: unknown; readonly presentation?: unknown }[];
+  get(ref: string, viewer: ApprovalViewerLike): { readonly record: unknown; readonly reading: unknown; readonly presentation?: unknown } | null;
   claim(ref: string, input: ApprovalActionInputLike, viewer: ApprovalViewerLike): Promise<ApprovalActionResultLike>;
   cancel(ref: string, input: ApprovalActionInputLike, viewer: ApprovalViewerLike): Promise<ApprovalActionResultLike>;
   release(ref: string, input: Omit<ApprovalActionInputLike, 'expectedRevision'> & { readonly holdId?: string | undefined }, viewer: ApprovalViewerLike): Promise<ApprovalActionResultLike>;

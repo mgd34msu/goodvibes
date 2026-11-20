@@ -10,7 +10,7 @@ import { prepareGatewayScopePolicyOwner, registerNativeAutomationGatewayMethods,
 import { openWorkspaceRegistrationStore, sharedWorkspaceRegisterPath, WorkspaceSwapManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { ApprovalRelay, GatewayMethodCatalog, createOwnerInbox, ownerInboxStorePath, terminalSessionPresence, type DaemonBrowserGatewayService } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { resolvePairingWebOrigin } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { describeModeInForceWords, hostItemPresenter } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { describeModeInForceWords, hostApprovalPresentation, hostItemPresenter } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { daemonReceiptStoreAt, daemonReceiptsPath } from '@goodvibes-jev/engine/platform/platform/daemon/receipts';
 import { MailboxReaders } from '@goodvibes-jev/engine/platform/platform/email';
 import { attachWsOnlyGatewayVerbHandlers } from '@goodvibes-jev/engine/terminal-shell';
@@ -189,7 +189,10 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     });
     disposalScope.registry.add('owner inbox', () => ownerInbox.dispose());
     // Every item carries its words (question, consequence, choices) on the wire, worded with this host's facts.
-    ownerInbox.usePresentation(hostItemPresenter({ configManager, homeDirectory, sessionTitle: (id) => sessionBroker.getSession(id)?.title }));
+    const askFactsSource = { configManager, homeDirectory, sessionTitle: (id: string) => sessionBroker.getSession(id)?.title };
+    ownerInbox.usePresentation(hostItemPresenter(askFactsSource));
+    // The same words ride every approval-update frame and approvals.list row, so no surface reads the inbox to word an approval.
+    approvalBroker.usePresentation((request, sessionId) => hostApprovalPresentation(askFactsSource, request, sessionId));
     // This daemon's agents and hosted sessions read their answers from the store directly.
     useOwnerAnswerReader(ownerInbox);
     disposalScope.registry.add('owner answer reader', () => useOwnerAnswerReader(null));

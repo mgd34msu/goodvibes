@@ -572,7 +572,7 @@ export class DaemonControlPlaneHelper {
     // another origin (another port of the same host carries the cookie) may not use it.
     if (viaNodeCookie) {
       const origin = req.headers.get('origin');
-      if (origin === null || !browserOriginAllowed(req, origin, this.context.allowedBrowserOrigins?.() ?? [])) {
+      if (origin === null || !browserOriginAllowed(origin, this.context.allowedBrowserOrigins?.() ?? [])) {
         return originNotAllowedResponse(origin, 'act as this device node');
       }
     }
@@ -798,7 +798,7 @@ export class DaemonControlPlaneHelper {
     const bearer = /^Bearer\s+\S+/i.test(req.headers.get('authorization') ?? '');
     const originAllowed = origin === null
       ? bearer
-      : browserOriginAllowed(req, origin, this.context.allowedBrowserOrigins?.() ?? []);
+      : browserOriginAllowed(origin, this.context.allowedBrowserOrigins?.() ?? []);
     if (!originAllowed) return originNotAllowedResponse(origin, 'connect');
     const rawDomains = url.searchParams.get('domains');
     const requested = parseRuntimeDomains(rawDomains);

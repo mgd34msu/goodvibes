@@ -1241,7 +1241,20 @@ export class UserAuthManager {
   retireStaleBootstrapCredential(): boolean {
     const credential = readBootstrapCredentialFile(this.bootstrapCredentialPath);
     if (credential === null) return false;
-    if (this.users.get(credential.username)?.bootstrap === true) return false;
+    const named = this.users.get(credential.username);
+    if (named?.bootstrap === true) return false;
+    // A store written by 3.3.1 or earlier has no bootstrap mark. While the file
+    // still holds that user's password it is the generated one, and the owner's
+    // only copy: mark it once and keep the file. One password check, only for
+    // a store that predates the mark.
+    if (named && named.bootstrap === undefined && this.persistUsers && verifyPassword(credential.password, named.passwordHash)) {
+      try {
+        if (this.persist(new Map(this.users).set(named.username, { ...named, bootstrap: true }), { username: named.username, passwordHash: named.passwordHash })) return false;
+      } catch (error) {
+        logger.warn('The generated password could not be marked in the user store; the bootstrap credential file is kept', { username: named.username, error: String(error) });
+        return false;
+      }
+    }
     return this.clearBootstrapCredentialFile();
   }
 

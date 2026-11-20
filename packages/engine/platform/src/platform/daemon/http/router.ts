@@ -100,7 +100,7 @@ import { gateGatewayBinding } from './gateway-binding-gate.js';
 import { assertDaemonRouteManifest } from './route-manifest.js';
 import { IdempotentReplayStore, replayKeyedRequest, takesIdempotencyKey } from '../../control-plane/idempotent-replay.js';
 import { deriveRequestWithBody } from '../derived-request.js';
-import { configuredBrowserOrigins, refuseCookieWriteFromOtherOrigin } from './browser-origin.js';
+import { ownBrowserOrigins, refuseCookieWriteFromOtherOrigin } from './browser-origin.js';
 import { handleBrowserNodeSession, handleBrowserSession } from './browser-session.js';
 import { isSurfaceIngressEnabled } from '../surface-policy.js';
 import { dispatchCloudflareRoutes } from './cloudflare-routes.js';
@@ -305,7 +305,7 @@ export class DaemonHttpRouter {
       preAuth: (req) => this.dispatchPreAuthRoutes(req),
       refuseUnauthenticated: (req) => this.refuseUnauthenticated(req),
       // A write made with the sign-in cookie is checked for the page's origin as the socket is, then for access.
-      admit: (req) => refuseCookieWriteFromOtherOrigin(req, () => configuredBrowserOrigins(context.configManager)) ?? gateGatewayBinding(req, context),
+      admit: (req) => refuseCookieWriteFromOtherOrigin(req, () => ownBrowserOrigins(context.configManager, context.listenerBinding)) ?? gateGatewayBinding(req, context),
       keyedReplay: (req, serve) => {
         // Only a write whose method takes the shared key, and only when a key was sent.
         const store = context.idempotentReplay;
@@ -511,7 +511,7 @@ export class DaemonHttpRouter {
         userAuth: this.context.userAuth,
         source: 'control-plane-router',
         trustProxy: Boolean(this.context.configManager.get('controlPlane.trustProxy')),
-        allowedBrowserOrigins: () => configuredBrowserOrigins(this.context.configManager),
+        allowedBrowserOrigins: () => ownBrowserOrigins(this.context.configManager, this.context.listenerBinding),
       });
     }
     // The web UI's direct-route sign-in: the credential goes into an HttpOnly cookie, never back to the page.
@@ -527,7 +527,7 @@ export class DaemonHttpRouter {
         }),
         describeCredentialRefusal: this.context.describeCredentialRefusal,
         recordRefused: (request) => this.authFailures.record(this.clientIpOf(request), 'control-plane-router'),
-        allowedBrowserOrigins: () => configuredBrowserOrigins(this.context.configManager),
+        allowedBrowserOrigins: () => ownBrowserOrigins(this.context.configManager, this.context.listenerBinding),
         trustProxy: Boolean(this.context.configManager.get('controlPlane.trustProxy')),
       });
     }
@@ -536,7 +536,7 @@ export class DaemonHttpRouter {
     if ((url.pathname === '/api/browser-session/node' || url.pathname === '/api/browser-session/node/end') && req.method === 'POST') {
       return handleBrowserNodeSession(req, {
         requireRemotePeer: (request) => this.context.requireRemotePeer(request),
-        allowedBrowserOrigins: () => configuredBrowserOrigins(this.context.configManager),
+        allowedBrowserOrigins: () => ownBrowserOrigins(this.context.configManager, this.context.listenerBinding),
         trustProxy: Boolean(this.context.configManager.get('controlPlane.trustProxy')),
       });
     }

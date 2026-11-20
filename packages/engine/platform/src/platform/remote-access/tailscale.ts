@@ -318,10 +318,25 @@ function isReceipt(value: unknown): value is TailscaleServeReceipt {
  * reader rather than replaced by the next append, because these receipts are
  * the only record of what was published to the tailnet.
  */
+/** The receipt store this daemon records its serves in, so the browser origin rule can read the tailnet address it set up. */
+let daemonServeReceipts: TailscaleServeReceiptStore | null = null;
+
+/**
+ * The https origin `tailscale serve` is fronting this daemon at, from the newest
+ * successful serve on record that has not been stopped, or null. One in-memory read.
+ */
+export function activeTailscaleServeOrigin(): string | null {
+  const url = daemonServeReceipts?.active()?.url;
+  if (!url) return null;
+  try { return new URL(url).origin; } catch { return null; }
+}
+
 export class TailscaleServeReceiptStore {
   private receipts: readonly TailscaleServeReceipt[] | undefined;
 
-  constructor(private readonly filePath: string) {}
+  constructor(private readonly filePath: string) {
+    daemonServeReceipts = this;
+  }
 
   list(): TailscaleServeReceipt[] {
     this.receipts ??= readDocument(this.filePath, {

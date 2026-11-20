@@ -60,7 +60,7 @@ import { DaemonSurfaceActionHelper } from './surface-actions.js';
 import { DaemonTransportEventsHelper } from './transport-events.js';
 import { DaemonHttpRouter } from './http/router.js';
 import { DaemonWorkAdmission, isAdmissionRefusal } from './work-admission.js';
-import { configuredBrowserOrigins } from './http/browser-origin.js';
+import { ownBrowserOrigins } from './http/browser-origin.js';
 import { DaemonBatchManager } from '../batch/index.js';
 import { CloudflareTunnelConnector } from '../cloudflare/tunnel-connector.js';
 import { CompanionChatManager } from '../companion/companion-chat-manager.js';
@@ -747,7 +747,7 @@ export function createDaemonFacadeCollaborators(
     distributedRuntime: runtime.distributedRuntime,
     trustProxyEnabled: options.trustProxyEnabled,
     runtimeBus: runtime.runtimeBus,
-    allowedBrowserOrigins: () => configuredBrowserOrigins(runtime.configManager),
+    allowedBrowserOrigins: () => ownBrowserOrigins(runtime.configManager, () => ({ ...options.transportBinding(), scheme: options.tlsState()?.tls ? 'https' : 'http' })),
     dispatchApiRoutes: options.dispatchApiRoutes,
     parseJsonBody: options.parseJsonBody,
     requireAuthenticatedSession: options.requireAuthenticatedSession,

@@ -73,12 +73,16 @@ exposing it broadly, front it with Tailscale:
 ```bash
 # On the machine running the daemon:
 tailscale serve --bg 3421     # or the daemon's control-plane port
+goodvibes-daemon config set web.publicBaseUrl https://your-machine.tailnet.ts.net
 ```
 
 `tailscale serve` gives you an HTTPS hostname on your tailnet (for example
 `https://your-machine.tailnet.ts.net/`) that reaches the single daemon origin.
-Because the bundle and the API arrive same-origin over HTTPS, everything
-works with zero cross-origin configuration:
+`web.publicBaseUrl` tells the daemon that this is an address its web UI is served
+at, which is what lets a page there sign in (`tailscale.serve.run`, from Settings,
+sets it for you). Because the bundle and the API arrive same-origin over HTTPS,
+nothing cross-origin needs configuring; without `web.publicBaseUrl` the sign-in
+is refused (`403 ORIGIN_NOT_ALLOWED`) with a message naming that setting:
 
 - Open the HTTPS hostname in your phone's browser.
 - Sign in once: scan the code `goodvibes pair` shows, or use one of the other

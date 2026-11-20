@@ -112,12 +112,38 @@ export class CalendarTokenStore {
   private async loadConnection(provider: CalendarProviderId): Promise<StoredConnection | null> {
     const raw = await this.secrets.get(tokenKey(provider));
     if (!raw) return null;
+    let parsed: StoredConnection;
     try {
-      const parsed = JSON.parse(raw) as StoredConnection;
-      return parsed && typeof parsed === 'object' && typeof parsed.accessToken === 'string' ? parsed : null;
+      parsed = JSON.parse(raw) as StoredConnection;
     } catch {
       return null;
     }
+    if (!parsed || typeof parsed !== 'object' || typeof parsed.accessToken !== 'string') return null;
+    return parsed.account === undefined ? this.carryForwardAccount(provider, parsed) : parsed;
+  }
+
+  /**
+   * 3.3.1 kept the account under a key of its own beside the token record.
+   * A token record without an account takes it from there once: the joined
+   * record is written, and only then is the old key removed. Every record
+   * this version writes carries its account, so this read happens only for a
+   * connection made by 3.3.1.
+   */
+  private async carryForwardAccount(provider: CalendarProviderId, tokens: StoredConnection): Promise<StoredConnection> {
+    const previousKey = daemonSecretKeyFor(`calendar.${provider}.account`);
+    const raw = await this.secrets.get(previousKey);
+    if (!raw) return tokens;
+    let account: ConnectedAccount;
+    try {
+      account = JSON.parse(raw) as ConnectedAccount;
+    } catch {
+      return tokens;
+    }
+    if (!account || typeof account !== 'object') return tokens;
+    const joined: StoredConnection = { ...tokens, account };
+    await this.secrets.set(tokenKey(provider), JSON.stringify(joined));
+    await this.secrets.delete(previousKey);
+    return joined;
   }
 
   /** Read the stored token set for a provider, or null when disconnected. */

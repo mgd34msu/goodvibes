@@ -124,7 +124,39 @@ interface LoadedBudget {
   readonly unavailable?: true;
   readonly migrate?: true;
 }
-function loadInitialState(filePath: string): LoadedBudget {
+/**
+ * 3.3.1 wrote holds and spend without a currency: every amount was in the
+ * currency its limits were counted in, `payments.currency`. A record with no
+ * `currency` field takes that one (`currencyOfUnmarked`, read only when such
+ * a record is there), and the ledger is written back once in this version's
+ * form. A record whose currency is present but not a code stays invalid.
+ */
+function markUnmarkedCurrency(file: Partial<BudgetFile>, currencyOfUnmarked: (() => string) | undefined): boolean {
+  if (!currencyOfUnmarked) return false;
+  const unmarked = (record: unknown): record is Record<string, unknown> =>
+    typeof record === 'object' && record !== null && !Array.isArray(record) && (record as Record<string, unknown>)['currency'] === undefined;
+  let currency: string | undefined;
+  let count = 0;
+  const mark = (record: unknown): unknown => {
+    if (!unmarked(record)) return record;
+    currency ??= currencyOfUnmarked();
+    count += 1;
+    return { ...record, currency };
+  };
+  const mutable = file as Record<string, unknown>;
+  if (Array.isArray(file.spend)) mutable['spend'] = file.spend.map(mark);
+  if (Array.isArray(file.reservations)) mutable['reservations'] = file.reservations.map(mark);
+  if (Array.isArray(file.reconciliations)) {
+    mutable['reconciliations'] = (file.reconciliations as unknown[]).map((entry) => {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return entry;
+      const row = entry as Record<string, unknown>;
+      return { ...row, reservation: mark(row['reservation']), spend: mark(row['spend']) };
+    });
+  }
+  return count > 0;
+}
+
+function loadInitialState(filePath: string, currencyOfUnmarked?: () => string): LoadedBudget {
   const invalid = (): LoadedBudget => {
     logger.warn('Payment budget ledger is unreadable or unsupported. Payment accounting is disabled until the original state is repaired; no amounts were discarded.', { filePath });
     return { unavailable: true };
@@ -140,6 +172,7 @@ function loadInitialState(filePath: string): LoadedBudget {
   }
   if (typeof parsed !== 'object' || parsed === null) return invalid();
   const file = parsed as Partial<BudgetFile>;
+  const marked = markUnmarkedCurrency(file, currencyOfUnmarked);
   if ((file.version !== 1 && file.version !== BUDGET_FILE_VERSION && file.version !== 3)
     || !Array.isArray(file.spend) || !Array.isArray(file.reservations)
     || !file.spend.every(isSpendRecord) || !file.reservations.every(isReservation)) return invalid();
@@ -167,7 +200,7 @@ function loadInitialState(filePath: string): LoadedBudget {
       toleranceMinorUnits: entry.toleranceMinorUnits, expiresAtMs: entry.expiresAtMs,
       retainUntilSettled: entry.retainUntilSettled === true })) },
   );
-  return { observed, state: { spend, reservations, ...(reconciliations.length === 0 ? {} : { reconciliations }) }, ...(file.version === 1 ? { migrate: true as const } : {}) };
+  return { observed, state: { spend, reservations, ...(reconciliations.length === 0 ? {} : { reconciliations }) }, ...(file.version === 1 || marked ? { migrate: true as const } : {}) };
 }
 
 export class PaymentBudgetUnavailableError extends Error {
@@ -205,8 +238,8 @@ export class DurableBudgetLedger extends BudgetLedger {
    * to do with retention.
    */
   constructor(filePath: string, now: () => number = Date.now, beforeFormatWrite?: () => void, beforeReconciliationWrite?: () => void,
-    retainPendingSpend?: (purchaseId: string) => boolean, expectExisting?: () => boolean) {
-    const loaded = loadInitialState(filePath);
+    retainPendingSpend?: (purchaseId: string) => boolean, expectExisting?: () => boolean, currencyOfUnmarked?: () => string) {
+    const loaded = loadInitialState(filePath, currencyOfUnmarked);
     super(loaded.state);
     this.filePath = filePath;
     this.beforeFormatWrite = beforeFormatWrite;

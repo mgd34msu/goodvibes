@@ -51,7 +51,7 @@ const MAX_BODY_BYTES = 16 * 1024;
 
 export async function handleBrowserSession(req: Request, deps: BrowserSessionDeps): Promise<Response> {
   const origin = req.headers.get('origin');
-  if (origin === null || !browserOriginAllowed(req, origin, deps.allowedBrowserOrigins())) {
+  if (origin === null || !browserOriginAllowed(origin, deps.allowedBrowserOrigins())) {
     return originNotAllowedResponse(origin, 'sign this browser in');
   }
   if (req.headers.get('content-type')?.split(';', 1)[0]!.trim().toLowerCase() !== 'application/json') {
@@ -136,7 +136,7 @@ export interface BrowserNodeSessionDeps {
  */
 export async function handleBrowserNodeSession(req: Request, deps: BrowserNodeSessionDeps): Promise<Response> {
   const origin = req.headers.get('origin');
-  if (origin === null || !browserOriginAllowed(req, origin, deps.allowedBrowserOrigins())) {
+  if (origin === null || !browserOriginAllowed(origin, deps.allowedBrowserOrigins())) {
     return originNotAllowedResponse(origin, 'bind a device node to this browser');
   }
   if (new URL(req.url).pathname.endsWith('/end')) {

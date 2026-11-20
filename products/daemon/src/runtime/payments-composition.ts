@@ -279,6 +279,8 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
     () => purchases.list({ limit: 1, dayKey: undefined }).total > 0
       || operations.list().some(operation => operation.totalMinorUnits !== null
         && operation.phase !== null && ['awaiting-window', 'arming-payment', 'submit-pending', 'submitted'].includes(operation.phase)),
+    // 3.3.1 recorded amounts with no currency: they are in the one its limits were counted in.
+    () => readPaymentsServiceConfig(config).budgetCurrency,
   );
   if (options.groupSpend) budget.attachGroupSpend(options.groupSpend);
   const channelNotifier = liveChannelPaymentNotifier(config, options.channelDeliveryRouter, paymentReplies);

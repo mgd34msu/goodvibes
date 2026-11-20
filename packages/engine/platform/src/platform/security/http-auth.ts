@@ -168,6 +168,11 @@ function isSecureRequest(req: Request, trustProxy = false): boolean {
   } catch {
     // Ignore malformed URLs; Bun always provides a valid request URL.
   }
+  // A page served over https (a tunnel or proxy in front of this daemon, such as tailscale
+  // serve) gets a Secure cookie even when the hop to the daemon is plain http. This only
+  // ever adds Secure; which pages may use the cookie at all is the Origin rule's decision.
+  const page = req.headers.get('origin') ?? req.headers.get('referer') ?? '';
+  if (/^https:\/\//i.test(page)) return true;
   if (!trustProxy) return false;
   const forwardedProto = req.headers.get('x-forwarded-proto') ?? '';
   return forwardedProto

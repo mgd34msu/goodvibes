@@ -275,26 +275,32 @@ function ProjectionGroup({ items, query, selection, onSelect }: ProjectionGroupP
   );
 }
 
+/** Why no fact names a document although documents are listed. */
+const DOCUMENTS_UNREAD_NOTE = 'Documents are listed under Sources; facts are read from them when a decision model is set.';
+
 /** The subjects that hold something matching the Library search (all of them without one). */
 function matchingSubjects(subjects: readonly KnowledgeSubject[], query: string): readonly KnowledgeSubject[] {
   if (!query.trim()) return subjects;
   return subjects.filter((subject) => includesText([subject.name], query) || subject.facts.some((fact) => includesText([fact.text], query)));
 }
 
-function SubjectGroup({ subjects, active, onSelect }: { subjects: readonly KnowledgeSubject[]; active: string | null; onSelect: (name: string) => void }) {
+function SubjectGroup({ subjects, active, onSelect, note }: { subjects: readonly KnowledgeSubject[]; active: string | null; onSelect: (name: string) => void; note?: string | undefined }) {
   if (subjects.length === 0) return null;
   return (
+    <>
     <RowGroup label="Subjects" count={subjects.length}>
       {subjects.map((subject) => (
         <Row
           key={subject.name}
-          title={subject.name}
+          title={subject.label}
           meta={`${subject.facts.length} ${subject.facts.length === 1 ? 'fact' : 'facts'}`}
           selected={active === subject.name}
           onSelect={() => onSelect(subject.name)}
         />
       ))}
     </RowGroup>
+    {note && <p className="knowledge-subjects__note" role="note">{note}</p>}
+    </>
   );
 }
 
@@ -304,8 +310,8 @@ function FactsPane({ subject, query, selection, onSelect }: { subject: Knowledge
     ? subject.facts.filter((fact) => includesText([fact.text], query))
     : subject.facts;
   return (
-    <DetailPane title={subject.name} meta={`${facts.length} ${facts.length === 1 ? 'fact' : 'facts'}`}>
-      <RowList aria-label={`What it knows about ${subject.name}`}>
+    <DetailPane title={subject.label} meta={`${facts.length} ${facts.length === 1 ? 'fact' : 'facts'}`}>
+      <RowList aria-label={`What it knows about ${subject.label}`}>
         {facts.map((fact) => (
           <Row
             key={fact.id}
@@ -402,6 +408,9 @@ export function KnowledgeView({ query = '' }: KnowledgeViewProps) {
   const allIssues = useMemo(() => firstArray(issues.data, ['issues', 'items', 'data']), [issues.data]);
   const subjects = useMemo(() => knowledgeSubjects(allNodes, allSources), [allNodes, allSources]);
   const shownSubjects = useMemo(() => matchingSubjects(subjects, query), [subjects, query]);
+  // Sources are listed but no fact names one: their facts are read by the decision model, so without
+  // one every fact is a memory. Said once where the subjects are, rather than left to wonder about.
+  const documentsUnread = allSources.length > 0 && subjects.length > 0 && !subjects.some((item) => item.facts.some((fact) => fact.fromSource));
   const activeSubject = shownSubjects.find((item) => item.name === subject) ?? (phone ? null : shownSubjects[0] ?? null);
   const selectedFact = selection?.startsWith('fact:')
     ? activeSubject?.facts.find((fact) => `fact:${fact.id}` === selection) ?? null
@@ -478,6 +487,7 @@ export function KnowledgeView({ query = '' }: KnowledgeViewProps) {
       )}
       <SubjectGroup
         subjects={shownSubjects}
+        note={documentsUnread ? DOCUMENTS_UNREAD_NOTE : undefined}
         active={activeSubject?.name ?? null}
         onSelect={(name) => { setSubject(name); setSelection(null); }}
       />
@@ -604,7 +614,7 @@ export function KnowledgeView({ query = '' }: KnowledgeViewProps) {
             onCloseDetail={() => { if (selection) setSelection(null); else setSubject(null); }}
             listLabel="What it knows"
             detailLabel="Knowledge detail"
-            backLabel={selectedFact && activeSubject ? activeSubject.name : 'All knowledge'}
+            backLabel={selectedFact && activeSubject ? activeSubject.label : 'All knowledge'}
           />
         )}
 

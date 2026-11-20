@@ -90,4 +90,6 @@ export interface ChatViewProps {
    * Mike"). Absent or empty greets without a name.
    */
   userName?: string;
+  /** Open Settings at a section: the `asking you` chip's sheet offers `Change` for the mode on a phone. */
+  onOpenSettings?: (section: string) => void;
 }

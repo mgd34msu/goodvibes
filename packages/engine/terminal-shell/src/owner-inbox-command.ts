@@ -305,12 +305,18 @@ export function registerOwnerInboxCommands<Context extends OwnerInboxCommandCont
           const inbox = inboxOf(ctx);
           const item = await findItem(inbox, values.item!, 'open');
           const words = values.answer!.trim();
-          // With options, the first word is the choice and the rest, as typed, its note.
+          // With options, the choice is the longest one the answer starts with (a choice may be several words);
+          // the rest, as typed, is its note. With none matching, the first word is sent and refused by name.
+          const lower = words.toLowerCase();
+          const chosen = [...item.options].sort((a, b) => b.length - a.length)
+            .find((option) => lower === option.toLowerCase() || lower.startsWith(`${option.toLowerCase()} `));
           const space = words.search(/\s/);
+          const choice = chosen ?? (space < 0 ? words : words.slice(0, space));
+          const note = words.slice(chosen ? chosen.length : choice.length).trim();
           // An approval is answered at the revision shown: one that moved meanwhile is refused with how it stands now.
           const shown = item.revision !== undefined ? { expectedRevision: item.revision } : {};
           const answer = item.options.length > 0
-            ? { option: space < 0 ? words : words.slice(0, space), ...(space < 0 ? {} : { text: words.slice(space).trim() }), ...shown }
+            ? { option: choice, ...(note ? { text: note } : {}), ...shown }
             : { text: words, ...shown };
           let outcome;
           try { outcome = await inbox.answer(item.id, answer); } catch (error) { return failed('send the answer', error); }

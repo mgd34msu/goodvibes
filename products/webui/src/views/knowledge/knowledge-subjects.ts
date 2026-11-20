@@ -35,12 +35,16 @@ export interface KnowledgeFact {
   readonly text: string;
   /** `From <source title> · <when>`, or `<when>` alone when the record keeps no reference. */
   readonly origin: string;
+  /** True when the record keeps the source it was read from (a document, a page), not a memory. */
+  readonly fromSource: boolean;
   readonly updatedAt: number;
 }
 
 export interface KnowledgeSubject {
-  /** The subject's name (the topic's title). */
+  /** The subject's name (the topic's title): its key. */
   readonly name: string;
+  /** The name as the page shows it, first letter capital ("Watering"). */
+  readonly label: string;
   readonly facts: readonly KnowledgeFact[];
 }
 
@@ -70,12 +74,17 @@ export function sourceTitle(source: unknown): string {
 }
 
 /** Where a record came from, as the store keeps it on the record; '' when it keeps none. */
-function originOf(node: RecordLike, sourceTitles: ReadonlyMap<string, string>): string {
+function originOf(node: RecordLike, sourceTitles: ReadonlyMap<string, string>): { readonly from: string; readonly fromSource: boolean } {
   const metadata = asRecord(node.metadata);
   const sourceId = text(node.sourceId) || text(metadata.sourceId) || text(metadata.compiledFrom);
-  if (sourceId) return sourceTitles.get(sourceId) || 'a source no longer listed';
-  if (node.kind === 'memory' || text(metadata.memoryId)) return 'memory';
-  return '';
+  if (sourceId) return { from: sourceTitles.get(sourceId) || 'a source no longer listed', fromSource: true };
+  if (node.kind === 'memory' || text(metadata.memoryId)) return { from: 'memory', fromSource: false };
+  return { from: '', fromSource: false };
+}
+
+/** A subject's name as the page shows it: the first letter capital, the rest as the store spells it. */
+export function subjectLabel(name: string): string {
+  return name ? `${name.charAt(0).toLocaleUpperCase()}${name.slice(1)}` : name;
 }
 
 function subjectNamesOf(node: RecordLike): readonly string[] {
@@ -111,9 +120,9 @@ export function knowledgeSubjects(nodes: readonly unknown[], sources: readonly u
     const factText = text(record.title) || text(record.summary);
     if (!factText) continue;
     const updatedAt = time(record);
-    const from = originOf(record, sourceTitles);
+    const { from, fromSource } = originOf(record, sourceTitles);
     const when = whenLabel(updatedAt, now);
-    const fact: KnowledgeFact = { id, text: factText, origin: [from && `From ${from}`, when].filter(Boolean).join(' · '), updatedAt };
+    const fact: KnowledgeFact = { id, text: factText, origin: [from && `From ${from}`, when].filter(Boolean).join(' · '), fromSource, updatedAt };
     const subjects = new Set<string>();
     for (const name of subjectNamesOf(record)) {
       const subject = topics.get(name.toLowerCase());
@@ -126,7 +135,7 @@ export function knowledgeSubjects(nodes: readonly unknown[], sources: readonly u
     }
   }
   return [...grouped.entries()]
-    .map(([name, facts]) => ({ name, facts: [...facts].sort((a, b) => b.updatedAt - a.updatedAt) }))
+    .map(([name, facts]) => ({ name, label: subjectLabel(name), facts: [...facts].sort((a, b) => b.updatedAt - a.updatedAt) }))
     .sort((a, b) => {
       if (a.name === UNFILED_SUBJECT) return 1;
       if (b.name === UNFILED_SUBJECT) return -1;

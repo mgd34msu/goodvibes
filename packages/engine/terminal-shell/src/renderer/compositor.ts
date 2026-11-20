@@ -29,7 +29,7 @@ export interface CompositeRequest {
     search?: SearchInfo | undefined;
     /**
      * Surfaces stamped over the finished screen, in order: modals (which dim
-     * everything underneath first), toasts. Screen coordinates.
+     * everything underneath first) and popups. Screen coordinates.
      */
     layers?: readonly SurfaceLayer[] | undefined;
 }

@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, renameSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteDecisionLog } from '@goodvibes/judgment';
 import { logger } from '../utils/logger.js';
@@ -64,7 +65,9 @@ export function recoverUnreadableLog(path: string, error: unknown): { readonly l
     if (!isUnreadableLog(again)) throw again;
   }
   const kept = setUnreadableLogAside(path);
-  const notice = `The decision log could not be read (${summarizeError(error)}). It was kept at ${kept} and a new log was started.`;
+  const home = homedir();
+  const shown = home && kept.startsWith(`${home}/`) ? `~${kept.slice(home.length)}` : kept;
+  const notice = `The record of past decisions could not be read (${summarizeError(error)}). It was kept at ${shown} and a new one was started.`;
   logger.warn(notice, { path, kept });
   return { log: new SqliteDecisionLog(path), notice };
 }

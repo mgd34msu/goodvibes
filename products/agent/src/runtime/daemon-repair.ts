@@ -289,14 +289,14 @@ export async function runDaemonRepair(options: DaemonRepairRunOptions): Promise<
   } catch (error) {
     const reason = summarizeError(error);
     steps.push(`could not set ${DAEMON_ENABLED_KEY} to true: ${reason}`);
-    return finish(false, `[Daemon] Repair could not start: the ${DAEMON_ENABLED_KEY} setting could not be written (${reason}). Nothing was changed.`);
+    return finish(false, `[Daemon] Repair could not start: the setting "Use the background daemon" could not be saved (${reason}). Nothing was changed.`);
   }
 
   if (!offer.serviceInstalled) {
     const installed = await installDaemonService(options.runDaemonCli ?? createDaemonCliRunner());
     if (!installed.ok) {
       steps.push(`could not install the daemon service: ${installed.detail}`);
-      return finish(false, `[Daemon] Not repaired: ${DAEMON_ENABLED_KEY} is now true, but the daemon service could not be installed (${installed.detail}). Install it with: ${DAEMON_INSTALL_COMMAND}`);
+      return finish(false, `[Daemon] Not repaired: "Use the background daemon" is now on, but the daemon service could not be installed (${installed.detail}). Install it with: ${DAEMON_INSTALL_COMMAND}`);
     }
     steps.push(`installed the daemon service through goodvibes-daemon (${installed.detail})`);
   }
@@ -304,7 +304,7 @@ export async function runDaemonRepair(options: DaemonRepairRunOptions): Promise<
   const host = options.host ?? defaultDaemonHost(config);
   if (!host) {
     steps.push('could not reach the service manager from this process');
-    return finish(false, `[Daemon] Partly repaired: ${DAEMON_ENABLED_KEY} is now true. Start the daemon with: ${DAEMON_START_COMMAND}`);
+    return finish(false, `[Daemon] Partly repaired: "Use the background daemon" is now on. Start the daemon with: ${DAEMON_START_COMMAND}`);
   }
   let brought: DaemonBringUpResult;
   try {
@@ -314,8 +314,8 @@ export async function runDaemonRepair(options: DaemonRepairRunOptions): Promise<
   }
   steps.push(brought.detail);
   return brought.answered
-    ? finish(true, `[Daemon] Repaired: ${DAEMON_ENABLED_KEY} is true and the daemon answers. ${steps.length} steps recorded in the activity log.`)
-    : finish(false, `[Daemon] Partly repaired: ${DAEMON_ENABLED_KEY} is now true, but the daemon is not answering yet: ${brought.detail}. The Agent tries again at the next launch.`);
+    ? finish(true, `[Daemon] Repaired: "Use the background daemon" is on and the daemon answers. ${steps.length} steps recorded in the activity log.`)
+    : finish(false, `[Daemon] Partly repaired: "Use the background daemon" is now on, but the daemon is not answering yet: ${brought.detail}. The Agent tries again at the next launch.`);
 }
 
 /**

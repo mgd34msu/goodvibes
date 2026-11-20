@@ -2,19 +2,16 @@
  * notification-surfaces.ts, where the main conversation's system notices are
  * seen.
  *
- * The transcript draws no row for a system notice (core/notices.ts): each one
- * is a toast in the top right (renderer/toast-center.ts, drawn by
- * buildConversationLayers) and an entry, full text, in the notification
- * history, which /notifications opens as a kit modal. The feed is bridged to
- * the toasts where the notice sink is set (runtime/bootstrap-core.ts), so a
- * notice written during start-up toasts too.
+ * The transcript draws no row for a system notice (core/notices.ts), and
+ * nothing is drawn over the conversation: each one is an entry, full text, in
+ * the notification history, counted on the status bar while unread and opened
+ * with ctrl+n or /notifications as a kit modal.
  */
 
 import type { CommandContext } from '../input/command-registry.ts';
 import type { InputHandler } from '../input/handler.ts';
 import { NotificationsModal } from '../input/notifications-modal.ts';
 import { getSharedNotificationFeed } from '../core/notifications-feed.ts';
-import { getSharedToastCenter } from '../renderer/toast-center.ts';
 
 export interface NotificationSurfaceOptions {
   readonly commandContext: CommandContext;
@@ -24,7 +21,6 @@ export interface NotificationSurfaceOptions {
 
 export function wireNotificationSurfaces(options: NotificationSurfaceOptions): void {
   const { commandContext, input, render } = options;
-  getSharedToastCenter().onChange = render;
 
   commandContext.openNotifications = () => {
     const open = input.surfaceModals.modals().find((modal) => modal instanceof NotificationsModal);

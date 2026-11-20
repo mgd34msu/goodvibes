@@ -102,7 +102,7 @@ export function powerStatusLines(state: PowerSurfaceState): string[] {
     lines.push('sleep is not being held; the host sleeps on its own schedule');
   }
   // The sleep-edge hooks being off is true whatever is held, so it is said either way.
-  if (state.sleepEdgeNote) lines.push(`sleep hooks off: ${state.sleepEdgeNote}`);
+  if (state.sleepEdgeNote) lines.push(state.sleepEdgeNote);
   return lines;
 }
 

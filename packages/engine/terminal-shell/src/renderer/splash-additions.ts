@@ -10,9 +10,12 @@
  *                          ...
  *   c (first run only)  GoodVibes asks before ...  shift+tab  changes how often it asks. ...
  *
- * Each block is drawn only when all of its rows fit between the splash's last
- * row and the composer, one blank row kept above the composer; a block that
- * does not fit is left out whole and the next one is tried.
+ * The blocks are packed with no blank row between them, and the sentence of
+ * block c wraps to the screen's width so it takes as few rows as its words
+ * need. All three are drawn when their rows fit between the splash's last row
+ * and the composer; when they do not, the prompts (b) are left out first,
+ * then the sentence (c), each whole. Rows left over become blank rows: first
+ * one under the splash, then one above the composer, then between blocks.
  */
 import type { Line } from '@goodvibes/engine/platform/platform/types';
 import { getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/terminal-width';
@@ -31,11 +34,8 @@ function homeShort(folder: string): string {
 }
 
 interface Block {
+  readonly kind: 'a' | 'b' | 'c';
   readonly rows: readonly { readonly segments: readonly StyledSegment[]; readonly right?: string | undefined; readonly indent?: number | undefined; readonly prompt?: string | undefined }[];
-}
-
-function blank(): Block['rows'][number] {
-  return { segments: [] };
 }
 
 /**
@@ -57,6 +57,8 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
   const left = Math.max(2, leftEdge);
   const right = Math.min(width - 3, rightEdge);
   const blockWidth = Math.max(10, right - left + 1);
+  // The asks sentence runs to the screen's right margin, not the splash's: as few rows as its words need.
+  const sentenceWidth = Math.max(blockWidth, width - 3 - left);
 
   const blocks: Block[] = [];
   const firstRun = view.firstRun;
@@ -68,18 +70,18 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
       { text: ' · ', tone: 'dim' },
       { text: firstRun.signIn, tone: 'good' },
     ], blockWidth - 8);
-    blocks.push({ rows: [blank(), ...rows.map((segments, k) => ({ segments, ...(k === 0 ? { right: '3 of 3' } : {}) }))] });
+    blocks.push({ kind: 'a', rows: rows.map((segments, k) => ({ segments, ...(k === 0 ? { right: '3 of 3' } : {}) })) });
   } else if (firstRun?.kind === 'not-ready') {
     const rows = wrapSegments([
       { text: 'Not set up yet.', bold: true },
       { text: `  Choose a model with /model, or run ${view.setupCommand}.`, tone: 'dim' },
     ], blockWidth);
-    blocks.push({ rows: [blank(), ...rows.map((segments) => ({ segments }))] });
+    blocks.push({ kind: 'a', rows: rows.map((segments) => ({ segments })) });
   }
   if (view.prompts.length > 0) {
     const title = wrapSegments([{ text: 'Try one of these in ' }, { text: homeShort(view.folder), tone: 'cyan' }, { text: ':' }], blockWidth);
     const prompts = view.prompts.flatMap((prompt) => wrapSegments([{ text: prompt }], blockWidth - 3).map((segments) => ({ segments, indent: 3, prompt })));
-    blocks.push({ rows: [blank(), ...title.map((segments) => ({ segments })), ...prompts] });
+    blocks.push({ kind: 'b', rows: [...title.map((segments) => ({ segments })), ...prompts] });
   }
   if (firstRun?.kind === 'set' && view.asksBefore) {
     const rows = wrapSegments([
@@ -90,24 +92,35 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
       { text: ' ' },
       { text: view.setupCommand, chip: true },
       { text: ' whenever you want them.', tone: 'dim' },
-    ], blockWidth);
-    blocks.push({ rows: [blank(), ...rows.map((segments) => ({ segments }))] });
+    ], sentenceWidth);
+    blocks.push({ kind: 'c', rows: rows.map((segments) => ({ segments })) });
   }
 
-  // Free rows: from the row under the splash to the row above the blank row kept over the composer.
-  let room = height - 2 - last;
-  let y = last + 1;
+  // Free rows: every row under the splash's last row (the composer is below the viewport).
+  const free = height - 1 - last;
+  const rowsOf = (list: readonly Block[]): number => list.reduce((sum, block) => sum + block.rows.length, 0);
+  // Too short for every block: the prompts go first, then the sentence; block a goes last.
+  let shown: Block[] = blocks;
+  for (const drop of ['b', 'c', 'a'] as const) {
+    if (rowsOf(shown) <= free) break;
+    shown = shown.filter((block) => block.kind !== drop);
+  }
+  if (firstRun?.kind === 'set' && !shown.some((block) => block.kind === 'a')) {
+    // "You're set" left out: the status bar says it once instead (the mode segment's flash).
+    const message = takeSetFlash();
+    if (message) { getSharedModeFlash().start(message); requestSplashRender(); }
+  }
+  // Rows to spare become blank rows: under the splash, then above the composer, then between blocks.
+  let spare = free - rowsOf(shown);
+  const take = (): number => (spare > 0 ? (spare -= 1, 1) : 0);
+  const underSplash = shown.length > 0 ? take() : 0;
+  take(); // the blank row kept above the composer
+  const between = shown.map((_, index) => (index > 0 ? take() : 0));
+  let y = last + 1 + underSplash;
   const t = activeTokens();
   const drawnPrompts: { row: number; prompt: string }[] = [];
-  for (const [index, block] of blocks.entries()) {
-    if (block.rows.length > room) {
-      // "You're set" left out: the status bar says it once instead (the mode segment's flash).
-      if (index === 0 && firstRun?.kind === 'set') {
-        const message = takeSetFlash();
-        if (message) { getSharedModeFlash().start(message); requestSplashRender(); }
-      }
-      continue;
-    }
+  for (const [index, block] of shown.entries()) {
+    y += between[index] ?? 0;
     for (const row of block.rows) {
       const canvas = new SurfaceCanvas(width, 1);
       const end = drawSegments(canvas, left + (row.indent ?? 0), 0, row.segments);
@@ -117,7 +130,6 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
       if (row.prompt) drawnPrompts.push({ row: y, prompt: row.prompt });
       y += 1;
     }
-    room -= block.rows.length;
   }
   recordDrawnPrompts(drawnPrompts.length > 0 ? { prompts: view.prompts.filter((prompt) => drawnPrompts.some((entry) => entry.prompt === prompt)), rows: drawnPrompts } : null);
   return out;

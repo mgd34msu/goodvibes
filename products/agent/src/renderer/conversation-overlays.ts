@@ -26,8 +26,6 @@ import { renderAutocompleteOverlay } from './autocomplete-overlay.ts';
 import { renderAgentWorkspace } from './agent-workspace.ts';
 import { renderBlockActionsMenu } from './block-actions-overlay.ts';
 import type { SurfaceLayer } from './surface-kit.ts';
-import { getSharedToastCenter } from './toast-center.ts';
-import { firstRunOwnsScreen } from '@goodvibes/engine/terminal-shell/first-run';
 
 export interface ConversationOverlayContext {
   readonly input: InputHandler;
@@ -83,10 +81,6 @@ export interface ConversationLayerContext {
   readonly providerInputTokens?: number;
   /** The permission dialog, when a request is waiting (drawn above the other modals). */
   readonly permission?: SurfaceLayer | null;
-  /** Rows at the top of the screen held by the header (and the session chips row); toasts start below them. */
-  readonly headerRows?: number;
-  /** Rows at the bottom of the screen held by the footer (the throbber and its empty row while main works, the composer, the status line); toasts stay above them. */
-  readonly footerRows?: number;
 }
 
 /** The Agent workspace as it is painted on screen. */
@@ -129,10 +123,5 @@ export function buildConversationLayers(context: ConversationLayerContext): Surf
     width: w,
     height: h,
     permission: context.permission,
-    headerRows: context.headerRows,
-    footerRows: context.footerRows,
-    toasts: getSharedToastCenter(),
-    // First run's screens and the splash own the screen: notices go only to the count.
-    screenOwned: firstRunOwnsScreen() || context.conversation.isSplashShowing(),
   });
 }

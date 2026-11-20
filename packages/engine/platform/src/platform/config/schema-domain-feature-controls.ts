@@ -148,14 +148,14 @@ export const featureControlSettings: ConfigSettingRow[] = [
     appliesWhen: 'now',
     type: 'boolean',
     description:
-      'Adaptive notification suppression: past notifications.burstThreshold notifications of one kind (same domain, level and title) in one collapse window, the rest are counted into that kind\'s notification-history entry without a toast. Critical, milestone, and alert notifications are always exempt. Turn off to let every one toast as its level and the print level allow. Read when the app starts.',
+      'Adaptive notification suppression: past notifications.burstThreshold notifications of one kind (same domain, level and title) in one collapse window, the rest are counted into that kind\'s notification-history entry instead of each adding one. Critical, milestone, and alert notifications are always exempt. Turn off to record every one as its own entry. Read when the app starts.',
   },
   {
     key: 'notifications.burstThreshold',
     label: 'Repeats shown before notifications go quiet',
     type: 'number',
     description:
-      'How many notifications with the same domain, level and title toast within one collapse window while notifications.adaptiveSuppression is on; later ones in that window are counted into the same notification-history entry without a toast. The window follows the print level (behavior.hitlMode: 5 s quiet, 2 s balanced, 0.5 s operator) and runs from the first notification, so a steady trickle cannot keep one open. Critical, milestone and alert notifications never collapse. Read when the app starts.',
+      'How many notifications with the same domain, level and title are recorded as their own entries within one collapse window while notifications.adaptiveSuppression is on; later ones in that window are counted into the same notification-history entry. The window follows the print level (behavior.hitlMode: 5 s quiet, 2 s balanced, 0.5 s operator) and runs from the first notification, so a steady trickle cannot keep one open. Critical, milestone and alert notifications never collapse. Read when the app starts.',
     ...intRange(1, 10_000),
   },
   {

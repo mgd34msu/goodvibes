@@ -15,8 +15,8 @@ export function describePowerStatus(state: Pick<PowerState, 'work' | 'keepAwake'
   const held = describeHeld(state);
   // The sleep-edge hooks being off (no checkpoint before sleep, no catch-up on
   // wake) is true whatever is held, so it is said beside either note.
-  const edge = state.sleepEdge?.note ? `sleep hooks off: ${state.sleepEdge.note}` : null;
-  if (held && edge) return `${held}; ${edge}`;
+  const edge = state.sleepEdge?.note ?? null;
+  if (held && edge) return `${held}. ${edge}`;
   return held ?? edge;
 }
 
@@ -31,8 +31,8 @@ export function describePowerChip(state: Pick<PowerState, 'work' | 'keepAwake'> 
   // The notice says only what the person needs: the keep-awake switch and the
   // sleep-edge hooks being off. Sleep held while a turn or job runs is not news.
   const held = state.keepAwake.enabled ? describeHeld(state) : null;
-  const edge = state.sleepEdge?.note ? `sleep hooks off: ${state.sleepEdge.note}` : null;
-  const detail = held && edge ? `${held}; ${edge}` : held ?? edge;
+  const edge = state.sleepEdge?.note ?? null;
+  const detail = held && edge ? `${held}. ${edge}` : held ?? edge;
   if (detail === null) return null;
   // Only the owner's own keep-awake switch is a chip.
   const chip = state.keepAwake.enabled

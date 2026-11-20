@@ -31,7 +31,7 @@ export interface ConversationRenderContext {
     readonly splashOptions: SplashOptions;
     /**
      * 'elsewhere' for the main transcript: its system notices ([WRFC] …,
-     * [Agents] …, compaction receipts) are toasts and notification-history
+     * [Agents] …, compaction receipts) are notification-history
      * entries (core/notices.ts), so no row is drawn for them. Absent (an agent
      * view drawing a sub-agent's own conversation): drawn after the turn.
      */

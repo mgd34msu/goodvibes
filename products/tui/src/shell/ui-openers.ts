@@ -30,7 +30,6 @@ import { openCommandPaletteOn, type PaletteShortcut } from '@goodvibes/engine/te
 import type { KeybindingsManager } from '../input/keybindings.ts';
 import { AGENT_VIEW_NAMES, CHANGES_VIEW_NAMES, USAGE_VIEW_NAMES } from '../input/views.ts';
 import { confirmThrough } from '../input/confirm-dialog.ts';
-import { getSharedToastCenter } from '../renderer/toast-center.ts';
 import { categorizeBuiltinCommands } from '../input/commands.ts';
 import { syncServiceSettingToPlatform } from './service-settings-sync.ts';
 import { classifyServiceSettingChange } from '@goodvibes/engine/terminal-shell/service-setting-change';
@@ -390,9 +389,6 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
   commandContext.confirm = (options) => confirmThrough(input.surfaceModals, options);
   // A described command's guided panel (command-actions/panel.ts) is a kit modal on the same stack.
   commandContext.pushSurfaceModal = (modal) => input.surfaceModals.push(modal);
-  const toasts = getSharedToastCenter();
-  toasts.onChange = render;
-  commandContext.showToast = (toast) => toasts.show(toast);
 
   commandContext.openCommandPalette = () => {
     // Built live from the command registry when it opens; category labels come

@@ -10,6 +10,9 @@ import { join } from 'node:path';
 import type { SweepableSecrets } from '../config/plaintext-credential-sweep.js';
 import { describePlaintextSweep, sweepPlaintextCredentials } from '../config/plaintext-credential-sweep.js';
 import { raiseReaderFloorInFile } from '../config/shared-config-tier.js';
+import { takeDecisionPolicyNameOf3_2Read } from '../config/settings-ingestion.js';
+import { noteCarriedForward, sayCarriedForwardThrough } from '../state/carried-forward.js';
+import { daemonReceiptStoreAt, daemonReceiptsPath } from './receipts.js';
 import type { ConfigManager } from '../config/manager.js';
 import { ensureActivityLoggerConfigured, logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -74,12 +77,33 @@ export async function runDaemonBootGuarantees(
   services: DaemonBootServices,
 ): Promise<void> {
   ensureDaemonActivityLog(services.shellPaths.workingDirectory, configManager);
+  // What the upgrade steps carried forward from 3.3.1 is said once, as one receipt the next terminal or web UI shows.
+  sayCarriedForwardThrough((text) => { daemonReceiptStoreAt(daemonReceiptsPath(configManager)).record(text); });
   await sweepPlaintextCredentialsOnBoot(configManager, services);
+  writeCurrentDecisionPolicyName(configManager);
   // The live watch was armed during graph acquisition, before the sweep's
   // owned writes. Consume their disk generations before readiness. This uses
   // the ordinary reload/invalidation path and also observes external edits
   // that arrived during boot; no same-value or ABA invalidation is suppressed.
   configManager.flushConfigFileChanges();
+}
+
+/**
+ * A decision-model policy a settings file held under its 3.2.0 name is read
+ * under the current one (config/settings-ingestion.ts). The daemon owns that
+ * setting: it writes the current name into its own file once, so the old one
+ * is not read again. Costs nothing when no such name was read.
+ */
+function writeCurrentDecisionPolicyName(configManager: ConfigManager): void {
+  if (!takeDecisionPolicyNameOf3_2Read()) return;
+  const policy = configManager.get('judgment.policy');
+  try {
+    configManager.set('judgment.policy', policy);
+    noteCarriedForward('decision-model policy name');
+    logger.info('DaemonServer: the decision-model policy saved under its 3.2.0 name was written under its current name', { policy });
+  } catch (error) {
+    logger.warn('DaemonServer: the decision-model policy could not be written under its current name; it is still read under it', { policy, error: summarizeError(error) });
+  }
 }
 
 /**

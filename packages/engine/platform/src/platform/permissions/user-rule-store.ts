@@ -23,7 +23,7 @@
  * window stops matching in the others without a restart.
  */
 
-import { readFileSync, statSync, watch, type FSWatcher } from 'node:fs';
+import { existsSync, readFileSync, rmSync, statSync, watch, type FSWatcher } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { PolicyRule } from '../runtime/permissions/types.js';
 import { PersistentStore } from '../state/persistent-store.js';
@@ -34,6 +34,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { revisionSource, type RevisionSource } from '../utils/revision.js';
 import { compileRules, ruleCovers, type CompiledRules, type RememberTier } from './approval-rules.js';
 import { contentDigest } from '../utils/target-ref.js';
+import { noteCarriedForward } from '../state/carried-forward.js';
 
 /** One project's rules for evaluation: the committed and remembered lists, and both compiled for matching. */
 export interface CompiledProjectRules {
@@ -76,6 +77,17 @@ const USER_RULE_STALENESS_MS = 2_000;
 export function ownerPermissionRulesPath(config: { getHomeDirectory(): string | null; getControlPlaneConfigDir(): string }): string {
   const home = config.getHomeDirectory();
   return home ? join(home, '.goodvibes', 'shared', 'permission-rules.json') : join(config.getControlPlaneConfigDir(), 'permission-rules.json');
+}
+
+/**
+ * Where 3.3.1 and earlier kept the rules: each program's own control-plane
+ * config directory, `~/.goodvibes/tui` (the terminal app and the daemon) and
+ * `~/.goodvibes/agent`. Read once, by the first program that finds the shared
+ * file missing (UserPermissionRuleStore).
+ */
+export function previousOwnerPermissionRuleFiles(config: { getHomeDirectory(): string | null }): readonly string[] {
+  const home = config.getHomeDirectory();
+  return home ? ['tui', 'agent'].map((surface) => join(home, '.goodvibes', surface, 'permission-rules.json')) : [];
 }
 
 /** The identity a rule's project key is compared by: the resolved project root path. */
@@ -174,9 +186,12 @@ export class UserPermissionRuleStore {
   /** Whole mutations run one at a time, in call order. See StoreWriteQueue. */
   private readonly writes = new StoreWriteQueue();
 
-  constructor(filePath: string) {
+  readonly #previousFiles: readonly string[];
+
+  constructor(filePath: string, options: { readonly previousFiles?: readonly string[] | undefined } = {}) {
     this.filePath = filePath;
     this.store = new PersistentStore<UserRuleFile>(filePath);
+    this.#previousFiles = options.previousFiles ?? [];
   }
 
   /** One shared initial load, retaining the legacy logged, empty-rule fallback. */
@@ -213,7 +228,8 @@ export class UserPermissionRuleStore {
 
   private async loadInitialRules(attempt: RuleLoadOutcome): Promise<void> {
     try {
-      const data = await this.store.load();
+      let data = await this.store.load();
+      if (data === null && this.#previousFiles.length > 0 && this.store.lockPath !== null) data = await this.#carryForwardPreviousFiles();
       if (data && Array.isArray(data.rules)) {
         this.records = recordsOf(data);
       }
@@ -232,6 +248,43 @@ export class UserPermissionRuleStore {
     this.diskSignature = this.signatureOfFile();
     this.publicationRevision++;
     this.#changeRevision++;
+  }
+
+  /**
+   * 3.3.1 kept each program's rules in a file of its own
+   * (previousOwnerPermissionRuleFiles). While the shared file does not exist,
+   * the rules of those files are written to it, once per rule id, and only
+   * then are the old files removed, so this runs once. With no old file
+   * there it costs one stat per old path and writes nothing. An old file that
+   * cannot be read is left in place and named.
+   */
+  async #carryForwardPreviousFiles(): Promise<UserRuleFile | null> {
+    if (!this.#previousFiles.some((file) => existsSync(file))) return null;
+    return withProcessLock(`${this.filePath}.writer.sqlite`, async () => {
+      const current = await this.store.load();
+      if (current !== null) return current;
+      const carried: string[] = [];
+      const rules: StoredUserPermissionRule[] = [];
+      for (const file of this.#previousFiles) {
+        let data: UserRuleFile | null;
+        try {
+          data = JSON.parse(readFileSync(file, 'utf-8')) as UserRuleFile | null;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+            logger.warn('Permission rules saved by an earlier version could not be read and were left in place', { file, error: summarizeError(error) });
+          }
+          continue;
+        }
+        carried.push(file);
+        rules.push(...recordsOf(data));
+      }
+      const next = fileOf(recordsOf(fileOf(rules)));
+      await this.store.persist(next, { durable: true });
+      for (const file of carried) rmSync(file, { force: true });
+      noteCarriedForward('remembered permission rule', next.rules.length);
+      logger.info('Permission rules saved by an earlier version were carried into the shared rules file', { from: carried, to: this.filePath, rules: next.rules.length });
+      return next;
+    });
   }
 
   private signatureOfFile(): string {

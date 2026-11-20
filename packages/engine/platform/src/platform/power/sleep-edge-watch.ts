@@ -45,7 +45,7 @@ export function watchSleepEdge(input: {
     stopCurrent = trackSleepWatcher(child, (error) => {
       failedToSpawn = true;
       logger.warn(`[power] ${input.label} unavailable; sleep-edge signal disabled`, { error: error.message });
-      if (!stopped) off(`the sleep-edge watcher (${input.label}) could not start (${error.message}), so work is not checkpointed before sleep and nothing catches up on wake`);
+      if (!stopped) off('GoodVibes cannot tell when this computer goes to sleep, so work in progress is not saved before it sleeps and missed work is not caught up when it wakes. Restart GoodVibes to try again.');
     });
     const handleLine = input.createLineHandler();
     let sawOutput = false;
@@ -60,7 +60,7 @@ export function watchSleepEdge(input: {
       if (stopped || failedToSpawn) return;
       if (restarts >= maxRestarts) {
         logger.warn(`[power] ${input.label} keeps exiting; sleep-edge signal disabled`, { restarts, code, signal });
-        off(`the sleep-edge watcher (${input.label}) kept exiting, so work is not checkpointed before sleep and nothing catches up on wake until the process restarts`);
+        off('GoodVibes stopped noticing when this computer goes to sleep, so work in progress is not saved before it sleeps and missed work is not caught up when it wakes. Restart GoodVibes to turn this back on.');
         return;
       }
       restarts += 1;

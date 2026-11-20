@@ -14,7 +14,6 @@
  */
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import {
-  DAEMON_ENABLED_KEY,
   runDaemonRepair,
   type DaemonHost,
   type DaemonRepairConfig,
@@ -37,7 +36,7 @@ export function daemonRepairItems(offer: DaemonRepairOffer): SelectionItem[] {
     {
       id: 'repair',
       label: offer.serviceInstalled ? 'Start the daemon' : 'Install and start the daemon',
-      detail: `sets ${DAEMON_ENABLED_KEY} to true, ${offer.serviceInstalled ? 'starts the daemon service' : 'installs and starts the daemon service'}, then connects`,
+      detail: `turns on "Use the background daemon", ${offer.serviceInstalled ? 'starts the daemon service' : 'installs and starts the daemon service'}, then connects`,
     },
     { id: 'leave', label: 'Leave it as it is', detail: "nothing is changed; not asked again this session" },
   ];
@@ -99,7 +98,7 @@ export function createDaemonRepairPrompt(options: DaemonRepairPromptOptions): Da
       // A decline changes nothing at all, not the setting, not the service,
       // and is remembered for the rest of the session so it is never re-asked.
       session.decline();
-      systemMessageRouter.userAction(`[Daemon] Left as it is, nothing was changed. Set ${DAEMON_ENABLED_KEY} to true in settings whenever you want this machine to reach the platform again.`);
+      systemMessageRouter.userAction('[Daemon] Left as it is, nothing was changed. Turn on "Use the background daemon" in /settings open whenever you want this machine to reach the platform again.');
       render();
       return;
     }

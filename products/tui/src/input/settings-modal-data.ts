@@ -774,11 +774,6 @@ function refreshBuiltinSettingValue(entry: BuiltinSettingEntry, configManager: C
 }
 
 // ---------------------------------------------------------------------------
-// Ranked settings search (see settings-modal-search.ts)
-// ---------------------------------------------------------------------------
-
-export { fuzzyScoreSettingEntry, searchSettingEntries } from './settings-modal-search.ts';
-// ---------------------------------------------------------------------------
 // Re-export SubscriptionEntry for convenience
 // ---------------------------------------------------------------------------
 

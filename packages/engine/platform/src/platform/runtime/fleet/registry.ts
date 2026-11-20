@@ -55,7 +55,7 @@ import {
 import { adaptWorkflow } from './adapters/workflow.js';
 import { adaptHookAction } from './adapters/hook-action.js';
 import { adaptSchedule, scheduleNodeId } from './adapters/schedule.js';
-import { adaptWatcher } from './adapters/watcher.js';
+import { adaptWatcher, watcherServes } from './adapters/watcher.js';
 import { adaptWatcherTrigger } from './adapters/watcher-trigger.js';
 import type { TriggerManager as WatcherTriggerManager } from '../../triggers/manager.js';
 import { adaptBackgroundProcess } from './adapters/background-process.js';
@@ -136,7 +136,8 @@ export interface ProcessRegistryDeps {
   /** `fleetControls` is read for merge conflicts; a runner without it shows none. */
   readonly contractRunner: Pick<ContractRunner, 'list' | 'cancel'> & { readonly fleetControls?: ContractRunner['fleetControls'] | undefined };
   readonly processManager: Pick<ProcessManager, 'list' | 'stop' | 'getStatus'>;
-  readonly watcherRegistry: Pick<WatcherRegistry, 'list' | 'stopWatcher'>;
+  /** `awaitingOwner` names the platform watchers this process only restored from the store; a registry without it lists every record. */
+  readonly watcherRegistry: Pick<WatcherRegistry, 'list' | 'stopWatcher'> & Partial<Pick<WatcherRegistry, 'awaitingOwner'>>;
   readonly workflow: {
     readonly workflowManager: Pick<WorkflowManager, 'list' | 'cancel'>;
     /** `enable` backs ProcessRegistry.resume(), the inverse of `disable`'s interrupt/pause. */
@@ -274,6 +275,12 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
   const tickIntervalMs = deps.tickIntervalMs ?? DEFAULT_TICK_INTERVAL_MS;
   const slowRefreshMs = Math.max(deps.slowRefreshMs ?? DEFAULT_SLOW_REFRESH_MS, tickIntervalMs);
   const timers = deps.timers ?? defaultTimers;
+  // A platform watcher this process only restored from a store it shares with
+  // the daemon (the daemon heartbeat, the CI watch poller) runs in the process
+  // that registered it. Its copy here never beats, so judged here it would read
+  // "stopped answering" while it is healthy; the owner's own row (the daemon's,
+  // merged into the board) says how it is.
+  const isOtherProcessService = (id: string): boolean => watcherServes(id) === 'system' && deps.watcherRegistry.awaitingOwner?.(id) === true;
   // Demand-driven refresh: with a runtime bus, the events that change the fleet
   // mark it dirty and the next tick rebuilds; otherwise a tick rebuilds only
   // after slowRefreshMs. Without a bus nothing announces a change, so every
@@ -533,6 +540,7 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
       }
     }
     for (const watcher of deps.watcherRegistry.list()) {
+      if (isOtherProcessService(watcher.id)) continue;
       nodes.push(adaptWatcher(watcher, capturedAt));
     }
     for (const summary of deps.processManager.list()) {
@@ -645,7 +653,7 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
     if (schedule) return finish(adaptSchedule(schedule));
     const job = deps.automationManager?.listJobs().find((candidate) => automationJobNodeId(candidate.id) === id);
     if (job) return finish(adaptAutomationJob(job));
-    const watcher = deps.watcherRegistry.list().find((candidate) => candidate.id === id);
+    const watcher = deps.watcherRegistry.list().find((candidate) => candidate.id === id && !isOtherProcessService(candidate.id));
     if (watcher) return finish(adaptWatcher(watcher, capturedAt));
     const processRecord = deps.processManager.getStatus(id);
     if (processRecord) return finish(adaptBackgroundProcess(processRecord, capturedAt));

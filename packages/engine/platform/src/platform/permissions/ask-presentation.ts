@@ -26,7 +26,7 @@ import { buildPermissionApprovalBrief } from './briefs/build.js';
 import { execRunPlace, permissionSubject } from './subject.js';
 import { composeConsequence, folderName, readingAnswer, undoFactOf, commandEffect, type SandboxFact } from './ask-consequence.js';
 import type { ModeInForceWords } from './decision-model-readiness.js';
-import { PURCHASE_AMOUNT_METADATA, PURCHASE_ITEM_METADATA, PURCHASE_SHOP_METADATA } from '../payments/payment-ports.js';
+import { PURCHASE_AMOUNT_METADATA, PURCHASE_DEADLINE_METADATA, PURCHASE_ITEM_METADATA, PURCHASE_SHOP_METADATA } from '../payments/payment-ports.js';
 import { formatMinorUnits } from '../payments/message.js';
 import { minorUnitExponent } from '../payments/money-parsing.js';
 
@@ -534,7 +534,8 @@ export function presentApprovalAsk(request: PermissionPromptRequest, facts: AskF
     ...(kind === 'run-command' && facts.sandbox ? { sandbox: facts.sandbox } : {}),
     ...(facts.checkpointCovers ? { checkpointCovers: facts.checkpointCovers } : {}),
     ...(hosts && hosts.length > 0 ? { hosts: [...new Set(hosts)] } : {}),
-    weakensSetting: kind === 'change-setting' && readingAnswer(reading, 'weakensSecurity') === 'yes',
+    // The gate's own fact (it holds the call because it loosens a protection) needs no decision model; the reading's answer is the other way to know.
+    weakensSetting: kind === 'change-setting' && (request.ownerOnly === 'loosen-security' || readingAnswer(reading, 'weakensSecurity') === 'yes'),
   });
   const remember = rememberOf(request, cannotUndo);
   const by = whoAsked(request);
@@ -682,7 +683,9 @@ export function presentInboxAsk(item: OwnerItem, facts: AskFacts, request?: Perm
       // anything above it gets an approval window), so a veto window is inside it by construction.
       const withinBudget = purchase?.withinBudget ?? (windowKind === 'veto' ? true : undefined);
       const budget = withinBudget === true ? 'Inside your daily budget.' : withinBudget === false ? 'Over your daily budget.' : undefined;
-      const deadline = purchase?.deadlineMs ?? item.expiresAt;
+      // The window's deadline as the host posted it; the item's own expiry is a minute later.
+      const postedDeadline = item.metadata?.[PURCHASE_DEADLINE_METADATA];
+      const deadline = purchase?.deadlineMs ?? (typeof postedDeadline === 'number' ? postedDeadline : item.expiresAt);
       const choices: AskChoice[] = windowKind === 'veto'
         ? [{ id: 'acknowledge', label: 'Let it go ahead', key: 'y', value: 'go' }, { id: 'object', label: 'Stop it', key: 'n', default: true, value: 'stop' }]
         : windowKind === 'approval'

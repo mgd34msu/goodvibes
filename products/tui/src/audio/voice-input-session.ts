@@ -151,7 +151,7 @@ export function wireVoiceInputRuntime(deps: VoiceInputRuntimeDeps): VoiceInputRu
         session = null;
         // Same capture point as a manual stop: the draft as it is when recording ends.
         const draftRevision = deps.readDraftRevision?.();
-        deps.notify(`[Voice] Recording reached the ${settings.captureMaxSeconds}s ceiling (voice.wake.captureMaxSeconds) and stopped on its own.`);
+        deps.notify(`[Voice] Recording reached its ${settings.captureMaxSeconds}s limit ("Longest a spoken request may last") and stopped on its own.`);
         void transcribe(utterance, owner, draftRevision);
       },
       onError: (error) => { if (!current(owner)) return; deps.notify(`[Voice] Capture stopped: ${error.message}`); deps.render(); },

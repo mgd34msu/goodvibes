@@ -1,137 +1,41 @@
-import { settingCategoryLabel } from '@goodvibes/engine/terminal-shell/renderer/settings-metadata';
 import { createSettingsRows, settingsNavigationHints } from '@goodvibes/engine/terminal-shell/renderer/settings-rows';
-import { createSettingsLayout, settingsCategoryRows } from '@goodvibes/engine/terminal-shell/renderer/settings-layout';
+import { createSettingsLayout, settingsTopicRailRows } from '@goodvibes/engine/terminal-shell/renderer/settings-layout';
 import { createSettingsDocumentation } from '@goodvibes/engine/terminal-shell/renderer/settings-documentation';
+import { settingPlace } from '@goodvibes/engine/terminal-shell/settings-navigation';
 /**
- * renderSettingsModal, the settings modal drawn with the surface kit.
- *
- *   ✦ Settings › Display › Theme                                  esc
- *
- *   ▏Search all settings                                       display
- *
- *   ✦ interface          selected-item help
- *     Display       10      Color palette for the whole interface…
- *     UI             4      display.theme · default goodvibes · …
- *   ✦ ai routing
- *     Provider       7    ◇ Theme                        goodvibes
- *                         Theme mode                          dark
- *
- *   ↑↓ move   ⏎ change   ←→ category   ctrl+r reset
- *
- * The search row is always live and reaches every setting in every category
- * at once. Categories on the left, plain rows in an element panel on the
- * right: name, value, and a ◇ when the value differs from the default. The
- * selected row is explained above the uninterrupted list, with its key,
- * default, type and source. The breadcrumb in the title says where you are.
+ * renderSettingsModal, the settings screen drawn with the surface kit: the
+ * seven topics the web UI shows, in its order and words; each lists its
+ * sections' settings by name with the value in words, and the section and key
+ * small beneath. Typing searches every setting by name, key or description
+ * (the topics step aside). Under the rows, the selected one explained in a
+ * few sentences. The same screen as the terminal app's (see its renderer).
  */
 
-import type { SettingsModal, SettingEntry, FlagEntry } from '../input/settings-modal.ts';
-import { SETTINGS_CATEGORIES, SETTINGS_CATEGORY_GROUPS } from '../input/settings-modal.ts';
-import { CATEGORY_LABELS, flagStateColor, getSettingLabel, valueColor } from './settings-modal-helpers.ts';
-import {
-  CATEGORY_INFO,
-  ENUM_VALUE_DESCRIPTIONS,
-  categoryItemCount,
-  currentSettingValue,
-  settingContextLines,
-} from './settings-modal-context.ts';
+import type { SettingsModal, SettingEntry, FlagEntry, SettingsCategory } from '../input/settings-modal.ts';
+import { flagStateColor, formatDefault, getSettingLabel, valueColor } from './settings-modal-helpers.ts';
+import { currentSettingValue, listItemCount, settingContextLines } from './settings-modal-context.ts';
 import { formatProviderAuthRouteId } from '../provider-auth-route-display.ts';
-import { activeTokens } from './theme.ts';
 import { type KitHint } from './surface-kit.ts';
 import { type KitRow } from './surface-kit-list.ts';
 
 function flagRow(entry: FlagEntry, selected: boolean, focused: boolean): KitRow {
-  const t = activeTokens();
-  const on = entry.state === 'enabled';
   return {
     label: entry.feature.name,
-    desc: `${entry.feature.domain} · ${entry.feature.restartRequired ? 'applies next run' : 'applies now'}`,
-    right: entry.state,
+    sub: entry.feature.restartRequired ? 'takes effect the next time the Agent starts' : 'takes effect at once',
+    right: entry.state === 'enabled' ? 'On' : 'Off',
     rightFg: flagStateColor(entry.state),
-    mark: on ? '●' : '○',
-    markFg: on ? t.success : t.textFaint,
     selected: selected && focused,
     current: selected && !focused,
   };
 }
 
-const categoryOf = (entry: SettingEntry): string => settingCategoryLabel(entry.setting.key, CATEGORY_LABELS);
-
-function categoryRows(modal: SettingsModal): KitRow[] {
-  return settingsCategoryRows({
-    groups: SETTINGS_CATEGORY_GROUPS,
-    categories: SETTINGS_CATEGORIES,
-    categoryIndex: modal.categoryIndex,
+function topicRows(modal: SettingsModal): KitRow[] {
+  return settingsTopicRailRows({
+    topics: modal.topics,
+    topicIndex: modal.topicIndex,
     searching: modal.searchFocused,
     focused: !modal.searchFocused && modal.focusPane === 'categories',
-    label: (category) => CATEGORY_LABELS[category],
-    count: (category) => categoryItemCount(modal, category),
   });
-}
-
-/** The static strings this surface can show (checked by package verification). */
-export function renderSettingsModalPackageText(): string {
-  const lines: string[] = [
-    'Settings',
-    'Search all settings',
-    '<n> results',
-    'No settings in this category.',
-    'No features registered.',
-    'No MCP servers registered.',
-    'No provider subscriptions available or configured.',
-    'No setting is selected in this category.',
-    'No feature control is selected.',
-    'No MCP server is selected.',
-    'No subscription provider is selected.',
-    'No setting matches the search.',
-    'Trust meanings:',
-    'constrained: keep MCP activity inside declared paths/hosts and prompt on risk.',
-    'ask-on-risk: allow routine MCP operations but ask before risky behavior.',
-    'allow-all: allow unrestricted MCP operations for this server after explicit confirmation.',
-    'blocked: prevent this MCP server from being used.',
-    'Possible values:',
-    'true: enabled or allowed for this setting.',
-    'false: disabled or not allowed for this setting.',
-    'Secret handling: raw values entered here are stored through the secret manager and the config receives a goodvibes:// secret reference. Empty input clears the config value.',
-    'Editing: Enter opens inline edit, then type the value and press Enter to save. Arrow keys only navigate.',
-    'Editing: Enter opens inline edit. Delete the current text to save an empty value when that is valid for the setting.',
-    '<n> more ↑ · pgup',
-    '<n> more ↓ · pgdn',
-    'docs',
-    'move',
-    'change',
-    'category',
-    'reset',
-    'save',
-    'cancel edit',
-    'edit search',
-    'settings',
-    'pane',
-    'edit trust',
-    'review or sign out',
-    'toggle',
-    'sign out',
-    'cancel',
-    'applies next run',
-    'applies now',
-    'no scope',
-  ];
-
-  for (const group of SETTINGS_CATEGORY_GROUPS) {
-    lines.push(group.label);
-    for (const category of group.categories) {
-      lines.push(category, CATEGORY_LABELS[category], CATEGORY_INFO[category]);
-    }
-  }
-
-  for (const [key, values] of Object.entries(ENUM_VALUE_DESCRIPTIONS)) {
-    lines.push(key);
-    for (const [value, description] of Object.entries(values)) {
-      lines.push(value, description);
-    }
-  }
-
-  return lines.join('\n');
 }
 
 const { docLines, windowDoc, settingsDocumentation } = createSettingsDocumentation<SettingsModal>(settingContextLines, {
@@ -140,13 +44,14 @@ const { docLines, windowDoc, settingsDocumentation } = createSettingsDocumentati
 });
 export { settingsDocumentation };
 
-const { listRows } = createSettingsRows<SettingsModal, SettingEntry>({
+const { listRows } = createSettingsRows<SettingsModal, SettingEntry, SettingsCategory>({
   label: getSettingLabel,
-  rowLabel: getSettingLabel,
   color: valueColor,
   currentValue: currentSettingValue,
   unavailable: () => false,
-  category: categoryOf,
+  placeOf: (entry) => settingPlace(entry.setting.key, entry.setting.key.split('.', 1)[0] ?? ''),
+  visibleRows: (modal) => modal.visibleRows(),
+  listCount: listItemCount,
   focused: (modal) => modal.searchFocused || (modal.focusPane ?? 'settings') === 'settings',
   routeLabel: formatProviderAuthRouteId,
   specialList(modal, _width, focused, clampIndex) {
@@ -157,29 +62,35 @@ const { listRows } = createSettingsRows<SettingsModal, SettingEntry>({
     return { rows: items.map((entry, i) => flagRow(entry, i === sel, focused)), selected: sel };
   },
 });
+
+/** A number or a choice is nudged in place with shift+arrows; a picker's setting is not. */
+function adjustable(entry: SettingEntry | null): boolean {
+  if (!entry) return false;
+  return entry.setting.type === 'number' || (entry.setting.type === 'enum' && entry.setting.key !== 'permissions.mode');
+}
+
 function settingsHints(modal: SettingsModal): KitHint[] {
+  const selected = modal.getSelected();
   return settingsNavigationHints(modal, {
     resetPending: false,
-    categoryFocused: modal.focusPane === 'categories',
+    categoryFocused: !modal.searchFocused && modal.focusPane === 'categories',
     flagToggle: true,
+    resetTo: selected ? formatDefault(selected) : undefined,
+    onList: modal.getSelectedListRow() !== null,
+    adjustable: adjustable(selected),
   });
 }
 
 export const { renderSettingsModal } = createSettingsLayout<SettingsModal>({
   listRows,
-  categoryRows,
-  categoryLabel: (modal) => CATEGORY_LABELS[modal.currentCategory],
+  topicRows,
   hints: settingsHints,
   docLines,
   windowDoc,
   notices: (modal) => [...(modal.lastSettingEffectMessage ? [modal.lastSettingEffectMessage] : [])],
-
   breadcrumbs(modal) {
-    const category = modal.currentCategory;
-    const selected = !modal.searchFocused && !['flags', 'mcp', 'subscriptions'].includes(category) ? modal.getSelected() : null;
-    const flag = !modal.searchFocused && category === 'flags' ? modal.getSelectedFlag() : null;
-    return modal.searchFocused
-      ? ['Search']
-      : [CATEGORY_LABELS[category], ...(selected ? [getSettingLabel(selected)] : flag ? [flag.feature.name] : [])];
+    if (modal.searchFocused) return [];
+    const list = modal.openList !== null ? modal.topicRows.find((row) => row.kind === 'list' && row.list.category === modal.openList) : undefined;
+    return [modal.topicLabel, ...(list?.kind === 'list' ? [list.list.label] : [])];
   },
 });

@@ -84,6 +84,14 @@
   color: var(--warn);
 }
 
+.mode-chip__sheet-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text);
+  font-weight: var(--weight-medium);
+  white-space: normal;
+}
+
 .mode-chip__sentence {
   display: block;
   white-space: normal;

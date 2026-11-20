@@ -78,3 +78,11 @@
   text-overflow: clip;
   white-space: normal;
 }
+
+/* One line under the subjects when documents are listed but no fact was read from them. */
+.knowledge-subjects__note {
+  margin: 4px 0 12px;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  line-height: var(--leading-meta);
+}

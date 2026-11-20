@@ -101,7 +101,7 @@ export function renderNotificationsModal(view: NotificationsModalView, screenWid
   if (empty) {
     drawTextBlock(f.canvas, f.l, f.top, f.r - f.l + 1, [
       { text: 'Nothing here yet.', style: { fg: t.text } },
-      { text: 'Agent, task, workflow and security notices collect here as they happen; warnings and critical ones also show as a toast in the top right.', style: { fg: t.textMuted } },
+      { text: 'Agent, task, workflow and security notices collect here as they happen; the status bar counts the ones you have not read.', style: { fg: t.textMuted } },
     ], bottom);
   } else {
     const result = drawList(f.canvas, { mouseNavigation: true, rows: notificationRows(view).rows, top: f.top, bottom, x0: f.l, x1: f.r,

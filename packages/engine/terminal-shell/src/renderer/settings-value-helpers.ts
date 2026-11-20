@@ -1,6 +1,13 @@
+import { gatePresetLabel } from '@goodvibes/engine/platform/platform/gate/presets';
 import { activeTokens } from './theme.js';
 export interface SettingsValueEntry {
-  readonly setting: { readonly key: string };
+  readonly setting: {
+    readonly key: string;
+    readonly label?: string | undefined;
+    readonly type?: string | undefined;
+    readonly enumValues?: readonly string[] | undefined;
+    readonly default?: unknown;
+  };
   readonly currentValue: unknown;
   readonly isDefault: boolean;
   readonly flag?: { readonly feature: { readonly name: string } } | undefined;
@@ -9,72 +16,112 @@ export interface SettingsValueEntry {
   /** Why, for an unavailable row ("reading from the connected host", "host value unavailable: ..."). */
   readonly sourceLabel?: string | undefined;
 }
-const CHOICE_LABELS: Readonly<Record<string, string>> = {
-  'judgment.policy': 'Decision models', 'judgment.backend': 'Decision provider',
-  'judgment.model': 'Decision model', 'judgment.endpoint': 'Decision endpoint',
-  'judgment.keySource': 'Credential source', 'judgment.keyName': 'Credential reference',
-  'judgment.fallbacks': 'Decision fallback chain', 'judgment.timeoutMs': 'Decision timeout (ms)',
-  'judgment.decisionDeadlineMs': 'Decision deadline (ms)',
-  'provider.decisionRouter': 'Decision Router categories', 'permissions.mode': 'Execution permissions',
-};
+
+/** The setting facts value words are read from: its key, kind, choices and plain name. */
+export interface SettingWordsFacts {
+  readonly key: string;
+  readonly label?: string | undefined;
+  readonly type?: string | undefined;
+  readonly enumValues?: readonly string[] | undefined;
+}
+
+/** Text settings that hold one of a set of named levels ("medium"), read as a choice. */
+const LEVEL_KEYS = /(^|\.)reasoningEffort$/;
+
+/** Units a setting's name states in its closing brackets, "Wait before retrying (ms)". */
+const NAMED_UNITS = new Set(['%', 'bytes', 'ms', 'minutes', 'days', 'MB', 'MB per second', 'seconds', 'years', 'hours', 'USD']);
+
+/** What a setting's name says about its number: its unit and what 0 means ("(ms, 0 for no limit)"). */
+function namedNumber(label: string | undefined): { readonly unit?: string; readonly zero?: string } {
+  const bracket = label?.match(/\(([^)]*)\)\s*$/)?.[1];
+  if (!bracket) return {};
+  let unit: string | undefined;
+  let zero: string | undefined;
+  for (const part of bracket.split(',').map((piece) => piece.trim())) {
+    if (NAMED_UNITS.has(part)) unit = part;
+    const means = part.match(/^0 for (.+)$/)?.[1];
+    if (means) zero = means.charAt(0).toUpperCase() + means.slice(1);
+  }
+  return { ...(unit ? { unit } : {}), ...(zero ? { zero } : {}) };
+}
+
+/** A choice's own words: the permission modes' labels, otherwise the value written as words ("jev-decides" reads "Jev decides"). */
+export function settingChoiceWords(key: string, value: string): string {
+  if (key === 'permissions.mode') return gatePresetLabel(value);
+  if (value === '') return 'Not set';
+  const words = value
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[-_]+/g, ' ')
+    .trim();
+  return words.charAt(0).toUpperCase() + words.slice(1).toLowerCase();
+}
+
+/**
+ * A setting's value as a person reads it: On or Off, the choice's words, the
+ * number with the unit its name states, "Not set" for nothing. A secret is
+ * masked by the caller before it gets here.
+ */
+export function settingValueWords(setting: SettingWordsFacts, value: unknown): string {
+  if (value === null || value === undefined || value === '') return 'Not set';
+  if (typeof value === 'boolean') return value ? 'On' : 'Off';
+  if (typeof value === 'string' && (setting.type === 'enum' || setting.enumValues || LEVEL_KEYS.test(setting.key))) return settingChoiceWords(setting.key, value);
+  if (typeof value === 'number') {
+    const { unit, zero } = namedNumber(setting.label);
+    if (value === 0 && zero) return zero;
+    if (!unit) return String(value);
+    if (unit === '%') return `${value}%`;
+    return `${value} ${value === 1 && unit.endsWith('s') ? unit.slice(0, -1) : unit}`;
+  }
+  if (Array.isArray(value)) return value.length ? value.map(String).join(', ') : 'None';
+  if (typeof value === 'object') {
+    const count = Object.keys(value).length;
+    return count ? `${count} entr${count === 1 ? 'y' : 'ies'}` : 'None';
+  }
+  return String(value);
+}
+
 export function createSettingsValueHelpers<Entry extends SettingsValueEntry>(policy: {
-  readonly richValues: boolean;
-  readonly featureLabels: boolean;
   readonly isSecretKey: (key: string) => boolean;
   readonly isSecretReference: (value: string) => boolean;
-  readonly labels: Readonly<Partial<Record<string, string>>>;
-  readonly panelDescription: string;
-  readonly bothDescription: string;
 }) {
   function maskSecretValue(value: string): string {
-    if (!value.length) return '(empty)';
-    if (policy.isSecretReference(value)) return value;
+    if (!value.length) return 'Not set';
+    if (policy.isSecretReference(value)) return 'Kept in the secret store';
     if (value.length <= 4) return '••••';
     return '•'.repeat(Math.min(12, Math.max(4, value.length - 4))) + value.slice(-4);
   }
+  /** The value a row shows, in words. */
   function formatValue(entry: Entry): string {
     const value = entry.currentValue;
     if (entry.setting.key === 'judgment.fallbacks' && Array.isArray(value)) {
-      return `${value.length} fallback target${value.length === 1 ? '' : 's'} (Enter to ${value.length ? 'edit order' : 'add'})`;
+      return value.length ? `${value.length} backup model${value.length === 1 ? '' : 's'}` : 'None';
     }
-    if (entry.setting.key === 'provider.decisionRouter') return 'Enter to configure category routes';
+    if (entry.setting.key === 'provider.decisionRouter') return 'Choose';
     if (entry.setting.key === 'judgment.backend' && value && typeof value === 'object' && !Array.isArray(value)) {
       const adapter = (value as { adapter?: unknown }).adapter;
       return adapter === 'cloudflare-workers-ai' ? 'Cloudflare Workers AI' : adapter === 'laya' ? 'Laya' : 'System One';
     }
     // A value the host owns and has not given is unknown, not unset.
-    if (value === undefined && entry.effectiveSource === 'unavailable') return `(${entry.sourceLabel ?? 'host value unavailable'})`;
-    if (value === null || value === undefined) return '(unset)';
-    if (typeof value === 'boolean') return value ? 'true' : 'false';
-    if (typeof value === 'string' && policy.isSecretKey(entry.setting.key)) return maskSecretValue(value);
-    if (value === '') return '(empty)';
-    if (policy.richValues) {
-      if (Array.isArray(value)) return value.length ? value.join(', ') : '(empty)';
-      if (typeof value === 'object') {
-        const count = Object.keys(value).length;
-        if (!count) return '(none set)';
-        const json = JSON.stringify(value);
-        return json.length <= 64 ? json : `${count} entr${count === 1 ? 'y' : 'ies'} (Enter to edit as JSON)`;
-      }
+    if (value === undefined && entry.effectiveSource === 'unavailable') {
+      return entry.sourceLabel?.startsWith('reading') ? 'Asking the daemon…' : 'Unknown';
     }
-    return String(value);
+    if (typeof value === 'string' && policy.isSecretKey(entry.setting.key)) return maskSecretValue(value);
+    return settingValueWords(entry.setting, value);
+  }
+  /** The default a row returns to, in words. */
+  function formatDefault(entry: Entry): string {
+    if (policy.isSecretKey(entry.setting.key)) return 'Not set';
+    return settingValueWords(entry.setting, entry.setting.default);
   }
   function valueColor(entry: Entry): string {
     return entry.isDefault ? activeTokens().textMuted : activeTokens().accent;
   }
+  /** A setting's plain name: the feature's name for a feature's switch, else the setting's own label. */
   function getSettingLabel(entry: Entry): string {
-    if (policy.featureLabels && entry.flag) return entry.flag.feature.name;
-    const key = entry.setting.key;
-    if (Object.hasOwn(CHOICE_LABELS, key)) return CHOICE_LABELS[key] ?? key;
-    return (Object.hasOwn(policy.labels, key) ? policy.labels[key] : undefined) ?? key.replace(/^[^.]+\./, '');
+    if (entry.flag) return entry.flag.feature.name;
+    return entry.setting.label ?? entry.setting.key;
   }
-  function describeUiRouting(value: string): string {
-    if (value === 'panel') return policy.panelDescription;
-    if (value === 'conversation') return 'render inline in conversation';
-    if (value === 'both') return policy.bothDescription;
-    return value;
-  }
-  return { formatValue, valueColor, getSettingLabel, describeUiRouting };
+  return { formatValue, formatDefault, valueColor, getSettingLabel };
 }
 export function flagStateColor(state: string): string {
   const tokens = activeTokens();

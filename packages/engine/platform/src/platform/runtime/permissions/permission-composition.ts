@@ -15,7 +15,7 @@ import type { PermissionPromptDecision, PermissionPromptRequest } from '../../pe
 import { callingAgentId } from '../../agents/calling-agent.js';
 import type { GatePresetName } from '../../gate/presets.js';
 import { PermissionManager, createPermissionConfigReader } from '../../permissions/manager.js';
-import { ownerPermissionRulesPath, UserPermissionRuleStore } from '../../permissions/user-rule-store.js';
+import { ownerPermissionRulesPath, previousOwnerPermissionRuleFiles, UserPermissionRuleStore } from '../../permissions/user-rule-store.js';
 import type { HookDispatcher } from '../../hooks/index.js';
 import { isFeatureGateEnabled, type FeatureFlagManager } from '../feature-flags/index.js';
 import {
@@ -63,7 +63,7 @@ export type UserPermissionRuleAccess = Pick<UserPermissionRuleStore, 'rules' | '
 export function createUserPermissionRuleStore(
   configManager: Pick<ConfigManager, 'getControlPlaneConfigDir' | 'getHomeDirectory'>,
 ): UserPermissionRuleStore {
-  const store = new UserPermissionRuleStore(ownerPermissionRulesPath(configManager));
+  const store = new UserPermissionRuleStore(ownerPermissionRulesPath(configManager), { previousFiles: previousOwnerPermissionRuleFiles(configManager) });
   void store.init().catch((error) => logger.warn('user permission rule store init failed; asks will prompt', { error: summarizeError(error) }));
   return store;
 }

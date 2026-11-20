@@ -1208,8 +1208,6 @@ async function main(prepared: PreparedShellCliRuntime) {
       providerInputTokens: orchestrator.lastInputTokens,
       screenWidth: width,
       screenHeight: height,
-      headerRows: shellHeaderLines.length,
-      footerRows: shellFooterLines.length,
       permission: pendingPermission
         ? PermissionPromptUI.renderPromptModal(width, height, pendingPermission, pendingPermission, approvalBroker, input.prompt.length === 0, askContext(), localCards.size())
         : null,

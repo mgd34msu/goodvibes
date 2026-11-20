@@ -24,7 +24,7 @@ import type { ChannelDeliveryRouter, ChannelDeliveryTarget } from '../../channel
 import { createChannelPaymentNotifier } from '../notice-delivery.js';
 import type { PaymentNoticeRouter, PaymentNoticeTarget, PaymentReplySource } from '../notice-delivery.js';
 import { absent, failedRead, present, refusal, RefusalError, type Observed } from '@goodvibes/engine/errors';
-import { PAYMENT_ANSWER_UNREADABLE, PURCHASE_AMOUNT_METADATA, PURCHASE_ITEM_METADATA, PURCHASE_SHOP_METADATA, type PaymentNotifier, type PaymentNoticeWindow, type PurchaseNoticeFacts } from '../payment-ports.js';
+import { PAYMENT_ANSWER_UNREADABLE, PURCHASE_AMOUNT_METADATA, PURCHASE_DEADLINE_METADATA, PURCHASE_ITEM_METADATA, PURCHASE_SHOP_METADATA, type PaymentNotifier, type PaymentNoticeWindow, type PurchaseNoticeFacts } from '../payment-ports.js';
 import type { NewOwnerItem, OwnerItem } from '../../control-plane/owner-inbox.js';
 import type { ChannelDelivery } from '../windows.js';
 import { readNotifyChannels, type PaymentsConfigReader } from '../payments-config.js';
@@ -143,7 +143,7 @@ export function purchaseInboxKey(purchaseId: string, kind: PaymentWindowKind | '
 }
 
 /** The owner-inbox item for one purchase notice or window. */
-export function purchaseInboxItem(kind: PaymentWindowKind | 'notice', message: string, expiresAt: number, purchaseId?: string, facts?: PurchaseNoticeFacts): NewOwnerItem {
+export function purchaseInboxItem(kind: PaymentWindowKind | 'notice', message: string, expiresAt: number, purchaseId?: string, facts?: PurchaseNoticeFacts, deadlineMs?: number): NewOwnerItem {
   return {
     kind: 'purchase',
     title: INBOX_TITLES[kind],
@@ -152,9 +152,11 @@ export function purchaseInboxItem(kind: PaymentWindowKind | 'notice', message: s
     expiresAt,
     // The window's subject travels as facts, so every surface asks "Buy <item> from <shop> for <amount>?" from them.
     ...(purchaseId === undefined ? {} : { key: purchaseInboxKey(purchaseId, kind) }),
-    ...(purchaseId === undefined && !facts ? {} : { metadata: {
+    // The window's own deadline too, so its countdown ("goes ahead in 9 min") is the window's and not the item's.
+    ...(purchaseId === undefined && !facts && deadlineMs === undefined ? {} : { metadata: {
       ...(purchaseId === undefined ? {} : { purchaseId }),
       ...(facts ? { [PURCHASE_ITEM_METADATA]: facts.item, [PURCHASE_SHOP_METADATA]: facts.shop, [PURCHASE_AMOUNT_METADATA]: facts.amount } : {}),
+      ...(deadlineMs === undefined ? {} : { [PURCHASE_DEADLINE_METADATA]: deadlineMs }),
     } }),
   };
 }
@@ -191,16 +193,19 @@ export function withOwnerInbox(
   /** The configured length of each window, so an item a restart orphans expires with it. */
   windowMinutes?: (kind: PaymentWindowKind) => number,
 ): PaymentNotifier {
-  const expiry = (kind: PaymentWindowKind | 'notice'): number => {
+  /** The window's length in ms, when one is configured for this kind. */
+  const windowMs = (kind: PaymentWindowKind | 'notice'): number | undefined => {
     const minutes = kind === 'notice' ? undefined : windowMinutes?.(kind);
-    // A minute past the window, which is armed after the notice is sent.
-    return minutes === undefined || !Number.isFinite(minutes) || minutes <= 0
-      ? Date.now() + INBOX_NOTICE_LIFETIME_MS
-      : Date.now() + (minutes + 1) * 60_000;
+    return minutes === undefined || !Number.isFinite(minutes) || minutes <= 0 ? undefined : minutes * 60_000;
   };
   const post = (kind: PaymentWindowKind | 'notice', message: string, purchaseId?: string, facts?: PurchaseNoticeFacts): OwnerItem | null => {
+    const length = windowMs(kind);
+    const now = Date.now();
+    // The window is armed as the notice is sent; the item lives a minute past it.
+    const deadline = length === undefined ? undefined : now + length;
+    const expiresAt = deadline === undefined ? now + INBOX_NOTICE_LIFETIME_MS : deadline + 60_000;
     try {
-      return inbox.postNow(purchaseInboxItem(kind, message, expiry(kind), purchaseId, facts)).item;
+      return inbox.postNow(purchaseInboxItem(kind, message, expiresAt, purchaseId, facts, deadline)).item;
     } catch (error) {
       logger.warn('A purchase notice could not be posted to the owner inbox', { error: error instanceof Error ? error.message : String(error) });
       return null;

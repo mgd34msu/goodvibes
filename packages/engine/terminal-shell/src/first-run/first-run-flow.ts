@@ -407,6 +407,11 @@ export class FirstRunModal implements SurfaceModal {
   handleToken(token: InputToken, host: SurfaceModalHost): void {
     this.host = host;
     const step = this.step;
+    // Shift+Tab is a second back key on step 2, as the key row says (Esc is the first; escape() below).
+    if (step.kind !== 'choose' && token.type === 'key' && token.logicalName === 'tab' && token.shift) {
+      if (this.escape()) this.deps.renderRequest();
+      return;
+    }
     if (step.kind === 'choose') {
       if (token.type !== 'key' && !(token.type === 'text' && token.value === 'a')) return;
       if (token.type === 'text') { this.useFoundKey(); return; }

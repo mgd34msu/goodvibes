@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { openRecordLog, type RecordLog } from '../state/record-log.js';
+import { noteCarriedForward } from '../state/carried-forward.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
 import { WITHHELD_PROMPT_ANSWER, type PermissionPromptDecision, type PermissionPromptRequest, type PermissionRequestHandler } from '../permissions/prompt.js';
 import { buildDurableRuleForDecision, compileRules, type CompiledRuleMatch } from '../permissions/approval-rules.js';
@@ -333,6 +334,43 @@ function approvalFromSnapshotFile(value: unknown, homeNode: string): Record<stri
   return upgraded;
 }
 
+/** The words a settled approval keeps, as shown when it was decided (ApprovalBroker #keepWording). */
+export interface SettledApprovalWording {
+  readonly title: string;
+  readonly question: string;
+  readonly subject?: { readonly kind: 'command' | 'paths' | 'urls' | 'text' | 'money'; readonly lines: readonly string[] } | undefined;
+  readonly consequence?: string | undefined;
+}
+
+export function isSettledWording(value: unknown): value is SettledApprovalWording {
+  return isRecord(value) && typeof value['title'] === 'string' && typeof value['question'] === 'string';
+}
+
+/** The fields of an ask's presentation a settled record's kept words replace; what was not kept is left out, not rebuilt. */
+export function settledPresentation(wording: SettledApprovalWording): Pick<AskPresentation, 'title' | 'question' | 'subject' | 'consequence'> {
+  return {
+    title: wording.title,
+    question: wording.question,
+    subject: wording.subject,
+    consequence: wording.consequence === undefined ? undefined : { text: wording.consequence, withPlace: wording.consequence, tone: 'plain' },
+  };
+}
+
+/** Words for a settled ask whose own words were not kept (settled by 3.3.1, or before words were kept): what happened, and when. */
+function unwordedSettlement(status: SharedApprovalStatus, at: number): SettledApprovalWording {
+  const day = new Date(at).toISOString().slice(0, 10);
+  const what = status === 'approved' ? `A request you approved on ${day}`
+    : status === 'denied' ? `A request you refused on ${day}`
+      : status === 'expired' ? `A request that expired unanswered on ${day}` : `A request that was withdrawn on ${day}`;
+  return { title: what, question: what };
+}
+
+/** A settled record read without kept words gets the words that say what happened; an open one is worded live. */
+function withSettledWording(record: SharedApprovalRecord): SharedApprovalRecord {
+  if (isOpenApprovalStatus(record.status) || isSettledWording(record.metadata['wording'])) return record;
+  return { ...record, metadata: { ...record.metadata, wording: unwordedSettlement(record.status, record.resolvedAt ?? record.updatedAt) } };
+}
+
 function argumentsDigest(args: unknown): string {
   return `sha256:${createHash('sha256').update(stableJson(args)).digest('hex')}`;
 }
@@ -558,7 +596,7 @@ export class ApprovalBroker {
         logger.warn('A finished approval record cannot be read and was set aside', { file: this.storeFile, approvalId: id });
         return;
       }
-      this.approvals.set(approval.id, approval);
+      this.approvals.set(approval.id, withSettledWording(approval));
     });
     this.pruneTerminalApprovals();
     // A log that grew far past what it keeps (settled records pruned, many lines per record) is compacted now.
@@ -594,6 +632,7 @@ export class ApprovalBroker {
       carried += 1;
     }
     rmSync(snapshotPath, { force: true });
+    noteCarriedForward('approval', carried);
     logger.info('Approvals saved by an earlier version were carried into the approvals log', { from: snapshotPath, to: this.logPath, approvals: carried });
   }
 
@@ -1094,7 +1133,9 @@ export class ApprovalBroker {
   #next(current: SharedApprovalRecord, transition: ApprovalTransition, now: number, cause?: ApprovalCause, requester?: ApprovalRequester): SharedApprovalRecord {
     // Every write moves the sequence; only a change of what can be decided moves the revision.
     const decides = transition.to !== 'updated' && transition.to !== 'released';
-    const base = { ...current, revision: decides ? current.revision + 1 : current.revision, sequence: current.sequence + 1, updatedAt: now };
+    const settles = transition.to === 'approved' || transition.to === 'denied' || transition.to === 'cancelled' || transition.to === 'expired';
+    const base = { ...current, revision: decides ? current.revision + 1 : current.revision, sequence: current.sequence + 1, updatedAt: now,
+      ...(settles ? { metadata: this.#keepWording(current, transition.to, now) } : {}) };
     switch (transition.to) {
       case 'claimed':
         return { ...base, status: 'claimed', claimedBy: transition.actor.id, claimedAt: now,
@@ -1167,6 +1208,24 @@ export class ApprovalBroker {
   }
 
   /**
+   * The words a settled record keeps (metadata.wording): the question, subject
+   * and consequence as the person who decided saw them, worded from the open
+   * record while its arguments are still held. A settled record's arguments
+   * are withheld on disk, so they are never worded again afterwards. Words
+   * only: a typed answer is in the decision, never here.
+   */
+  #keepWording(current: SharedApprovalRecord, to: SharedApprovalStatus, at: number): Record<string, unknown> {
+    if (isSettledWording(current.metadata['wording'])) return current.metadata;
+    const shown = this.presentationOf(current);
+    const wording: SettledApprovalWording = shown
+      ? { title: shown.title, question: shown.question,
+        ...(shown.subject ? { subject: { kind: shown.subject.kind, lines: shown.subject.lines.slice(0, 5).map((line) => line.slice(0, 200)) } } : {}),
+        ...(shown.consequence ? { consequence: shown.consequence.text } : {}) }
+      : unwordedSettlement(to, at);
+    return { ...current.metadata, wording };
+  }
+
+  /**
    * Word every ask this broker publishes and lists (`approval-update`,
    * `approvals.list`) with `presenter`, so a surface draws the same question,
    * consequence and choices without another read. One pure call per record.
@@ -1183,7 +1242,11 @@ export class ApprovalBroker {
   presentationOf(record: SharedApprovalRecord, full = false): AskPresentation | undefined {
     if (this.#presenter === null) return undefined;
     try {
-      const presentation = this.#presenter(record.request, record.sessionId);
+      const settled = record.metadata['wording'];
+      // A settled ask reads as it was asked: its kept words, never words rebuilt from withheld arguments.
+      const presentation = isSettledWording(settled) && !isOpenApprovalStatus(record.status)
+        ? { ...this.#presenter(record.request, record.sessionId), ...settledPresentation(settled) }
+        : this.#presenter(record.request, record.sessionId);
       // Compact: the details (arguments, checklist) stay for the read of one record (ask-presentation.ts compactAskPresentation).
       return full ? presentation : { ...presentation, details: [] };
     } catch (error) {

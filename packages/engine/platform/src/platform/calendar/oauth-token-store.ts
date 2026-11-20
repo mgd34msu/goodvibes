@@ -7,6 +7,7 @@
  * honest about the account being broken until the user reconnects.
  */
 
+import { noteCarriedForward } from '../state/carried-forward.js';
 import { OAuthFlowError, refreshAccessToken, revokeToken } from './oauth-flow.js';
 import { daemonSecretKeyFor } from '../config/daemon-secret-keys.js';
 import type {
@@ -143,6 +144,7 @@ export class CalendarTokenStore {
     const joined: StoredConnection = { ...tokens, account };
     await this.secrets.set(tokenKey(provider), JSON.stringify(joined));
     await this.secrets.delete(previousKey);
+    noteCarriedForward('calendar connection');
     return joined;
   }
 

@@ -15,7 +15,7 @@ const policy = process.env.RUNTHROUGH_POLICY || 'No Decision Model';
 const scripted = Boolean(process.env.RUNTHROUGH_DECISION_URL);
 const inUse = policy !== 'No Decision Model' && scripted;
 const expected = inUse ? 'A decision model is in use'
-  : policy === 'No Decision Model' ? 'judgment.policy is No Decision Model' : 'none is set';
+  : policy === 'No Decision Model' ? 'you turned decision models off' : 'none is set';
 const label = `${policy}, ${scripted ? 'scripted decision model' : 'nothing configured'}`;
 const s = await stage(`j13-${policy.replace(/\s+/g, '-').toLowerCase()}-${scripted ? 'scripted' : 'none'}`);
 

@@ -285,7 +285,7 @@ export function createTerminalWakeRuntime(policy: {
             deps.notify(
               restarting
                 ? policy.captureFailure(error.message, failureDetail)
-                : `[Wake] The wake-word detector stopped: ${failureDetail}. It stays off until voice.wake.enabled is turned off and on again.`,
+                : `[Wake] Listening for the wake word stopped: ${failureDetail}. It stays off until you turn "Listen for the wake word" off and on again in /settings open.`,
             );
             deps.render();
           },

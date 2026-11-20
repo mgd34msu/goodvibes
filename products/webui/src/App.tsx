@@ -788,6 +788,7 @@ export default function App() {
           })}
           onSessionMissing={handleMissingChatSession}
           userName={signedInName || profileName}
+          onOpenSettings={openSettings}
         />
       )}
       {activeView === 'work' && (

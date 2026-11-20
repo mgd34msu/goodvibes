@@ -50,10 +50,12 @@ export function formatOnboardingApplyCompletionMessage(items: readonly Onboardin
   const failed = items.filter((item) => item.status === 'fail').length;
   const warnings = items.filter((item) => item.status === 'warn');
   const passed = items.filter((item) => item.status === 'pass').length;
-  if (failed === 0 && warnings.length === 0) return `Onboarding applied and verified ${items.length} item(s).`;
+  const checks = (count: number): string => `${count} check${count === 1 ? '' : 's'}`;
+  if (failed === 0 && warnings.length === 0) return `Settings saved, and all ${checks(items.length)} passed.`;
+  // Plain sentences only: an item's id is for the program, never for the person reading this.
   return [
-    `Onboarding settings applied. ${passed} of ${items.length} verification item(s) passed`
-      + `${failed > 0 ? `; ${failed} failed` : ''}${warnings.length > 0 ? `; ${warnings.length} warning(s) need attention` : ''}.`,
-    ...warnings.map((warning) => `  warning ${warning.id}: ${warning.message}`),
+    `Settings saved. ${passed} of ${checks(items.length)} passed`
+      + `${failed > 0 ? `; ${failed} failed` : ''}${warnings.length > 0 ? `; ${warnings.length} need${warnings.length === 1 ? 's' : ''} your attention:` : '.'}`,
+    ...warnings.map((warning) => `  ! ${warning.message}`),
   ].join('\n');
 }

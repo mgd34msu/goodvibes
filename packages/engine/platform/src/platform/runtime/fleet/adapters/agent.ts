@@ -7,7 +7,7 @@ import type {
   ProcessUsage,
 } from '../types.js';
 import { contractNodeId, contractUnitNodeId } from './contract.js';
-import { beadArgument, beadName, toolActivityFallback, toolCallActivity } from '@goodvibes/engine/contracts';
+import { beadArgument, beadName, toolActivityFallback, toolActivityPhrase, toolCallActivity } from '@goodvibes/engine/contracts';
 import { toolActivityOf } from '../../../tools/registry.js';
 import { archetypeDisplayName } from '../../../agents/archetypes.js';
 
@@ -178,6 +178,19 @@ function activityTitle(call: NonNullable<AgentRecord['activeCall']>): string {
   return argument ? `${words.doing} ${argument}` : beadName({ ...call, activity });
 }
 
+/**
+ * A call the side table saw by its tool's name while the record holds no call
+ * in flight (the runner clears `activeCall` when a call ends, whatever event
+ * came last): what the agent last did, as a phase in the tool's finished words
+ * ("Read files"), never the tool's name and never as what it is doing now.
+ */
+function endedCallActivity(seen: ProcessActivity): ProcessActivity {
+  const name = seen.toolName ?? seen.text;
+  const words = toolCallActivity(toolActivityOf(name), undefined) ?? toolActivityFallback(name);
+  const done = toolActivityPhrase(words, 1, 'done');
+  return { kind: 'phase', text: done.charAt(0).toUpperCase() + done.slice(1), at: seen.at };
+}
+
 /** AgentRecord → ProcessNode. */
 export function adaptAgent(record: AgentRecord, ctx: AgentAdapterContext): ProcessNode {
   const entry = ctx.activity.get(record.id);
@@ -217,11 +230,13 @@ export function adaptAgent(record: AgentRecord, ctx: AgentAdapterContext): Proce
   const label = record.cohort ? `${role} · ${record.cohort}` : role;
   const elapsedMs = Math.max(0, (record.completedAt ?? ctx.now) - record.startedAt);
 
-  // What it is doing now, in the tool's own words and the call's key argument ("Writing docs/usage.md").
+  // What it is doing now, in the tool's own words and the call's key argument ("Writing docs/usage.md");
+  // a call the record no longer holds has ended (endedCallActivity).
   const call = active ? record.activeCall : undefined;
+  const seen = entry?.activity;
   const currentActivity = call
-    ? { kind: 'tool' as const, text: activityTitle(call), toolName: call.name, at: entry?.activity?.at ?? record.startedAt }
-    : entry?.activity;
+    ? { kind: 'tool' as const, text: activityTitle(call), toolName: call.name, at: seen?.at ?? record.startedAt }
+    : seen?.kind === 'tool' ? endedCallActivity(seen) : seen;
   const filesRead = record.filesRead ?? 0;
   const filesChanged = record.filesChanged ?? 0;
 

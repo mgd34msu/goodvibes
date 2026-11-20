@@ -1,6 +1,5 @@
 import type { Line } from '@goodvibes/engine/platform/platform/types';
 import type { SurfaceLayer } from './surface-kit.js';
-import { renderToasts, type ToastSpec } from './surface-kit-parts.js';
 import { overlayViewportBottom } from './conversation-layout.js';
 import { isTrackedModal, type StackedModal } from '../surface-modal-host.js';
 export type ModalEntry = readonly [name: string, active: boolean, render: () => SurfaceLayer | null];
@@ -49,8 +48,9 @@ export function applyConversationPopupRows<Input extends {
  * Draw the modal stack bottom to top: a kit modal draws itself, a tracked
  * modal through the product's entry of the same name (an entry that is not
  * visible, or a modal with no entry, such as a composer popup, draws nothing
- * here), then the permission dialog. Toasts wait while any of these, or a
- * full-screen flow, is open.
+ * here), then the permission dialog. Nothing else is drawn over the
+ * conversation: a notice is never a box on screen, only the status bar's
+ * count, opened with the notices key.
  */
 export function composeConversationLayers(options: {
   readonly entries: readonly ModalEntry[];
@@ -58,12 +58,6 @@ export function composeConversationLayers(options: {
   readonly width: number;
   readonly height: number;
   readonly permission?: SurfaceLayer | null | undefined;
-  readonly headerRows?: number | undefined;
-  readonly footerRows?: number | undefined;
-  /** The toast state: held while a layer below would be covered, then read for this frame. */
-  readonly toasts: { hold(held: boolean, drop?: boolean): void; visible(): readonly ToastSpec[] };
-  /** A full-screen flow (the onboarding wizard) owns the screen, so toasts wait as they do over a modal. */
-  readonly screenOwned?: boolean | undefined;
 }): SurfaceLayer[] {
   const { entries, modals, width, height } = options;
   const layers: SurfaceLayer[] = [];
@@ -78,15 +72,6 @@ export function composeConversationLayers(options: {
     if (layer) layers.push(layer);
   }
   if (options.permission) layers.push(options.permission);
-  // A toast never covers a modal or the permission card: it waits until they
-  // close. Over the splash or a first-run screen nothing is drawn and nothing
-  // waits: those notices are only in the status bar's count (toast-center.ts hold).
-  options.toasts.hold(layers.length > 0 || options.screenOwned === true, options.screenOwned === true);
-  const toasts = renderToasts(width, height, options.toasts.visible(), {
-    top: options.headerRows ?? 1,
-    bottom: height - (options.footerRows ?? 2),
-  });
-  if (toasts) layers.push(toasts);
   return layers;
 }
 /** The full-screen product flow can replace the viewport; transient popups remain composer-anchored. */

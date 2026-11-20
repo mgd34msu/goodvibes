@@ -344,6 +344,27 @@ function adaptStoredTerminalTheme(raw: Record<string, unknown>): Record<string, 
   return { ...raw, display: { ...display, theme: name } };
 }
 
+/**
+ * The decision-model policy names 3.2.0 saved, one to one with today's. 3.3.1
+ * read them without rewriting the file, so a home that set the policy under
+ * 3.2.0 still holds one. Read here under the current name (someone who chose
+ * no decision model keeps none); the daemon writes the current name into its
+ * file once at boot (daemon/facade-boot-guarantees.ts).
+ */
+const DECISION_POLICIES_SAVED_BY_3_2: Readonly<Record<string, string>> = Object.freeze({
+  'Classic - Off': 'No Decision Model',
+  'Default - On': 'Decision Model Only',
+  Preferred: 'Hybrid',
+});
+let decisionPolicyNameOf3_2Read = false;
+
+/** Whether a settings file read by this process held a 3.2.0 policy name; asking clears it (read by the daemon's boot). */
+export function takeDecisionPolicyNameOf3_2Read(): boolean {
+  const read = decisionPolicyNameOf3_2Read;
+  decisionPolicyNameOf3_2Read = false;
+  return read;
+}
+
 /** Known keys whose stored value fails the schema entry that defines them. */
 function screenSchemaValues(
   raw: Record<string, unknown>,
@@ -359,6 +380,13 @@ function screenSchemaValues(
       const retired = retiredPermissionModeNotice(hit.value);
       if (retired !== undefined) {
         found.push({ file, key: setting.key, reason: retired, remedy: 'set permissions.mode to a current mode to silence this', action: 'skipped' });
+      }
+    }
+    if (setting.key === 'judgment.policy' && typeof hit.value === 'string' && isPlainObject(raw.judgment)) {
+      const current = DECISION_POLICIES_SAVED_BY_3_2[hit.value];
+      if (current !== undefined) {
+        raw.judgment.policy = current;
+        decisionPolicyNameOf3_2Read = true;
       }
     }
     const failure = schemaFailure(setting, readDotPath(raw, setting.key).value);

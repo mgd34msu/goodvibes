@@ -48,6 +48,8 @@ export const PAYMENT_ANSWER_UNREADABLE = 'PAYMENT_ANSWER_UNREADABLE';
 export const PURCHASE_ITEM_METADATA = 'purchaseItem';
 export const PURCHASE_SHOP_METADATA = 'purchaseShop';
 export const PURCHASE_AMOUNT_METADATA = 'purchaseAmount';
+/** When a window closes (epoch ms): a veto window goes ahead then, an approval window stops waiting. The item itself outlives it by a minute. */
+export const PURCHASE_DEADLINE_METADATA = 'purchaseDeadline';
 
 /** A purchase window's subject as facts: the item, the shop and the amount with its currency ("$64.00"). */
 export interface PurchaseNoticeFacts {

@@ -1231,8 +1231,6 @@ async function main(prepared: PreparedShellCliRuntime) {
         keybindingsManager: ctx.services.keybindingsManager,
         screenWidth: width,
         screenHeight: height,
-        headerRows: shellHeaderLines.length,
-        footerRows: shellFooterLines.length,
         contextWindow: providerRegistry.getKnownContextWindowForModel(currentModel) ?? 0,
         providerInputTokens: orchestrator.lastInputTokens,
         permission: pendingPermission

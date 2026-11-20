@@ -231,6 +231,33 @@ export function isBackgroundCall(call: ToolCallInput): boolean {
 function errorText(content: string): string {
     return content.replace(/^Error:\s*/, '');
 }
+/**
+ * A call the permission layer refused or held, in the words the person reads
+ * (the error text itself is written for the model: reason codes, scope, next
+ * steps). Null for any other error.
+ */
+function refusalSummary(text: string): string | null {
+    const match = /^Tool '[^']*' was (refused|held for the owner|not run)\b[^(]*\(reason: ([a-z_]+)/.exec(text);
+    if (!match)
+        return null;
+    if (match[1] === 'held for the owner')
+        return 'held for you to approve; not run yet';
+    const words: Readonly<Record<string, string>> = {
+        user_denied: 'you said no, so it did not run',
+        session_cached_deny: 'you said no to this earlier, so it did not run',
+        user_rule_deny: 'a rule you saved refuses it, so it did not run',
+        config_deny: 'your permission settings refuse it, so it did not run',
+        preset_deny: 'how often it asks refuses this, so it did not run',
+        mode_denied: 'how often it asks refuses this, so it did not run',
+        plan_mode: 'plan mode is on, so it did not run',
+        jev_reject: 'Jev refused it, so it did not run',
+        jev_defer: 'Jev put it off, so it did not run',
+        jev_revise: 'Jev asked for a smaller change, so it did not run',
+        managed_policy_deny: 'your organisation\'s policy refuses it, so it did not run',
+        mode_queued_for_owner: 'held for you to approve; not run yet',
+    };
+    return words[match[2]!] ?? 'not allowed, so it did not run';
+}
 // ---------------------------------------------------------------------------
 // Exec results
 // ---------------------------------------------------------------------------
@@ -436,6 +463,9 @@ function rawSummary(call: ToolCallInput, status: BeadStatus, content: string | u
         if (totals)
             return { text: totals, tone: 'bad' };
         const first = errorText(content).split('\n')[0] ?? '';
+        const refused = refusalSummary(first);
+        if (refused)
+            return { text: refused, tone: 'bad' };
         const execExit = /exit(?: code)? (\d+)/i.exec(first);
         return { text: execExit ? `exit ${execExit[1]}` : first, tone: 'bad' };
     }

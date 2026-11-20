@@ -184,8 +184,6 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
   confirm?: (options: import('./confirm-dialog.ts').ConfirmOptions) => Promise<boolean>;
   /** Push a kit modal on the surface's modal stack (a described command's guided panel). */
   pushSurfaceModal?: (modal: import('@goodvibes/engine/terminal-shell/surface-modal-host').SurfaceModal) => void;
-  /** Show a toast in the top right corner for five seconds (a colored ┃ on both sides). */
-  showToast?: (toast: import('../renderer/surface-kit-parts.ts').ToastSpec) => void;
   /**
    * The /status report: session, model, tools, notification mode, token
    * totals and cost, context use, cross-surface posture and the safety

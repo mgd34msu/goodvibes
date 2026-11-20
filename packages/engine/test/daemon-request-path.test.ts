@@ -18,6 +18,7 @@ import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { UserAuthManager } from '../platform/src/platform/security/user-auth.ts';
 import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.ts';
 import { DaemonHttpRouter } from '../platform/src/platform/daemon/http/router.ts';
+import { ownBrowserOrigins } from '../platform/src/platform/daemon/http/browser-origin.ts';
 import { ControlPlaneGateway } from '../platform/src/platform/control-plane/gateway.ts';
 import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.ts';
@@ -37,23 +38,27 @@ function daemon() {
   userAuth.addUser('deputy', 'deputy-password', ['admin']);
   const catalog = new GatewayMethodCatalog();
   const runtimeBus = new RuntimeEventBus();
-  const configManager = new ConfigManager({ configDir: join(dir, 'config'), workingDir: dir, homeDir: join(dir, 'home'), surfaceRoot: 'goodvibes' });
+  // The daemon's own settings manager: it owns the daemon's settings file.
+  const configManager = new ConfigManager({ configDir: join(dir, 'config'), workingDir: dir, homeDir: join(dir, 'home'), surfaceRoot: 'goodvibes', daemonTierPath: join(dir, 'daemon', 'settings.json'), ownsDaemonTier: true });
   const distributedRuntime = new DistributedRuntimeManager(join(dir, 'remote', 'distributed-runtime.json'));
+  // Where the listener is bound, as the daemon's composition reports it; the browser origins are read from it and the settings.
+  const listenerBinding = () => ({ host: '127.0.0.1', port: 3421, scheme: 'http' as const });
   let router: DaemonHttpRouter | undefined;
   const helper = new DaemonControlPlaneHelper({
     gatewayMethods: catalog, userAuth, pairingTokens: new PairingTokenManager(join(dir, 'pairing-tokens.json')),
     controlPlaneGateway: new ControlPlaneGateway({ runtimeBus }), distributedRuntime,
+    allowedBrowserOrigins: () => ownBrowserOrigins(configManager, listenerBinding),
     authToken: () => OPERATOR_TOKEN, trustProxyEnabled: () => false, host: '127.0.0.1', port: 3421,
     dispatchApiRoutes: (req: Request) => router!.dispatchApiRoutes(req),
   } as unknown as DaemonControlPlaneContext);
   router = new DaemonHttpRouter({
-    configManager, userAuth, gatewayMethods: catalog, runtimeBus, runtimeStore: null, githubWebhookSecret: null, distributedRuntime,
+    configManager, userAuth, gatewayMethods: catalog, runtimeBus, runtimeStore: null, githubWebhookSecret: null, distributedRuntime, listenerBinding,
     authToken: () => OPERATOR_TOKEN,
     authenticateRequest: (req: Request) => helper.authenticateRequest(req),
     extractAuthToken: (req: Request) => helper.extractAuthToken(req),
     requireRemotePeer: (req: Request, scope?: string) => helper.requireRemotePeer(req, scope),
   } as unknown as ConstructorParameters<typeof DaemonHttpRouter>[0]);
-  return { userAuth, helper, router: router!, distributedRuntime };
+  return { userAuth, helper, router: router!, distributedRuntime, configManager };
 }
 
 /** A socket path call with the context the socket builds from its authenticated principal. */
@@ -110,7 +115,10 @@ test('no credential is refused before any route; a viewer is refused an admin me
 });
 
 test('a browser cookie acts for no page of another origin: no change, no event stream, no sign-out with the sign-in cookie, no peer call with the device-node cookie; the daemon\'s own page is let through', async () => {
-  const { userAuth, router, distributedRuntime } = daemon();
+  const { userAuth, router, distributedRuntime, configManager } = daemon();
+  // The owner states the address a proxy (tailscale serve) reaches the web UI at; the proxy sends the request on with the upstream Host.
+  const PUBLIC = 'https://goodvibes.tailnet.example';
+  configManager.set('web.publicBaseUrl', PUBLIC);
   const session = userAuth.createSession('admin').token;
   const cookie = `goodvibes_session=${encodeURIComponent(session)}`;
   const asked = await distributedRuntime.requestPairing({ peerKind: 'node', label: 'phone page' });
@@ -118,24 +126,27 @@ test('a browser cookie acts for no page of another origin: no change, no event s
   const peerToken = (await distributedRuntime.verifyPairRequest(asked.request.id, asked.challenge))!.token.value;
   const nodeCookie = `goodvibes_node=${encodeURIComponent(peerToken)}`;
 
-  const send = async (method: string, path: string, cookieHeader: string, origin: string | null, body?: unknown) => {
-    const response = await router.handleRequest(new Request(`${DAEMON}${path}`, {
-      method, headers: { cookie: cookieHeader, ...(origin === null ? {} : { origin }), ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+  const send = async (method: string, path: string, cookieHeader: string, origin: string | null, body?: unknown, at = DAEMON, forwarded: Record<string, string> = {}) => {
+    const response = await router.handleRequest(new Request(`${at}${path}`, {
+      method, headers: { cookie: cookieHeader, ...forwarded, ...(origin === null ? {} : { origin }), ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     }));
     const code = codeOf(await response.json().catch(() => null));
     return code === 'ORIGIN_NOT_ALLOWED' ? 'refused for its origin' : response.status === 401 ? 'unauthenticated' : 'let through';
   };
-  const create = (origin: string | null) => send('POST', '/api/local-auth/users', cookie, origin, { username: 'mallory', password: 'mallory-password', roles: ['admin'] });
+  const create = (origin: string | null, at = DAEMON, forwarded: Record<string, string> = {}) => send('POST', '/api/local-auth/users', cookie, origin, { username: 'mallory', password: 'mallory-password', roles: ['admin'] }, at, forwarded);
+  const ATTACKER = 'https://attacker.example';
   const rows: ReadonlyArray<readonly [string, () => Promise<string>, string]> = [
     ['a change from another origin', () => create('https://elsewhere.example'), 'refused for its origin'],
     ['a change from another port on this host', () => create('http://127.0.0.1:8080'), 'refused for its origin'],
     ['a change with no origin', () => create(null), 'refused for its origin'],
     ['the event stream from another origin', () => send('GET', '/api/control-plane/events', cookie, 'https://elsewhere.example'), 'refused for its origin'],
     ['a sign-out from another origin', () => send('POST', '/logout', cookie, 'https://elsewhere.example'), 'refused for its origin'],
+    ['a change whose Host and X-Forwarded-Host name the attacker\'s origin, from that origin', () => create(ATTACKER, ATTACKER, { host: 'attacker.example', 'x-forwarded-host': 'attacker.example', 'x-forwarded-proto': 'https' }), 'refused for its origin'],
     ['a peer call on the device-node cookie from another origin', () => send('POST', '/api/remote/heartbeat', nodeCookie, 'https://elsewhere.example', {}), 'refused for its origin'],
     // The controls: the daemon's own page, and a same-origin read that names no origin, pass the origin check.
     ['a change from the daemon\'s own origin', () => create(DAEMON), 'let through'],
+    ['a change from the stated public address, its Host the upstream one', () => create(PUBLIC), 'let through'],
     ['a read with no origin', () => send('GET', '/api/local-auth', cookie, null), 'let through'],
     ['a peer call on the device-node cookie from the daemon\'s own origin', () => send('POST', '/api/remote/heartbeat', nodeCookie, DAEMON, {}), 'let through'],
   ];

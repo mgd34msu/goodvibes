@@ -12,7 +12,7 @@ import { getSharedNotificationFeed } from '../views/notifications-feed.ts';
 
 /**
  * The TUI's panel is the Notifications history: a line whose target is `panel`
- * is recorded (and toasted) there and kept out of the transcript. Every
+ * is recorded there (counted on the status bar) and kept out of the transcript. Every
  * transcript notice is already recorded there by the conversation's notice
  * sink, so `both` and `conversation` show the same in this product. A
  * high-priority error or warning reaches the transcript even under a `panel`

@@ -1,24 +1,22 @@
 import { SHARED_SETTING_ENUM_DESCRIPTIONS } from '@goodvibes/engine/terminal-shell/renderer/settings-metadata';
 import { buildMcpHelp } from '@goodvibes/engine/terminal-shell/renderer/mcp-trust-context';
-import { helpFact, helpHeading, helpText, helpWarning, type HelpLine } from '@goodvibes/engine/terminal-shell/renderer/settings-documentation';
+import { helpText, helpWarning, type HelpLine } from '@goodvibes/engine/terminal-shell/renderer/settings-documentation';
+import { asSentence, firstSentence, settingStateWarnings } from '@goodvibes/engine/terminal-shell/renderer/settings-context';
 /**
- * settings-modal-context.ts, the documentation the settings modal shows for
- * its selected row: every setting's key, current and default value, type,
- * source, lock and conflict state, description, possible values (with the
- * per-value meaning for enums), editing notes, and the full feature-unit,
- * MCP-trust, subscription and connection documentation. Split out of
- * settings-modal.ts for the 800-line file cap. Each line states its kind
+ * settings-modal-context.ts, the few sentences the settings screen shows under
+ * its rows for the selected one: what a setting does, when a change takes
+ * effect, its default in words, and where its value comes from when that is
+ * not the default; a feature's state; and the MCP-trust, sign-in and
+ * connection help of the lists a topic opens. Each line states its kind
  * (HelpLine); the renderer wraps and styles it by that kind.
  */
 
 import type { SettingsModal, SettingEntry, SettingsCategory } from '../input/settings-modal.ts';
 import { FEATURE_SETTINGS_BY_ID, isFeatureValueEnabled } from '@goodvibes/engine/terminal-shell';
-import { CATEGORY_INFO, describeUiRouting, formatValue, getSettingLabel } from './settings-modal-helpers.ts';
+import { formatDefault, formatValue, getSettingLabel } from './settings-modal-helpers.ts';
 import { buildConnectionHelp } from './settings-modal-connections.ts';
 import { isSecretConfigKey } from '../config/secret-config.ts';
-import '../input/concealed-input.ts';
 import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes/engine/platform/platform/payments';
-import '@goodvibes/engine/platform/platform/runtime/operations';
 import { GLYPHS } from './ui-primitives.ts';
 import { GATE_PRESETS } from '@goodvibes/engine/platform/platform/gate';
 
@@ -96,121 +94,65 @@ export const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
 };
 
 /**
- * The option shape of a feature header, rendered from the same schema the
- * write path uses: enum headers list every mode choice (marking the current
- * value and which values keep the feature active), boolean headers state the
- * two positions.
+ * The help for a feature's switch, in words: what the feature does, whether it
+ * is on, when a change takes effect, and a restart still pending.
  */
-function buildFeatureOptionLines(entry: SettingEntry): HelpLine[] {
-  const feature = entry.flag!.feature;
-  const setting = entry.setting;
-  const lines: HelpLine[] = [];
-  if (setting.type === 'enum' && setting.enumValues) {
-    lines.push(helpText(''), helpHeading(`Mode choices for ${setting.key}:`));
-    const activeValues = feature.enablement.enabledValues ?? [];
-    const descriptions = ENUM_VALUE_DESCRIPTIONS[setting.key] ?? {};
-    for (const value of setting.enumValues) {
-      const marks: string[] = [];
-      if (value === String(entry.currentValue)) marks.push('current');
-      if (feature.enablement.kind === 'enum') {
-        marks.push(activeValues.includes(value) ? 'feature on' : 'feature off');
-      }
-      const suffix = marks.length > 0 ? ` (${marks.join(', ')})` : '';
-      lines.push(helpText(`${value}${suffix}: ${descriptions[value] ?? `Use ${value} for this setting.`}`));
-    }
-  } else if (setting.type === 'boolean') {
-    lines.push(helpText(''), helpHeading('Possible values:'), helpText('true: the feature is enabled.'), helpText('false: the feature is disabled.'));
-  }
-  return lines;
-}
-
-/**
- * Under-cursor documentation for a feature-unit header, rendered entirely
- * from the platform's per-feature settings metadata: full behavior description,
- * the real option shape, every settings key that tunes the feature, and the
- * honest live/restart state from the gate manager.
- */
-function buildFlagHelp(entry: SettingEntry | null): HelpLine[] {
-  const flagEntry = entry?.flag ?? null;
-  if (!entry || !flagEntry) return [helpText('Features'), helpText('No feature is selected.')];
-  const { feature, state, persistedState, pendingRestart } = flagEntry;
-  const configOn = isFeatureValueEnabled(feature, entry.currentValue);
-  const displayState = configOn ? 'enabled' : 'disabled';
+function buildFlagHelp(entry: SettingEntry): HelpLine[] {
+  const flagEntry = entry.flag!;
+  const { feature, state, pendingRestart } = flagEntry;
+  const on = isFeatureValueEnabled(feature, entry.currentValue);
   const lines: HelpLine[] = [
     helpText(feature.name),
-    helpFact('Feature', `${feature.id} (${feature.domain} domain)`),
-    helpFact('Setting', `${feature.enablement.key} = ${formatValue(entry)}`),
-    helpFact('State', displayState),
-    ...(entry.metadataUnavailable ? [helpFact('Source', 'unavailable', 'source unavailable'), helpWarning(`Unavailable: ${entry.metadataUnavailable}`)] : []),
-    // A capability the registry declares not operable reads as disabled no
-    // matter what its settings key says. Without this line the row shows a
-    // value of true beside a state of disabled and explains nothing, the
-    // written reason exists in the registry, so render it where the user meets
-    // the contradiction rather than leaving it to be discovered.
+    ...settingStateWarnings(entry),
+    // A capability the registry declares not operable reads as off whatever its setting says; say why where the two disagree.
     ...(feature.operable === false && feature.inoperableDetail ? [helpWarning(`Not available in this build: ${feature.inoperableDetail}`)] : []),
-    helpFact('Default', feature.defaultEnabled ? 'enabled' : 'disabled', `default ${feature.defaultEnabled ? 'enabled' : 'disabled'}`),
-    helpFact('Applies', feature.restartRequired ? 'on next launch (startup-gated)' : 'immediately'),
-    ...(pendingRestart ? [helpWarning(`Pending restart: saved as ${persistedState}; effective state stays ${state} until the next launch.`)] : []),
-    helpText(''),
-    helpText(feature.description),
+    ...(pendingRestart
+      ? [helpWarning(`Saved ${on ? 'on' : 'off'}; it stays ${state === 'enabled' ? 'on' : 'off'} until the next start.`)]
+      : []),
+    helpText(firstSentence(feature.description).first),
   ];
-
-  lines.push(...buildFeatureOptionLines(entry));
-
-  lines.push(helpText(''));
-  if (feature.enablement.kind === 'enum') {
-    lines.push(helpText(`How it turns on: active while ${feature.enablement.key} is ${(feature.enablement.enabledValues ?? []).join(' or ')}.`));
-  } else if (feature.enablement.kind === 'constant' && entry.setting.type !== 'boolean') {
-    lines.push(helpText('How it turns on: always active; the settings listed below tune its behavior directly.'));
-  } else {
-    lines.push(helpText(`How it turns on: ${feature.enablement.key} set to true.`));
-  }
-
-  if (feature.settings.length > 1) {
-    lines.push(helpText(''), helpHeading('Settings in this feature:'));
-    for (const key of feature.settings) {
-      lines.push(helpText(key === feature.enablement.key ? `${key} (this row)` : key));
-    }
-  }
-
+  const value = entry.currentValue;
+  const meaning = typeof value === 'string' ? ENUM_VALUE_DESCRIPTIONS[entry.setting.key]?.[value] : undefined;
+  if (meaning) lines.push(helpText(`${formatValue(entry)}: ${meaning}`));
+  lines.push(helpText(feature.restartRequired ? 'Takes effect after a restart.' : 'Takes effect at once.'));
+  lines.push(helpText(`The default is ${feature.defaultEnabled ? 'On' : 'Off'}.`));
+  const rest = firstSentence(feature.description).rest;
+  if (rest) lines.push(helpText(''), helpText(rest));
   return lines;
 }
 
 /**
- * The documentation for whatever the settings list has selected, one entry
- * per line (unwrapped; '' separates paragraphs). The first line names the
- * selection; the renderer shows it above the uninterrupted options, with a separate pager.
+ * The help for whatever the screen has selected, one entry per line
+ * (unwrapped). The first line names the selection; the row already shows it.
  */
 export function settingContextLines(modal: SettingsModal): HelpLine[] {
-  const category = modal.currentCategory;
   if (modal.searchFocused) {
     const selected = modal.getSelected();
     if (selected) return buildSettingHelp(modal, selected);
-    // A search that matches nothing is said once, by the list's own empty row.
-    return modal.searchQuery.trim().length === 0 ? [helpText('Type a query to search across all settings categories.')] : [];
+    return [];
   }
-  const lines: HelpLine[] = [];
-  if (category === 'mcp') lines.push(...buildMcpHelp(modal, modal.getSelectedMcp()));
-  else if (category === 'subscriptions') lines.push(...buildSubscriptionHelp(modal, modal.getSelectedSubscription()));
-  else if (category === 'connections') lines.push(...buildConnectionHelp(modal));
-  else {
-    const selected = modal.getSelected();
-    // A feature-unit header shows the feature's documentation (full
-    // description, option shape, settings list, live/restart state); its
-    // settings sub-rows and plain settings show the setting context.
-    if (selected?.flag) lines.push(...buildFlagHelp(selected));
-    else if (selected) lines.push(...buildSettingHelp(modal, selected));
-    else lines.push(helpText('No setting is selected in this category.'));
+  const category = modal.currentCategory;
+  if (category === 'mcp') return buildMcpHelp(modal, modal.getSelectedMcp());
+  if (category === 'subscriptions') return buildSubscriptionHelp(modal, modal.getSelectedSubscription());
+  if (category === 'connections') return buildConnectionHelp(modal);
+  const list = modal.getSelectedListRow();
+  if (list !== null) {
+    const row = modal.visibleRows().find((candidate) => candidate.kind === 'list' && candidate.list.category === list);
+    return row?.kind === 'list' ? [helpText(row.list.label), helpText(asSentence(`Opens ${row.list.description}`))] : [];
   }
-  lines.push(helpText(''), helpText(`Category purpose: ${CATEGORY_INFO[category]}`));
-  return lines;
+  const selected = modal.getSelected();
+  if (selected?.flag) return buildFlagHelp(selected);
+  if (selected) return buildSettingHelp(modal, selected);
+  return [];
 }
 
-export function categoryItemCount(modal: SettingsModal, category: SettingsCategory): number {
-  if (category === 'mcp') return modal.mcpEntries.length;
-  if (category === 'subscriptions') return modal.subscriptionEntries.length;
-  if (category === 'connections') return modal.connectionEntries.length;
-  return modal.groups.get(category)?.length ?? 0;
+/** How many items a list a topic opens holds, for its row. */
+export function listItemCount(modal: SettingsModal, category: SettingsCategory): string | undefined {
+  const count = category === 'mcp' ? modal.mcpEntries.length
+    : category === 'subscriptions' ? modal.subscriptionEntries.length
+    : category === 'connections' ? modal.connectionEntries.length
+    : modal.groups.get(category)?.length ?? 0;
+  return count > 0 ? String(count) : undefined;
 }
 
 import { createSettingContext, createSubscriptionContext } from '@goodvibes/engine/terminal-shell/renderer/settings-context';
@@ -218,26 +160,19 @@ export const { currentSettingValue, buildSettingHelp } = createSettingContext<Se
   isSecretKey: isSecretConfigKey,
   cursor: GLYPHS.surface.cursor,
   formatValue,
+  formatDefault,
   label: getSettingLabel,
-  source: (entry) => (entry.metadataUnavailable ? 'unavailable' : (entry.effectiveSource ?? 'default')),
+  source: (modal, entry) => modal.describeSource(entry),
   detail(entry) {
-    const lines: HelpLine[] = [];
-    if (entry.metadataUnavailable) lines.push(helpWarning(`Unavailable: ${entry.metadataUnavailable}`));
-    if (entry.locked) lines.push(helpWarning(`Locked: ${entry.lockReason ?? 'This setting is locked by a higher-priority layer.'}`));
-    if (entry.conflict) lines.push(helpWarning(`Conflict: resolve with /settings-sync resolve ${entry.setting.key} local|synced.`));
-
-    // A settings sub-row owned by a feature unit names its feature so "what does this do" is answerable without scrolling back to the header row.
+    const lines: HelpLine[] = settingStateWarnings(entry);
+    // A setting a feature owns names the feature, so what it belongs to is answered here.
     if (entry.ownerFlagId) {
       const owner = FEATURE_SETTINGS_BY_ID.get(entry.ownerFlagId);
-      if (owner) lines.push(helpFact('Part of feature', `${owner.name} (the header row above).`));
+      if (owner) lines.push(helpText(`Part of ${owner.name}.`));
     }
-
-
     return lines;
   },
   enumDescriptions: ENUM_VALUE_DESCRIPTIONS,
-  routingKeys: ['ui.systemMessages', 'ui.operationalMessages', 'ui.contractMessages'],
-  describeUiRouting,
 });
 const buildSubscriptionHelp = createSubscriptionContext<SettingsModal>({
   confirmLogout: (provider) => `Sign out ${provider}? Enter/y to confirm, n/Esc to cancel.`,

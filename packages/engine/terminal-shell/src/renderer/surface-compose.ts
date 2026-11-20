@@ -162,7 +162,7 @@ function clearGlyphs(grid: CellGrid, x: number, y: number, step: 1 | -1): void {
  * Apply layers in order, bottom first. A layer that asks for dimming dims
  * everything under it (the screen, and any modal below it: a confirm dialog
  * over a modal puts that modal in the background too); layers that do not
- * dim (toasts, popups) are stamped as they are.
+ * dim (popups) are stamped as they are.
  */
 export function composeLayers(grid: CellGrid, layers: readonly SurfaceLayer[], params: DimParams = currentDimParams()): void {
   for (const layer of layers) {

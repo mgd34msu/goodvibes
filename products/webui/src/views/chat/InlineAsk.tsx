@@ -20,7 +20,9 @@ import { approvalReading, type ApprovalReading } from '../../lib/approvals';
 import { readingStateLine, type OpenAsk } from '../../lib/asks';
 import type { ApprovalRecord } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
-import { Menu, MenuItem, MenuMeta } from '../../components/ui/Menu';
+import { Menu, MenuItem, MenuMeta, MenuSeparator } from '../../components/ui/Menu';
+import { ModeSheetItems } from '../../components/shell/ModeChip';
+import { useOptionalShell } from '../../components/shell/ShellContext';
 import { AskCard, DecidedLine, type DecidedWords } from '../work/AskCard';
 import { useApprovalActions } from '../work/useApprovalActions';
 import { useAskActions } from '../work/useAskActions';
@@ -42,9 +44,15 @@ function scrollToAsk(key: string): void {
   element.querySelector<HTMLElement>('button:not([disabled])')?.focus({ preventScroll: true });
 }
 
-/** The header chip: `asking you · 1`, opening this chat's asks; choosing one scrolls to its card. */
-export function ChatAsksChip({ sessionId }: { sessionId: string }) {
+/**
+ * The header chip: `asking you · 1`, opening this chat's asks; choosing one
+ * scrolls to its card. On a phone header the mode chip steps aside for the
+ * chat's title while this chip shows (shell.css), so its sheet ends with the
+ * mode in force and `Change`.
+ */
+export function ChatAsksChip({ sessionId, onOpenSettings }: { sessionId: string; onOpenSettings?: ((section: string) => void) | undefined }) {
   const asks = useChatAsks(sessionId);
+  const phoneHeader = useOptionalShell()?.mode === 'drawer';
   if (asks.length === 0) return null;
   return (
     <Menu
@@ -63,6 +71,8 @@ export function ChatAsksChip({ sessionId }: { sessionId: string }) {
           {ask.presentation.title}
         </MenuItem>
       ))}
+      {phoneHeader && <MenuSeparator />}
+      {phoneHeader && <ModeSheetItems onOpenSettings={onOpenSettings} withLabel />}
     </Menu>
   );
 }

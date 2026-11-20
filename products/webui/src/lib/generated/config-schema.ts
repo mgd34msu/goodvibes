@@ -128,7 +128,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "now",
     "type": "boolean",
     "default": false,
-    "description": "Show reasoning/thinking content in a dimmed block above assistant responses"
+    "description": "Shows what the model was reasoning about above each answer"
   },
   {
     "key": "display.showReasoningSummary",
@@ -136,7 +136,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "now",
     "type": "boolean",
     "default": false,
-    "description": "Show reasoning summary (Mercury-2) in a dimmed block above assistant responses"
+    "description": "Shows a short summary of the model's thinking above each answer, for models that give one"
   },
   {
     "key": "display.showTokenSpeed",
@@ -428,7 +428,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "now",
     "type": "enum",
     "default": "jev-decides",
-    "description": "Who decides what ordinary work does not settle. ask-me: you are asked about dangerous actions and owner-only decisions. jev-decides (default): Jev, the decision model, decides judgment calls and you are asked only owner-only decisions; with no working decision model it behaves as ask-me, and while it is only the default (not chosen) it also does until a calibration run has measured Jev's decisions on the configured decision model. just-vibes: does as much as it can without interrupting you; Jev decides judgment calls when a decision model works, and anything that needs you is held and listed at the end. yolo: runs every action without safety denials (containment, secret storage and payment limits still apply). plan is a separate read-only planning posture.",
+    "description": "Who decides what ordinary work does not settle. Ask me: you are asked about dangerous actions and owner-only decisions. Jev decides (the default): Jev, the decision model, decides judgment calls and you are asked only owner-only decisions; with no working decision model it behaves as Ask me, and while it is only the default (not chosen) it also does until a calibration run has measured Jev's decisions on the configured decision model. Just vibes: does as much as it can without interrupting you; Jev decides judgment calls when a decision model works, and anything that needs you is held and listed at the end. YOLO: runs every action without safety denials (containment, secret storage and payment limits still apply). Plan: a separate read-only planning posture.",
     "enumValues": [
       "ask-me",
       "jev-decides",
@@ -5210,14 +5210,14 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "appliesWhen": "now",
     "type": "boolean",
     "default": true,
-    "description": "Adaptive notification suppression: past notifications.burstThreshold notifications of one kind (same domain, level and title) in one collapse window, the rest are counted into that kind's notification-history entry without a toast. Critical, milestone, and alert notifications are always exempt. Turn off to let every one toast as its level and the print level allow. Read when the app starts."
+    "description": "Adaptive notification suppression: past notifications.burstThreshold notifications of one kind (same domain, level and title) in one collapse window, the rest are counted into that kind's notification-history entry instead of each adding one. Critical, milestone, and alert notifications are always exempt. Turn off to record every one as its own entry. Read when the app starts."
   },
   {
     "key": "notifications.burstThreshold",
     "label": "Repeats shown before notifications go quiet",
     "type": "number",
     "default": 3,
-    "description": "How many notifications with the same domain, level and title toast within one collapse window while notifications.adaptiveSuppression is on; later ones in that window are counted into the same notification-history entry without a toast. The window follows the print level (behavior.hitlMode: 5 s quiet, 2 s balanced, 0.5 s operator) and runs from the first notification, so a steady trickle cannot keep one open. Critical, milestone and alert notifications never collapse. Read when the app starts.",
+    "description": "How many notifications with the same domain, level and title are recorded as their own entries within one collapse window while notifications.adaptiveSuppression is on; later ones in that window are counted into the same notification-history entry. The window follows the print level (behavior.hitlMode: 5 s quiet, 2 s balanced, 0.5 s operator) and runs from the first notification, so a steady trickle cannot keep one open. Critical, milestone and alert notifications never collapse. Read when the app starts.",
     "validationHint": "integer in [1, 10000]"
   },
   {

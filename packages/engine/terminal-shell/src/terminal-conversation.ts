@@ -282,8 +282,8 @@ export class TerminalConversationManager extends PlatformConversationManager {
     }
     /**
      * A turn's failure and its retry line are rows of the transcript under the
-     * turn (turn-failure-actions.ts); they are not published as notices, so no
-     * toast is drawn over the conversation for them.
+     * turn (turn-failure-actions.ts); they are not published as notices, so they
+     * are not counted among the notices.
      */
     public override addTurnFailure(failure: Parameters<PlatformConversationManager['addTurnFailure']>[0]): void {
         this.messageKindRegistry.delete(this.getMessageCount());
@@ -302,7 +302,7 @@ export class TerminalConversationManager extends PlatformConversationManager {
         this.markDirty();
         this.publishSystemNotice(nextIndex, false);
     }
-    /** A `!` command's output is drawn in the transcript only; it is not a toast or a notification. */
+    /** A `!` command's output is drawn in the transcript only; it is not a notification. */
     public override addShellOutput(content: string, failed: boolean): void {
         this.messageKindRegistry.delete(this.getMessageCount());
         super.addShellOutput(content, failed);
@@ -562,7 +562,7 @@ export class TerminalConversationManager extends PlatformConversationManager {
             if (message.role === 'system' && message.notice?.kind)
                 this.messageKindRegistry.set(index, message.notice.kind);
         }
-        // A restored session's notices go back into the history (not toasted).
+        // A restored session's notices go back into the history (not counted as unread).
         if (this.noticeSink) {
             const restored = this.readMessagesInPlace();
             for (let index = 0; index < restored.length; index++)
@@ -639,7 +639,7 @@ export class TerminalConversationManager extends PlatformConversationManager {
         const displayStart = this._displayFromMessageIndex;
         const visibleSnapshot = displayStart > 0 ? renderSnapshot.slice(displayStart) : renderSnapshot;
         // Tool and system messages are not transcript content: a system message is
-        // a notice (a toast and the notification history, see core/notices.ts),
+        // a notice (the notification history, see core/notices.ts),
         // except the lines the transcript draws itself (isTranscriptNotice).
         const hasDisplayMessage = visibleSnapshot.some((m) => (m.role !== 'tool' && m.role !== 'system') || isTranscriptNotice(m));
         if (!hasDisplayMessage && displayStart === 0 && !this.suppressSplash && !this.splashGate.dismissed && (this.presentation.stickySplash || this.displayOnly.count === 0)) {
@@ -874,7 +874,7 @@ export class TerminalConversationManager extends PlatformConversationManager {
         this.suppressSplash = suppressed;
         this.markDirty();
     }
-    /** Retire the splash for the run, any submission does it (SplashGateState). */
+    /** Retire the splash for the run: a chat submission does it (SplashGateState). */
     /** Retire the splash; rebuilt now (not marked dirty) so a command's output logged in the same tick survives the next frame. */
     public dismissSplash(): void { if (this.splashGate.dismiss() && this.splashGate.showing)
         this.rebuildHistory(); }

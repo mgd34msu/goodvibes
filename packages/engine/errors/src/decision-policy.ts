@@ -119,7 +119,7 @@ export function runDecisionOrClassic<T>(decision: () => Promise<T>, classic: () 
 /** The one line a failing set model is reported with: the model, what failed, what the work does, and the next step. */
 export function decisionModelFailingLine(failure: Pick<DecisionModelFailureState, 'model' | 'what' | 'nextStep'>, policy: DecisionModelPolicy): string {
   const then = policy === 'Decision Model Only'
-    ? 'work that needs it stops (judgment.policy is Decision Model Only; Hybrid would continue without it)'
+    ? 'work that needs it stops (you chose Decision Model Only for "When the decision model is missing or fails"; Hybrid would continue without it)'
     : 'continuing without it';
   return `The decision model ${failure.model} is unavailable (${failure.what}); ${then}. Next: ${failure.nextStep}`;
 }
@@ -141,11 +141,11 @@ export function decisionModelUse(state: DecisionModelPolicyState = decisionModel
   const label = decisionModelPolicyLabel(state.policy);
   const failure = state.failure;
   if (state.reason === 'selected') return { inUse: false, policy: state.policy, reason: 'selected',
-    line: 'No decision model is in use: judgment.policy is No Decision Model, so decisions take their fallbacks.' };
+    line: 'No decision model is in use: you turned decision models off (No Decision Model), so decisions take their fallbacks.' };
   if (state.reason === 'not-set') return { inUse: false, policy: state.policy, reason: 'not-set',
-    line: 'No decision model is in use: none is set, so decisions take their fallbacks. Next: to use one, set judgment.model, judgment.endpoint or TYPESAFE_API_KEY.' };
+    line: 'No decision model is in use: none is set, so decisions take their fallbacks. To use one, choose a Decision model in /settings open.' };
   if (failure !== undefined) return { inUse: false, policy: state.policy, reason: 'unavailable', failure, line: decisionModelFailingLine(failure, state.policy) };
   if (state.reason === 'unavailable') return { inUse: false, policy: state.policy, reason: 'unavailable',
     line: 'The decision model is unavailable; continuing without it.' };
-  return { inUse: true, policy: state.policy, reason: null, line: `A decision model is in use (judgment.policy ${label}).` };
+  return { inUse: true, policy: state.policy, reason: null, line: `A decision model is in use (${label}).` };
 }

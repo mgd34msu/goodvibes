@@ -368,7 +368,7 @@ export async function checkContextWindowPreflight(
       failedPreflightCompaction.set(deps.conversation, deps.conversation.workRevision);
       // A failed compaction ends the turn only when the request cannot be sent as it is.
       deps.conversation.addNotice(fits
-        ? `Auto-compact failed: ${msg}. The request is sent as it is, since it still fits the model's context window; compaction is not tried again until the conversation changes. To free room, run /compact, start a fresh conversation with /clear, or set behavior.autoCompactThreshold to 0 to turn auto-compact off.`
+        ? `Auto-compact failed: ${msg}. The request is sent as it is, since it still fits the model's context window; compaction is not tried again until the conversation changes. To free room, run /compact, start a fresh conversation with /clear, or set "Shorten the conversation when context is this full" to 0 in /settings open to turn auto-compact off.`
         : `Auto-compact failed: ${msg}. The request does not fit the model's context window, so it was not sent. Run /compact, start a fresh conversation with /clear, or switch to a model with a larger window with /model.`,
       { level: fits ? 'warning' : 'error' });
       if (deps.hookDispatcher) {

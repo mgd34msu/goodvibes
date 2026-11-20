@@ -4,7 +4,7 @@
  * when it stored none); no model reads a notice, and nothing screens its text.
  * Publication is synchronous: the entry is recorded in the same call that
  * received the notice, so there is no later point at which it could be stale.
- * Restored notices enter history without another toast.
+ * Restored notices enter history without counting as unread again.
  */
 import { runtimeEventOfNotice, type RuntimeEventProvenance } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
 import type { NotificationFeed } from '@goodvibes/engine/platform/platform/runtime/notification-feed';
@@ -16,7 +16,7 @@ export type NoticeSink = (
     readonly restored: boolean;
   },
 ) => void | Promise<void>;
-/** The pieces of a notice as the history and the toast show them. */
+/** The pieces of a notice as the history shows them. */
 export interface NoticeParts {
   /** Lower-case bracket tag ('wrfc', 'agents', 'compaction', …) or 'system' when untagged. */
   readonly domain: string;
@@ -38,7 +38,7 @@ export function noticeParts(text: string): NoticeParts {
 export interface NoticeOptions {
   /** An aborted signal means the conversation that sent the notice is gone: nothing is recorded. */
   readonly signal?: AbortSignal | undefined;
-  /** Restored from a saved session: kept in history, not toasted. */
+  /** Restored from a saved session: kept in history. */
   readonly restored?: boolean | undefined;
   readonly now?: (() => number) | undefined;
   readonly runtimeEvent?: RuntimeEventProvenance | undefined;
@@ -46,7 +46,7 @@ export interface NoticeOptions {
   readonly notice?: NoticeMeta | undefined;
 }
 const FEED_LEVEL: Readonly<Record<NoticeMeta['level'], 'info' | 'warning' | 'critical'>> = { info: 'info', success: 'info', warning: 'warning', error: 'critical' };
-/** Keep one system notice in the history; the feed's toast bridge toasts it unless restored. */
+/** Keep one system notice in the history; the status bar counts it while unread. */
 export interface NoticePublicationPolicy {
   readonly resolveEvent?:
     | ((

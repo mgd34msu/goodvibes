@@ -1,14 +1,11 @@
 /**
  * agents-modal-text.ts, the plain-text pieces the Agents modal shows: the
- * hosted session's header facts and rows, and a compact live tail of an
- * agent's conversation for the side column.
+ * hosted session's header facts and rows.
  *
  * Every hosted fact is a field of the daemon's own record; nothing is derived
- * here. The tail shows what an agent said and did most recently: its words,
- * the tools it called (→) and the first line of each result (←).
+ * here.
  */
 
-import type { ConversationMessageSnapshot } from '@goodvibes/engine/platform/platform/core';
 import { createEmptyLine, type Line } from '@goodvibes/engine/platform/platform/types';
 import type { HostedSessionFeedState, HostedSessionRow } from '../views/hosted-session-feed.ts';
 import type { PanelText as AgentsText } from '@goodvibes/engine/terminal-shell/work-board';
@@ -103,45 +100,4 @@ export function hostedTranscriptLines(rows: readonly HostedSessionRow[], width: 
 /** Existing tail-only helper; the actual modal owns its scroll cursor separately. */
 export function hostedBody(rows: readonly HostedSessionRow[], width: number, height: number): Line[] {
   return hostedTranscriptLines(rows, width).slice(-Math.max(1, height)).map(entry => entry.line);
-}
-
-function contentText(content: string | ReadonlyArray<{ type: string; text?: string }>): string {
-  if (typeof content === 'string') return content;
-  return content.map((part) => (part.type === 'text' ? part.text ?? '' : `[${part.type}]`)).join(' ');
-}
-
-/** The one argument that says what a tool call is about (a path, a command, a query). */
-function callSubject(args: Record<string, unknown>): string {
-  for (const key of ['path', 'file_path', 'filePath', 'command', 'cmd', 'pattern', 'query', 'url', 'name']) {
-    const value = args[key];
-    if (typeof value === 'string' && value.trim()) return value.trim();
-  }
-  return '';
-}
-
-function firstLine(text: string): string {
-  return text.split('\n').find((line) => line.trim().length > 0)?.trim() ?? '';
-}
-
-/** The most recent `limit` entries of an agent's conversation, as tail lines. */
-export function transcriptTail(snapshot: readonly ConversationMessageSnapshot[], limit: number): AgentsText[] {
-  const out: AgentsText[] = [];
-  for (const message of snapshot) {
-    if (message.role === 'user') {
-      const text = firstLine(contentText(message.content as string));
-      if (text) out.push({ text: `you: ${text}`, tone: 'text', bold: true });
-    } else if (message.role === 'assistant') {
-      const text = message.content.trim();
-      if (text) for (const paragraph of text.split(/\n\s*\n/).slice(-2)) out.push({ text: paragraph.replace(/\s+/g, ' ').trim(), tone: 'text' });
-      for (const call of message.toolCalls ?? []) {
-        const subject = callSubject(call.arguments);
-        out.push({ text: subject ? `${call.name} ${subject}` : call.name, tone: 'muted', glyph: '→' });
-      }
-    } else if (message.role === 'tool') {
-      const text = firstLine(message.content);
-      out.push({ text: `${message.toolName ?? 'result'}${text ? `: ${text}` : ''}`, tone: 'faint', glyph: '←' });
-    }
-  }
-  if (out.length === 0) out.push({ text: 'No messages yet.', tone: 'faint' });
-  return out.slice(-limit);
 }

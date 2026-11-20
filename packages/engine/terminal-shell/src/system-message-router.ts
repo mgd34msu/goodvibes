@@ -157,7 +157,7 @@ export class TerminalSystemMessageRouter<Feed extends SystemMessageActivityFeed 
     const declared = declaredNoticeLevel(message, level);
     return declared === 'error' || declared === 'warning';
   }
-  /** Store the line with the level its writer declared, so the transcript and the toast show it as given. */
+  /** Store the line with the level its writer declared, so the transcript and the notification history show it as given. */
   private addDeclared(message: string, priority: SystemMessagePriority, kind: SystemMessageKind | undefined, level: NoticeLevel | undefined): void {
     this.conversation.addNotice(message, { level: declaredNoticeLevel(message, level), priority, ...(kind ? { kind } : {}) });
   }

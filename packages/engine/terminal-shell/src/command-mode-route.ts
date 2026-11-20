@@ -129,7 +129,6 @@ export function createCommandModeTokenHandler<Context extends CommandRouteContex
       const raw = originalCommand.trim();
       if (raw.startsWith('/') && state.commandRegistry && state.commandContext) {
         closeCommandMode();
-        state.conversationManager?.dismissSplash(); // command input retires the splash, same as text input
         const prepared = presentation.prepare(state.commandContext, state, raw);
         if (!prepared) return true;
         const { name, args, context: ctx } = prepared;

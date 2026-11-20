@@ -1,3 +1,4 @@
+import { getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 import { activeTokens } from './theme.js';
 import {
   beginModal,
@@ -18,12 +19,17 @@ export interface SettingsLayoutModal {
   readonly searchQuery: string;
   readonly searchResults: readonly unknown[];
   readonly currentCategory: string;
+  readonly topicIndex: number;
+  readonly openList: string | null;
 }
-/** Settings adapt their documentation pager to the shared list/context element. */
+/**
+ * The settings screen of both terminal programs: the search row, the seven
+ * topics on the left (they step aside while a search is shown), the rows on
+ * the right, and under them the selected row's help in a few sentences.
+ */
 export function createSettingsLayout<Modal extends SettingsLayoutModal>(policy: {
   readonly listRows: (modal: Modal, width: number) => { rows: KitRow[]; selected: number };
-  readonly categoryRows: (modal: Modal) => KitRow[];
-  readonly categoryLabel: (modal: Modal) => string;
+  readonly topicRows: (modal: Modal) => KitRow[];
   readonly breadcrumbs: (modal: Modal) => string[];
   readonly hints: (modal: Modal) => KitHint[];
   readonly notices: (modal: Modal) => string[];
@@ -47,40 +53,51 @@ export function createSettingsLayout<Modal extends SettingsLayoutModal>(policy: 
         rows[index] = { ...row, onClick: () => policy.selectRow?.(modal, index) };
       });
     const doc = policy.docLines(modal, selected >= 0, width);
-    return drawList(f.canvas, {
+    const area = Math.max(1, bottom - p.top + 1);
+    // The help takes what it needs up to two fifths of the column, and never the
+    // last rows the list needs to show the selection with a row either side.
+    const docHeight = doc.length === 0 ? 0 : Math.max(0, Math.min(doc.length, Math.floor(area * 0.4), area - 4));
+    const listBottom = docHeight > 0 ? bottom - docHeight - 1 : bottom;
+    const result = drawList(f.canvas, {
       rows,
       activeIndex: selected,
       top: p.top,
-      bottom,
+      bottom: listBottom,
       x0: sx,
       x1: sr,
-      context: { lines: doc, window: capacity => policy.windowDoc(modal, doc, capacity) },
-      scrollKey: { owner: modal, name: modal.searchFocused ? 'search' : `category:${modal.currentCategory}` },
+      scrollKey: { owner: modal, name: modal.searchFocused ? 'search' : modal.openList ?? `topic:${modal.topicIndex}` },
     });
+    if (docHeight > 0) {
+      // Right under the rows when they fit, at the foot of the column when they scroll.
+      const docTop = Math.min(result.endY + 1, bottom - docHeight + 1);
+      const shown = policy.windowDoc(modal, doc, docHeight);
+      shown.forEach((line, k) => f.canvas.put(sx, docTop + k, line.text, { fg: line.fg, bold: line.bold === true }));
+    }
+    return result;
   }
   function renderSettingsModal(modal: Modal, screenWidth: number, screenHeight = 24): SurfaceLayer {
     const crumbs = policy.breadcrumbs(modal);
     const f = beginModal(screenWidth, screenHeight, { title: 'Settings', crumbs, hints: policy.hints(modal) });
 
-    const count = modal.searchFocused
-      ? `${modal.searchResults.length} result${modal.searchResults.length === 1 ? '' : 's'}`
-      : policy.categoryLabel(modal).toLowerCase();
-    searchRow(f, f.top, modal.searchQuery, 'Search all settings', count);
+    const count = modal.searchFocused ? `${modal.searchResults.length} result${modal.searchResults.length === 1 ? '' : 's'}` : undefined;
+    searchRow(f, f.top, modal.searchQuery, 'Search settings by name, key or what they do', count);
 
     const body = f.top + 2;
     const inner = f.r - f.l + 1;
     let detailX = 2;
-    // Search spans every category, so the category list steps aside for it.
+    // Search spans every topic, so the topics step aside for it.
     if (inner >= 56 && !modal.searchFocused) {
-      const catW = Math.max(18, Math.min(26, Math.round(inner * 0.22)));
+      const rail = policy.topicRows(modal);
+      const widest = rail.reduce((most, row) => Math.max(most, getDisplayWidth(row.label ?? '')), 0);
+      const catW = Math.max(16, Math.min(24, widest + 4));
       const x1 = f.l + catW - 1;
       drawScrollingList(f.canvas, {
-        rows: policy.categoryRows(modal),
+        rows: rail,
         top: body,
         bottom: f.bottom,
         x0: f.l,
         x1,
-        scrollKey: { owner: modal, name: 'categories' },
+        scrollKey: { owner: modal, name: 'topics' },
       });
       detailX = x1 + 3;
     }
@@ -92,32 +109,21 @@ export function createSettingsLayout<Modal extends SettingsLayoutModal>(policy: 
   return { renderSettingsModal };
 }
 
-export function settingsCategoryRows<Category extends string>(options: {
-  readonly groups: readonly { readonly label: string; readonly categories: readonly Category[] }[];
-  readonly categories: readonly Category[];
-  readonly categoryIndex: number;
+/** The topic rail: the seven topics in the web UI's order and words. */
+export function settingsTopicRailRows(options: {
+  readonly topics: readonly { readonly label: string }[];
+  readonly topicIndex: number;
   readonly searching: boolean;
   readonly focused: boolean;
-  readonly label: (category: Category) => string;
-  readonly count: (category: Category) => number;
-  readonly onSelect?: ((category: Category) => void) | undefined;
+  readonly onSelect?: ((index: number) => void) | undefined;
 }): KitRow[] {
-  const rows: KitRow[] = [];
-  for (const group of options.groups) {
-    const categories = group.categories.filter((category) => options.categories.includes(category));
-    if (!categories.length) continue;
-    rows.push({ header: group.label });
-    for (const category of categories) {
-      const active = options.categories.indexOf(category) === options.categoryIndex && !options.searching;
-      const count = options.count(category);
-      rows.push({
-        ...(options.onSelect ? { onClick: () => options.onSelect?.(category) } : {}),
-        label: options.label(category),
-        right: count > 0 ? String(count) : undefined,
-        selected: active && options.focused,
-        current: active && !options.focused,
-      });
-    }
-  }
-  return rows;
+  return options.topics.map((topic, index) => {
+    const active = index === options.topicIndex && !options.searching;
+    return {
+      ...(options.onSelect ? { onClick: () => options.onSelect?.(index) } : {}),
+      label: topic.label,
+      selected: active && options.focused,
+      current: active && !options.focused,
+    };
+  });
 }

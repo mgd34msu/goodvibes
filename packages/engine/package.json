@@ -2008,11 +2008,6 @@
       "types": "./terminal-shell/dist/surface-modal-host.d.ts",
       "import": "./terminal-shell/dist/surface-modal-host.js"
     },
-    "./terminal-shell/toast-center": {
-      "bun": "./terminal-shell/src/renderer/toast-center.ts",
-      "types": "./terminal-shell/dist/renderer/toast-center.d.ts",
-      "import": "./terminal-shell/dist/renderer/toast-center.js"
-    },
     "./terminal-shell/notifications-modal": {
       "bun": "./terminal-shell/src/renderer/notifications-modal.ts",
       "types": "./terminal-shell/dist/renderer/notifications-modal.d.ts",

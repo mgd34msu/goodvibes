@@ -6,11 +6,12 @@
  * already at its line-count gate) and out of `suppressSplash`, which is a
  * per-frame posture the modal layer sets both ways on every render:
  *
- *   - `dismissed`, sticky for the run. Owner rule: the splash yields to ANY
- *     submission, a chat message or a slash command alike. A slash command
- *     whose whole output is a modal (or nothing) still means the session has
- *     started, so the splash must not reappear underneath it, and must not
- *     come back in the gap before the first reply arrives.
+ *   - `dismissed`, sticky for the run: a chat submission retires the splash,
+ *     so it does not come back in the gap before the first reply arrives. A
+ *     slash command does not: the splash stays while the conversation is
+ *     empty, and a command whose whole output is a modal (or a notice) leaves
+ *     it showing; one that writes into the transcript retires it like any
+ *     transcript content.
  *
  *   - the splash→transcript EDGE, latched when a rebuild that would have
  *     drawn the splash draws transcript content instead. The shell consumes

@@ -9,6 +9,10 @@ export type SettingsRouteState<Context, Target, Action extends string> = {
     active: boolean;
     editingMode: boolean;
     currentCategory: string;
+    /** The chosen topic's name, for "reset this topic". */
+    topicLabel?: string | undefined;
+    /** Close a list a topic row opened; true when one was open (Esc goes back one level). */
+    leaveList?: (() => boolean) | undefined;
     focusRegion?: ('categories' | 'settings') | undefined;
     focusPane?: ('categories' | 'settings') | undefined;
     toggleFocusPane?: (() => void) | undefined;
@@ -175,7 +179,7 @@ export function createSettingsModalRoute<Context extends { readonly openSelectio
       const items: SelectionItem[] = [
         { id: 'setting', label: 'This setting', detail: 'Put the selected setting back to its default now.' },
         ...(modal.initiateResetCategory && !searching
-          ? [{ id: 'category', label: 'This category', detail: `Put every setting in "${modal.currentCategory}" back to its default. Asks before it does.` }]
+          ? [{ id: 'category', label: 'This topic', detail: `Put every setting in ${modal.topicLabel ?? 'this topic'} back to its default. Asks before it does.` }]
           : []),
         ...(modal.initiateResetAll
           ? [{ id: 'all', label: 'All settings', detail: 'Put every setting back to its default. Asks before it does.' }]
@@ -199,6 +203,10 @@ export function createSettingsModalRoute<Context extends { readonly openSelectio
         // first (mirrors handler-modal-stack.ts); otherwise the modal closes.
         if (policy.cancelInlineEditOnEscape && modal.editingMode) {
           modal.cancelEdit?.();
+          state.requestRender();
+          return true;
+        }
+        if (!modal.editingMode && !searching && modal.leaveList?.()) {
           state.requestRender();
           return true;
         }
@@ -242,6 +250,10 @@ export function createSettingsModalRoute<Context extends { readonly openSelectio
         modal.scrollContext?.(-3);
       } else if (token.logicalName === 'pagedown' && !modal.editingMode) {
         modal.scrollContext?.(3);
+      } else if (token.logicalName === 'tab' && searching && !modal.editingMode) {
+        // Tab leaves the search for browsing by topic.
+        modal.clearSearch();
+        modal.focusCategories?.();
       } else if (token.logicalName === 'tab' && !searching) {
         if (modal[policy.toggleFocusKey]) modal[policy.toggleFocusKey]?.();
         else if (focusRegion === 'categories') modal.focusSettings?.();

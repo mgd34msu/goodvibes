@@ -28,8 +28,6 @@ import { replaceViewportWithOverlay } from './conversation-layout.ts';
 import type { SurfaceLayer } from './surface-kit.ts';
 import { layerToLines } from './surface-kit-extra.ts';
 import './surface-kit-parts.ts';
-import { getSharedToastCenter } from './toast-center.ts';
-import { firstRunOwnsScreen } from '@goodvibes/engine/terminal-shell/first-run';
 
 export interface ConversationOverlayContext {
   readonly input: InputHandler;
@@ -93,10 +91,6 @@ export interface ConversationLayerContext {
   readonly providerInputTokens?: number;
   /** The permission dialog, when a request is waiting (drawn above the other modals). */
   readonly permission?: SurfaceLayer | null;
-  /** Rows at the top of the screen held by the header (and the session chips row); toasts start below them. */
-  readonly headerRows?: number;
-  /** Rows at the bottom of the screen held by the footer (the throbber and its empty row while main works, the composer, the status line); toasts stay above them. */
-  readonly footerRows?: number;
 }
 
 /**
@@ -106,7 +100,7 @@ export interface ConversationLayerContext {
  * picker), both are drawn in the order they were opened (the input layer's
  * modal stack, kit modals such as the command palette included), the newer
  * on top, each dimming what is under it. The permission dialog sits above
- * all of them; toasts wait until they close.
+ * all of them.
  */
 export function buildConversationLayers(context: ConversationLayerContext): SurfaceLayer[] {
   const { input, screenWidth: w, screenHeight: h } = context;
@@ -134,11 +128,5 @@ export function buildConversationLayers(context: ConversationLayerContext): Surf
     width: w,
     height: h,
     permission: context.permission,
-    headerRows: context.headerRows,
-    footerRows: context.footerRows,
-    toasts: getSharedToastCenter(),
-    // The onboarding wizard and first run's screens own the screen: notices wait.
-    // Onboarding, first run's screens and the splash own the screen: notices go only to the count.
-    screenOwned: onboarding || firstRunOwnsScreen() || context.conversation.isSplashShowing(),
   });
 }

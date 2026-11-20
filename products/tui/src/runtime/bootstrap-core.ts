@@ -30,7 +30,6 @@ import { readTuiNotificationsMetadataOnly } from '../config/host-settings.ts';
 import { ConversationManager } from '../core/conversation';
 import { createShellNoticeSink } from './notification-dispatch.ts';
 import { getSharedNotificationFeed } from '../views/notifications-feed.ts';
-import { bridgeNotificationFeedToToasts, getSharedToastCenter } from '../renderer/toast-center.ts';
 import { registerSessionConversation, unregisterSessionConversation } from './conversation-rewind-port.ts';
 import { SelectionManager } from '@goodvibes/engine/terminal-shell';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
@@ -320,13 +319,11 @@ export async function initializeBootstrapCore(
 
   const conversation = new ConversationManager(() => stdout.columns || 80);
   conversation.setConfigManager(configManager);
-  // Every system notice is a toast and a notification-history entry, full
-  // text (core/notices.ts); the transcript draws none of them.
-  // One history entry per event: see createShellNoticeSink. Toasting starts with
-  // the sink, so a notice written during start-up reaches the screen like any
-  // other; the one print-less setting decides which entries toast.
+  // Every system notice is a notification-history entry, full text
+  // (core/notices.ts); the transcript draws none of them and nothing is drawn
+  // over the conversation: the status bar counts the unread ones (ctrl+n).
+  // One history entry per event: see createShellNoticeSink.
   conversation.setNoticeSink(createShellNoticeSink(getSharedNotificationFeed()));
-  bridgeNotificationFeedToToasts(getSharedNotificationFeed(), getSharedToastCenter(), () => configManager.get('behavior.hitlMode'));
   getConversationTitle = () => conversation.title;
 
   const compositor = new Compositor(stdout);
@@ -442,10 +439,11 @@ export async function initializeBootstrapCore(
     const hlNetworkPlaintext = hlEnabled && hlHostMode !== 'local' && hlTlsMode === 'off';
     if (cpNetworkPlaintext || hlNetworkPlaintext) {
       const affected: string[] = [];
-      if (cpNetworkPlaintext) affected.push('control plane');
-      if (hlNetworkPlaintext) affected.push('HTTP listener');
+      const settings: string[] = [];
+      if (cpNetworkPlaintext) { affected.push('the daemon'); settings.push('"Encryption for the daemon\'s connections"'); }
+      if (hlNetworkPlaintext) { affected.push('the webhook receiver'); settings.push('"Encryption for webhooks"'); }
       startupNoticeBuffer.push(
-        `[SECURITY] TLS is off for the ${affected.join(' and ')} but it is network-reachable. All traffic (credentials, tokens, conversation content) travels in plaintext. Enable TLS (controlPlane.tls.mode / httpListener.tls.mode) or restrict to loopback before exposing to untrusted networks.`,
+        `[Security] Other devices can reach ${affected.join(' and ')} without encryption: passwords, keys and your conversations travel in plain text. Turn on ${settings.join(' and ')} in /settings open, or keep GoodVibes to this computer with /setup, "Keep everything on this computer".`,
         'high',
       );
     }

@@ -26,7 +26,6 @@ import {
 } from '@/runtime/index.ts';
 import type { ProviderDiscoveryReporter } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
 import {
-  discoveredProvidersFilePath,
   loadLanScanConsent,
   saveLanScanConsent,
   type ConsentRoots,
@@ -48,14 +47,13 @@ export const NETWORK_SCAN_DISABLE_COMMAND = '/network-scan off';
 export const NETWORK_SCAN_STATUS_COMMAND = '/network-scan';
 
 /** Shown exactly once, the very first time the Agent starts and no decision has been recorded yet. */
-export function firstRunConsentMessage(roots: ConsentRoots, surfaceRoot: string): string {
-  const storePath = discoveredProvidersFilePath(roots, surfaceRoot);
+export function firstRunConsentMessage(): string {
   return (
     '[Scan] Model servers on this computer (such as Ollama or LM Studio) are found at each start. ' +
     'Scanning the local network for model servers on other devices is off by default. ' +
     'If turned on, it checks other devices on this computer\'s local network (your subnet only, nothing beyond it) ' +
     'so the servers it finds can be added as chat providers. ' +
-    `Servers found are saved to ${storePath}. ` +
+    'Servers it finds are remembered for the next start. ' +
     `Turn it on with ${NETWORK_SCAN_ENABLE_COMMAND}; nothing on the network is scanned until you do.`
   );
 }
@@ -116,7 +114,7 @@ export function runGatedLanScan(options: LanScanGateOptions): BackgroundRuntimeT
   const existing = loadLanScanConsent(shellPaths, surfaceRoot);
   if (!existing) {
     saveLanScanConsent(shellPaths, surfaceRoot, 'declined');
-    systemMessageRouter.low(firstRunConsentMessage(shellPaths, surfaceRoot));
+    systemMessageRouter.low(firstRunConsentMessage());
   }
   return startPass(options, existing?.decision === 'granted');
 }

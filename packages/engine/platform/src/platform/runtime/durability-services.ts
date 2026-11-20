@@ -31,7 +31,7 @@
  */
 import { AppendOnlyRetentionScheduler, runStartupAppendOnlySweep } from './retention/append-only-registry.js';
 import { StoreSnapshotScheduler } from '../state/store-snapshots.js';
-import { ownerPermissionRulesPath, UserPermissionRuleStore } from '../permissions/user-rule-store.js';
+import { ownerPermissionRulesPath, previousOwnerPermissionRuleFiles, UserPermissionRuleStore } from '../permissions/user-rule-store.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { startDurabilityHousekeeping } from './durability-housekeeping.js';
@@ -172,7 +172,7 @@ export function createDurabilityServices(input: DurabilityServicesInput): Durabi
     stopConfigFileWatch();
   };
 
-  const userPermissionRuleStore = new UserPermissionRuleStore(ownerPermissionRulesPath(configManager));
+  const userPermissionRuleStore = new UserPermissionRuleStore(ownerPermissionRulesPath(configManager), { previousFiles: previousOwnerPermissionRuleFiles(configManager) });
   void userPermissionRuleStore.init().catch((error) => logger.warn('user permission rule store init failed; asks will prompt', { error: summarizeError(error) }));
 
   return { storeSnapshotScheduler, appendOnlyRetentionScheduler, userPermissionRuleStore, stopDurabilityHousekeeping, stopConfigWatch };

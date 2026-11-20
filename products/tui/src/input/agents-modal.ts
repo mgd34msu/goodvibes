@@ -29,7 +29,7 @@ import type { Line } from '@goodvibes/engine/platform/platform/types';
 import type { WorkBoardAsk, WorkBoardSession } from '@goodvibes/engine/contracts';
 import type { SurfaceModal, SurfaceModalHost } from '@goodvibes/engine/terminal-shell/surface-modal-host';
 import { renderWorkBoardPanel, type PanelDetail, type PanelText, type WorkBoardPanelView } from '@goodvibes/engine/terminal-shell/work-board';
-import { boardAskDetail, WorkBoardList } from '@goodvibes/engine/terminal-shell/work-board-input';
+import { boardAskDetail, boardNodeDetail, WorkBoardList } from '@goodvibes/engine/terminal-shell/work-board-input';
 import type { KitHint, SurfaceLayer } from '../renderer/surface-kit.ts';
 import { fleetNodeAttention, isRunningProcessState, isTerminalProcessState, type FleetReadModel, type FleetSnapshot } from '../views/fleet-read-model.ts';
 import type { FleetActs } from '../views/fleet-acts.ts';
@@ -46,7 +46,7 @@ import type { HostedSessionFeed } from '../views/hosted-session-feed.ts';
 import { isTextBackspace } from './delete-key-policy.ts';
 import type { ConfirmOptions } from './confirm-dialog.ts';
 import type { ViewTarget } from './views.ts';
-import { hostedHeaderTexts, hostedRowTexts, transcriptTail } from './agents-modal-text.ts';
+import { hostedHeaderTexts, hostedRowTexts } from './agents-modal-text.ts';
 import { HostedTranscriptViewport } from './hosted-transcript-viewport.ts';
 import { currentHostedBinding } from '../runtime/client/hosted-attachments.ts';
 import type { SessionBinding } from '@goodvibes/engine/platform/platform/runtime/client/session-binding';
@@ -124,8 +124,6 @@ export class AgentsModal implements SurfaceModal {
    */
   private liveSnapshot: FleetSnapshot | null = null;
   private archivedSnapshot: FleetSnapshot | null = null;
-  /** The selected agent's transcript tail, read once per fleet reading. */
-  private tailCache: { readonly nodeId: string; readonly texts: PanelText[] } | null = null;
 
   constructor(private readonly deps: AgentsModalDeps) {
     this.list = new WorkBoardList({
@@ -161,7 +159,6 @@ export class AgentsModal implements SurfaceModal {
   private invalidate(): void {
     this.liveSnapshot = null;
     this.archivedSnapshot = null;
-    this.tailCache = null;
     this.list.invalidate();
   }
 
@@ -651,19 +648,17 @@ export class AgentsModal implements SurfaceModal {
     const ask = this.list.ask(row);
     if (ask) return boardAskDetail(row, ask);
     const node = this.selectedNode();
-    if (!node) return { title: row.title, meta: row.meta.full, blocks: [], tail: [] };
+    // An agent's detail is the Agent's, word for word: the task, who and since
+    // when, then the model, time, files, tokens and what it is doing now in the
+    // tool's own words (terminal-shell work-board-input.ts). Never its raw results.
+    if (!node || node.kind === 'agent' || node.kind === 'acp-agent') return boardNodeDetail(row, node ?? undefined);
+    // A contract, a workstream or an observed agent adds its workspace, checks and task graph.
     const stopping = this.stopTracker.isStopping(node.id);
     const blocked = !stopping && fleetNodeAttention(node) !== null;
     this.deps.acts?.ensureGraphFor(node);
     const observedDraft = this.deps.acts?.observedSteerDraftFor(node.id) ?? null;
     const graph = this.deps.acts?.graphFor(node.id) ?? null;
-    let tail: PanelText[] = [];
-    if (node.kind === 'agent' || node.kind === 'acp-agent') {
-      // The tail shows 30 lines and every message it shows gives at least one, so only the last 30 messages are copied.
-      if (this.tailCache?.nodeId !== node.id) this.tailCache = { nodeId: node.id, texts: transcriptTail(this.deps.actions.getConversationSnapshot(node.id, { last: 30 }), 30) };
-      tail = this.tailCache.texts;
-    }
-    return { title: row.title, meta: row.meta.full, blocks: [{ kind: 'lines', build: (width) => renderFleetDetailLines(node, width, stopping, blocked, undefined, observedDraft, graph) }], tail };
+    return { title: row.title, meta: row.meta.full, blocks: [{ kind: 'lines', build: (width) => renderFleetDetailLines(node, width, stopping, blocked, undefined, observedDraft, graph) }], tail: [] };
   }
 
   private fullBody(width: number, height: number): readonly Line[] {

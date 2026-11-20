@@ -34,6 +34,7 @@
 import { randomUUID } from 'node:crypto';
 import { refusal, type Refusal } from '@goodvibes/engine/errors';
 import type { ApprovalBroker, SharedApprovalRecord } from './approval-broker.js';
+import { isSettledWording, settledPresentation } from './approval-broker.js';
 import { approvalViewerOfActor, localApprovalActions, type ApprovalActions } from './approval-actions.js';
 import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import { formatApprovalRef, readApproval, type ApprovalReading, type ApprovalViewer } from './approval-lifecycle.js';
@@ -456,7 +457,7 @@ export function validateNewOwnerItem(input: NewOwnerItem): Omit<StoredOwnerItem,
   const seen = new Set<string>();
   const cleanOptions = options.map((option) => {
     const text = requireText(option, 'options', OWNER_ITEM_LIMITS.optionChars);
-    if (/\s/.test(text)) throw new OwnerInboxInputError(`option "${text}" must be one word so it can be typed as an answer.`, 'options');
+    // A choice may be a short phrase ("Hi there"): a typed answer names it by its words (/questions answer).
     if (seen.has(text.toLowerCase())) throw new OwnerInboxInputError(`option "${text}" is listed twice.`, 'options');
     seen.add(text.toLowerCase());
     return text;
@@ -830,8 +831,10 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     const presenter = this.#presenter;
     if (presenter === null) return item;
     try {
-      const request = item.kind === 'approval' ? this.#approvals?.getApproval(item.id)?.request : undefined;
-      const worded = presenter(item, request);
+      const record = item.kind === 'approval' ? this.#approvals?.getApproval(item.id) : undefined;
+      const kept = record && item.status !== 'open' ? record.metadata['wording'] : undefined;
+      // A settled ask reads as it was asked: its kept words, never words rebuilt from withheld arguments.
+      const worded = isSettledWording(kept) ? { ...presenter(item, record?.request), ...settledPresentation(kept) } : presenter(item, record?.request);
       // Compact: the details (arguments, checklist) stay for the read of one item (ask-presentation.ts compactAskPresentation).
       const presentation: AskPresentation = full ? worded : { ...worded, details: [] };
       return { ...item, presentation, ...(item.kind === 'approval' ? { title: presentation.title } : {}) };

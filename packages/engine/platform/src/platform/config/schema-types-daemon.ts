@@ -8,9 +8,9 @@ import type { TriggersConfig } from './schema-domain-triggers.js';
  */
 export interface NotificationsConfig {
   webhookUrls: string[];
-  /** Repeats past burstThreshold in one collapse window go to the history without a toast. Default true. */
+  /** Repeats past burstThreshold in one collapse window are counted into one history entry. Default true. */
   adaptiveSuppression: boolean;
-  /** Notifications with the same domain, level and title that toast per collapse window. */
+  /** Notifications with the same domain, level and title recorded as their own entries per collapse window. */
   burstThreshold: number;
   /** Device-push fan-out for pending approvals. ON by default; a toggle to silence, never a working prerequisite. */
   pushApproval: boolean;

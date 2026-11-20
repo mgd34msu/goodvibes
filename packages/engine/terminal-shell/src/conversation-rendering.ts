@@ -123,7 +123,7 @@ export function createConversationRenderer(presentation: ConversationPresentatio
     /**
      * Draw a turn model (lines, blocks and error lines relative to the turn), then
      * the notices that arrived during it (never in the main transcript, whose
-     * notices are toasts and notification-history entries: systemNotices). A notice is not a step of the turn, so it
+     * notices are notification-history entries: systemNotices). A notice is not a step of the turn, so it
      * is drawn after the turn and outside its lanes, exactly as a notice between
      * turns is (the concept's turns hold only the turn's own text, beads, lanes and
      * answer; agent and WRFC state is the lanes' own spawn and merge rows).
@@ -218,7 +218,7 @@ export function createConversationRenderer(presentation: ConversationPresentatio
         if (message.role === 'user')
             renderConversationUserMessage(context, message, width, msgIdx);
         else if (message.role === 'system') {
-            // The main transcript's notices are toasts and history entries, not rows; a turn's failure or retry and a `!` command's output are drawn.
+            // The main transcript's notices are history entries, not rows; a turn's failure or retry and a `!` command's output are drawn.
             if (context.systemNotices !== 'elsewhere' || isTranscriptNotice(message))
                 renderConversationSystemMessage(context, message, width, msgIdx);
         }

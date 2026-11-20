@@ -30,11 +30,12 @@
  * agents, the menu keycap the palette.
  *
  * When the row is short, pieces give way in this order until it fits: the
- * menu keycap, the cost, optional chips, the branch, the context, the mode's
- * reason shortens (`decision model unreachable` → `unreachable`), the
- * background summary (unless it holds focus), the model, the mode's reason
- * goes, the notices, the mode's keycap. The mode's words, `asking you for
- * now`, the kept chips and the esc hint always stay. A segment given up
+ * menu keycap, the cost, optional chips, the mode's reason shortens
+ * (`decision model unreachable` → `unreachable`), the mode's reason goes (the
+ * words the design lets shorten go before any segment), the branch, the
+ * context, the background summary (unless it holds focus), the model, the
+ * notices, the mode's keycap. The mode's words, `asking you for now`, the
+ * kept chips and the esc hint always stay. A segment given up
  * before a later step freed the room comes back when it fits (the model, then
  * the context, the branch, the cost, the menu keycap).
  */
@@ -370,12 +371,12 @@ export function renderStatusLine(options: StatusLineOptions): Line {
             if (idx >= 0)
                 plan.chips.splice(idx, 1);
         }),
+        () => { plan.asks = { ...plan.asks, because: 'short' }; },
+        () => { plan.asks = { ...plan.asks, because: 'none' }; },
         () => { plan.branch = false; },
         () => { plan.context = false; },
-        () => { plan.asks = { ...plan.asks, because: 'short' }; },
         () => { if (!bg?.focused) plan.summary = false; },
         () => { plan.model = false; },
-        () => { plan.asks = { ...plan.asks, because: 'none' }; },
         () => { plan.notices = false; },
         () => { plan.asks = { ...plan.asks, key: false }; },
     ];

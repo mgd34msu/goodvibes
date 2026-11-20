@@ -47,10 +47,28 @@ export function ModeChip({ onOpenSettings }: { onOpenSettings: (section: string)
         </button>
       )}
     >
+      <ModeSheetItems onOpenSettings={onOpenSettings} />
+    </Menu>
+  );
+}
+
+/**
+ * What the chip opens: the reading's sentence and `Change`. A chat's `asking
+ * you` chip shows the same items on a phone header, where the mode chip steps
+ * aside so the chat's title fits (ux A2.4, A7.4); with `withLabel` they open
+ * with the chip's own words, since the chip is not on screen then.
+ */
+export function ModeSheetItems({ onOpenSettings, withLabel = false }: { onOpenSettings?: ((section: string) => void) | undefined; withLabel?: boolean }) {
+  const words = useDaemonModeInForce().data?.words;
+  if (!words) return null;
+  const full = words.inForce !== undefined ? `${words.chosen} · ${words.inForce}` : words.chosen;
+  return (
+    <>
       <MenuMeta>
+        {withLabel && <span className="mode-chip__sheet-label">Asks: {full}</span>}
         <span className="mode-chip__sentence">{words.sentence}</span>
       </MenuMeta>
-      <MenuItem onSelect={() => onOpenSettings('permissions')}>Change</MenuItem>
-    </Menu>
+      {onOpenSettings && <MenuItem onSelect={() => onOpenSettings('permissions')}>Change</MenuItem>}
+    </>
   );
 }

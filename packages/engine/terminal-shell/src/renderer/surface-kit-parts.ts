@@ -6,7 +6,6 @@
  *   - tabs (the active tab carries the gradient)
  *   - button chips (arrows pick, Enter confirms; the danger chip is red)
  *   - meters (▰▱)
- *   - toasts (top right, a colored ┃ on both sides, wrapped text)
  *   - composer popups (the slash and @ lists: anchored to the composer, no dim,
  *     ┃ bar, surface fill, selected row gradient, no frame and no hint rows)
  *
@@ -197,107 +196,6 @@ export function meter(canvas: SurfaceCanvas, x: number, y: number, fraction: num
   let cx = x;
   for (let q = 0; q < 10; q++) cx = canvas.put(cx, y, q < n ? '▰' : '▱', { fg: q < n ? color : t.border, bg });
   return cx;
-}
-
-// ---------------------------------------------------------------------------
-// Toasts
-// ---------------------------------------------------------------------------
-
-export type ToastTone = 'info' | 'success' | 'warning' | 'error';
-
-export interface ToastSpec {
-  readonly title: string;
-  readonly body?: (string) | undefined;
-  readonly tone: ToastTone;
-}
-
-function toastToneColor(tone: ToastTone): string {
-  const t = activeTokens();
-  return tone === 'error' ? t.error : tone === 'warning' ? t.warning : tone === 'success' ? t.success : t.info;
-}
-
-/** Width of a toast on a screen of width screenW. */
-function toastWidth(screenW: number): number {
-  return Math.max(20, Math.min(50, screenW - 4));
-}
-
-/** Rows toasts may use: from `top` down to (not including) `bottom`. */
-export interface ToastArea {
-  readonly top: number;
-  /** First row toasts must not cover: the composer's top (the status line and composer sit below it). */
-  readonly bottom: number;
-}
-
-/** Cleared columns left of each toast: text beside it keeps 2 columns from its fill (Measurements). */
-const TOAST_GAP_COLS = 2;
-/** Cleared rows between two stacked toasts and under the lowest one. */
-const TOAST_GAP_ROWS = 1;
-
-/**
- * Toasts stacked in the top right corner (below the header row), newest first.
- * Each toast: ┃ in its tone on both sides, a padding row above and below, the
- * title bold, the body muted and wrapped in full. They stay inside `area`, so
- * they never cover the composer or the status line: a toast that does not fit
- * below the ones above it waits in the notification history, and a single
- * toast taller than the area shows what fits and ends with where the full
- * text is.
- *
- * Toasts float over the transcript, so the layer carries its own gap: a
- * cleared row between stacked toasts and under the lowest one, and
- * TOAST_GAP_COLS cleared columns on their left. The layer is `clearBlank`, so
- * those cells show the plain screen, never a transcript block's fill or text
- * touching a toast's edge.
- */
-export function renderToasts(screenW: number, screenH: number, toasts: readonly ToastSpec[], area: ToastArea = { top: 1, bottom: screenH - 2 }): SurfaceLayer | null {
-  const top = Math.max(0, area.top);
-  // Room for toasts: the area less the gap row the lowest toast keeps under it.
-  const maxH = Math.min(screenH, area.bottom) - top - TOAST_GAP_ROWS;
-  if (toasts.length === 0 || screenW < 24 || maxH < 3) return null;
-  const t = activeTokens();
-  const w = toastWidth(screenW);
-  const textW = w - 6;
-  const blocks = toasts.map((toast) => {
-    const lines = [
-      ...wrapLines(toast.title, textW).map((text) => ({ text, bold: true, fg: t.text })),
-      ...(toast.body ? wrapLines(toast.body, textW).map((text) => ({ text, bold: false, fg: t.textMuted })) : []),
-    ];
-    return { toast, lines, h: lines.length + 2 };
-  });
-  let total = 0;
-  const shown: typeof blocks = [];
-  for (const block of blocks) {
-    const need = total + (shown.length > 0 ? TOAST_GAP_ROWS : 0) + block.h;
-    if (need > maxH) break;
-    shown.push(block);
-    total = need;
-  }
-  if (shown.length === 0) {
-    // The newest toast alone is taller than the area: show what fits, and say
-    // where the rest is instead of cutting it off silently.
-    const first = blocks[0]!;
-    const room = maxH - 2;
-    const pointer = { text: 'full text in /notifications', bold: false, fg: t.textFaint };
-    const lines = room <= 1 ? [pointer] : [...first.lines.slice(0, room - 1), pointer];
-    shown.push({ toast: first.toast, lines, h: lines.length + 2 });
-    total = lines.length + 2;
-  }
-  // Blank cells (the left gap columns, the rows between toasts, the gap row
-  // under the lowest one) stay blank: the layer clears them on the screen.
-  const canvas = new SurfaceCanvas(w + TOAST_GAP_COLS, total + TOAST_GAP_ROWS);
-  let y = 0;
-  shown.forEach((block, k) => {
-    if (k > 0) y += TOAST_GAP_ROWS;
-    const bar = toastToneColor(block.toast.tone);
-    const x0 = TOAST_GAP_COLS;
-    for (let r = 0; r < block.h; r++) {
-      canvas.fill(x0, y + r, w, 1, t.backgroundPanel);
-      canvas.put(x0, y + r, '┃', { fg: bar });
-      canvas.put(x0 + w - 1, y + r, '┃', { fg: bar });
-    }
-    block.lines.forEach((line, i) => canvas.put(x0 + 3, y + 1 + i, line.text, { fg: line.fg, bold: line.bold }));
-    y += block.h;
-  });
-  return { x: screenW - w - 2 - TOAST_GAP_COLS, y: top, lines: canvas.lines, dim: false, clearBlank: true };
 }
 
 // ---------------------------------------------------------------------------

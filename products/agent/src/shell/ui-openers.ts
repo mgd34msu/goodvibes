@@ -381,7 +381,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     render();
   };
 
-  // System notices: toasts plus the /notifications history (notification-surfaces.ts).
+  // System notices: the /notifications history, counted on the status bar (notification-surfaces.ts).
   wireNotificationSurfaces({ commandContext, input, render });
 }
 

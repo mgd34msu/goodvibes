@@ -315,12 +315,12 @@ export function describeDaemonAutostart(
   adoptedAfterwards: boolean,
   adoptionFailureReason?: string | undefined,
 ): { readonly level: 'low' | 'high'; readonly text: string } | null {
-  const suffix = adoptedAfterwards ? '' : `, but adopting it still failed: ${adoptionFailureReason ?? 'unknown reason'}`;
+  const suffix = adoptedAfterwards ? '' : `, but connecting to it still failed: ${adoptionFailureReason ?? 'no reason given'}`;
   switch (outcome.action) {
     case 'started':
-      return { level: 'low', text: `[Startup] The daemon was installed but stopped; started it (service "${outcome.serviceName}")${suffix}.` };
+      return { level: 'low', text: `[Startup] The GoodVibes daemon was stopped; GoodVibes started it${suffix}.` };
     case 'came-online':
-      return { level: 'low', text: `[Startup] The daemon service "${outcome.serviceName}" was already starting; connected once it answered${suffix}.` };
+      return { level: 'low', text: `[Startup] The GoodVibes daemon was already starting; GoodVibes connected once it answered${suffix}.` };
     case 'start-failed':
       return { level: 'high', text: `[Startup] The daemon is installed but not answering, and starting it did not succeed: ${outcome.reason}. Start it manually with: goodvibes service start` };
     case 'not-installed':

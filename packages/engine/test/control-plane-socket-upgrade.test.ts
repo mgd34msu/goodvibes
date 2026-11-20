@@ -10,6 +10,8 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { ownBrowserOrigins } from '../platform/src/platform/daemon/http/browser-origin.ts';
 import { UserAuthManager } from '../platform/src/platform/security/user-auth.ts';
 import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../platform/src/platform/daemon/control-plane.ts';
 import { ControlPlaneGateway } from '../platform/src/platform/control-plane/gateway.ts';
@@ -24,12 +26,15 @@ beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'gv-socket-upgrade-')); });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
 test('no credential, a wrong one, or the sign-in cookie from another origin opens no socket; the own origin, an allowed one and a bearer do', () => {
+  const config = new ConfigManager({ configDir: join(dir, 'config'), workingDir: dir, homeDir: join(dir, 'home'), surfaceRoot: 'goodvibes', daemonTierPath: join(dir, 'daemon', 'settings.json'), ownsDaemonTier: true });
+  config.set('controlPlane.cors.allowedOrigins', 'https://allowed.example');
   const userAuth = new UserAuthManager({ bootstrapFilePath: join(dir, 'users.json'), bootstrapCredentialPath: join(dir, 'bootstrap.txt'), scryptParams: { N: 1024, r: 1, p: 1 } });
   const helper = new DaemonControlPlaneHelper({
     gatewayMethods: new GatewayMethodCatalog(), userAuth, pairingTokens: new PairingTokenManager(join(dir, 'pairing-tokens.json')),
     controlPlaneGateway: new ControlPlaneGateway({ runtimeBus: new RuntimeEventBus() }),
     authToken: () => OPERATOR_TOKEN, trustProxyEnabled: () => false, host: '127.0.0.1', port: 3421,
-    allowedBrowserOrigins: () => ['https://allowed.example'],
+    // The daemon's own browser origins as its composition reads them: the bound listener and the settings (an allowed origin among them).
+    allowedBrowserOrigins: () => ownBrowserOrigins(config, () => ({ host: '127.0.0.1', port: 3421, scheme: 'http' })),
   } as unknown as DaemonControlPlaneContext);
   const cookie = `goodvibes_session=${encodeURIComponent(userAuth.createSession('admin').token)}`;
   const opened: { authenticated?: boolean }[] = [];

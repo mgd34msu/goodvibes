@@ -3,7 +3,7 @@
  *
  * Every notification is recorded in the shared feed (the notification
  * history); the platform's NotificationRouter decides only how loudly it is
- * shown (a toast now, or the history alone) and which collapse group it joins.
+ * grouped and which collapse group it joins.
  * This module builds the router, records every routed notification, and
  * bridges the runtime event bus so real domain events become notifications.
  * The feed folds a notification and the conversation notice restating the
@@ -21,8 +21,8 @@ import { runtimeEventKey } from '@goodvibes/engine/platform/platform/runtime/boo
 
 export interface NotificationDispatcher {
   /**
-   * Route a notification and record it in the feed; the decision says whether
-   * it also toasts. `eventKey` names the runtime event it came from (the
+   * Route a notification and record it in the feed; the decision says how
+   * loudly it is shown. `eventKey` names the runtime event it came from (the
    * platform's runtimeEventKey), so the feed keeps one entry when the same event
    * also arrives as a conversation notice. Returns the decision.
    */
@@ -228,7 +228,7 @@ export function wireRuntimeNotificationBridge(
   return () => { for (const unsubscribe of unsubscribes) unsubscribe(); };
 }
 
-/** The shell's conversation notice sink: every system notice is a toast and a history entry (core/notices.ts). */
+/** The shell's conversation notice sink: every system notice is a history entry, counted on the status bar while unread (core/notices.ts). */
 export function createShellNoticeSink(feed: NotificationFeed = getSharedNotificationFeed()): NoticeSink {
   return async (content, options) => { await publishNotice(feed, content, options); };
 }

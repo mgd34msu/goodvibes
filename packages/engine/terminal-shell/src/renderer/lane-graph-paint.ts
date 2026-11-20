@@ -175,14 +175,15 @@ export function applyFocus(line: Line, width: number, glyphs: LaneGlyphs): void 
     }
 }
 /** Right side of a row: the summary ending SUMMARY_GAP columns left of the time, and the time. Returns the column the left text must stop before. */
-function paintRight(line: Line, p: GraphPaint, summary: BeadSummary | null, summaryMark: string | undefined, time: string | undefined, timeFg: string): number {
+function paintRight(line: Line, p: GraphPaint, summary: BeadSummary | null, summaryMark: string | undefined, time: string | undefined, timeFg: string, nameWidth = 10): number {
     const end = timeEnd(p.width);
     let limit = end + 1;
     if (time)
         limit = putRight(line, end, tx(p, time), { fg: timeFg }) - 2;
     if (summary) {
         const sumEnd = end - SUMMARY_GAP;
-        const room = Math.max(0, sumEnd - textColumn(p) - 12);
+        // The row's name ("Running a command") keeps its whole width: the summary is cut first.
+        const room = Math.max(0, sumEnd - textColumn(p) - Math.max(12, nameWidth + 2));
         const text = tx(p, truncateDisplay(summaryMark ? `${summaryMark} ${summary.text}` : summary.text, Math.max(8, room), p.glyphs.ellipsis));
         limit = Math.min(limit, putRight(line, sumEnd, text, { fg: summaryColor(summary.tone) }) - 2);
     }
@@ -210,7 +211,7 @@ export function paintBeadRow(gutter: GutterRow, spec: BeadRowSpec, p: GraphPaint
         putText(line, x - 2, x - 1, spec.open ? p.glyphs.opened : p.glyphs.closed, { fg: spec.open ? t.textMuted : t.textFaint });
         markChrome(line, x - 2, x - 1);
     }
-    const limit = paintRight(line, p, spec.summary, undefined, spec.time, spec.status === 'run' ? spec.laneColor : t.textFaint);
+    const limit = paintRight(line, p, spec.summary, undefined, spec.time, spec.status === 'run' ? spec.laneColor : t.textFaint, getDisplayWidth(tx(p, spec.name)));
     const cancelled = spec.status === 'cancel';
     const nameFg = spec.status === 'run' || spec.status === 'wait' ? t.text : spec.status === 'err' ? t.error : t.textMuted;
     let cx = putText(line, x, limit, tx(p, spec.name), { fg: nameFg, bold: spec.status === 'run', strikethrough: cancelled });

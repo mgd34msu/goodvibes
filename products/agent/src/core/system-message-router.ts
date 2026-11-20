@@ -17,7 +17,7 @@ export type {
 
 /**
  * The panel is the Notifications history, as in the terminal app: a line whose
- * target is `panel` is recorded (and toasted) there and kept out of the
+ * target is `panel` is recorded there (counted on the status bar) and kept out of the
  * transcript. Every transcript notice is already recorded there by the
  * conversation's notice sink, so it is not pushed twice. A high-priority line,
  * one the person must see or act on, also lands on the main screen unless the

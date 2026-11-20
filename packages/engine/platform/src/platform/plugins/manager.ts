@@ -102,6 +102,8 @@ export interface PluginManagerObserver {
     safe: string[];
     tier: PluginTrustTier;
     blocked: string[];
+    /** A tier 3.3.1 or earlier set, not bound to this copy's files, so not applied: set it again to apply it. */
+    earlierTier?: PluginTrustTier | undefined;
   } | null;
   getTrustRecord(name: string): Readonly<PluginTrustRecord> | undefined;
   getQuarantineRecord(name: string): Readonly<QuarantineRecord> | undefined;
@@ -120,6 +122,23 @@ function readTrustRecords(raw: unknown): Record<string, PluginTrustRecord> {
     records[name] = record as PluginTrustRecord;
   }
   return records;
+}
+
+/**
+ * A tier given by 3.3.1 or earlier, before a tier was bound to a copy's
+ * directory and files: it is not applied (the copy runs untrusted), and the
+ * owner is told once per process which plugins need it set again.
+ */
+export function isUnboundTrustRecord(record: Readonly<PluginTrustRecord> | undefined): boolean {
+  return record !== undefined && record.tier !== 'untrusted' && record.boundDir === undefined && record.contentDigest === undefined;
+}
+const unboundTrustNoted = new Set<string>();
+function noteUnboundTrust(records: Readonly<Record<string, PluginTrustRecord>>): void {
+  for (const [name, record] of Object.entries(records)) {
+    if (!isUnboundTrustRecord(record) || unboundTrustNoted.has(name)) continue;
+    unboundTrustNoted.add(name);
+    logger.warn(`[plugins] ${name}: its trust tier '${record.tier}' was set by an earlier version, before a tier was bound to a plugin's files, so it runs untrusted; set it again with /plugin trust ${name} ${record.tier}`);
+  }
 }
 
 /** One copy of a plugin as trust is bound to it: its directory and its content digest. */
@@ -434,6 +453,8 @@ export class PluginManager {
     safe: string[];
     tier: PluginTrustTier;
     blocked: string[];
+    /** A tier 3.3.1 or earlier set, not bound to this copy's files, so not applied: set it again to apply it. */
+    earlierTier?: PluginTrustTier | undefined;
   } | null {
     const discovered = this.findDiscoveredPlugin(name);
     if (!discovered) {
@@ -447,7 +468,8 @@ export class PluginManager {
     const grant = resolvePluginGrant(name, discovered.manifest, tier);
     const blocked = [...grant.declared].filter((capability) => !grant.granted.has(capability));
 
-    return { ok: true, requested, highRisk, safe, tier, blocked };
+    const record = this.currentTrust().getRecord(name);
+    return { ok: true, requested, highRisk, safe, tier, blocked, ...(isUnboundTrustRecord(record) ? { earlierTier: record!.tier } : {}) };
   }
 
   /**
@@ -1056,7 +1078,10 @@ export class PluginManager {
         recovery: 'Every plugin returns to the untrusted tier until its trust is set again with /plugin trust.',
         validate: readTrustRecords,
       });
-      if (records) store.importRecords(records);
+      if (records) {
+        store.importRecords(records);
+        noteUnboundTrust(records);
+      }
     } catch (err) {
       logger.warn(`[plugins] Could not read trust tiers from ${path}: ${summarizeError(err)}; every plugin is treated as untrusted`);
     }

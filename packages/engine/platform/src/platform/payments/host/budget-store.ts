@@ -20,6 +20,7 @@ import { lstatSync } from 'node:fs';
 import { logger } from '../../utils/logger.js';
 import { BudgetLedger } from '../budget.js';
 import { parseCurrencyCode } from '../types.js';
+import { noteCarriedForward } from '../../state/carried-forward.js';
 import type { PaymentStoreStop } from '../payment-host-health.js';
 import type {
   BudgetLimits,
@@ -153,6 +154,7 @@ function markUnmarkedCurrency(file: Partial<BudgetFile>, currencyOfUnmarked: (()
       return { ...row, reservation: mark(row['reservation']), spend: mark(row['spend']) };
     });
   }
+  noteCarriedForward('payment budget record', count);
   return count > 0;
 }
 

@@ -20,7 +20,7 @@
 
 import { getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 import { activeTokens } from './theme.js';
-import { MODAL_MARK_INSET, SurfaceCanvas, scrollCountText, wrapLines, type KitStyle } from './surface-kit.js';
+import { MODAL_MARK_INSET, SurfaceCanvas, clipText, scrollCountText, wrapLines, type KitStyle } from './surface-kit.js';
 
 /** A run of text with one style (used for custom labels such as fuzzy-match highlights). */
 export interface KitSpan {
@@ -42,6 +42,8 @@ export interface KitRow {
   readonly spans?: (readonly KitSpan[]) | undefined;
   /** Compact row metadata or an editable field value (wraps with the label). */
   readonly desc?: (string) | undefined;
+  /** A second line in small secondary text under the label ("Display · display.showThinking"); outside the selection fill. */
+  readonly sub?: (string) | undefined;
   /** Explanatory text, shown above the list when this item is selected. */
   readonly detail?: string | undefined;
   /** Muted metadata right-aligned on the row's first line. */
@@ -175,6 +177,8 @@ function wrapSpans(spans: readonly Piece[], width: number): Piece[][] {
 interface RowLayout {
   readonly lines: Piece[][];
   readonly right?: (string) | undefined;
+  /** Lines of the row's own text, before its `sub` line; the selection fill covers these. */
+  readonly main: number;
 }
 
 function rowPieces(row: KitRow): Piece[] {
@@ -200,11 +204,13 @@ function rowPieces(row: KitRow): Piece[] {
 
 function layoutRow(row: KitRow, x0: number, x1: number): RowLayout {
   const width = Math.max(1, x1 - x0 + 1);
-  if (isHeader(row)) return { lines: [[{ text: row.header!.toLowerCase(), style: {} }]], right: row.headerRight };
+  if (isHeader(row)) return { lines: [[{ text: row.header!.toLowerCase(), style: {} }]], right: row.headerRight, main: 1 };
   const rightW = row.right ? getDisplayWidth(row.right) + 2 : 0;
   const textW = Math.max(4, width - rightW);
   const lines = wrapSpans(rowPieces(row), textW);
-  return { lines, right: row.right };
+  const main = lines.length;
+  if (row.sub) lines.push([{ text: clipText(`  ${row.sub}`, width), style: { fg: activeTokens().textFaint } }]);
+  return { lines, right: row.right, main };
 }
 
 /** Rows a list row takes at the given text span. */
@@ -232,7 +238,7 @@ export function drawRow(canvas: SurfaceCanvas, y: number, row: KitRow, x0: numbe
   if (sel) {
     // An armed (danger) row is red, not the gradient: it is about to do something destructive.
     const span = x1 - x0 + 1 + 2 * MODAL_MARK_INSET;
-    for (let k = 0; k < used; k++) {
+    for (let k = 0; k < Math.min(used, layout.main); k++) {
       if (row.danger) canvas.tint(x0 - MODAL_MARK_INSET, y + k, span, t.error);
       else canvas.grad(x0 - MODAL_MARK_INSET, y + k, span, t.brand, t.brandEnd);
     }

@@ -491,7 +491,7 @@ export class PowerManager {
     if (this.sleepEdgeOff !== null) return { watching: false, note: this.sleepEdgeOff };
     if (this.unsubscribeSleepEdge !== null) return { watching: true, note: null };
     if (this.seamAvailable !== null && !this.options.seam.onPrepareForSleep) {
-      return { watching: false, note: `this host has no sleep-edge signal (${this.options.seam.platform}), so work is not checkpointed before sleep and nothing catches up on wake` };
+      return { watching: false, note: 'GoodVibes cannot tell when this computer goes to sleep, so work in progress is not saved before it sleeps and missed work is not caught up when it wakes.' };
     }
     return { watching: false, note: null };
   }

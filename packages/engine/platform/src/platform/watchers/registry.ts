@@ -664,6 +664,16 @@ export class WatcherRegistry {
     return sortWatchers([...this.watchers.values()].map(watcher => this.normalizeRecord(watcher.record)));
   }
 
+  /**
+   * Whether the watcher was restored from the store file and waits for the
+   * component that registered it: its work runs in that component's process
+   * (a daemon sharing this store, or a run of this program that has ended),
+   * never here, so its record here has no heartbeat to judge.
+   */
+  awaitingOwner(id: string): boolean {
+    return this.awaitingRegistration.has(id);
+  }
+
   getWatcher(id: string): WatcherRecord | null {
     if (!this.isEnabled()) {
       this.clearTimers();

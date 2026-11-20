@@ -10,12 +10,15 @@ import { NOTHING_TO_COMPACT_YET, NothingToCompactError } from '@goodvibes/engine
 import { createHelpCommand } from '@goodvibes/engine/terminal-shell/help-command';
 import { shortcutGroups } from '../../renderer/shortcut-groups.ts';
 import { registerModelCommands } from '@goodvibes/engine/terminal-shell/model-command';
+import { publishNotice } from '../../core/notices.ts';
+import { getSharedNotificationFeed } from '../../core/notifications-feed.ts';
 
 const coreActions = createShellCoreActions<CommandContext>(
   { startFreshConversation },
   {
-    freshConversation: (ctx, savedAs) =>
-      ctx.print('Fresh conversation. The previous one is saved as ' + savedAs + ': /session resume ' + savedAs + ' returns to it.'),
+    // A notice (the status bar's count, ctrl+n), never a row: a row would retire the empty conversation's splash.
+    freshConversation: (_ctx, savedAs) =>
+      void publishNotice(getSharedNotificationFeed(), '[Session] Fresh conversation. The previous one is saved as ' + savedAs + ': /session resume ' + savedAs + ' returns to it.'),
   },
 );
 

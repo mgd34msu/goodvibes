@@ -1,102 +1,60 @@
-import { settingCategoryLabel } from '@goodvibes/engine/terminal-shell/renderer/settings-metadata';
 import { createSettingsRows, settingsNavigationHints } from '@goodvibes/engine/terminal-shell/renderer/settings-rows';
-import { createSettingsLayout, settingsCategoryRows } from '@goodvibes/engine/terminal-shell/renderer/settings-layout';
-import '@goodvibes/engine/terminal-shell/renderer/mcp-form-rows';
+import { createSettingsLayout, settingsTopicRailRows } from '@goodvibes/engine/terminal-shell/renderer/settings-layout';
 import { createSettingsDocumentation, fitValue } from '@goodvibes/engine/terminal-shell/renderer/settings-documentation';
+import { settingPlace } from '@goodvibes/engine/terminal-shell/settings-navigation';
 /**
- * renderSettingsModal, the settings modal drawn with the surface kit.
+ * renderSettingsModal, the settings screen drawn with the surface kit.
  *
- *   ✦ Settings › Display › Theme                                  esc
+ *   ✦ Settings › General                                          esc
  *
- *   ▏Search all settings                                       display
+ *   ▏Search settings by name, key or what they do
  *
- *   ✦ interface          selected-item help
- *     Display       10      Color palette for the whole interface…
- *     UI             4      display.theme · default goodvibes · …
- *   ✦ ai routing
- *     Provider       7    ◇ Theme                        goodvibes
- *                         Theme mode                          dark
+ *   General                 Stream the answer as it arrives          On
+ *   Account                   Display · display.stream
+ *   Models and providers    Show the model's thinking               Off
+ *   Voice                     Display · display.showThinking
+ *   …
+ *                           Shows what the model was reasoning about.
+ *                           Takes effect at once. The default is Off.
  *
- *   ↑↓ move   ⏎ change   ←→ category   ctrl+r reset to default
+ *   ↑↓ move   ⏎ change   ctrl+r reset to Off   ← topics
  *
- * Search reaches every setting in every category at once (the search row is
- * always live). Categories on the left, plain rows on the right: name, value,
- * and a ◇ when the value differs from the default. The selected row is explained
- * above the uninterrupted list, with its key, default, type and source
- * (PgUp/PgDn scroll long documentation). The breadcrumb in the title says
- * where you are. Changes to the theme preview live (see theme-settings-actions).
+ * The seven topics the web UI shows, in its order and words; each lists its
+ * sections' settings by name with the value in words, and the section and key
+ * small beneath. Typing searches every setting by name, key or description
+ * (the topics step aside). Under the rows, the selected one explained in a
+ * few sentences. Changes to the theme preview live (see theme-settings-actions).
  */
 
-import type { SettingsModal, SettingEntry } from '../input/settings-modal.ts';
-import { SETTINGS_CATEGORIES, SETTINGS_CATEGORY_GROUPS } from '../input/settings-modal.ts';
-import { isFeatureValueEnabled } from '@goodvibes/engine/terminal-shell';
-import { CATEGORY_LABELS, getSettingLabel, valueColor } from './settings-modal-helpers.ts';
+import type { SettingsModal, SettingEntry, SettingsCategory } from '../input/settings-modal.ts';
+import { formatDefault, getSettingLabel, valueColor } from './settings-modal-helpers.ts';
 import { connectionRows } from './settings-modal-connections.ts';
-import { categoryItemCount, currentSettingValue, settingContextLines } from './settings-modal-context.ts';
+import { currentSettingValue, listItemCount, settingContextLines } from './settings-modal-context.ts';
 import { activeTokens } from './theme.ts';
-import '../utils/terminal-width.ts';
 import { type KitHint } from './surface-kit.ts';
 import { type KitRow } from './surface-kit-list.ts';
-import './surface-kit-parts.ts';
 
-// ---------------------------------------------------------------------------
-// Rows
-// ---------------------------------------------------------------------------
+/** What a saved network change restarts, in words. */
+const RESTART_WORDS = {
+  'control-plane': 'Restarting the daemon\'s connection for other programs.',
+  'http-listener': 'Restarting the listener for webhooks.',
+  web: 'Restarting the web UI.',
+} as const;
 
-/**
- * Keep a long value from crowding the name out (the documentation shows it in
- * full). While editing, the value gets all the room the label leaves, and a
- * draft longer than that keeps its end (where the cursor is) in view.
- */
-
-const categoryOf = (entry: SettingEntry): string => settingCategoryLabel(entry.setting.key, CATEGORY_LABELS);
-
-/** The rows of the right-hand list for the current view, and which one is selected. */
-
-function categoryRows(modal: SettingsModal): KitRow[] {
-  return settingsCategoryRows({
-    groups: SETTINGS_CATEGORY_GROUPS,
-    categories: SETTINGS_CATEGORIES,
-    categoryIndex: modal.categoryIndex,
+function topicRows(modal: SettingsModal): KitRow[] {
+  return settingsTopicRailRows({
+    topics: modal.topics,
+    topicIndex: modal.topicIndex,
     searching: modal.searchFocused,
     focused: !modal.searchFocused && modal.focusRegion === 'categories',
-    label: (category) => CATEGORY_LABELS[category],
-    count: (category) => categoryItemCount(modal, category),
-    onSelect: (category) => {
+    onSelect: (index) => {
       if (modal.editingMode) return;
       modal.clearSearch();
-      modal.selectCategory(category);
+      modal.selectTopic(index);
       modal.focusRegion = 'settings';
     },
   });
 }
-
-// ---------------------------------------------------------------------------
-// Documentation block
-// ---------------------------------------------------------------------------
-
-/** Fact lines folded into one compact line above the list (the row itself shows the current value). */
-
-/**
- * The complete documentation the selected row explains itself with (its name
- * first), as the wrapped lines the renderer windows over with PgUp/PgDn.
- */
-
-/** Window the documentation by modal.contextScroll, marking hidden lines honestly. */
-
-// ---------------------------------------------------------------------------
-// Right side: the settings column
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Hints
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Renderer
-// ---------------------------------------------------------------------------
-
-/** Below this many text columns the category list folds into the breadcrumb (←→ still switch). */
 
 const { docLines, windowDoc, settingsDocumentation } = createSettingsDocumentation<SettingsModal>(settingContextLines, {
   clampStoredOffset: false,
@@ -104,39 +62,33 @@ const { docLines, windowDoc, settingsDocumentation } = createSettingsDocumentati
 });
 export { settingsDocumentation };
 
-const { listRows } = createSettingsRows<SettingsModal, SettingEntry>({
+const { listRows } = createSettingsRows<SettingsModal, SettingEntry, SettingsCategory>({
   label: getSettingLabel,
-  rowLabel: (entry) => (entry.ownerFlagId ? '· ' + getSettingLabel(entry) : getSettingLabel(entry)),
   color: valueColor,
   currentValue: currentSettingValue,
   unavailable: (entry) => !!entry.metadataUnavailable,
-  category: categoryOf,
+  placeOf: (entry) => settingPlace(entry.setting.key, entry.setting.key.split('.', 1)[0] ?? ''),
+  visibleRows: (modal) => modal.visibleRows(),
+  listCount: listItemCount,
   focused: (modal) => modal.searchFocused || (modal.focusRegion ?? 'settings') === 'settings',
   routeLabel: (route) => route,
-  specialRow(modal, entry, selected, focused, width, category) {
+  specialRow(modal, entry, selected, focused, width, sub) {
+    if (!entry.flag) return undefined;
     const t = activeTokens();
     const editing = selected && modal.editingMode;
-    const danger = modal.currentCategory === 'danger' && !modal.searchFocused;
-    if (entry.flag) {
-      const { feature, pendingRestart } = entry.flag;
-      const configOn = isFeatureValueEnabled(feature, entry.currentValue);
-      const raw = currentSettingValue(modal, entry, selected);
-      // A startup-gated feature changed this session shows its saved value with
-      // a restart-pending marker (⟳); the documentation spells it out.
-      const value = pendingRestart ? `${raw} ⟳` : raw;
-      return {
-        label: feature.name,
-        desc: [category, entry.metadataUnavailable ? 'unavailable' : ''].filter(Boolean).join(' · ') || undefined,
-        right: fitValue(value, width, editing, feature.name),
-        rightFg: valueColor(entry),
-        mark: configOn ? '●' : '○',
-        markFg: configOn ? t.success : t.textFaint,
-        selected: selected && focused,
-        current: selected && !focused,
-        labelFg: danger ? t.error : undefined,
-      };
-    }
-    return undefined;
+    const { feature, pendingRestart } = entry.flag;
+    const raw = currentSettingValue(modal, entry, selected);
+    // A startup-gated feature changed this session says it waits for a restart.
+    const value = pendingRestart ? `${raw} after a restart` : raw;
+    return {
+      label: feature.name,
+      sub,
+      right: fitValue(value, width, editing, feature.name),
+      rightFg: valueColor(entry),
+      selected: selected && focused,
+      current: selected && !focused,
+      labelFg: entry.setting.key.startsWith('danger.') ? t.error : undefined,
+    };
   },
   specialList: (modal, _width, focused, clampIndex) =>
     modal.currentCategory === 'connections'
@@ -146,23 +98,35 @@ const { listRows } = createSettingsRows<SettingsModal, SettingEntry>({
         }
       : undefined,
 });
+
+/** A number or a choice is nudged in place with shift+arrows; a picker's setting is not. */
+function adjustable(entry: SettingEntry | null): boolean {
+  if (!entry) return false;
+  return entry.setting.type === 'number' || (entry.setting.type === 'enum' && entry.setting.key !== 'permissions.mode');
+}
+
 function settingsHints(modal: SettingsModal): KitHint[] {
+  const selected = modal.getSelected();
   return settingsNavigationHints(modal, {
     resetPending: modal.resetCategoryConfirm !== null || modal.resetAllConfirm !== null,
-    categoryFocused: modal.focusRegion === 'categories',
+    categoryFocused: !modal.searchFocused && modal.focusRegion === 'categories',
     flagToggle: false,
+    resetTo: selected ? (selected.flag ? (selected.flag.feature.defaultEnabled ? 'On' : 'Off') : formatDefault(selected)) : undefined,
+    onList: modal.getSelectedListRow() !== null,
+    adjustable: adjustable(selected),
   });
 }
 
 export const { renderSettingsModal } = createSettingsLayout<SettingsModal>({
   listRows,
-  categoryRows,
-  categoryLabel: (modal) => CATEGORY_LABELS[modal.currentCategory],
+  topicRows,
   hints: settingsHints,
   docLines,
   windowDoc,
   notices: (modal) => [
-    ...(modal.lastSaveTriggeredRestart ? ['Restarting ' + modal.lastSaveTriggeredRestart] : []),
+    ...(modal.resetCategoryConfirm ? [`Put every setting in ${modal.resetCategoryConfirm.subject} back to its default? Enter resets them, Esc keeps them.`] : []),
+    ...(modal.resetAllConfirm ? ['Put every setting back to its default? Enter resets them all, Esc keeps them.'] : []),
+    ...(modal.lastSaveTriggeredRestart ? [RESTART_WORDS[modal.lastSaveTriggeredRestart]] : []),
     ...(modal.lastSettingEffectMessage ? [modal.lastSettingEffectMessage] : []),
   ],
   selectRow: (modal, index) => {
@@ -171,13 +135,8 @@ export const { renderSettingsModal } = createSettingsLayout<SettingsModal>({
     modal.contextScroll = 0;
   },
   breadcrumbs(modal) {
-    const selected =
-      !modal.searchFocused && !['mcp', 'subscriptions', 'connections'].includes(modal.currentCategory) ? modal.getSelected() : null;
-    return modal.searchFocused
-      ? ['Search']
-      : [
-          CATEGORY_LABELS[modal.currentCategory],
-          ...(selected ? [selected.flag ? selected.flag.feature.name : getSettingLabel(selected)] : []),
-        ];
+    if (modal.searchFocused) return [];
+    const list = modal.openList !== null ? modal.topicRows.find((row) => row.kind === 'list' && row.list.category === modal.openList) : undefined;
+    return [modal.topicLabel, ...(list?.kind === 'list' ? [list.list.label] : [])];
   },
 });

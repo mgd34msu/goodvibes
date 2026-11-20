@@ -56,7 +56,7 @@ Always-speak mode is controlled by the `ui.voiceEnabled` config key (boolean, de
 
 The **Always Speak** row appears at the top of the TTS settings tab. Toggle it there or use `/voice on` / `/voice off`. Both are the same switch writing the same `ui.voiceEnabled` key.
 
-`/settings open tts` opens the fullscreen configuration workspace at the TTS category. From there users can toggle always-speak mode, choose the streaming TTS provider, choose a voice from that provider, open the fullscreen provider/model workspace for the TTS response model override, clear text fields, or reset selected settings.
+`/settings open tts` opens the settings screen at the Voice topic, on the first spoken-reply setting. From there users can toggle always-speak mode, choose the streaming TTS provider, choose a voice from that provider, open the fullscreen provider/model workspace for the TTS response model override, clear text fields, or reset selected settings.
 
 The modal and direct commands write the platform TTS config keys:
 

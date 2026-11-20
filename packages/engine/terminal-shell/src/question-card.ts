@@ -35,6 +35,7 @@ import {
 import { presentInboxAsk, type AskFacts, type AskPresentation } from '@goodvibes/engine/platform/platform/permissions';
 import { homeOwnerInbox } from '@goodvibes/engine/platform/platform/runtime/client';
 import { getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/terminal-width';
+import { createEmptyCell } from '@goodvibes/engine/platform/platform/types/grid';
 import { activeTokens } from './renderer/theme.js';
 import { beginModal, finishModal, layoutHintRows, modalInnerWidth, standardModalWidth, wrapLines, type KitHint, type SurfaceLayer } from './renderer/surface-kit.js';
 import { paintKeycapHints } from './renderer/surface-kit-parts.js';
@@ -235,8 +236,7 @@ export class OwnerQuestionCard {
       if (answered === null) return null;
       if (Date.now() > this.#answeredUntil) { this.#answered = null; return null; }
       const f = beginModal(screenWidth, screenHeight, { title: `Answered: ${answered}`, titleGlyph: { char: '✓', fg: t.success }, width, height: 3, escKey: false, dim: false });
-      const layer = finishModal(f);
-      return { ...layer, y: Math.max(0, screenHeight - footerRows - layer.lines.length) };
+      return ownRows(finishModal(f), screenWidth, screenHeight, footerRows);
     }
     const p = state.presentation;
     const choices = p.choices;
@@ -293,10 +293,24 @@ export class OwnerQuestionCard {
       const line = f.canvas.lines[hy++];
       if (line) paintKeycapHints(line, f.l, f.r + 1, row, { fg: t.textMuted });
     }
-    const layer = finishModal(f);
     // Pinned above the composer, not centred: the conversation stays readable above it.
-    return { ...layer, y: Math.max(0, screenHeight - footerRows - layer.lines.length) };
+    return ownRows(finishModal(f), screenWidth, screenHeight, footerRows);
   }
+}
+
+/**
+ * The card owns the rows it stands on: pinned above the composer, and the
+ * cells left and right of it on those rows cleared to the plain screen, so no
+ * transcript row shows through at its edges.
+ */
+function ownRows(layer: SurfaceLayer, screenWidth: number, screenHeight: number, footerRows: number): SurfaceLayer {
+  const lines = layer.lines.map((line) => {
+    const left = Math.max(0, layer.x);
+    const right = Math.max(0, screenWidth - left - line.length);
+    return [...Array.from({ length: left }, createEmptyCell), ...line, ...Array.from({ length: right }, createEmptyCell)];
+  });
+  const hitTargets = layer.hitTargets?.map((target) => ({ ...target, x: target.x + Math.max(0, layer.x) }));
+  return { ...layer, x: 0, y: Math.max(0, screenHeight - footerRows - lines.length), lines, clearBlank: true, ...(hitTargets ? { hitTargets } : {}) };
 }
 
 /**

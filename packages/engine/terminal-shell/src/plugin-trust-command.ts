@@ -95,7 +95,11 @@ export function verifyPlugin(manager: PluginTrustControls, name: string, command
 export function pluginCapabilitiesText(manager: PluginTrustControls, name: string, command = 'plugin'): string {
   const info = manager.capabilities(name);
   if (!info) throw commandRefusal(`Plugin '${name}' not found.`, `/${command} list shows the installed plugins.`);
-  const lines: string[] = [`Plugin: ${name}`, `Trust tier: ${info.tier} (${PLUGIN_TIER_EFFECT[info.tier]})`, '', `Declared capabilities (${info.requested.length}):`];
+  const lines: string[] = [`Plugin: ${name}`, `Trust tier: ${info.tier} (${PLUGIN_TIER_EFFECT[info.tier]})`];
+  if (info.earlierTier !== undefined) {
+    lines.push(`Its tier '${info.earlierTier}' was set by an earlier version, before a tier was bound to a plugin's files, so it is not applied. /${command} trust ${name} ${info.earlierTier} sets it again for the files there now.`);
+  }
+  lines.push('', `Declared capabilities (${info.requested.length}):`);
   if (info.requested.length === 0) {
     lines.push(info.tier === 'untrusted'
       ? '  (none: it may register commands only)'

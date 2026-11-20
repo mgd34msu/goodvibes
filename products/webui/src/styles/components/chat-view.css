@@ -265,6 +265,25 @@
   margin-left: 0;
 }
 
+/* On a phone the chat's title shares the row with the asks chip: it takes two
+ * lines before it is cut, so a title of a few words reads whole (ux A2.4). */
+.shell-header--phone .chat-title-button {
+  height: auto;
+  min-height: 32px;
+  padding: 2px 6px;
+}
+
+.shell-header--phone .chat-title-button__text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: var(--text-sm);
+  line-height: 1.25;
+}
+
 /* ── Working line (thinking shimmer) ───────────────────────── */
 .chat-working {
   display: flex;

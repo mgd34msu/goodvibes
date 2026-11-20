@@ -62,10 +62,19 @@ function formatRuntimeActiveFailureMessage(
   const binding = getRuntimeEndpointBinding(handler, request, endpoint);
   const portInUse = endpoint === 'daemon' ? state?.daemonPortInUse : state?.httpListenerPortInUse;
   const status = getRuntimeEndpointStatus(state, endpoint);
-  const impact = endpoint === 'daemon'
-    ? 'browser, LAN, and service-backed GoodVibes surfaces may be unavailable until the daemon is running there.'
-    : 'incoming webhooks and event surfaces will not receive traffic until the listener is running there.';
-  return `${binding.label} is enabled for ${binding.host}:${binding.port}, but onboarding could not confirm an embedded or verified external service after restart. ${runtimePortDiagnostic(binding, portInUse, status)} Settings were saved; ${impact}`;
+  // What the person loses and what to do, in plain words; the endpoint's diagnostics stay in /health.
+  const where = `${binding.host}:${binding.port}`;
+  const taken = portInUse === true || status?.mode === 'blocked' || status?.mode === 'incompatible';
+  if (endpoint === 'daemon') {
+    const lost = 'so the web UI, your phone and your other devices cannot reach GoodVibes yet. Your settings were saved.';
+    return taken
+      ? `Another program (or another version of GoodVibes) is using ${where}, ${lost} Stop that program, or choose another port in /setup, "Use it from other devices".`
+      : `GoodVibes' background service is not running at ${where}, ${lost} To start it and keep it running, run goodvibes-daemon install-service in a terminal.`;
+  }
+  const lost = 'so webhooks and events from other tools do not arrive yet. Your settings were saved.';
+  return taken
+    ? `Another program is using ${where}, ${lost} Stop that program, or choose another port in /setup, "Receive webhooks".`
+    : `The webhook receiver is not running at ${where}, ${lost} It starts with GoodVibes' background service.`;
 }
 
 function formatRuntimeStoppedFailureMessage(
@@ -285,7 +294,7 @@ export async function handleOnboardingActionForHandler(handler: InputHandler, ac
         verificationItems = verification.items;
         failedChecks = verification.items
           .filter((item) => item.status === 'fail')
-          .map((item) => `${item.id}: ${item.message}`);
+          .map((item) => item.message);
       }
 
       if (appliedErrors.length === 0) {
@@ -308,7 +317,7 @@ export async function handleOnboardingActionForHandler(handler: InputHandler, ac
           // A network bind left without local auth is a failure, never advice; the rest is advice about the runtime.
           failedChecks = [...failedChecks, ...runtimeItems
             .filter((item) => item.status === 'fail' && item.id === 'runtime:remote-auth-gate')
-            .map((item) => `${item.id}: ${item.message}`)];
+            .map((item) => item.message)];
           runtimeWarnings = dedupeOnboardingVerificationItems(runtimeItems
             .map((item): OnboardingVerificationItem => item.status === 'fail' && item.id !== 'runtime:remote-auth-gate'
               ? { ...item, status: 'warn' }
@@ -721,7 +730,9 @@ export function verifyOnboardingRuntimePostureForHandler(handler: InputHandler, 
       status: hasLocalAuth && !auth.bootstrapCredentialPresent ? 'pass' : 'fail',
       message: hasLocalAuth && !auth.bootstrapCredentialPresent
         ? 'Local auth is configured and bootstrap credentials are not present.'
-        : 'Network-capable surfaces require local auth with no bootstrap credential file.',
+        : hasLocalAuth
+          ? 'The first-run sign-in file is still on this computer: remove it with /local-auth once you have signed in, so other devices can only sign in with your account.'
+          : 'Other devices can reach GoodVibes, but no account is set up to sign in with yet: create one in /setup, "Who can sign in here".',
       target: 'auth',
     });
     if (posture.remoteExposure) {

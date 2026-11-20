@@ -1,7 +1,6 @@
 /**
- * Ranked search over the settings workspace of both terminal apps: every word
- * of the query must occur in a setting's key, label or description, and the
- * results are ordered by where the words occur.
+ * Search over the settings screen of both terminal apps: every word of the
+ * query must occur in a setting's key, name or description.
  */
 
 export interface SearchSettingEntry {
@@ -60,33 +59,20 @@ export function fuzzyScoreSettingEntry<Entry extends SearchSettingEntry>(
 }
 
 /**
- * Search all setting entries across all groups, returning results ranked by
- * relevance score (highest first). Excludes the flags, mcp, and subscriptions
- * special categories (which have their own entry types).
- *
- * @param query - User input string. Empty string returns []; a query no
- *   setting contains returns [] too (the list then says no setting matches).
- * @param groups - The settings group map from buildSettingGroups.
- * @param getLabel - Pure function mapping an entry to its display label.
+ * The settings every word of the query occurs in (by name, key or
+ * description), in the order the topics list them, as the web UI's settings
+ * search keeps its own order. Entries arrive once each, in browse order.
  */
-export function searchSettingEntries<Category, Entry extends SearchSettingEntry>(
+export function searchSettingsInOrder<Entry extends SearchSettingEntry>(
   query: string,
-  groups: ReadonlyMap<Category, readonly Entry[]>,
+  entries: readonly Entry[],
   getLabel: (e: Entry) => string,
 ): Entry[] {
   if (query.trim().length === 0) return [];
   const lq = query.trim().toLowerCase();
-  const seen = new Set<string>();
-  const scored: Array<{ entry: Entry; score: number }> = [];
-  for (const entries of groups.values()) {
-    for (const entry of entries) {
-      // Deduplicate: network tab cross-lists keys already in controlPlane/httpListener/web
-      if (seen.has(entry.setting.key)) continue;
-      seen.add(entry.setting.key);
-      const score = fuzzyScoreSettingEntry(lq, entry, getLabel);
-      if (score !== null) scored.push({ entry, score });
-    }
-  }
-  scored.sort((a, b) => b.score - a.score);
-  return scored.map(r => r.entry);
+  const found = entries.filter((entry) => fuzzyScoreSettingEntry(lq, entry, getLabel) !== null);
+  // A setting named exactly, by key or name, leads; the rest keep the topics' order.
+  const exact = found.findIndex((entry) => entry.setting.key.toLowerCase() === lq || getLabel(entry).toLowerCase() === lq);
+  if (exact > 0) found.unshift(...found.splice(exact, 1));
+  return found;
 }

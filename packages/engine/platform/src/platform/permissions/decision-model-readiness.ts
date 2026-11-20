@@ -104,7 +104,7 @@ export function describePermissionModeInForce(
   const autoApprove = fromSettings && configManager.get('behavior.autoApprove' as ConfigKey) === true;
   const chosen = normalizePermissionMode(fromSettings ? configManager.get('permissions.mode' as ConfigKey) : input.chosen);
   if (autoApprove && chosen !== 'yolo') {
-    return { chosen, mode: 'yolo', reason: 'the saved setting behavior.autoApprove is on, which selects yolo; choosing a mode in /settings clears it' };
+    return { chosen, mode: 'yolo', reason: '"Approve every tool request without asking" is on in your settings, which means YOLO; choosing how often it asks in /settings clears it' };
   }
   const why = chosen === 'jev-decides'
     ? readinessReason(configManager, { ...(input.explicitlyChosen === true ? { chosen: true } : {}), ...(input.env ? { env: input.env } : {}) })
@@ -112,11 +112,11 @@ export function describePermissionModeInForce(
   const mode = effectivePermissionMode(chosen, false, why === undefined);
   if (why === undefined || mode === chosen) return { chosen, mode };
   const reason = why.kind === 'selected'
-    ? 'judgment.policy is No Decision Model, so Jev cannot decide and every call it would decide asks you'
+    ? 'you turned decision models off, so Jev cannot decide and every call it would decide asks you'
     : why.kind === 'not-set'
-      ? 'no decision model is set (judgment.model, judgment.endpoint or TYPESAFE_API_KEY), so every call Jev would decide asks you'
+      ? 'no decision model is set, so every call Jev would decide asks you (to use one, choose a Decision model in /settings open)'
       : why.kind === 'uncalibrated'
-        ? 'jev-decides is only the shipped default here and the gate\'s decisions were not measured on this decision model; choose jev-decides yourself (/settings permissions.mode) to use it'
+        ? 'Jev decides is only the shipped default here and its decisions were not measured on this decision model; choose Jev decides yourself (shift+tab, or /settings open) to use it'
         : `the decision model ${why.model} is not answering (${why.what}, since ${new Date(why.since).toISOString()}); calls Jev would decide ask you until it answers again`;
   return { chosen, mode, reason };
 }
@@ -146,9 +146,10 @@ export interface ModeInForceWords {
  */
 const UNREACHABLE_FAILURE = /could not be reached|did not answer in time|did not answer within the decision deadline|missing the decision deadline|could not answer/;
 
+/** The few words of becauseSentence, for the chip and the status bar: the same state in the same words. */
 function becauseWords(why: DecisionModelUnreadyReason): string {
   switch (why.kind) {
-    case 'selected': return 'no decision model chosen';
+    case 'selected': return 'decision models switched off';
     case 'not-set': return 'no decision model set';
     case 'uncalibrated': return 'not measured yet';
     case 'failing': return UNREACHABLE_FAILURE.test(why.what) ? 'decision model unreachable' : 'decision model failing';

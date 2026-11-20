@@ -98,6 +98,9 @@ export function drawSegments(canvas: SurfaceCanvas, x: number, y: number, segmen
 
 const NAME_COLUMN = 26;
 
+/** Step 2's back keys: both Esc and Shift+Tab return to step 1 (first-run-flow.ts). */
+const BACK_HINT: KitHint = ['esc / shift+tab', 'back'];
+
 /** The modal's width: 76 on a wide screen, the kit's full width on a narrow one. */
 function firstRunWidth(screenW: number): number {
   return screenW < NARROW_MODAL_BREAKPOINT ? standardModalWidth(screenW) : Math.min(76, standardModalWidth(screenW));
@@ -265,7 +268,7 @@ function signInBody(view: SignInStepView, inner: number): { readonly lines: Styl
       }
     }
     if (error.length > 0) { blank(); lines.push(...error); }
-    return { lines, hints: [['⏎', 'continue'], ['c', 'copy the address'], ['esc', 'back']] };
+    return { lines, hints: [['⏎', 'continue'], ['c', 'copy the address'], BACK_HINT] };
   }
   if (view.kind === 'api-key') {
     wrap([{ text: `Paste your ${view.name} API key.` }]);
@@ -276,7 +279,7 @@ function signInBody(view: SignInStepView, inner: number): { readonly lines: Styl
     blank();
     wrap([{ text: view.busy ? `Checking the key with ${view.name}…` : `It is stored in ${view.storedIn}, never shown again.`, tone: 'dim' }]);
     if (error.length > 0) { blank(); lines.push(...error); }
-    return { lines, hints: [['⏎', 'save'], ['esc', 'back']] };
+    return { lines, hints: [['⏎', 'save'], BACK_HINT] };
   }
   if (view.none) {
     wrap([{ text: view.scanning ? 'Looking for models on this computer…' : 'GoodVibes found no model server on this computer.' }]);
@@ -285,7 +288,7 @@ function signInBody(view: SignInStepView, inner: number): { readonly lines: Styl
       wrap([{ text: 'Start one (Ollama, LM Studio or llama.cpp), then press ⏎ to look again.', tone: 'dim' }]);
     }
     if (error.length > 0) { blank(); lines.push(...error); }
-    return { lines, hints: [['⏎', 'look again'], ['esc', 'back']] };
+    return { lines, hints: [['⏎', 'look again'], BACK_HINT] };
   }
   wrap([{ text: 'Which model on this computer?' }]);
   blank();
@@ -293,7 +296,7 @@ function signInBody(view: SignInStepView, inner: number): { readonly lines: Styl
     lines.push([{ text: model.label, ...(index === view.selected ? { bold: true } : {}) }, ...(model.detail ? [{ text: `  ${model.detail}`, tone: 'dim' as const }] : [])]);
   });
   if (error.length > 0) { blank(); lines.push(...error); }
-  return { lines, hints: [['↑↓', 'move'], ['⏎', 'choose'], ['esc', 'back']] };
+  return { lines, hints: [['↑↓', 'move'], ['⏎', 'choose'], BACK_HINT] };
 }
 
 export function renderSignInStep(screenW: number, screenH: number, view: SignInStepView): SurfaceLayer {

@@ -80,7 +80,7 @@ const CURATED: ReadonlyArray<readonly [string, CuratedEntry]> = [
   ['agents', { title: 'Agents', group: 'Views', keywords: ['hosted', 'acp', 'claude code', 'codex', 'opencode', 'steer', 'stop'] }],
   ['usage', { title: 'Usage', group: 'Views', keywords: ['budget', 'compact', 'price'] }],
   ['changes', { title: 'See changes', group: 'Views', keywords: ['files', 'stage', 'commit', 'hunk'] }],
-  ['notifications', { title: 'Notifications', group: 'Views', keywords: ['notifications', 'alerts', 'messages', 'history', 'toasts'] }],
+  ['notifications', { title: 'Notifications', group: 'Views', keywords: ['notifications', 'alerts', 'messages', 'history', 'notices'] }],
   ['context', { title: 'See what fills the context', group: 'Views', keywords: ['tokens', 'window'] }],
   ['work-plan', { title: 'Work plan', group: 'Views', keywords: ['todo', 'plan'] }],
   ['hosted', { title: 'Hosted sessions', group: 'Views', keywords: ['daemon'] }],

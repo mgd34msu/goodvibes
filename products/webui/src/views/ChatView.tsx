@@ -86,6 +86,7 @@ export function ChatView({
   onLocalSessionUpdated,
   onSessionMissing,
   userName,
+  onOpenSettings,
 }: ChatViewProps) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -833,7 +834,7 @@ export function ChatView({
       )}
       {headerSlots?.actionsSlot && createPortal(
         <>
-          {activeSessionId && <ChatAsksChip sessionId={activeSessionId} />}
+          {activeSessionId && <ChatAsksChip sessionId={activeSessionId} onOpenSettings={onOpenSettings} />}
           <ChatFindButton open={showSearch} onToggle={() => setShowSearch((v) => !v)} />
         </>,
         headerSlots.actionsSlot,

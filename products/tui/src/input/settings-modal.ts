@@ -6,7 +6,17 @@ import type {
   SettingsModalChangeHandler as PlatformSettingsModalChangeHandler,
 } from '@goodvibes/engine/terminal-shell/settings-model-types';
 import { TerminalSettingsModalState } from '@goodvibes/engine/terminal-shell/settings-modal-state';
-import { moveSettingsSelection, selectSettingsTarget, type SettingsTargetOutcome } from '@goodvibes/engine/terminal-shell/settings-navigation';
+import {
+  buildSettingsTopics,
+  findSettingsTopicTarget,
+  moveSettingsSelection,
+  settingsTopicEntries,
+  type SettingsTargetOutcome,
+  type SettingsTopicList,
+  type SettingsTopicRow,
+} from '@goodvibes/engine/terminal-shell/settings-navigation';
+import { searchSettingsInOrder } from '@goodvibes/engine/terminal-shell/settings-search';
+import { settingSourceWords } from '@goodvibes/engine/terminal-shell/renderer/settings-context';
 /**
  * SettingsModal, state management for the /settings fullscreen workspace.
  *
@@ -41,8 +51,6 @@ import type { ConnectionStatus } from './commands/connection-status.ts';
 import { initialConnectionEntries, refreshConnectionEntries } from './settings-modal-connections.ts';
 
 import {
-  SETTINGS_CATEGORIES,
-  SETTINGS_CATEGORY_GROUPS,
   type FlagEntry,
   type McpEntry,
   type SettingEntry,
@@ -58,7 +66,6 @@ import {
   readSettingsPolicy,
   refreshEntryValues,
   refreshSettingsPolicyAvailability,
-  searchSettingEntries,
   type SettingsPolicyRead,
 } from './settings-modal-data.ts';
 import { getSettingLabel } from '../renderer/settings-modal-helpers.ts';
@@ -112,6 +119,9 @@ export interface SettingsModalOpenOptions {
   readonly requestRender?: () => void;
 }
 
+/** The host fields shown only while their mode is `custom`. */
+const NETWORK_HOST_KEYS: ReadonlySet<string> = new Set(['controlPlane.host', 'httpListener.host', 'web.host']);
+
 export {
   SETTINGS_CATEGORIES,
   SETTINGS_CATEGORY_GROUPS,
@@ -122,6 +132,13 @@ export {
   type SettingsFocusRegion,
   type SubscriptionEntry,
 } from './settings-modal-types.ts';
+
+/** The lists a topic opens in place of a setting. */
+const TOPIC_LISTS: readonly SettingsTopicList<SettingsCategory>[] = [
+  { category: 'mcp', label: 'Tool servers (MCP)', description: 'what each connected tool server may do', topic: 'permissions', sectionId: 'permissions' },
+  { category: 'subscriptions', label: 'Provider sign-ins', description: 'subscriptions you signed in to, and signing out', topic: 'models', sectionId: 'credentials' },
+  { category: 'connections', label: 'Mail and calendar', description: 'whether your mail and calendar answer right now', topic: 'account', sectionId: 'account' },
+];
 
 // ---------------------------------------------------------------------------
 // SettingsModal
@@ -134,7 +151,6 @@ export class SettingsModal extends TerminalSettingsModalState<
   'tts-provider' | 'tts-voice' | 'theme' | SettingsChoiceAction | 'payments-cards'
 > {
   public searchFocused = false;
-  /** Index into SETTINGS_CATEGORIES. */
 
   /** Selected setting index within the current category. */
 
@@ -225,6 +241,8 @@ export class SettingsModal extends TerminalSettingsModalState<
   private subscriptionManager: SubscriptionManager | null = null;
   private serviceRegistry: Pick<ServiceInspectionQuery, 'getAll'> | null = null;
   private onSettingApplied: SettingsModalChangeHandler | null = null;
+  /** Every setting once, in browse order: what search filters (built with the topics). */
+  private searchEntries: SettingEntry[] = [];
 
   /**
    * Open the modal, loading current config values from configManager.
@@ -255,12 +273,16 @@ export class SettingsModal extends TerminalSettingsModalState<
     this.mcpRegistry = mcpRegistry ?? null;
     this.onSettingApplied = options?.onSettingApplied ?? null;
     this.groups = buildSettingGroups(configManager, featureFlagManager);
+    this.topics = buildSettingsTopics(this.groups, TOPIC_LISTS);
+    this.searchEntries = settingsTopicEntries(this.topics);
     this.mcpEntries = buildMcpEntries(this.mcpRegistry);
     this.subscriptionEntries = buildSubscriptionEntries(subscriptionManager, serviceRegistry);
     this.gatewayMethods = options?.gatewayMethods ?? null;
     this.requestRender = options?.requestRender ?? null;
     this.connectionEntries = initialConnectionEntries();
-    this.categoryIndex = 0;
+    this.topicIndex = 0;
+    this.openList = null;
+    this.openListRow = 0;
     this.selectedIndex = 0;
     this.focusRegion = 'categories';
     this.editingMode = false;
@@ -339,7 +361,7 @@ export class SettingsModal extends TerminalSettingsModalState<
     if (query.trim().length === 0) {
       this.searchResults = [];
     } else {
-      this.searchResults = searchSettingEntries(query, this.groups, getSettingLabel);
+      this.searchResults = searchSettingsInOrder(query, this.searchEntries, getSettingLabel);
     }
     this.selectedIndex = 0;
   }
@@ -351,30 +373,30 @@ export class SettingsModal extends TerminalSettingsModalState<
     this.searchFocused = false;
   }
 
-  /** Select a category directly, loading only the destination. */
-  selectCategory(category: SettingsCategory): void {
-    if (this.editingMode) return;
-    const index = SETTINGS_CATEGORIES.indexOf(category);
-    if (index < 0) return;
-    this.categoryIndex = index;
+  /** Choose a topic; its first row is selected and any open list closes. */
+  selectTopic(index: number): void {
+    if (this.editingMode || this.topics.length === 0) return;
+    this.topicIndex = ((index % this.topics.length) + this.topics.length) % this.topics.length;
+    this.openList = null;
     this.selectedIndex = 0;
     this.contextScroll = 0;
     this.subscriptionLogoutConfirmationTarget = null;
-    this._reloadTabEntries();
   }
 
-  /** Cycle to the next category (Tab). */
+  /** The next topic (Down in the topic rail). */
   nextCategory(): void {
-    this.selectCategory(SETTINGS_CATEGORIES[(this.categoryIndex + 1) % SETTINGS_CATEGORIES.length]!);
+    this.selectTopic(this.topicIndex + 1);
   }
 
-  /** Cycle to the previous category (Shift+Tab). */
+  /** The previous topic (Up in the topic rail). */
   prevCategory(): void {
-    this.selectCategory(SETTINGS_CATEGORIES[(this.categoryIndex - 1 + SETTINGS_CATEGORIES.length) % SETTINGS_CATEGORIES.length]!);
+    this.selectTopic(this.topicIndex - 1);
   }
 
+  /** Left: back out of an open list, else to the topic rail. */
   focusCategories(): void {
     if (this.editingMode) return;
+    if (this.leaveList()) return;
     this.focusRegion = 'categories';
   }
 
@@ -385,7 +407,45 @@ export class SettingsModal extends TerminalSettingsModalState<
 
   toggleFocusRegion(): void {
     if (this.editingMode) return;
-    this.focusRegion = this.focusRegion === 'settings' ? 'categories' : 'settings';
+    if (this.focusRegion === 'settings') this.focusCategories();
+    else this.focusRegion = 'settings';
+  }
+
+  /** Close the list a topic row opened, back on that row; false when none was open. */
+  leaveList(): boolean {
+    if (this.openList === null || this.editingMode) return false;
+    this.openList = null;
+    this.selectedIndex = this.openListRow;
+    this.contextScroll = 0;
+    this.mcpAllowAllConfirmationTarget = null;
+    this.subscriptionLogoutConfirmationTarget = null;
+    this.focusRegion = 'settings';
+    return true;
+  }
+
+  /** The chosen topic's rows as shown: a host field shows only while its mode is custom. */
+  visibleRows(): readonly SettingsTopicRow<SettingEntry, SettingsCategory>[] {
+    const rows = this.topicRows;
+    const hidden = new Set(buildNetworkFilteredItems(
+      rows.flatMap((row) => (row.kind === 'setting' && NETWORK_HOST_KEYS.has(row.entry.setting.key) ? [row.entry] : [])),
+      this.configManager,
+    ));
+    return rows.filter((row) => row.kind !== 'setting' || !NETWORK_HOST_KEYS.has(row.entry.setting.key) || hidden.has(row.entry));
+  }
+
+  /** Where the selected setting's value comes from, in a sentence, when that is not its default. */
+  describeSource(entry: SettingEntry): string | undefined {
+    if (entry.kind === 'host') return entry.isDefault ? undefined : settingSourceWords({ tier: 'global', program: 'the terminal app' });
+    let tier: ReturnType<ConfigManager['describeConfigKeySource']>['tier'] | undefined;
+    let runtime = false;
+    try {
+      const source = this.configManager?.describeConfigKeySource(entry.setting.key);
+      tier = source?.tier;
+      runtime = source?.effectiveOrigin === 'runtime';
+    } catch {
+      tier = undefined;
+    }
+    return settingSourceWords({ effectiveSource: entry.effectiveSource, tier, runtime, program: 'the terminal app' });
   }
 
   moveFocusedUp(): void {
@@ -400,7 +460,7 @@ export class SettingsModal extends TerminalSettingsModalState<
 
   moveUp(): void {
     moveSettingsSelection(this, -1, {
-      items: () => this._currentItems().length,
+      items: () => (this.openList === null ? this.visibleRows().length : 0),
       specialItems: () =>
         this.currentCategory === 'mcp'
           ? this.mcpEntries.length
@@ -415,7 +475,7 @@ export class SettingsModal extends TerminalSettingsModalState<
 
   moveDown(): void {
     moveSettingsSelection(this, 1, {
-      items: () => this._currentItems().length,
+      items: () => (this.openList === null ? this.visibleRows().length : 0),
       specialItems: () =>
         this.currentCategory === 'mcp'
           ? this.mcpEntries.length
@@ -434,9 +494,16 @@ export class SettingsModal extends TerminalSettingsModalState<
     if (this.searchFocused) {
       return this.searchResults[Math.max(0, Math.min(this.searchResults.length - 1, this.selectedIndex))] ?? null;
     }
-    const items = this._currentItems();
-    if (items.length === 0) return null;
-    return items[Math.max(0, Math.min(items.length - 1, this.selectedIndex))] ?? null;
+    if (this.openList !== null) return null;
+    const row = this.selectedTopicRow(this.visibleRows());
+    return row?.kind === 'setting' ? row.entry : null;
+  }
+
+  /** The selected topic row when it opens a list, while browsing. */
+  getSelectedListRow(): SettingsCategory | null {
+    if (this.searchFocused || this.openList !== null) return null;
+    const row = this.selectedTopicRow(this.visibleRows());
+    return row?.kind === 'list' ? row.list.category : null;
   }
 
   /**
@@ -457,8 +524,9 @@ export class SettingsModal extends TerminalSettingsModalState<
     return selectedSettingsCategoryEntry(this.currentCategory, 'subscriptions', this.subscriptionEntries, this.selectedIndex);
   }
 
-  get currentCategory(): SettingsCategory {
-    return SETTINGS_CATEGORIES[this.categoryIndex];
+  /** The open list's category; `topic` while a topic's own rows are shown. */
+  get currentCategory(): SettingsCategory | 'topic' {
+    return this.openList ?? 'topic';
   }
 
   get currentItems(): SettingEntry[] {
@@ -467,13 +535,21 @@ export class SettingsModal extends TerminalSettingsModalState<
 
   /** Lands on a category or setting; any other text becomes the search, and the outcome says which. */
   selectTarget(target?: string): SettingsTargetOutcome {
-    return selectSettingsTarget(this, target, SETTINGS_CATEGORIES, this.groups, {
-      resetScroll: true,
-      focusSettings: () => {
-        this.focusRegion = 'settings';
-      },
-      search: (query) => this.setSearchQuery(query),
-    });
+    const wanted = target?.trim();
+    if (!wanted) return 'none';
+    this.contextScroll = 0;
+    const found = findSettingsTopicTarget(this.topics, wanted, getSettingLabel);
+    if (!found) {
+      this.setSearchQuery(wanted);
+      return 'not-found';
+    }
+    this.clearSearch();
+    this.selectTopic(found.topicIndex);
+    const row = this.topicRows[found.rowIndex];
+    this.selectedIndex = Math.max(0, this.visibleRows().findIndex((candidate) => candidate === row));
+    this.focusRegion = 'settings';
+    if (found.kind === 'list') this._openList(found.category);
+    return found.kind === 'setting' ? 'setting' : 'category';
   }
 
   /**
@@ -487,6 +563,11 @@ export class SettingsModal extends TerminalSettingsModalState<
   }
 
   activateSelected(): void {
+    const list = this.getSelectedListRow();
+    if (list !== null) {
+      this._openList(list);
+      return;
+    }
     this._refreshPolicyAvailability();
     _activateSelected({
       // While a search is shown the highlighted row is a search result (a setting): the
@@ -751,9 +832,10 @@ export class SettingsModal extends TerminalSettingsModalState<
   /** Arm a category-reset confirmation gate for the current category. */
   initiateResetCategory(): void {
     if (this.pendingSecretWrite) return;
+    if (this.openList !== null) return;
     _initiateResetCategory({
       hasConfigManager: this.configManager !== null,
-      currentCategory: this.currentCategory,
+      currentCategory: this.topicLabel,
       setResetCategoryConfirm: (v) => {
         this.resetCategoryConfirm = v;
       },
@@ -815,7 +897,17 @@ export class SettingsModal extends TerminalSettingsModalState<
 
   // ── Private helpers ────────────────────────────────────────────────────────────────
 
-  /** Reload mcp/subscription entries when the active tab changes. */
+  /** Show the list a topic row opens, reloading what it lists. */
+  private _openList(category: SettingsCategory): void {
+    this.openListRow = this.openList === null ? this.selectedIndex : this.openListRow;
+    this.openList = category;
+    this.selectedIndex = 0;
+    this.contextScroll = 0;
+    this.focusRegion = 'settings';
+    this._reloadTabEntries();
+  }
+
+  /** Reload mcp/subscription entries when a list opens. */
   private _reloadTabEntries(): void {
     if (this.currentCategory === 'mcp') {
       this.mcpEntries = buildMcpEntries(this.mcpRegistry);
@@ -826,18 +918,10 @@ export class SettingsModal extends TerminalSettingsModalState<
     }
   }
 
-  /**
-   * Returns [] for the mcp/subscriptions categories (which render their own
-   * entry types). Every other category flows through the normal group path,
-   * feature-unit headers included.
-   */
+  /** The settings of the chosen topic as shown; [] while a list is open (its rows are not settings). */
   private _currentItems(): SettingEntry[] {
-    if (this.currentCategory === 'mcp' || this.currentCategory === 'subscriptions' || this.currentCategory === 'connections') return [];
-    const items = this.groups.get(this.currentCategory) ?? [];
-    if (this.currentCategory === 'network') {
-      return buildNetworkFilteredItems(items, this.configManager);
-    }
-    return items;
+    if (this.openList !== null) return [];
+    return this.visibleRows().flatMap((row) => (row.kind === 'setting' ? [row.entry] : []));
   }
 
   /**

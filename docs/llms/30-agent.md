@@ -181,7 +181,7 @@ The text goes back into the composer; remove the image marker or reference and d
 
 ### What the conversation shows besides messages
 
-Other notices go to toasts and `/notifications`; these lines are drawn in the conversation itself, where they happened:
+Other notices are never drawn over the conversation: the status bar counts the unread ones and `Ctrl+N` (or `/notifications`) opens them. These lines are drawn in the conversation itself, where they happened:
 
 - Why a turn ended without an answer, with what to do next, for example `sample chat request failed 500: ...` then `Hint: ...`, or `openrouter chat request failed: Connection error.` then `Next: send it again, or choose another provider or model with /model.`
 - The first time a model request fails and is retried, why, and how long the retries can take: `Retrying up to 5 times over about 2 minutes. Next: wait, press Esc to stop, or choose another model with /model.`, or, when a fallback model is open (see "Failover" in the terminal app part), `Retrying once in about 2 s, then moving to the next model of your fallback order. Next: wait, or press Esc to stop.` The row under the conversation counts the attempts (`Retrying (attempt 2/5)...`).
@@ -844,7 +844,7 @@ Every tool that changes something outside the conversation (a message, a reminde
 
 ## Agent settings
 
-Settings work as in the terminal app (`/settings`, `goodvibes-agent -c key=value`), stored under `~/.goodvibes/agent/`.
+Settings work as in the terminal app (`/settings`, `goodvibes-agent -c key=value`), stored under `~/.goodvibes/agent/`. The settings screen is the terminal app's: the seven topics, each setting by name with its value in words and its section and key beneath, search by name, key or description, and the selected setting explained in a few sentences. A setting the daemon owns shows the daemon's value (`Held by the daemon.`), or `Unknown` with why while the daemon has not given it.
 A project settings file cannot change permission, approval, provider, tool, surface, automation or helper settings.
 The settings the Agent adds or uses most:
 

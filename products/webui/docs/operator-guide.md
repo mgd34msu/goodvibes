@@ -135,10 +135,13 @@ Provider/model controls in the composer update daemon model selection. Message
 sends themselves do not include provider/model routing.
 
 An approval or question a chat is waiting on appears in that chat, as a card
-below the last message with its choices, and the chat header shows a chip
-("asking you · 1") that lists them. Work lists the same asks. Once one is
-decided, here or anywhere else, the card folds to one dim line saying what was
-decided.
+below the last message with its choices and the links "Why am I asked?" and
+"Details" (the tool, the folder, the decision and the arguments, read when you
+open it), and the chat header shows a chip ("asking you · 1") that lists them.
+On a phone the header keeps the chat's title and that chip; the permission mode
+chip steps aside while it shows, and the chip's sheet ends with the mode in
+force and Change. Work lists the same asks. Once one is decided, here or
+anywhere else, the card folds to one dim line saying what was decided.
 
 A turn's tool calls read as one collapsed line ("Read 2 files, edited 1 · 4 s")
 that opens to one line per call, worded as the terminal words it; the raw
@@ -224,7 +227,12 @@ closes or stops, the next takes over, so one wake phrase is heard and sent once.
 
 Work is one list of everything working for you, grouped by what you would do
 about it: Waiting for you (approvals, questions, purchase windows and anything
-else that needs your answer, each in a sentence), Running now, Scheduled
+else that needs your answer, each in a sentence, with who asked and, when it
+loosens a protection, "this weakens a safety setting"; a purchase window reads
+"Buy a drip irrigation kit from Example Garden Supply for $38.40?" with "inside
+your daily budget · goes ahead in 9 min unless you say no"), Running now (each
+agent by what it is doing in words, "Reading 2 files", or its task when nothing
+is known; never a tool's name), Scheduled
 (schedules, triggers and CI watches between runs, with when they run and how the
 last run went) and Finished (the ten newest). The header chip says how many
 things wait for you; the sidebar badge and the account menu's "running" are the
@@ -399,9 +407,12 @@ not serve memory" state, never a blank panel that reads as empty.
 ### Knowledge
 
 Knowledge is the regular GoodVibes Knowledge/Wiki surface. Browse shows what it
-knows by subject: the subjects (the store's topics) on the left, the facts filed
-under the chosen one on the right, each with "From <source> · <when>" (on a
-phone the facts open as their own page with Back). Below the subjects are the
+knows by subject: the subjects (the store's topics, first letter capital) on
+the left, the facts filed under the chosen one on the right, each with "From
+<source> · <when>" (on a phone the facts open as their own page with Back).
+Facts are read from documents by the decision model; while sources are listed
+and no fact names one, a line under the subjects says so ("Documents are listed
+under Sources; facts are read from them when a decision model is set"). Below the subjects are the
 sources it read, and a Details disclosure holds the graph itself: nodes with
 their kinds and states, issues and wiki projections. It is also for asking the
 knowledge base, searching it, the map, rendering projections when the

@@ -2,6 +2,7 @@ import type { ConfigChange, ConfigKey, ConfigManager, JudgmentFallbackSettings, 
 import { CONFIG_SCHEMA, localOwnerActor } from '@goodvibes/engine/platform/platform/config';
 import { DECISION_MODEL_PROFILES, captureJudgmentBackendSettings, validEndpointURL, type DecisionModelProfile } from '@goodvibes/judgment';
 import type { OpenSelection, SelectionItem } from './selection-modal.js';
+import { gatePresetLabel } from '@goodvibes/engine/platform/platform/gate/presets';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 
 export type SettingsChoiceAction = 'judgment-provider' | 'judgment-model' | 'decision-policy' | 'permission-mode' | 'decision-router' | 'judgment-fallbacks';
@@ -33,7 +34,7 @@ const POLICY_DETAILS: Readonly<Record<string, string>> = {
   'Decision Model Only': 'Use the set decision model; when it fails, stop the operation and report the model, what failed and the next step. With none set, work still continues without one.',
   'No Decision Model': 'Make no decision-model requests. Ordinary chat and tools remain available with the chosen execution permissions.',
   'ask-me': 'With a working decision model, ordinary work runs automatically and dangerous actions and owner-only decisions ask you; without one, every action asks you except a read inside the workspace and a change to files inside it that can be undone.',
-  'jev-decides': 'A decision model decides every action the permission rules do not settle, critical ones included; owner-only decisions ask you. With no working decision model it behaves as ask-me.',
+  'jev-decides': 'A decision model decides every action the permission rules do not settle, critical ones included; owner-only decisions ask you. With no working decision model it behaves as Ask me.',
   'just-vibes': 'Does as much as it can without interrupting you; anything that needs you is held and listed at the end.',
   yolo: 'Run without general execution approval prompts. Authentication, workspace boundaries and spending rules still apply.',
   plan: 'Inspect and plan: every action that is not a read is refused.',
@@ -104,7 +105,7 @@ export function openSettingsChoice(
     const values = CONFIG_SCHEMA.find(setting => setting.key === key)?.enumValues ?? [];
     open(action === 'decision-policy' ? 'Decision models' : 'Execution permissions',
       // The default policy reads "Hybrid (default)"; only the bare value is stored.
-      values.map(value => ({ id: value, label: value === 'yolo' ? 'YOLO' : value === 'Hybrid' && key === 'judgment.policy' ? 'Hybrid (default)' : value, detail: POLICY_DETAILS[value] ?? '', primaryAction: 'select' })),
+      values.map(value => ({ id: value, label: key === 'permissions.mode' ? gatePresetLabel(value) : value === 'Hybrid' ? 'Hybrid (default)' : value, detail: POLICY_DETAILS[value] ?? '', primaryAction: 'select' })),
       { preSelectId: String(config.get(key)), allowSearch: true },
       result => { if (!result) return;
         if (key === 'permissions.mode' && setExecutionMode) { if (current()) { setExecutionMode(result.item.id); changed(); } }

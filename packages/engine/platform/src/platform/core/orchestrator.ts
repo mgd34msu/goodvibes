@@ -1104,12 +1104,12 @@ export class Orchestrator {
       // The first failure also changes the mode in force: jev-decides asks the owner until the model answers again.
       const inForce = describePermissionModeInForce(requireConfigManager(this.coreServices));
       const flipped = inForce.chosen === 'jev-decides' && inForce.mode === 'ask-me'
-        ? ' Permission mode in force: ask-me (calls Jev would decide ask you) until it answers again.' : '';
+        ? ' Until it answers again, GoodVibes asks you about every call Jev would decide.' : '';
       this.conversation.addNotice(`[Decision model] ${use.line}${flipped}`, { level: 'error', kind: 'operational' });
     } else if (told.failingSince !== undefined) {
       this.decisionModelTold = {};
       const inForce = describePermissionModeInForce(requireConfigManager(this.coreServices));
-      const restored = inForce.chosen === 'jev-decides' && inForce.mode === 'jev-decides' ? ' Permission mode in force: jev-decides again.' : '';
+      const restored = inForce.chosen === 'jev-decides' && inForce.mode === 'jev-decides' ? ' Jev decides again.' : '';
       this.conversation.addNotice(`[Decision model] The decision model is answering again.${restored}`, { level: 'info', kind: 'operational' });
     } else if (!use.inUse && use.reason !== 'unavailable' && !told.noneInUse) {
       this.decisionModelTold = { noneInUse: true };
@@ -1500,7 +1500,7 @@ export class Orchestrator {
     const display = error instanceof ProviderError ? { provider: providerRegistry.getCurrentModel().provider, source: 'provider' as const } : {};
     // A failure with a status, errno or code is worded from it; only one with none is read, and a failed reading never replaces it.
     const structured = (error instanceof AppError && (error.statusCode !== undefined || error.category !== 'unknown')) || classifyFailure(error) !== undefined;
-    const msg = judgmentFailed ? `[Judgment] ${error.message}` : structured ? formatError(error, display)
+    const msg = judgmentFailed ? `[Decision model] ${error.message}` : structured ? formatError(error, display)
       : await readFormattedError(error, { site: 'core.orchestrator.turn-error', ...display }).catch(() => formatError(error, display));
     // The person's fallback order was already tried inside the turn (providers/failover.ts);
     // why it did not move the turn is in the facts, for the row's details.

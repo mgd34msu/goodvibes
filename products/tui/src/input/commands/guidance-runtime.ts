@@ -115,8 +115,8 @@ export interface GuidanceNoticeTurnEvents {
 }
 
 /**
- * Push each new guidance occurrence into the notification history (and a
- * toast when the router allows) once, at the end of a turn, so the owner is
+ * Push each new guidance occurrence into the notification history (counted
+ * on the status bar) once, at the end of a turn, so the owner is
  * told without running /guidance. An occurrence already announced is not
  * announced again; one that clears and later comes back is. Dismissed items
  * and guidance mode `off` push nothing, because evaluateContextualGuidance

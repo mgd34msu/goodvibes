@@ -15,6 +15,6 @@ export function readProductVersion(moduleDirectory: string, packageName: string,
 export function workspaceProductUpdatePolicy(manifest: { readonly private?: boolean; readonly dependencies?: Readonly<Record<string, unknown>> }, packageName: string, label: string) {
   const isWorkspaceDistribution = detectInstallKind(process.execPath) !== 'binary' && manifest.private === true && manifest.dependencies?.['@goodvibes/engine'] === 'workspace:*';
   const rebuildCommand = `bun run --filter ${packageName} build`;
-  const guidance = `This ${label} is built from a private Jev workspace. Update the workspace and build the engine, then run ${rebuildCommand} from the workspace root.`;
+  const guidance = `This copy of GoodVibes${label === 'Agent' ? ' Agent' : ''} runs from its source folder, so it does not update itself. To update it, get the latest source in that folder and rebuild it there: ${rebuildCommand}`;
   return { isWorkspaceDistribution, rebuildCommand, guidance };
 }

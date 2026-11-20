@@ -495,6 +495,13 @@
   max-width: 40%;
 }
 
+/* A chat waiting on an answer: its title and its `asking you` chip take the
+ * phone row; the mode chip steps aside, and the asks chip's sheet carries the
+ * mode instead (views/chat/InlineAsk.tsx ChatAsksChip). */
+.shell-header--phone:has(.chat-asks-chip) .mode-chip {
+  display: none;
+}
+
 /* Thin connection banner and the page-level banners */
 .shell-main > .banner,
 .shell-main > .daemon-receipts > .banner {

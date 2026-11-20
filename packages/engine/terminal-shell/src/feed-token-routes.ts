@@ -377,7 +377,6 @@ export function createFeedTokenRoutes<
             return { handled: true, prompt, cursorPos, inputScrollTop, commandMode, indicatorFocused };
           }
           if (name) {
-            state.conversationManager?.dismissSplash(); // command input retires the splash, same as text input
             state.inputHistory?.add(commandHistoryLine(text, name, args, state.commandRegistry.get(name)?.secretArgs));
             const executeCommand = state.commandContext.executeCommand;
             // Only the actual terminal fallback may carry the exact owner source.

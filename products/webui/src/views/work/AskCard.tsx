@@ -15,9 +15,11 @@
  * reply it is sent.
  */
 import { useMemo, useState, type ReactNode } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { agoWords } from '@goodvibes/engine/contracts';
+import { client as platformClient } from '../../lib/goodvibes';
 import { hunkSummary, readApprovalEditHunks, readExecPromptAsk } from '../../lib/approvals';
-import { askReading, isAnswerable, type AskChoice, type OpenAsk } from '../../lib/asks';
+import { askReading, isAnswerable, wirePresentation, type AskChoice, type OpenAsk } from '../../lib/asks';
 import { Button } from '../../components/ui/Button';
 import { Checkbox } from '../../components/ui/Checkbox';
 import { Input } from '../../components/ui/Field';
@@ -214,7 +216,21 @@ export function AskCard({ ask, actions, variant, extraDetails = [], onDecided, l
     </form>
   ) : null;
 
-  const details = [...p.details, ...extraDetails];
+  // The open-ask lists carry each ask's words without its details (the daemon keeps
+  // lists compact); they are read for this one ask when "Details" is opened.
+  const readDetails = open === 'details' && ask.worded && p.details.length === 0;
+  const fullWords = useQuery({
+    queryKey: ['ask-details', ask.key],
+    queryFn: async () => {
+      const page = await platformClient.operator.invoke('inbox.list', { itemId: ask.id, status: 'all' }) as { items?: readonly unknown[] } | null;
+      return wirePresentation(page?.items?.[0])?.details ?? [];
+    },
+    enabled: readDetails,
+    staleTime: Infinity,
+  });
+  const details = [...(p.details.length > 0 ? p.details : fullWords.data ?? []), ...extraDetails];
+  // Details is offered while the daemon worded the ask: its details are read on open.
+  const hasDetails = details.length > 0 || (ask.worded && p.details.length === 0);
 
   return (
     <div
@@ -265,13 +281,15 @@ export function AskCard({ ask, actions, variant, extraDetails = [], onDecided, l
         {p.why && (
           <button type="button" className="ask-card__link" aria-expanded={open === 'why'} onClick={() => setOpen(open === 'why' ? null : 'why')}>Why am I asked?</button>
         )}
-        {p.why && details.length > 0 && <span aria-hidden="true"> · </span>}
-        {details.length > 0 && (
+        {p.why && hasDetails && <span aria-hidden="true"> · </span>}
+        {hasDetails && (
           <button type="button" className="ask-card__link" aria-expanded={open === 'details'} onClick={() => setOpen(open === 'details' ? null : 'details')}>Details</button>
         )}
       </p>
       {open === 'why' && <p className="ask-card__why">{p.why}</p>}
-      {open === 'details' && (
+      {open === 'details' && readDetails && fullWords.isPending && <p className="ask-card__dim">Reading the details…</p>}
+      {open === 'details' && readDetails && fullWords.isError && <p className="ask-card__dim">The details could not be read: {fullWords.error instanceof Error ? fullWords.error.message : String(fullWords.error)}</p>}
+      {open === 'details' && details.length > 0 && (
         <dl className="ask-card__details">
           {details.map((row, index) => (
             <div key={`${row.label}-${index}`} className="ask-card__detail">

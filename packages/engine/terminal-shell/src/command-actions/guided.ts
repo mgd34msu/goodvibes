@@ -187,8 +187,8 @@ async function runInPanel(
     const result = await openGuidedPanel(command, ctx, next);
     if (!result || result.kind === 'cancel') return;
     if (!(await askSentence(result.action, result.values, ctx))) {
-      // Back: the form again, on its last step, with what was filled in.
-      next = { action: result.action, values: result.values, step: Number.MAX_SAFE_INTEGER };
+      // Back: the form again, on its last step, with what was filled in; an action with no blanks has no form, so the list again.
+      next = result.action.inputs.length === 0 ? {} : { action: result.action, values: result.values, step: Number.MAX_SAFE_INTEGER };
       continue;
     }
     await runAndSay(command, result.action, result.values, ctx);

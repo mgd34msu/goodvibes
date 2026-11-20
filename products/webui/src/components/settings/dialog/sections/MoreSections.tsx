@@ -1,4 +1,4 @@
-import { TriggerRecoverySettings } from '../../TriggerRecoverySettings';
+import { TriggersPanel } from '../../../command/screens/TriggersPanel';
 /**
  * The smaller settings sections. Each one gathers the panels that used to sit
  * on the Admin and Providers pages (or were their own page) and the config
@@ -24,7 +24,7 @@ import { StatusDot } from '../../../ui/StatusDot';
 import { Toggle } from '../../../ui/Toggle';
 import { MemoryDiagnostics } from '../../MemoryDiagnostics';
 import { PermissionRules } from '../../PermissionRules';
-import { McpToolRules } from '../../McpToolRules';
+import { McpServers } from '../../../command/screens/McpServers';
 import { PermissionModeCards } from '../../PermissionModeCards';
 import { NotificationSettings } from '../../NotificationSettings';
 import { PairingTokensSettings } from '../../PairingTokensSettings';
@@ -192,7 +192,7 @@ export function PermissionsSection() {
         <summary className="dv-disclosure__summary">Advanced</summary>
         <div className="dv-disclosure__body">
           <PermissionRules />
-          <McpToolRules />
+          <McpServers />
           <SectionConfig id="permissions" emptyText="No permission settings reported." />
         </div>
       </details>
@@ -213,7 +213,7 @@ export function NetworkSection() {
 export function AllSettingsSection() {
   return (
     <>
-      <TriggerRecoverySettings />
+      <TriggersPanel />
       <SectionConfig id="all" emptyText="Every setting the daemon reports has a home in another section." />
     </>
   );

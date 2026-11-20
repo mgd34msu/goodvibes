@@ -4,6 +4,8 @@ import '@goodvibes-jev/engine/platform/platform/config';
 import { requireReadModels } from './runtime-services.ts';
 import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import type { AgentsHost } from '@goodvibes-jev/engine/terminal-shell/agents-command';
+import { defineCommand } from '@goodvibes-jev/engine/terminal-shell/command-actions';
+import { doAction } from '@goodvibes-jev/engine/terminal-shell/described-command-kit';
 
 /** Work contracts and stopping agents for `/agents` (terminal-shell/agents-command.ts) in this app. */
 export function contractsHost(): Exclude<AgentsHost<CommandContext>['contracts'], { readonly unavailable: string }> {
@@ -52,16 +54,20 @@ export function contractsHost(): Exclude<AgentsHost<CommandContext>['contracts']
 }
 
 export function registerControlRoomRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
+  registry.register(defineCommand<CommandContext>({
     name: 'communication',
-    aliases: ['comms'],
-    description: 'Inspect structured agent communication routes and recent activity',
-    handler(_args, ctx) {
-      if (ctx.openCommunicationView) {
+    title: 'Agent communication',
+    summary: 'The routes agents talk to each other over, and their recent messages',
+    group: 'Agents',
+    actions: [doAction<CommandContext>({
+      id: 'open', label: 'Open agent communication', word: '',
+      sentence: 'Opens the view of the routes agents talk over and their recent messages.',
+      operator: { terminalOnly: 'it opens a view of this terminal' },
+      async run(_values, ctx) {
+        if (!ctx.openCommunicationView) throw commandRefusal('The Agents view is not available in this runtime.');
         ctx.openCommunicationView();
-        return;
-      }
-      ctx.print('The Agents view is not available in this runtime.');
-    },
-  });
+        return undefined;
+      },
+    })],
+  }));
 }

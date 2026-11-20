@@ -216,7 +216,7 @@ export function registerPersonasRuntimeCommands(registry: CommandRegistry): void
           textInput({ id: 'tags', label: 'Tags', help: 'Words to find it by, separated by commas', why: 'your own words', typed: { flag: '--tags' }, optional: { default: '', means: 'none' } }),
           textInput({ id: 'triggers', label: 'When to suggest it', help: 'Words that bring it up, separated by commas', why: 'your own words', typed: { flag: '--triggers' }, optional: { default: '', means: 'never on its own' } }),
         ],
-        sentence: 'A persona {name} ("{description}") is kept with the instructions given, until you change it.', example: { name: 'editor', description: 'A careful copy editor', body: 'Edit for clarity; keep the author\'s voice.' },
+        sentence: 'A persona {name} ("{description}") is kept with the instructions "{body}", until you change it.', example: { name: 'editor', description: 'A careful copy editor', body: 'Edit for clarity; keep the author\'s voice.' },
         undoneBy: 'delete',
         async run(values, ctx) {
           const persona = step(() => registryFromContext(ctx).create({

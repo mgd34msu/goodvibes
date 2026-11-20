@@ -748,7 +748,7 @@ Agent channel delivery sent
 ### Media and devices
 
 `/media providers | generate [--provider <id>] [--model <id>] [--mime <mime>] <prompt> --yes | generate collect <provider> <task-id> [key=value ...]` lists media providers, generates an image or video (saved as an artifact), or collects a job that had not finished. A collect with `waitSeconds=0` checks the job once and answers at once. A generation cancelled after the provider accepted the job still answers with the job's task id (`pending`), and the job is cancelled at the provider when the provider allows it, so it can be found, collected or cancelled; a submission whose answer was lost is reported as of unknown outcome (`MEDIA_SUBMIT_OUTCOME_UNKNOWN`), never as not sent: look for it in the provider's console before submitting again.
-`/network-scan [on|off|status]` (alias `/discover-lan`) turns local-network scanning for model servers on or off; when on, the Agent scans at each start and `/provider` shows what it found. `off` prints `Local network scanning is now off. Nothing on your network will be probed.`
+`/network-scan [on|off|status]` turns local-network scanning for model servers on or off; when on, the Agent scans at each start and `/provider` shows what it found. `off` prints `Local network scanning is now off. Nothing on your network will be probed.`
 
 ### Support
 

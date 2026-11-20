@@ -11,7 +11,7 @@
  */
 import { useState, type SyntheticEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, GitBranch, ListTodo, Plus, Search, Server } from 'lucide-react';
+import { CalendarClock, ChevronDown, GitBranch, ListTodo, Plus, Search, Server } from 'lucide-react';
 import { client as platformClient } from '../../lib/goodvibes';
 import type { SessionsHostedCreateInput } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
@@ -26,6 +26,7 @@ import { Menu, MenuItem } from '../../components/ui/Menu';
 import { Select } from '../../components/ui/Select';
 import { CiReportDetail, type CiReport } from './CiWatchDetail';
 import { NativeIntakeForm } from './NativeIntakeForm';
+import { ActionSheet, findCommandAction } from '../../components/command/ActionSheet';
 import type { ClientLifetime } from '../../lib/client-lifetime';
 
 type NewKind = 'native' | 'task' | 'hosted' | 'ci-watch' | 'ci-status';
@@ -34,6 +35,8 @@ export interface NewWorkMenuProps {
   lifetime: ClientLifetime;
   /** A created item to open: its Work key (`hosted:<id>`, ...). */
   onCreated: (key: string) => void;
+  /** Open the schedules screen (the Scheduled group's own management). */
+  onSchedules?: () => void;
 }
 
 function TaskForm({ onDone }: { onDone: () => void }) {
@@ -284,8 +287,12 @@ const TITLES: Record<NewKind, { title: string; description: string }> = {
   'ci-status': { title: 'Check CI status', description: 'Look up any repository, ref or pull request once, without creating a watch.' },
 };
 
-export function NewWorkMenu({ onCreated, lifetime }: NewWorkMenuProps) {
+export function NewWorkMenu({ onCreated, lifetime, onSchedules }: NewWorkMenuProps) {
   const [open, setOpen] = useState<NewKind | null>(null);
+  const [scheduling, setScheduling] = useState(false);
+  // The words are /schedule's own (its description), so the menu says what the terminal says.
+  const addSchedule = findCommandAction('schedule', 'add')?.action.label;
+  const seeSchedules = findCommandAction('schedule', 'see-schedules')?.action.label;
   const close = () => setOpen(null);
   const done = (key?: string) => {
     setOpen(null);
@@ -308,7 +315,10 @@ export function NewWorkMenu({ onCreated, lifetime }: NewWorkMenuProps) {
         <MenuItem icon={<Server />} onSelect={() => setOpen('hosted')}>Start a session in a folder</MenuItem>
         <MenuItem icon={<GitBranch />} onSelect={() => setOpen('ci-watch')}>CI watch</MenuItem>
         <MenuItem icon={<Search />} onSelect={() => setOpen('ci-status')}>Check CI status</MenuItem>
+        {addSchedule ? <MenuItem icon={<CalendarClock />} onSelect={() => setScheduling(true)}>{addSchedule}…</MenuItem> : null}
+        {onSchedules && seeSchedules ? <MenuItem icon={<CalendarClock />} onSelect={onSchedules}>{seeSchedules}</MenuItem> : null}
       </Menu>
+      {scheduling ? <ActionSheet open command="schedule" action="add" onClose={() => setScheduling(false)} /> : null}
       <Dialog
         open={open !== null}
         onClose={close}

@@ -1,3 +1,9 @@
+/**
+ * `/notify` and `/notifications`, described once (command-actions/) for both
+ * terminal apps: the webhook addresses notifications go to (each kept in the
+ * secret store, the settings list holding its reference), a test, a send, the
+ * notifications that failed and resending them; and the history view.
+ */
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   forgetNotificationWebhook,
@@ -9,8 +15,12 @@ import {
   type NotificationWebhookSecretStore,
   type WebhookNotifier,
 } from '@goodvibes-jev/engine/platform/platform/integrations';
-import { secretArg, type TerminalCommandRegistry } from './command-registry.js';
-import { commandRefusal, stripYesFlag, takeYesFromText } from './command-confirmation.js';
+import type { TerminalCommandRegistry } from './command-registry.js';
+import { commandRefusal } from './command-confirmation.js';
+import { defineCommand } from './command-actions/define.js';
+import { defineList, type ListRow } from './command-actions/lists.js';
+import type { CommandActionContext } from './command-actions/types.js';
+import { doAction, listInput, readAction, textInput } from './described-command-kit.js';
 interface NotifyContext {
   readonly platform: {
     readonly configManager: Pick<ConfigManager, 'getCategory' | 'mergeCategory'>;
@@ -18,20 +28,6 @@ interface NotifyContext {
     readonly secretsManager?: NotificationWebhookSecretStore | null | undefined;
   };
   print(message: string): void;
-}
-
-/**
- * Where a `/notify add <url>` or `/notify remove <url>` line holds a URL: the
- * word after the subcommand (`--yes` is not a word of the line). A webhook URL
- * carries its key, so the input history keeps `<redacted>` there and the
- * handler reads it with `secretArg`. A list number is not a URL.
- */
-function notifyUrlPositions(args: readonly string[]): number[] {
-  const words = args.map((token, index) => ({ token, index })).filter((entry) => entry.token !== '--yes');
-  const sub = words[0]?.token.toLowerCase();
-  const target = words[1];
-  if (!target || (sub !== 'add' && sub !== 'remove')) return [];
-  return sub === 'remove' && /^\d+$/.test(target.token) ? [] : [target.index];
 }
 
 /** The part of a dead-letter id a person types: the random tail after the last colon. */
@@ -47,208 +43,238 @@ function formatDeadLetter(entry: NotificationDeadLetter): string {
   return `  ${shortDeadLetterId(entry.id)}  ${entry.channel}  ${when}  ${entry.attempts} attempt${entry.attempts === 1 ? '' : 's'}  ${entry.finalError}${status}\n      ${summary}`;
 }
 
-export function createNotifyRuntimeCommands<Context extends NotifyContext>(
-  requireWebhookNotifier: (context: Context) => Pick<WebhookNotifier, 'setUrls' | 'send' | 'test' | 'listDeadLetters' | 'replayDeadLetters' | 'targetProblem'>,
-  policy: {
-    /** Other notifiers whose failed notifications `/notify failed` and `/notify resend` also cover (the Slack and Discord one). */
-    readonly deadLetterSources?: ((context: Context) => readonly NotificationDeadLetterSource[]) | undefined;
-    readonly description: string;
-    readonly usage: string;
-    readonly argsHint: string;
-    readonly maskUrls: boolean;
-    readonly allowSend: boolean;
+export interface NotifyHost<Context> {
+  readonly webhookNotifier: (context: Context) => Pick<WebhookNotifier, 'setUrls' | 'send' | 'test' | 'listDeadLetters' | 'replayDeadLetters' | 'targetProblem'>;
+  /** Other notifiers whose failed notifications "See notifications that failed" and the resend also cover (the Slack and Discord one). */
+  readonly deadLetterSources?: ((context: Context) => readonly NotificationDeadLetterSource[]) | undefined;
+}
+
+const EMPTY_LIST = 'No webhook addresses are set. Add one with /notify add <address>.';
+
+let hostOf: NotifyHost<NotifyContext> | undefined;
+function host(): NotifyHost<NotifyContext> {
+  if (!hostOf) throw commandRefusal('/notify is not wired in this program.');
+  return hostOf;
+}
+
+/** The stored webhook references (each a goodvibes://secrets/ reference to a stored URL). */
+function storedUrls(context: NotifyContext): string[] {
+  const notifications = context.platform.configManager.getCategory('notifications');
+  return Array.isArray(notifications.webhookUrls) ? [...notifications.webhookUrls] : [];
+}
+async function resolveUrl(context: NotifyContext, entry: string): Promise<string | null> {
+  const secrets = context.platform.secretsManager ?? undefined;
+  return secrets ? resolveNotificationWebhook(entry, secrets) : null;
+}
+function deadLetters(context: NotifyContext): { readonly sources: readonly NotificationDeadLetterSource[]; readonly entries: readonly NotificationDeadLetter[] } {
+  const sources: readonly NotificationDeadLetterSource[] = [host().webhookNotifier(context), ...(host().deadLetterSources?.(context) ?? [])];
+  return { sources, entries: sources.flatMap((source) => source.listDeadLetters()).sort((a, b) => a.deadAt - b.deadAt) };
+}
+
+const WEBHOOKS = defineList<NotifyContext>({
+  name: 'notify.webhooks',
+  async read(context) {
+    const urls = storedUrls(context);
+    const resolved = await Promise.all(urls.map((entry) => resolveUrl(context, entry)));
+    return resolved.map((url, index): ListRow => ({ value: String(index + 1), label: shownNotificationWebhook(url) }));
   },
-) {
-  const emptyList = `No webhook URLs configured. Add one with /notify add <url>`;
-  /** A URL as the transcript shows it: the path holds the secret topic or token, so a masked policy shows only the origin. */
-  const shownUrl = (url: string | null): string => (!policy.maskUrls && url !== null ? url : shownNotificationWebhook(url));
-  function registerNotifyRuntimeCommands(registry: Pick<TerminalCommandRegistry<Context>, 'register'>): void {
-    registry.register({
-      name: 'notify',
-      effect: 'external-network',
-      // The message is free text, sent as typed; a first or last --yes confirms.
-      rawRest: (args) => (args[0]?.toLowerCase() === 'send' ? 1 : undefined),
-      aliases: [],
-      description: policy.description,
-      usage: policy.usage,
-      argsHint: policy.argsHint,
-      secretArgs: { select: notifyUrlPositions },
-      async handler(args, ctx) {
-        const parsed = { rest: stripYesFlag(args).rest };
-        const commandArgs = [...parsed.rest];
-        const notifications = ctx.platform.configManager.getCategory('notifications');
-        // Each member is a goodvibes://secrets/ reference to a stored URL.
-        const urls: string[] = Array.isArray(notifications.webhookUrls) ? [...notifications.webhookUrls] : [];
-        const notifier = requireWebhookNotifier(ctx);
-        const sub = commandArgs[0];
-        const secrets = ctx.platform.secretsManager ?? undefined;
-        const resolve = async (entry: string): Promise<string | null> => secrets ? resolveNotificationWebhook(entry, secrets) : null;
+  operator: { terminalOnly: 'the addresses are kept in this program\'s secret store' },
+});
+const FAILED = defineList<NotifyContext>({
+  name: 'notify.failed',
+  async read(context) {
+    return [
+      { value: 'all', label: 'Every failed notification' },
+      ...deadLetters(context).entries.map((entry): ListRow => ({ value: shortDeadLetterId(entry.id), label: entry.summary.split('\n')[0] ?? entry.id, detail: `${entry.channel}, ${entry.finalError}` })),
+    ];
+  },
+  operator: { method: 'notifications.deadLetters.list', input: {}, rows: { from: 'deadLetters', value: 'id', label: 'summary', detail: 'channel' } },
+});
 
-        if (!sub || sub === 'list') {
-          const showFull = !policy.maskUrls || commandArgs.includes('--show');
-          if (urls.length === 0) ctx.print(emptyList);
-          else {
-            // --show is the owner's explicit request to see the stored URLs.
-            const resolved = await Promise.all(urls.map(resolve));
-            const display = resolved.map((url, i) => `  ${i + 1}. ${showFull && url !== null ? url : shownNotificationWebhook(url)}`);
-            ctx.print([
-              `Webhook URLs (${urls.length}):`,
-              ...display,
-              ...(showFull ? [] : [`Remove one by its number: /notify remove <n>. Reveal the full URLs: /notify list --show.`]),
-            ].join('\n'));
-          }
-          return;
-        }
-
-        if (sub === 'add') {
-          const position = notifyUrlPositions(args)[0];
-          // Read through the declared secret position, which the input history masked.
-          const url = position === undefined ? undefined : secretArg(position).reveal('store-write');
-          if (!url) {
-            throw commandRefusal(`Usage: /notify add <url>\nExample: /notify add https://ntfy.sh/my-topic`);
-          }
-          if (!secrets) {
-            throw commandRefusal('Nothing was added: this session has no secret store, and a webhook URL carries its key, so it is never written into the settings file.');
-          }
+/** Register `/notify` (webhook notification addresses) and `/notifications` (the history view), one description for both apps. */
+export function registerNotifyCommands<Context extends NotifyContext & CommandActionContext & { readonly openNotifications?: (() => void) | undefined }>(
+  registry: Pick<TerminalCommandRegistry<Context>, 'register'>,
+  notifyHost: NotifyHost<Context>,
+): void {
+  hostOf = notifyHost as unknown as NotifyHost<NotifyContext>;
+  registry.register(defineCommand<Context>({
+    name: 'notifications',
+    title: 'Notification history',
+    summary: 'Every notice and notification in full, newest first; Enter goes to its subject',
+    group: 'Notifications',
+    actions: [doAction<Context>({
+      id: 'open', label: 'Open the notification history', word: '',
+      sentence: 'Opens every notice and notification collected, newest first.',
+      operator: { terminalOnly: 'it opens a view of this terminal' },
+      async run(_values, context) {
+        if (!context.openNotifications) throw commandRefusal('The notification history needs the interactive shell.');
+        context.openNotifications();
+        return undefined;
+      },
+    })],
+  }));
+  registry.register(defineCommand<Context>({
+    name: 'notify',
+    title: 'Webhook notifications',
+    summary: 'The webhook addresses (ntfy.sh format) notifications go to: add, remove, test, send, and resend the ones that failed',
+    group: 'Notifications',
+    report: 'list',
+    actions: [
+      readAction<Context>({
+        id: 'list', label: 'See where notifications go', word: 'list',
+        inputs: [{ id: 'show', label: 'Addresses', help: 'Each address carries its key, so only its site is shown unless you ask', kind: 'choice',
+          choices: [{ value: 'no', label: 'Show only each site' }, { value: 'yes', label: 'Show the full addresses', risk: 'loosens-a-protection' }],
+          required: { default: 'no', defaultMeans: 'only each site' }, typed: { flag: '--show', switchOn: 'yes' } }],
+        sentence: 'Lists the webhook addresses notifications go to, by number.', example: { show: 'yes' },
+        operator: { terminalOnly: 'the addresses are kept in this program\'s secret store' },
+        async run(values, context) {
+          const urls = storedUrls(context);
+          if (urls.length === 0) return EMPTY_LIST;
+          const full = values.show === 'yes';
+          const resolved = await Promise.all(urls.map((entry) => resolveUrl(context, entry)));
+          return [`Webhook addresses (${urls.length}):`, ...resolved.map((url, index) => `  ${index + 1}. ${full && url !== null ? url : shownNotificationWebhook(url)}`),
+            ...(full ? [] : ['Remove one by its number: /notify remove <n>. Show the full addresses: /notify list --show.'])].join('\n');
+        },
+      }),
+      {
+        id: 'add', label: 'Send notifications to an address', word: 'add',
+        inputs: [{ id: 'url', label: 'Address', help: 'A webhook address such as https://ntfy.sh/my-topic; it carries its key, so it is kept secret', kind: 'secret', required: true, typed: { position: 1 } }],
+        sentence: 'Notifications also go to the address you gave, kept in the secret store, until you change it.', done: '',
+        touches: 'credential', lasts: 'kept', risk: 'none', undoneBy: 'remove',
+        operator: { terminalOnly: 'the address is kept in this program\'s secret store' },
+        example: {},
+        async run(values, context) {
+          const url = values.url!;
+          const secrets = context.platform.secretsManager ?? undefined;
+          if (!secrets) throw commandRefusal('Nothing was added: this session has no secret store, and a webhook address carries its key, so it is never written into the settings file.');
           let target: URL;
           try {
             target = new URL(url);
           } catch {
-            throw commandRefusal(`Nothing was added: that is not a URL. Give the full address, for example https://ntfy.sh/my-topic.`);
+            throw commandRefusal('Nothing was added: that is not an address. Give the full address, for example https://ntfy.sh/my-topic.');
           }
-          if (target.protocol !== 'http:' && target.protocol !== 'https:') {
-            throw commandRefusal(`Nothing was added: ${target.protocol} addresses cannot be delivered to; use an http or https webhook URL.`);
-          }
-          // The delivery's own rule: a stored URL it refuses would only ever fail. A host on the
+          if (target.protocol !== 'http:' && target.protocol !== 'https:') throw commandRefusal(`Nothing was added: ${target.protocol} addresses cannot be delivered to; use an http or https webhook address.`);
+          // The delivery's own rule: a stored address it refuses would only ever fail. A host on the
           // owner's network is admitted once it is listed in network.privateDeliveryHosts, and the refusal says so.
+          const notifier = host().webhookNotifier(context);
           const problem = notifier.targetProblem(url);
-          if (problem !== undefined) {
-            throw commandRefusal(`Nothing was added: ${problem}`);
-          }
-          if ((await Promise.all(urls.map(resolve))).includes(url)) {
-            ctx.print(`Already configured: ${shownUrl(url)}`);
-            return;
-          }
-          // The URL goes to the secret store; the list keeps its reference.
+          if (problem !== undefined) throw commandRefusal(`Nothing was added: ${problem}`);
+          const urls = storedUrls(context);
+          if ((await Promise.all(urls.map((entry) => resolveUrl(context, entry)))).includes(url)) return `Already set: ${shownNotificationWebhook(url)}`;
+          // The address goes to the secret store; the list keeps its reference.
           const reference = await storeNotificationWebhook(url, secrets);
           urls.push(reference);
           try {
-            ctx.platform.configManager.mergeCategory('notifications', { webhookUrls: urls });
+            context.platform.configManager.mergeCategory('notifications', { webhookUrls: urls });
           } catch (error) {
             await forgetNotificationWebhook(reference, secrets).catch(() => undefined);
             throw error;
           }
           notifier.setUrls(urls);
-          ctx.print(`Webhook added: ${shownUrl(url)} (kept in the secret store; the settings list holds its reference)`);
-          return;
-        }
-
-        if (sub === 'remove') {
-          const given = commandArgs[1];
-          if (!given) {
-            throw commandRefusal(`Usage: /notify remove <n|url>  (n is the number /notify list shows)`);
-          }
-          // The list number names a stored URL without printing its secret topic to remove it;
-          // a typed URL is a declared secret position and is matched against the stored ones.
-          const position = /^\d+$/.test(given) ? Number(given) : undefined;
-          const typedPosition = position === undefined ? notifyUrlPositions(args)[0] : undefined;
-          const typed = typedPosition === undefined ? undefined : secretArg(typedPosition).reveal('dispatch');
-          const resolved = await Promise.all(urls.map(resolve));
-          const index = position !== undefined ? position - 1 : resolved.findIndex((url) => url !== null && url === typed);
-          const entry = urls[index];
-          if (position !== undefined && entry === undefined) {
-            throw commandRefusal(`No webhook has the number ${given}; /notify list shows ${urls.length === 0 ? 'none configured' : `1 to ${urls.length}`}.`);
-          }
-          if (entry === undefined) {
-            throw commandRefusal(`Not found: ${shownUrl(typed ?? null)}. /notify list shows the stored URLs by number.`);
-          }
+          return `Webhook added: ${shownNotificationWebhook(url)} (kept in the secret store; the settings list holds its reference)`;
+        },
+      },
+      {
+        id: 'remove', label: 'Stop sending to an address', word: 'remove',
+        inputs: [listInput({ id: 'address', label: 'Address', help: 'The addresses by number, as /notify list shows them', list: WEBHOOKS })],
+        sentence: 'Notifications stop going to address {address}, until you change it; its stored key is deleted.', done: '',
+        touches: 'credential', lasts: 'kept', risk: 'none', undoneBy: 'add',
+        operator: { terminalOnly: 'the addresses are kept in this program\'s secret store' },
+        example: { address: '1' },
+        async run(values, context) {
+          const urls = storedUrls(context);
+          const index = Number(values.address) - 1;
+          const entry = Number.isInteger(index) ? urls[index] : undefined;
+          if (entry === undefined) throw commandRefusal(`No address has the number ${values.address}; /notify list shows ${urls.length === 0 ? 'none set' : `1 to ${urls.length}`}.`);
+          const shown = shownNotificationWebhook(await resolveUrl(context, entry));
           const next = urls.filter((_, at) => at !== index);
-          ctx.platform.configManager.mergeCategory('notifications', { webhookUrls: next });
-          notifier.setUrls(next);
+          context.platform.configManager.mergeCategory('notifications', { webhookUrls: next });
+          host().webhookNotifier(context).setUrls(next);
+          const secrets = context.platform.secretsManager ?? undefined;
           if (secrets) await forgetNotificationWebhook(entry, secrets).catch(() => undefined);
-          ctx.print(`Webhook removed: ${shownUrl(resolved[index] ?? null)}`);
-          return;
-        }
-
-        if (sub === 'clear') {
-          ctx.platform.configManager.mergeCategory('notifications', { webhookUrls: [] });
-          notifier.setUrls([]);
+          return `Webhook removed: ${shown}`;
+        },
+      },
+      {
+        id: 'clear', label: 'Stop sending to every address', word: 'clear', inputs: [],
+        sentence: 'Every webhook address is removed and its stored key deleted.', done: '',
+        touches: 'credential', lasts: 'kept', risk: 'cannot-be-undone',
+        operator: { terminalOnly: 'the addresses are kept in this program\'s secret store' },
+        example: {},
+        async run(_values, context) {
+          const urls = storedUrls(context);
+          context.platform.configManager.mergeCategory('notifications', { webhookUrls: [] });
+          host().webhookNotifier(context).setUrls([]);
+          const secrets = context.platform.secretsManager ?? undefined;
           if (secrets) for (const entry of urls) await forgetNotificationWebhook(entry, secrets).catch(() => undefined);
-          ctx.print('All webhook URLs cleared.');
-          return;
-        }
-
-        if (sub === 'test') {
-          if (urls.length === 0) {
-            ctx.print(emptyList);
-            return;
-          }
-          ctx.print(`Testing ${urls.length} webhook${urls.length !== 1 ? 's' : ''}...`);
+          return 'All webhook addresses cleared.';
+        },
+      },
+      doAction<Context>({
+        id: 'test', label: 'Send a test notification', word: 'test',
+        sentence: 'A test notification is sent to every address, and each one\'s answer is shown.',
+        touches: 'another-machine', risk: 'sends-out',
+        operator: { terminalOnly: 'the addresses are kept in this program\'s secret store' },
+        async run(_values, context) {
+          const urls = storedUrls(context);
+          if (urls.length === 0) return EMPTY_LIST;
+          const notifier = host().webhookNotifier(context);
           notifier.setUrls(urls);
           const results = await notifier.test();
-          // A result names the list member (its reference); the host is read back for the line.
-          const shown = await Promise.all(results.map(async (r) => shownUrl(await resolve(r.url))));
-          ctx.print(
-            results
-              .map((r, i) => (r.ok ? `  [ok] ${shown[i]}` : `  [fail] ${shown[i]}: ${r.error ?? 'unknown error'}`))
-              .join('\n'),
-          );
-          return;
-        }
-
-        if (policy.allowSend && sub === 'send') {
-          const typed = takeYesFromText(commandArgs.slice(1).join(' '));
-          const message = typed.text;
-          if (!message) {
-            throw commandRefusal(`Usage: /notify send <message>`);
-          }
-          if (urls.length === 0) {
-            ctx.print(emptyList);
-            return;
-          }
+          // A result names the list member (its reference); the site is read back for the line.
+          const shown = await Promise.all(results.map(async (result) => shownNotificationWebhook(await resolveUrl(context, result.url))));
+          return results.map((result, i) => (result.ok ? `  [ok] ${shown[i]}` : `  [fail] ${shown[i]}: ${result.error ?? 'unknown error'}`)).join('\n');
+        },
+      }),
+      doAction<Context>({
+        id: 'send', label: 'Send a notification', word: 'send',
+        inputs: [textInput({ id: 'message', label: 'Message', help: 'What the notification says', why: 'your own words', kind: 'long-text', typed: { tail: true } })],
+        sentence: '"{message}" is sent to every webhook address.', example: { message: 'Build is green' },
+        touches: 'another-machine', risk: 'sends-out',
+        operator: { terminalOnly: 'the addresses are kept in this program\'s secret store' },
+        async run(values, context) {
+          const urls = storedUrls(context);
+          if (urls.length === 0) return EMPTY_LIST;
+          const notifier = host().webhookNotifier(context);
           notifier.setUrls(urls);
-          const result = await notifier.send(message);
+          const result = await notifier.send(values.message!);
           const reached = result.failed === 0 ? 'Notification sent' : result.delivered === 0 ? 'Notification not delivered' : 'Notification partly delivered';
-          ctx.print(
-            [
-              `${reached}: delivered to ${result.delivered} of ${result.attempted} target${result.attempted === 1 ? '' : 's'}`,
-              `  attempted ${result.attempted}`,
-              `  delivered ${result.delivered}`,
-              `  failed ${result.failed}`,
-              ...result.results
-                .slice(0, 20)
-                .map(
-                  (delivery, index) =>
-                    `  target ${index + 1} ${delivery.ok ? 'ok' : `failed${delivery.error ? ` (${delivery.error})` : ''}`}`,
-                ),
-              ...(result.results.length > 20 ? [`  ${result.results.length - 20} more target(s) omitted.`] : []),
-            ].join('\n'),
-          );
-          return;
-        }
-
-        if (sub === 'failed' || sub === 'resend') {
-          const sources: readonly NotificationDeadLetterSource[] = [notifier, ...(policy.deadLetterSources?.(ctx) ?? [])];
-          const entries = sources.flatMap((source) => source.listDeadLetters()).sort((a, b) => a.deadAt - b.deadAt);
-          if (sub === 'failed') {
-            ctx.print(entries.length === 0
-              ? 'No failed notifications.'
-              : [`Failed notifications (${entries.length}), oldest first:`, ...entries.map(formatDeadLetter),
-                `Resend one with /notify resend <id>, or all with /notify resend all.`].join('\n'));
-            return;
-          }
-          const toCurrent = commandArgs.includes('--to-current');
-          const which = commandArgs.slice(1).find((arg) => arg !== '--to-current');
-          if (!which) {
-            throw commandRefusal(`Usage: /notify resend <id|all> [--to-current]\nList them with /notify failed.`);
-          }
-          const ids = which === 'all'
-            ? entries.map((entry) => entry.id)
-            : entries.filter((entry) => entry.id === which || shortDeadLetterId(entry.id) === which).map((entry) => entry.id);
+          return [
+            `${reached}: delivered to ${result.delivered} of ${result.attempted} target${result.attempted === 1 ? '' : 's'}`,
+            ...result.results.slice(0, 20).map((delivery, index) => `  target ${index + 1} ${delivery.ok ? 'ok' : `failed${delivery.error ? ` (${delivery.error})` : ''}`}`),
+            ...(result.results.length > 20 ? [`  ${result.results.length - 20} more target(s) omitted.`] : []),
+          ].join('\n');
+        },
+      }),
+      readAction<Context>({
+        id: 'failed', label: 'See notifications that failed', word: 'failed',
+        sentence: 'Lists the notifications that could not be delivered, oldest first, with why.',
+        operator: { method: 'notifications.deadLetters.list', fields: {} },
+        async run(_values, context) {
+          const { entries } = deadLetters(context);
+          return entries.length === 0 ? 'No failed notifications.'
+            : [`Failed notifications (${entries.length}), oldest first:`, ...entries.map(formatDeadLetter), 'Resend one with /notify resend <id>, or all with /notify resend all.'].join('\n');
+        },
+      }),
+      doAction<Context>({
+        id: 'resend', label: 'Send failed notifications again', word: 'resend',
+        inputs: [
+          listInput({ id: 'which', label: 'Which', help: 'One failed notification, or all of them', list: FAILED, other: 'a failed notification\'s id' }),
+          { id: 'where', label: 'Where', help: 'Where a Slack or Discord channel that moved since posts', kind: 'choice',
+            choices: [{ value: 'same', label: 'Where it was going' }, { value: 'current', label: 'Where the channel posts now' }],
+            required: { default: 'same', defaultMeans: 'where it was going' }, typed: { flag: '--to-current', switchOn: 'current' } },
+        ],
+        sentence: 'The failed notification {which} is sent again.', example: { which: 'all' },
+        touches: 'another-machine', risk: 'sends-out',
+        operator: { method: 'notifications.deadLetters.replay', fields: { ids: 'which:lines' } },
+        async run(values, context) {
+          const { sources, entries } = deadLetters(context);
+          const which = values.which!;
+          const toCurrent = values.where === 'current';
+          const ids = which === 'all' ? entries.map((entry) => entry.id) : entries.filter((entry) => entry.id === which || shortDeadLetterId(entry.id) === which).map((entry) => entry.id);
           if (ids.length === 0) {
             if (which !== 'all') throw commandRefusal(`No failed notification has the id ${which}.`, 'List them with /notify failed.');
-            ctx.print('No failed notifications.');
-            return;
+            return 'No failed notifications.';
           }
           const results = new Map<string, string>();
           const moved: string[] = [];
@@ -259,21 +285,15 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
             }
           }
           const count = (outcome: string) => [...results.values()].filter((value) => value === outcome).length;
-          const delivered = count('delivered');
-          const retrying = count('retrying');
-          const failed = count('dead_letter');
           const changed = count('destination-changed');
-          ctx.print([
-            `Resent ${ids.length - changed} of ${ids.length} notification${ids.length === 1 ? '' : 's'}: ${delivered} delivered, ${retrying} queued for another attempt, ${failed} failed again${changed > 0 ? `, ${changed} not sent because the channel now posts somewhere else` : ''}.`,
+          const failed = count('dead_letter');
+          return [
+            `Resent ${ids.length - changed} of ${ids.length} notification${ids.length === 1 ? '' : 's'}: ${count('delivered')} delivered, ${count('retrying')} queued for another attempt, ${failed} failed again${changed > 0 ? `, ${changed} not sent because the channel now posts somewhere else` : ''}.`,
             ...(failed > 0 ? ['The ones that failed again are back in /notify failed.'] : []),
             ...(changed > 0 ? [...moved, `Resend them to where the channel posts now with /notify resend ${which} --to-current.`] : []),
-          ].join('\n'));
-          return;
-        }
-
-        ctx.print('Usage: /notify ' + policy.usage + ' | failed | resend <id|all> [--to-current]');
-      },
-    });
-  }
-  return { registerNotifyRuntimeCommands };
+          ].join('\n');
+        },
+      }),
+    ],
+  }));
 }

@@ -55,6 +55,11 @@ import { CiWatchDetail } from './CiWatchDetail';
 import { useHostedAttachment } from './HostedSessionDetail';
 import { HostedSessionWorkDetail } from './HostedSessionWorkDetail';
 import { NewWorkMenu } from './NewWorkMenu';
+import { CommandScreenDrawer } from '../../components/command/screens/CommandScreens';
+import { findCommandAction } from '../../components/command/ActionSheet';
+
+/** The Scheduled group's management, in /schedule's own words. */
+const seeSchedules = findCommandAction('schedule', 'see-schedules')?.action.label;
 import { OwnerQuestions } from './OwnerQuestions';
 import { useContractScope } from '../../hooks/useContracts';
 import type { ClientLifetime } from '../../lib/client-lifetime';
@@ -122,12 +127,19 @@ function BoardRowItem({ row, selected, child, onSelect }: { row: BoardRow; selec
   );
 }
 
-function BoardGroup({ label, rows, selectedKey, onOpen }: { label: string; rows: readonly BoardRow[]; selectedKey: string; onOpen: (key: string) => void }) {
+function BoardGroup({ label, rows, selectedKey, onOpen, action }: {
+  label: string; rows: readonly BoardRow[]; selectedKey: string; onOpen: (key: string) => void;
+  /** The group's own management, beside its heading (the Scheduled group opens the schedules screen). */
+  action?: { readonly label: string; readonly run: () => void } | undefined;
+}) {
   if (rows.length === 0) return null;
   const ids = new Set(rows.map((row) => row.ref.id));
   return (
     <section className="work-board__group" aria-label={`${label}, ${rows.length}`}>
-      <h3 className="work-board__label">{label} · {rows.length}</h3>
+      <div className="work-board__head">
+        <h3 className="work-board__label">{label} · {rows.length}</h3>
+        {action ? <Button size="sm" variant="ghost" onClick={action.run}>{action.label}</Button> : null}
+      </div>
       <RowList aria-label={label}>
         {rows.map((row) => {
           const key = workKeyOf(row);
@@ -158,6 +170,7 @@ function WorkViewContent({ contractScope, tab, subscriptionActive = true, sessio
   const { toast } = useToast();
   const phone = useMediaQuery(PHONE_QUERY);
   const [query, setQuery] = useState('');
+  const [schedulesOpen, setSchedulesOpen] = useState(false);
   const [scope, setScope] = useState<ShowScope>('active');
   const [archiving, setArchiving] = useState(false);
   const [servicesOpen, setServicesOpen] = useState(false);
@@ -462,7 +475,7 @@ function WorkViewContent({ contractScope, tab, subscriptionActive = true, sessio
         <>
           <BoardGroup label="Waiting for you" rows={groups.waiting} selectedKey={selectedKey} onOpen={openItem} />
           <BoardGroup label="Running now" rows={groups.running} selectedKey={selectedKey} onOpen={openItem} />
-          <BoardGroup label="Scheduled" rows={groups.scheduled} selectedKey={selectedKey} onOpen={openItem} />
+          <BoardGroup label="Scheduled" rows={groups.scheduled} selectedKey={selectedKey} onOpen={openItem} action={seeSchedules ? { label: seeSchedules, run: () => setSchedulesOpen(true) } : undefined} />
           <BoardGroup label="Finished" rows={groups.finished} selectedKey={selectedKey} onOpen={openItem} />
 
           <div className="work-services">
@@ -584,7 +597,8 @@ function WorkViewContent({ contractScope, tab, subscriptionActive = true, sessio
           {!archived && waitingCount > 0 && (
             <Chip tone="warn" className="work-header__chip">{waitingCount} waiting for you</Chip>
           )}
-          <NewWorkMenu lifetime={contractScope} onCreated={(key) => { dismissedRef.current = true; setSelectedKey(workKey(key)); }} />
+          <NewWorkMenu lifetime={contractScope} onCreated={(key) => { dismissedRef.current = true; setSelectedKey(workKey(key)); }} onSchedules={() => setSchedulesOpen(true)} />
+          <CommandScreenDrawer screen={schedulesOpen ? 'schedules' : null} onClose={() => setSchedulesOpen(false)} />
         </span>
       )}
       filters={(

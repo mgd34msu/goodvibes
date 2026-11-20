@@ -20,7 +20,7 @@ const HARDCODED_ROWS: ReadonlyArray<readonly [string, string]> = [
   ['Esc', 'Close overlay / clear prompt / leave an agent or process view / interrupt main'],
   ['Shift+Tab', 'Cycle permission mode; with session chips showing and an empty composer, the previous session'],
   ['F2', 'Open Agents'],
-  ['?  or  /help', 'Help: every command and key']
+  ['?  or  /help', 'Help: every command and key'],
   // Precedence: a partial path under the cursor claims Tab for completion,
   // otherwise it collapses or expands the nearest block.
   ['Tab', 'Path-complete, else collapse/expand block; with session chips showing and an empty composer, the next session'],

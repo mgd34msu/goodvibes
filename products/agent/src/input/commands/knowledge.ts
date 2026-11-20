@@ -1,447 +1,171 @@
-import { handleKnowledgeMutationCommand, printKnowledgeIngestResult } from '@goodvibes-jev/engine/terminal-shell/knowledge-mutation-command';
-import { handleKnowledgeReadCommand } from '@goodvibes-jev/engine/terminal-shell/knowledge-read-command';
-import { readKnowledgeAskArguments } from '@goodvibes-jev/engine/terminal-shell/command-arguments';
-import { readFlag, readStringListFlag, readPositiveIntFlag, positionalArgs } from '@goodvibes-jev/engine/terminal-shell/command-arguments';
-import type { CommandContext, SlashCommand } from '../command-registry.ts';
-import { commandRefusal, requireYesFlag, stripYesFlag } from './confirmation.ts';
+/**
+ * `/knowledge` in the Agent (terminal-shell/knowledge-command.ts): Agent
+ * Knowledge only, over the Agent-owned routes. It never uses the default
+ * knowledge or another product's knowledge space, and nothing falls back to
+ * them: a question naming a knowledge space is refused. Every write checks
+ * that the session it belongs to is still the one open.
+ */
+import { registerKnowledgeCommand, knowledgeIngestLine } from '@goodvibes-jev/engine/terminal-shell/knowledge-command';
+import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import { commandRefusal } from './confirmation.ts';
 import { parseBrowserImportScope } from './knowledge-browser-flags.ts';
 import { formatKnowledgeMap, renderKnowledgeAskResult } from './knowledge-format.ts';
-import { readRefusal } from '@goodvibes-jev/engine/errors';
-import { OUTWARD_VERB, ownerOnlyVerb, withCommandVerbs, type CommandVerbPolicy, type CommandVerbs } from './command-verbs.ts';
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+function knowledgeOf(context: CommandContext) {
+  const knowledge = context.clients?.agentKnowledgeApi;
+  if (!knowledge) throw commandRefusal('[knowledge] Agent Knowledge is not available here. Nothing falls back to the default knowledge or another knowledge space.');
+  return knowledge;
 }
 
-function requireAgentKnowledgeApi(context: CommandContext) {
-  const knowledgeApi = context.clients?.agentKnowledgeApi;
-  if (!knowledgeApi) {
-    context.print(
-      '[knowledge] Agent Knowledge API is not available in this runtime. Refusing to use default knowledge or non-Agent knowledge fallback.',
-    );
-    return null;
-  }
-  return knowledgeApi;
-}
-
-function findDisallowedKnowledgeScopeFlag(args: readonly string[]): string | null {
-  const disallowed = [
-    '--space',
-    '--knowledge-space',
-    '--knowledge-space-id',
-    ['--knowledge', 'SpaceId'].join(''),
-    '--include-all-spaces',
-    ['--include', 'AllSpaces'].join(''),
-    ['--home', 'graph'].join(''),
-    ['--home', '-graph'].join(''),
-  ];
-  for (const token of args) {
-    for (const flag of disallowed) {
-      if (token === flag || token.startsWith(`${flag}=`)) return flag;
-    }
-  }
-  return null;
-}
-
-function printScopeFlagRejection(context: CommandContext, flag: string): void {
-  context.print(
-    [
-      `[knowledge] Agent Knowledge is isolated; ${flag} is not accepted.`,
-      '[knowledge] GoodVibes Agent must not use default knowledge or non-Agent product spaces.',
-      '[knowledge] Use only /api/goodvibes-agent/knowledge/* Agent-owned routes.',
-    ].join('\n'),
-  );
-}
-
-function parseConnectorInputFlag(args: string[]): unknown {
-  const value = readFlag(args, '--input');
-  if (!value) return undefined;
+/** The input a connector takes: JSON when it reads as JSON, else the text as typed. */
+function connectorInput(value: string): unknown {
   const trimmed = value.trim();
   if (!trimmed) return undefined;
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-    try {
-      return JSON.parse(trimmed) as unknown;
-    } catch {
-      return trimmed;
-    }
+    try { return JSON.parse(trimmed) as unknown; } catch { return trimmed; }
   }
   return trimmed;
 }
 
-/** The ingest lines that take `--allow-private-hosts`, which loosens the network guard for that fetch. */
-const PRIVATE_HOST_INGEST_VERBS: ReadonlySet<string> = new Set(['ingest-url', 'import-urls', 'import-bookmarks', 'ingest-connector']);
-
-function privateHostIngestVerb(rest: readonly string[]): CommandVerbPolicy {
-  return rest.includes('--allow-private-hosts')
-    ? ownerOnlyVerb('outward', 'lets the ingest fetch from addresses on your local network or this machine, which ingests normally refuse')
-    : OUTWARD_VERB;
+function tagsOf(value: string): string[] | undefined {
+  const tags = value.split(',').map((entry) => entry.trim()).filter(Boolean);
+  return tags.length > 0 ? tags : undefined;
 }
 
-/**
- * Every /knowledge line keeps the one admission it has always had (it reaches
- * Agent Knowledge on the connected host); a line that allows private hosts is
- * the owner's to type, so a model-run one is refused before any admission.
- */
-const KNOWLEDGE_VERBS: CommandVerbs = {
-  defaultVerb: 'status',
-  verbs: Object.fromEntries([...PRIVATE_HOST_INGEST_VERBS].map((verb) => [verb, privateHostIngestVerb])),
-  otherwise: OUTWARD_VERB,
-};
-
-export const knowledgeCommand: SlashCommand = withCommandVerbs({
-  name: 'knowledge',
-  effect: 'mixed',
-  aliases: ['know'],
-  description:
-    'Agent Knowledge: isolated Agent-owned status, ask/search, source/node/issue lists, item lookup, map, connectors, ingest, and review queue.',
-  firstScreen: false,
-  usage: '<subcommand> [args]',
-  // Ingests, imports, review, reindex, consolidation and cancelling a run are
-  // recoverable and run at once. Letting an ingest fetch from private hosts
-  // loosens the network guard, so that line asks once.
-  confirm(args) {
-    const sub = (args[0] ?? '').toLowerCase();
-    if (!PRIVATE_HOST_INGEST_VERBS.has(sub) || !args.includes('--allow-private-hosts')) return undefined;
-    const what = sub === 'ingest-connector' ? 'The connector input' : sub === 'ingest-url' ? 'The address' : 'Every address in the list';
-    return { title: `Let this ${sub === 'ingest-connector' ? 'connector' : 'import'} fetch from private network hosts?`, detail: `${what} may then be fetched from addresses on your local network or this machine, which ingests normally refuse.`, confirmLabel: 'Allow' };
-  },
-  // No secret is typed on a /knowledge line.
-  secretArgs: {},
-  argsHint:
-    'status|ask|search|list|get|map|connectors|ingest-url|ingest-file|ingest-artifact|import-urls|import-bookmarks|import-browser-history --yes|ingest-connector|review-issue|reindex|consolidate|cancel-run',
-  handler: async (args: string[], context: CommandContext): Promise<void> => {
-    if (args.length === 0 && context.openAgentWorkspace) {
-      context.openAgentWorkspace('knowledge');
-      return;
-    }
-    const knowledge = requireAgentKnowledgeApi(context);
-    if (!knowledge) {
-      return;
-    }
-    const sub = (args[0] ?? 'status').toLowerCase();
-    const confirmation = stripYesFlag(args.slice(1));
-    const rest = [...confirmation.rest];
-    const disallowedScopeFlag = findDisallowedKnowledgeScopeFlag(rest);
-    if (disallowedScopeFlag) {
-      printScopeFlagRejection(context, disallowedScopeFlag);
-      return;
-    }
-    // A knowledge read does not depend on the transcript: it carries the caller's
-    // abort signal and its answer is printed once. A write is recorded under the
-    // session it was asked in, so it is sent only while that session is still open.
-    const sessionId = context.session.runtime.sessionId;
-    const reading = { signal: context.judgmentReadingOptions?.signal };
-    const print = (text: string): void => context.print(text);
-    const sameSession = (): void => {
-      if (context.session.runtime.sessionId !== sessionId)
-        throw new Error('The session changed before this write was sent, so nothing was written. Run the command again in the session it belongs to.');
+export function registerKnowledgeRuntimeCommands(registry: CommandRegistry): void {
+  /** A write is sent only while the session it belongs to is still the one open. */
+  const guard = (ctx: CommandContext) => {
+    const sessionId = ctx.session.runtime.sessionId;
+    return {
+      sessionId,
+      same(): void {
+        if (ctx.session.runtime.sessionId !== sessionId) throw new Error('The session changed before this write was sent, so nothing was written. Run the command again in the session it belongs to.');
+      },
     };
-
-    try {
-      const answer = await handleKnowledgeReadCommand(
-        sub,
-        rest,
-        {
-          status: () => knowledge.status.get({}, reading),
-          nodes: (limit) => knowledge.graph.nodes.list(limit, reading),
-          issues: (limit) => knowledge.graph.issues.list(limit, reading),
-          sources: (limit) => knowledge.sources.list(limit, reading),
-          search: (query, limit) => knowledge.graph.items.search(query, limit, reading),
-          get: (id) => knowledge.graph.items.get(id, {}, reading),
-          lint: () => knowledge.status.lint(),
-          packet: (query, scopes) => knowledge.packets.buildPrompt(query, scopes, undefined, reading),
-          candidates: (limit) => knowledge.consolidation.candidates(limit),
-          reports: (limit) => knowledge.consolidation.reports(limit),
-          schedules: (limit) => knowledge.jobs.schedules.list(limit),
-        },
-        {
-          statusTitle: '[knowledge] Agent Knowledge status',
-          headingSuffix: '',
-          fieldSeparator: ' ',
-          scoreSeparator: ' ',
-          nodeKind: 'type',
-        },
-      );
-      if (answer) {
-        // The one check of a read: the answer belongs to the session that asked.
-        print(
-          context.session.runtime.sessionId === sessionId
-            ? answer.join('\n')
-            : `[knowledge] The session changed while /knowledge ${sub} was reading, so its answer is not shown here. Run it again.`,
-        );
-        return;
-      }
-      if (
-        await handleKnowledgeMutationCommand(
-          sub,
-          rest,
-          print,
-          {
-            sessionId: () => sessionId,
-            url: (input) => {
-              sameSession();
-              return knowledge.ingest.url(input);
-            },
-            bookmarksFile: (input) => {
-              sameSession();
-              return knowledge.ingest.bookmarksFile(input);
-            },
-            urlsFile: (input) => {
-              sameSession();
-              return knowledge.ingest.urlsFile(input);
-            },
-            review: (input) => {
-              sameSession();
-              return knowledge.graph.issues.review(input);
-            },
-            reindex: () => {
-              sameSession();
-              return knowledge.status.reindex();
-            },
-            run: (id, options) => {
-              sameSession();
-              return knowledge.jobs.run(id, options);
-            },
-            runs: (limit, jobId) => knowledge.jobs.runs(limit, jobId),
-            cancelRun: (runId) => {
-              sameSession();
-              return knowledge.jobs.cancelRun(runId);
-            },
-            describeError: (error) => (error instanceof Error ? error.message : String(error)),
-          },
-          { fieldSeparator: ' ', reviewer: 'agent', sourceLabel: 'knowledge source' },
-        )
-      )
-        return;
-      switch (sub) {
-        case 'ask': {
-          const service = context.extensions.agentKnowledgeService;
-          if (!service?.ask) {
-            print(
-              '[knowledge] Agent Knowledge ask is not available in this runtime. Refusing to use default knowledge or non-Agent knowledge fallback.',
-            );
-            return;
-          }
-          const input = readKnowledgeAskArguments(rest, false);
-          const query = input.query;
-          if (!query) {
-            print('[knowledge] Usage: /knowledge ask <query> [--limit <n>] [--mode <concise|standard|detailed>]');
-            return;
-          }
-          const result = await service.ask(input);
-          print(renderKnowledgeAskResult(result));
-          break;
-        }
-
-        case 'ingest-file': {
-          const [path] = positionalArgs(rest, ['--title', '--tags', '--folder', '--connector']);
-          if (!path) {
-            print('[knowledge] Usage: /knowledge ingest-file <path> [--title <title>] [--tags <a,b>] [--folder <path>]');
-            return;
-          }
-          sameSession();
-          const result = await knowledge.ingest.artifact({
-            path,
-            title: readFlag(rest, '--title'),
-            tags: readStringListFlag(rest, '--tags'),
-            folderPath: readFlag(rest, '--folder'),
-            sessionId,
-            connectorId: readFlag(rest, '--connector') ?? 'goodvibes-agent-file',
-          });
-          printKnowledgeIngestResult(print, result.source, path);
-          if (result.source.summary) print(`  ${result.source.summary}`);
-          if (result.artifactId) print(`  artifact: ${result.artifactId}`);
-          break;
-        }
-
-        case 'ingest-artifact': {
-          const [artifactId] = positionalArgs(rest, ['--title', '--tags', '--folder', '--connector']);
-          if (!artifactId) {
-            print('[knowledge] Usage: /knowledge ingest-artifact <artifactId> [--title <title>] [--tags <a,b>] [--folder <path>]');
-            return;
-          }
-          sameSession();
-          const result = await knowledge.ingest.artifact({
-            artifactId,
-            title: readFlag(rest, '--title'),
-            tags: readStringListFlag(rest, '--tags'),
-            folderPath: readFlag(rest, '--folder'),
-            sessionId,
-            connectorId: readFlag(rest, '--connector') ?? 'goodvibes-agent-artifact-browser',
-          });
-          printKnowledgeIngestResult(print, result.source, artifactId);
-          if (result.source.summary) print(`  ${result.source.summary}`);
-          if (result.artifactId) print(`  artifact: ${result.artifactId}`);
-          break;
-        }
-
-        case 'import-browser-history':
-        case 'sync-browser-history': {
-          if (!confirmation.yes) {
-            requireYesFlag(
-              context,
-              'import browser history into Agent Knowledge',
-              '/knowledge import-browser-history [--browsers chrome,firefox] [--sources history,bookmark] [--limit <n>] [--since-days <n>] --yes',
-            );
-            return;
-          }
-          const scope = parseBrowserImportScope(rest, Date.now());
-          if (!scope.ok) {
-            print(`[knowledge] ${scope.message}`);
-            return;
-          }
-          sameSession();
-          const result = await knowledge.ingest.browserHistory({
-            browsers: scope.scope.browsers,
-            sourceKinds: scope.scope.sourceKinds,
-            homeOverride: readFlag(rest, '--home'),
-            limit: scope.scope.limit,
-            sinceMs: scope.scope.sinceMs,
-            connectorId: 'goodvibes-agent-browser-history',
-            sessionId,
-          });
-          print(`[knowledge] Imported browser knowledge: ${result.imported} ok, ${result.failed} failed`);
-          if (result.profiles.length > 0) print(`  profiles ${result.profiles.length}`);
-          if (result.errors.length > 0) {
-            for (const error of result.errors.slice(0, 10)) print(`  error ${error}`);
-          }
-          break;
-        }
-
-        case 'ingest-connector': {
-          const [connectorId] = positionalArgs(rest, ['--input', '--path', '--content']);
-          if (!connectorId) {
-            print(
-              '[knowledge] Usage: /knowledge ingest-connector <connectorId> [--input <json-or-text>|--path <path>|--content <text>]',
-            );
-            return;
-          }
-          const input = parseConnectorInputFlag(rest);
-          const path = readFlag(rest, '--path');
-          const content = readFlag(rest, '--content');
-          if (input === undefined && !path && !content) {
-            print(
-              '[knowledge] Usage: /knowledge ingest-connector <connectorId> [--input <json-or-text>|--path <path>|--content <text>]',
-            );
-            return;
-          }
-          sameSession();
-          const result = await knowledge.ingest.connectorInput({
-            connectorId,
-            input,
-            path,
-            content,
-            sessionId,
-            fetchMode: rest.includes('--allow-private-hosts') ? 'allow-private-hosts' : 'public-only',
-          });
-          print(`[knowledge] Imported connector input: ${result.imported} ok, ${result.failed} failed`);
-          if (result.errors.length > 0) {
-            for (const error of result.errors.slice(0, 10)) print(`  error ${error}`);
-          }
-          break;
-        }
-
-        case 'map': {
-          const limit = readPositiveIntFlag(rest, '--limit', 50);
-          const query = positionalArgs(rest, ['--limit']).join(' ').trim();
-          const result = await knowledge.graph.map({ limit, ...(query.length > 0 ? { query } : {}) }, reading);
-          print(formatKnowledgeMap(result));
-          break;
-        }
-
-        case 'connectors': {
-          const [first, second] = positionalArgs(rest);
-          if (first === 'doctor') {
-            if (!second) {
-              print('[knowledge] Usage: /knowledge connectors doctor <connectorId>');
-              return;
-            }
-            const report = await knowledge.connectors.doctor(second);
-            if (!report) {
-              print(`[knowledge] Connector doctor report unavailable ${second}`);
-              return;
-            }
-            print(
-              [
-                `[knowledge] Connector doctor ${report.connectorId}`,
-                `  ready: ${report.ready ? 'yes' : 'no'}`,
-                `  summary: ${report.summary}`,
-                ...(report.checks.length > 0
-                  ? [
-                      '  checks:',
-                      ...report.checks.slice(0, 10).map((check) => `    - ${check.id} [${check.status}] ${check.label} - ${check.detail}`),
-                    ]
-                  : []),
-                ...(report.hints.length > 0 ? ['  hints:', ...report.hints.slice(0, 8).map((hint) => `    - ${hint}`)] : []),
-              ].join('\n'),
-            );
-            return;
-          }
-          if (first) {
-            const connector = knowledge.connectors.get(first);
-            if (!connector) {
-              print(`[knowledge] Unknown connector ${first}`);
-              return;
-            }
-            print(
-              [
-                `[knowledge] Connector ${connector.id}`,
-                `  name ${connector.displayName ?? connector.id}`,
-                `  source type ${connector.sourceType}`,
-                `  description ${connector.description}`,
-                `  capabilities: ${connector.capabilities?.join(', ') || 'none'}`,
-              ].join('\n'),
-            );
-            return;
-          }
-          const connectors = knowledge.connectors.list();
-          if (connectors.length === 0) {
-            print('[knowledge] No connectors.');
-            return;
-          }
-          print(`[knowledge] Connectors (${connectors.length})`);
-          for (const connector of connectors) {
-            print(`  ${connector.id} [${connector.sourceType}] ${connector.displayName ?? connector.id}`);
-            print(`    ${connector.description}`);
-          }
-          break;
-        }
-
-        default:
-          print(
-            [
-              'Usage: /knowledge <subcommand>',
-              '  status',
-              '  ask <query> [--limit <n>] [--mode <concise|standard|detailed>]',
-              '  ingest-url <url> [--title <title>] [--tags <a,b>] [--folder <path>] [--allow-private-hosts]',
-              '  ingest-file <path> [--title <title>] [--tags <a,b>] [--folder <path>]',
-              '  ingest-artifact <artifactId> [--title <title>] [--tags <a,b>] [--folder <path>]',
-              '  ingest-connector <connectorId> [--input <json-or-text>|--path <path>|--content <text>] [--allow-private-hosts]',
-              '  import-bookmarks <path> [--allow-private-hosts]',
-              '  import-urls <path> [--allow-private-hosts]',
-              '  import-browser-history [--browsers chrome,firefox] [--sources history,bookmark] [--limit <n>] [--since-days <n>] --yes',
-              '  list [--kind <sources|nodes|issues>] [--limit <n>]',
-              '  search <query> [--limit <n>]',
-              '  get <id>',
-              '  map [query] [--limit <n>]',
-              '  queue [limit]',
-              '  review-issue <issueId> <accept|reject|resolve|reopen|edit|forget> [--reviewer <name>] [--value <json-object>]',
-              '  candidates [limit]',
-              '  connectors [connectorId|doctor <connectorId>]',
-              '  reports [limit]',
-              '  schedules',
-              '  lint',
-              '  packet <task...> [--scope <path> ...]',
-              '  explain <task...> [--scope <path> ...]',
-              '  reindex',
-              '  consolidate [light|deep]',
-              '  cancel-run [runId]',
-            ].join('\n'),
-          );
-      }
-    } catch (error) {
-      if (readRefusal(error)) throw error;
-      throw commandRefusal(`[knowledge] ${error instanceof Error ? error.message : String(error)}`);
-    }
-  },
-}, KNOWLEDGE_VERBS);
+  };
+  registerKnowledgeCommand<CommandContext>(registry, {
+    ports(ctx) {
+      const knowledge = knowledgeOf(ctx);
+      const session = guard(ctx);
+      const reading = { signal: ctx.judgmentReadingOptions?.signal };
+      const service = ctx.extensions.agentKnowledgeService;
+      return {
+        status: () => knowledge.status.get({}, reading),
+        nodes: (limit) => knowledge.graph.nodes.list(limit, reading),
+        issues: (limit) => knowledge.graph.issues.list(limit, reading),
+        sources: (limit) => knowledge.sources.list(limit, reading),
+        search: (query, limit) => knowledge.graph.items.search(query, limit, reading),
+        get: (id) => knowledge.graph.items.get(id, {}, reading),
+        lint: () => knowledge.status.lint(),
+        candidates: (limit) => knowledge.consolidation.candidates(limit),
+        reports: (limit) => knowledge.consolidation.reports(limit),
+        schedules: (limit) => knowledge.jobs.schedules.list(limit),
+        packet: (query, scopes) => knowledge.packets.buildPrompt(query, scopes, undefined, reading),
+        url: (input) => { session.same(); return knowledge.ingest.url(input); },
+        bookmarksFile: (input) => { session.same(); return knowledge.ingest.bookmarksFile(input); },
+        urlsFile: (input) => { session.same(); return knowledge.ingest.urlsFile(input); },
+        review: (input) => { session.same(); return knowledge.graph.issues.review(input); },
+        reindex: () => { session.same(); return knowledge.status.reindex(); },
+        run: (id, options) => { session.same(); return knowledge.jobs.run(id, options); },
+        runs: (limit, jobId) => knowledge.jobs.runs(limit, jobId),
+        cancelRun: (runId) => { session.same(); return knowledge.jobs.cancelRun(runId); },
+        ask: service?.ask ? (input) => service.ask(input) : undefined,
+        sessionId: () => session.sessionId,
+      };
+    },
+    open(ctx) {
+      if (!ctx.openAgentWorkspace) throw commandRefusal('The Agent workspace needs the interactive shell.', '/knowledge status shows how it stands.');
+      ctx.openAgentWorkspace('knowledge');
+    },
+    presentation: {
+      statusTitle: '[knowledge] Agent Knowledge',
+      headingSuffix: '',
+      fieldSeparator: ' ',
+      scoreSeparator: ' ',
+      nodeKind: 'type',
+      reviewer: 'agent',
+      sourceLabel: 'knowledge source',
+      renderAsk: renderKnowledgeAskResult,
+    },
+    spacesRefused: '[knowledge] Agent Knowledge is isolated: a question cannot name another knowledge space, and nothing falls back to the default knowledge.',
+    more: {
+      async ingestFile(ctx, input) {
+        const knowledge = knowledgeOf(ctx);
+        const session = guard(ctx);
+        session.same();
+        const result = await knowledge.ingest.artifact({ path: input.path, title: input.title || undefined, tags: tagsOf(input.tags), folderPath: input.folder || undefined, sessionId: session.sessionId, connectorId: 'goodvibes-agent-file' });
+        return [knowledgeIngestLine(result.source, input.path), ...(result.source.summary ? [`  ${result.source.summary}`] : []), ...(result.artifactId ? [`  artifact: ${result.artifactId}`] : [])].join('\n');
+      },
+      async ingestArtifact(ctx, input) {
+        const knowledge = knowledgeOf(ctx);
+        const session = guard(ctx);
+        session.same();
+        const result = await knowledge.ingest.artifact({ artifactId: input.artifact, title: input.title || undefined, tags: tagsOf(input.tags), folderPath: input.folder || undefined, sessionId: session.sessionId, connectorId: 'goodvibes-agent-artifact-browser' });
+        return [knowledgeIngestLine(result.source, input.artifact), ...(result.source.summary ? [`  ${result.source.summary}`] : []), ...(result.artifactId ? [`  artifact: ${result.artifactId}`] : [])].join('\n');
+      },
+      async browserHistory(ctx, input) {
+        // The same validation the shell-less command uses: a narrower choice that resolves to nothing is refused, not widened.
+        const scope = parseBrowserImportScope([
+          ...(input.browsers ? ['--browsers', input.browsers] : []),
+          ...(input.sources ? ['--sources', input.sources] : []),
+          ...(input.limit ? ['--limit', input.limit] : []),
+          ...(input.days ? ['--since-days', input.days] : []),
+        ], Date.now());
+        if (!scope.ok) throw commandRefusal(`[knowledge] ${scope.message}`);
+        const knowledge = knowledgeOf(ctx);
+        const session = guard(ctx);
+        session.same();
+        const result = await knowledge.ingest.browserHistory({
+          browsers: scope.scope.browsers, sourceKinds: scope.scope.sourceKinds, limit: scope.scope.limit, sinceMs: scope.scope.sinceMs,
+          connectorId: 'goodvibes-agent-browser-history', sessionId: session.sessionId,
+        });
+        return [
+          `[knowledge] Added from your browsers: ${result.imported} ok, ${result.failed} failed`,
+          ...(result.profiles.length > 0 ? [`  browser profiles ${result.profiles.length}`] : []),
+          ...result.errors.slice(0, 10).map((error) => `  error ${error}`),
+        ].join('\n');
+      },
+      async connector(ctx, input) {
+        const given = connectorInput(input.input);
+        if (given === undefined && !input.path && !input.content) throw commandRefusal('[knowledge] Give the connector something to read: an input, a file or text. Nothing was added.');
+        const knowledge = knowledgeOf(ctx);
+        const session = guard(ctx);
+        session.same();
+        const result = await knowledge.ingest.connectorInput({
+          connectorId: input.connector, input: given, path: input.path || undefined, content: input.content || undefined, sessionId: session.sessionId,
+          fetchMode: input.allowPrivate ? 'allow-private-hosts' : 'public-only',
+        });
+        return [`[knowledge] Added through ${input.connector}: ${result.imported} ok, ${result.failed} failed`, ...result.errors.slice(0, 10).map((error) => `  error ${error}`)].join('\n');
+      },
+      async map(ctx, query, limit) {
+        const reading = { signal: ctx.judgmentReadingOptions?.signal };
+        return formatKnowledgeMap(await knowledgeOf(ctx).graph.map({ limit, ...(query ? { query } : {}) }, reading));
+      },
+      connectors(ctx) {
+        return knowledgeOf(ctx).connectors.list().map((connector) => ({ id: connector.id, name: connector.displayName ?? connector.id, sourceType: connector.sourceType, description: connector.description }));
+      },
+      connectorDetail(ctx, id) {
+        const connector = knowledgeOf(ctx).connectors.get(id);
+        if (!connector) throw commandRefusal(`[knowledge] No connector ${id}.`, '/knowledge connectors lists them.');
+        return [
+          `[knowledge] Connector ${connector.id}`,
+          `  name ${connector.displayName ?? connector.id}`,
+          `  reads ${connector.sourceType}`,
+          `  ${connector.description}`,
+          `  can: ${connector.capabilities?.join(', ') || 'nothing more'}`,
+        ].join('\n');
+      },
+      async doctor(ctx, id) {
+        const report = await knowledgeOf(ctx).connectors.doctor(id);
+        if (!report) throw commandRefusal(`[knowledge] No check is available for connector ${id}.`);
+        return [
+          `[knowledge] Connector ${report.connectorId}`,
+          `  ready: ${report.ready ? 'yes' : 'no'}`,
+          `  ${report.summary}`,
+          ...(report.checks.length > 0 ? ['  checks:', ...report.checks.slice(0, 10).map((check) => `    - ${check.id} [${check.status}] ${check.label} - ${check.detail}`)] : []),
+          ...(report.hints.length > 0 ? ['  to fix:', ...report.hints.slice(0, 8).map((hint) => `    - ${hint}`)] : []),
+        ].join('\n');
+      },
+    },
+  });
+}

@@ -547,6 +547,18 @@
   flex-direction: column;
 }
 
+.work-board__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 4px;
+}
+
+.work-board__head .work-board__label {
+  margin: 0;
+}
+
 .work-board__label {
   margin: 0 0 4px;
   color: var(--text-3);

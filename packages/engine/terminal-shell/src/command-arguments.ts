@@ -35,22 +35,3 @@ export function positionalArgs(args: readonly string[], valuedFlags: readonly st
   });
 }
 
-export function readKnowledgeTaskArguments(args: readonly string[]) {
-  return { scopeValues: readOptionValues(args, '--scope'), query: positionalArgs(args, ['--scope']).join(' ').trim() };
-}
-export function readKnowledgeAskArguments(args: readonly string[], allowKnowledgeSpace: boolean) {
-  const query = positionalArgs(args, allowKnowledgeSpace ? ['--space', '--knowledge-space', '--limit', '--mode'] : ['--limit', '--mode'])
-    .join(' ')
-    .trim();
-  const requested = readOptionValue(args, '--mode');
-  const mode = requested === 'concise' || requested === 'standard' || requested === 'detailed' ? requested : 'standard';
-  return {
-    query,
-    limit: readPositiveInt(args, '--limit', 10),
-    mode,
-    includeSources: true,
-    includeConfidence: true,
-    includeLinkedObjects: true,
-    ...(allowKnowledgeSpace ? { knowledgeSpaceId: readOptionValue(args, '--space') ?? readOptionValue(args, '--knowledge-space') } : {}),
-  } as const;
-}

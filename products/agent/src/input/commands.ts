@@ -5,7 +5,7 @@ import type { CommandRegistry } from './command-registry.ts';
 import type { CommandContext } from './command-registry.ts';
 import { resumeCommand, saveCommand, sessionCommand } from './commands/session.ts';
 import { memoryCommand } from './commands/memory.ts';
-import { knowledgeCommand } from './commands/knowledge.ts';
+import { registerKnowledgeRuntimeCommands } from './commands/knowledge.ts';
 import { registerShellCoreCommands } from './commands/shell-core.ts';
 import { registerConfigCommand } from './commands/config.ts';
 import { registerScheduleRuntimeCommands } from './commands/schedule-runtime.ts';
@@ -113,7 +113,7 @@ export function registerBuiltinCommands(
   registry.register(saveCommand);
 
   // ── /knowledge ───────────────────────────────────────────────────────────
-  registry.register(knowledgeCommand);
+  registerKnowledgeRuntimeCommands(registry);
 
   // Shared commands state which of their verbs only read; the model's command runner reads it.
   for (const [name, verbs] of Object.entries(SHARED_COMMAND_VERBS)) {

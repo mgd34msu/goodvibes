@@ -1,4 +1,3 @@
-import { readTriggerOperatorStatus } from '@goodvibes-jev/engine/platform/platform/triggers/browser';
 import { readFeatureRestartStatus, type FeatureRestartStatus } from './feature-restart-status';
 import {
   createBrowserKnowledgePlatform,
@@ -1832,11 +1831,8 @@ export const client = {
       },
     },
     // watchers.stop: the fleet-node stop action for a watcher (fleet is a live-process
-    // reader, not a watcher-authoring surface), plus the trigger supervisor status read.
+    // reader, not a watcher-authoring surface). Triggers are the Triggers screen's (command/screens).
     watchers: {
-      triggers: {
-        status: async () => readTriggerOperatorStatus(await requestJson('/api/control-plane/methods/watchers.triggers.status/invoke', { method: 'POST', body: { body: {} } })),
-      },
       stop: (watcherId: string): Promise<WatcherActionResult> => invokeOperator('watchers.stop', { watcherId }),
     },
     // push.* (Web Push), ws-only, generic-invoke. The PWA reads the public VAPID key,

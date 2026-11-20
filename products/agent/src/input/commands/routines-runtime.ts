@@ -360,7 +360,7 @@ export function registerRoutinesRuntimeCommands(registry: CommandRegistry): void
           textInput({ id: 'triggers', label: 'When to suggest it', help: 'Words that bring it up, separated by commas', why: 'your own words', typed: { flag: '--triggers' }, optional: OPTIONAL('only when you ask') }),
           ENABLED,
         ],
-        sentence: 'A routine {name} ("{description}") is kept with the steps given, until you change it.', example: { name: 'morning-brief', description: 'Summarise my morning', steps: 'Read my inbox and calendar, then summarise.' },
+        sentence: 'A routine {name} ("{description}") is kept with the steps "{steps}", until you change it.', example: { name: 'morning-brief', description: 'Summarise my morning', steps: 'Read my inbox and calendar, then summarise.' },
         undoneBy: 'delete',
         async run(values, ctx) {
           if (values.enabled === 'yes') assertActorMayEnable(actorOf(ctx), 'routine', values.name!, 'fresh');
@@ -505,7 +505,7 @@ export function registerRoutinesRuntimeCommands(registry: CommandRegistry): void
           textInput({ id: 'model', label: 'Model', help: 'The model a run uses', why: 'a model id', typed: { flag: '--model' }, optional: OPTIONAL('the host\'s usual'), step: 4 }),
           choiceInput({ id: 'paused', label: 'Start paused', help: 'Kept, but runs only once resumed', choices: [{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes' }], typed: { flag: '--disabled', switchOn: 'yes' }, optional: { default: 'no', means: 'no' }, step: 4 }),
         ],
-        sentence: 'Routine {routine} runs on the connected host at the times given ({when}), whether or not this Agent is open, until you change it.', example: { routine: 'morning-brief', how: 'cron', when: '0 9 * * 1-5' },
+        sentence: 'Routine {routine} runs on the connected host ({how}: {when}), whether or not this Agent is open, until you change it.', example: { routine: 'morning-brief', how: 'cron', when: '0 9 * * 1-5' },
         touches: 'another-machine', operator: { terminalOnly: 'The schedule is made with this Agent\'s link to its host.' },
         async run(values, ctx) {
           const parsed = promotionOf(values);

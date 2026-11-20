@@ -843,7 +843,7 @@ The sections below explain the commands grouped by task. Each entry gives the pu
 `/guidance [review|dismiss <id>|reset [id]]` lists contextual guidance items, dismisses one for its current occurrence, or resets dismissals.
 `/guidance dismiss g1` on an item that is not showing prints `Guidance item g1 is not showing now, so there is nothing to dismiss. /guidance lists the items that are.`
 
-`/deeplink [review|open <view|goodvibes://open/...> [target]|bundle export <path>|bundle inspect <path>]` (alias `/link`) lists, opens and exports `goodvibes://open/<view>` links. `/deeplink open agents` opens Your agents. A link that is not of that form prints `Not opened: <link> is not a goodvibes://open/<view> link.`
+`/deeplink` lists (`review`, what `/deeplink` alone gives a model or script), opens (`open <view|goodvibes://open/...> [target]`) and saves (`export <path>`, read back with `inspect <path>`) `goodvibes://open/<view>` links. `/deeplink open agents` opens Your agents. A link that is not of that form prints `Not opened: <link> is not a goodvibes://open/<view> link.`
 
 `/health` is the one place for "is everything working". Bare in the terminal, it opens its list of actions; from a model or a script it prints the short status: `✓ Everything is working.`, or a headline such as `2 things need attention:` and one line per thing (`✕ <what is wrong>`) with `  Fix: <the line that fixes it>` under it. It reads setup, providers and accounts, settings, services, MCP servers, remote runners, the first-run sign-in file and the conversation's size; it makes no model request and changes nothing. Its actions:
 
@@ -1162,7 +1162,7 @@ Failure reports are actions of `/health` (see above).
 `/agents [--target <id>[:<kind>]] | list | host <agentId> [directory]` (alias `/acp`) opens Your agents.
 `/agents list` lists third-party coding agents found on `PATH` that can be hosted over ACP (Claude Code, Codex, opencode).
 `/agents host <agentId> [directory]` starts one as a row in Your agents that can be steered and stopped like any agent (`n` in the panel does the same with a picker). With none installed: `[agents] No third-party ACP agents discovered. Install Claude Code, Codex, or opencode on PATH to host one.`
-`/communication` (alias `/comms`) shows agent communication routes and recent activity.
+`/communication` opens the view of agent communication routes and recent activity.
 `/orchestration [show [contractId] | cancel graph <graphId> | cancel subtree <agentId>]` (alias `/orch`) shows contracts and cancels agent graphs or subtrees. An unknown contract prints `Unknown contract: <id>`.
 
 `/tasks [list [status|kind] | show <taskId> | output <taskId> | create <kind> <owner> <title...> | start <taskId> | update <taskId> <title|description|result> <value...> | complete <taskId> [result] | fail <taskId> <error...> | cancel <taskId> [note] | pause <taskId> [note] | resume <taskId> [note] | retry <taskId> [note]]` (alias `/task`) inspects and controls runtime tasks. Bare `/tasks` opens Your agents.
